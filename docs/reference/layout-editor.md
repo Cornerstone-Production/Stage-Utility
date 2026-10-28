@@ -29,6 +29,24 @@ showing the time needs no source — rather than left as an empty heading.
 
 See [Widget reference](widgets.md) for what each widget's Content settings mean.
 
+### How the controls look
+
+Every widget's settings are drawn from one set of rows, so they look and behave the
+same on every widget, and a change to the set reaches all of them.
+
+- **Label beside the control.** A label too long for its column, or a panel narrower
+  than about 290px, puts the label above the control instead of cutting it off.
+- **A short choice is a track.** Up to four options draw as a row of segments with the
+  chosen one raised. When the words together fit beside the label, the track sits
+  beside it; when they are wider, the track runs full width under the label.
+- **A long list is a dropdown.** Five or more options, or words too long even for a
+  full-width track, become a dropdown. Whether a choice is a track or a dropdown
+  depends on its words, never on which widget it belongs to.
+- **A setting that does nothing right now is not shown.** Lyrics shows **Width** only
+  with the tag beside the words, and its **Underneath** settings only while **Show
+  what comes next** is on. Change the setting that decides it and the rows appear.
+- **A switch** has its label at the start of the row and the switch at the far end.
+
 ## Starting from something
 
 A custom view can start blank or from a built-in layout. **Screens → New view →

@@ -5,8 +5,8 @@
 // into it (the Look section's type rows, the ProPresenter picker) is on the path
 // too. A control that renders is not a control that writes the right key.
 //
-// NOT covered: the stacked layout and the segmented controls' look — jsdom loads
-// no stylesheet, so those were checked in a browser.
+// NOT covered: the controls' look — jsdom loads no stylesheet, so that was
+// checked in a browser.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
@@ -70,35 +70,45 @@ const pressed = (m: M, groupLabel: string) =>
 const created = () => LAYOUT_OBJECTS.lyrics.config() as Record<string, unknown>;
 
 describe("what the inspector offers", () => {
+  const CHOICES: [string, string[]][] = [
+    ["Group tag", ["Beside", "Above", "Arranged"]],
+    ["Style", ["Filled", "Outline", "Text"]],
+    ["Color", ["ProPresenter", "One"]],
+    ["Text", ["As named", "Short", "CAPS"]],
+    ["Width (beside)", ["Column", "Fit"]],
+    ["Size", ["Fit", "S", "M", "L"]],
+    ["Weight", ["Regular", "Bold"]],
+    ["Align", ["Left", "Center"]],
+    ["No words", ["Blank", "Tag only"]],
+    ["Shows", ["Next slide", "Next group"]],
+    ["Dimmed", ["Less", "More"]],
+  ];
+
   test("the mockup's groups, controls and choices", async () => {
-    const m = await mount(created());
-    try {
-      const choices: [string, string[]][] = [
-        ["Group tag", ["Beside", "Above", "Arrangement"]],
-        ["Style", ["Filled", "Outline", "Text"]],
-        ["Colour", ["ProPresenter", "One colour"]],
-        ["Text", ["As named", "Short", "CAPS"]],
-        ["Width (beside)", ["Column", "Fit"]],
-        ["Size", ["Fit", "S", "M", "L"]],
-        ["Weight", ["Regular", "Bold"]],
-        ["Align", ["Left", "Centre"]],
-        ["No words", ["Blank", "Tag only"]],
-        ["Shows", ["Next slide", "Next group"]],
-        ["Dimmed", ["A little", "More"]],
-      ];
-      for (const [label, options] of choices) {
-        const g = group(m, label);
-        assert.ok(g, `no "${label}" control`);
-        assert.deepEqual([...g.querySelectorAll("button")].map((b) => b.textContent), options, label);
+    // Width is only drawn Beside and Align only elsewhere, so the two layouts
+    // between them show every control.
+    for (const display of ["above", "beside"]) {
+      const m = await mount({ ...created(), display });
+      try {
+        const drawn = new Set<string>();
+        for (const [label, options] of CHOICES) {
+          const g = group(m, label);
+          if (!g) continue;
+          drawn.add(label);
+          assert.deepEqual([...g.querySelectorAll("button")].map((b) => b.textContent), options, label);
+        }
+        const expected = CHOICES.map(([l]) => l).filter((l) => (display === "beside" ? l !== "Align" : l !== "Width (beside)"));
+        assert.deepEqual([...drawn].sort(), expected.sort(), `the controls drawn with the tag ${display}`);
+        for (const l of ["Show what comes next", "Its lyrics", "Song title"]) {
+          assert.ok(m.getByRole("switch", { name: l }), `no "${l}" switch`);
+        }
+        for (const h of ["Layout", "Group tag", "Lyrics", "Underneath"]) {
+          assert.ok([...m.container.querySelectorAll("span")].some((s) => s.textContent === h), `no "${h}" heading`);
+        }
+      } finally {
+        m.restore();
       }
-      for (const l of ["Show what comes next", "Its lyrics", "Song title"]) {
-        assert.ok(m.getByRole("switch", { name: l }), `no "${l}" switch`);
-      }
-      for (const h of ["Layout", "Group tag", "Lyrics", "Underneath"]) {
-        assert.ok([...m.container.querySelectorAll("span")].some((s) => s.textContent === h), `no "${h}" heading`);
-      }
-    } finally {
-      m.restore();
+      cleanup();
     }
   });
 
@@ -106,8 +116,8 @@ describe("what the inspector offers", () => {
     const m = await mount({ type: "lyrics" });
     try {
       const expected: [string, string][] = [
-        ["Group tag", "Above"], ["Style", "Filled"], ["Colour", "ProPresenter"], ["Text", "As named"], ["Width (beside)", "Column"],
-        ["Size", "L"], ["Weight", "Bold"], ["Align", "Left"], ["No words", "Tag only"], ["Shows", "Next group"], ["Dimmed", "A little"],
+        ["Group tag", "Above"], ["Style", "Filled"], ["Color", "ProPresenter"], ["Text", "As named"],
+        ["Size", "L"], ["Weight", "Bold"], ["Align", "Left"], ["No words", "Tag only"], ["Shows", "Next group"], ["Dimmed", "Less"],
       ];
       for (const [label, option] of expected) assert.deepEqual(pressed(m, label), [option], label);
       assert.equal(m.getByRole("switch", { name: "Show what comes next" }).getAttribute("aria-checked"), "true");
@@ -120,15 +130,14 @@ describe("what the inspector offers", () => {
 });
 
 describe("each control writes the field it names, and keeps the rest", () => {
-  // One non-default option per segmented control, so the write differs from what
-  // was there. Width and Align are covered separately: each is greyed in the
-  // layout the default is in.
+  // One non-default option per choice, so the write differs from what was there.
+  // Width and Align are covered separately: each is only drawn in some layouts.
   const cases: [string, string, string, string][] = [
     ["Group tag", "Beside", "display", "beside"],
-    ["Group tag", "Arrangement", "display", "strip"],
+    ["Group tag", "Arranged", "display", "strip"],
     ["Style", "Outline", "tagStyle", "outline"],
     ["Style", "Text", "tagStyle", "text"],
-    ["Colour", "One colour", "tagColor", "one"],
+    ["Color", "One", "tagColor", "one"],
     ["Text", "Short", "tagText", "short"],
     ["Text", "CAPS", "tagText", "caps"],
     ["Size", "Fit", "size", "fit"],
@@ -138,6 +147,7 @@ describe("each control writes the field it names, and keeps the rest", () => {
     ["No words", "Blank", "noWords", "blank"],
     ["Shows", "Next slide", "underShows", "slide"],
     ["Dimmed", "More", "underDim", "strong"],
+    ["Dimmed", "Less", "underDim", "light"],
   ];
   for (const [groupLabel, option, key, value] of cases) {
     test(`${groupLabel}: ${option} writes ${key}=${value}`, async () => {
@@ -162,7 +172,7 @@ describe("each control writes the field it names, and keeps the rest", () => {
     cleanup();
     const above = await mount(created());
     try {
-      pick(above, "Align", "Centre");
+      pick(above, "Align", "Center");
       assert.equal((above.writes.at(-1) as { align?: string }).align, "center");
     } finally {
       above.restore();
@@ -172,7 +182,7 @@ describe("each control writes the field it names, and keeps the rest", () => {
   test("Align writes in the Arrangement too, where it centres the chips", async () => {
     const m = await mount({ ...created(), display: "strip" });
     try {
-      pick(m, "Align", "Centre");
+      pick(m, "Align", "Center");
       assert.deepEqual(m.writes.at(-1), { ...created(), display: "strip", align: "center" });
     } finally {
       m.restore();
@@ -194,20 +204,20 @@ describe("each control writes the field it names, and keeps the rest", () => {
   });
 });
 
-describe("a control that would change nothing is greyed, not live", () => {
+describe("a control that would change nothing is not drawn", () => {
   test("Width is for Beside only, Align for everything but Beside", async () => {
     const above = await mount(created());
     try {
-      pick(above, "Width (beside)", "Fit");
-      assert.equal(above.writes.length, 0, "Width wrote while the tag is above");
+      assert.equal(group(above, "Width (beside)"), null, "Width is drawn while the tag is above");
+      assert.ok(group(above, "Align"), "Align is missing while the tag is above");
     } finally {
       above.restore();
     }
     cleanup();
     const beside = await mount({ ...created(), display: "beside" });
     try {
-      pick(beside, "Align", "Centre");
-      assert.equal(beside.writes.length, 0, "Align wrote while the tag is beside");
+      assert.equal(group(beside, "Align"), null, "Align is drawn while the tag is beside");
+      assert.ok(group(beside, "Width (beside)"), "Width is missing while the tag is beside");
     } finally {
       beside.restore();
     }
@@ -216,10 +226,10 @@ describe("a control that would change nothing is greyed, not live", () => {
   test("everything underneath waits on Show what comes next", async () => {
     const m = await mount({ ...created(), under: false });
     try {
-      pick(m, "Shows", "Next slide");
-      pick(m, "Dimmed", "More");
-      assert.equal(m.writes.length, 0, "a setting under a switched-off Underneath wrote");
-      assert.equal((m.getByRole("switch", { name: "Its lyrics" }) as HTMLButtonElement).disabled, true);
+      assert.equal(group(m, "Shows"), null, "Shows is drawn with Underneath off");
+      assert.equal(group(m, "Dimmed"), null, "Dimmed is drawn with Underneath off");
+      assert.equal(m.queryByRole("switch", { name: "Its lyrics" }), null, "Its lyrics is drawn with Underneath off");
+      assert.ok(m.getByRole("switch", { name: "Song title" }), "Song title waits on nothing");
     } finally {
       m.restore();
     }

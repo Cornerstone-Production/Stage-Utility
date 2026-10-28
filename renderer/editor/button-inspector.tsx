@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { Button, ErrorNote, StackedField, toast } from "../components/ui";
+import { Button, ErrorNote, toast } from "../components/ui";
 import { validateParams } from "@main/services/automation-param-validation";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { automationRegistryQuery } from "../lib/automation-registry";
@@ -22,7 +22,7 @@ import { useLatestRef } from "../lib/use-latest-ref";
 import type { CuesLive } from "../main/use-cue-live";
 import { ActionButtonInspector } from "./action-button-inspector";
 import { CuePicker } from "./cue-picker";
-import { RowSwitch, RowText, Segmented } from "./inspector-rows";
+import { Row, RowSwitch, RowText, RowToggle } from "./inspector-rows";
 import { chosenLabel, makeCueFromAction } from "./make-it-a-cue";
 
 type CueButtonConfig = Extract<LayoutObjectConfig, { type: "cue-button" }>;
@@ -83,45 +83,44 @@ export function ButtonInspector({
   }, [cueMode]);
   return (
     <div ref={root} className="contents">
-      <StackedField
+      <RowToggle
         label="Does"
         description={
           cueMode
             ? "A cue is shared: its Run button, Home Assistant, voice and every button bound to it fire the same thing."
             : "The action lives on this button alone."
         }
-      >
-        <Segmented
-          label="Does"
-          value={does}
-          disabled={making}
-          options={[
-            { value: "cue", label: "Fire a cue" },
-            { value: "action", label: "Run an action" },
-          ]}
-          onChange={(v) => {
-            if (v === does) return;
-            onConfig(v === "cue" ? toCueButton(c) : toActionButton(c));
-          }}
-        />
-      </StackedField>
+        value={does}
+        disabled={making}
+        options={[
+          { value: "cue", label: "Fire a cue" },
+          { value: "action", label: "Run an action" },
+        ]}
+        onChange={(v) => {
+          if (v === does) return;
+          onConfig(v === "cue" ? toCueButton(c) : toActionButton(c));
+        }}
+      />
 
       {cueMode ? (
         <>
-          <StackedField
+          <Row
             label="Cue"
+            stacked
             description="Your own cues come from the Automation page. Built in cues drive OBS, REAPER, ProVideoPlayer and the app itself with no rule behind them."
           >
-            <CuePicker cues={cues} value={c.cue} onChange={(v) => onConfig({ ...c, cue: v })} />
-            <a
-              href={NEW_MANUAL_CUE_HREF}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="self-start rounded text-footnote text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              + New manual cue…
-            </a>
-          </StackedField>
+            <div className="flex w-full flex-col gap-1.5">
+              <CuePicker cues={cues} value={c.cue} onChange={(v) => onConfig({ ...c, cue: v })} />
+              <a
+                href={NEW_MANUAL_CUE_HREF}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="self-start rounded text-footnote text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                + New manual cue…
+              </a>
+            </div>
+          </Row>
           <RowSwitch
             label="Show device"
             hint="The room or device under the label, and the reason when a reading is stale."

@@ -11,10 +11,8 @@ import * as React from "react";
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   Switch,
-  FieldLabel,
   Input,
   Button,
-  ButtonGroup,
   InfoHint,
   NumberInput as UiNumberInput,
   Select,
@@ -80,14 +78,22 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Label beside control — until the panel is too narrow for both, and then label
- * ABOVE control.
+ * The words of a label that still read beside a control. A 96px label column
+ * holds about this many characters at the inspector's label size, and a hint icon
+ * takes two characters' worth of it.
+ */
+const LABEL_FITS = 16;
+
+/**
+ * Label beside control — until the label is too long for its column or the panel
+ * is too narrow for both, and then label ABOVE control.
  *
  * A fixed 96px label in a 176px panel leaves 64px for the control, which is
  * narrower than a stepper field, so the row overflowed and the whole inspector
  * scrolled sideways. Stacking gives the control the full width instead, and the
  * controls wrap inside it, so nothing is ever cut off however far the panel is
- * dragged in.
+ * dragged in. A long label ("When the feed is offline") stacks for the same reason
+ * rather than truncating beside its control.
  *
  * A container query on the PANEL, not a media query: the inspector's width is
  * dragged, and the window's says nothing about it.
@@ -95,36 +101,45 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
 export function Row({
   label,
   hint,
-  disabled,
+  description,
+  stacked,
   children,
 }: {
   label: string;
   hint?: string;
-  /** Greys the row. A string is also said, under it, as the reason: "Not shown
-   *  in Countdown only." The caller disables its own control; this is the look
-   *  and the explanation, so a greyed row is never a mystery. */
-  disabled?: boolean | string;
+  /** A sentence under the control, in full, for what an operator must read before
+   *  choosing and cannot be left behind an (i). */
+  description?: React.ReactNode;
+  /** Forces the label above the control. A label too long to sit beside it does
+   *  this on its own. */
+  stacked?: boolean;
   children: React.ReactNode;
 }) {
+  const above = stacked || label.length + (hint ? 2 : 0) > LABEL_FITS;
   const row = (
     <div
       className={cn(
-        "flex items-center gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1",
-        disabled && "opacity-45",
+        "flex gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1",
+        above ? "flex-col items-stretch gap-1" : "items-center",
       )}
     >
-      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[288px]/insp:w-auto">
-        <span className="truncate" title={label}>{label}</span>
+      <span
+        className={cn(
+          "text-caption2 text-fg-muted flex items-center gap-1 @max-[288px]/insp:w-auto",
+          above ? "w-auto" : "w-24 shrink-0",
+        )}
+      >
+        <span className={above ? "" : "truncate"} title={label}>{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
       <div className="flex-1 min-w-0 flex items-center gap-1 @max-[288px]/insp:flex-wrap">{children}</div>
     </div>
   );
-  if (typeof disabled !== "string") return row;
+  if (!description) return row;
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       {row}
-      <span className="text-caption2 text-fg-subtle">{disabled}</span>
+      <span className="text-caption2 text-fg-subtle leading-snug">{description}</span>
     </div>
   );
 }
@@ -195,18 +210,23 @@ export function AlignPad({
 // inspector (and the branches a default config does not draw) and fails on any
 // control it reaches that is left without one.
 
-export function RowSwitch({ label, hint, checked, onChange, disabled }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean | string }) {
-  return <Row label={label} hint={hint} disabled={disabled}><Switch aria-label={label} checked={checked} onCheckedChange={onChange} disabled={!!disabled} /></Row>;
-}
-
-/** The stacked variant of RowSwitch: the label above-left and the switch at the
- *  far end of one line, for the sections drawn with stacked fields (Video, Timer)
- *  whose labels do not fit beside a 96px label column. */
-export function StackedSwitch({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+/**
+ * A switch: the label at the start of the row and the switch at the far end of it,
+ * the label in the same size and colour as every other row's.
+ *
+ * The label is not held to the 96px column the other rows use. "Show what comes
+ * next" and "Warn at (seconds left)" are the point of the row, and a switch has no
+ * wide control to protect, so the label takes the room and wraps rather than
+ * truncating.
+ */
+export function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-2.5">
-      <FieldLabel>{label}</FieldLabel>
-      <Switch aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />
+    <div className="flex min-h-7 items-center justify-between gap-2">
+      <span className="text-caption2 text-fg-muted flex items-center gap-1 min-w-0">
+        <span>{label}</span>
+        {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
+      </span>
+      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }
@@ -279,32 +299,57 @@ export function RowNumber({ label, hint, value, step, min, max, suffix, onChange
   );
 }
 
-/** A segmented (accent/filled) button toggle — the most repeated inspector control. */
+/**
+ * A choice from a list of words, drawn by one rule so no widget decides it for
+ * itself:
+ *
+ *  - up to four options whose words total TRACK_BESIDE characters or fewer: a
+ *    track beside the label;
+ *  - up to four whose words total TRACK_ABOVE or fewer: the same track on its own
+ *    line under the label, because the words cannot fit beside it;
+ *  - anything longer, or five or more options: a dropdown.
+ *
+ * Width decides where a track sits; it never decides between a track and a
+ * dropdown for a short list. Counted in characters, not measured, so the same
+ * options draw the same way on every machine and the test can say which they get.
+ */
+export const TRACK_BESIDE = 20;
+export const TRACK_ABOVE = 30;
+export const TRACK_MAX_OPTIONS = 4;
+
+export function choiceLayout(options: readonly { label: string }[]): "beside" | "above" | "dropdown" {
+  if (options.length > TRACK_MAX_OPTIONS) return "dropdown";
+  const chars = options.reduce((n, o) => n + o.label.length, 0);
+  if (chars <= TRACK_BESIDE) return "beside";
+  return chars <= TRACK_ABOVE ? "above" : "dropdown";
+}
+
 export function RowToggle<T extends string>({
   label,
   hint,
+  description,
   value,
   options,
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
+  description?: React.ReactNode;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
+  /** Inert for a moment the choice must not change (a write in flight), not a way
+   *  to say the choice does not apply: a control that does not apply is not drawn. */
+  disabled?: boolean;
 }) {
-  // TWO options stay a toggle; three or more become a dropdown.
-  //
-  // A binary choice reads better shown than hidden — Rect / Ellipse is one
-  // glance. Past two, a row of word buttons squeezes each label until it
-  // truncates, and it does it worst in a narrow panel, which is where the
-  // inspector spends most of its life. The rule lives HERE rather than at each
-  // of the seven call sites, so they cannot drift into disagreeing about it.
-  if (options.length > 2) {
+  const layout = choiceLayout(options);
+  if (layout === "dropdown") {
     return (
       <RowSelect
         label={label}
         hint={hint}
+        description={description}
         value={String(value)}
         options={options.map((o) => ({ value: String(o.value), label: o.label }))}
         onChange={(v) => onChange(v as T)}
@@ -312,14 +357,8 @@ export function RowToggle<T extends string>({
     );
   }
   return (
-    <Row label={label} hint={hint}>
-      <ButtonGroup role="group" aria-label={label}>
-        {options.map((o) => (
-          <Button key={o.value} variant={value === o.value ? "accent" : "filled"} size="small" onClick={() => onChange(o.value)}>
-            {o.label}
-          </Button>
-        ))}
-      </ButtonGroup>
+    <Row label={label} hint={hint} description={description} stacked={layout === "above"}>
+      <Segmented label={label} compact disabled={disabled} value={value} options={options} onChange={onChange} />
     </Row>
   );
 }
@@ -336,6 +375,7 @@ export function Segmented<T extends string>({
   options,
   onChange,
   disabled,
+  compact,
 }: {
   /** Names the group for assistive tech; the visible label is the caller's. */
   label: string;
@@ -346,9 +386,12 @@ export function Segmented<T extends string>({
    *  aria-disabled rather than the disabled attribute, so a segment that holds
    *  keyboard focus keeps it. */
   disabled?: boolean;
+  /** The inspector's height: 22px segments, so a track sits on a 28px row. Left
+   *  off, a segment is the taller one the other pages use. */
+  compact?: boolean;
 }) {
   return (
-    <div role="group" aria-label={label} className={cn("flex flex-wrap gap-0.5 rounded-lg bg-fill p-0.5", disabled && "opacity-50")}>
+    <div role="group" aria-label={label} className={cn("flex w-full flex-wrap gap-0.5 rounded-lg bg-fill p-0.5", disabled && "opacity-50")}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -359,7 +402,8 @@ export function Segmented<T extends string>({
             if (!disabled) onChange(o.value);
           }}
           className={cn(
-            "flex-1 whitespace-nowrap rounded-md px-2 py-1 text-caption1 font-medium transition-colors",
+            "flex-1 whitespace-nowrap rounded-md px-2 text-caption1 font-medium transition-colors",
+            compact ? "h-[22px]" : "py-1",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             value === o.value ? "bg-surface-raised text-fg shadow-[var(--su-shadow-1)]" : "text-fg-muted hover:text-fg",
           )}
@@ -371,11 +415,11 @@ export function Segmented<T extends string>({
   );
 }
 
-/** A labeled dropdown row (for when there are more options than fit a toggle). */
-export function RowSelect({ label, hint, value, options, onChange, disabled }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean | string }) {
+/** A labeled dropdown row, for a long list of choices. */
+export function RowSelect({ label, hint, description, value, options, onChange }: { label: string; hint?: string; description?: React.ReactNode; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
   return (
-    <Row label={label} hint={hint} disabled={disabled}>
-      <Select value={value} onValueChange={onChange} disabled={!!disabled}>
+    <Row label={label} hint={hint} description={description}>
+      <Select value={value} onValueChange={onChange}>
         <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           {options.map((o) => (
@@ -485,7 +529,7 @@ export function TypeSizeRows({
   if (setsOwnType(type)) {
     return (
       <p className="text-caption2 text-fg-muted leading-snug">
-        This widget sets its own type: Size, Weight and Align are under Lyrics above. Colour below still applies.
+        This widget sets its own type: Size, Weight and Align are under Lyrics above. Color below still applies.
       </p>
     );
   }
@@ -493,7 +537,7 @@ export function TypeSizeRows({
     return (
       <p className="text-caption2 text-fg-muted leading-snug">
         This widget sets its own type: it fits its caption, value and sub-line to the box, so make the object bigger
-        to make the reading bigger. Colour and alignment below still apply.
+        to make the reading bigger. Color and alignment below still apply.
       </p>
     );
   }

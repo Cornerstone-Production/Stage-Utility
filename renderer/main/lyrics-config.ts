@@ -60,7 +60,7 @@ export const LYRICS_OPTIONS: { [K in LyricsChoice]: readonly { value: LyricsSett
   display: [
     { value: "beside", label: "Beside" },
     { value: "above", label: "Above" },
-    { value: "strip", label: "Arrangement" },
+    { value: "strip", label: "Arranged" },
   ],
   tagStyle: [
     { value: "filled", label: "Filled" },
@@ -69,7 +69,7 @@ export const LYRICS_OPTIONS: { [K in LyricsChoice]: readonly { value: LyricsSett
   ],
   tagColor: [
     { value: "propresenter", label: "ProPresenter" },
-    { value: "one", label: "One colour" },
+    { value: "one", label: "One" },
   ],
   tagText: [
     { value: "named", label: "As named" },
@@ -92,7 +92,7 @@ export const LYRICS_OPTIONS: { [K in LyricsChoice]: readonly { value: LyricsSett
   ],
   align: [
     { value: "left", label: "Left" },
-    { value: "center", label: "Centre" },
+    { value: "center", label: "Center" },
   ],
   noWords: [
     { value: "blank", label: "Blank" },
@@ -103,7 +103,7 @@ export const LYRICS_OPTIONS: { [K in LyricsChoice]: readonly { value: LyricsSett
     { value: "group", label: "Next group" },
   ],
   underDim: [
-    { value: "light", label: "A little" },
+    { value: "light", label: "Less" },
     { value: "strong", label: "More" },
   ],
 };

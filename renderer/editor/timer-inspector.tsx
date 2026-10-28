@@ -3,12 +3,12 @@
 // switches every source shares, then the warning settings (or a sentence saying
 // why a baptism has none).
 //
-// Stacked labels and switch rows rather than the label-left Rows, as the Video
-// section is built, because "Show the next item" and "Warn at (seconds left)" do
-// not fit beside a 96px label.
+// Built from the shared rows, like every other widget's inspector. A label too
+// long to sit beside its control ("Warn at (seconds left)") goes above it on its
+// own, and the Timer field takes the full width for its long placeholder.
 
 import type { LayoutObjectConfig } from "@main/types/views";
-import { FieldLabel, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StackedField } from "../components/ui";
+import { Input } from "../components/ui";
 import {
   BAPTISM_FIELD_OPTIONS,
   TIMER_SOURCES,
@@ -17,7 +17,7 @@ import {
   withTimerSource,
   type TimerConfig,
 } from "../main/timer-config";
-import { Segmented, StackedSwitch } from "./inspector-rows";
+import { Row, RowNumber, RowSelect, RowSwitch, RowText, RowToggle } from "./inspector-rows";
 
 export function TimerInspector({
   c,
@@ -42,23 +42,17 @@ export function TimerInspector({
   const warnOn = c.warnSeconds != null;
 
   return (
-    <div className="flex flex-col gap-3.5">
-      <StackedField label="Source">
-        <Segmented
-          label="Source"
-          value={source}
-          options={TIMER_SOURCES}
-          onChange={(v) => onConfig(withTimerSource(c, v))}
-        />
-      </StackedField>
+    <div className="flex flex-col gap-2.5">
+      <RowToggle label="Source" value={source} options={TIMER_SOURCES} onChange={(v) => onConfig(withTimerSource(c, v))} />
 
       {info.nextItem && (
-        <StackedSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
+        <RowSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
       )}
 
       {source === "propresenter" && (
-        <StackedField
+        <Row
           label="Timer"
+          stacked
           description="A second ProPresenter picker appears only when more than one is connected."
         >
           {/* Always a text field: typing a name before the service has to work, and
@@ -85,74 +79,49 @@ export function TimerInspector({
               <option key={n} value={n} />
             ))}
           </datalist>
-        </StackedField>
+        </Row>
       )}
 
       {source === "baptism" && (
-        <StackedField label="Shows">
-          <Select value={c.field ?? "live"} onValueChange={(v) => set({ field: v as NonNullable<TimerConfig["field"]> })}>
-            <SelectTrigger aria-label="Shows" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {BAPTISM_FIELD_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </StackedField>
+        <RowSelect
+          label="Shows"
+          value={c.field ?? "live"}
+          options={BAPTISM_FIELD_OPTIONS}
+          onChange={(v) => set({ field: v as NonNullable<TimerConfig["field"]> })}
+        />
       )}
 
-      <div className="flex flex-col gap-3 border-t border-line pt-3.5">
-        <StackedField label="Caption">
-          <Input
-            aria-label="Caption"
-            value={c.caption ?? ""}
-            // Empty is NO caption, except on a service Timer that has never had
-            // one set, which draws the live item's name.
-            placeholder={source === "service" && c.caption === undefined ? "The item\u2019s name" : "No caption"}
-            onChange={(e) => set({ caption: e.target.value })}
-          />
-        </StackedField>
-        <StackedSwitch
-          label={info.subSwitch}
-          checked={c.showLabel ?? true}
-          onChange={(v) => set({ showLabel: v })}
+      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
+        <RowText
+          label="Caption"
+          value={c.caption ?? ""}
+          // Empty is NO caption, except on a service Timer that has never had
+          // one set, which draws the live item's name.
+          placeholder={source === "service" && c.caption === undefined ? "The item\u2019s name" : "No caption"}
+          onChange={(v) => set({ caption: v })}
         />
+        <RowSwitch label={info.subSwitch} checked={c.showLabel ?? true} onChange={(v) => set({ showLabel: v })} />
         {source === "baptism" && (c.showLabel ?? true) && (
-          <StackedField label="Label">
-            <Input
-              aria-label="Label"
-              value={c.label ?? ""}
-              placeholder="(auto)"
-              onChange={(e) => set({ label: e.target.value })}
-            />
-          </StackedField>
+          <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => set({ label: v })} />
         )}
-        <StackedSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => set({ hideWhenIdle: v })} />
+        <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => set({ hideWhenIdle: v })} />
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-line pt-3.5">
+      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
         {info.warns ? (
           <>
-            <StackedSwitch
-              label="Amber near the end"
-              checked={warnOn}
-              onChange={(v) => set({ warnSeconds: v ? 60 : undefined })}
-            />
+            <RowSwitch label="Amber near the end" checked={warnOn} onChange={(v) => set({ warnSeconds: v ? 60 : undefined })} />
             {warnOn && (
-              <div className="flex items-center justify-between gap-2.5">
-                <FieldLabel className="text-fg-muted font-normal">Warn at (seconds left)</FieldLabel>
-                <NumberInput
-                  aria-label="Warn at (seconds left)"
-                  value={c.warnSeconds ?? 0}
-                  step={5}
-                  min={0}
-                  max={3600}
-                  onChange={(v) => set({ warnSeconds: Math.round(v) })}
-                  className="w-24"
-                />
-              </div>
+              <RowNumber
+                label="Warn at (seconds left)"
+                value={c.warnSeconds ?? 0}
+                step={5}
+                min={0}
+                max={3600}
+                onChange={(v) => set({ warnSeconds: Math.round(v) })}
+              />
             )}
-            <StackedSwitch label="Red on overrun" checked={c.redOnOverrun ?? true} onChange={(v) => set({ redOnOverrun: v })} />
+            <RowSwitch label="Red on overrun" checked={c.redOnOverrun ?? true} onChange={(v) => set({ redOnOverrun: v })} />
           </>
         ) : (
           <p className="text-caption2 text-fg-subtle leading-snug">

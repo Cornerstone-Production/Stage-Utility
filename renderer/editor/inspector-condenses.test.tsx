@@ -51,7 +51,23 @@ describe("a row at that width", () => {
     assert.match(row.className, /@max-\[\d+px\]\/insp:flex-col/, "the row no longer stacks when narrow");
     const control = row.lastElementChild as HTMLElement;
     assert.match(control.className, /@max-\[\d+px\]\/insp:flex-wrap/, "the control no longer wraps when narrow");
-    // And it is still a side-by-side row at a normal width.
-    assert.match(row.className, /^flex items-center/);
+    // And it is still a side-by-side row at a normal width: centred, with no
+    // unprefixed flex-col.
+    assert.match(row.className, /(^| )items-center( |$)/);
+    assert.doesNotMatch(row.className, /(^| )flex-col( |$)/);
+  });
+
+  test("a label too long for its column goes above its control at any width", () => {
+    const { container } = render(
+      React.createElement(Row as never, { label: "When the feed is offline", children: React.createElement("input") }),
+    );
+    assert.match((container.firstElementChild as HTMLElement).className, /(^| )flex-col( |$)/);
+  });
+
+  test("stacked puts a short label above its control too", () => {
+    const { container } = render(
+      React.createElement(Row as never, { label: "Cue", stacked: true, children: React.createElement("input") }),
+    );
+    assert.match((container.firstElementChild as HTMLElement).className, /(^| )flex-col( |$)/);
   });
 });

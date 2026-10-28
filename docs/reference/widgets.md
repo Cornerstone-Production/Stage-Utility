@@ -400,9 +400,9 @@ bar and in red when **Warn near the end** is on, until the layer moves on. A pau
 reverse: it draws its frozen time with no state word, since there is no room for
 one here — switch to Full or Compact to see **paused**. **Progress bar**,
 **Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
-hairline along the bottom edge). **Next cue** and **Label** are greyed out in
-the inspector, each saying why, since neither is drawn in it. (Next cue is also
-unused by Compact, and Label by Full, and they grey out there too.)
+hairline along the bottom edge). **Next cue** and **Label** are not shown in
+the inspector, since neither is drawn in it. (Next cue is also unused by
+Compact, and Label by Full, and they are not shown there either.)
 
 **Warn near the end**, off by default so an existing widget is unchanged, turns
 the time and the progress hairline amber at **Amber at** seconds left (default
@@ -465,7 +465,7 @@ times is three places in the strip. It has three layouts:
 - **Above**: the tag over the words. The default.
 - **Beside**: the tag in a column to the left of the words, so a run of slides lines
   up down the screen.
-- **Arrangement**: every group of the song in play order as a strip of short tags
+- **Arranged**: every group of the song in play order as a strip of short tags
   (V1, C, B), the current one lit and the ones already played dimmed, with the words
   under it.
 
@@ -473,7 +473,7 @@ A slide with no words (an Intro or an Outro) shows its tag alone, or nothing, as
 set; a slide that belongs to no named group, such as a media slide, has no tag to
 show. Nothing is drawn underneath on the last slide. **Next group** underneath is
 the next group with a different name, so a chorus played twice in a row is skipped
-to the group after it, while the Arrangement strip shows both. The widget draws
+to the group after it, while the Arranged strip shows both. The widget draws
 nothing while ProPresenter has not answered yet, a dim dash when ProPresenter is
 not connected or has no presentation open, and never the words of a slide that has
 gone. **Short** tag text is derived: Verse 1 is V1, Chorus C, Pre-Chorus PC, Bridge
@@ -833,7 +833,7 @@ chooses which; with one, it is not shown.
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
 | **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
-| **Lyrics** | **Layout** (Above, Beside or Arrangement; Above to start). **Group tag**: **Style** (Filled, Outline or Text), **Colour** (ProPresenter's, or one colour, the app accent), **Text** (As named, Short or CAPS), **Width** when beside (Column, or Fit). **Lyrics**: **Size** (Fit, S, M or L; L to start. S, M and L are a share of the object's own height and come down when the words would not fit it; Fit is the largest size that does), **Weight** (Regular or Bold; Bold), **Align** (Left or Centre; Left; greyed Beside, which is always left; Centre also centres the Arrangement's strip), **No words** (Blank or Tag only; Tag only). **Underneath**: **Show what comes next** (on), **Shows** the next slide or the next group (the next group), **Its lyrics** (off), **Dimmed** (a little or more). **Song title** (off), the presentation's name in the corner. Its own Size, Weight and Align replace the Look section's type controls; the text colour still applies |
+| **Lyrics** | **Layout** (Above, Beside or Arranged; Above to start). **Group tag**: **Style** (Filled, Outline or Text), **Color** (ProPresenter's, or One, the app accent), **Text** (As named, Short or CAPS), **Width**, shown only when beside (Column, or Fit). **Lyrics**: **Size** (Fit, S, M or L; L to start. S, M and L are a share of the object's own height and come down when the words would not fit it; Fit is the largest size that does), **Weight** (Regular or Bold; Bold), **Align** (Left or Center; Left; not shown Beside, which is always left; Center also centers the Arranged strip), **No words** (Blank or Tag only; Tag only). **Underneath**: **Show what comes next** (on); while it is on, **Shows** the next slide or the next group (the next group), **Its lyrics** (off) and **Dimmed** (Less or More; Less). Switch it off and those three are not shown. **Song title** (off), the presentation's name in the corner. Its own Size, Weight and Align replace the Look section's type controls; the text color still applies |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
 | **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |
