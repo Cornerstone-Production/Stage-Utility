@@ -153,14 +153,14 @@ const SPL_SUMMARY: SplServiceSummary[] = WEEKENDS.map((day, i) => ({
   },
 }));
 
-/** Two calibrated meters at DIFFERENT levels, so "loudest" and a pinned quiet
+/** Two calibrated meters, each reporting an A- and a C-weighted metric, at DIFFERENT levels, so "loudest" and a pinned quiet
  *  channel cannot come out the same number. Balcony is the quiet one. */
 const SPL_LIVE: SplMetricsDTO = {
   connected: true,
   apiVersion: "4",
   meters: {
-    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4 }, ts: SINCE },
-    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1 }, ts: SINCE },
+    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4, "SPL C Slow": 101.2 }, ts: SINCE },
+    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1, "SPL C Slow": 88.6 }, ts: SINCE },
   },
 };
 /** Connected, reporting nothing — the loudest-meter path says "no readings yet"
@@ -194,7 +194,7 @@ const PVP_IDLE: PvpStatusDTO = { connected: true, layers: [], sampledAt: null, i
  * A STILL, for `countStills` alone.
  *
  * `LAYER` above is a rolling video on purpose — it is what every OTHER pvp-now
- * setting (showProgress, showNextCue, compact, nowLabel) is proven against, and
+ * setting (showProgress, showNextCue, layout, nowLabel) is proven against, and
  * `countStills` has no effect at all on a video. Swapping the shared fixture for
  * a still would have broken `showProgress`'s own pair test: a still draws no bar
  * unless it is counting down, so with `countStills` untouched (its own
@@ -236,12 +236,32 @@ const PRO_LIVE: ProPresenterStatusDTO = {
   currentSection: null,
   nextSection: null,
   nextArrangementSection: null,
+  nextGroupText: null,
+  playOrderGroups: [],
+  playOrderGroupIndex: null,
   currentServiceItem: null,
   nextServiceItem: null,
   // Overrun, which is the only state `warnStates` colours.
   timers: [{ name: "Sermon", time: "-0:42", state: "overrun" }],
   slidePreviewKey: null,
 };
+
+/** A live item twelve seconds past its length with another after it, so the
+ *  Timer's two service switches have something to show: Red on overrun colours
+ *  the time, Show the next item adds the line. */
+const PCO_LIVE = {
+  mode: "item",
+  currentItemId: "item-1",
+  label: "Message",
+  lengthSec: 60,
+  liveStartAt: new Date(NOW - 72_000).toISOString(),
+  targetAt: null,
+  serverNow: new Date(NOW).toISOString(),
+  currentItemTitle: "Message",
+  nextItemTitle: "Announcements",
+  serviceTimeId: null,
+  serviceTimeStartsAt: null,
+} as unknown as PcoLiveDTO;
 
 /** A service running four minutes behind, so `service-pacing` has a drift to
  *  report and its two display modes cannot come out the same. */
@@ -341,6 +361,7 @@ function ctxFor(home: boolean, live: boolean) {
     // are fed, because the guard renders each pair on both surfaces.
     scores: live ? SCORES_LIVE : SCORES_IDLE,
     propresenter: live ? PRO_LIVE : null,
+    pcoLive: live ? PCO_LIVE : null,
     serviceTimeline: live ? TIMELINE : null,
   });
 }
@@ -371,7 +392,7 @@ const PREREQ: Record<string, Record<string, unknown>> = {
   splMetric: { showSpl: true },
   // Label only has an effect in compact mode — the normal composition's value
   // stays the media name regardless of it.
-  nowLabel: { compact: true },
+  nowLabel: { layout: "compact" },
 };
 
 /**
@@ -380,13 +401,28 @@ const PREREQ: Record<string, Record<string, unknown>> = {
  */
 const PVP_LIVE_FOR: Record<string, PvpStatusDTO> = {
   countStills: PVP_LIVE_STILL,
+  // Warn near the end only changes anything INSIDE a threshold: 90 s left, the
+  // shared video's, is white either way. 20 s left is amber (the default
+  // threshold is 30).
+  warnNearEnd: {
+    connected: true,
+    layers: [{ ...LAYER, anchorElapsedSec: 70 }],
+    sampledAt: new Date(NOW).toISOString(),
+    imageDurationSec: 20,
+  },
 };
 
 /** One render of one object, as markup. */
 async function draw(type: string, key: string, value: unknown, home: boolean, live: boolean): Promise<string> {
-  happening = live;
   activePvpLive = PVP_LIVE_FOR[key] ?? PVP_LIVE;
   const base = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as Record<string, unknown>;
+  return drawConfig({ ...base, ...(PREREQ[key] ?? {}), [key]: value }, home, live);
+}
+
+/** One render of an object with EXACTLY this config, as markup — for a config
+ *  no registry default produces, like a widget saved before a setting existed. */
+async function drawConfig(config: Record<string, unknown>, home: boolean, live: boolean): Promise<string> {
+  happening = live;
   let container!: HTMLElement;
   await act(async () => {
     ({ container } = render(
@@ -396,7 +432,7 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
         React.createElement(ObjectContent, {
           o: {
             id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1,
-            config: { ...base, ...(PREREQ[key] ?? {}), [key]: value },
+            config,
             style: {},
           },
           ctx: ctxFor(home, live),
@@ -465,6 +501,9 @@ describe("every setting Home's card menu offers changes what the widget draws", 
  */
 const PICK_VALUES: Record<string, [unknown, unknown]> = {
   meterId: ["loudest", "Console::Balcony"],
+  // Automatic reads the A-weighted metric; the pin names the C-weighted one the
+  // fixture meters also report, at levels well clear of the A-weighted ones.
+  metricKey: ["", "SPL C Slow"],
   // "auto" takes the first followed game; the pin names the second.
   game: ["auto", "mlb:t-200"],
   // Every recorder at once vs one of them. REAPER is idle in the LIVE fixture
@@ -478,6 +517,8 @@ const PICK_VALUES: Record<string, [unknown, unknown]> = {
   // deliberately different strings, so the two labels cannot draw the same
   // caption.
   nowLabel: ["cue", "file"],
+  // Full draws a caption and a name; Countdown only draws neither.
+  layout: ["full", "countdown"],
 };
 
 describe("every CHOICE Home's card menu offers changes what the widget draws", () => {
@@ -511,6 +552,19 @@ describe("every CHOICE Home's card menu offers changes what the widget draws", (
       );
     });
   }
+});
+
+describe("a Home card saved before Layout existed", () => {
+  // The card is drawn through HomeCard -> PvpNowCard, a path no wall render
+  // touches: a Home card with `compact: true` and no `layout` has to come out
+  // Compact there too, not Full.
+  test("home-pvp-now with compact: true and no layout draws what layout: compact draws", async () => {
+    const legacy = await drawConfig({ type: "home-pvp-now", compact: true }, true, true);
+    const compact = await drawConfig({ type: "home-pvp-now", layout: "compact" }, true, true);
+    const full = await drawConfig({ type: "home-pvp-now" }, true, true);
+    assert.equal(legacy, compact, "a saved Compact Home card no longer draws Compact");
+    assert.notEqual(legacy, full, "a saved Compact Home card drew Full");
+  });
 });
 
 describe("a pick that both surfaces read is read on BOTH", () => {

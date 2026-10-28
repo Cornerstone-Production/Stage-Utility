@@ -3,11 +3,28 @@
 
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { DataStore } from "./data-store.js";
+import { asArray, checked } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
 const store = new DataStore<CategoryRole[]>("servicecue-roles.json", [], "config", {
   renamedFrom: { filename: "scriptview-roles.json", logTag: SERVICECUE_LOG_TAG },
+  restoreCheck: checked((raw) => cleanRoles(asArray(raw, "the roles"))),
 });
+
+/**
+ * What POST /api/servicecue/roles saves of a list: roles with a text id and a
+ * name that is not blank, the name trimmed, members trimmed and deduplicated.
+ * Shared by that route and a config restore.
+ */
+export function cleanRoles(roles: readonly unknown[]): CategoryRole[] {
+  return (roles as Partial<CategoryRole>[])
+    .filter((r): r is CategoryRole => !!r && typeof r.id === "string" && typeof r.name === "string" && !!r.name.trim())
+    .map((r) => ({
+      id: r.id,
+      name: r.name.trim(),
+      members: [...new Set((Array.isArray(r.members) ? r.members : []).map((m) => String(m).trim()).filter(Boolean))],
+    }));
+}
 
 /** Stable id from a category name, so re-seeding does not churn ids. */
 function idFor(name: string): string {
@@ -41,5 +58,9 @@ export const serviceCueRolesStore = {
   },
   async save(roles: CategoryRole[]): Promise<void> {
     await store.save(roles);
+  },
+  /** Why saves to the roles are refused: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return store.refusingSaves();
   },
 };

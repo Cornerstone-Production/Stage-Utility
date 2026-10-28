@@ -30,6 +30,7 @@ import {
   type MessagingConfig,
 } from "../types/messages.js";
 import { DataStore } from "./data-store.js";
+import { asObject, checked, refuse } from "./restore-check.js";
 import { MessageRefused, checkedText } from "./message-rules.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
@@ -115,13 +116,37 @@ function attempt<T>(check: () => T): { value: T } | { why: string } {
  * missing or would not parse (which never reaches here), leaves it false.
  */
 function readFile(parsed: unknown): MessagingConfig {
-  const out = defaults();
-  const skipped: string[] = [];
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     console.warn("[messages] messaging.json is not an object; using the defaults");
-    return out;
+    return defaults();
   }
-  const raw = parsed as Record<string, unknown>;
+  const { config, skipped } = readEntries(parsed as Record<string, unknown>);
+  if (skipped.length > 0) {
+    console.warn(
+      `[messages] messaging.json: left out ${scrub(plural(skipped.length, "entry", "entries"))} that break a rule: ${scrub(skipped.join(", "), 600)}`,
+    );
+  }
+  readClean = skipped.length === 0 && Array.isArray((parsed as Record<string, unknown>).groups);
+  return config;
+}
+
+/**
+ * A restored messaging.json: refused if any entry breaks a rule readFile would
+ * leave it out for — the same rules PUT /api/messaging applies to each group,
+ * quick message and quick reply. Not validate() itself, which also demands the
+ * version the page read the config at: a restore replaces the config, it does
+ * not edit one.
+ */
+const restoreCheck = checked((parsed) => {
+  const { skipped } = readEntries(asObject(parsed, "the messaging config"));
+  if (skipped.length > 0) refuse(`messaging: ${skipped[0]}`);
+  return parsed;
+});
+
+/** Every entry of a messaging file that keeps the rules, and a line for each that does not. */
+function readEntries(raw: Record<string, unknown>): { config: MessagingConfig; skipped: string[] } {
+  const out = defaults();
+  const skipped: string[] = [];
   if (typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0) out.version = raw.version;
 
   // A field that is there but is not a list is named, like any other bad shape.
@@ -172,14 +197,7 @@ function readFile(parsed: unknown): MessagingConfig {
   };
   out.quickMessages = list(raw.quickMessages, out.quickMessages, QUICK_MESSAGES_MAX, MESSAGE_MAX, "quick message", "quick messages");
   out.quickReplies = list(raw.quickReplies, out.quickReplies, QUICK_REPLIES_MAX, QUICK_REPLY_MAX, "quick reply", "quick replies");
-
-  if (skipped.length > 0) {
-    console.warn(
-      `[messages] messaging.json: left out ${scrub(plural(skipped.length, "entry", "entries"))} that break a rule: ${scrub(skipped.join(", "), 600)}`,
-    );
-  }
-  readClean = skipped.length === 0 && Array.isArray(raw.groups);
-  return out;
+  return { config: out, skipped };
 }
 
 /**
@@ -191,7 +209,7 @@ function readFile(parsed: unknown): MessagingConfig {
  */
 let readClean = false;
 
-const store = new DataStore<MessagingConfig>("messaging.json", defaults(), "config", { normalize: readFile });
+const store = new DataStore<MessagingConfig>("messaging.json", defaults(), "config", { normalize: readFile, restoreCheck });
 
 /**
  * What get() answers, synchronously. DataStore holds the truth and serialises the

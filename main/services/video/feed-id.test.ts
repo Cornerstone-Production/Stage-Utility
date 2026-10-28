@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { feedIdFor, FEED_ID_PATTERN } from "./feed-id.js";
+import { feedIdFor, isReservedFeedId, FEED_ID_PATTERN } from "./feed-id.js";
 
 test("slugs a name", () => assert.equal(feedIdFor("Program (IMAG)", new Set()), "program-imag"));
 test("never empty", () => assert.equal(feedIdFor("!!!", new Set()), "feed"));
@@ -28,4 +28,22 @@ test("prototype names are ordinary ids", () => {
 test("accents fold into their letters rather than splitting the word", () => {
   assert.equal(feedIdFor("Résumé cam", new Set()), "resume-cam");
   assert.equal(feedIdFor("Façade Ñandú", new Set()), "facade-nandu");
+});
+
+// A feed's `<id>-listen` relay path carries its converted audio, so an id of that
+// shape would be two feeds on one path.
+test("no feed id ends in -listen, whichever feed is made first", () => {
+  assert.equal(feedIdFor("Cam Listen", new Set()), "cam-listen-2");
+  assert.equal(feedIdFor("Cam", new Set(["cam-listen-2"])), "cam");
+  const first = feedIdFor("Cam", new Set());
+  assert.equal(first, "cam");
+  assert.equal(feedIdFor("Cam Listen", new Set([first])), "cam-listen-2");
+  assert.equal(feedIdFor("Cam Listen", new Set(["cam-listen-2"])), "cam-listen-3");
+  assert.equal(feedIdFor("Listen", new Set()), "listen", "only the suffix is reserved");
+});
+
+test("isReservedFeedId names exactly the -listen shape", () => {
+  assert.equal(isReservedFeedId("cam-listen"), true);
+  assert.equal(isReservedFeedId("cam-listening"), false);
+  assert.equal(isReservedFeedId("listen"), false);
 });

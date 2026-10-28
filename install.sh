@@ -18,6 +18,7 @@
 #
 set -euo pipefail
 
+# Also spelled in main/services/github-repo.ts and the other installers.
 REPO="${STAGE_REPO:-Cornerstone-Production/Stage-Utility}"
 TRACK="${STAGE_TRACK:-main}"
 PORT="${STAGE_PORT:-8788}"
@@ -92,7 +93,7 @@ _logs=""
 [ -n "${STAGE_UPDATE_LIVE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LIVE_LOG"
 [ -n "${STAGE_UPDATE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LOG"
 if [ -n "$_logs" ]; then
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086 # $_logs is a space-separated list of paths, meant to split
   exec > >(tee -a $_logs) 2>&1
 fi
 
@@ -133,6 +134,45 @@ else
 
   curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sudo bash"
 fi
+
+# Installs the system's ffmpeg for the Video relay's audio conversion. Best
+# effort: whatever happens here, the install carries on, because video works
+# without it and Advanced says whether the server found one.
+# Kept identical in install.sh and scripts/install.sh (scripts/installer-ffmpeg.test.ts).
+install_ffmpeg() {
+  if command -v ffmpeg >/dev/null 2>&1; then
+    log "ffmpeg is already installed."
+    return 0
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    warn "ffmpeg is not installed and this is not running as root, so it was not installed. Audio conversion needs it; video works without it."
+    return 0
+  fi
+  local out="" status=1
+  if command -v apt-get >/dev/null 2>&1; then
+    log "Installing ffmpeg with apt-get..."
+    if out="$(DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg 2>&1)"; then status=0
+    elif apt-get update >/dev/null 2>&1 && out="$(DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg 2>&1)"; then status=0
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    log "Installing ffmpeg with dnf..."
+    if out="$(dnf install -y ffmpeg 2>&1)"; then status=0
+    elif out="$(dnf install -y ffmpeg-free 2>&1)"; then status=0
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    log "Installing ffmpeg with pacman..."
+    if out="$(pacman -S --noconfirm --needed ffmpeg 2>&1)"; then status=0; fi
+  else
+    warn "No apt-get, dnf or pacman found, so ffmpeg was not installed. Audio conversion needs it; video works without it."
+    return 0
+  fi
+  if [ "$status" -eq 0 ]; then
+    log "ffmpeg installed."
+  else
+    warn "Could not install ffmpeg: $(printf '%s' "$out" | tail -n 1). Audio conversion needs it; video works without it."
+  fi
+  return 0
+}
 
 for tool in curl tar; do
   command -v "$tool" >/dev/null || die "'$tool' is required but not installed."
@@ -199,35 +239,48 @@ fi
 
 write_progress install
 say "Verifying"
+# The digest the releases API lists for asset $1 in the release JSON $2, or nothing.
+#
 # Within an asset object the API emits "name" before "digest", so the digest we
-# want is the first one after this archive's name. Anchoring on the exact name
-# is what stops another platform's hash being read as this one's — and the
-# response is pretty-printed, so the two fields are never on the same line.
-# Same here-string reason as above, and this is the one that actually bit: awk
-# `exit`s the moment it has the digest — which for the newest release is in the
-# first few KB — so the writer was still pushing 275 KB into a closed pipe.
-# Observed as `printf: write error: Broken pipe` on a real beta install, with
-# the script dying before it verified anything.
+# want is the first one after this archive's name. Anchoring on the exact name is
+# what stops another platform's hash being read as this one's, and every "name"
+# line resets the match, so an asset that lists no digest of its own (null, or no
+# key) never takes the NEXT asset's. The response is pretty-printed, so the two
+# fields are never on the same line, and this reads that form: a record in any
+# other layout finds nothing, and the install refuses rather than guesses.
+#
+# The JSON arrives by here-string and awk `exit`s the moment it has the digest —
+# which for the newest release is in the first few KB — so a pipe's writer was
+# still pushing 275 KB into a closed pipe. Observed as `printf: write error:
+# Broken pipe` on a real beta install, with the script dying before it verified
+# anything.
+#
 # No interval expression (`{64}`) anywhere below. mawk — the DEFAULT awk on
 # Debian and Ubuntu, i.e. most Linux servers — does not support them and offers
 # no flag to enable them, so `match($0, /[0-9a-f]{64}/)` simply never matched
-# there. The extraction returned empty, and the install died on the line under
-# this one with "publishes no checksum … refusing to install unverified": the
-# one-line installer could not install on a stock Debian or Ubuntu box at all.
-# It failed safe, which is why it stayed quiet; GitHub's runners and any machine
-# with gawk installed take the same path and pass.
+# there. The extraction returned empty, and the install died with "publishes no
+# checksum … refusing to install unverified": the one-line installer could not
+# install on a stock Debian or Ubuntu box at all. It failed safe, which is why it
+# stayed quiet; GitHub's runners and any machine with gawk installed take the same
+# path and pass.
 #
 # So: strip the prefix, strip anything from the first non-hex character, and
 # check the length. Plain POSIX awk, identical result under mawk and gawk.
-WANT=$(awk -v want="\"name\": \"${ARCHIVE}\"" '
-  index($0, want) { found = 1; next }
-  found && /"digest": "sha256:/ {
-    line = $0
-    sub(/.*sha256:/, "", line)
-    sub(/[^0-9a-f].*$/, "", line)
-    if (length(line) == 64) { print line; exit }
-  }
-' <<<"$RELEASE_JSON")
+#
+# The same extraction as digest_from_release in scripts/kiosk/install-macos.sh;
+# scripts/kiosk-install-macos.test.ts runs both over the same fixtures.
+release_digest() {
+  awk -v want="\"name\": \"$1\"" '
+    /"name": "/ { found = (index($0, want) > 0); next }
+    found && /"digest": "sha256:/ {
+      line = $0
+      sub(/.*sha256:/, "", line)
+      sub(/[^0-9a-f].*$/, "", line)
+      if (length(line) == 64) { print line; exit }
+    }
+  ' <<<"$2"
+}
+WANT=$(release_digest "$ARCHIVE" "$RELEASE_JSON")
 
 [ -n "${WANT:-}" ] \
   || die "Release ${TAG} publishes no checksum for ${ARCHIVE}; refusing to install unverified."
@@ -248,7 +301,7 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 log "unpacking into ${RELEASE_DIR}"
 tar -xzf "$WORK/$ARCHIVE" -C "$RELEASE_DIR" || die "Could not unpack ${ARCHIVE} into ${RELEASE_DIR}."
-log "unpacked $(ls -1 "$RELEASE_DIR" | wc -l | tr -d " ") entries"
+log "unpacked $(find "$RELEASE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ") entries"
 [ -x "${RELEASE_DIR}/node" ] || die "Archive is missing its runtime — refusing to switch to it."
 
 mkdir -p "$DATA"
@@ -305,9 +358,11 @@ if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
   if [ "$OS" = linux ] && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ] \
      && ! grep -q "AmbientCapabilities" "/etc/systemd/system/${SERVICE_NAME}.service"; then
     if [ "$(id -u)" -eq 0 ] && command -v setcap >/dev/null 2>&1; then
-      setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null \
-        && log "granted port-80 binding to the new release" \
-        || warn "Could not grant port-80 binding to the new release; the app still serves on ${PORT}."
+      if setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null; then
+        log "granted port-80 binding to the new release"
+      else
+        warn "Could not grant port-80 binding to the new release; the app still serves on ${PORT}."
+      fi
     else
       warn "This install predates the port-80 service capability, so :80 will stop answering after this update. Re-run the installer once with sudo to restore it; ${PORT} is unaffected."
       log "port-80 capability not carried across the swap (old unit, unprivileged swap)"
@@ -340,6 +395,14 @@ if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
   fi
   log "update finished"
   exit 0
+fi
+
+# ── ffmpeg (optional) ─────────────────────────────────────────────────────────
+# Fresh installs only: an update swap runs unprivileged and changes no packages.
+if [ "$OS" = linux ]; then
+  install_ffmpeg
+else
+  log "ffmpeg: on macOS run  brew install ffmpeg  as your own user for audio conversion (video works without it)."
 fi
 
 if [ -n "${STAGE_NO_SERVICE:-}" ]; then

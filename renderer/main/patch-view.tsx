@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
@@ -6,35 +6,69 @@ import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
+import { useElementTier } from "../lib/use-element-width";
+import { chainNodes, collectChanges, noRowsMessage, rackSections, sourceColor, withOwnerHeadings } from "../lib/patch-view-model";
 import { plural } from "@main/services/plural";
+import { LEGEND_NODES, PatchChain } from "./patch-chain";
+import { PatchWide } from "./patch-view-wide";
 
-type ChainNode = { text: string; kind: "source" | "hop" | "rack" | "console" };
-const PILL: Record<ChainNode["kind"], string> = {
-  source: "border-line-strong bg-fill-active text-fg font-medium",
-  hop: "border-line bg-surface text-fg-muted font-mono",
-  rack: "border-line-strong bg-surface text-fg font-mono",
-  console: "border-line bg-transparent text-fg-subtle font-mono",
-};
+/**
+ * Three layouts, chosen by how wide the page itself is (the pane beside the
+ * sidebar, not the window): the stacked column that suits a phone held in the
+ * wings, the same cards in a row above full-width tables, and a sticky column
+ * beside the tables.
+ *
+ * Measured: with the console node left out of the path, which the rack card does
+ * below 62rem, the widest table this app draws (real chain labels such as
+ * "1.11 SD Rack in 12", a mic name, the longest note) is 879px. That table in a
+ * card the width of the pane, 881px with the card's border, is the medium layout:
+ * 56rem (896px at a 16px root) is that rounded up to a whole rem. Beside a 270px
+ * column and its 14px gap the card is 284px narrower, so the sticky column needs
+ * 1165px. 74rem (1184px) clears that with room, and is exactly a 1280px window
+ * with the sidebar collapsed. At either width the note column,
+ * which says why a row changed, stays in its card for the names measured; a
+ * classic 15px scrollbar takes some of the 15px (medium) or 19px (wide) of room,
+ * and a longer name takes the rest.
+ *
+ * With the sidebar at its default width a 1024px window is a 760px pane (stacked,
+ * or 928px collapsed: medium), 1280px is 1016px (medium), 1440px is 1176px
+ * (medium) and 1920px is 1656px (wide); collapsed, 1280px is exactly 1184px
+ * (wide). Dragging the sidebar moves the pane with it.
+ */
+export const PATCH_MEDIUM_MIN_PANE_REM = 56;
+export const PATCH_WIDE_MIN_PANE_REM = 74;
+/** Ascending, so the tier is how many of them the pane has reached. */
+const PANE_TIERS = [PATCH_MEDIUM_MIN_PANE_REM, PATCH_WIDE_MIN_PANE_REM] as const;
+const LAYOUT_BY_TIER = ["stacked", "medium", "wide"] as const;
 
-/** SVG chevron connector between diagram nodes. */
-function Arrow() {
+function SheetTabs({ sheets, activeId, onPick, className }: { sheets: PatchSheet[]; activeId?: string; onPick: (id: string) => void; className: string }) {
+  if (sheets.length < 2) return null;
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" className="shrink-0 text-fg-faint" aria-hidden="true">
-      <path d="M4 2.5 L7.5 6 L4 9.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className={`flex items-center gap-1 overflow-x-auto ${className}`}>
+      {sheets.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => onPick(s.id)}
+          className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === activeId ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+        >
+          {s.name}
+        </button>
+      ))}
+    </div>
   );
 }
 
-/** A signal path drawn as connected nodes: source → hops → rack → console. */
-function PatchChain({ nodes }: { nodes: ChainNode[] }) {
+/** The editor is the back of this page. Without this link it is a route
+ *  nobody can find — which is exactly what happened when Settings
+ *  dissolved and only the viewer was routed. "Settings → Patch" is also
+ *  no longer where it lives. */
+function PatchFooter() {
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {nodes.map((n, i) => (
-        <Fragment key={i}>
-          {i > 0 && <Arrow />}
-          <span className={`rounded-md border px-2 py-0.5 text-caption2 whitespace-nowrap ${PILL[n.kind]}`}>{n.text}</span>
-        </Fragment>
-      ))}
+    <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
+      <CableIcon className="size-3.5" />
+      <span>Read-only · updates live ·</span>
+      <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
     </div>
   );
 }
@@ -80,215 +114,198 @@ export function PatchView() {
     [sheet, state?.serviceTypeId, state?.planId],
   );
 
-  const devName = (id: string) => sheet?.devices.find((d) => d.id === id)?.name ?? id;
-  const racks = useMemo(() => (sheet?.devices ?? []).filter((d) => d.kind === "rack"), [sheet]);
-  const baseByKey = useMemo(() => new Map((sheet?.endpoints ?? []).map((e) => [endpointKey(e), e] as const)), [sheet]);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const layout = LAYOUT_BY_TIER[useElementTier(paneRef, PANE_TIERS)];
 
-  function chainNodes(e: PatchEndpoint): ChainNode[] {
-    const hops: ChainNode[] = (e.path ?? []).map((h) => ({ text: `${devName(h.deviceId)} ${h.connector}`.trim(), kind: "hop" }));
-    const rk = racks.find((r) => r.id === e.rackId);
-    const rack: ChainNode = { text: `${rk?.name ?? "rack"} ${e.dir === "in" ? "in" : "out"} ${e.index}`, kind: "rack" };
-    const console: ChainNode[] = e.consoleChannel ? [{ text: `console ${e.consoleChannel}`, kind: "console" }] : [];
-    const src: ChainNode[] = e.label ? [{ text: e.label, kind: "source" }] : [];
-    // Signal flows source → stage boxes → rack → console (outputs flow the other way).
-    return e.dir === "in" ? [...src, ...hops, rack, ...console] : [...console, rack, ...hops, ...src];
-  }
-  function meaningful(e: PatchEndpoint): boolean {
-    return Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused);
-  }
-
-  // "What changed vs the default" for the current direction.
-  const changes = useMemo(() => {
-    if (!resolved) return [];
-    return resolved.endpoints
-      .filter((e) => e.dir === tab && resolved.changed.has(endpointKey(e)))
-      .sort((a, b) => a.index - b.index)
-      .map((e) => {
-        const base = baseByKey.get(endpointKey(e));
-        let note = "";
-        if (e.unused) note = "unused this week";
-        else if ((base?.label ?? "") !== (e.label ?? "")) note = base?.label ? `was ${base.label}` : "new";
-        else if (JSON.stringify(base?.path ?? []) !== JSON.stringify(e.path ?? [])) note = "re-patched";
-        return { e, note };
-      });
-  }, [resolved, tab, baseByKey]);
+  // Every change, both directions: the desk layout lists them all, the stacked
+  // one only the direction on screen.
+  const allChanges = useMemo(() => (sheet && resolved ? collectChanges(sheet, resolved) : []), [sheet, resolved]);
+  const sections = useMemo(
+    () => (sheet && resolved ? rackSections(sheet, resolved, tab, { changesOnly, q }) : []),
+    [sheet, resolved, tab, changesOnly, q],
+  );
 
   const hasPatch = sheets.length > 0;
+  const toggleRack = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+  const openRack = (id: string) => setCollapsed((c) => (c[id] ? { ...c, [id]: false } : c));
+
+  const body =
+    layout !== "stacked" && sheet && resolved ? (
+      <div className="pb-[max(1rem,env(safe-area-inset-bottom))] pt-1">
+        <SheetTabs sheets={sheets} activeId={sheet.id} onPick={setSheetId} className="mb-3" />
+        <PatchWide
+          layout={layout}
+          sheet={sheet}
+          state={state}
+          resolved={resolved}
+          changes={allChanges}
+          sections={sections}
+          tab={tab}
+          onTab={setTab}
+          q={q}
+          onQ={setQ}
+          changesOnly={changesOnly}
+          onChangesOnly={setChangesOnly}
+          collapsed={collapsed}
+          onToggleRack={toggleRack}
+          onOpenRack={openRack}
+        />
+        <PatchFooter />
+      </div>
+    ) : null;
+
+  const changes = allChanges.filter(({ e }) => e.dir === tab);
+
+  const stacked = (
+  <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    {/* No brand row here - the shell's rail carries the logo and app name.
+        The read-only pill stays: it is information about this page, not
+        chrome. */}
+    <div className="flex items-center">
+      <span className="ml-auto rounded-full border border-line px-2 py-0.5 text-caption2 text-fg-subtle">Read-only</span>
+    </div>
+
+    {/* Context */}
+    {/* The eyebrow sits ABOVE the row rather than stacked inside it. As one
+        column of two lines it was the tallest thing on a centred flex row, so
+        everything beside it centred against the PAIR: the plan title's
+        baseline landed 8px above the service type's, and the two names read
+        as belonging to different lines. Lifted out, every item on the row is
+        a single line and they align on the baseline they share. */}
+    <div className="mt-4 rounded-xl border border-line bg-surface px-4 py-3">
+      <span className="block text-caption2 uppercase tracking-wider text-fg-subtle">This week</span>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-body font-semibold">{state?.serviceTypeName ?? "—"}</span>
+        {resolved?.variantName && (
+          // self-center: a chip is a box, not a word, and its own baseline
+          // would hang it below the names it sits between.
+          <span className="self-center rounded-full bg-fill px-2.5 py-1 text-caption1 text-fg">
+            Base: {resolved.variantName}
+          </span>
+        )}
+        {state?.planTitle && <span className="text-footnote text-fg-muted">{state.planTitle}</span>}
+      </div>
+    </div>
+
+    {/* Sheet tabs (only when more than one sheet has a patch) */}
+    <SheetTabs sheets={sheets} activeId={sheet?.id} onPick={setSheetId} className="mt-4" />
+
+    {!hasPatch ? (
+      <div className="mt-6 rounded-xl border border-line bg-surface px-4 py-10 text-center text-footnote text-fg-subtle">
+        No patch has been set up yet.
+      </div>
+    ) : (
+      <>
+        {/* How to read the diagram */}
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">How to read</span>
+          <PatchChain nodes={LEGEND_NODES} />
+        </div>
+        {/* Changes-first */}
+        {changes.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-warn-9/40 bg-warn-9/12">
+            <div className="flex items-center gap-2 border-l-2 border-warn-9 px-4 py-2.5 text-footnote font-semibold">
+              <TriangleAlertIcon className="size-4 text-warn-11" />
+              <span className="text-warn-11">{plural(changes.length, "change")}</span>
+              <span className="text-fg-muted">from the standard patch</span>
+            </div>
+            <div className="divide-y divide-line">
+              {changes.map(({ e, note }) => (
+                <div key={endpointKey(e)} className="flex items-baseline gap-3 px-4 py-2">
+                  <span className="w-10 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.dir} {e.index}</span>
+                  <span className="font-medium">{e.unused ? <span className="text-fg-subtle line-through">{e.label || "(source)"}</span> : e.label || "(unnamed)"}</span>
+                  {note && <span className="text-caption1 text-fg-muted">· {note}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Controls */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex rounded-lg border border-line bg-surface p-1">
+            {(["in", "out"] as const).map((t) => (
+              <button key={t} type="button" onClick={() => setTab(t)} className={`rounded-md px-3.5 py-1.5 text-footnote transition-colors ${tab === t ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}>
+                {t === "in" ? "Inputs" : "Outputs"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="h-8 w-32 rounded-md border border-line-strong bg-field px-2.5 text-footnote text-fg focus:outline-none focus:border-focus" />
+            <button type="button" onClick={() => setChangesOnly((v) => !v)} className={`rounded-md border px-3 py-1.5 text-footnote transition-colors ${changesOnly ? "border-warn-9 bg-warn-9/12 text-warn-11" : "border-line text-fg-muted hover:text-fg"}`}>
+              Changes only
+            </button>
+          </div>
+        </div>
+
+        {/* Full patch, grouped by rack (and by owner within a rack) */}
+        <div className="mt-4 flex flex-col gap-3">
+          {sections.length === 0 && (
+            <div className="rounded-xl border border-line bg-surface px-4 py-8 text-center text-footnote text-fg-subtle">
+              {noRowsMessage(tab, { changesOnly, q })}
+            </div>
+          )}
+          {sections.map(({ rack, rows }) => {
+            const isCollapsed = collapsed[rack.id];
+            return (
+              <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
+                <button type="button" onClick={() => toggleRack(rack.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
+                  <ChevronRightIcon className={`size-4 text-fg-subtle transition-transform ${isCollapsed ? "" : "rotate-90"}`} />
+                  {rack.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: rack.color }} />}
+                  <span className="text-footnote font-semibold">{rack.name}</span>
+                  <span className="text-caption2 text-fg-subtle">{rows.length}</span>
+                </button>
+                {!isCollapsed && (
+                  <div className="divide-y divide-line/60">
+                    {withOwnerHeadings(rows).map(({ e, heading }) => {
+                      const changed = resolved?.changed.has(endpointKey(e));
+                      const srcColor = sheet ? sourceColor(e, sheet.devices) : undefined;
+                      return (
+                        <Fragment key={endpointKey(e)}>
+                          {heading && (
+                            <div className="bg-fill/60 px-4 py-1 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+                              Owned by {heading}
+                            </div>
+                          )}
+                          <div
+                            style={!changed && srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
+                            className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-9/12 shadow-[inset_2px_0_0_var(--su-warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}
+                          >
+                            <span className="w-14 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.index}{e.consoleChannel ? ` · ${e.consoleChannel}` : ""}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-baseline gap-x-2">
+                                <span className={`font-medium ${e.unused ? "line-through text-fg-subtle" : ""}`}>{e.label || "—"}</span>
+                                {tab === "in" && e.mic && <span className="text-caption1 text-fg-muted">{e.mic}</span>}
+                                {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
+                                {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
+                              </div>
+                              <div className="mt-1"><PatchChain nodes={chainNodes(e, sheet?.devices ?? [])} /></div>
+                            </div>
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    )}
+
+    <PatchFooter />
+  </div>
+  );
 
   return (
     // No `dark` class: this renders inside the operator shell, which follows the
     // user's light/dark toggle. It used to force dark because it was served as a
     // standalone chrome-free page alongside the always-dark kiosk.
-    <div className="h-full overflow-y-auto bg-bg text-fg">
-      <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        {/* No brand row here - the shell's rail carries the logo and app name.
-            The read-only pill stays: it is information about this page, not
-            chrome. */}
-        <div className="flex items-center">
-          <span className="ml-auto rounded-full border border-line px-2 py-0.5 text-caption2 text-fg-subtle">Read-only</span>
-        </div>
-
-        {/* Context */}
-        {/* The eyebrow sits ABOVE the row rather than stacked inside it. As one
-            column of two lines it was the tallest thing on a centred flex row, so
-            everything beside it centred against the PAIR: the plan title's
-            baseline landed 8px above the service type's, and the two names read
-            as belonging to different lines. Lifted out, every item on the row is
-            a single line and they align on the baseline they share. */}
-        <div className="mt-4 rounded-xl border border-line bg-surface px-4 py-3">
-          <span className="block text-caption2 uppercase tracking-wider text-fg-subtle">This week</span>
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-body font-semibold">{state?.serviceTypeName ?? "—"}</span>
-            {resolved?.variantName && (
-              // self-center: a chip is a box, not a word, and its own baseline
-              // would hang it below the names it sits between.
-              <span className="self-center rounded-full bg-fill px-2.5 py-1 text-caption1 text-fg">
-                Base: {resolved.variantName}
-              </span>
-            )}
-            {state?.planTitle && <span className="text-footnote text-fg-muted">{state.planTitle}</span>}
-          </div>
-        </div>
-
-        {/* Sheet tabs (only when more than one sheet has a patch) */}
-        {sheets.length > 1 && (
-          <div className="mt-4 flex items-center gap-1 overflow-x-auto">
-            {sheets.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSheetId(s.id)}
-                className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === sheet?.id ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {!hasPatch ? (
-          <div className="mt-6 rounded-xl border border-line bg-surface px-4 py-10 text-center text-footnote text-fg-subtle">
-            No patch has been set up yet.
-          </div>
-        ) : (
-          <>
-            {/* How to read the diagram */}
-            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
-              <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">How to read</span>
-              <PatchChain nodes={[{ text: "Kick In", kind: "source" }, { text: "Snake B 1", kind: "hop" }, { text: "Input Rack in 12", kind: "rack" }, { text: "console 12", kind: "console" }]} />
-            </div>
-            {/* Changes-first */}
-            {changes.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-warn-6 bg-warn-2/40">
-                <div className="flex items-center gap-2 border-l-2 border-warn-9 px-4 py-2.5 text-footnote font-semibold">
-                  <TriangleAlertIcon className="size-4 text-warn-11" />
-                  <span className="text-warn-11">{plural(changes.length, "change")}</span>
-                  <span className="text-fg-muted">from the standard patch</span>
-                </div>
-                <div className="divide-y divide-line">
-                  {changes.map(({ e, note }) => (
-                    <div key={endpointKey(e)} className="flex items-baseline gap-3 px-4 py-2">
-                      <span className="w-10 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{tab === "in" ? "in" : "out"} {e.index}</span>
-                      <span className="font-medium">{e.unused ? <span className="text-fg-subtle line-through">{e.label || "(source)"}</span> : e.label || "(unnamed)"}</span>
-                      {note && <span className="text-caption1 text-fg-muted">· {note}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Controls */}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="inline-flex rounded-lg border border-line bg-surface p-1">
-                {(["in", "out"] as const).map((t) => (
-                  <button key={t} type="button" onClick={() => setTab(t)} className={`rounded-md px-3.5 py-1.5 text-footnote transition-colors ${tab === t ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}>
-                    {t === "in" ? "Inputs" : "Outputs"}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="h-8 w-32 rounded-md border border-line-strong bg-field px-2.5 text-footnote text-fg focus:outline-none focus:border-focus" />
-                <button type="button" onClick={() => setChangesOnly((v) => !v)} className={`rounded-md border px-3 py-1.5 text-footnote transition-colors ${changesOnly ? "border-warn-7 bg-warn-2/40 text-warn-11" : "border-line text-fg-muted hover:text-fg"}`}>
-                  Changes only
-                </button>
-              </div>
-            </div>
-
-            {/* Full patch, grouped by rack (and by owner within a rack) */}
-            <div className="mt-4 flex flex-col gap-3">
-              {racks.map((rack) => {
-                const rows = (resolved?.endpoints ?? [])
-                  .filter((e) => e.rackId === rack.id && e.dir === tab && meaningful(e))
-                  .filter((e) => !changesOnly || resolved?.changed.has(endpointKey(e)))
-                  .filter((e) => {
-                    if (!q.trim()) return true;
-                    const hay = `${e.index} ${e.label ?? ""} ${e.mic ?? ""} ${e.feedType ?? ""} ${e.consoleChannel ?? ""} ${e.owner ?? ""}`.toLowerCase();
-                    return hay.includes(q.toLowerCase());
-                  })
-                  .sort((a, b) => a.index - b.index);
-                if (rows.length === 0) return null;
-                const isCollapsed = collapsed[rack.id];
-                let lastOwner: string | undefined;
-                return (
-                  <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
-                    <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [rack.id]: !c[rack.id] }))} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
-                      <ChevronRightIcon className={`size-4 text-fg-subtle transition-transform ${isCollapsed ? "" : "rotate-90"}`} />
-                      {rack.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: rack.color }} />}
-                      <span className="text-footnote font-semibold">{rack.name}</span>
-                      <span className="text-caption2 text-fg-subtle">{rows.length}</span>
-                    </button>
-                    {!isCollapsed && (
-                      <div className="divide-y divide-line/60">
-                        {rows.map((e) => {
-                          const changed = resolved?.changed.has(endpointKey(e));
-                          const owner = e.owner?.trim() || undefined;
-                          const showOwner = owner !== lastOwner && owner !== undefined;
-                          lastOwner = owner;
-                          const srcColor = sheet?.devices.find((dv) => dv.id === e.path?.[0]?.deviceId)?.color;
-                          return (
-                            <Fragment key={endpointKey(e)}>
-                              {showOwner && (
-                                <div className="bg-fill/60 px-4 py-1 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-                                  Owned by {owner}
-                                </div>
-                              )}
-                              <div
-                                style={!changed && srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
-                                className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-2/25 shadow-[inset_2px_0_0_var(--warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}
-                              >
-                                <span className="w-14 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.index}{e.consoleChannel ? ` · ${e.consoleChannel}` : ""}</span>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-baseline gap-x-2">
-                                    <span className={`font-medium ${e.unused ? "line-through text-fg-subtle" : ""}`}>{e.label || "—"}</span>
-                                    {tab === "in" && e.mic && <span className="text-caption1 text-fg-muted">{e.mic}</span>}
-                                    {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
-                                    {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
-                                  </div>
-                                  <div className="mt-1"><PatchChain nodes={chainNodes(e)} /></div>
-                                </div>
-                              </div>
-                            </Fragment>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* The editor is the back of this page. Without this link it is a route
-            nobody can find — which is exactly what happened when Settings
-            dissolved and only the viewer was routed. "Settings → Patch" is also
-            no longer where it lives. */}
-        <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
-          <CableIcon className="size-3.5" />
-          <span>Read-only · updates live ·</span>
-          <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
-        </div>
-      </div>
+    // One wrapper for both layouts: the pane's width is measured on it, and a
+    // wrapper that remounted when the layout changed would lose the measurement.
+    <div ref={paneRef} className="h-full overflow-y-auto bg-bg text-fg">
+      {body ?? stacked}
     </div>
   );
 }

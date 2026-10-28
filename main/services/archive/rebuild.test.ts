@@ -270,3 +270,21 @@ test("rebuilding a record keeps its identity and the fields samples cannot carry
   assert.equal(out.items[0].maxSpl, 103.6, "primary-metric mirror repopulated");
   assert.equal(out.items[0].sampleCount, 5);
 });
+
+test("rows are folded in time order, not the order of the files they are in", async () => {
+  // A column set that comes back resumes the earlier rolled file, and a file
+  // the appender passed over is resumed once it reads again, so spl.csv can
+  // hold a row later than one in spl.2.csv. An item's last row is its end.
+  const ctx = { serviceKey: "st1:p1:order", serviceDate: "2026-10-18" };
+  const dir = serviceDirPath(ctx.serviceKey, ctx.serviceDate);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "spl.csv"),
+    "at,itemId,item,laeq\n2026-10-18T14:00:00.000Z,i1,Song,90\n2026-10-18T14:02:00.000Z,i1,Song,92\n",
+  );
+  await fs.writeFile(path.join(dir, "spl.2.csv"), "at,itemId,item,laeq,lceq\n2026-10-18T14:01:00.000Z,i1,Song,91,95\n");
+  const items = (await rebuildSplItems(ctx.serviceKey, ctx.serviceDate))!;
+  assert.equal(items.length, 1);
+  assert.equal(items[0].startedAt, "2026-10-18T14:00:00.000Z");
+  assert.equal(items[0].endedAt, "2026-10-18T14:02:00.000Z", "the item ended at the row read last, not the latest");
+});

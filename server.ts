@@ -73,6 +73,7 @@ import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
+import { configSnapshot } from "./main/services/config-snapshot.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { resiService } from "./main/services/resi-service.js";
 import { youtubeService } from "./main/services/youtube-service.js";
@@ -89,6 +90,7 @@ import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 import { videoService } from "./main/services/video/video-service.js";
+import { servicecuePublisher } from "./main/services/servicecue-publisher-instance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -111,6 +113,14 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 }
 
 // ── Init services ─────────────────────────────────────────────────────────────
+
+// Say on [config-snapshot] which config files on disk a save would refuse (a
+// hand edit, or a file an older build wrote), before anything reads them, so a
+// file that then trips a service's start-up is already named in /log. Changes
+// nothing; see checkOnDisk. A failure of the check itself must not stop the
+// server coming up, so it is logged here, the same exception
+// reconcileOpenRecords below makes.
+await configSnapshot.checkOnDisk().catch((err) => console.error("[config-snapshot] the start-up check of the config files failed:", scrubError(err)));
 
 console.log("[server] initialising services...");
 await streamStartStore.init();
@@ -158,6 +168,11 @@ await deviceManager.start();
 // plan is selected / PCO isn't configured.
 livePoller.start();
 
+// Push ServiceCue out to the public page, if the operator switched that on. This waits
+// for the settings and the token, which are files, and for no request: a page that is
+// down must not hold the server back, and its first request is a timer away.
+await servicecuePublisher.start();
+
 // Keep the photo + attachment disk caches from growing unbounded over months.
 cacheMaintenance.start();
 calendarBroadcaster.start();
@@ -172,6 +187,8 @@ async function shutdown(signal: string): Promise<void> {
   stageController.stopUpdateChecks();
   stageController.stopDeviceStatusUpdates();
   livePoller.stop();
+  // The public page keeps what it holds: a restart is not a reason to blank it.
+  servicecuePublisher.stop();
   cacheMaintenance.stop();
   propresenterService.stop();
   resiService.stop();

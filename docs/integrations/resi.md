@@ -84,15 +84,15 @@ one of them reads as one design:
 |---|---|
 | — | dimmed. The screen has just loaded and Resi has not answered yet |
 | Offline | dimmed. Resi is not set up, or cannot be reached |
-| Off air | grey — reachable, nothing going out |
+| Off air | gray — reachable, nothing going out |
 | Live | green, with the elapsed time underneath |
 
 Green, not the red a recorder uses: red is what OBS and REAPER mean by rolling,
-and a wall carrying both should tell them apart by colour rather than by weight.
+and a wall carrying both should tell them apart by color rather than by weight.
 
 Live fills the whole widget by default, exactly as OBS status and REAPER status
 fill red while recording — the four sit side by side and are meant to read as one
-set. Turn **Fill green when live** off to colour just the word instead. **Hide
+set. Turn **Fill green when live** off to color just the word instead. **Hide
 when idle** makes it a tally light, drawing nothing at all until something is
 going out.
 

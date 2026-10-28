@@ -42,7 +42,10 @@ Where a driver needs a password — Spectera's base-station API password — it 
 kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
 excluded from config snapshots like every other credential. The API and the SSE
 channel report it as `••••` when set and `""` when not; saving the mask back
-leaves it unchanged, and saving an empty value clears it.
+leaves it unchanged, and saving an empty value clears it. It is only sent to the
+address it was entered for: changing the connection's host, port or provider
+clears it unless the same change types it again, the panel says so, and `/log`
+records `[wireless] cleared the stored password on <connection>`.
 
 ## Setup
 
@@ -109,7 +112,7 @@ the gear provides one:
 | Sennheiser EW-DX | yes, where the rack reports `battery/lifetime` |
 | Shure PSM, Sennheiser ewG4, Spectera, SBC chargers | no — shows a dash |
 
-The reading is coloured against a service rather than a percentage: green past 90
+The reading is colored against a service rather than a percentage: green past 90
 minutes, amber past 30, red below — enough for a service, enough for one that has
 started, and time to go and swap it.
 

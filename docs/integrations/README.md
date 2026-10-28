@@ -54,7 +54,7 @@ it, and they mean different things:
 
 | You do | What happens |
 | --- | --- |
-| Leave the bullets alone | The stored value is untouched, whatever else you save |
+| Leave the bullets alone | The stored value is untouched, unless the save changes where it is sent (below) |
 | Type a new value | It replaces the stored one |
 | Clear the field and save | The stored value is **deleted** |
 
@@ -65,6 +65,16 @@ and never the values.
 
 A box upgrading from a build that kept a credential in `settings.json` moves it
 into the secret store on the next start, and says how many it moved on `/log`.
+
+A credential is only sent to the address it was entered for. ProdCom's API key and
+the OBS, Smaart and ProVideoPlayer passwords go to the host and port on the card.
+A save that changes where one would go, or turns ProVideoPlayer's HTTPS off, clears
+it unless the same save types it again; so does a config restore that would send
+one somewhere new. The dialog says so, and `/log` records
+`[integration-manager] cleared the stored <field> on <id>: its address changed
+from <old> to <new>`, never the value. A Spectera base station's API password and
+a pulled camera's password follow the same rule: see [Wireless](wireless.md) and
+[Video feeds](video-feeds.md).
 
 A stored credential is only ever sent to its own vendor. Planning Center,
 SenSource (its token host and its Vea API host separately), SafeSpace and
@@ -91,7 +101,10 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    `integration-manager.ts`; secret keys in `SECRET_KEYS`. Every `password` field
    must appear there and every entry there must be a `password` field —
    `integration-secret-parity.test.ts` fails otherwise, because the two drifting
-   apart is how a credential ends up in `settings.json` and in every backup.
+   apart is how a credential ends up in `settings.json` and in every backup. An
+   integration with a `host` field and a `password` field also gets its target
+   in `integration-targets.ts`, which the dialling code and the address check
+   both read; `integration-credential-moves.test.ts` fails without it.
 3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
    from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.

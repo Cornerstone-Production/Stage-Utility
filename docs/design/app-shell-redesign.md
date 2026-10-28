@@ -282,7 +282,7 @@ dropped:
 
 Unassigned views deliberately sit in their own section rather than mixed into the
 grid: a screen is a physical thing with a URL, a presence dot and a lock, and a
-view is content. Greying an orphan view inside the same grid would read as
+view is content. Graying an orphan view inside the same grid would read as
 "disabled" rather than "not in use".
 
 This merges the presentation only. The Views-and-Outputs data model is correct
@@ -530,16 +530,16 @@ running displays:
 Consequence, accepted: existing displays keep their current appearance until
 reset deliberately.
 
-### Colour
+### Color
 
-The default look derives colour from **semantics and category**, not decoration.
+The default look derives color from **semantics and category**, not decoration.
 Status ramps (live green, over red, caution amber) plus the existing categorical
 helpers — `category-color.ts`, `channel-color.ts`, `item-color.ts`, and the patch
-sheet's device and rack colouring — supply it.
+sheet's device and rack coloring — supply it.
 
 This is consistent with the locked design direction rather than a reversal of it:
 that direction governs chrome (rail, cards, navigation), which stays quiet. The
-data is what carries colour.
+data is what carries color.
 
 ### Motion and interaction quality
 

@@ -9,7 +9,9 @@ Orientation for working in the codebase.
 ├── server.ts                  # Backend entry point
 ├── index.html                 # Kiosk display bundle (Vite entry)
 ├── app.html                   # Operator app bundle (Vite entry)
+├── servicecue.html            # The public ServiceCue page (its own Vite entry)
 ├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
+├── vite.servicecue.config.ts  # The public ServiceCue page's own build, into publish/servicecue/public/
 ├── main/                      # Backend
 │   ├── services/              # stage-controller, remote-server, pco-service,
 │   │   │                      #   live-poller, one <id>-service.ts per integration,
@@ -31,9 +33,13 @@ Orientation for working in the codebase.
 │   │                          #   layout-renderer (custom layouts); hooks + pco-timer
 │   ├── editor/                # The layout editor: canvas, palette, inspector
 │   ├── settings/sections/     # Settings and tool pages rendered by app/ routes
+│   ├── public/                # The public ServiceCue page: its entry, router, shell and
+│   │                          #   "Not updating" notice (the pages themselves are shared)
 │   ├── components/            # Shared components + ui/ primitives
 │   └── lib/api.ts             # REST + SSE client
-├── public/                    # App icon, web manifest, and a fallback remote page
+├── public/                    # Built-in app icons and a fallback remote page; the web manifest is served by the app
+├── publish/servicecue/        # The Cloudflare Worker behind the public ServiceCue page
+│                              #   (its own package.json and wrangler.jsonc)
 ├── packaging/homebrew/        # The Homebrew formula
 ├── helper/macos/              # The Mac output helper (Swift)
 ├── .github/                   # CI and release workflows, shared actions
@@ -54,6 +60,11 @@ Orientation for working in the codebase.
 | `npm run server` | Backend via `tsx server.ts` on `:8788` (dev) |
 | `npm start` | Backend via `node --import tsx server.ts` (production) |
 | `npm run build` | Build both bundles into `build/renderer/` |
+| `npm run servicecue:build` | Build the public ServiceCue page into `publish/servicecue/public/` |
+| `npm run servicecue:dev` | Build it and run its Worker locally with `wrangler dev` (see [ServiceCue on the web](ops/servicecue-on-the-web.md)) |
+| `npm run servicecue:deploy` | Build it and deploy its Worker to the Cloudflare account Wrangler is signed in to |
+| `npm --prefix publish/servicecue run typecheck` | The Worker package's own `tsc`, which covers the files that import `cloudflare:workers` |
+| `npm --prefix publish/servicecue test` | Runs the Worker in workerd with `wrangler dev` and drives it over HTTP and a real WebSocket; nothing is sent to Cloudflare |
 | `npm test` | The whole suite, on Node's test runner. Arguments pass through: `npm test -- --test-shard=2/4` runs the second quarter, as CI does |
 | `npm run type-check` | `tsc --noEmit` |
 | `npm run lint` | ESLint (flat config + react-hooks) |

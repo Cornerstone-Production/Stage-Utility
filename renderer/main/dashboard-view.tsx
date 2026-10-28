@@ -309,7 +309,7 @@ function Tile({
     accent === "green"
       ? "border-live-9/15 bg-live-9/8"
       : accent === "red"
-        ? "border-red-a6 bg-red-a3"
+        ? "border-danger-9/30 bg-danger-9/12"
         : "border-line bg-surface";
   const labelColor = accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : "text-fg-subtle";
   return (

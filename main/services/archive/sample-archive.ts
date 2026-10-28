@@ -191,23 +191,14 @@ class SampleArchive {
     await Promise.all(waits);
   }
 
-  /** Record what this service produced, so an importer knows what to expect. */
+  /** Record what this service produced, so an importer knows what to expect.
+   *  From the directory, not this process's appenders: those miss what an
+   *  earlier run wrote before a restart, and a file one of them passed over. */
   async writeManifest(ctx: ServiceCtx): Promise<void> {
     const e = this.entry(ctx);
     if (!e) return;
     await this.flush(); // name the files that actually landed, not the ones queued
-    const files = [...new Set([...e.appenders.values()].flatMap((a) => a.files()))].sort();
-    if (files.length === 0) return; // nothing was recorded — leave no empty directory
-    await fs.mkdir(e.dir, { recursive: true });
-    await fs.writeFile(
-      path.join(e.dir, "manifest.json"),
-      JSON.stringify(
-        { version: MANIFEST_VERSION, serviceKey: ctx.serviceKey, serviceDate: ctx.serviceDate, files },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+    await this.rewriteManifest(ctx, e.dir);
   }
 
   /**
@@ -231,18 +222,26 @@ class SampleArchive {
    * Returns rows moved per source, for the caller to log. Throws: unlike the
    * record path this is an operator action with a caller waiting on the answer,
    * so a failure must reach them rather than be logged past.
+   *
+   * Every file on both sides is read before the first write, so a file that
+   * cannot be read refuses the whole merge with nothing changed, rather than
+   * leaving the sources before it rewritten for a retry to merge in twice.
    */
   async mergeInto(source: ServiceCtx, target: ServiceCtx): Promise<Record<string, number>> {
     const srcDir = serviceDirPath(source.serviceKey, source.serviceDate);
     const tgtDir = serviceDirPath(target.serviceKey, target.serviceDate);
     if (srcDir === tgtDir) return {};
 
-    const moved: Record<string, number> = {};
+    const plan: { base: string; srcRows: ArchiveRow[]; tgtRows: ArchiveRow[]; tgtRolled: string[] }[] = [];
     for (const base of ARCHIVE_SOURCES) {
       const srcRows = await readArchiveRows(srcDir, base);
       if (!srcRows || srcRows.length === 0) continue;
       const tgtRows = (await readArchiveRows(tgtDir, base)) ?? [];
+      plan.push({ base, srcRows, tgtRows, tgtRolled: await rolledFiles(tgtDir, base) });
+    }
 
+    const moved: Record<string, number> = {};
+    for (const { base, srcRows, tgtRows, tgtRolled } of plan) {
       const all = rowsByTime([...tgtRows, ...srcRows]);
       const header = unionHeader(all);
       await fs.mkdir(tgtDir, { recursive: true });
@@ -250,7 +249,7 @@ class SampleArchive {
       await atomicWrite(path.join(tgtDir, `${base}.csv`), body);
       // The union lives in `${base}.csv` now, so every rolled file this source
       // had is stale. Left in place they would be read back as duplicate rows.
-      for (const name of await rolledFiles(tgtDir, base)) {
+      for (const name of tgtRolled) {
         if (name !== `${base}.csv`) await fs.rm(path.join(tgtDir, name), { force: true });
       }
       moved[base] = srcRows.length;
@@ -266,8 +265,8 @@ class SampleArchive {
     return moved;
   }
 
-  /** Restate a manifest from what is actually on disk — after a merge the
-   *  appenders' record of what they wrote no longer describes the directory. */
+  /** State a manifest from what is actually on disk. Nothing recorded leaves
+   *  no directory and no manifest. */
   private async rewriteManifest(ctx: ServiceCtx, dir: string): Promise<void> {
     const files: string[] = [];
     for (const base of ARCHIVE_SOURCES) files.push(...(await rolledFiles(dir, base)));

@@ -4,8 +4,9 @@
 // for a phase and wires the DOM (the <video> element, on-screen gating, the
 // preview pause) around it.
 //
-// Always muted, no controls: video only, never audio, and nothing on a stage
-// display for anyone to scrub or pause.
+// Muted, with no controls, unless `listen` is set: only the operator's own views
+// (the Video feeds page, a Home card) offer a Listen button (listen-control.tsx),
+// and never a wall, a kiosk or a stage display. Nothing there to scrub or pause.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ErrorInfo } from "react";
 
@@ -15,6 +16,8 @@ import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
 import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
+import { ListenControl } from "./listen-control";
+import { claimListen, listenPathOf, listenView, releaseListen, useListenOwner } from "./listen";
 import { registerPlayback } from "./playback-reports";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
@@ -64,6 +67,7 @@ export function VideoObject({
   appLogo,
   appLogoMonochrome,
   allowHls,
+  listen = false,
 }: {
   o: LayoutObject;
   config: VideoObjectConfig;
@@ -71,6 +75,8 @@ export function VideoObject({
   appLogoMonochrome: boolean;
   /** This screen's own "Use HLS on this screen" switch. */
   allowHls: boolean;
+  /** Offer a Listen button. Only the operator's own views say yes. */
+  listen?: boolean;
 }) {
   return (
     // Keyed on the feed id: a different feed (or one disappearing) is a clean
@@ -79,7 +85,7 @@ export function VideoObject({
     // and a verdict about the PREVIOUS feed's WebRTC support, or a pending
     // backoff timer, can never carry onto the next feed either.
     <VideoErrorBoundary key={config.feedId ?? "none"} fallback={<CantPlayBody name="This feed" />}>
-      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls={allowHls} />
+      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls={allowHls} listen={listen} />
     </VideoErrorBoundary>
   );
 }
@@ -90,12 +96,14 @@ function VideoObjectBody({
   appLogo,
   appLogoMonochrome,
   allowHls,
+  listen,
 }: {
   objectId: string;
   config: VideoObjectConfig;
   appLogo: string | null;
   appLogoMonochrome: boolean;
   allowHls: boolean;
+  listen: boolean;
 }) {
   const state = useVideoState();
   const feed = useMemo(
@@ -119,7 +127,35 @@ function VideoObjectBody({
   const onLog = useCallback((reason: string) => logToServer("video", reason), []);
   const active = onScreen && !previewPaused;
 
-  const { phase, embedUrl, latency, sample } = useVideoSession({
+  // One control per page holds the sound, and only a relay feed has audio the server can describe.
+  const listenId = useId();
+  const listenOwner = useListenOwner();
+  const offersListen = listen && feed?.play.via === "relay";
+  const wanted = offersListen && listenOwner === listenId;
+  const audio = feed?.audio;
+  const feedListenPath = listenPathOf(audio);
+  const listenPath = wanted ? feedListenPath : null;
+  // Why the last attempt to listen gave up. It stands until the next tap, and goes the
+  // moment it stops being about what is on screen: another control took the sound, or
+  // this feed's listen path or audio state changed.
+  const audioState = audio?.state ?? null;
+  const [failure, setFailure] = useState<{ reason: string; path: string | null; audioState: string | null } | null>(null);
+  const failureStands = failure !== null && listenOwner === null && failure.path === feedListenPath && failure.audioState === audioState;
+  if (failure !== null && !failureStands) setFailure(null);
+  const onListenFailed = useCallback(
+    (reason: string) => {
+      releaseListen(listenId);
+      setFailure({ reason, path: feedListenPath, audioState });
+    },
+    [listenId, feedListenPath, audioState],
+  );
+  // Off screen, hidden, paused, or the feed lost its audio: the page stops listening.
+  useEffect(() => {
+    if (wanted && (!active || feedListenPath === null)) releaseListen(listenId);
+  }, [wanted, active, feedListenPath, listenId]);
+  useEffect(() => () => releaseListen(listenId), [listenId]);
+
+  const { phase, embedUrl, latency, sample, listen: listenOutcome } = useVideoSession({
     active,
     feed,
     feedDeleted,
@@ -127,7 +163,12 @@ function VideoObjectBody({
     allowHls,
     relayRunning: state?.relay.state === "running",
     onLog,
+    listenPath,
+    onListenFailed,
   });
+  // A listening session that dropped is not a feed gone offline: the control says the audio is retrying, and the cover reads Connecting.
+  const coverPhase = listenPath !== null && phase === "offline" && feed?.status.state !== "offline" ? "connecting" : phase;
+  const view = offersListen && !previewPaused ? listenView({ audio, wanted, phase, outcome: listenOutcome, failure: failureStands ? failure.reason : null }) : null;
 
   const name = feed?.name ?? "This feed";
   const isEmbed = embedUrl !== null;
@@ -199,11 +240,11 @@ function VideoObjectBody({
               entirely for "nothing": the approved design's offline-nothing
               state is transparent over the box, not a covered one with empty
               content. */}
-          {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
+          {!isEmbed && !showingPicture && !(coverPhase === "offline" && config.whenOffline === "nothing") && (
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
               {phase === "waiting" && <StateText {...waitingText(state?.relay.state)} />}
-              {phase === "connecting" && <ConnectingBody name={name} />}
-              {phase === "offline" && (
+              {coverPhase === "connecting" && <ConnectingBody name={name} />}
+              {coverPhase === "offline" && (
                 <OfflineBody
                   mode={config.whenOffline ?? "message"}
                   name={name}
@@ -221,6 +262,19 @@ function VideoObjectBody({
             </span>
           )}
         </>
+      )}
+      {view && (
+        <ListenControl
+          view={view}
+          name={name}
+          videoEl={videoEl}
+          wanted={wanted}
+          onToggle={() => {
+            if (wanted) return releaseListen(listenId);
+            setFailure(null);
+            claimListen(listenId);
+          }}
+        />
       )}
       {showTag && (
         <span

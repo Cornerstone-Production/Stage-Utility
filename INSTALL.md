@@ -46,6 +46,13 @@ set it to auto-start → configure in the browser.**
 - **Node.js ≥ 24** and **git** — the steps below install these per-OS.
 - **The repo URL:** `https://github.com/Cornerstone-Production/Stage-Utility.git`.
   It's a public repo, so cloning needs no authentication.
+- **ffmpeg** (optional) — the Video relay's audio conversion needs the system's
+  own. `install.sh` installs it with `apt-get`, `dnf` or `pacman` when run as
+  root, `install.ps1` with `winget install --id Gyan.FFmpeg -e`, and the
+  Homebrew formula with its dependency; each is best effort and never fails the
+  install. Otherwise run `sudo apt install ffmpeg` (or your distribution's
+  package), `brew install ffmpeg` or `winget install --id Gyan.FFmpeg -e`. Video
+  works without it. Advanced shows whether the server found it.
 - **Ports 8788 and 80** must be reachable on your LAN (open them in the firewall —
   shown per platform). Override the main port with `STAGE_UTILITY_PORT`; change or
   disable the port-free listener with `STAGE_UTILITY_FRIENDLY_PORT` (`0` = off).

@@ -167,7 +167,7 @@ In this order:
 
 1. Something of that type is **still recording** — not finished.
 2. The date is **not today** in the app's time zone — finished. The setting
-   under Advanced, falling back to the **server's** clock when it is left on
+   under Advanced → General, falling back to the **server's** clock when it is left on
    "follow server clock" — never the zone of the browser you happen to be
    looking from. Most Linux images run UTC, where the calendar date rolls at
    7pm in Chicago, and a laptop in Chicago reading a UTC server would otherwise
@@ -211,7 +211,7 @@ noise wearing a direction.
 
 The tiles are ordered by the figure each one shows — the latest day, highest
 first — so the order you read is the order of the numbers in it. The first type
-seen in that order takes the first colour in the palette, once, and the
+seen in that order takes the first color in the palette, once, and the
 assignment is then frozen.
 
 The switch at the top right chooses what is plotted:
@@ -255,15 +255,15 @@ twitches. Under `prefers-reduced-motion` the reading lands immediately, the node
 stops pulsing, and the dash stays: the dash is the information, the motion is
 decoration.
 
-Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
-change figure, its line, its legend swatch and its milestones. The colour is
+Each service type keeps **one color**, everywhere: its tile, its sparkline, its
+change figure, its line, its legend swatch and its milestones. The color is
 assigned per service type the first time it is seen and then persisted, so it
 does not follow the sort order — it does not change when you switch measure or
 range, when a quiet type has a loud week, or when a type misses a week.
 
 **Point at the chart** and the card's subtitle becomes the readout: the nearest
 **recorded** day to the pointer, then each drawn service type's figure at its own
-nearest day, in that type's own colour. The crosshair snaps to the same day, so
+nearest day, in that type's own color. The crosshair snaps to the same day, so
 the line, the date and the figures are one statement — a date on screen is never
 one nothing was recorded on. Moving off puts the sentence back. It replaces a
 line that is already there rather than being drawn over the plot, so nothing
@@ -298,8 +298,8 @@ from two places, and draw alike:
   counted as leaving and rejoining one.
 
 A milestone scoped to **one service type** draws only while that type's line is
-on, in that line's colour. One that applies to everything stays neutral — a
-colour would claim a series it has not got. Hiding a service type takes its
+on, in that line's color. One that applies to everything stays neutral — a
+color would claim a series it has not got. Hiding a service type takes its
 milestones with it. The legend names the triangles — *▲ milestone · hover for
 the label* — so the marks under the axis are not an unexplained row.
 
@@ -334,7 +334,7 @@ and no count in the cell: the day number sits alone and the shade carries the
 rest, with the count on the cell's tooltip and its accessible name. Today is
 outlined in the accent and the selected day carries a heavier accent ring;
 neither fills the cell, so the shade still shows underneath — and neither shares
-a colour with the shade, so the accent means "the day you are looking at" and
+a color with the shade, so the accent means "the day you are looking at" and
 nothing else. One sentence under the grid says what the shade is, in place of a
 row of tinted swatches repeating the grid above it.
 
@@ -564,7 +564,7 @@ step as the whole answer, and the server logs the reason on a `[spl-series]`
 line.
 
 Each item's **peak** is a small downward triangle in a row above the plot, in the
-primary line's colour, at the loudest point of the line inside that item. Only
+primary line's color, at the loudest point of the line inside that item. Only
 the triangle shows at rest. Hover it, the column of line down to the peak point,
 or the item's block in the lane: a dotted line runs from the triangle to the peak
 point, a dot marks the point, and the strip says what the item peaked at and
@@ -621,8 +621,10 @@ reduced motion; the live edge itself stays, because it is information.
 Home's **Recent services** widget is a glance with a way into History: four
 headline figures for the active service type (average attendance with its trend,
 peak, average length and average start), an attendance trend chart when the tile
-is tall enough to hold one, and **Open History**. It stays hidden until something
-has been recorded, and says so rather than hiding when the history cannot be read.
+is tall enough to hold one, and **Open History**, which goes to the operator's
+History in the sidebar rather than the shared read-only `/history` link, so the app's
+sidebar stays on screen. It stays hidden until something has been recorded, and says
+so rather than hiding when the history cannot be read.
 
 The chart can carry a second line, the **service SPL** for each date, drawn behind
 the attendance curve on its own dB scale. Right-click the widget — or tap and hold
@@ -741,7 +743,7 @@ unreachable, not that the room emptied.
 Recording covers more than the service proper. Sampling starts during the arrival
 ramp — the lead window before the service time, default 60 minutes — and continues
 through a taper after the last item, also 60 minutes by default, so the curve shows
-the room emptying. Both windows are set in Advanced.
+the room emptying. Both windows are set in Advanced → Schedule.
 
 Only the service proper feeds peak, low, average and last; the ramp and taper
 would otherwise drag those figures toward an empty room — far enough that an

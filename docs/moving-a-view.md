@@ -4,7 +4,7 @@ Take one layout from one Stage Utility and put it on another — a mobile rig th
 needs three layouts from the main install, not a copy of the main install. Or
 take a whole service type's setup at once: see [Moving a plan](#moving-a-plan).
 
-For everything at once, use the config snapshot in Settings → Advanced instead.
+For everything at once, use the config snapshot in Settings → Advanced → Data instead.
 That replaces the destination's configuration; this adds to it.
 
 ## Doing it

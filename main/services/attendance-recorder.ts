@@ -107,7 +107,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
         // the next tick's cooldown check then resumes it as "post".
         if (this.current && !this.current.endedAt) {
           this.finalizeRecord();
-          await attendanceStore.upsert(this.current);
+          await this.saveClosed(this.current);
           broadcast("attendance:history", this.current);
         }
         return;

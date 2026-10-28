@@ -6,6 +6,8 @@ import { type RouteCtx, json, error, readBody, queryFlag, MAX_CONFIG_BODY_BYTES 
 import { datedExportFilename } from "../export-filename.js";
 import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
+import { loadFfmpegPath } from "../video/ffmpeg-path-store.js";
+import { findFfmpeg, publicFfmpegStatus, setFfmpegPath } from "../video/ffmpeg-system.js";
 import { videoService } from "../video/video-service.js";
 import { PUSH_PROTOCOLS, type PushProtocol } from "../../types/video.js";
 import { plural } from "../plural.js";
@@ -73,6 +75,23 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     const r = await videoService.importFeeds(await readBody(req, MAX_CONFIG_BODY_BYTES));
     if (r.ok) json(res, r.report);
     else error(res, r.error);
+    return;
+  }
+  // Whether this server has a usable ffmpeg, and the path saved in Advanced.
+  if (method === "GET" && pathname === "/api/video/ffmpeg") {
+    json(res, { path: await loadFfmpegPath(), status: publicFfmpegStatus(await findFfmpeg()) });
+    return;
+  }
+  // Saves the path (empty finds it automatically) and checks again; the same
+  // value saved twice is "check again".
+  if (method === "PATCH" && pathname === "/api/video/ffmpeg") {
+    const r = await setFfmpegPath(await readBody(req));
+    if (r.ok) {
+      // A `-listen` path appears or goes with ffmpeg, and the relay's RTSP
+      // listener with it.
+      await videoService.ffmpegChanged();
+      json(res, { status: publicFfmpegStatus(r.result) });
+    } else error(res, r.error);
     return;
   }
   if (method === "PATCH" && pathname === "/api/video/ports") {

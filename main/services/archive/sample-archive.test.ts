@@ -117,6 +117,19 @@ test("attendance columns stay stable when a field is momentarily null", async ()
   assert.deepEqual(r[2].slice(1), ["13", "3", ""]);
 });
 
+test("the manifest names a file an earlier run wrote, not only this run's", async () => {
+  // A restart mid-service whose meter came back with another column set: the
+  // earlier run's spl.csv stays, this run writes spl.2.csv. Listing only this
+  // run's appenders left spl.csv out of the manifest.
+  const ctx = { serviceKey: "st1:p1:restart", serviceDate: "2026-07-26" };
+  await fs.mkdir(dirFor(ctx), { recursive: true });
+  await fs.writeFile(path.join(dirFor(ctx), "spl.csv"), "at,itemId,item,LAeq 10\nt0,i1,Welcome,80\n");
+  sampleArchive.recordSpl(ctx, "i1", "Welcome", { "LAeq 10": 85, "SPL A Slow": 88 });
+  await sampleArchive.writeManifest(ctx);
+  const m = JSON.parse(await fs.readFile(path.join(dirFor(ctx), "manifest.json"), "utf8"));
+  assert.deepEqual(m.files, ["spl.2.csv", "spl.csv"]);
+});
+
 test("writes a manifest naming every file", async () => {
   await sampleArchive.writeManifest(CTX);
   const m = JSON.parse(await fs.readFile(path.join(dirFor(CTX), "manifest.json"), "utf8"));

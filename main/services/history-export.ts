@@ -129,10 +129,12 @@ export function historyFileName(from?: string | null, to?: string | null): strin
 /** Assemble the workbook and return its bytes. */
 export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<Buffer> {
   const { from, to, include, host } = opts;
+  // Strict: a workbook missing the services whose files could not be read
+  // reads as a complete report of what happened.
   const [attendance, timelines, spls, baptismSessions] = await Promise.all([
-    attendanceStore.list(),
-    serviceTimelineStore.list(),
-    splHistoryStore.list(),
+    attendanceStore.listStrict(),
+    serviceTimelineStore.listStrict(),
+    splHistoryStore.listStrict(),
     baptismStore.listSessions(),
   ]);
 

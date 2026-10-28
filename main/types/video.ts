@@ -38,10 +38,22 @@ export type VideoSource =
 
 export type VideoSourceKind = VideoSource["kind"];
 
+/** Whether the server converts a feed's audio so a browser can listen to it live.
+ *  "auto" converts only AAC, which WebRTC cannot carry; "off" never runs ffmpeg
+ *  for the feed; "always" converts whatever the audio is. */
+export const AUDIO_CONVERSIONS = ["auto", "off", "always"] as const;
+export type AudioConversion = (typeof AUDIO_CONVERSIONS)[number];
+
 export interface VideoFeed {
   id: string;
   name: string;
   source: VideoSource;
+  /** Only on a pull or push feed, and only when not "auto": absent means "auto". */
+  audioConversion?: AudioConversion;
+  /** An http or https address that carries the feed's audio in a form a browser
+   *  can receive (Opus), for an encoder whose RTSP output does not. No
+   *  username or password in it. Absent means the feed's own audio is used. */
+  audioSourceUrl?: string;
 }
 
 /** LAN inputs (rtmp, srt, webrtcUdp) and loopback-only listeners (the rest). */
@@ -52,6 +64,10 @@ export interface VideoPorts {
   webrtcHttp: number;
   hls: number;
   api: number;
+  /** The relay's RTSP listener, loopback only: where the server's own ffmpeg
+   *  reads a feed and publishes its `-listen` path. Bound only when ffmpeg is
+   *  usable. */
+  rtsp: number;
 }
 
 export const DEFAULT_VIDEO_PORTS: VideoPorts = {
@@ -61,12 +77,21 @@ export const DEFAULT_VIDEO_PORTS: VideoPorts = {
   webrtcHttp: 8889,
   hls: 8888,
   api: 9997,
+  rtsp: 8554,
 };
 
 export interface VideoFeedsFile {
   feeds: VideoFeed[];
   ports: VideoPorts;
 }
+
+/** Whether this server has a usable ffmpeg (main/services/video/ffmpeg-system.ts),
+ *  as a browser may see it: the version and where it was found as a class, or a
+ *  reason that names no folder. `hint` is the install command for this platform.
+ *  The folders stay in the server log. */
+export type FfmpegStatus =
+  | { ok: true; version: string; source: "automatic" | "homebrew" | "configured" }
+  | { ok: false; reason: string; hint: string };
 
 /** null state: an external feed, which Stage Utility cannot see. */
 export type FeedState = "live" | "delayed" | "standby" | "waiting" | "offline" | "embed";
@@ -83,11 +108,41 @@ export interface FeedStatus {
   lastSeenAt?: number | null;
 }
 
+/** How long the relay holds a reader of a `-listen` path while its ffmpeg starts
+ *  publishing (runOnDemandStartTimeout). Shared because the browser's handshake
+ *  timeout for a listening session (use-video-session.ts) must outlast it: the
+ *  WHEP POST is held that long on a cold start. */
+export const LISTEN_START_TIMEOUT_MS = 15_000;
+
+/** The same-origin playback addresses of a relay path (a feed's id, or its `-listen`
+ *  sibling): where the proxy answers WHEP and HLS for it. */
+export function relayPlayback(path: string): { whep: string; hls: string } {
+  const base = `/video/${path}`;
+  return { whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+}
+
 /** How a screen plays a feed. Relay URLs are same-origin paths. */
 export type FeedPlay =
   | { via: "relay"; whep: string; hls: string }
   | { via: "external"; url: string; protocol: "whep" | "hls" }
   | { via: "embed"; src: string };
+
+/** What a feed's sound is, and where a listener should read it. `listenPath` is
+ *  the relay path to play: the feed's own id, or its `-listen` sibling that holds
+ *  the same video with Opus audio. */
+export type FeedAudioStatus =
+  /** The source has no audio. */
+  | { state: "none" }
+  /** Not seen yet, so what the audio is has not been learned. */
+  | { state: "unknown" }
+  /** Opus or G.711: a browser plays it as the relay has it. */
+  | { state: "direct"; listenPath: string }
+  /** Re-encoded to Opus by the server's ffmpeg, on demand. */
+  | { state: "converted"; listenPath: string }
+  /** Read from the feed's audio source address and republished unchanged. */
+  | { state: "pass-through"; listenPath: string }
+  /** Cannot be heard, and why, in a sentence the page shows as it is. */
+  | { state: "unavailable"; reason: string };
 
 /** A feed as the wire carries it: no secrets, ever. */
 export interface VideoFeedView {
@@ -104,6 +159,11 @@ export interface VideoFeedView {
    *  it — never the value. The editor uses this to say "a password is
    *  saved" without a blank field implying there is none. */
   hasPassword?: boolean;
+  /** Only for a pull or push feed, the three below. The setting as resolved
+   *  ("auto" when none is stored) and the address ("" when none). */
+  audioConversion?: AudioConversion;
+  audioSourceUrl?: string;
+  audio?: FeedAudioStatus;
 }
 
 /**
@@ -340,7 +400,7 @@ export interface VideoFeedsBundle {
   appVersion: string;
   createdAt: string;
   source: { server: string };
-  feeds: { id: string; name: string; source: VideoSource; password?: string }[];
+  feeds: { id: string; name: string; source: VideoSource; password?: string; audioConversion?: AudioConversion; audioSourceUrl?: string }[];
   ports?: VideoPorts;
 }
 
@@ -349,7 +409,7 @@ export type ImportFeedStatus = "new" | "same" | "differs" | "invalid";
 /** One field that differs between a file's feed and the one here. A password
  *  difference carries no values, ever. */
 export interface FeedDifference {
-  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password";
+  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password" | "audioConversion" | "audioSourceUrl";
   here?: string;
   file?: string;
 }
@@ -402,6 +462,10 @@ export interface ImportReport {
   skipped: { name: string; reason: string }[];
   /** Push feeds that got a freshly made publish password: their devices need it. */
   newPushPasswords: string[];
+  /** Pull feeds replaced with an address on another camera (or a plain scheme
+   *  where it was encrypted) and no password in the file: the one stored here
+   *  was entered for the old address and is gone. */
+  passwordsCleared: string[];
   passwordsWritten: number;
   portsApplied: boolean;
   /** Set when the ports were asked for and could not be saved; the feeds are already in. */

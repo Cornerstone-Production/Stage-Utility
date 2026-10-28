@@ -64,12 +64,19 @@ enum CEFEngine {
       _ = fail("could not make \(paths.userDir.path) for Chromium's profile: \(error.localizedDescription)")
       return app
     }
+    let chromiumLog = paths.userDir.appendingPathComponent("chromium.log")
+    logCapOutcome(Result { try LogFileCap.enforce(chromiumLog) })
+    // The host copies the switches during `initialize`.
+    let switches = ChromiumSwitches.browser.map { strdup($0) }
+    defer { switches.forEach { free($0) } }
     let ok = profile.path.withCString { cache in
-      paths.userDir.appendingPathComponent("chromium.log").path.withCString { logFile in
-        var settings = su_cef_settings(
-          cache_path: cache, log_file: logFile, context: nil,
-          context_initialized: { _ in MainActor.assumeIsolated { CEFEngine.contextInitialized() } })
-        return api.pointee.initialize!(&settings, &error, error.count)
+      chromiumLog.path.withCString { logFile in
+        switches.map { UnsafePointer($0) }.withUnsafeBufferPointer { list in
+          var settings = su_cef_settings(
+            cache_path: cache, log_file: logFile, switches: list.baseAddress, switch_count: list.count, context: nil,
+            context_initialized: { _ in MainActor.assumeIsolated { CEFEngine.contextInitialized() } })
+          return api.pointee.initialize!(&settings, &error, error.count)
+        }
       }
     }
     guard ok else {
@@ -77,11 +84,45 @@ enum CEFEngine {
       return app
     }
     state = .ready(api)
+    // Off the main thread, which also draws every output: a trim reads and
+    // writes 5 MB. Only its outcome comes back here, to be logged.
+    logCapTimer = Timer.scheduledTimer(withTimeInterval: LogFileCap.checkInterval, repeats: true) { _ in
+      DispatchQueue.global(qos: .utility).async {
+        let outcome = Result { try LogFileCap.enforce(chromiumLog) }
+        DispatchQueue.main.async { MainActor.assumeIsolated { logCapOutcome(outcome) } }
+      }
+    }
     Log.notice(
       .cef,
       "Chromium started: CEF \(String(cString: api.pointee.cef_version!()!)), sandbox \(api.pointee.sandboxed!() ? "on" : "off")")
     return app
   }
+
+  /// Held so the repeating check has an owner; the run loop retains it too.
+  private static var logCapTimer: Timer?
+  private static var logCapFailing = false
+
+  /// What keeping Chromium's own log under its cap did (see `LogFileCap`). A
+  /// check that keeps failing is logged when it starts failing and when it
+  /// works again.
+  private static func logCapOutcome(_ result: Result<LogFileCap.Outcome, Error>) {
+    do {
+      let outcome = try result.get()
+      if logCapFailing {
+        logCapFailing = false
+        Log.notice(.cef, "chromium.log can be kept under \(LogFileCap.capBytes / 1_048_576) MB again")
+      }
+      if case .trimmed(let from, let kept) = outcome {
+        Log.notice(.cef, "chromium.log reached \(mb(from)) MB; kept its last \(mb(kept)) MB")
+      }
+    } catch {
+      guard !logCapFailing else { return }
+      logCapFailing = true
+      Log.error(.cef, "could not keep chromium.log under \(LogFileCap.capBytes / 1_048_576) MB: \(error.localizedDescription); trying again every \(Int(LogFileCap.checkInterval / 60)) min")
+    }
+  }
+
+  private static func mb(_ bytes: Int) -> String { String(format: "%.1f", Double(bytes) / 1_048_576) }
 
   private static func fail(_ why: String) -> NSApplication {
     state = .failed(why)

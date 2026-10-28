@@ -6,7 +6,7 @@
 
 import type { ChangeEvent, ComponentProps, ReactNode } from "react";
 
-import { Button, Input, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
+import { Button, Input, RadioGroup, RadioItem, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { viewIsConsole, viewSurface, type ViewSurface } from "@main/types/views";
 import { NEW_CONTROL, NEW_WALL, NONE, SURFACE_COPY } from "../screen-role-confirm";
@@ -39,7 +39,7 @@ export function FieldLabel({ htmlFor, children }: { htmlFor: string; children: R
 /** One setting: its name and what it does, and the control beside them.
  *  `htmlFor` makes the name the label of a control carrying that id; a control
  *  with no id (a Switch, the NumberInput) names itself with aria-label. */
-export function SettingRow({ label, help, htmlFor, children }: { label: string; help: string; htmlFor?: string; children: ReactNode }) {
+export function SettingRow({ label, help, htmlFor, children }: { label: string; help: ReactNode; htmlFor?: string; children: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 py-1.5">
       <div className="min-w-0">
@@ -125,33 +125,70 @@ export function SlugInput({ id, baseUrl, value, onChange, children }: {
 }
 
 /** A choice drawn as a card: a title, one line under it, and which is chosen.
- *  `badge` is a small word after the title ("Usual"). */
-export function ChoiceCard({ title, hint, badge, pressed, disabled, onChoose }: {
+ *  `badge` is a small word after the title ("Usual"). `children` are the choice's own
+ *  options, drawn under a rule inside the card while it is the chosen one. */
+export function ChoiceCard({ title, hint, badge, pressed, disabled, onChoose, children }: {
   title: string;
   hint: string;
   badge?: string;
   pressed: boolean;
   disabled?: boolean;
   onChoose: () => void;
+  children?: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onChoose}
+    <div
       className={cn(
-        "flex flex-col items-start justify-start rounded-[10px] border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+        "flex flex-col rounded-[10px] border transition-colors",
         pressed ? "border-accent bg-accent/12" : "border-line-strong bg-fill hover:bg-fill-hover",
-        disabled && "cursor-not-allowed opacity-45 hover:bg-fill",
+        disabled && "opacity-45 hover:bg-fill",
       )}
     >
-      <span className="block text-footnote font-semibold text-fg">
-        {title}
-        {badge && <span className="ml-1.5 text-caption2 font-semibold uppercase tracking-wider text-accent">{badge}</span>}
-      </span>
-      <span className="mt-0.5 block text-caption1 text-fg-muted">{hint}</span>
-    </button>
+      <button
+        type="button"
+        aria-pressed={pressed}
+        disabled={disabled}
+        onClick={onChoose}
+        className={cn(
+          "flex w-full flex-col items-start justify-start rounded-[9px] p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+          disabled && "cursor-not-allowed",
+        )}
+      >
+        <span className="block text-footnote font-semibold text-fg">
+          {title}
+          {badge && <span className="ml-1.5 text-caption2 font-semibold uppercase tracking-wider text-accent">{badge}</span>}
+        </span>
+        <span className="mt-0.5 block text-caption1 text-fg-muted">{hint}</span>
+      </button>
+      {pressed && children && <div className="flex flex-col gap-2.5 border-t border-line px-2.5 pb-3 pt-3">{children}</div>}
+    </div>
+  );
+}
+
+/** A group of options of which one is chosen, drawn as a two-column grid of buttons. It
+ *  is a Radix radio group: arrow keys move the choice and Tab enters and leaves once. */
+export function OptionGrid<T extends string>({ label, options, value, onChange }: {
+  label: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <RadioGroup aria-label={label} value={value} onValueChange={(v) => onChange(v as T)} className="grid grid-cols-2 gap-1.5">
+      {options.map((o) => (
+        <RadioItem
+          key={o.value}
+          value={o.value}
+          className={cn(
+            "rounded-[7px] bg-fill px-1.5 py-2 text-center text-footnote text-fg transition-colors hover:bg-fill-hover",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+            "data-[state=checked]:bg-accent data-[state=checked]:font-medium data-[state=checked]:text-white",
+          )}
+        >
+          {o.label}
+        </RadioItem>
+      ))}
+    </RadioGroup>
   );
 }
 

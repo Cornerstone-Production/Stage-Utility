@@ -29,7 +29,7 @@ const { errorMessage } = await import("./errors.js");
 const { automationEngine } = await import("./automation-engine.js");
 const { automationLog } = await import("./automation-log.js");
 const { CALL_TRIGGER_ID } = await import("./automation-triggers.js");
-const { MAX_ALIASES, encodeAliases, nextAliases, parseAliases } = await import("./cue-aliases.js");
+const { MAX_ALIASES, encodeAliases, nextAliases, parseAliases, takenCueNames } = await import("./cue-aliases.js");
 type Rule = import("../types/automation.js").Rule;
 
 after(async () => {
@@ -81,6 +81,10 @@ describe("the encoding", () => {
     assert.deepEqual(parseAliases({}), []);
     assert.deepEqual(parseAliases({ aliases: "" }), []);
     assert.equal(encodeAliases([]), "");
+  });
+
+  test("a cue whose params are missing (a hand-edited rules file) has no former names, rather than throwing", () => {
+    assert.deepEqual(parseAliases(undefined), []);
   });
 
   test("a rename appends the old name, oldest first, capped", () => {
@@ -194,5 +198,18 @@ describe("resolution", () => {
     await automationEngine.addRule(cue("screens_on", ["projectors_on"]));
     const r = await automationEngine.callByName("nothing_like_it", { caller: "curl" });
     assert.equal(r.status, 404);
+  });
+});
+
+describe("takenCueNames", () => {
+  test("the taken names are every cue's name and former names, and the built-ins", () => {
+    const taken = takenCueNames(
+      [
+        { trigger: { id: "call.by-name", params: { name: "Stage_Reset", aliases: "old_reset, older_reset" } } },
+        { trigger: { id: "pco.service-started", params: { name: "not_a_cue" } } },
+      ],
+      ["obs_record_on"],
+    );
+    assert.deepEqual([...taken].sort(), ["obs_record_on", "old_reset", "older_reset", "stage_reset"]);
   });
 });

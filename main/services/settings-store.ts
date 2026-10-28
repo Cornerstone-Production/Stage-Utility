@@ -2,12 +2,19 @@
 // integration configs (non-secret fields), display options.
 
 import type { BaptismAutoStart, BaptismMode, DisplayInfo, Output } from "../types/stage.js";
+import { NO_APP_ICON, type AppIconSettings } from "./app-icon.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
+import { settingsRestoreCheck } from "./settings-restore-check.js";
 
-export interface SettingsData {
+/**
+ * `AppIconSettings` is the custom tab and home-screen icon: all null until one is
+ * set, and then all set together (see app-icon.ts). It is spread in rather than
+ * restated so a field added there cannot be missing here.
+ */
+export interface SettingsData extends AppIconSettings {
   /** Whether and how the baptism timer starts itself from the plan. */
   baptismAutoStart?: BaptismAutoStart;
   /** Workflow the baptism timer opens in. Grouped is how a baptism actually
@@ -66,6 +73,10 @@ export interface SettingsData {
    * leave a screen dark until somebody opened settings.
    */
   kioskDiscovery: boolean;
+  /** Mac output helpers and Windows kiosks install this server's version on their
+   *  own when it updates (machine-updates.ts). On unless switched off: a helper
+   *  behind its server is the failure this exists to end. */
+  autoUpdateMachines: boolean;
   /** Port for the discovery exchange. Adjustable because AV gear is fond of odd
    *  UDP ports and a collision should be a settings change, not a rebuild. */
   kioskDiscoveryPort: number;
@@ -210,6 +221,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
   kioskDiscovery: false,
+  autoUpdateMachines: true,
   kioskDiscoveryPort: 8789,
   serverId: null,
   accentColor: null,
@@ -223,6 +235,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   defaultAvatar: null,
   defaultAvatarOriginal: null,
   defaultAvatarCrop: null,
+  ...NO_APP_ICON,
   ndiEnabled: false,
   publicUrl: null,
   iconColors: {},
@@ -243,7 +256,10 @@ export const DEFAULT_SETTINGS: SettingsData = {
  *  when unset) and the stage state the Advanced tab reads. */
 export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
-const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config");
+const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config", {
+  // Key by key, each with what its settings route applies: see the table there.
+  restoreCheck: settingsRestoreCheck,
+});
 
 /** Keep the process-wide zone in step with what was just read or written. Every
  *  path in and out of settings funnels through here so no caller can forget, and
@@ -256,6 +272,11 @@ function syncTimeZone(data: SettingsData): SettingsData {
 export const settingsStore = {
   async load(): Promise<SettingsData> {
     return syncTimeZone(await store.load());
+  },
+
+  /** Why saves to settings.json are refused: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return store.refusingSaves();
   },
 
   // There is deliberately no `save`. A whole-object write is a read-modify-write
@@ -301,12 +322,41 @@ export const settingsStore = {
     id: string,
     config: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    return (await settingsStore.swapIntegrationConfig(id, config)).merged;
+  },
+
+  /**
+   * {@link patchIntegrationConfig}, also answering what the config was just
+   * before this write. Both halves are read inside the same write, so a caller
+   * comparing them compares one moment, not two reads a concurrent save could
+   * land between. The integration manager compares where a credential is sent
+   * before and after a save; see integration-targets.ts.
+   */
+  async swapIntegrationConfig(
+    id: string,
+    config: Record<string, unknown>,
+  ): Promise<{ before: Record<string, unknown>; merged: Record<string, unknown> }> {
+    let before: Record<string, unknown> = {};
     let merged: Record<string, unknown> = {};
     syncTimeZone(await store.update((current) => {
-      merged = { ...(current.integrationConfigs?.[id] ?? {}), ...config };
+      before = { ...(current.integrationConfigs?.[id] ?? {}) };
+      merged = { ...before, ...config };
       return { ...current, integrationConfigs: { ...current.integrationConfigs, [id]: merged } };
     }));
-    return merged;
+    return { before, merged };
+  },
+
+  /**
+   * Put one integration's config back exactly as `config`, inside the write
+   * queue. What a save does when the half after its config write fails: the
+   * integration manager puts the old address back when it could not clear a
+   * credential that the new one must not receive.
+   */
+  async putIntegrationConfig(id: string, config: Record<string, unknown>): Promise<void> {
+    syncTimeZone(await store.update((current) => ({
+      ...current,
+      integrationConfigs: { ...current.integrationConfigs, [id]: { ...config } },
+    })));
   },
 
   /**

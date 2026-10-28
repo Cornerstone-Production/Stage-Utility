@@ -247,6 +247,8 @@ const FIELD_LABEL: Record<FeedDifference["field"], string> = {
   player: "player",
   ref: "video or channel",
   password: "password",
+  audioConversion: "audio conversion",
+  audioSourceUrl: "audio source address",
 };
 
 const KIND_WORD: Record<string, string> = { pull: "pulled", push: "pushed", embed: "embed", external: "other address" };
@@ -530,6 +532,12 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
         <Note tone="warn">
           {joinWithAnd(report.newPushPasswords)} {report.newPushPasswords.length === 1 ? "has" : "have"} a new publish password on this
           server: paste the new publish password into each device.
+        </Note>
+      )}
+      {report.passwordsCleared.length > 0 && (
+        <Note tone="warn">
+          {joinWithAnd(report.passwordsCleared)} now {report.passwordsCleared.length === 1 ? "pulls" : "pull"} from a different address, so
+          the password saved here for the old one was cleared: enter it again if the new address needs it.
         </Note>
       )}
       {newPull.length > 0 && (

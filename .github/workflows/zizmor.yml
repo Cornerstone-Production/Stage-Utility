@@ -1,0 +1,55 @@
+# zizmor, the GitHub Actions security linter, over every workflow, composite
+# action and the Dependabot config.
+#
+# release.yml holds write access to the repository and the Homebrew tap token, so
+# an injectable `run:` or a mutable action reference there is a way into the
+# release. zizmor reads for exactly that: template injection from PR titles and
+# branch names, unpinned actions, over-broad permissions, persisted credentials.
+#
+# Two passes. The first uploads SARIF to code scanning (the Security tab); zizmor
+# exits 0 in that mode, so it cannot fail the job. The second is the gate: the
+# same audit with annotations, which exits non-zero on a finding. Neither a fork
+# nor Dependabot can write to code scanning from a pull request, so for them only
+# the gate runs.
+#
+# Runs when anything under .github changes, on every push to main, and weekly: a
+# new zizmor audit can flag a workflow nobody touched.
+
+name: zizmor
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "47 6 * * 1" # Mondays, off the hour to avoid the rush
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: zizmor, results to code scanning
+        if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          advanced-security: true
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          advanced-security: false
+          annotations: true

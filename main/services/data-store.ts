@@ -4,12 +4,62 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { errnoCode, errorMessage, isNotFound } from "./errors.js";
 import { adoptLegacyStoreFile } from "./store-file-adoption.js";
+import type { RestoreCheck } from "./restore-check.js";
 import { registerStore, type RenamedFrom, type StoreClass } from "./store-registry.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
+/**
+ * A store file that is there but could not be read: EACCES, EIO, EMFILE, a
+ * directory where the file should be. Not the absence of data. Held by the store
+ * (see unreadable()), and thrown by a save refused because of it.
+ */
+export class StoreReadError extends Error {
+  readonly code: string;
+  /** What a route that throws it answers: the server cannot serve this now,
+   *  which is not a bug in it (500). */
+  readonly status = 503;
+
+  constructor(
+    readonly filename: string,
+    cause: unknown,
+    action = "could not be read",
+  ) {
+    const code = errnoCode(cause) ?? "error";
+    super(`${filename} ${action} (${code})`, { cause });
+    this.name = "StoreReadError";
+    this.code = code;
+  }
+}
+
+interface StoreOptions<T> {
+  renamedFrom?: RenamedFrom;
+  normalize?: (parsed: T) => T;
+}
+
+/**
+ * A config store's options. `restoreCheck` is required: a restore writes this
+ * store's file whole, and without the rules its settings routes apply on a save,
+ * any device on the LAN could post a backup that puts there what those routes
+ * refuse. See restore-check.ts.
+ */
+interface ConfigStoreOptions<T> extends StoreOptions<T> {
+  restoreCheck: RestoreCheck;
+}
+
 export class DataStore<T> {
   private cache: T | null = null;
+  // The last read's failure, until a read succeeds. While it is set, load()
+  // serves the defaults without caching them.
+  private readFailure: StoreReadError | null = null;
+  // The first read failure this process saw, kept until it exits: writes are
+  // refused while it is set. Not cleared when the file reads again, because
+  // what the process built from the defaults outlives that read — the screens
+  // held in memory since boot, saved whole on the next edit, replaced the real
+  // views.json the moment a permission fix let a save through. secrets.bin
+  // makes the same call: fix the file, then restart.
+  private servedDefaults: StoreReadError | null = null;
   private filePath: string | null = null;
   // Serializes writes so concurrent saves/updates can't interleave (the file
   // write isn't atomic) or clobber each other's read-modify-write. Critical
@@ -34,14 +84,24 @@ export class DataStore<T> {
    *   older build wrote is read as today's. The file keeps the old shape until the
    *   next save, which writes the new one. It must be total: it runs on whatever
    *   the file held.
+   * @param options.restoreCheck Required for a "config" store: the rules a restore
+   *   of this file must pass, the same ones its settings routes apply on a save.
    */
+  constructor(filename: string, defaultValue: T, classification: "config", options: ConfigStoreOptions<T>);
+  constructor(filename: string, defaultValue: T, classification: "runtime", options?: StoreOptions<T>);
   constructor(
     private readonly filename: string,
     private readonly defaultValue: T,
     classification: StoreClass,
-    private readonly options: { renamedFrom?: RenamedFrom; normalize?: (parsed: T) => T } = {},
+    private readonly options: StoreOptions<T> & { restoreCheck?: RestoreCheck } = {},
   ) {
-    registerStore({ filename, classification, kind: "file", renamedFrom: options.renamedFrom });
+    registerStore({
+      filename,
+      classification,
+      kind: "file",
+      renamedFrom: options.renamedFrom,
+      restoreCheck: options.restoreCheck,
+    });
   }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
@@ -50,6 +110,14 @@ export class DataStore<T> {
   }
 
   private async writeRaw(data: T): Promise<void> {
+    // Refused before anything changes: see servedDefaults.
+    if (this.servedDefaults) {
+      throw new StoreReadError(
+        this.filename,
+        this.servedDefaults.cause,
+        "was not saved: it could not be read since this server started, and saving would replace it",
+      );
+    }
     // The cache is set BEFORE the write, and that ordering is load-bearing:
     // load() is not enqueued, so a concurrent first read of a store that has
     // never been read would otherwise see cache === null, go to disk, and install
@@ -93,10 +161,15 @@ export class DataStore<T> {
     if (this.cache !== null) return this.cache;
     const filePath = await this.getFilePath();
     let raw: string | null = null;
+    let readError: unknown = null;
     try {
       raw = await fs.readFile(filePath, "utf-8");
-    } catch {
-      // File doesn't exist yet (first run) — safe to start from defaults.
+    } catch (err) {
+      // Only a missing file is the first run, safe to start from defaults.
+      // Anything else is a file we could not read. Caching the defaults for it
+      // is how a server came to tell every kiosk bound to it that it had never
+      // heard of them, and how the next save replaced the file.
+      if (!isNotFound(err)) readError = err;
     }
     // A save that ran while this read was in flight has already set the cache,
     // and what it set is newer than the bytes just read. writeRaw assigning
@@ -104,6 +177,18 @@ export class DataStore<T> {
     // the disk used to finish by installing the old bytes over the save, and
     // the next save — built on that stale cache — erased the first from disk.
     if (this.cache !== null) return this.cache;
+    if (readError !== null) {
+      // Served, not cached, and saves refused: the secrets.bin model. The
+      // stores are read at top-level awaits, so a throw here would keep the
+      // server from starting. A reader that must not act on an empty store
+      // checks unreadable().
+      this.readFailed(readError);
+      return this.defaultValue;
+    }
+    if (this.readFailure) {
+      console.log(`[data-store] ${this.filename} is readable again; restart the server to save to it`);
+      this.readFailure = null;
+    }
     if (raw === null) {
       this.cache = this.defaultValue;
       return this.cache;
@@ -157,6 +242,49 @@ export class DataStore<T> {
     // read as a corrupt file and the operator's data quarantined for a bug of ours.
     this.cache = this.options.normalize ? this.options.normalize(parsed) : parsed;
     return this.cache;
+  }
+
+  /** Record a failed read, saying so once per run of failures rather than on
+   *  every retry: the kiosk responder reads on each probe. */
+  private readFailed(err: unknown): void {
+    const failure = new StoreReadError(this.filename, err);
+    if (!this.readFailure) {
+      console.error(
+        `[data-store] ${failure.message}: ${errorMessage(err)}. ` +
+          "Running on its defaults without saving them, and refusing saves to it until the server restarts. Fix the permissions or the disk, then restart.",
+      );
+    }
+    this.readFailure = failure;
+    this.servedDefaults ??= failure;
+  }
+
+  /**
+   * Why the last read failed, or null when it did not. While set, what load()
+   * returned is the defaults, not the file: a reader whose answer to an empty
+   * store goes out to something else (a kiosk told it is unknown, a backup)
+   * checks this first.
+   */
+  unreadable(): StoreReadError | null {
+    return this.readFailure;
+  }
+
+  /**
+   * Why every save to this store is refused, or null when none is: set by the
+   * first failed read and kept until the server restarts, even once the file
+   * reads again. A pass that is about to write checks this, not unreadable(),
+   * or a read that failed earlier and succeeds now lets it start a write that
+   * is then refused half-way.
+   */
+  refusingSaves(): StoreReadError | null {
+    return this.servedDefaults;
+  }
+
+  /** load(), for a reader that must not answer from the defaults: throws the
+   *  StoreReadError instead while the file cannot be read. */
+  async loadStrict(): Promise<T> {
+    const value = await this.load();
+    if (this.readFailure) throw this.readFailure;
+    return value;
   }
 
   async save(data: T): Promise<void> {

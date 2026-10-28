@@ -334,10 +334,12 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // sibling of, which moved `home-readiness` one place down on purpose.
   { type: "screen-embed", label: "Embedded screen", group: "PCO / service", after: "view-embed" },
   // The general form of the two buttons above: bound to any entry in the
-  // automation action registry rather than one integration.
-  { type: "action-button", label: "Action button", group: "Control", after: "rosstalk-button" },
+  // automation action registry rather than one integration. Folded into the
+  // palette's one "Button" (see FOLDED): its `group` is null, so the placement
+  // claims below skip it and `notes` follows `rosstalk-button`.
+  { type: "action-button", label: "Button", group: "Control", after: "rosstalk-button" },
   // The operator's own work product, stored outside the layout in notes.json.
-  { type: "notes", label: "Notes", group: "Control", after: "action-button" },
+  { type: "notes", label: "Notes", group: "Control", after: "rosstalk-button" },
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
   // Home's own cards, so Home is built from the same widget set as every other
   // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
@@ -348,8 +350,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // one mechanism.
   // Renamed when it was split: it drew recording and SPL too, and does not any
   // more. The type id stays so no stored layout has to move.
+  // Retired into the Timer (see RETIRED): the label is still pinned, the
+  // placement is skipped, and the card after it now follows `home-next-service`.
   { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },
-  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
+  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-next-service" },
   // The live card's insides, split out so each can be placed on its own once
   // Home became a grid. The card kept the timer; these three kept their look.
   // Each sits beside the widgets it belongs with rather than with the other Home
@@ -387,7 +391,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // Control rather than beside the action button it is a specialised form of:
   // `notes` already claims to sit directly after `action-button`, and that claim
   // is a pinned fact about what shipped.
-  { type: "cue-button", label: "Cue button", group: "Control", after: "checklist" },
+  { type: "cue-button", label: "Button", group: "Control", after: "checklist" },
   // Stage messages: the screen's feed of them, after the cue button for the same
   // reason the cue button follows the checklist.
   { type: "messages", label: "Messages", group: "Control", after: "cue-button" },
@@ -395,6 +399,12 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The Video feeds page's own widget: a live camera or program feed, named by
   // id. Sits after the logo, the last of the plain Layout media types.
   { type: "video", label: "Video", group: "Layout", after: "brand-logo" },
+  // One timer for the service clock, a ProPresenter timer and the baptism
+  // readouts: it replaces four widgets (see RETIRED) and leads the group's tail.
+  { type: "timer", label: "Timer", group: "Text & time", after: "clock" },
+  // The words on the slide with their group's tag. Sits after the two slide-text
+  // widgets it is the richer form of.
+  { type: "lyrics", label: "Lyrics", group: "ProPresenter", after: "next-slide-text" },
 ];
 
 /**
@@ -407,6 +417,13 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
  */
 const RETIRED: { type: string; label: string; replacedBy: string }[] = [
   { type: "service-order", label: "Service order (legacy)", replacedBy: "view-embed" },
+  // The four timers the Timer replaced. Unlike the rest they offer no Convert
+  // button: a saved one is read as a Timer wherever it is read (timer-config.ts),
+  // so nothing ever shows an old one to convert. Sorted, one per line.
+  { type: "baptism-timer", label: "Baptism timer", replacedBy: "timer" },
+  { type: "countdown-timer", label: "PCO countdown", replacedBy: "timer" },
+  { type: "home-live-status", label: "Service timer", replacedBy: "timer" },
+  { type: "pp-timer", label: "ProPresenter timer", replacedBy: "timer" },
   // The per-source Home cards. Each was one component with one prop fixed —
   // `<RecordingCard recorder="OBS" />`, `<StreamingCard platform="Resi" />` — so
   // the prop became a right-click choice on the general card and these four stop
@@ -417,9 +434,22 @@ const RETIRED: { type: string; label: string; replacedBy: string }[] = [
   { type: "home-streaming-youtube", label: "YouTube status", replacedBy: "home-streaming" },
 ];
 
-/** Retirements, by type — the two assertions over ADDED_SINCE that only hold
- *  while a type is still ON the palette skip these. Its label is still pinned. */
-const IS_RETIRED = new Set(RETIRED.map((r) => r.type));
+/**
+ * Types that are NOT retired but are not offered on their own either: another
+ * type's palette entry stands for them, and the inspector switches a widget
+ * between the two. Both stored types stay registered, rendered and restorable,
+ * so nothing is migrated.
+ *
+ * Listed so that leaving the palette is a deliberate edit here, the same bar as
+ * a retirement. `into` is the type whose entry the operator sees instead.
+ */
+const FOLDED: { type: string; into: string }[] = [
+  { type: "action-button", into: "cue-button" },
+];
+
+/** Retirements and folds, by type — the two assertions over ADDED_SINCE that only
+ *  hold while a type is still ON the palette skip these. Its label is still pinned. */
+const OFF_PALETTE = new Set([...RETIRED.map((r) => r.type), ...FOLDED.map((f) => f.type)]);
 
 // ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -437,7 +467,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
       // only while it is. A retired type's group is null by definition, which
       // `retired types leave the palette but stay renderable` asserts instead.
       assert.equal(typeLabel(a.type as never), a.label);
-      if (IS_RETIRED.has(a.type)) continue;
+      if (OFF_PALETTE.has(a.type)) continue;
       assert.equal(LAYOUT_OBJECTS[a.type as LayoutObjectType].group, a.group);
     }
   });
@@ -456,6 +486,20 @@ describe("layout-object registry vs. the structures it replaced", () => {
       assert.equal(spec.retired?.replacedBy, r.replacedBy, `${r.type} must name its replacement`);
       // Still constructs — an old layout containing one has to keep working.
       assert.equal(defaultConfig(r.type as never).type, r.type);
+    }
+  });
+
+  test("folded types leave the palette, and the type they fold into is on it", () => {
+    const inPalette = PALETTE_GROUPS.flatMap((g) => g.types as string[]);
+    for (const f of FOLDED) {
+      const spec = LAYOUT_OBJECTS[f.type as LayoutObjectType];
+      assert.equal(spec.group, null, `${f.type} must not be offered in the palette on its own`);
+      assert.equal(spec.retired, undefined, `${f.type} is folded, not retired: it keeps no conversion`);
+      assert.ok(inPalette.includes(f.into), `${f.into} must carry the palette entry for ${f.type}`);
+      // Both read "Button", so the layer list and the inspector header do not
+      // change their word when a widget is switched.
+      assert.equal(typeLabel(f.type as never), typeLabel(f.into as never));
+      assert.equal(defaultConfig(f.type as never).type, f.type);
     }
   });
 
@@ -480,7 +524,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
     // Pins placement too, so a new object cannot silently reorder the palette.
     // `after: null` means it leads its group.
     for (const a of ADDED_SINCE) {
-      if (IS_RETIRED.has(a.type)) continue;
+      if (OFF_PALETTE.has(a.type)) continue;
       if (a.after === null) {
         const g = PALETTE_GROUPS.find((x) => (x.types as string[]).includes(a.type));
         assert.ok(g, `${a.type} is not in the palette`);

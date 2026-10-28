@@ -14,7 +14,7 @@ is an item and neither can be configured — the readings below are what you
 arrange.
 
 **Right-click the bar and choose "Configure bar"** — or tap and hold it — or use
-**Settings → Advanced → Server → Context bar**. All three open the same thing.
+**Settings → Advanced → General → Context bar**. All three open the same thing.
 On a touch device the bar also carries a **⋯ button** at its right edge, since
 there is no right-click to discover. There are two arrangements, both shared by
 everybody: the one above a desktop page, and the one a phone shows.
@@ -52,15 +52,15 @@ The other eight always have something true to say, so their resting state is a
 reading; scores would spend most of the year showing a word that never changed.
 See [Live scores](../integrations/scores.md).
 
-Colour carries the state instead:
+Color carries the state instead:
 
 | | |
 |---|---|
-| **Grey** | Resting. Nothing is running, and nothing is wrong. |
+| **Gray** | Resting. Nothing is running, and nothing is wrong. |
 | **Green** | A service is live, or a recorder is rolling. |
 | **Red** | Act now: an item has run past its length, the service start time has passed with nothing begun, or a connected recorder has stopped. |
 
-Red is deliberately scarce. An idle bar is grey, so red on this strip always
+Red is deliberately scarce. An idle bar is gray, so red on this strip always
 means something wants you.
 
 **Integration health** counts only integrations you have set up and enabled — one
@@ -141,7 +141,7 @@ in a fixed order, and the order is the design:
 | *(before any of these)* | On a desktop, the **page's name** gives up width first — down to about 14 characters and no further. Every built-in page name is shorter than that and so is never shortened at all; only a console you have given a long name ever ends in an ellipsis here. |
 | **Full** | Nothing. Everything at its full length. |
 | **Qualifiers** | The clock's seconds. The score capsule's inning or period. The label beside a pre-service countdown. |
-| **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps and edge padding tighten. The score capsule tightens. |
+| **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps tighten, and on a phone so does the edge padding. The score capsule tightens. |
 | **The floor** | Names somebody wrote — the service type, the plan title, the current item — give way and end in an ellipsis. |
 
 Four things it may never do:
@@ -150,7 +150,7 @@ Four things it may never do:
   character, a score is never shortened. A mark may replace a *word*, never a
   value. The clock's seconds are the one deliberate exception, and what they cost
   is precision, not a reading: `16:59` is still the time.
-- **Never remove a state colour.** Live green, overrun red and the amber on a
+- **Never remove a state color.** Live green, overrun red and the amber on a
   disconnected count survive every step.
 - **Never drop an item.** Every reading on the strip is one somebody put there on
   purpose — and shortening an item to nothing is dropping it, so no step takes an
@@ -214,7 +214,7 @@ it gives up is words the ladder was built to give up.
 
 ## 12-hour or 24-hour
 
-**Settings → Advanced → Server → Clock format**, beside the time
+**Settings → Advanced → General → Clock format**, beside the time
 zone. It sets how *every* clock in the app reads — the context bar, service
 times in History and Home's Recent services card, the rundown, the automation log, and stage
 displays.
@@ -239,7 +239,7 @@ follows it away from what comes before. It decides **alignment**.
 | None, or one at the end | Everything packs to the left |
 | One in the middle | A left group and a right group |
 | One at the very start | Everything packs to the right |
-| Two | The items between them are centred |
+| Two | The items between them are centered |
 
 **Space** is a fixed 24px gap — a deliberate break between two groups that does
 not push either to an edge. It decides **distance**. Put several side by side
@@ -248,7 +248,7 @@ apart without one.)
 
 Reach for a Space when you want a reading set slightly apart from its
 neighbours; reach for a Flexible space when you want a group pinned to an edge
-or centred.
+or centered.
 
 The bar is one row at every width. A Flexible space on a phone has very little
 slack to eat, but it still decides which side of the strip a group sits on, and

@@ -6,6 +6,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -21,7 +22,7 @@ afterEach(() => {
   __resetReplayCacheForTests();
 });
 
-const PORTS: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const PORTS: VideoPorts = DEFAULT_VIDEO_PORTS;
 
 interface Call {
   method: string;
@@ -109,5 +110,19 @@ test("a refused save shows the rule inline, rather than swallowing it", async ()
     await eventually(() => assert.match(screen.getByRole("alert").textContent ?? "", /must be different/));
   } finally {
     c.restore();
+  }
+});
+
+test("the Loading placeholder does not carry the setting id: only the real form does", async () => {
+  const realFetch = globalThis.fetch;
+  // A read that never answers: the panel stays on its placeholder.
+  globalThis.fetch = (() => new Promise(() => {})) as typeof fetch;
+  try {
+    const { container } = render(<VideoRelayPortsPanel />);
+    await settle();
+    assert.match(container.textContent ?? "", /Loading…/);
+    assert.equal(container.querySelector("[data-setting-id]"), null, "the placeholder is counted as the ports row");
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });

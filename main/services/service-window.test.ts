@@ -7,7 +7,7 @@
 // dead integration that never retries (delay becomes Infinity). Both are covered.
 
 import assert from "node:assert/strict";
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, it, beforeEach } from "node:test";
 
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 
@@ -179,4 +179,45 @@ test("the dormant delay is never shorter than the active cadence", () => {
   serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
   serviceWindow.setWindows([{ open: now + 500, close: now + 3600_000 }]);
   assert.ok(serviceWindow.pollDelayMs(4000, 300_000, now) >= 4000);
+});
+
+describe("activeUntil", () => {
+  it("is null outside every window", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 100, close: 200 }]);
+    assert.equal(s.activeUntil(50), null);
+    assert.equal(s.activeUntil(250), null);
+  });
+
+  it("is the close of the window holding now", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 100, close: 200 }, { open: 500, close: 600 }]);
+    assert.equal(s.activeUntil(150), 200);
+  });
+
+  it("runs through windows that overlap, so a rehearsal's tail into the service's lead reads as one", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 300, close: 450 }, { open: 100, close: 320 }, { open: 900, close: 950 }]);
+    assert.equal(s.activeUntil(150), 450);
+  });
+});
+
+// ── isDormant — the question a slow background reader asks ──────────────────
+
+test("isDormant is true only between windows, with the schedule known and the feature on", () => {
+  const now = Date.now();
+  const day = 24 * 3600_000;
+  const cases: { name: string; enabled: boolean; windows: { open: number; close: number }[]; dormant: boolean }[] = [
+    { name: "the next window is a day off", enabled: true, windows: [{ open: now + day, close: now + day + 3600_000 }], dormant: true },
+    { name: "inside a window", enabled: true, windows: [{ open: now - 60_000, close: now + 60_000 }], dormant: false },
+    { name: "no window is known", enabled: true, windows: [], dormant: false },
+    { name: "every window known has closed", enabled: true, windows: [{ open: now - 5 * 3600_000, close: now - 3600_000 }], dormant: false },
+    { name: "the feature is off", enabled: false, windows: [{ open: now + day, close: now + day + 3600_000 }], dormant: false },
+  ];
+  for (const c of cases) {
+    serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE, enabled: c.enabled });
+    serviceWindow.setWindows(c.windows);
+    assert.equal(serviceWindow.isDormant(now), c.dormant, c.name);
+  }
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
 });

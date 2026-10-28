@@ -26,7 +26,7 @@ function declared(): string[] {
 
 /** Content that is a number you watch change. */
 const NUMERIC = [
-  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "clock", "countdown-timer", "pp-timer", "baptism-timer", "timer",
   "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
 ];
 

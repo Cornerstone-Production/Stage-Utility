@@ -12,7 +12,7 @@ import { installDom } from "../../test-dom.js";
 
 const teardown = installDom();
 
-const { KIND_LABELS, KIND_ORDER } = await import("./new-view-dialog.js");
+const { KIND_LABELS, KIND_ORDER } = await import("./view-kinds.js");
 const { defaultViewName } = await import("../../../main/services/layout-clone.js");
 
 after(() => teardown());

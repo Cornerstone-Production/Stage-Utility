@@ -7,6 +7,8 @@ import { pcoConnected, useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
+import { useOriginHref } from "../lib/back-target";
+import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -39,6 +41,10 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const { failed, fail, clear } = useFailedReads<"load">("servicecue");
+  // On the public page: the church has not sent one of the three yet (see notPublishedYet).
+  const [notSent, setNotSent] = useState(false);
+  // Lets a rundown's back arrow lead back to this page.
+  const withThisPage = useOriginHref();
   const [sel, setSel] = useState<Record<string, string>>({});
   // A launcher for Planning Center's service types, so nothing is read until it
   // is connected (see pcoConnected).
@@ -64,9 +70,16 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
         setTypes(t);
         setLayouts(l);
         setShownIds(c.serviceTypeIds ?? []);
+        setNotSent(false);
         clear("load");
       })
-      .catch((err: unknown) => { if (!cancelled) fail("load", "the ServiceCue service types and layouts", err); });
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const missing = notPublishedYet(err);
+        setNotSent(missing);
+        if (missing) clear("load");
+        else fail("load", "the ServiceCue service types and layouts", err);
+      });
     return () => { cancelled = true; };
   }, [pcoConfigured, fail, clear]);
 
@@ -118,6 +131,8 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
 
           {pcoConfigured === false ? (
             <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ServiceCue.</p>
+          ) : notSent ? (
+            <p className="text-body text-fg-subtle text-center max-w-xs">{SERVICES_NOT_SENT}</p>
           ) : failed.has("load") ? (
             <ErrorNote>Couldn't load ServiceCue's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
@@ -143,7 +158,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
                   </div>
                   <Tooltip label={`Open ${type.name}`}>
                     <a
-                      href={serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
+                      href={withThisPage(serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name))}
                       className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-fill-hover"
                       aria-label={`Open ${type.name}`}
                     >
@@ -154,12 +169,15 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
               );
             })
           )}
-          <a
-            href="/servicecue/presets"
-            className="mt-2 self-start text-caption1 text-accent hover:underline"
-          >
-            Edit column presets
-          </a>
+          {/* Editing stays in the building: the public page has no presets page to go to. */}
+          {!isPublicMode() && (
+            <a
+              href="/servicecue/presets"
+              className="mt-2 self-start text-caption1 text-accent hover:underline"
+            >
+              Edit column presets
+            </a>
+          )}
         </div>
         </div>
       </div>

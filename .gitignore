@@ -9,6 +9,15 @@ node_modules
 build/
 .vite/
 
+# The public ServiceCue viewer's build (npm run servicecue:build), which the Worker
+# in publish/servicecue/ serves as its static assets, and wrangler's local state
+# and secrets for it. A .dev.vars holds the publishing token.
+publish/servicecue/public/
+publish/servicecue/.wrangler/
+publish/servicecue/.dev.vars*
+publish/servicecue/deploy.local.json
+publish/servicecue/wrangler.deploy.jsonc
+
 # The Mac output helper's SwiftPM build, the .app it assembles, the CEF download
 # cache and the CMake build of the browser host, and cmake/ninja in a venv
 helper/macos/.build/

@@ -208,6 +208,23 @@ describe("the state is fetched once for everyone", () => {
     }
   });
 
+  test("reads the state again when the public page's Worker names it as removed, and not for any other doc", async () => {
+    // `publish:docs` names a doc that is also a frame only when it was removed. A state frame cannot say "nothing",
+    // so the state is read again, and the page does not go on showing the last one.
+    render(React.createElement(OneConsumer));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 1);
+    const say = (keys: string[]) => {
+      for (const handler of [...(listeners.get("publish:docs") ?? [])]) handler({ data: JSON.stringify({ keys }) });
+    };
+    act(() => say(["servicecue-layouts", "rundown-100"]));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 1, "a doc that is not the state read the state again");
+    act(() => say(["state"]));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 2, "the removed state was not read again");
+  });
+
   test("unmounting one consumer does not blind the others", async () => {
     const a = render(React.createElement(OneConsumer));
     const b = render(React.createElement(OneConsumer));
@@ -306,6 +323,22 @@ describe("the tab icon", () => {
     });
     assert.equal(href(), STOCK_FAVICON, "removing the logo left the old one in the tab");
     assert.equal(link()?.getAttribute("type"), STOCK_FAVICON_TYPE);
+  });
+
+  test("a custom icon in the state wins over the logo, and removing it brings the logo back", async () => {
+    // The hook has to hand the icon to applyFavicon at all: a favicon helper that
+    // is right in isolation and never given the field leaves the tab on the logo.
+    const ICON = "/branding-images/feedbeef.png"; // its tab href is the route, keyed by this name
+    render(React.createElement(OneConsumer));
+    await settle();
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: ICON });
+    });
+    assert.equal(href(), "/icon-192.png?v=feedbeef", "the custom icon never reached the tab");
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: null });
+    });
+    assert.equal(href(), LOGO, "removing the icon left it in the tab");
   });
 
   test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {

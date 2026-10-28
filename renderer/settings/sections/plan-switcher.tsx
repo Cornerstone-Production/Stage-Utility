@@ -12,6 +12,7 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
+import { PUBLISH_UPCOMING_DAYS } from "@main/types/servicecue-publish";
 import { Button, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
@@ -27,8 +28,15 @@ import {
   type SwitcherEntry,
 } from "./plan-switcher-step";
 
-/** How far ahead the switcher looks. Two months covers anything planned. */
-const UPCOMING_DAYS = 60;
+/**
+ * How far ahead the switcher looks. Two months covers anything planned. It is the
+ * number the public ServiceCue page's plan list is published for, so the two cannot
+ * differ: a switcher that asked for another would find nothing there.
+ */
+const UPCOMING_DAYS = PUBLISH_UPCOMING_DAYS;
+
+/** The query the list is read under, with the number of days after it. */
+export const UPCOMING_PLANS_QUERY = "plans:upcoming";
 
 /**
  * The list the arrows walk.
@@ -39,7 +47,7 @@ const UPCOMING_DAYS = 60;
  */
 export function useUpcomingPlans({ enabled = true }: { enabled?: boolean } = {}) {
   const { data, error } = useQuery({
-    queryKey: ["plans:upcoming", UPCOMING_DAYS],
+    queryKey: [UPCOMING_PLANS_QUERY, UPCOMING_DAYS],
     queryFn: () => ipc<UpcomingPlansDTO>("plans:upcoming", { days: UPCOMING_DAYS }),
     staleTime: 5 * 60 * 1000,
     // Off while Planning Center is not connected: the list would only come back

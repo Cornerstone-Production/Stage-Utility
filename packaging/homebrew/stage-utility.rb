@@ -13,8 +13,10 @@ class StageUtility < Formula
   version "1.9.2-beta.5"
   license "GPL-3.0-or-later"
 
-  # Each archive already contains a Node runtime, so the formula depends on
-  # nothing and builds nothing.
+  # Each archive already contains a Node runtime, so nothing is built. ffmpeg is
+  # the system's own, which the Video relay's audio conversion needs.
+  depends_on "ffmpeg"
+
   on_macos do
     on_arm do
       url "https://github.com/Cornerstone-Production/Stage-Utility/releases/download/v#{version}/stage-utility-#{version}-darwin-arm64.tar.gz"

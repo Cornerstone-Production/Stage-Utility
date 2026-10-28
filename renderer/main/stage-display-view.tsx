@@ -324,7 +324,7 @@ function Cell({
 }) {
   const border =
     accent === "green" ? "border-live-9/15 bg-live-9/8"
-    : accent === "red" ? "border-red-a6 bg-red-a3"
+    : accent === "red" ? "border-danger-9/30 bg-danger-9/12"
     : accent === "amber" ? "border-amber-a5 bg-amber-a2"
     : "border-line bg-surface";
   const labelColor =

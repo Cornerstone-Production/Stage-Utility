@@ -5,7 +5,9 @@
 // alone" is tested against plain objects. mediamtx-relay.ts is the only
 // thing that turns a plan into HTTP calls.
 
-import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { listenPathName } from "./audio-listen.js";
+import { apiUser, listenPublisherUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { LISTEN_START_TIMEOUT_MS } from "../../types/video.js";
 import type { RelayFeed } from "./relay.js";
 
 /** The subset of a MediaMTX path's config this app ever sets. `GET
@@ -18,6 +20,10 @@ export interface PathConf {
   sourceOnDemandStartTimeout?: string;
   sourceOnDemandCloseAfter?: string;
   overridePublisher?: boolean;
+  runOnDemand?: string;
+  runOnDemandRestart?: boolean;
+  runOnDemandStartTimeout?: string;
+  runOnDemandCloseAfter?: string;
 }
 
 /** MediaMTX's own built-in catch-all path. It is never in `desired` — no
@@ -97,6 +103,36 @@ export function pathConf(feed: RelayFeed): PathConf {
   return { source: "publisher", overridePublisher: false };
 }
 
+/** How long after the last reader leaves the converter keeps running: long enough
+ *  that switching Listen off and on reuses it, short enough to cost little CPU. */
+export const LISTEN_CLOSE_AFTER_MS = 10_000;
+
+/** The config of a feed's `<id>-listen` path. MediaMTX runs `command` when the
+ *  first reader arrives (one process, whoever else joins), restarts it while
+ *  readers remain, and stops it LISTEN_CLOSE_AFTER_MS after the last leaves. The
+ *  path itself is fed by that process publishing to it over RTSP. */
+export function listenPathConf(command: string): PathConf {
+  return {
+    source: "publisher",
+    overridePublisher: false,
+    runOnDemand: command,
+    runOnDemandRestart: true,
+    runOnDemandStartTimeout: `${LISTEN_START_TIMEOUT_MS / 1000}s`,
+    runOnDemandCloseAfter: `${LISTEN_CLOSE_AFTER_MS / 1000}s`,
+  };
+}
+
+/** Every relay path the feeds ask for: each feed's own, then the `-listen`
+ *  sibling of each that has a command. */
+export function desiredPaths(feeds: RelayFeed[]): [string, PathConf][] {
+  const out: [string, PathConf][] = [];
+  for (const feed of feeds) {
+    out.push([feed.id, pathConf(feed)]);
+    if (feed.listenCommand !== undefined) out.push([listenPathName(feed.id), listenPathConf(feed.listenCommand)]);
+  }
+  return out;
+}
+
 /** The relay's whole publish-user list: the fixed reader user, then one
  *  `video` user per push feed, sorted by path so the list (and the
  *  before/after comparison `MediaMtxRelay.reconcile` makes against it) is
@@ -111,7 +147,11 @@ export function publishUsers(feeds: RelayFeed[]): RelayUser[] {
       permissions: [{ action: "publish" as const, path: feed.id }],
     }))
     .sort((a, b) => a.permissions[0].path.localeCompare(b.permissions[0].path));
-  return [READER_USER, ...pushUsers];
+  const listenPaths = feeds
+    .filter((feed) => feed.listenCommand !== undefined)
+    .map((feed) => listenPathName(feed.id))
+    .sort();
+  return [READER_USER, ...(listenPaths.length > 0 ? [listenPublisherUser(listenPaths)] : []), ...pushUsers];
 }
 
 /** Every user the relay holds: publishUsers(), then the API's own user.
@@ -138,21 +178,21 @@ export function planReconcile(
   current: { name: string; conf: Record<string, unknown> }[],
 ): { add: [string, PathConf][]; replace: [string, PathConf][]; remove: string[] } {
   const currentByName = new Map(current.map((path) => [path.name, path.conf]));
-  const desiredIds = new Set(desired.map((feed) => feed.id));
+  const wantedPaths = desiredPaths(desired);
+  const desiredNames = new Set(wantedPaths.map(([name]) => name));
 
   const add: [string, PathConf][] = [];
   const replace: [string, PathConf][] = [];
-  for (const feed of desired) {
-    const wanted = pathConf(feed);
-    const existing = currentByName.get(feed.id);
+  for (const [name, wanted] of wantedPaths) {
+    const existing = currentByName.get(name);
     if (existing === undefined) {
-      add.push([feed.id, wanted]);
+      add.push([name, wanted]);
     } else if (!matchesWanted(existing, wanted)) {
-      replace.push([feed.id, wanted]);
+      replace.push([name, wanted]);
     }
   }
 
-  const remove = current.map((path) => path.name).filter((name) => name !== ALL_OTHERS && !desiredIds.has(name));
+  const remove = current.map((path) => path.name).filter((name) => name !== ALL_OTHERS && !desiredNames.has(name));
 
   return { add, replace, remove };
 }

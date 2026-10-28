@@ -5,6 +5,7 @@
 
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
+import * as fs from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 
 import { withoutDataDir } from "../app-paths.js";
@@ -21,10 +22,15 @@ import { stageController } from "../stage-controller.js";
 import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
+import { audioFieldsOf, resolveAudioFields } from "./audio-input.js";
+import { classifyAudio, listenPathName, planAudio, resolveAudio, type ConverterWhy, type ListenCapability } from "./audio-listen.js";
+import { systemFfmpegFinder, type FfmpegFinder } from "./ffmpeg-system.js";
+import { AudioMemory } from "./audio-memory.js";
 import { embedSrc } from "./embed.js";
-import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
+import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId, feedOwnerOf } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
-import { externalProtocol, parseFeedInput } from "./feed-input.js";
+import { OFFERED_KINDS, externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
+import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
 import {
   assertVideoBundle,
   buildPreview,
@@ -43,13 +49,15 @@ import { InFlight } from "./in-flight.js";
 import { ProbeScheduler } from "./probe-scheduler.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
-import { RelayLogWatcher } from "./relay-log.js";
+import { RelayLogWatcher, type RelayLogEvent } from "./relay-log.js";
 import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
 import {
   DEFAULT_VIDEO_PORTS,
   PUSH_PROTOCOL_LABEL,
+  relayPlayback,
+  type FeedAudioStatus,
   type FeedPlay,
   type FeedState,
   type FeedStatus,
@@ -82,6 +90,30 @@ const KICK_LOG_TEXT: Record<KickResult, string> = {
   failed: "could not drop the current publisher",
 };
 
+/** How MediaMTX words a converter that never started: "fork/exec ...: no such file or directory". */
+const LAUNCH_ERROR = /fork\/exec|no such file|not found|permission denied|exec format/i;
+const FFMPEG_RECHECK_MS = 60_000;
+
+/** Whether the relay was started listening for RTSP (what `-listen` paths need),
+ *  and when it was not, why: set only when an RTSP port busy with another program
+ *  is the reason, so the feeds can say so. Without a reason, ffmpeg's own status
+ *  is the one to report. */
+export type RelayRtsp = { on: true } | { on: false; why: string | null };
+export const RTSP_OFF: RelayRtsp = { on: false, why: null };
+
+/** A feed's audio as one reconcile settled it, for reportAudio. */
+interface SettledAudio {
+  /** sourceCodecKey of the feed this was settled for. */
+  key: string;
+  name: string;
+  status: FeedAudioStatus;
+  why?: ConverterWhy;
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  return fs.access(p).then(() => true, () => false);
+}
+
 const CHANGED_SINCE_REVIEW = "Changed on this server since the review. Review the file again.";
 
 /** Keys the review fingerprints below. Per process, so a fingerprint means
@@ -103,16 +135,16 @@ const REVIEW_KEY = randomBytes(32);
 function reviewFingerprint(feed: VideoFeed | undefined, secretRevision: number): string {
   if (!feed) return "";
   return createHmac("sha256", REVIEW_KEY)
-    .update(JSON.stringify({ name: feed.name, source: feed.source, secretRevision }))
+    .update(JSON.stringify({ name: feed.name, source: feed.source, ...audioFieldsOf(feed), secretRevision }))
     .digest("hex")
     .slice(0, 32);
 }
 const FINGERPRINT_FORMAT = /^(?:[0-9a-f]{32})?$/;
 
-/** The same feed, by what the import compares: name and source, or both absent. */
+/** The same feed, by what the import compares: name, source and audio settings, or both absent. */
 function sameFeed(a: VideoFeed | undefined, b: VideoFeed | undefined): boolean {
   if (!a || !b) return !a && !b;
-  return isDeepStrictEqual({ name: a.name, source: a.source }, { name: b.name, source: b.source });
+  return isDeepStrictEqual({ name: a.name, source: a.source, ...audioFieldsOf(a) }, { name: b.name, source: b.source, ...audioFieldsOf(b) });
 }
 
 /** Where a feed's picture comes from, as far as what the service remembers
@@ -125,7 +157,6 @@ function sourceMoved(a: VideoSource, b: VideoSource): boolean {
   return false;
 }
 
-export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
 /** A push feed's publish password: 16 base62 characters from
  *  crypto.randomInt, never anything predictable — it is what stands
@@ -245,7 +276,10 @@ const feedsOf = (current: VideoFeedsFile): VideoFeed[] => (Array.isArray(current
  * it silently dropped a pull feed's new password. Guarded through the real
  * route in video-routes.test.ts.
  */
-function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
+function mergedFeedPatch(
+  existing: VideoFeed,
+  body: unknown,
+): { name: unknown; source: unknown; password: unknown; audioConversion: unknown; audioSourceUrl: unknown } {
   const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   return {
     // Present means supplied, whatever its type: a name that is not text
@@ -253,7 +287,23 @@ function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; s
     name: "name" in obj ? obj.name : existing.name,
     source: obj.source !== undefined ? obj.source : existing.source,
     password: obj.password,
+    // Left out of the body means unchanged; "" clears the address.
+    audioConversion: obj.audioConversion !== undefined ? obj.audioConversion : existing.audioConversion,
+    audioSourceUrl: obj.audioSourceUrl !== undefined ? obj.audioSourceUrl : existing.audioSourceUrl,
   };
+}
+
+/** What ffmpeg prints when it opened the input and cannot write it to the relay
+ *  as it is (raw ADTS AAC: "Could not write header (incorrect codec parameters
+ *  ?)"), as opposed to an input it could not open or a relay that did not answer (the same
+ *  "Could not write header" line, ending "Connection refused"). */
+const COPY_CANNOT_WORK = /Could not write header[^\n]*Invalid data found|incorrect codec parameters \?\): Invalid data|not currently supported in container|Could not find tag for codec/i;
+
+/** The audio settings a remembered source codec belongs to: a changed address or
+ *  conversion no longer matches it. */
+function sourceCodecKey(feed: VideoFeed): string {
+  const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+  return `${audioConversion}\n${audioSourceUrl ?? ""}`;
 }
 
 class VideoService {
@@ -346,6 +396,7 @@ class VideoService {
    *  for the ports one. */
   private feedsChangedListener: (() => void) | null = null;
   private portsChangedListener: (() => void) | null = null;
+  private listenCapabilityListener: (() => void) | null = null;
   /** relay-lifecycle.ts's own connection-row mapping, fired with the fresh
    *  RelayStatus on every publish() whose relay status changed — the ONE place
    *  the integration manager's row is driven from, so a transition
@@ -378,6 +429,19 @@ class VideoService {
    * listening on yet.
    */
   private attachedPorts: VideoPorts | null = null;
+  /** How the current relay process was started as to RTSP, the listener the
+   *  `-listen` paths need (audio-listen.ts). Pinned at attachRelay() like the
+   *  ports: it is a fact about the process. */
+  private attachedRtsp: RelayRtsp = RTSP_OFF;
+  /** What is remembered about each relay feed's audio; see AudioMemory. */
+  private readonly audio = new AudioMemory();
+  /** Feed ids already reported as reserved, so the log says it once. */
+  private readonly reservedIdLogged = new Set<string>();
+  /** ffmpeg as the server finds it. The one seam: a test hands in its own. */
+  private ffmpegFinder: FfmpegFinder = systemFfmpegFinder;
+  /** When the finder was last reset because a converter could not launch, so a
+   *  broken ffmpeg is looked for again at most once a minute, not every restart. */
+  private lastLaunchRecheckAt = 0;
   /** Whether the connection row has already been told THIS attachment's
    *  version — see handleLine()'s own comment. Reset on every
    *  attachRelay()/detachInternal(), since a fresh attachment (a genuinely
@@ -527,7 +591,7 @@ class VideoService {
   private pollTimer: NodeJS.Timeout | null = null;
 
   allowedKinds(): ReadonlySet<VideoSourceKind> {
-    return new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
+    return OFFERED_KINDS;
   }
 
   /**
@@ -644,8 +708,7 @@ class VideoService {
     const s = feed.source;
     if (s.kind === "embed") return { via: "embed", src: embedSrc(s.player, s.ref) };
     if (s.kind === "external") return { via: "external", url: s.url, protocol: externalProtocol(s.url) };
-    const base = `/video/${feed.id}`;
-    return { via: "relay", whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+    return { via: "relay", ...relayPlayback(feed.id) };
   }
 
   /** The page's list line: what kind of source, then its address, protocol
@@ -679,6 +742,10 @@ class VideoService {
     };
     if (feed.source.kind === "pull") {
       out.hasPassword = (await this.storedPassword(feed.id)) !== undefined;
+    }
+    if (feed.source.kind === "pull" || feed.source.kind === "push") {
+      Object.assign(out, resolveAudioFields(feed));
+      out.audio = (await this.resolveFeedAudio(feed)).status;
     }
     return out;
   }
@@ -759,13 +826,28 @@ class VideoService {
     this.relayProcessListener = cb;
   }
 
+  /** relay-lifecycle.ts's hook for "whether this server can run ffmpeg may have
+   *  changed" (see ffmpegChanged). */
+  setListenCapabilityListener(cb: (() => void) | null): void {
+    this.listenCapabilityListener = cb;
+  }
+
+  /** The ffmpeg this server uses was found, lost or replaced (the Advanced path
+   *  was saved). A `-listen` path appears or goes with it, and the relay is
+   *  restarted when it must start or stop listening for RTSP. */
+  async ffmpegChanged(): Promise<void> {
+    this.listenCapabilityListener?.();
+    await this.reconcileRelay();
+    await this.publish();
+  }
+
   /** `PATCH /api/video/ports`: validated, saved, and — only when the saved
    *  values actually changed — relay-lifecycle.ts told to restart an
    *  already-running relay on the new ones. */
   async setPorts(body: unknown): Promise<{ ok: true; ports: VideoPorts } | { ok: false; error: string }> {
-    const parsed = parsePorts(body);
-    if (!parsed.ok) return parsed;
     const before = (await loadFeedsFile()).ports;
+    const parsed = parsePorts(body, before);
+    if (!parsed.ok) return parsed;
     const changed = JSON.stringify(before) !== JSON.stringify(parsed.ports);
     await videoFeedsStore.update((current) => ({ ...current, ports: parsed.ports }));
     await this.publish();
@@ -863,12 +945,13 @@ class VideoService {
    *  "off" is published for that half: a caller replacing one relay with
    *  another gets ONE settled state at the end, published once below, not
    *  an "off" broadcast between the two. */
-  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts): void {
+  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts, rtsp: RelayRtsp): void {
     if (this.relay) this.detachInternal();
     this.relayGeneration++;
     this.relay = relay;
     this.supervisor = supervisor;
     this.attachedPorts = ports;
+    this.attachedRtsp = rtsp;
     // Irrelevant from here on — relayStatus() only reads this while
     // `this.supervisor` is null — but cleared anyway so it cannot survive
     // stale into a later detach that leaves it behind.
@@ -919,6 +1002,10 @@ class VideoService {
     this.relay = null;
     this.supervisor = null;
     this.attachedPorts = null;
+    this.attachedRtsp = RTSP_OFF;
+    // Nothing about a feed's audio is known of a relay that is not there, and a
+    // converter of the old process is gone with it.
+    this.audio.relayGone();
     // A caller that just detached is telling relay-lifecycle.ts's own
     // sequence to report from scratch (setPreAttachStatus, next) — never
     // whatever a previous run last set.
@@ -983,7 +1070,12 @@ class VideoService {
     // this one could dial the source.
     this.requestedAt.clear();
     this.unansweredSince.clear();
-    if (status.state !== "running") this.lastPaths = new Map();
+    if (status.state !== "running") {
+      this.lastPaths = new Map();
+      // The converters and codecs were the dead process's; the next one's first
+      // listen-started is a new session, not a repeat.
+      this.audio.relayGone();
+    }
     void this.background.track(this.settleFeeds());
     // Last: a reconcile the readiness poll starts from here captures the
     // generation just bumped, so its success counts for this process.
@@ -1104,10 +1196,17 @@ class VideoService {
   private async settleFeeds(): Promise<void> {
     const { feeds } = await loadFeedsFile();
     const now = Date.now();
+    let audioChanged = false;
     for (const feed of feeds) {
       const kind = feed.source.kind;
       if (kind !== "pull" && kind !== "push") continue;
       const path = this.lastPaths.get(feed.id);
+      if (path?.ready && path.audio !== undefined && this.audio.peek(feed.id)?.codec !== path.audio) {
+        this.audio.get(feed.id).codec = path.audio;
+        audioChanged = true;
+      }
+
+      if (this.observeSourceCodec(feed, this.lastPaths.get(listenPathName(feed.id)))) audioChanged = true;
 
       if (this.pendingBFrames.has(feed.id)) {
         const pendingSince = this.pendingBFramesAt.get(feed.id) ?? 0;
@@ -1137,6 +1236,11 @@ class VideoService {
       // disk, right when a feed drops — flush it the moment that happens.
       if (leftReady) await this.flushSeenSafely(feed.id);
     }
+    // A feed's audio just became known, or changed (an encoder reconfigured
+    // from AAC to Opus): whether it needs a `-listen` path, and which path a
+    // listener reads, follows from it. The reconcile polls again, finds the
+    // codec unchanged, and stops there.
+    if (audioChanged) void this.background.track(this.reconcileRelay());
     await this.publish();
   }
 
@@ -1324,9 +1428,61 @@ class VideoService {
     return wasReady && !isReady;
   }
 
+  /** One line per converter start, stop and failure, on [video]. Nothing per
+   *  listener: MediaMTX starts the command once for the first reader and keeps it
+   *  for the rest, and these are that command's own lifecycle. A converter that
+   *  fails restarts every few seconds (runOnDemandRestart), so a failing session
+   *  is one line, and its restarts are not announced as starts. A session that
+   *  starts after the last one ended starts its failure count afresh: the outage
+   *  log would otherwise hold the next session's failure quiet for minutes. */
+  private async logConverterEvent(event: Extract<RelayLogEvent, { feedId: string }>): Promise<void> {
+    const id = event.feedId;
+    const name = (await loadFeedsFile()).feeds.find((f) => f.id === id)?.name ?? id;
+    const now = Date.now();
+    const state = this.audio.get(id);
+    if (event.kind === "listen-started") {
+      state.replacedUntilStart = false;
+      if (state.running) return;
+      state.running = true;
+      this.audio.outage.forget(id);
+      console.log(`[video] ${scrub(name)}: audio converter started${state.why ? ` (${scrub(state.why)})` : ""}`);
+    } else if (event.kind === "listen-stopped") {
+      state.running = false;
+      console.log(`[video] ${scrub(name)}: audio converter stopped (${scrub(event.reason || "no listeners")})`);
+    } else {
+      // A converter that cannot even launch (the ffmpeg file moved, say) is a
+      // reason to look for ffmpeg again, not only to log.
+      if (LAUNCH_ERROR.test(event.reason)) this.recheckFfmpeg(now);
+      else await this.noteCopyFailed(id, event.lastOutput);
+      const decision = this.audio.outage.fail(id, event.reason, now);
+      if (!decision.log) return;
+      const output = event.lastOutput ? ` — ffmpeg said: ${event.lastOutput}` : "";
+      console.warn(
+        `[video] ${scrub(name)}: audio converter failed: ${scrub(event.reason)}${scrub(output, 400)}; the relay tries again while someone is listening${scrub(decision.note)}`,
+      );
+    }
+  }
+
+  /** Forget the kept ffmpeg answer and reconcile, so the next command names the
+   *  file that is there now. At most once a minute. */
+  private recheckFfmpeg(now: number): void {
+    if (now - this.lastLaunchRecheckAt < FFMPEG_RECHECK_MS) return;
+    this.lastLaunchRecheckAt = now;
+    this.ffmpegFinder.reset();
+    void this.background.track(this.reconcileRelay());
+  }
+
+  /** Swap the ffmpeg finder (a test's). */
+  useFfmpegFinder(finder: FfmpegFinder): void {
+    this.ffmpegFinder = finder;
+  }
+
   private handleLine(text: string): void {
     const event = this.logWatcher.line(text);
     if (event?.kind === "b-frames") void this.background.track(this.markBFrames(event.path));
+    if (event?.kind === "listen-started" || event?.kind === "listen-stopped" || event?.kind === "listen-exited") {
+      void this.background.track(this.logConverterEvent(event));
+    }
     // The supervisor's own version() is
     // updated (supervisor.ts's attachReader()) BEFORE this listener ever
     // runs, so the moment the relay's startup banner is the line just read,
@@ -1414,34 +1570,45 @@ class VideoService {
   /**
    * Where the playback proxy (video-proxy-routes.ts) should forward a
    * `/video/<feedId>/<kind>…` request, or the reason to refuse. Read off
-   * `this.snapshot` — the same synchronous truth writeHelloBurst uses (see
-   * the field comment above) — so this needs no store read of its own: every
-   * mutation that could change the answer (addFeed/updateFeed/removeFeed,
-   * attachRelay/detachRelay, a status poll picking up "running") already ends
-   * in publish(), which is what keeps the snapshot current.
+   * `this.snapshot` — the same synchronous truth writeHelloBurst uses — so this
+   * needs no store read of its own: every mutation that could change the answer
+   * ends in publish(), which keeps the snapshot current.
    *
    * 404 for a pattern-failing or unknown id, for a kind this feed's source
-   * cannot serve (embed/external have no relay path at all; "whip" beyond
-   * that needs a push feed whose OWN protocol is whip — a pull feed, or a
-   * push feed on SRT/RTMP, has nothing listening for a WHIP offer). 503 only
-   * once a feed and kind both check out: an unknown feed is never "the relay
-   * is down" even while it genuinely is. 503 as well while the running
-   * process has not yet been reconciled with this feed (reconciledFeedIds).
+   * cannot serve (embed/external have no relay path at all; "whip" beyond that
+   * needs a push feed whose OWN protocol is whip). 503 only once a feed and kind
+   * both check out: an unknown feed is never "the relay is down" even while it
+   * genuinely is. 503 as well while the running process has not yet been
+   * reconciled with this feed (reconciledFeedIds).
+   *
+   * `<id>-listen` is answered for WHEP only, and only while the owning feed's
+   * audio status names exactly that path as converted or pass-through: a direct
+   * feed, a feed with no audio and a feed whose converter cannot run have no
+   * `-listen` path a browser may reach. A stored legacy feed whose own id ends in
+   * `-listen` is never answered as another feed's audio. `owner` is the feed the
+   * request is about, for demand and for the failure log.
    */
   relayTarget(
     feedId: string,
     kind: "whep" | "whip" | "hls",
-  ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
+  ): { host: "127.0.0.1"; port: number; owner: string; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
     if (!FEED_ID_PATTERN.test(feedId)) return { refuse: 404 };
-    const feed = this.snapshot.feeds.find((f) => f.id === feedId);
+    const owner = feedOwnerOf(feedId);
+    const isListen = owner !== feedId;
+    if (isListen && (kind !== "whep" || this.snapshot.feeds.some((f) => f.id === feedId))) return { refuse: 404 };
+    const feed = this.snapshot.feeds.find((f) => f.id === owner);
     if (!feed || (feed.source.kind !== "pull" && feed.source.kind !== "push")) return { refuse: 404 };
+    if (isListen) {
+      const audio = feed.audio;
+      if (!audio || (audio.state !== "converted" && audio.state !== "pass-through") || audio.listenPath !== feedId) return { refuse: 404 };
+    }
     if (kind === "whip" && !(feed.source.kind === "push" && feed.source.protocol === "whip")) return { refuse: 404 };
     if (this.snapshot.relay.state !== "running") return { refuse: 503, error: RELAY_NOT_RUNNING };
-    if (!this.reconciledFeedIds.has(feedId)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
+    if (!this.reconciledFeedIds.has(owner)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
     const { ports } = this.snapshot.relay;
     return kind === "hls"
-      ? { host: "127.0.0.1", port: ports.hls, path: `/${feedId}` }
-      : { host: "127.0.0.1", port: ports.webrtcHttp, path: `/${feedId}/${kind}` };
+      ? { host: "127.0.0.1", port: ports.hls, owner, path: `/${feedId}` }
+      : { host: "127.0.0.1", port: ports.webrtcHttp, owner, path: `/${feedId}/${kind}` };
   }
 
   // ── Reconciling the relay on a feed change ───────────────────────────────
@@ -1474,7 +1641,7 @@ class VideoService {
   private readonly mintingPassword = new Map<string, Promise<string>>();
 
   private async pushPassword(feed: VideoFeed): Promise<string> {
-    const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+    const secrets = await secretsStore.getSecrets(feedSecretSlot(feed.id));
     if (secrets.password) return secrets.password;
     const inFlight = this.mintingPassword.get(feed.id);
     if (inFlight) return inFlight;
@@ -1499,17 +1666,138 @@ class VideoService {
    *  and respawn before a reconcile can reach the relay. PUBLIC for that
    *  second caller alone. */
   async relayFeeds(): Promise<RelayFeed[]> {
+    return (await this.relayFeedsWithAudio()).feeds;
+  }
+
+  /** relayFeeds(), and each feed's audio as it was settled for it, so the one
+   *  caller that reports on it (reconcileOnce) does not decide it a second time. */
+  private async relayFeedsWithAudio(): Promise<{ feeds: RelayFeed[]; audio: Map<string, SettledAudio> }> {
     const { feeds } = await loadFeedsFile();
     const out: RelayFeed[] = [];
+    const audio = new Map<string, SettledAudio>();
     for (const feed of feeds) {
       const s = feed.source;
+      if (s.kind !== "pull" && s.kind !== "push") continue;
+      // Its path would be another feed's `-listen` path. Never deleted, never
+      // renamed: it is the operator's, and the log says what to do.
+      if (isReservedFeedId(feed.id)) {
+        if (!this.reservedIdLogged.has(feed.id)) {
+          this.reservedIdLogged.add(feed.id);
+          console.warn(
+            `[video] ${scrub(feed.name)}: its id "${scrub(feed.id)}" ends in -listen, which is reserved for audio, so it is not given to the relay. Make the feed again under another name.`,
+          );
+        }
+        continue;
+      }
+      const resolved = await this.resolveFeedAudio(feed);
+      audio.set(feed.id, { key: sourceCodecKey(feed), name: feed.name, status: resolved.status, why: resolved.why });
+      const listen = resolved.listenCommand !== undefined ? { listenCommand: resolved.listenCommand } : {};
       if (s.kind === "pull") {
-        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, await this.storedPassword(feed.id)) });
-      } else if (s.kind === "push") {
-        out.push({ id: feed.id, kind: "push", password: await this.pushPassword(feed) });
+        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, await this.storedPassword(feed.id)), ...listen });
+      } else {
+        out.push({ id: feed.id, kind: "push", password: await this.pushPassword(feed), ...listen });
       }
     }
-    return out;
+    return { feeds: out, audio };
+  }
+
+  /** What the relay and ffmpeg can do for a `-listen` path right now. ffmpeg is
+   *  asked about only when a feed already needs it, so a server whose feeds have
+   *  nothing to convert never runs the check. */
+  private async listenCapability(): Promise<ListenCapability> {
+    if (!this.relay || !this.attachedPorts) return { ok: false, reason: "the video relay is not running" };
+    if (!this.attachedRtsp.on && this.attachedRtsp.why) return { ok: false, reason: this.attachedRtsp.why };
+    let ffmpeg = await this.ffmpegFinder.find();
+    // The answer is kept, so a file that has moved since (`brew upgrade` replaces
+    // the Cellar folder the link resolved into) is found out here, not by a
+    // converter that fails to launch.
+    if (ffmpeg.ok && !(await fileExists(ffmpeg.resolvedPath))) {
+      this.ffmpegFinder.reset();
+      ffmpeg = await this.ffmpegFinder.find();
+    }
+    if (!ffmpeg.ok) return { ok: false, reason: ffmpeg.reason };
+    if (!this.attachedRtsp.on) return { ok: false, reason: "the relay is restarting to turn on audio conversion" };
+    return { ok: true, ffmpegPath: ffmpeg.resolvedPath, rtspPort: this.attachedPorts.rtsp };
+  }
+
+  /** A pass-through `-listen` path copies its audio source address, so whatever
+   *  that carries reaches the browser as it is. When the path reports a codec a
+   *  browser cannot play, remember it for this address and conversion so the next
+   *  plan encodes instead; a memory for other settings is dropped. True when the
+   *  plan changed. */
+  private observeSourceCodec(feed: VideoFeed, listen: RelayPath | undefined): boolean {
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const state = this.audio.peek(feed.id);
+    const key = sourceCodecKey(feed);
+    if (state?.sourceCodec && state.sourceCodec.key !== key) {
+      state.sourceCodec = undefined;
+      return true;
+    }
+    if (!audioSourceUrl || audioConversion === "off" || state?.sourceCodec) return false;
+    // The path describes the settings it was planned from, which an edit since may have changed.
+    if (state?.plannedKey !== key) return false;
+    if (!listen?.ready || typeof listen.audio !== "string" || classifyAudio(listen.audio) === "direct") return false;
+    this.audio.get(feed.id).sourceCodec = { key, codec: listen.audio };
+    console.log(`[video] ${scrub(feed.name)}: the audio source address carries ${scrub(listen.audio)}, not Opus; its audio is re-encoded to Opus`);
+    return true;
+  }
+
+  /** The relay now holds the `-listen` command planned from these settings. A path
+   *  seen before the change described the old ones, so it is dropped. */
+  private notePlanned(audio: Map<string, SettledAudio>): void {
+    for (const [id, { key }] of audio) {
+      const state = this.audio.get(id);
+      if (state.plannedKey === key) continue;
+      if (state.plannedKey !== undefined) state.replacedUntilStart = true;
+      state.plannedKey = key;
+      this.lastPaths.delete(listenPathName(id));
+    }
+  }
+
+  /** A pass-through converter that fails to run: ffmpeg cannot always copy a source
+   *  into the relay (raw AAC has no usable codec parameters), and then the path
+   *  never comes up to be observed. Remember that, so the same address is read
+   *  again with its audio encoded. Only a failure that says ffmpeg opened the
+   *  input and could not write the output counts: an unreachable or reset source
+   *  says nothing about its codec. A failure while already encoding is not this,
+   *  nor is one from a command planned from other settings than the feed has now. */
+  private async noteCopyFailed(feedId: string, lastOutput: string | null): Promise<void> {
+    if (!lastOutput || !COPY_CANNOT_WORK.test(lastOutput)) return;
+    const feed = (await loadFeedsFile()).feeds.find((f) => f.id === feedId);
+    if (!feed) return;
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const state = this.audio.get(feedId);
+    const key = sourceCodecKey(feed);
+    if (!audioSourceUrl || audioConversion === "off" || state.plannedKey !== key || state.replacedUntilStart || state.sourceCodec?.key === key) return;
+    state.sourceCodec = { key, codec: null };
+    console.log(`[video] ${scrub(feed.name)}: copying the audio source address failed, so its audio is re-encoded to Opus`);
+    void this.background.track(this.reconcileRelay());
+  }
+
+  /** A feed's audio, settled: the rule table (audio-listen.ts) against what the
+   *  relay last reported of the feed and what ffmpeg can do. */
+  private async resolveFeedAudio(feed: VideoFeed) {
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const seen = this.audio.peek(feed.id);
+    const sourceCodec = seen?.sourceCodec?.key === sourceCodecKey(feed) ? seen.sourceCodec.codec : undefined;
+    const plan = planAudio({ conversion: audioConversion, sourceUrl: audioSourceUrl, audio: seen?.codec, sourceCodec }, feed.id);
+    return plan.converter ? resolveAudio(plan, feed.id, await this.listenCapability()) : { status: plan.status };
+  }
+
+  /** The log lines for what reconcile just settled: a converter now wanted for a
+   *  reason, and a feed whose audio cannot be heard, each said once. */
+  private reportAudio(audio: Map<string, SettledAudio>): void {
+    for (const [id, { name, status, why }] of audio) {
+      const state = this.audio.get(id);
+      state.why = why;
+      if (status.state !== "unavailable") {
+        state.unavailableLogged = undefined;
+        continue;
+      }
+      if (state.unavailableLogged === status.reason) continue;
+      state.unavailableLogged = status.reason;
+      console.warn(`[video] ${scrub(name)}: audio unavailable: ${scrub(status.reason)}`);
+    }
   }
 
   /** True while a reconcileOnce() chain is running — see reconcileRelay()'s
@@ -1600,8 +1888,11 @@ class VideoService {
     const generation = this.relayGeneration;
     let feeds: RelayFeed[] = [];
     try {
-      feeds = await this.relayFeeds();
+      const planned = await this.relayFeedsWithAudio();
+      feeds = planned.feeds;
       await this.relay.reconcile(feeds);
+      this.reportAudio(planned.audio);
+      this.notePlanned(planned.audio);
       // Both are facts about the process that was current when this
       // started; a respawn in between gets its own reconcile from the
       // readiness poll.
@@ -1764,7 +2055,12 @@ class VideoService {
     let feed: VideoFeed | undefined;
     await videoFeedsStore.update((current) => {
       const feeds = feedsOf(current);
-      feed = { id: feedIdFor(parsed.name, new Set(feeds.map((f) => f.id))), name: parsed.name, source: parsed.source };
+      feed = {
+        id: feedIdFor(parsed.name, new Set(feeds.map((f) => f.id))),
+        name: parsed.name,
+        source: parsed.source,
+        ...audioFieldsOf(parsed),
+      };
       return { ...current, feeds: [...feeds, feed] };
     });
     if (!feed) throw new Error("[video] the feed store's update never ran");
@@ -1778,14 +2074,22 @@ class VideoService {
     // no password behind it is worse than one that never appears, so a
     // failed write takes the feed back out and the failure goes to the
     // caller.
+    //
+    // With no password to store, the slot is emptied instead. An id comes from
+    // the name, so a new feed can land on the slot of one removed before it,
+    // and that feed's password (another camera's) is still there whenever its
+    // own clear never ran: a restore that dropped it, a delete that failed part
+    // way. A new feed must not inherit it.
     const password = added.source.kind === "push" ? generatePushPassword() : parsed.password;
-    if (password) {
-      try {
-        await this.setFeedPassword(added.id, password);
-      } catch (err) {
-        await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
-        throw err;
+    try {
+      if (password) await this.setFeedPassword(added.id, password);
+      else if ((await this.storedPassword(added.id)) !== undefined) {
+        await this.clearFeedSecret(added.id);
+        console.warn(`[video] ${scrub(added.name)}: cleared a password left behind by an earlier feed with the same id`);
       }
+    } catch (err) {
+      await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
+      throw err;
     }
     await this.publish();
     await this.notifyFeedsChanged(added.id);
@@ -1805,15 +2109,36 @@ class VideoService {
     // existing source (and, now, the body's own password) handed back through.
     // A pull feed's stored password stays when the body carries none (see
     // updateFeedSecret); any other kind's is cleared, so there is none to keep.
-    const kept = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
-    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds(), kept);
+    //
+    // Except when the address moved to another camera, or from an encrypted
+    // scheme to a plain one. The password was entered for the old address, and
+    // the editor sends it back as "unchanged", so keeping it would hand it to
+    // whatever answers at the new one on the next dial.
+    // Decided before the parse, so an SRT address is not checked against a
+    // passphrase it will never use.
+    const patched = mergedFeedPatch(existing, body);
+    const stored = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
+    const targetBefore = pullCredentialTarget(existing.source);
+    const targetAfter = pullCredentialTarget(patched.source);
+    const movedAway = stored !== undefined && credentialTargetMoved(targetBefore, targetAfter);
+    const parsed = parseFeedInput(patched, this.allowedKinds(), movedAway ? undefined : stored);
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     // The id never changes on update — it is the layout binding's permanent
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
-    const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
+    const feed: VideoFeed = { id, name: parsed.name, source: parsed.source, ...audioFieldsOf(parsed) };
 
-    // The feed store write happens FIRST, updateFeedSecret() second.
+    // A pull feed moving to another camera loses the old camera's password
+    // BEFORE the new address is written, the order a restore uses
+    // (restore-credentials.ts). The other way round, the new address and the
+    // old password sat on disk together between the two writes: anything
+    // reading the feeds then (a reconcile already under way, or the next boot
+    // after a crash) dialled the new address with it. A store write that fails
+    // puts the password back, since the feed is still at its old address.
+    const clearedForMove = movedAway && existing.source.kind === "pull" && feed.source.kind === "pull";
+    if (clearedForMove) await this.clearFeedSecret(id);
+
+    // The feed store write happens BEFORE updateFeedSecret().
     // The reverse order (this used to run the secret change BEFORE the
     // store write) meant a store write that failed left a feed whose file
     // still named the OLD kind sitting behind a secret already changed to
@@ -1821,11 +2146,17 @@ class VideoService {
     // already cleared the push password, though the feed on disk was still
     // push. A failure here (the store write itself) is thrown, unhandled —
     // exactly as it was before this reordering.
-    await videoFeedsStore.update((current) => ({
-      ...current,
-      feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
-    }));
+    try {
+      await videoFeedsStore.update((current) => ({
+        ...current,
+        feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
+      }));
+    } catch (err) {
+      if (clearedForMove) await this.setFeedPassword(id, stored!);
+      throw err;
+    }
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
+    if (clearedForMove && parsed.password === undefined) this.logMovedPassword(feed.name, targetBefore, targetAfter);
     // What was remembered describes the old source: a feed changed to another
     // kind and back must not log "went offline" against a state of the first.
     if (sourceMoved(existing.source, feed.source)) await this.forgetFeedRuntime(id);
@@ -1898,6 +2229,8 @@ class VideoService {
     this.requestedAt.delete(id);
     this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
+    // What was seen of its audio, and said of it, describes the old source.
+    this.audio.forget(id);
     // An outage still open for it would swallow the new feed's first failure
     // as a repeat, and its recovery line would count the old one's.
     this.dialOutage.forget(id);
@@ -1942,6 +2275,8 @@ class VideoService {
     await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
     await this.clearFeedSecret(id);
     await this.forgetFeedRuntime(id);
+    // A feed put back under a reserved id is the same warning again, not a repeat.
+    this.reservedIdLogged.delete(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return true;
@@ -1961,24 +2296,35 @@ class VideoService {
   }
 
   private async setFeedPassword(id: string, password: string): Promise<void> {
-    await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+    await secretsStore.setSecret(feedSecretSlot(id), "password", password);
     this.bumpSecretRevision(id);
   }
 
   private async clearFeedSecret(id: string): Promise<void> {
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    await secretsStore.clearSecrets(feedSecretSlot(id));
     this.bumpSecretRevision(id);
   }
 
+  /** The line for a pull feed whose stored password was cleared because its
+   *  address moved off the camera, or the encryption, it was entered for.
+   *  updateFeed and the import both say it here, so they say it the same way. */
+  private logMovedPassword(name: string, before: CredentialTarget | null, after: CredentialTarget | null): void {
+    console.warn(
+      `[video] ${scrub(name)}: cleared the stored password: its address changed from ` +
+        `${scrub(describeTarget(before))} to ${scrub(describeTarget(after))}, and it is never sent to an ` +
+        "address it was not entered for. Enter it again if the new address needs one.",
+    );
+  }
+
   private async restoreFeedSecrets(id: string, previous: Record<string, string>): Promise<void> {
-    if (Object.keys(previous).length) await secretsStore.setSecrets(SECRET_SLOT(id), previous);
-    else await secretsStore.clearSecrets(SECRET_SLOT(id));
+    if (Object.keys(previous).length) await secretsStore.setSecrets(feedSecretSlot(id), previous);
+    else await secretsStore.clearSecrets(feedSecretSlot(id));
     this.bumpSecretRevision(id);
   }
 
   /** A feed's stored password, or undefined — the secret slot's one field. */
   private async storedPassword(id: string): Promise<string | undefined> {
-    return (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined;
+    return (await secretsStore.getSecrets(feedSecretSlot(id))).password || undefined;
   }
 
   /**
@@ -2000,13 +2346,13 @@ class VideoService {
 
   /** `POST /api/video/import/preview`: each feed in the file against what is here. */
   async previewImport(raw: unknown): Promise<{ ok: true; preview: ImportPreview } | { ok: false; error: string }> {
+    const here = await loadFeedsFile();
     let bundle: VideoFeedsBundle;
     try {
-      bundle = assertVideoBundle(raw);
+      bundle = assertVideoBundle(raw, here.ports);
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
-    const here = await loadFeedsFile();
     const plans = await planImport(bundle, here.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     const preview = buildPreview(bundle, plans, here);
     const local = new Map(here.feeds.map((f) => [f.id, f]));
@@ -2052,7 +2398,7 @@ class VideoService {
     }
     let bundle: VideoFeedsBundle;
     try {
-      bundle = assertVideoBundle(req.bundle);
+      bundle = assertVideoBundle(req.bundle, (await loadFeedsFile()).ports);
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
@@ -2066,65 +2412,105 @@ class VideoService {
       if (reviewFingerprint(seen.get(id), this.secretRevision.get(id) ?? 0) !== reviewed) movedOn.add(id);
     }
 
+    // A pull feed the file moves to another camera loses the old camera's
+    // password before the new address is written, for the reason updateFeed
+    // gives. Worked out from `seen`, which the plans were built from; a feed
+    // the write below then leaves alone, or a write that fails, gets its
+    // password back.
+    const clearedForMove = new Map<string, { password: string; before: CredentialTarget | null; after: CredentialTarget | null }>();
+    for (const plan of plans) {
+      const id = plan.preview.id;
+      const prior = seen.get(id);
+      if (!plan.parsed || plan.preview.status !== "differs" || (choices.get(id) ?? "replace") === "keep" || movedOn.has(id)) continue;
+      if (prior?.source.kind !== "pull" || plan.parsed.source.kind !== "pull") continue;
+      const before = pullCredentialTarget(prior.source);
+      const after = pullCredentialTarget(plan.parsed.source);
+      const password = await this.storedPassword(id);
+      if (password === undefined || !credentialTargetMoved(before, after)) continue;
+      clearedForMove.set(id, { password, before, after });
+      await this.clearFeedSecret(id);
+    }
+    const restoreCleared = async (keep: (id: string) => boolean) => {
+      for (const [id, { password }] of clearedForMove) if (!keep(id)) await this.setFeedPassword(id, password);
+    };
+
     interface Landed { plan: FeedPlan; outcome: "added" | "replaced" | "kept" | "same"; prior?: VideoFeed }
     const landed: Landed[] = [];
     const changed: { name: string; reason: string }[] = [];
-    await videoFeedsStore.update((current) => {
-      landed.length = 0;
-      changed.length = 0;
-      const feeds = feedsOf(current);
-      const byId = new Map(feeds.map((f) => [f.id, f]));
-      const next = [...feeds];
-      for (const plan of plans) {
-        if (!plan.parsed) continue;
-        const { id } = plan.preview;
-        const prior = byId.get(id);
-        // The plan was built from `seen`. A feed that is not what the plan saw
-        // (edited, added or deleted since) is left alone: the operator reviewed
-        // something else, and a delete must never turn into an add.
-        if (!sameFeed(seen.get(id), prior) || movedOn.has(id)) {
-          changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
-          continue;
+    try {
+      await videoFeedsStore.update((current) => {
+        landed.length = 0;
+        changed.length = 0;
+        const feeds = feedsOf(current);
+        const byId = new Map(feeds.map((f) => [f.id, f]));
+        const next = [...feeds];
+        for (const plan of plans) {
+          if (!plan.parsed) continue;
+          const { id } = plan.preview;
+          const prior = byId.get(id);
+          // The plan was built from `seen`. A feed that is not what the plan saw
+          // (edited, added or deleted since) is left alone: the operator reviewed
+          // something else, and a delete must never turn into an add.
+          if (!sameFeed(seen.get(id), prior) || movedOn.has(id)) {
+            changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
+            continue;
+          }
+          const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source, ...audioFieldsOf(plan.parsed) };
+          if (!prior) {
+            next.push(feed);
+            landed.push({ plan, outcome: "added" });
+          } else if (plan.preview.status === "same") {
+            landed.push({ plan, outcome: "same", prior });
+          } else if ((choices.get(id) ?? "replace") === "keep") {
+            landed.push({ plan, outcome: "kept", prior });
+          } else {
+            next[next.findIndex((f) => f.id === id)] = feed;
+            landed.push({ plan, outcome: "replaced", prior });
+          }
         }
-        const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
-        if (!prior) {
-          next.push(feed);
-          landed.push({ plan, outcome: "added" });
-        } else if (plan.preview.status === "same") {
-          landed.push({ plan, outcome: "same", prior });
-        } else if ((choices.get(id) ?? "replace") === "keep") {
-          landed.push({ plan, outcome: "kept", prior });
-        } else {
-          next[next.findIndex((f) => f.id === id)] = feed;
-          landed.push({ plan, outcome: "replaced", prior });
-        }
-      }
-      // Nothing to write: hand back the object it was given, which the store reads as "no change".
-      if (!landed.some((l) => l.outcome === "added" || l.outcome === "replaced")) return current;
-      return { ...current, feeds: next };
-    });
+        // Nothing to write: hand back the object it was given, which the store reads as "no change".
+        if (!landed.some((l) => l.outcome === "added" || l.outcome === "replaced")) return current;
+        return { ...current, feeds: next };
+      });
+    } catch (err) {
+      await restoreCleared(() => false);
+      throw err;
+    }
+    // A feed the write left alone (changed on this server since the review)
+    // keeps the password it had.
+    await restoreCleared((id) => landed.some((l) => l.outcome === "replaced" && l.plan.preview.id === id));
 
     // Secrets. Each one's previous slot is remembered first, so a failure can put it back.
     const undo: Array<() => Promise<void>> = [];
     const newPushPasswords: string[] = [];
+    const passwordsCleared: string[] = [];
     let passwordsWritten = 0;
     try {
       for (const { plan, outcome, prior } of landed) {
         if (outcome !== "added" && outcome !== "replaced") continue;
         const { id } = plan.preview;
         const parsed = plan.parsed!;
-        const slot = SECRET_SLOT(id);
-        const previous = await secretsStore.getSecrets(slot);
+        const slot = feedSecretSlot(id);
+        const moved = clearedForMove.get(id);
+        const stored = await secretsStore.getSecrets(slot);
+        // What a failure puts back is what the feed had before this import,
+        // the password cleared above for a move included.
+        const previous = moved ? { ...stored, password: moved.password } : stored;
         undo.push(() => this.restoreFeedSecrets(id, previous));
         const newKind = parsed.source.kind;
         const oldKind = prior?.source.kind;
         if (parsed.password !== undefined) {
-          if (parsed.password !== previous.password) {
+          if (parsed.password !== stored.password) {
             await this.setFeedPassword(id, parsed.password);
             passwordsWritten++;
           }
         } else if (oldKind === newKind) {
-          // A replaced feed of the same kind keeps this server's password.
+          // A replaced feed of the same kind keeps this server's password,
+          // unless it now pulls from another camera, whose was cleared above.
+          if (moved) {
+            this.logMovedPassword(parsed.name, moved.before, moved.after);
+            passwordsCleared.push(parsed.name);
+          }
         } else if (oldKind === undefined) {
           if (newKind === "push") {
             await this.setFeedPassword(id, generatePushPassword());
@@ -2174,6 +2560,7 @@ class VideoService {
         ...changed,
       ],
       newPushPasswords,
+      passwordsCleared,
       passwordsWritten,
       portsApplied: false,
     };
@@ -2210,6 +2597,7 @@ class VideoService {
       `same ${report.same.length}, skipped ${report.skipped.length}` +
       (report.passwordsWritten ? `, wrote ${plural(report.passwordsWritten, "password")}` : "") +
       (report.newPushPasswords.length ? `, made ${plural(report.newPushPasswords.length, "new publish password")}` : "") +
+      (report.passwordsCleared.length ? `, cleared ${plural(report.passwordsCleared.length, "password")} whose address changed` : "") +
       (report.portsApplied ? ", applied relay ports" : "") +
       (report.portsError ? `, could not apply relay ports: ${report.portsError}` : "") +
       skippedText;

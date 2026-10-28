@@ -12,15 +12,16 @@ Releases are cut automatically from Conventional Commits by
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged and published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged and published as the latest GitHub release |
 
-A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no
-release**, so documentation churn does not mint versions.
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`/`revert` produces
+**no release**, so documentation churn does not mint versions.
 
 Otherwise the level is the highest severity among every commit since the last
-**stable** release — one `feat` among twenty `docs` makes it a minor. A `feat`,
-`fix` or `perf` scoped to the tooling itself (`release`, `ci`, `dx`, `test`) is
-left out of that reading, and out of the notes; see `scripts/release-level.sh`.
-Measuring from the last stable rather than the last tag is what lets a beta line
-accumulate:
+**stable** release — one `feat` among twenty `docs` makes it a minor. `fix`, `perf`
+and `polish` are patch level, so a release of only those is X.Y.Z+1. A `feat`,
+`fix`, `perf` or `polish` scoped to the tooling itself (`release`, `ci`, `dx`,
+`test`) is left out of that reading, and out of the notes; see
+`scripts/release-level.sh`. Measuring from the last stable rather than the last
+tag is what lets a beta line accumulate:
 
 ```
 v1.9.2            last stable release
@@ -35,12 +36,16 @@ The base version moves only when the pending release changes class; refinements
 advance `-beta.N`. The version never decreases — if the beta line already sits above
 what the level implies, it stays.
 
+Prereleases ship continuously, one per push to `beta` that carries a releasable
+commit. Stable releases are promoted about every two weeks, or sooner for a fix that
+cannot wait; see [Release rhythm](../contributing.md#release-rhythm).
+
 Nothing is ever force-pushed. Deployments track these branches, and a rewrite breaks
 their updater.
 
 ## Tracks
 
-Two update tracks, selectable in **Settings → Advanced → Update track**:
+Two update tracks, selectable in **Settings → Advanced → Updates → Update track**:
 
 - **main** — stable releases only.
 - **beta** — prereleases *and* stable releases, so a beta server is never held back
@@ -64,22 +69,79 @@ Targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `win-x64`.
 
 When the release's tree has the [Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper)
 (`helper/macos/build-app.sh`), a macOS job also builds it, once per architecture, and
-the same release carries four more assets:
+the same release carries two more assets:
 
 ```
-StageUtilityOutput-arm64.zip     StageUtilityOutput-arm64.zip.sha256
-StageUtilityOutput-x86_64.zip    StageUtilityOutput-x86_64.zip.sha256
+StageUtilityOutput-arm64.zip
+StageUtilityOutput-x86_64.zip
 ```
 
-Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium) and
-each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
-server serves from its own cache; the updater never reads them. A tree without the
+Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium).
+They are for the Mac installer, which a server serves from its own cache; the updater
+never reads them. Like the archives, they are verified against the SHA-256 `digest`
+the releases API lists for the asset; no checksum file is published beside them. A
+release made before GitHub began serving asset digests (2025) has none, and its zips
+cannot be verified, so a server running one refuses them. A tree without the
 build script skips the job and releases as before, and a macOS build that fails or is
 cancelled releases without the zips rather than stopping the release (the archives do
 wait for that job, up to its 60-minute timeout); the run then carries an
 error annotation, and Macs whose server runs that version cannot install the helper
 until the server updates. The assets are made before
 the release is created, because a published release cannot be added to.
+
+Every release also carries a signature of each payload a machine
+[updates itself from](../kiosk-devices.md#signed-updates):
+
+```
+kiosk-windows.ps1.sig              the Windows kiosk's launcher, as in scripts/kiosk
+StageUtilityOutput-arm64.zip.sig   when the helper was built
+StageUtilityOutput-x86_64.zip.sig  when the helper was built
+```
+
+Each is RSA-3072, PKCS#1 v1.5 over SHA-256, made by
+`scripts/sign-release-assets.sh` in a `sign` job of its own, with the private key in
+the `RELEASE_SIGNING_KEY` secret. That job installs and runs nothing from npm: it checks
+out the tag, signs the launcher as the tagged blob (`git show v<version>:…`) and the
+helper's zips from the helper job's artifact, and verifies each signature against the
+committed public key. The artifacts job checks the set again before it attaches it: one
+signature per payload, each verifying. No secret, or a secret that is not the committed
+key's private half, stops the run before it tags. A signing failure after the tag does
+not cost the release: it is published without signatures and the run carries an
+error annotation, and every Mac helper and Windows kiosk refuses that release, staying
+on the version it has, until a signed one. A partial or mismatched set is never
+attached.
+
+## The release signing key
+
+The private key exists only as the GitHub Actions secret `RELEASE_SIGNING_KEY`. The
+public half is `scripts/kiosk/release-signing.pub.pem`, the one copy in the tree; the
+server serves it to the installers and never has the private half.
+
+The release job checks the secret (`scripts/sign-release-assets.sh --check`) before it
+tags, in a step that nothing from npm has run before, so a missing or wrong key stops a
+release with nothing pushed, and the `sign` job's signing step signs with it. No other
+step, job or workflow-level environment sees it.
+
+To make a key pair (once, on a trusted machine) and set the secret:
+
+```sh
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out release-signing.key.pem
+openssl pkey -in release-signing.key.pem -pubout -out scripts/kiosk/release-signing.pub.pem
+gh secret set RELEASE_SIGNING_KEY --repo Cornerstone-Production/Stage-Utility < release-signing.key.pem
+```
+
+Commit the public key, then keep the private key offline (a password manager, or
+`openssl pkey -aes256` for an encrypted copy) or destroy it: the secret is what CI uses,
+and a lost key is replaced, not recovered.
+
+**Rotating it** (a leaked key, or a lost one) is the same three commands, with the new
+public key committed in place of the old. Releases from then on are signed with the new
+key. A machine keeps the key it was installed with and refuses every release signed
+with another, and running its installer again keeps that key too. So once their server
+runs the first release with the new key, run the installer on every Mac with
+`--replace-signing-key` (`curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --replace-signing-key`)
+and on every Windows kiosk with `$env:STAGE_REPLACE_SIGNING_KEY = '1'` set first. Until
+then they stay on the version they have.
 
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a
 build toolchain — installed or to update. About 35 MB compressed, 115 MB on disk, of
@@ -102,6 +164,10 @@ per asset. It has to come from outside the archive: a checksum shipped inside th
 file it describes proves nothing, because whoever alters the file alters the
 checksum with it. An installer that cannot obtain a digest refuses to install
 rather than proceeding unverified.
+
+The kiosk installers and the updaters they leave on a Mac or a Windows PC check one
+more thing: the release's signature of the payload, against the key installed with
+the updater. See [Signed updates](../kiosk-devices.md#signed-updates).
 
 Installers are distributed as a script rather than a `.pkg` or `.msi` because an
 unsigned installer bundle is worse than none: macOS Gatekeeper refuses to open an

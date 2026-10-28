@@ -12,6 +12,7 @@ import { logReadFailure } from "../../lib/client-log";
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
+import { CHECK_INTERVAL_MS, type MachineUpdate } from "@main/services/machine-updates";
 import { notSetUp } from "./not-set-up";
 import { toError } from "@main/services/errors";
 // One phrasing of a screen size, shared with the holding screen the operator is
@@ -28,6 +29,17 @@ export interface DevicesPayload {
    *  reporting. Pushed with every `kiosk:devices`, so it is as fresh as the
    *  server last said. */
   health: OutputHealth[];
+  /** Each Mac helper and Windows kiosk that has checked for updates lately: what
+   *  it runs, what this server has, and what it was told. */
+  updates: MachineUpdate[];
+  /** How long the server had been answering update checks when it sent this, in
+   *  milliseconds of ITS clock: until one check interval has passed, a machine it
+   *  has not heard from may just not have asked yet. Read with `readAt`. */
+  updatesListeningFor: number | null;
+  /** This browser's clock when the listing arrived. The server's duration plus the
+   *  time since, both from this browser's own clock, is how long it has been
+   *  listening now, however wrong this browser's clock is. */
+  readAt: number;
   /** Ids of the devices that have reported health at any time since this page
    *  loaded. A reading that is no longer in `health` was dropped after the helper
    *  stopped, which is what tells "stopped reporting" from "never reported". */
@@ -37,7 +49,7 @@ export interface DevicesPayload {
   error: Error | null;
 }
 
-const EMPTY: DevicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], reported: [], error: null };
+const EMPTY: DevicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], updates: [], updatesListeningFor: null, readAt: 0, reported: [], error: null };
 
 let current: DevicesPayload = EMPTY;
 /** The read on the wire now, if any. */
@@ -63,7 +75,7 @@ function publish(next: DevicesPayload): void {
 }
 
 function read(): Promise<Error | null> {
-  const p: Promise<Error | null> = invoke<Partial<Omit<DevicesPayload, "error" | "reported">>>("devices:list")
+  const p: Promise<Error | null> = invoke<Partial<Omit<DevicesPayload, "error" | "reported" | "readAt">>>("devices:list")
     .then((d): Error | null => {
       // `health` is absent from a server older than the page, which an updating
       // appliance is for a moment; no readings, rather than a page that throws.
@@ -79,6 +91,9 @@ function read(): Promise<Error | null> {
         matches: d.matches ?? {},
         bound: d.bound ?? [],
         health,
+        updates: d.updates ?? [],
+        updatesListeningFor: d.updatesListeningFor ?? null,
+        readAt: Date.now(),
         reported,
         error: null,
       });
@@ -153,9 +168,30 @@ function subscribe(listener: (d: DevicesPayload) => void): () => void {
   };
 }
 
+/** How long the server must have listened before a machine it has never heard from
+ *  is called one without an updater: a whole check, and a minute of slack for one
+ *  that was mid-flight. */
+export const LISTENING_GRACE_MS = CHECK_INTERVAL_MS + 60_000;
+
+/** How long the server has been listening for update checks as of `now`, or null
+ *  when it never said. Both sides of the sum are this browser's clock. */
+export function listeningFor(data: Pick<DevicesPayload, "updatesListeningFor" | "readAt">, now = Date.now()): number | null {
+  return data.updatesListeningFor === null ? null : data.updatesListeningFor + Math.max(0, now - data.readAt);
+}
+
 export function useDevices(): DevicesPayload {
   const [data, setData] = useState(current);
+  const [, tick] = useState(0);
   useEffect(() => subscribe(setData), []);
+  // The "version unknown" notice waits out the grace period, and nothing else
+  // re-renders when it passes: a page left open would never show it. Wake once,
+  // when it does.
+  useEffect(() => {
+    const heard = listeningFor(data);
+    if (heard === null || heard >= LISTENING_GRACE_MS) return;
+    const timer = setTimeout(() => tick((n) => n + 1), LISTENING_GRACE_MS - heard + 1);
+    return () => clearTimeout(timer);
+  }, [data]);
   return data;
 }
 

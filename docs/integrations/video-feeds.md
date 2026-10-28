@@ -61,6 +61,78 @@ names folders relative to the data folder and a busy port's holder by
 program name only. The server log has the full path and the holder's
 process id.
 
+### ffmpeg
+
+The Video relay's audio conversion runs the operating system's own ffmpeg as a
+separate process. The server never downloads or bundles it, so system updates
+patch it. Video itself works without it. The server finds ffmpeg, checks it, and
+shows the result under **Advanced, Video relay, ffmpeg**.
+
+| Platform | Install |
+|---|---|
+| Linux | `sudo apt install ffmpeg` (or your distribution's package) |
+| macOS | `brew install ffmpeg`. The Homebrew formula installs it with Stage Utility |
+| Windows | `winget install --id Gyan.FFmpeg -e` |
+
+**Where it looks,** in this order: the path set in Advanced; every absolute
+directory on `PATH` (a relative or empty entry is skipped); then
+`/opt/homebrew/bin` and `/usr/local/bin` on macOS and Linux, because a launchd
+service starts with no Homebrew on its `PATH`. When a path is set, only that path
+is tried, and one that does not run is reported rather than replaced by another
+ffmpeg.
+
+**What it will run.** The path is a setting, so the server only runs an ffmpeg
+that passes all of these, whether it came from Advanced, `PATH` or a Homebrew
+directory:
+
+- its file name is exactly `ffmpeg` (`ffmpeg.exe` on Windows, in any case);
+- the file it resolves to after following symlinks is named the same, so a link
+  called `ffmpeg` that points at another program is refused while Homebrew's link
+  into its Cellar is not (the log line names the target);
+- on macOS and Linux, that file is not writable by group or other users and its
+  folder is not writable by other users, which rules out `/tmp` and `/var/tmp`;
+- on Windows, the file is on a local drive: a path set in Advanced, and the file
+  it resolves to, must not be a network share or `\\?\` device path.
+
+What this does not check:
+
+- On macOS and Linux only the file and its immediate folder are looked at, not
+  the folders above it. A folder writable by its group is allowed, because
+  Intel Homebrew's `/usr/local/bin` is one.
+- On Windows the file's folder is not checked for who can write to it. Keep
+  ffmpeg in Program Files or a folder only administrators can write.
+- A mapped network drive (`Z:` on a share) looks like a local drive and is not
+  detected.
+
+A refused one is named in the status line and the log. When it was found on
+`PATH` or in a Homebrew directory, the search carries on to the next candidate.
+
+The path is specific to this machine. It is kept in `video-ffmpeg.json`, which is
+never in a backup or a feeds export and is ignored by an import.
+
+**What it must be able to do:** decode AAC, encode Opus (`libopus`), read HTTP
+and write RTSP. That is checked once, by running `ffmpeg -version`, `-decoders`,
+`-encoders`, `-protocols` and `-muxers` (each given 10 seconds). The answer, good
+or bad, is remembered until the path is saved again, so a newly installed ffmpeg
+is picked up with **Save and check again** under Advanced, not a restart. Each
+save runs those five commands, so saves are taken one at a time, simultaneous
+ones share one check, and an unchanged path saved again within 10 seconds reuses
+the last answer.
+
+**What is shown.** The status line, like the rest of what a browser on the
+network can read, names no folder:
+
+- A usable ffmpeg reads `ffmpeg <version>, found automatically` (on `PATH`),
+  `found in a Homebrew folder`, or `at the path set above`.
+- Otherwise it says what is missing or refused, in words that name no folder
+  (`ffmpeg is not installed on this server`, `ffmpeg was found but it cannot
+  encode Opus (libopus)`, `the ffmpeg found was refused: it is in a folder anyone
+  can write to`), and gives this platform's install command.
+
+`GET /api/video/ffmpeg` answers the same. The server log has the full paths,
+including where a symlink resolves to. The file the checks ran against is
+internal: code that runs ffmpeg starts that file, never the link.
+
 Once running, the relay is a child process of this server. If it exits for
 any reason it is restarted automatically, backing off from 1 second up to 60
 between attempts, and it never gives up.
@@ -86,12 +158,12 @@ Test button of its own, having no settings to test.
 The relay's ports live on their own card in **Advanced**, reachable from
 this line's "Change ports in Advanced" while running, or failing on a busy
 port specifically — the one failure that page can actually fix — saving
-them restarts the relay if it is running, unless the six values did not
+them restarts the relay if it is running, unless the seven values did not
 actually change.
 
 ## Ports and the firewall
 
-The relay listens on six ports, all editable on that same card in
+The relay listens on seven ports, all editable on that same card in
 **Advanced**:
 
 | Port | Default | Protocol | Reaches | Carries |
@@ -102,9 +174,10 @@ The relay listens on six ports, all editable on that same card in
 | WebRTC signalling | 8889 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | HLS | 8888 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it, with a password made fresh at every relay start; nothing else on the machine can read or change the relay's paths, a pull feed's address among them |
+| RTSP (audio conversion) | 8554 | TCP | 127.0.0.1 only | This server's own ffmpeg, reading a feed and publishing its `-listen` path (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). Bound only while ffmpeg is usable, and TCP only, so the relay opens no UDP ports for it. If something else holds the port when the relay starts, the relay starts without RTSP: video is unaffected, audio conversion is off for that run, and every feed that needs it says "the RTSP port 8554 is in use by …: change it in Advanced" (logged once). Saving the ports restarts the relay and tries again |
 
 If the server sits behind a firewall, or the gear it talks to is on another
-VLAN, two directions matter — the loopback-only three never need a rule,
+VLAN, two directions matter — the loopback-only four never need a rule,
 since nothing outside this machine ever reaches them:
 
 - **UDP 8189 must reach the server from the screens' network.** Every screen
@@ -117,10 +190,182 @@ since nothing outside this machine ever reaches them:
 
 ## What a feed is
 
-A feed is a name (up to 60 characters) and a source, `{id, name, source}`. The `id` is a slug of the
+A feed is a name (up to 60 characters) and a source, `{id, name, source}`, and for a pull or push feed two audio settings (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). The `id` is a slug of the
 name it was given when created and never changes, even across a rename — so
 renaming a feed on the Video feeds page does not break any layout or Home card
 already pointed at it.
+
+## Listening to a feed's audio
+
+A browser listening live gets sound over WebRTC, which carries Opus and G.711
+but not AAC, the audio the Magewell Ultra Encodes send. The relay forwards a
+feed's picture over WebRTC without that sound. A feed that needs it gets a
+second relay path, `<feed id>-listen`, holding the same video and Opus audio.
+
+**Audio conversion** is a setting of a pull or push feed, in its editor:
+
+| Setting | What the feed does |
+|---|---|
+| Auto (default) | Converts only AAC. Opus, G.711, G.722 and LPCM are listened to as they are, on the feed's own path. Any other codec (MP3, AC-3) is reported unavailable; Auto does not convert it |
+| Off | Never runs ffmpeg for the feed. AAC then cannot be heard live |
+| Always | Converts whatever the audio is |
+
+**Audio source address** is optional: an `http` or `https` address that already
+carries the feed's audio as Opus, for an encoder that sends only G.711 or AAC on
+the output the relay pulls but Opus on another (a URayTech sends G.711 8 kHz mono
+over RTSP and H.264 plus Opus 48 kHz stereo at `http://<encoder>/0.ts`). While
+someone listens, ffmpeg reads that address and republishes it to `-listen` with
+`-c copy`: no re-encoding, so negligible CPU, and picture and sound stay in sync
+because they come from one stream. It uses the encoder's HTTP output, not a
+second RTSP session. The address takes no username or password, and only letters,
+digits and the punctuation `- . _ ~ : / ? [ ] @ ! & ( ) * + , ; = %`, because it
+becomes an argument of the command the relay runs. Auto and Always use it; Off
+ignores it.
+
+The `-listen` suffix is reserved: a feed is never given an id ending in it (a feed
+named "Cam Listen" becomes `cam-listen-2`), an import refuses such an id, and a stored
+feed that has one is not given to the relay and says so in the log. The address is
+checked again when the command is built, so a restored or hand-edited store cannot
+make ffmpeg read a file or open a socket, and each input is limited to the protocols
+it needs (`-protocol_whitelist`).
+
+Both settings are saved with the feed in `video-feeds.json`, carried by the feeds
+export and import (the import review lists a difference in either), and ignored
+on an embed or external feed.
+
+**How the conversion runs.** MediaMTX defines the `-listen` path with
+`runOnDemand`: it starts one ffmpeg when the first reader asks for the path and
+stops it 10 seconds after the last leaves, restarting it while readers remain.
+Two people listening to one feed share one ffmpeg; no feed has one while nobody
+listens. The relay holds the first listener's request for up to 15 seconds while
+ffmpeg starts, and the browser waits 20 seconds for it, so a cold start is not
+counted as a failed attempt. ffmpeg reads the feed from the relay's own copy over loopback RTSP,
+never from the encoder (the Ultra Encodes refuse a second RTSP reader), copies
+the video untouched and encodes the audio to Opus, 128 kb/s stereo, 20 ms frames,
+`-application lowdelay`. Its input flags (`-fflags nobuffer`, `-flags low_delay`,
+`-probesize 65536`, `-analyzeduration 500000`) skip reading seconds of media to
+learn codecs the stream already describes: on a local relay that took the first
+packet from about 3 s to about 1 s. The command runs without a shell: MediaMTX
+splits it with shell quoting and expands `$NAME` in each word, so every word is
+single-quoted and one holding a quote or `$` is refused, never escaped. A feed
+whose `-listen` path cannot be written says why instead.
+
+**Listening on the page.** The Video feeds page's preview and a Home Video card
+have a speaker button at the bottom right of the picture (see
+[Video](../reference/widgets.md#video) for its states). It is off each time a
+page loads. A tap opens one WebRTC session that asks for audio as well as video,
+on the path the feed's status names: its own for `direct`, `<id>-listen` for
+`converted` and `pass-through`. The picture then comes from that same session, so
+sound and picture stay together; stopping puts the tile back on its picture-only
+session. The tap itself unmutes and starts the element, which is what browsers'
+autoplay rules want from a gesture. A level meter reads the playing stream through
+a Web Audio analyser that is not wired to the speakers, and the volume is kept in
+the browser's local storage. One feed plays per page, and a tile that leaves the
+screen, a hidden tab or a closed page stops. Wall layouts, kiosks, consoles and
+the layout editor's preview never offer it.
+
+Nothing is logged per listener or per tap. The converter's own start, stop and
+failure lines (below) are the record. A browser whose listening session keeps
+failing writes its own lines on `[video]`, one per failure streak and worded about
+the sound (`listening to "<feed>" failed (…); retrying`, then
+`listening to "<feed>" failed (…); the picture plays without sound` when it gives
+up after three drops in a row, or at once when the relay refuses the path with a 400,
+406, 415 or 422), and `listening to "<feed>" works again` on recovery. They never read as the
+feed failing. The button shows "Audio stopped, retrying" while it retries and "Audio
+could not start: <reason>" once it has given up, and the picture plays on without sound.
+A drop is a dropped or refused connection, no picture within 5 seconds of connecting
+(a cold converter can take that long), ICE failing before it connected, or the video
+element erroring; a session that plays for 10 seconds starts the count over. Listening
+keeps its own count and its own log streak, so asking for sound never changes the
+picture's retry delay or its log lines.
+
+**Measuring.** `scripts/listen-measure.ts` reports what a feed's `-listen` path
+costs on a running server. Run it on the server itself, from its install folder,
+because the relay's RTSP port listens on loopback only; it needs `ffprobe` beside
+`ffmpeg`:
+
+```
+npx tsx scripts/listen-measure.ts 127.0.0.1:8554 <feed id> --minutes 30
+```
+
+The address is the RTSP port from the Advanced card (8554 unless changed). It reads
+`<id>` and `<id>-listen` from the relay, never from the encoder, though opening the
+feed's own path makes an on-demand pull feed dial its device. It prints the time to
+the first audio packet on `-listen` (cold if nobody had listened in the last 10
+seconds, since it includes the converter starting), then one line per `--interval`
+seconds (10) and a summary of three figures, each with its min, max and slope in
+ms per minute:
+
+- **Added audio delay**, `-listen` against the source: how much later a sound
+  arrives on `-listen` than the same sound on `<id>`. The two paths number their
+  timestamps from different origins; the copied video appears on both with an
+  identical checksum, which gives the shift, and the audio is compared through it.
+- **Added video delay**, from the same matched frames, as a cross-check: the tool
+  says so when this and the audio's method disagree by more than 10 ms.
+- **Audio/video offset inside `-listen`**: positive is the sound arriving later than
+  its picture.
+
+Resolution is about 10 to 20 ms. A feed converted from AAC is measurable; a
+pass-through feed's `-listen` carries a different encode of the video from the
+audio source address, so no frames match and the tool says so instead of guessing.
+`--json` prints the whole report, `--warmup` (4 seconds) discards each reader's
+first burst, and `--minutes` sets the length (30 by default, long enough to show
+drift).
+
+**CPU.** Copying the video is close to free. Encoding one stereo Opus stream is a
+few percent of one core on a desktop CPU, more on a Raspberry Pi. It runs per
+listened feed, not per listener, and only while someone listens.
+
+**Status.** Each pull or push feed's view carries an `audio` status and the relay
+path a listener should read:
+
+| `audio.state` | Meaning | Path to read |
+|---|---|---|
+| `none` | The source has no audio track | nothing |
+| `unknown` | The feed has not been seen yet, so its audio is not known | nothing |
+| `direct` | Opus, G.711, G.722 or LPCM: playable as the relay has it | the feed's own path |
+| `converted` | AAC, re-encoded to Opus on demand | `<id>-listen` |
+| `pass-through` | Read from the audio source address and copied, or re-encoded to Opus when the address does not carry Opus | `<id>-listen` |
+| `unavailable` | Cannot be heard; `reason` says why | nothing |
+
+The status names the path. The playback proxy serves a feed's own path, and,
+for a `converted` or `pass-through` feed only, `/video/<id>-listen/whep`: WHEP
+and nothing else, never HLS or WHIP, and never the `-listen` path of a feed
+whose status is anything else.
+
+A pass-through `-listen` path copies the address as it is, so it assumes Opus.
+When the relay reports that path carrying another codec (AAC, MP3, anything
+WebRTC cannot play), or the copy fails because ffmpeg cannot write that source
+to the relay as it is (raw AAC, say, which leaves the path never coming up), the
+server remembers it for that address and Audio conversion and re-plans the path
+to read the same address and re-encode the audio to Opus; a listener reconnects
+onto it. A source that is unreachable or resets the connection is not taken as
+that. Changing the address or Audio conversion, or removing the feed, forgets
+it. A failure while already encoding does not switch back. If ffmpeg cannot run,
+the status is `unavailable` and the reason names the codec, or says copying
+failed.
+
+The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
+not installed on this server."). The codec is learned from the relay's track
+list while the feed is showing and remembered while it is idle; an encoder
+changed from AAC to Opus is noticed on the next poll and its `-listen` path is
+dropped. A feed not yet seen gets a `-listen` path under Auto and Always, which
+costs nothing while idle.
+
+**Needs ffmpeg.** Without a usable ffmpeg (see [ffmpeg](#ffmpeg)) no `-listen`
+path is written and a feed that needs one is `unavailable` with ffmpeg's reason.
+The relay listens for RTSP only while ffmpeg is usable, decided when it starts;
+saving the ffmpeg path in Advanced restarts a running relay when that answer
+changes.
+
+**Installers.** `install.sh` (both the one-line installer and `scripts/install.sh`)
+installs ffmpeg with `apt-get`, `dnf` or `pacman` when it runs as root and finds
+none; `install.ps1` runs `winget install --id Gyan.FFmpeg -e` when `winget`
+exists. Both are best effort: a failure is printed and the install carries on.
+On RHEL, Rocky and Alma without RPM Fusion there is no ffmpeg package, so
+`dnf` fails and the line says so; install ffmpeg another way and save its path in
+Advanced if the server does not find it. On Windows the server runs as SYSTEM, whose `PATH` may not include a per-user
+install; if Advanced says ffmpeg is not found, save its path there.
 
 ## Kinds
 
@@ -190,7 +435,14 @@ The relay only dials the address while something is actually showing the feed
 it connected. Once a password is stored, the field says "A password is
 saved. Type to replace it, or clear it." with a **Clear** button that
 removes it at once; typing a new one and saving replaces it, and leaving
-the field untouched on an edit leaves whatever is already stored.
+the field untouched on an edit leaves whatever is already stored, unless the
+edit points the feed at another camera. A password is only sent to the
+camera it was entered for, so a new host clears it, and so does moving from
+`rtsps` or `https` to a scheme that is not encrypted; a new path, port or
+protocol on the same camera does not. The editor says so, and `/log` records
+`[video] <feed>: cleared the stored password`. An SRT address on another
+camera is then not checked against the old password, since it is no longer
+kept.
 
 A Magewell Ultra Stream can serve one feed to Stage Utility this way while
 its first output keeps streaming to Resi: turn on the Ultra Stream's RTSP
@@ -330,7 +582,8 @@ and **Save** replaces it with the real feed.
 ![The Video feeds page: pulled cameras, pushed encoders and the feed editor](../images/video-feeds.png)
 
 The editor shows the feed's live picture, its **Name** and **Source**, and the
-fields for that source, each with its label above it. A new feed's **Name**
+fields for that source (for a pulled or pushed feed, **Audio conversion** and
+**Audio source address** too, with the feed's audio status under them), each with its label above it. A new feed's **Name**
 and **Address** start empty, with "New feed" and "rtsp://" as placeholders;
 saving without a name is refused. Under **Save**,
 **Cancel** and **Delete feed** it says which layouts use the feed. Delete asks
@@ -352,7 +605,7 @@ feeds you tick: each one's id, name and source. Feeds keep their ids, so a view
 moved with them (see [Moving a view](../moving-a-view.md)) finds its Video
 widgets' feeds on the other server. Two things are opt-in:
 
-- **Relay ports**: the six ports, as saved.
+- **Relay ports**: the seven ports, as saved.
 - **Passwords**: a pull feed's camera password and a push feed's publish
   password. The file holds them in plain text, and anyone with it can publish
   to those feeds and log in to those cameras; the panel says so when the box is
@@ -370,15 +623,18 @@ on this server, each tagged:
   only reads "password differs", never the values), with a choice per feed:
   **Use the file's** (the default) or **Keep this server's**.
 - **Can't import**: this build cannot take the feed (a source kind it does not
-  offer, an address with a login inside it, an SRT address whose kept password
-  is not a valid passphrase); the reason is shown and the feed is skipped.
+  offer, an address with a login inside it, an SRT address on the same camera
+  whose kept password is not a valid passphrase); the reason is shown and the
+  feed is skipped.
 
 An import never removes a feed: the ones the file does not have are named and
 left alone. It never touches the **Video feeds** on/off switch, and it works
 with the switch off. A file that carries ports shows a **Use the file's relay
 ports** box, off by default; ticking it saves them, which restarts a running
 relay. A file with no passwords leaves this server's passwords alone on a feed
-it replaces, unless the feed's kind changes. A new push feed from a file
+it replaces, unless the feed's kind changes or its address is on another
+camera (or no longer encrypted); the result names each feed whose password was
+cleared that way. A new push feed from a file
 without a password gets a new publish password made here, and the result names
 it: its device needs the new password pasted in.
 
@@ -405,6 +661,52 @@ reference: see [Video](../reference/widgets.md#video).
 
 A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
 screen; a Pi 5 or a computer handles 1080p.
+
+### How each browser plays a feed
+
+A relay feed plays over WebRTC wherever the stream allows it, in every
+browser. When it needs HLS (B-frames, or WebRTC not reaching this screen),
+the player depends on what the browser has:
+
+| Browser | HLS player |
+|---|---|
+| Chrome, Firefox, Edge on a computer or Android | hls.js, on Media Source Extensions |
+| Safari on macOS, Safari on iPadOS | hls.js, on Media Source Extensions |
+| Any browser on iPhone, iOS 17.1 or later | hls.js, on Managed Media Source |
+| Any browser on iPhone before iOS 17.1 | Safari's own HLS player |
+
+The widget starts the picture itself as soon as the browser can play it,
+rather than leaving that to the browser's autoplay, which in Safari waits
+until it judges enough is buffered (about 2.5 seconds on the relay's
+low-latency HLS).
+
+Send the encoder's full frame rate, 59.94 or 60, rather than a setting that
+halves it to 30 (some encoders call it Auto). On a 60 Hz screen Safari
+sometimes shows a 30 fps picture with an uneven cadence, alternating short
+and long frames, which reads as judder: in half the sessions measured,
+and in the worst more than half its frames were held a refresh too short or
+too long. At 59.94 it stayed as close to even as Chrome does at either
+rate.
+
+### Measuring playback
+
+Playback timing and cadence are measured in a browser on a running server,
+the same way as a stutter reported on a real device:
+
+- **Cadence**: `requestVideoFrameCallback` on the widget's `<video>`, the
+  wall-clock interval between presented frames as a histogram. An even
+  picture sits at one bucket (16.7 ms at 60 fps, 33.3 ms at 30 fps); judder
+  shows as a spread across neighbouring buckets.
+- **Decode and freezes**: on WebRTC, the `inbound-rtp` video report from the
+  peer connection's `getStats()`: `framesDecoded`, `framesDropped`,
+  `freezeCount`, `totalFreezesDuration`, and `jitterBufferDelay` over
+  `jitterBufferEmittedCount`. Safari reports zero from
+  `getVideoPlaybackQuality()` for a WebRTC picture, so read these instead.
+- **Start and stalls**: the `<video>` element's `seeking`, `playing`,
+  `waiting` and `ratechange` events, timed from the first.
+
+On an iPhone or iPad, the same readings can be taken from Safari's Web
+Inspector console for that device, opened from a Mac's Develop menu.
 
 ## Health from the screens
 
@@ -511,7 +813,8 @@ the server's own log; see Logging below.
 Exporting and importing feeds writes one line each, tagged `[video-export]`
 and `[video-import]`: the count of feeds, and whether passwords or relay ports
 were included or applied. The import line also names each skipped feed and
-why. An import that fails writes `import failed, nothing was changed:` and the
+why, and says `cleared N passwords whose address changed` when it moved pull
+feeds to another camera. An import that fails writes `import failed, nothing was changed:` and the
 reason, or `import failed and could not restore:` when putting things back
 failed too. A password is never in any of them.
 
@@ -526,10 +829,34 @@ from the server:
   SIGKILL` — and when it restarts; a failing streak's start and its recovery,
   each once, not on every retry. `relay could not rewrite its config` when a
   restart cannot write `mediamtx.yml`, retried the same way.
+- `<feed>: the audio source address carries <codec>, not Opus; its audio is
+  re-encoded to Opus` once, when a pass-through `-listen` path is seen carrying a
+  codec a browser cannot play, and `<feed>: copying the audio source address
+  failed, so its audio is re-encoded to Opus` when ffmpeg cannot write the source
+  to the relay as it is. If it cannot be converted, the `audio unavailable: ...`
+  line names the codec.
 - `relay stopped`, and why: video switched off, or no pull or push feed left.
+- `<feed>: audio converter started (<why>)` when a feed's ffmpeg starts for its
+  first listener (why: the feed's audio is AAC, Audio conversion is Always, or
+  audio source address copied as it is, the audio source address does not carry
+  Opus so its audio is re-encoded, or it could not be copied as it is so its audio
+  is re-encoded), once, not again for a restart after a
+  failure; `audio converter stopped (not needed by anyone)` when the last
+  listener has gone; `audio converter failed: <reason> — ffmpeg said: <its last
+  line>` once per failing session, not on each of the relay's retries every 5
+  seconds. Nothing is logged per listener. When two converters run at once their
+  output interleaves, so the line quoted may be the other's.
+- `<feed>: audio unavailable: <reason>`, once per reason, for a feed that needs
+  ffmpeg and cannot have it.
+- `relay restarting to turn on audio conversion (ffmpeg is usable now)`, or `off`,
+  when saving the ffmpeg path changed whether the relay listens for RTSP.
 - Downloading the pinned MediaMTX release, and a checksum that does not
   match — from a fresh download or a hand-placed archive — refused rather
   than run, with where to place the archive by hand.
+- ffmpeg, once per check: `ffmpeg <version> at <path>` when it is found and
+  capable, `ffmpeg is not installed on this server`, `ffmpeg was not found at
+  the path set in Advanced`, or `found at <path> but it cannot <what>`. A check
+  runs the first time something asks and again only after the path is saved.
 - `removed old relay files (...), freeing N MB` when a release bump leaves
   earlier versions behind and they are cleared, only when something was
   removed; `could not remove old relay file <name>` when one cannot be.
@@ -582,6 +909,11 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
   feed that had lost its password, which its device then needs.
+- `<feed>: cleared the stored password: its address changed from <old> to
+  <new>`, when an edit or an import moves a pull feed to another camera, or
+  off an encrypted scheme; `<feed>: cleared a password left behind by an
+  earlier feed with the same id` when a new feed lands on the slot of one
+  removed before it. Neither line carries the password.
 - A screen struggling with a feed — dropped frames and stalls, in the last
   minute — the moment its window crosses the threshold above, and playing it
   smoothly again the moment it clears; each once, not repeated while it stays
@@ -606,8 +938,14 @@ Each screen writes its own `[video]` lines from the browser:
 - A feed failing on a screen, once per failing streak: its first failure and
   the reason, a reminder at most every 5 minutes while it goes on failing
   (with how many attempts and for how long), and a line when it is playing
-  again after holding for 10 seconds. Individual retries are not logged; the
+  again after holding for 60 seconds, so a picture that keeps dropping and
+  coming back is one outage. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- A picture that froze is one such failure, with the reason `the picture
+  froze: no new frame for 5 s` (`15 s` over HLS).
+- When a picture never arrived because the browser refused to start it, the
+  reason on that line, or on the WebRTC fallback line below, ends with the
+  browser's own words.
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.

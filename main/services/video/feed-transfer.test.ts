@@ -8,7 +8,8 @@ import { test } from "node:test";
 // store, which must read this directory and never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-feed-transfer-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { planImport } = await import("./feed-transfer.js");
+const { planImport, assertVideoBundle } = await import("./feed-transfer.js");
+const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 type VideoFeed = import("../../types/video.js").VideoFeed;
 type VideoFeedsBundle = import("../../types/video.js").VideoFeedsBundle;
 
@@ -54,4 +55,19 @@ test("a feed that is not a pull feed here keeps no password, so there is nothing
   const external: VideoFeed = { id: "cam", name: "Cam", source: { kind: "external", url: "https://cdn.example/x.m3u8" } };
   const [plan] = await planImport(file, [external], async () => "short", KINDS);
   assert.equal(plan.preview.status, "differs");
+});
+
+test("a file with a feed id ending in -listen is refused: that path belongs to another feed's audio", () => {
+  const entry = { id: "cam-listen", name: "Cam", source: { kind: "push", protocol: "rtmp" } };
+  assert.throws(() => assertVideoBundle({ kind: "stage-utility-video-feeds", version: 1, feeds: [entry] }, DEFAULT_VIDEO_PORTS), /id this server cannot use/);
+  assert.doesNotThrow(() => assertVideoBundle({ kind: "stage-utility-video-feeds", version: 1, feeds: [{ ...entry, id: "cam" }] }, DEFAULT_VIDEO_PORTS));
+});
+
+test("an export from before the RTSP port existed keeps this server's RTSP port rather than resetting it", () => {
+  const { rtsp: _gone, ...six } = DEFAULT_VIDEO_PORTS;
+  const here = { ...DEFAULT_VIDEO_PORTS, rtsp: 28554 };
+  const bundle = assertVideoBundle({ kind: "stage-utility-video-feeds", version: 1, feeds: [], ports: six }, here);
+  assert.equal(bundle.ports?.rtsp, 28554);
+  // Taken from the file's own port when it has one.
+  assert.equal(assertVideoBundle({ kind: "stage-utility-video-feeds", version: 1, feeds: [], ports: { ...six, rtsp: 9554 } }, here).ports?.rtsp, 9554);
 });

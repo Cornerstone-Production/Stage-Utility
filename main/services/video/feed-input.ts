@@ -1,7 +1,14 @@
 // main/services/video/feed-input.ts — validate operator input for a feed source.
 
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
+import type { CredentialTarget } from "../credential-target.js";
+import { parseAudioFields, type AudioFields } from "./audio-input.js";
 import { normalizeEmbedRef } from "./embed.js";
+import { hasUserinfo } from "./url-userinfo.js";
+
+/** The source kinds this build offers. One set, so the routes and a config
+ *  restore cannot disagree about which kinds a feed may be. */
+export const OFFERED_KINDS: ReadonlySet<VideoSourceKind> = new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
 
 /** Longest name a feed may have, after trimming. */
 export const MAX_NAME_LENGTH = 60;
@@ -10,18 +17,39 @@ function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
   return typeof v === "string" && (list as readonly string[]).includes(v);
 }
 
-/** A username or password inside the address itself. Refused for every kind
- *  that takes an address: stored there it would sit in the config store and
- *  go out on video:state to every screen, and a browser refuses to fetch an
- *  address that carries one, so it could never play either. */
-function hasUserinfo(u: URL): boolean {
-  return u.username !== "" || u.password !== "";
-}
-
 /** Printable ASCII, space to tilde — what an encoder's own settings page
  *  takes for an SRT passphrase, and what makes the length rule's
  *  "characters" the same count as MediaMTX's bytes. */
 const PLAIN_ASCII = /^[\x20-\x7E]*$/;
+
+/** The pull schemes that carry the password inside an encrypted connection. */
+const ENCRYPTED_PULL_SCHEMES = new Set(["https:", "rtsps:"]);
+
+/**
+ * Where a pull feed's stored password is sent: the camera's host, and whether
+ * the connection to it is encrypted. Null for a source that is not a pull with
+ * an address that parses, which takes no password. Takes `unknown` because the
+ * update and import paths ask before the source is validated (see
+ * video-service.ts's updateFeed).
+ *
+ * The host and not the port, unlike an integration's target: one camera serves
+ * RTSP, SRT and HLS on ports of its own, and moving a feed between them is an
+ * ordinary edit, where the kept password is already held to the SRT passphrase
+ * rule (passphraseProblem). Encrypted or not, so an edit cannot take the
+ * password from rtsps or https down to a scheme that sends it in the clear.
+ */
+export function pullCredentialTarget(source: unknown): CredentialTarget | null {
+  if (typeof source !== "object" || source === null) return null;
+  const s = source as Record<string, unknown>;
+  if (s.kind !== "pull" || typeof s.url !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(s.url);
+  } catch {
+    return null;
+  }
+  return { host: url.hostname || null, encrypted: ENCRYPTED_PULL_SCHEMES.has(url.protocol) };
+}
 
 /** `problem` (from passphraseProblem), said for a stored password that an SRT
  *  address would take over — the one place the operator did not just type it. */
@@ -47,7 +75,7 @@ export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
   keptPassword?: string,
-): { ok: true; name: string; source: VideoSource; password?: string } | { ok: false; error: string } {
+): ({ ok: true; name: string; source: VideoSource; password?: string } & AudioFields) | { ok: false; error: string } {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid input." };
   }
@@ -76,6 +104,13 @@ export function parseFeedInput(
   if (!allowKinds.has(kind)) {
     return { ok: false, error: `This build does not offer ${kind}.` };
   }
+
+  // Only a feed the relay carries has audio to convert: an embed or an external
+  // address ignores both fields, so changing a feed's kind never trips over what
+  // the old kind left behind.
+  const audio = parseAudioFields(obj);
+  if (!audio.ok) return audio;
+  const audioFields = kind === "pull" || kind === "push" ? audio.fields : {};
 
   // Validate per kind
   if (kind === "external") {
@@ -158,7 +193,7 @@ export function parseFeedInput(
       }
     }
 
-    const result: { ok: true; name: string; source: VideoSource; password?: string } = {
+    const result: { ok: true; name: string; source: VideoSource; password?: string } & AudioFields = {
       ok: true,
       name,
       source: {
@@ -166,6 +201,7 @@ export function parseFeedInput(
         url: source.url,
         username,
       },
+      ...audioFields,
     };
     // `!== undefined`, not truthy: `password: ""` is how an update explicitly
     // CLEARS a stored password (video-service.ts's updateFeed), and a truthy
@@ -183,7 +219,7 @@ export function parseFeedInput(
     if (!isOneOf(PUSH_PROTOCOLS, source.protocol)) {
       return { ok: false, error: `Push protocol must be one of: ${PUSH_PROTOCOLS.join(", ")}.` };
     }
-    return { ok: true, name, source: { kind: "push", protocol: source.protocol } };
+    return { ok: true, name, source: { kind: "push", protocol: source.protocol }, ...audioFields };
   }
 
   if (kind === "embed") {

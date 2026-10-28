@@ -4,13 +4,17 @@ import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
-import { Collapsible, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { plural } from "@main/services/plural";
+import { EYEBROW } from "./patch-device-manager";
+
+const WA_ROW = "flex items-center justify-between gap-2 border-t border-line py-1.5 text-caption1";
+const WA_SELECT = "h-6 max-w-[9.5rem] shrink-0 px-2";
 
 /**
  * Weekly assignment — pick a standing variant per PCO service type. The resolved
  * week patch (default → service-type variant → per-plan override → week tweaks) is
- * what the /patch volunteer view shows. Per-plan overrides land in a later increment.
+ * what the /patch volunteer view shows.
  */
 export function PatchWeekly({
   variants,
@@ -85,66 +89,63 @@ export function PatchWeekly({
 
   const standingForPlan = plan?.serviceTypeId ? assignments.byServiceType[plan.serviceTypeId] : undefined;
   const planEntry = plan?.planId ? assignments.byPlan[plan.planId] : undefined;
-  const setCount = Object.keys(assignments.byServiceType).length;
-
   return (
-    <div className="rounded-xl border border-line bg-surface">
-      <Collapsible label="Weekly assignment" summary={`${setCount} set`} headerClassName="px-4 py-2.5">
-        <div className="flex flex-col gap-2 px-3 pb-3">
-          {failed.has("allowed") && types && types.length > 0 && (
-            // The unfiltered list is still the useful thing to show: every
-            // assignment in it is real, there are just more rows than the Plan
-            // tab would offer.
-            <ErrorNote>Couldn't load which service types the Plan tab enables, so all of them are listed.</ErrorNote>
+    <section aria-label="Weekly assignment" className="rounded-xl border border-line bg-surface px-3.5 py-3">
+      <div className={`mb-1.5 ${EYEBROW}`}>Weekly assignment</div>
+      {failed.has("allowed") && types && types.length > 0 && (
+        // The unfiltered list is still the useful thing to show: every
+        // assignment in it is real, there are just more rows than the Plan
+        // tab would offer.
+        <ErrorNote className="mb-1.5">Couldn't load which service types the Plan tab enables, so all of them are listed.</ErrorNote>
+      )}
+      {pcoConfigured === false ? (
+        <p className="border-t border-line pt-2 text-footnote text-fg-subtle">Connect Planning Center to assign a standing patch per service type.</p>
+      ) : failed.has("types") ? (
+        <ErrorNote>Couldn't load the service types.</ErrorNote>
+      ) : !types ? (
+        <p className="border-t border-line pt-2 text-footnote text-fg-subtle">Loading service types…</p>
+      ) : visibleTypes.length === 0 ? (
+        <p className="border-t border-line pt-2 text-footnote text-fg-subtle">No service types to assign.</p>
+      ) : (
+        visibleTypes.map((t) => (
+          <div key={t.id} className={WA_ROW}>
+            <span className="min-w-0 text-fg">{t.name}</span>
+            <Select value={assignments.byServiceType[t.id] ?? ""} onValueChange={(v) => setStanding(t.id, v)}>
+              <SelectTrigger className={WA_SELECT}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Default patch</SelectItem>
+                {variants.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))
+      )}
+      {plan?.planId && (
+        <div className="border-t border-line py-1.5">
+          {/* Stacked: the plan's title is long and would otherwise wrap to four
+              lines beside its select. */}
+          <div className="flex flex-col gap-1 text-caption1">
+            <span className="min-w-0 font-medium text-fg">This week{plan.planTitle ? ` · ${plan.planTitle}` : ""}</span>
+            {/* The per-plan override is the one assignment no delete path
+                cleans up: removing a variant clears it from byServiceType and
+                leaves byPlan pointing at it. The Select keeps that id visible
+                rather than reading as "Use standing". */}
+            <Select value={planEntry?.variantId ?? ""} onValueChange={(v) => setPlanVariant(plan.planId!, v)}>
+              <SelectTrigger className="h-6 w-full px-2"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</SelectItem>
+                {variants.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {planEntry?.tweaks && Object.keys(planEntry.tweaks).length > 0 && (
+            <p className="mt-1 text-caption2 text-fg-subtle">{plural(Object.keys(planEntry.tweaks).length, "one-off tweak")} this week — edit via the “This week” target above the table.</p>
           )}
-          {pcoConfigured === false ? (
-            <p className="text-footnote text-fg-subtle">Connect Planning Center to assign a standing patch per service type.</p>
-          ) : failed.has("types") ? (
-            <ErrorNote>Couldn't load the service types.</ErrorNote>
-          ) : !types ? (
-            <p className="text-footnote text-fg-subtle">Loading service types…</p>
-          ) : visibleTypes.length === 0 ? (
-            <p className="text-footnote text-fg-subtle">No service types to assign.</p>
-          ) : (
-            visibleTypes.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
-                <span className="text-footnote text-fg">{t.name}</span>
-                <Select value={assignments.byServiceType[t.id] ?? ""} onValueChange={(v) => setStanding(t.id, v)}>
-                  <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Default patch</SelectItem>
-                    {variants.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))
-          )}
-          {plan?.planId && (
-            <div className="mt-1 flex flex-col gap-1 rounded-lg border border-line-strong bg-surface-raised px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-footnote font-medium text-fg">This week{plan.planTitle ? ` · ${plan.planTitle}` : ""}</span>
-                {/* The per-plan override is the one assignment no delete path
-                    cleans up: removing a variant clears it from byServiceType and
-                    leaves byPlan pointing at it. The Select keeps that id visible
-                    rather than reading as "Use standing". */}
-                <Select value={planEntry?.variantId ?? ""} onValueChange={(v) => setPlanVariant(plan.planId!, v)}>
-                  <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</SelectItem>
-                    {variants.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              {planEntry?.tweaks && Object.keys(planEntry.tweaks).length > 0 && (
-                <span className="text-caption2 text-fg-subtle">{plural(Object.keys(planEntry.tweaks).length, "one-off tweak")} this week — edit via the “This week” target above the table.</span>
-              )}
-            </div>
-          )}
-          <p className="text-caption2 text-fg-subtle">Each service type falls back to the Default patch unless a variant is assigned; a specific week can override that.</p>
         </div>
-      </Collapsible>
-    </div>
+      )}
+      <p className="mt-1.5 text-caption2 text-fg-subtle">Each service type falls back to the Default patch unless a variant is assigned; a specific week can override that.</p>
+    </section>
   );
 }

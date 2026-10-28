@@ -7,13 +7,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { within } from "../fixtures/within.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, RECENT_REQUEST_MS, videoPollDeps } =
+const { videoService, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, RECENT_REQUEST_MS, videoPollDeps } =
   await import("./video-service.js");
+const { feedSecretSlot } = await import("./feed-id.js");
 const { PULL_START_TIMEOUT_MS } = await import("./reconcile-plan.js");
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
@@ -26,7 +28,6 @@ const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type RelayPath = import("./relay.js").RelayPath;
 type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
-type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoPorts = import("../../types/video.js").VideoPorts;
 type RelayStatus = import("../../types/video.js").RelayStatus;
 type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
@@ -41,7 +42,7 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
  * production method itself.
  */
 const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS) =>
-  videoService.attachRelay(relay, supervisor, ports);
+  videoService.attachRelay(relay, supervisor, ports, { on: false, why: null });
 
 /** Real wall-clock polling, never affected by a test's own mocked setTimeout
  *  or Date (performance.now() is neither), for a condition the service offers
@@ -69,7 +70,7 @@ test("a config snapshot never carries a feed's password", async () => {
   const made = await videoService.addFeed({ name: "Lobby cam", source: { kind: "pull", url: "rtsp://192.0.2.10:8554/s", username: "admin" }, password });
   assert.ok(made.ok, "expected the pull feed to be added");
   const id = (made as { feed: { id: string } }).feed.id;
-  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(id))).password, password, "the seed never reached the secrets store");
+  assert.equal((await secretsStore.getSecrets(feedSecretSlot(id))).password, password, "the seed never reached the secrets store");
 
   const snapshot = await configSnapshot.build();
   const serialized = JSON.stringify(snapshot);
@@ -150,21 +151,6 @@ test("a pull or push feed reads standby, not offline, while no relay is attached
 // to a single process), a failing poll's behaviour, the seen store's
 // write-failure handling, and the guard against a stale in-flight poll.
 
-class FakeSupervisor extends EventEmitter {
-  // "running" by default — the service never polls while the supervisor
-  // reports "off" (see pollOnce()'s own guard), so every test that expects
-  // pollOnce() to actually call relay.status() would otherwise need its own
-  // explicit override. The handful of tests ABOUT off/starting/failing set
-  // their own.
-  current: SupervisorStatus = { state: "running", since: 1 };
-  ver: string | null = null;
-  status(): SupervisorStatus {
-    return this.current;
-  }
-  version(): string | null {
-    return this.ver;
-  }
-}
 
 /** A fake child process for the tests that drive a REAL RelaySupervisor —
  *  structurally satisfies SupervisedChild (an EventEmitter with
@@ -1142,6 +1128,7 @@ test("relayTarget refuses whip on a pull feed and on a push feed whose own proto
     assert.deepEqual(videoService.relayTarget(whipId, "whip"), {
       host: "127.0.0.1",
       port: 8889,
+      owner: whipId,
       path: `/${whipId}/whip`,
     });
   } finally {
@@ -1176,7 +1163,7 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
     supervisor.current = { state: "running", since: Date.now() };
     await videoService.reconcileRelay();
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, path: `/${id}` });
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, owner: id, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
@@ -1196,7 +1183,7 @@ test("relayTarget answers 503 for a running relay until a reconcile has handed i
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay(), supervisor);
   const publish = () => (videoService as unknown as { publish(): Promise<void> }).publish();
-  const whep = { host: "127.0.0.1", port: 8889, path: `/${id}/whep` };
+  const whep = { host: "127.0.0.1", port: 8889, owner: id, path: `/${id}/whep` };
   try {
     await publish();
     assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_GIVEN, "running, but not reconciled yet");
@@ -1267,7 +1254,7 @@ test("relayTarget keeps answering 503 for a feed the last reconcile failed to ha
   const secondId = (second as { feed: { id: string } }).feed.id;
   try {
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` });
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, owner: firstId, path: `/${firstId}` });
     assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN);
   } finally {
     fail = false;
@@ -1302,7 +1289,7 @@ test("a reconcile that rejects one feed's path still hands the relay the others,
   try {
     assert.equal(await videoService.reconcileRelay(), false, "a partial failure is still a failed reconcile, so the readiness poll retries");
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` }, "the feed whose path was set up must play");
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, owner: firstId, path: `/${firstId}` }, "the feed whose path was set up must play");
     assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the feed whose path was rejected stays refused");
     assert.ok(
       lines.some((line) => line.includes("[video] could not reconcile the relay") && line.includes(secondId)),
@@ -1331,7 +1318,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997 };
+  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997, rtsp: 18554 };
   const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -1341,7 +1328,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
     await (videoService as unknown as { publish(): Promise<void> }).publish();
     assert.deepEqual(
       videoService.relayTarget(id, "hls"),
-      { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` },
+      { host: "127.0.0.1", port: OLD_PORTS.hls, owner: id, path: `/${id}` },
       "sanity: the relay's own attach-time ports before anything changes",
     );
 
@@ -1349,7 +1336,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
     // restarted and is still bound to OLD_PORTS.
     await videoFeedsStore.update((current) => ({
       ...current,
-      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 },
+      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997, rtsp: 28554 },
     }));
     // A poll/publish after the store write — the moment a proxy reading the
     // store would point at a port the relay is not listening on yet.
@@ -1357,10 +1344,10 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
 
     assert.deepEqual(
       videoService.relayTarget(id, "whep"),
-      { host: "127.0.0.1", port: OLD_PORTS.webrtcHttp, path: `/${id}/whep` },
+      { host: "127.0.0.1", port: OLD_PORTS.webrtcHttp, owner: id, path: `/${id}/whep` },
       "the relay has not restarted — the proxy must still reach it on the port it actually opened",
     );
-    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` });
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: OLD_PORTS.hls, owner: id, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
@@ -2419,7 +2406,7 @@ test("a push feed's plan entry carries its password, read fresh from secretsStor
     const first = reconciled[0]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
     assert.ok(first, "expected the just-added feed in the reconciled plan");
     assert.equal(first.kind, "push");
-    assert.equal(first.password, (await secretsStore.getSecrets(SECRET_SLOT(id))).password);
+    assert.equal(first.password, (await secretsStore.getSecrets(feedSecretSlot(id))).password);
 
     await videoService.newPushPassword(id);
     const rotated = reconciled[reconciled.length - 1]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
@@ -2562,7 +2549,7 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
     const made = await videoService.addFeed({ name: "ProPresenter output", source: { kind: "push", protocol: "srt" } });
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
-    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+    const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
 
     const result = await videoService.newPushPassword(id);
     assert.ok(result, "expected newPushPassword to still answer even though the kick failed");
@@ -2601,7 +2588,7 @@ test("pushAddress's SRT and RTMP forms embed the password in the address; WHIP's
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
     try {
-      const stored = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+      const stored = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
       assert.ok(stored, "expected addFeed to have minted a password already");
       const address = await videoService.pushAddress(id);
       assert.ok(address);
@@ -2791,8 +2778,8 @@ test("a push feed with no stored secret (a restored snapshot, a wiped secrets fi
   try {
     // Simulate a restored snapshot / wiped secrets file: the secret is gone,
     // but the feed itself is still there.
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
-    assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+    await secretsStore.clearSecrets(feedSecretSlot(id));
+    assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(id)), {});
 
     const lines = captureConsole(t, "warn");
     const address = await videoService.pushAddress(id);
@@ -2800,7 +2787,7 @@ test("a push feed with no stored secret (a restored snapshot, a wiped secrets fi
     assert.ok(address);
     assert.ok(address!.password.length > 0, "expected pushAddress to mint a fresh password rather than publish with none");
     assert.equal(
-      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      (await secretsStore.getSecrets(feedSecretSlot(id))).password,
       address!.password,
       "expected the minted password to actually be stored, not just handed out once",
     );
@@ -2823,7 +2810,7 @@ test("relayFeeds() mints a password for a push feed with no stored secret too, s
     const made = await videoService.addFeed({ name: "No-secret push", source: { kind: "push", protocol: "rtmp" } });
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    await secretsStore.clearSecrets(feedSecretSlot(id));
 
     // A no-op update just to trigger another reconcile without touching the secret directly.
     await videoService.updateFeed(id, { name: "No-secret push 2" });
@@ -2841,7 +2828,7 @@ test("a kind change's store write failing leaves the OLD secret in place — the
   const made = await videoService.addFeed({ name: "Reorder push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-  const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+  const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
   assert.ok(before);
 
   const { videoFeedsStore } = await import("./feed-store.js");
@@ -2860,7 +2847,7 @@ test("a kind change's store write failing leaves the OLD secret in place — the
   }
 
   assert.equal(
-    (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+    (await secretsStore.getSecrets(feedSecretSlot(id))).password,
     before,
     "a failed store write must leave the OLD (push) secret exactly as it was — the kind on disk is still push",
   );
@@ -2871,8 +2858,8 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
   const made = await videoService.addFeed({ name: "Racing mint push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-  await secretsStore.clearSecrets(SECRET_SLOT(id));
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+  await secretsStore.clearSecrets(feedSecretSlot(id));
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(id)), {});
 
   // Every read of THIS feed's slot waits on one shared gate, released only
   // once BOTH callers' reads are pending on it — so both resolve together,
@@ -2889,7 +2876,7 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
   let readsPending = 0;
   (secretsStore as unknown as { getSecrets: typeof secretsStore.getSecrets }).getSecrets = async (slot: string) => {
     const result = await realGetSecrets(slot);
-    if (slot === SECRET_SLOT(id)) {
+    if (slot === feedSecretSlot(id)) {
       readsPending++;
       await gatePromise;
     }
@@ -2908,7 +2895,7 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
     assert.ok(a && b);
     assert.equal(a!.password, b!.password, "expected one password everywhere, not two callers racing two mints");
     assert.equal(
-      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      (await secretsStore.getSecrets(feedSecretSlot(id))).password,
       a!.password,
       "expected the shared mint to actually be the one stored, not overwritten by a second write",
     );
@@ -3124,7 +3111,7 @@ test("newPushPassword logs one summary line per rotation, without the password, 
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   try {
-    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+    const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
     lines.length = 0;
     await videoService.newPushPassword(id);
     const summary = lines.find((l) => l.startsWith("[video] Summary line push: new publish password"));
@@ -3144,10 +3131,10 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   });
   assert.ok(madePull.ok);
   const pullId = (madePull as { feed: { id: string } }).feed.id;
-  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(pullId))).password, "pull-secret");
+  assert.equal((await secretsStore.getSecrets(feedSecretSlot(pullId))).password, "pull-secret");
 
   await videoService.updateFeed(pullId, { source: { kind: "external", url: "http://192.0.2.100/x/whep" } });
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId)), {}, "pull -> external must clear the slot");
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(pullId)), {}, "pull -> external must clear the slot");
   await videoService.removeFeed(pullId);
 
   const madePull2 = await videoService.addFeed({
@@ -3158,7 +3145,7 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   assert.ok(madePull2.ok);
   const pullId2 = (madePull2 as { feed: { id: string } }).feed.id;
   await videoService.updateFeed(pullId2, { source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" } });
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId2)), {}, "pull -> embed must clear the slot");
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(pullId2)), {}, "pull -> embed must clear the slot");
   await videoService.removeFeed(pullId2);
 
   const madePull3 = await videoService.addFeed({
@@ -3169,7 +3156,7 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   assert.ok(madePull3.ok);
   const pullId3 = (madePull3 as { feed: { id: string } }).feed.id;
   await videoService.updateFeed(pullId3, { source: { kind: "push", protocol: "srt" } });
-  const afterPushSecret = (await secretsStore.getSecrets(SECRET_SLOT(pullId3))).password;
+  const afterPushSecret = (await secretsStore.getSecrets(feedSecretSlot(pullId3))).password;
   assert.ok(afterPushSecret, "expected pull -> push to mint a push password");
   assert.notEqual(afterPushSecret, "pull-secret-3", "expected the OLD pull password overwritten, not reused as the push password");
   await videoService.removeFeed(pullId3);
@@ -3244,11 +3231,11 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
   const calls: string[] = [];
   videoService.setPortsChangedListener(() => calls.push("changed"));
   try {
-    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 });
+    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 });
     assert.equal(bad.ok, false, "a port below 1024 must be refused");
     assert.equal(calls.length, 0, "the hook fired on a body that never saved anything");
 
-    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997 });
+    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997, rtsp: 38554 });
     assert.ok(ok.ok);
     assert.equal(calls.length, 1, "a valid ports save never fired the hook");
   } finally {
@@ -3259,7 +3246,7 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
 });
 
 test("saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
-  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997, rtsp: 48554 };
   const calls: string[] = [];
   try {
     const setup = await videoService.setPorts(CHANGED);

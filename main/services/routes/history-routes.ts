@@ -33,8 +33,6 @@ import { historyMilestonesStore } from "../history-milestones-store.js";
 import { sampleArchive } from "../archive/sample-archive.js";
 import { readBaptismRows } from "../archive/rebuild-baptism.js";
 import { baptismLaneSpans, type BaptismSpan } from "../archive/baptism-lane.js";
-import { rolledFiles } from "../archive/archive-rows.js";
-import { serviceDirPath } from "../archive/archive-paths.js";
 
 /**
  * Every service type id that has a SERVICE the Trends chart draws, for
@@ -79,22 +77,14 @@ async function recordedServiceTypeIds(): Promise<string[]> {
  * debounce and a service opened seconds ago is not in the store yet.
  *
  * `[]` when the service has no baptism archive. An archive that exists and
- * cannot be read is a failure, not an empty lane — readArchiveRows answers null
- * for both, so the files are looked for before believing it.
+ * cannot be read is a failure, not an empty lane: readArchiveRows throws for it.
  */
 async function baptismLaneFor(serviceKey: string): Promise<BaptismSpan[]> {
   await sampleArchive.flush();
   const record = await serviceTimelineRecorder.getRecord(serviceKey);
   if (!record) return [];
   const rows = await readBaptismRows(serviceKey, record.serviceDate);
-  if (rows === null) {
-    const present = await rolledFiles(serviceDirPath(serviceKey, record.serviceDate), "baptism");
-    if (present.length > 0) {
-      throw new Error(`${present.length} baptism archive file(s) present for this service, and none could be read`);
-    }
-    return [];
-  }
-  return baptismLaneSpans(rows, serviceKey);
+  return rows === null ? [] : baptismLaneSpans(rows, serviceKey);
 }
 
 /**

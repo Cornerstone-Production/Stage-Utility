@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- The public ServiceCue viewer, served by publish/servicecue/ (see
+     vite.servicecue.config.ts). `data-servicecue-public` makes the shared code behave
+     as the public page (renderer/lib/public-mode.ts), and is on no other document.
+     No inline script: the Worker's content security policy allows none. -->
+<html lang="en" data-servicecue-public>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ServiceCue" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e0e" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>ServiceCue</title>
+    <style>
+      :root {
+        --background: #f7f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0e0e0e; /* pure neutral: R=G=B, no cool or purple cast */
+        }
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: var(--background);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./renderer/public/servicecue-public.tsx"></script>
+  </body>
+</html>

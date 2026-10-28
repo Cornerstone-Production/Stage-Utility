@@ -12,6 +12,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { FakeSupervisor } from "./fixtures/fake-supervisor.js";
 
 process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "video-test-branch-"));
 
@@ -31,20 +32,8 @@ function seed(): void {
 }
 
 
-class FakeSupervisor {
-  ver: string | null = "v1.21.1";
-  status(): { state: "running"; since: number } {
-    return { state: "running", since: Date.now() };
-  }
-  version(): string | null {
-    return this.ver;
-  }
-  on(): this {
-    return this;
-  }
-  off(): this {
-    return this;
-  }
+class VersionedSupervisor extends FakeSupervisor {
+  override ver: string | null = "v1.21.1";
 }
 
 beforeEach(() => {
@@ -64,7 +53,7 @@ test("video test: off answers not running, never the generic fallback", async ()
 });
 
 test("video test: running answers ok with the version", async () => {
-  videoService.attachRelay(fakeRelay(), new FakeSupervisor() as unknown as RelaySupervisorLike, DEFAULT_VIDEO_PORTS);
+  videoService.attachRelay(fakeRelay(), new VersionedSupervisor() as unknown as RelaySupervisorLike, DEFAULT_VIDEO_PORTS, { on: false, why: null });
   const r = await integrationManager.test("video");
   assert.equal(r.ok, true);
   assert.equal(r.message, "MediaMTX v1.21.1");
@@ -119,7 +108,7 @@ test("video test: a failure inside test() unrelated to the relay never overwrite
       ),
     );
 
-    videoService.attachRelay(fakeRelay(), new FakeSupervisor() as unknown as RelaySupervisorLike, DEFAULT_VIDEO_PORTS);
+    videoService.attachRelay(fakeRelay(), new VersionedSupervisor() as unknown as RelaySupervisorLike, DEFAULT_VIDEO_PORTS, { on: false, why: null });
     await (videoService as unknown as { publish: () => Promise<void> }).publish();
     assert.equal(states.get("video")?.connection, "connected", "the relay's real state must reach the row before the failure");
 

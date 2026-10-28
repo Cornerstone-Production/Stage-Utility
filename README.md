@@ -37,6 +37,7 @@ the operator app and a phone remote from one port.
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
 | [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) | two operator surfaces on the plan |
+| [ServiceCue on the web](docs/ops/servicecue-on-the-web.md) | a public address for ServiceCue on a free Cloudflare Worker, with no login |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
 | [Automation](docs/automation.md) | rules that fire on live events |
 | [Data archive](docs/data-archive.md) | raw sample retention, export and import |
@@ -46,6 +47,7 @@ the operator app and a phone remote from one port.
 | [Updates and logs](docs/ops/updates-and-logs.md) | the in-app updater, and the log page |
 | [Releases and distribution](docs/ops/distribution.md) | how versions are cut, and how a server gets one |
 | [API reference](docs/reference/api.md) | the HTTP surface |
+| [ServiceCue publishing protocol](docs/reference/servicecue-publishing.md) | what a server sends to the public ServiceCue Worker, and what it answers |
 | [Code scanning](docs/reference/code-scanning.md) | how credentialed requests and cached downloads are kept to their own origin |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |

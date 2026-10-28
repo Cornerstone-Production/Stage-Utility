@@ -49,6 +49,8 @@ import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
 const RECONNECT_MS = 4000;
+/** Cap for one raw frame under `PRODCOM_DEBUG=1`; scrub()'s default 200 would cut a frame short. */
+const RAW_FRAME_LOG_MAX = 10_000;
 /**
  * How often TCP probes the peer once the SSE fallback goes quiet.
  *
@@ -995,7 +997,7 @@ export class ProdComService extends ConnectionLifecycle {
 
   override start(): void {
     if (this.running || !this.configured) return;
-    console.log(`[prodcom] connecting ${this.host}:${this.port}`);
+    console.log(`[prodcom] connecting ${scrub(this.host)}:${scrub(this.port)}`);
     super.start();
   }
 
@@ -1076,7 +1078,7 @@ export class ProdComService extends ConnectionLifecycle {
   private armSseIdleWatchdog(): void {
     this.clearSseIdleWatchdog();
     this.sseIdleTimer = setTimeout(() => {
-      console.warn(`[prodcom] no transcript data for ${this.streamIdleMs / 1000}s — treating the stream as dead`);
+      console.warn(`[prodcom] no transcript data for ${scrub(this.streamIdleMs / 1000)}s — treating the stream as dead`);
       this.report("error", "Transcript stream went silent — reconnecting");
       this.dropFallbackStream();
       this.scheduleReconnect();
@@ -1105,7 +1107,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.clearWsHeartbeatWatchdog();
     this.wsHeartbeatTimer = setTimeout(() => {
       console.warn(
-        `[prodcom] no websocket frame for ${Math.round(this.heartbeatTimeoutMs / 1000)}s — ` +
+        `[prodcom] no websocket frame for ${scrub(Math.round(this.heartbeatTimeoutMs / 1000))}s — ` +
           `heartbeat missed, treating the connection as dead`,
       );
       const wasPromoted = this.onWebSocket;
@@ -1279,7 +1281,7 @@ export class ProdComService extends ConnectionLifecycle {
       this.wsSilentBox = false;
       console.log(
         `[prodcom] the websocket is carrying the transcript again ` +
-          `(${this.wsSubscribeFilterSuspect ? "no subscribe frame sent" : "subscribed to the transcript stream"}) — ` +
+          `(${scrub(this.wsSubscribeFilterSuspect ? "no subscribe frame sent" : "subscribed to the transcript stream")}) — ` +
           `captions stay on it`,
       );
     } else if (this.wsSubscribeFilterSuspect) {
@@ -1456,22 +1458,22 @@ export class ProdComService extends ConnectionLifecycle {
       const out = this.wsOutages.fail("silence-check", page.error, this.now());
       if (out.log) {
         console.warn(
-          `[prodcom] could not check whether the ${promoted ? "promoted " : ""}websocket is missing transcript ` +
-            `lines (${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+          `[prodcom] could not check whether the ${scrub(promoted ? "promoted " : "")}websocket is missing transcript ` +
+            `lines (${scrub(page.error)}) — leaving it alone and asking again in ${scrub(quiet)}${scrub(out.note)}`,
         );
       }
       this.armSilenceCheck();
       return null;
     }
     const askable = this.wsOutages.ok("silence-check", this.now());
-    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
+    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${scrub(askable.note)}`);
 
     const missed = baseline === null ? [] : this.missedSpokenRows(page.rows, baseline);
     // Move past whatever this check just read, whether or not it found
     // anything — a check must never re-judge a row it has already seen.
     this.adoptBaseline(page.rows);
     if (baseline === null) {
-      console.debug(`[prodcom] the ${promoted ? "promoted " : ""}websocket's silence check read its baseline — judging from the next window`);
+      console.debug(`[prodcom] the ${scrub(promoted ? "promoted " : "")}websocket's silence check read its baseline — judging from the next window`);
     }
     return missed;
   }
@@ -1519,9 +1521,9 @@ export class ProdComService extends ConnectionLifecycle {
     // the question was answered the first time.
     if (this.wsSilentBox) {
       console.warn(
-        `[prodcom] the websocket has carried no transcript in ${quiet} and this box has failed ` +
+        `[prodcom] the websocket has carried no transcript in ${scrub(quiet)} and this box has failed ` +
           `that test before — captions stay on the SSE fallback, and the next re-test will connect ` +
-          `${this.alternateSubscribeMode()}`,
+          `${scrub(this.alternateSubscribeMode())}`,
       );
       this.giveUpOnUnprovenWebSocket(SILENT_SOCKET_REASON);
       return;
@@ -1561,7 +1563,7 @@ export class ProdComService extends ConnectionLifecycle {
       // Nothing was said on the newest page. debug, not log: a quiet room is
       // not an event, and this repeats for as long as the room stays quiet.
       if (baseline !== null) {
-        console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
+        console.debug(`[prodcom] websocket quiet for ${scrub(quiet)}, and ProdCom has no spoken lines since it opened`);
       }
       this.armSilenceCheck();
       return;
@@ -1574,8 +1576,8 @@ export class ProdComService extends ConnectionLifecycle {
       // right the socket keeps working for every site running this build.
       this.wsSubscribeFilterSuspect = true;
       console.warn(
-        `[prodcom] websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
-          `${missed.length} spoken line(s) since it opened — reopening it without the subscribe frame`,
+        `[prodcom] websocket delivered no transcript in ${scrub(quiet)} while ProdCom has at least ` +
+          `${scrub(missed.length)} spoken line(s) since it opened — reopening it without the subscribe frame`,
       );
       this.reopenWebSocketUnsubscribed(host, port);
       return;
@@ -1584,10 +1586,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsSilentBox = true;
     console.warn(
       `[prodcom] websocket delivered no transcript with or without the subscribe frame, while ProdCom has ` +
-        `at least ${missed.length} spoken line(s) since it opened — captions stay on the SSE fallback, ` +
-        `the websocket is re-tested every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
-        `${everyMs(this.wsRetryIntervalMs)}, and every ${WS_SILENT_RETRY_EVERY} reconnect(s) ` +
-        `instead of every ${WS_RETRY_EVERY}, starting ${this.alternateSubscribeMode()}`,
+        `at least ${scrub(missed.length)} spoken line(s) since it opened — captions stay on the SSE fallback, ` +
+        `the websocket is re-tested every ${scrub(everyMs(this.wsSilentRetryIntervalMs))} instead of every ` +
+        `${scrub(everyMs(this.wsRetryIntervalMs))}, and every ${scrub(WS_SILENT_RETRY_EVERY)} reconnect(s) ` +
+        `instead of every ${scrub(WS_RETRY_EVERY)}, starting ${scrub(this.alternateSubscribeMode())}`,
     );
     this.giveUpOnUnprovenWebSocket(SILENT_SOCKET_REASON);
   }
@@ -1655,7 +1657,7 @@ export class ProdComService extends ConnectionLifecycle {
     if (missed.length === 0) {
       // Quiet room, not a silent socket.
       if (baseline !== null) {
-        console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
+        console.debug(`[prodcom] promoted websocket quiet for ${scrub(quiet)}, and ProdCom has no spoken lines since`);
       }
       this.armSilenceCheck();
       return;
@@ -1667,10 +1669,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsSilentBox = true;
     this.wsLastGiveUpWasSilence = true;
     console.warn(
-      `[prodcom] the promoted websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
-        `${missed.length} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
-        `the gap, and re-testing the websocket every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
-        `${everyMs(this.wsRetryIntervalMs)} from here`,
+      `[prodcom] the promoted websocket delivered no transcript in ${scrub(quiet)} while ProdCom has at least ` +
+        `${scrub(missed.length)} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
+        `the gap, and re-testing the websocket every ${scrub(everyMs(this.wsSilentRetryIntervalMs))} instead of every ` +
+        `${scrub(everyMs(this.wsRetryIntervalMs))} from here`,
     );
     this.closeSocket();
     this.demoteFromPromoted("stopped delivering while promoted — ProdCom shows spoken lines it never carried");
@@ -1742,7 +1744,7 @@ export class ProdComService extends ConnectionLifecycle {
     const before = this.finals.length;
     this.finals = this.finals.filter((e) => this.finalTimestamp(e) >= cutoff);
     const dropped = before - this.finals.length;
-    if (dropped > 0) console.log(`[prodcom] dropped ${dropped} line(s) older than 4h`);
+    if (dropped > 0) console.log(`[prodcom] dropped ${scrub(dropped)} line(s) older than 4h`);
     this.syncPartialSweep();
     return dropped > 0;
   }
@@ -1788,9 +1790,9 @@ export class ProdComService extends ConnectionLifecycle {
       entry.lastLoggedAt = now;
       const lastUpdateAgo = Math.round((now - entry.seenAt) / 1000);
       console.log(
-        `[prodcom] partial on channel ${scrub(ch)} in progress for ${Math.round(age / 1000)}s — ` +
-          `${entry.resendsUnchanged} unchanged re-sends, ${entry.textChanges} text changes, ` +
-          `last update ${lastUpdateAgo}s ago, ${entry.line.text.length} chars`,
+        `[prodcom] partial on channel ${scrub(ch)} in progress for ${scrub(Math.round(age / 1000))}s — ` +
+          `${scrub(entry.resendsUnchanged)} unchanged re-sends, ${scrub(entry.textChanges)} text changes, ` +
+          `last update ${scrub(lastUpdateAgo)}s ago, ${scrub(entry.line.text.length)} chars`,
       );
     }
   }
@@ -1816,8 +1818,8 @@ export class ProdComService extends ConnectionLifecycle {
     for (const [ch, entry] of this.partials) {
       const age = Math.round((now - entry.firstSeenAt) / 1000);
       console.log(
-        `[prodcom] transcript cleared by operator: ${this.finals.length} finals, ${this.partials.size} partials; ` +
-          `partial ch=${scrub(ch)} age=${age}s unchanged-resends=${entry.resendsUnchanged} text-changes=${entry.textChanges}`,
+        `[prodcom] transcript cleared by operator: ${scrub(this.finals.length)} finals, ${scrub(this.partials.size)} partials; ` +
+          `partial ch=${scrub(ch)} age=${scrub(age)}s unchanged-resends=${scrub(entry.resendsUnchanged)} text-changes=${scrub(entry.textChanges)}`,
       );
     }
     for (const e of this.finals) this.clearedIds.add(e.line.id);
@@ -1919,11 +1921,8 @@ export class ProdComService extends ConnectionLifecycle {
   setRedactSensitive(on: boolean): void {
     if (this.redactSensitive === on) return;
     this.redactSensitive = on;
-    console.log(
-      on
-        ? "[prodcom] sensitive keywords will be hidden on displays"
-        : "[prodcom] sensitive-keyword redaction turned OFF — displays show the transcript in full",
-    );
+    if (on) console.log("[prodcom] sensitive keywords will be hidden on displays");
+    else console.log("[prodcom] sensitive-keyword redaction turned OFF — displays show the transcript in full");
     this.pushTranscript();
   }
 
@@ -2432,9 +2431,9 @@ export class ProdComService extends ConnectionLifecycle {
         `[prodcom] websocket unavailable (${scrub(reason)}) — ` +
           (stillOnFallback
             ? this.sseUp
-              ? `captions stay on the transcript SSE fallback${out.note}`
-              : `captions have no live transport until SSE reconnects${out.note}`
-            : `falling back to the transcript SSE stream${out.note}`) +
+              ? `captions stay on the transcript SSE fallback${scrub(out.note)}`
+              : `captions have no live transport until SSE reconnects${scrub(out.note)}`
+            : `falling back to the transcript SSE stream${scrub(out.note)}`) +
           (detail ? ` — the box said: ${scrub(detail)}` : ""),
       );
     }
@@ -2462,7 +2461,7 @@ export class ProdComService extends ConnectionLifecycle {
     // followed by a fallback line, every thirty minutes, indefinitely.
     if (this.wsSilentBox) return;
     const back = this.wsOutages.ok("websocket", this.now());
-    if (back.log) console.log(`[prodcom] websocket is back${back.note}`);
+    if (back.log) console.log(`[prodcom] websocket is back${scrub(back.note)}`);
   }
 
   /**
@@ -2477,7 +2476,7 @@ export class ProdComService extends ConnectionLifecycle {
     // not pin (see WS_ENTRY_CONTAINERS). `PRODCOM_DEBUG=1` logs every frame
     // verbatim, which is how somebody on site during a service can capture it
     // and replace the search with the single real key.
-    if (process.env.PRODCOM_DEBUG) console.log(`[prodcom] RAW ws ${raw}`);
+    if (process.env.PRODCOM_DEBUG) console.log(`[prodcom] RAW ws ${scrub(raw, RAW_FRAME_LOG_MAX)}`);
 
     const frame = asRecord(safeJson(raw));
     if (!frame) {
@@ -2496,12 +2495,12 @@ export class ProdComService extends ConnectionLifecycle {
     if (type === "pong") return;
     if (type === "welcome") {
       const streams = Array.isArray(frame["streams"]) ? (frame["streams"] as unknown[]).filter((s) => typeof s === "string") : [];
-      console.log(`[prodcom] websocket open — streams offered: ${streams.length ? streams.join(", ") : "none listed"}`);
+      console.log(`[prodcom] websocket open — streams offered: ${scrub(streams.length ? streams.join(", ") : "none listed")}`);
       return;
     }
     if (type === "error") {
       const message = str(frame, "message") ?? "no detail";
-      console.warn(`[prodcom] websocket reported an error: ${message}`);
+      console.warn(`[prodcom] websocket reported an error: ${scrub(message)}`);
       return;
     }
 
@@ -2514,8 +2513,8 @@ export class ProdComService extends ConnectionLifecycle {
       this.wsEnvelopeLogged = true;
       console.log(
         `[prodcom] websocket transcript frames carry the entry ` +
-          `${found.at === null ? "at the top level" : `under "${found.at}"`}` +
-          `${type ? ` (type=${type})` : ""}`,
+          `${found.at === null ? "at the top level" : `under "${scrub(found.at)}"`}` +
+          `${type ? ` (type=${scrub(type)})` : ""}`,
       );
     }
     // Here rather than in acceptEntry(): what is being proven is that the SOCKET
@@ -2540,7 +2539,7 @@ export class ProdComService extends ConnectionLifecycle {
   private logUnknownWsFrame(detail: string): void {
     if (this.wsUnknownFrameLogged) return;
     this.wsUnknownFrameLogged = true;
-    console.warn(`[prodcom] websocket frame is not a transcript entry, ignoring it (${detail})`);
+    console.warn(`[prodcom] websocket frame is not a transcript entry, ignoring it (${scrub(detail)})`);
   }
 
   // ── SSE fallback transport ────────────────────────────────────────────────
@@ -2592,7 +2591,7 @@ export class ProdComService extends ConnectionLifecycle {
         // data.
         const reader = createSseReader({
           onOverflow: () =>
-            console.warn(`[prodcom] transcript buffer exceeded ${SSE_MAX_BUFFER} bytes — resyncing`),
+            console.warn(`[prodcom] transcript buffer exceeded ${scrub(SSE_MAX_BUFFER)} bytes — resyncing`),
         });
         res.on("data", (chunk: string) => {
           if (this.req !== req) return;
@@ -2657,7 +2656,7 @@ export class ProdComService extends ConnectionLifecycle {
       // outage that is already reported once by noteWebSocketDown, with the
       // attempt count on its 15-minute reminder — an operator reading /log
       // wants the outage, not each probe inside it.
-      console.debug(`[prodcom] retrying the websocket after ${this.sseReconnects} SSE reconnect(s)`);
+      console.debug(`[prodcom] retrying the websocket after ${scrub(this.sseReconnects)} SSE reconnect(s)`);
       this.useWebSocket = true;
     }
   }
@@ -2673,13 +2672,13 @@ export class ProdComService extends ConnectionLifecycle {
   // (event:/id: names ignored — transcript framing is carried in the payload)
   private handleSseEvent({ data: payload }: SseEvent): void {
     if (!payload || payload === "[DONE]") return;
-    if (process.env.PRODCOM_DEBUG) console.log(`[prodcom] RAW sse ${payload}`);
+    if (process.env.PRODCOM_DEBUG) console.log(`[prodcom] RAW sse ${scrub(payload, RAW_FRAME_LOG_MAX)}`);
     const entry = asRecord(safeJson(payload));
     if (!entry) {
       // Every SSE event on this endpoint is "a JSON object representing a new,
       // updated, or completed transcript entry" per the spec. Anything else is
       // not a caption and must not reach a stage wall as one.
-      console.warn(`[prodcom] transcript stream sent a frame that is not JSON, ignoring it (${payload.length} bytes)`);
+      console.warn(`[prodcom] transcript stream sent a frame that is not JSON, ignoring it (${scrub(payload.length)} bytes)`);
       return;
     }
     this.acceptEntry(entry);
@@ -2711,7 +2710,7 @@ export class ProdComService extends ConnectionLifecycle {
     const seen = (this.skippedSources.get(source) ?? 0) + 1;
     this.skippedSources.set(source, seen);
     if (seen === 1) {
-      console.log(`[prodcom] not captioning "${source}" entries — they are not spoken audio`);
+      console.log(`[prodcom] not captioning "${scrub(source)}" entries — they are not spoken audio`);
     }
     return false;
   }
@@ -2774,7 +2773,7 @@ export class ProdComService extends ConnectionLifecycle {
         this.orphanFinalLogged.add(ch);
         console.log(
           `[prodcom] final on channel ${scrub(ch)} with no partial in flight; ` +
-            `${this.partials.size} partial(s) live on other channels`,
+            `${scrub(this.partials.size)} partial(s) live on other channels`,
         );
       }
       this.partials.delete(ch);
@@ -2938,11 +2937,11 @@ export class ProdComService extends ConnectionLifecycle {
     const result = await this.backfill(host, port);
     if (result.error) {
       console.warn(
-        `[prodcom] backfill failed after ${result.pages} page(s) (${result.error}) — ` +
-          `${result.added} line(s) landed; the live stream is unaffected`,
+        `[prodcom] backfill failed after ${scrub(result.pages)} page(s) (${scrub(result.error)}) — ` +
+          `${scrub(result.added)} line(s) landed; the live stream is unaffected`,
       );
     } else if (result.added > 0 || result.pages > 1) {
-      console.log(`[prodcom] backfill: ${result.added} line(s) over ${result.pages} page(s)`);
+      console.log(`[prodcom] backfill: ${scrub(result.added)} line(s) over ${scrub(result.pages)} page(s)`);
     }
   }
 
@@ -3098,8 +3097,8 @@ export class ProdComService extends ConnectionLifecycle {
    *  say the same thing. */
   private logChannelFailure(error: string): void {
     console.warn(
-      `[prodcom] channel list unavailable (${error}) — ` +
-        `captions fall back to per-channel colours chosen by the display`,
+      `[prodcom] channel list unavailable (${scrub(error)}) — ` +
+        `captions fall back to per-channel colors chosen by the display`,
     );
   }
 
@@ -3199,7 +3198,7 @@ export class ProdComService extends ConnectionLifecycle {
     if (summary !== this.lastKeywordSummary) {
       this.lastKeywordSummary = summary;
       console.log(
-        `[prodcom] keywords loaded: ${summary} — ` +
+        `[prodcom] keywords loaded: ${scrub(summary)} — ` +
           (this.redactSensitive
             ? "sensitive matches are hidden on displays"
             : "redaction is OFF, so they are shown in full"),
@@ -3222,9 +3221,9 @@ export class ProdComService extends ConnectionLifecycle {
   private logKeywordFailure(error: string): void {
     const held = this.globalSensitive.length + [...this.channelSensitive.values()].reduce((n, p) => n + p.length, 0);
     console.warn(
-      `[prodcom] keyword list unavailable (${error}) — ` +
+      `[prodcom] keyword list unavailable (${scrub(error)}) — ` +
         (held > 0
-          ? `still hiding ${held} sensitive keyword(s) from the last successful read`
+          ? `still hiding ${scrub(held)} sensitive keyword(s) from the last successful read`
           : "no sensitive keywords are loaded, so nothing is being hidden on displays"),
     );
   }
@@ -3291,8 +3290,8 @@ export class ProdComService extends ConnectionLifecycle {
       if (data.length === 0 || meta?.["hasMore"] !== true) break;
       if (pages === BACKFILL_MAX_PAGES) {
         console.warn(
-          `[prodcom] backfill stopped at the ${BACKFILL_MAX_PAGES}-page cap — ` +
-            `ProdCom reports more history since ${since} than ${BACKFILL_MAX_PAGES * BACKFILL_PAGE_SIZE} lines`,
+          `[prodcom] backfill stopped at the ${scrub(BACKFILL_MAX_PAGES)}-page cap — ` +
+            `ProdCom reports more history since ${scrub(since)} than ${scrub(BACKFILL_MAX_PAGES * BACKFILL_PAGE_SIZE)} lines`,
         );
       }
     }
@@ -3301,7 +3300,7 @@ export class ProdComService extends ConnectionLifecycle {
       // A reconfigure or a stop() landed while these pages were in flight —
       // this is the OLD box's history, and applying it would put its lines on
       // a buffer that now belongs to a different connection.
-      console.debug(`[prodcom] dropped a backfill (${rows.length} row(s)) that arrived after this connection was replaced`);
+      console.debug(`[prodcom] dropped a backfill (${scrub(rows.length)} row(s)) that arrived after this connection was replaced`);
       return { added: 0, skipped: 0, pages, error };
     }
     const applied = this.applyBackfillRows(rows);
@@ -3364,7 +3363,7 @@ export class ProdComService extends ConnectionLifecycle {
       }
     }
     if (from > 0) {
-      console.log(`[prodcom] backfill skipped ${from} line(s) from before the operator cleared the transcript`);
+      console.log(`[prodcom] backfill skipped ${scrub(from)} line(s) from before the operator cleared the transcript`);
     }
     for (const row of rows.slice(from)) {
       const entry = asRecord(row);
@@ -3382,7 +3381,7 @@ export class ProdComService extends ConnectionLifecycle {
       added++;
     }
     if (skipped > 0) {
-      console.log(`[prodcom] backfill skipped ${skipped} line(s) older than 4h`);
+      console.log(`[prodcom] backfill skipped ${scrub(skipped)} line(s) older than 4h`);
     }
     if (added > 0) this.pushTranscript();
     return { added, skipped };

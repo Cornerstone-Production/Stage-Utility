@@ -18,6 +18,7 @@ import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { WEEKEND_ATTENDANCE } from "../../test-fixtures/weekend-attendance.js";
 
 const teardown = installRenderDom();
 
@@ -32,29 +33,6 @@ afterEach(() => cleanup());
 // The card's "Open History" is a router Link, which needs a router in context.
 const router = createRouter({ routeTree: createRootRoute(), history: createMemoryHistory({ initialEntries: ["/"] }) });
 await router.load();
-
-const WEEKENDS = ["2026-08-16", "2026-08-23", "2026-08-30"];
-const ATTENDANCE = WEEKENDS.map((day, i) => ({
-  serviceKey: `st-1:plan-${day}:${day}`,
-  serviceTypeId: "st-1",
-  serviceTypeName: "Weekend",
-  planId: `plan-${day}`,
-  planTitle: "Sample plan",
-  seriesTitle: null,
-  serviceDate: day,
-  serviceTimeId: null,
-  serviceTimeStartsAt: `${day}T15:00:00.000Z`,
-  startedAt: `${day}T15:00:00.000Z`,
-  endedAt: `${day}T16:30:00.000Z`,
-  samples: [],
-  attendanceBaseline: 0,
-  totalAttendance: 200 + i * 10,
-  peakAttendance: 200 + i * 10,
-  peakOccupancy: 200 + i * 10,
-  minOccupancy: 0,
-  lastAttendance: 200 + i * 10,
-  lastOccupancy: 200 + i * 10,
-})) as ServiceAttendance[];
 
 type Read = "timeline" | "attendance" | "spl";
 
@@ -121,7 +99,7 @@ for (const [read, words] of [["timeline", "the service timings"], ["attendance",
 
 test("a sound summary that loads on a second try takes its note away", async () => {
   const failing: Read[] = ["spl"];
-  const f = stubFetch(failing, ATTENDANCE);
+  const f = stubFetch(failing, WEEKEND_ATTENDANCE);
   try {
     const view = await mount(true);
     await eventually(() => assert.match(alerts(), /Couldn't load the sound summary/i));
@@ -138,7 +116,7 @@ test("a sound summary that loads on a second try takes its note away", async () 
 });
 
 test("a sound summary that could not be read is named on a card that has figures", async () => {
-  const f = stubFetch(["spl"], ATTENDANCE);
+  const f = stubFetch(["spl"], WEEKEND_ATTENDANCE);
   try {
     await mount();
     await eventually(() => assert.equal(!!screen.queryByText("Peak"), true, "the attendance figures still draw"));
@@ -161,7 +139,7 @@ test("control: nothing recorded, and nothing failed, still renders no card at al
 });
 
 test("control: every read loads, the card draws its figures with no alert", async () => {
-  const f = stubFetch([], ATTENDANCE);
+  const f = stubFetch([], WEEKEND_ATTENDANCE);
   try {
     await mount();
     await eventually(() => assert.equal(!!screen.queryByText("Peak"), true));

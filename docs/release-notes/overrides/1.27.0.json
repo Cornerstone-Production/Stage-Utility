@@ -1,0 +1,37 @@
+[
+  {
+    "commit": "b2522ab4",
+    "betaOnly": true,
+    "reason": "listen-measure is new in this cycle; the trailer carries a parenthetical after true, which the trailer pattern does not read."
+  },
+  {
+    "commit": "c876ecee",
+    "betaOnly": true,
+    "reason": "The -listen path is new in this cycle; the trailer carries a parenthetical after true, which the trailer pattern does not read."
+  },
+  {
+    "commit": "6c3420e2",
+    "betaOnly": true,
+    "reason": "Make it a cue is new in this cycle (#720); v1.26.0 has no make-it-a-cue.ts."
+  },
+  {
+    "commit": "44d78dd5",
+    "betaOnly": true,
+    "reason": "Make it a cue is new in this cycle (#720); v1.26.0 has no make-it-a-cue.ts."
+  },
+  {
+    "commit": "dd6296e6",
+    "betaOnly": true,
+    "reason": "Make it a cue is new in this cycle (#720); v1.26.0 has no make-it-a-cue.ts."
+  },
+  {
+    "commit": "699c5287",
+    "betaOnly": true,
+    "reason": "Duplicate cue names come from running Make it a cue twice, which is new in this cycle (#720)."
+  },
+  {
+    "commit": "a926b1a8",
+    "betaOnly": true,
+    "reason": "Corrects the toast dedupe in 72ad7e9d from the same cycle; v1.26.0 never refreshed a repeated toast."
+  }
+]

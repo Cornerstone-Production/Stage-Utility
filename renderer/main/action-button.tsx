@@ -14,6 +14,7 @@ import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { validateParams } from "@main/services/automation-param-validation";
 import { toast } from "../components/ui";
+import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { useAutomationActions } from "./use-automation-actions";
 
 export function ActionButton({
@@ -79,30 +80,24 @@ export function ActionButton({
         aria-label={label}
         style={{
           ...ts,
-          width: "100%",
-          height: "100%",
-          display: "flex",
+          ...BUTTON_BASE_STYLE,
           flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
           gap: "0.15em",
-          border: "none",
-          borderRadius: "inherit",
           cursor: interactive ? "pointer" : "default",
           pointerEvents: interactive ? "auto" : "none",
           opacity: unknown || registryError ? 0.6 : 1,
         }}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: "0.4em" }}>
+        <ButtonLabel>
           {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : label}
-        </span>
+        </ButtonLabel>
         {/* Said plainly rather than left to a press: pressing an unknown action
             already gets a toast off the server's own "unknown action" refusal
             (action-invoke.ts), but that only ever shows once the operator has
             already tried it. A layout built against a renamed or removed
             action must not render identically to a working one until then. */}
         {unknown && (
-          <span style={{ fontSize: "0.5em", opacity: 0.85, color: "var(--red-9)", lineHeight: 1.1 }}>
+          <span style={{ flexShrink: 0, fontSize: "0.5em", opacity: 0.85, color: "var(--red-9)", lineHeight: 1.1 }}>
             unknown action
           </span>
         )}
@@ -111,7 +106,7 @@ export function ActionButton({
             valid — showing "unknown action" here would be a claim this button
             has no basis for. */}
         {registryError && (
-          <span style={{ fontSize: "0.5em", opacity: 0.85, color: "var(--amber-9)", lineHeight: 1.1 }}>
+          <span style={{ flexShrink: 0, fontSize: "0.5em", opacity: 0.85, color: "var(--amber-9)", lineHeight: 1.1 }}>
             action list could not be loaded
           </span>
         )}

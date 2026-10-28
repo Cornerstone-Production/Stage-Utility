@@ -10,11 +10,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
+import { resolveAudioFields } from "@main/services/video/audio-input";
 import {
+  AUDIO_CONVERSIONS,
   EMBED_PLAYERS,
   PUSH_PROTOCOL_LABEL,
   PUSH_PROTOCOLS,
+  type AudioConversion,
   type EmbedPlayer,
+  type FeedAudioStatus,
   type KickResult,
   type PushProtocol,
   type VideoFeedView,
@@ -24,6 +28,7 @@ import {
 
 import {
   Button,
+  Callout,
   confirm,
   ErrorNote,
   Input,
@@ -33,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
   StackedField,
+  toast,
 } from "../../components/ui";
 import { Segmented } from "../../editor/inspector-rows";
 import { invoke } from "../../lib/api";
@@ -41,6 +47,7 @@ import { VideoObject } from "../../main/video/video-object";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 import { SIDE_PANE } from "./side-pane";
 import { plural } from "@main/services/plural";
+import { droppedCredentialMessage } from "../../lib/dropped-credentials";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -123,6 +130,34 @@ interface Draft {
   embedPlayer: EmbedPlayer;
   embedRef: string;
   externalUrl: string;
+  audioConversion: AudioConversion;
+  audioSourceUrl: string;
+}
+
+const AUDIO_CONVERSION_LABEL: Record<AudioConversion, string> = {
+  auto: "Auto (convert AAC)",
+  off: "Off",
+  always: "Always",
+};
+
+/** What a feed's audio status says, in a sentence, for the editor's line under
+ *  the setting. */
+export function audioStatusText(a: FeedAudioStatus | undefined): string {
+  if (!a) return "";
+  switch (a.state) {
+    case "none":
+      return "This feed has no audio.";
+    case "unknown":
+      return "Audio is checked once the feed is showing.";
+    case "direct":
+      return "Audio plays as it is: no conversion needed.";
+    case "converted":
+      return "Audio is converted to Opus on this server while someone listens.";
+    case "pass-through":
+      return "Audio comes from the audio source address, copied as it is, while someone listens.";
+    case "unavailable":
+      return `Audio unavailable: ${a.reason.replace(/\.+$/, "")}.`;
+  }
 }
 
 function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]): Draft {
@@ -136,6 +171,7 @@ function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]
     embedPlayer: feed?.source.kind === "embed" ? feed.source.player : "youtube-channel",
     embedRef: feed?.source.kind === "embed" ? feed.source.ref : "",
     externalUrl: feed?.source.kind === "external" ? feed.source.url : "",
+    ...resolveAudioFields(feed ?? {}),
   };
 }
 
@@ -275,6 +311,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       // stored password; leaving the key out entirely is how it is told to
       // leave the existing one alone.
       if (draft.kind === "pull" && pullPasswordTouched) body.password = draft.pullPassword;
+      // Always sent for a feed the relay carries, so clearing the address saves
+      // as "" rather than being read as "unchanged".
+      if (draft.kind === "pull" || draft.kind === "push") {
+        body.audioConversion = draft.audioConversion;
+        body.audioSourceUrl = draft.audioSourceUrl.trim();
+      }
       // Nothing reads as saved until this resolves: onSaved only fires with
       // the server's own view of the feed, never the local draft.
       const result =
@@ -282,6 +324,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           ? await invoke<{ feed: VideoFeedView }>("video:addFeed", body)
           : await invoke<{ feed: VideoFeedView }>("video:updateFeed", { id: feed.id, patch: body });
       onSaved(result.feed);
+      // A password left alone that is gone after the save was cleared by the
+      // server: the address moved to another camera, or off an encrypted
+      // scheme, and a password is never sent where it was not entered for.
+      if (!isNew && feed?.hasPassword && !pullPasswordTouched && result.feed.source.kind === "pull" && !result.feed.hasPassword) {
+        toast.info(droppedCredentialMessage(result.feed.name, ["password"]));
+      }
       setDraft((d) => ({ ...d, pullPassword: "" }));
       setPullPasswordTouched(false);
     } catch (err) {
@@ -350,13 +398,13 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         {/* This preview is the feed editor, never a real kiosk display, so it
             must never refuse a B-frame feed over some wall's own "Use HLS on
             this screen" switch. */}
-        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls />
+        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls listen />
       </div>
 
       {warning && (
-        <p className="rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+        <Callout tone="warn">
           <b>{warning.headline}</b> {warning.body}
-        </p>
+        </Callout>
       )}
 
       <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
@@ -502,6 +550,47 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
             onChange={(e) => setDraft({ ...draft, externalUrl: e.target.value })}
           />
         </StackedField>
+      )}
+
+      {(draft.kind === "pull" || draft.kind === "push") && (
+        <>
+          <StackedField
+            label="Audio conversion"
+            description="Browsers cannot play AAC live. Auto converts it to Opus on this server, only while someone listens, and needs ffmpeg."
+          >
+            <Select value={draft.audioConversion} onValueChange={(v) => setDraft({ ...draft, audioConversion: v as AudioConversion })}>
+              <SelectTrigger aria-label="Audio conversion" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AUDIO_CONVERSIONS.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {AUDIO_CONVERSION_LABEL[c]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </StackedField>
+
+          <StackedField
+            label="Audio source address"
+            description="Optional. An http or https address that already carries this feed's audio as Opus; the server copies it as it is. No username or password."
+          >
+            <Input
+              aria-label="Audio source address"
+              placeholder="http://"
+              className="font-mono text-caption1"
+              value={draft.audioSourceUrl}
+              onChange={(e) => setDraft({ ...draft, audioSourceUrl: e.target.value })}
+            />
+          </StackedField>
+
+          {!isNew && feed && audioStatusText(feed.audio) !== "" && (
+            <Callout data-testid="audio-status" tone={feed.audio?.state === "unavailable" ? "warn" : "neutral"}>
+              {audioStatusText(feed.audio)}
+            </Callout>
+          )}
+        </>
       )}
 
       <div className="flex flex-wrap items-center gap-2">

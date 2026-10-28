@@ -41,7 +41,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
  * are the ones the comparison page was approved at: those are shares of the
  * widget's outer height, padding included.
  */
-function useBoxSize(): [React.RefObject<HTMLDivElement | null>, number, number] {
+export function useBoxSize(): [React.RefObject<HTMLDivElement | null>, number, number] {
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ h: 0, w: 0 });
   useLayoutEffect(() => {
@@ -111,6 +111,19 @@ function useShrinkToWidth(deps: unknown[]): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return { wrapRef, elRef, scale };
+}
+
+/** A horizontal alignment as the flex cross-axis value that sets it. Shared with
+ *  the Countdown only layout, which aligns its number the same way. */
+export function readoutAlignItems(side: LayoutHAlign): "flex-start" | "center" | "flex-end" {
+  switch (side) {
+    case "right":
+      return "flex-end";
+    case "center":
+      return "center";
+    default:
+      return "flex-start";
+  }
 }
 
 /**
@@ -225,6 +238,13 @@ export interface ReadoutProps {
    * discontinuities the fractions themselves reveal — see readout-meter.ts.
    */
   meterKey?: string | null;
+  /**
+   * The rule's own colour where it should differ from the value's ink — a
+   * ProVideoPlayer countdown that has turned amber takes its hairline with it.
+   * Absent, the rule follows the value's ink as it always has. The track
+   * behind it is derived from the same colour, so the two stay one family.
+   */
+  meterColor?: string | null;
   /** The quietest line, under everything: a secondary or qualified answer that
    *  must never compete with the value. First to be dropped in a short box. */
   footer?: ReactNode;
@@ -255,13 +275,14 @@ export function Readout({
   subEnd,
   meter = null,
   meterKey = null,
+  meterColor = null,
   footer = null,
 }: ReadoutProps) {
   const side = align ?? DEFAULT_READOUT_ALIGN;
   // One value drives BOTH the flex cross-axis and text-align. The lines are
   // different widths, so aligning the boxes without aligning the text leaves a
   // centred caption sitting over a left-set value.
-  const items = side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
+  const items = readoutAlignItems(side);
   const [ref, boxH, boxW] = useBoxSize();
   // Lines are dropped rather than clipped when the box cannot hold them — see
   // fitComposition. A caption cut in half is not a caption.
@@ -478,7 +499,7 @@ export function Readout({
             // in the same family whatever ink the object is using.
             background: filled
               ? "rgba(255,255,255,0.25)"
-              : "color-mix(in srgb, var(--readout-value-color, var(--color-fg)) 22%, transparent)",
+              : `color-mix(in srgb, ${meterColor ?? "var(--readout-value-color, var(--color-fg))"} 22%, transparent)`,
             opacity: dim ? 0.45 : 1,
           }}
         >
@@ -489,7 +510,7 @@ export function Readout({
             // forgotten.
             fraction={meter}
             seriesKey={meterKey}
-            fill={filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))"}
+            fill={filled ? "#ffffff" : meterColor ?? "var(--readout-value-color, var(--color-fg))"}
           />
         </span>
       ) : null}

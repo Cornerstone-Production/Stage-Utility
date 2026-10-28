@@ -9,6 +9,8 @@
 //
 // Always near-black. A wall display has no light mode.
 
+import { escapeHtml } from "./html-escape.js";
+
 export interface HoldingScreenInfo {
   id: string | null;
   ip?: string;
@@ -16,32 +18,31 @@ export interface HoldingScreenInfo {
   mac?: string;
   /** Already formatted for reading — "1920 × 1080". */
   screen?: string;
-  reason: "unclaimed" | "no-device";
+  reason: "unclaimed" | "no-device" | "unreadable";
 }
 
-const esc = (s: string): string =>
-  s.replace(/[&<>"']/g, (ch) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string,
-  );
-
 const field = (label: string, value: string | undefined): string =>
-  value ? `<div class="f"><span>${esc(label)}</span><b>${esc(value)}</b></div>` : "";
+  value ? `<div class="f"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>` : "";
 
 export function holdingScreen(info: HoldingScreenInfo): string {
   const headline =
     info.reason === "no-device"
       ? "No device id"
-      : "Waiting to be assigned";
+      : info.reason === "unreadable"
+        ? "Cannot read the screen list"
+        : "Waiting to be assigned";
   const sub =
     info.reason === "no-device"
       ? "This page is opened by an installed kiosk device, which supplies its own id."
-      : "Open Devices in Stage Utility and give this screen an output.";
+      : info.reason === "unreadable"
+        ? "The server cannot read its list of screens right now. This page tries again on its own."
+        : "Open Devices in Stage Utility and give this screen an output.";
 
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Stage Utility — ${esc(headline)}</title>
+<title>Stage Utility — ${escapeHtml(headline)}</title>
 <style>
   :root { color-scheme: dark }
   html,body { height:100%; margin:0 }
@@ -62,8 +63,8 @@ export function holdingScreen(info: HoldingScreenInfo): string {
 </head><body>
 <main>
   <div class="cap">Stage Utility</div>
-  <h1>${esc(headline)}</h1>
-  <p>${esc(sub)}</p>
+  <h1>${escapeHtml(headline)}</h1>
+  <p>${escapeHtml(sub)}</p>
   <div class="ids">
     ${field("Device", info.id ?? undefined)}
     ${field("Address", info.ip)}

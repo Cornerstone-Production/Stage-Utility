@@ -13,9 +13,9 @@
 //   1  qualifiers    The clock's seconds; the capsule's inning/period detail;
 //                    the timer's pre-service label. Each is context the operator
 //                    already has, and none of them is an item's only reading.
-//   2  compact       Every idle WORD becomes that item's own mark, gaps and edge
-//                    padding tighten from 12px to 8px, and the score capsule
-//                    tightens. "6 disconnected" keeps its 6 and loses the word.
+//   2  compact       Every idle WORD becomes that item's own mark, gaps tighten
+//                    from 12px to 8px (and on a phone, whose edge padding is
+//                    12px, so does that), and the score capsule tightens. "6 disconnected" keeps its 6 and loses the word.
 //   3  floor         Prose — a service type, a plan title, a live item's title —
 //                    ellipsises.
 //

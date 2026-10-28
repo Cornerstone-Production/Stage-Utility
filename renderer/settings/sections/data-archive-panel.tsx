@@ -21,9 +21,11 @@ import {
   FieldContent,
   FieldDescription,
   FieldGroup,
+  FieldLabel,
   FieldSet,
   toast,
 } from "../../components/ui";
+import { settingText } from "./advanced-settings";
 
 interface ServiceMeta {
   serviceKey: string;
@@ -142,6 +144,7 @@ export function DataArchivePanel() {
     }
   }
 
+  const text = settingText("data-archive");
   const fresh = pending?.plan.newServices.length ?? 0;
   const identical = pending?.plan.identicalServices.length ?? 0;
   const differing = pending?.plan.differingServices ?? [];
@@ -149,18 +152,14 @@ export function DataArchivePanel() {
   const willChange = fresh + affected;
 
   return (
-    <FieldSet flat>
+    <FieldSet flat data-setting-id="data-archive">
       <FieldGroup>
         <Field orientation="vertical">
-          {/* No FieldLabel: the collapsible header above already says "Data archive",
-              and repeating it two lines apart reads as a duplication bug. */}
           <FieldContent>
+            <FieldLabel>{text.name}</FieldLabel>
             <FieldDescription>
-              Everything the app has recorded — service history, SPL readings, attendance and
-              baptism timings, plus the raw samples behind them. Use it to move your history onto
-              a rebuilt machine. This is not Backup &amp; restore above: that one covers how the
-              app is set up, this one covers what it recorded. Services recorded before this
-              version kept only their summaries, so those carry no raw samples.
+              {text.description} Services recorded before this version kept only their summaries,
+              so those carry no raw samples.
             </FieldDescription>
           </FieldContent>
 

@@ -6,7 +6,18 @@ import globals from "globals";
 
 export default [
   // helper/ is the Swift Mac output helper: nothing in it is JavaScript.
-  { ignores: ["build/**", "node_modules/**", "public/**", "helper/**"] },
+  // The public ServiceCue viewer's build output is minified bundles, and wrangler's
+  // state is not ours: neither is source.
+  {
+    ignores: [
+      "build/**",
+      "node_modules/**",
+      "public/**",
+      "helper/**",
+      "publish/servicecue/public/**",
+      "publish/servicecue/.wrangler/**",
+    ],
+  },
   js.configs.recommended,
   {
     // Plain ESM helpers run by the update scripts — Node globals, no TS parser.

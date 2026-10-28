@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { configFiles, runtimeFiles } from "./config-snapshot.js";
-import { allStores } from "./stores.js";
+import { allStores, restoreCheckFor } from "./stores.js";
 
 // Every persisted store must be classified as the operator's WORK (restored from
 // a backup) or an OBSERVATION (not restored). Both failure directions are silent:
@@ -103,6 +103,7 @@ const EXPECTED_CONFIG = [
   "bar-config.json",
   // The operator's own dates worth marking on the Trends chart.
   "history-milestones.json",
+  "host-names.json",
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
@@ -121,6 +122,9 @@ const EXPECTED_CONFIG = [
   "scores-favourites.json",
   "servicecue-config.json",
   "servicecue-layouts.json",
+  // Whether web publishing is on, and the address it publishes to. The token is in
+  // secrets.bin, which a snapshot never carries.
+  "servicecue-publish.json",
   "servicecue-roles.json",
   "settings.json",
   "slots.json",
@@ -134,6 +138,7 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  "host-names-seen.json",
   // The day's stage messages: an observation, cleared nightly.
   "messages.json",
   "service-timeline.json",
@@ -141,6 +146,8 @@ const EXPECTED_RUNTIME = [
   "spl-history.json",
   "stream-starts.json",
   "update-notices.json",
+  // Where ffmpeg is on THIS machine: never restored onto another.
+  "video-ffmpeg.json",
   "video-seen.json",
 ];
 
@@ -161,6 +168,15 @@ describe("store classification", () => {
 
   test("the config half is exactly this set", () => {
     assert.deepEqual(configFiles().slice().sort(), [...EXPECTED_CONFIG].sort());
+  });
+
+  test("every config store declares a restore check", () => {
+    // A restore writes each file whole, from any device on the LAN. A config
+    // store with no check would take whatever a crafted backup put there. The
+    // constructor's type already demands one; this is the same fact from the
+    // registry, which is what config-snapshot actually asks.
+    const checked = configFiles().filter((f) => restoreCheckFor(f) !== undefined);
+    assert.deepEqual(checked.sort(), [...EXPECTED_CONFIG].sort());
   });
 
   test("the runtime half is exactly this set", () => {

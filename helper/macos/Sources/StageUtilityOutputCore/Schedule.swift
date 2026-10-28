@@ -6,9 +6,12 @@ public enum Backoff {
   /// first): 2, 4, 8, 16, then 30 for good.
   public static func reloadDelay(failures: Int) -> TimeInterval {
     let n = max(1, failures)
-    if n >= 5 { return 30 }
+    if n >= 5 { return reloadCap }
     return TimeInterval(2 << (n - 1))
   }
+
+  /// The longest wait between reloads.
+  public static let reloadCap: TimeInterval = 30
 
   /// Consecutive failures that mean the address may have changed and discovery
   /// should run again.

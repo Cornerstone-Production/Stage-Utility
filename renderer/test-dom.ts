@@ -122,6 +122,12 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
   // navigation.
   win.scrollTo = () => {};
 
+  // The same for a media element's play(): jsdom plays nothing, reports "not
+  // implemented" and returns no promise, and a Video widget calls it once a
+  // source is attached (use-video-session.ts). Resolving is the honest stub:
+  // there is no playback to refuse.
+  (win.HTMLMediaElement as { prototype: { play: () => Promise<void> } }).prototype.play = () => Promise.resolve();
+
   for (const key of EXPOSED) {
     // defineProperty rather than assignment: some of these — `navigator` on
     // Node 26 — are getter-only on globalThis, and a plain `g[key] = …` throws

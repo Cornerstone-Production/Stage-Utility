@@ -34,7 +34,7 @@ describe("seeding", () => {
 
   test("Home starts with the cards the fixed panels showed", () => {
     assert.deepEqual(typesOf(seedHomeView([])), [
-      "home-live-status",
+      "timer",
       "home-recording",
       "home-spl",
       "home-screens",
@@ -42,6 +42,15 @@ describe("seeding", () => {
       "home-readiness",
       "home-recent-services",
     ]);
+  });
+
+  test("the seeded timer is the service clock, as wide as Home goes and only while live", () => {
+    // The card the retired `home-live-status` was: it reads as this Timer, so a
+    // new Home and an old one draw the same thing, and the tile it arrives in is
+    // stated on the card because a Timer's own default is not an xl live tile.
+    const timer = seedHomeView([]).find((v) => v.id === HOME_VIEW_ID)!.layout!.objects[0];
+    assert.deepEqual(timer.config, { type: "timer", source: "service", nextItem: true });
+    assert.deepEqual(timer.home, { size: "xl", when: "live" });
   });
 
   test("Home is a console, so its controls are live on the shell", () => {
@@ -74,7 +83,7 @@ describe("idempotence", () => {
     const after = seedHomeView(edited(once, objects));
     assert.deepEqual(
       typesOf(after),
-      ["home-live-status", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services"],
+      ["timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services"],
       "the deleted card came back",
     );
   });
@@ -103,7 +112,7 @@ describe("idempotence", () => {
         : v,
     );
     assert.deepEqual(typesOf(seedHomeView(stale)), [
-      "home-live-status",
+      "timer",
       "home-recording",
       "home-spl",
       "home-screens",
@@ -117,6 +126,31 @@ describe("idempotence", () => {
     const once = seedHomeView([]);
     const renamed = once.map((v) => (v.id === HOME_VIEW_ID ? { ...v, name: "Front page" } : v));
     assert.equal(seedHomeView(renamed).length, once.length);
+  });
+});
+
+describe("a Home saved before the Timer existed", () => {
+  // `home-live-status` is retired into the Timer, but a Home the operator saved
+  // keeps it, and it must keep working: it still reads as a Timer on screen, and
+  // the older split — it once drew recording, SPL and screens inside itself —
+  // still puts those back when they are missing.
+  const old = (types: string[]) =>
+    edited(seedHomeView([]), types.map((type, i) => ({ id: type, x: 0, y: i * 0.1, w: 1, h: 0.1, z: 1, config: { type }, style: {} })));
+
+  test("an edited Home holding the old card keeps it, untouched", () => {
+    const home = old(["home-live-status", "home-recording", "home-spl", "home-screens"]);
+    assert.equal(seedHomeView(home), home);
+    assert.deepEqual(typesOf(seedHomeView(home)), ["home-live-status", "home-recording", "home-spl", "home-screens"]);
+  });
+
+  test("the old card with its three stats missing gets them back, directly after it", () => {
+    assert.deepEqual(typesOf(seedHomeView(old(["home-live-status", "home-next-service"]))), [
+      "home-live-status",
+      "home-recording",
+      "home-spl",
+      "home-screens",
+      "home-next-service",
+    ]);
   });
 });
 

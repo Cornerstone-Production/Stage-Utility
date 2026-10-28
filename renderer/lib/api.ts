@@ -7,6 +7,9 @@
 // (port 8788), so all paths here are relative.
 
 import { errorMessage } from "@main/services/errors";
+import { DEPLOY_NOW_TIMEOUT_MS } from "@main/types/servicecue-deploy";
+import { isPublicMode } from "./public-mode";
+import { startPublicLive, type PublicLiveDeps } from "./public-live";
 import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
@@ -44,6 +47,11 @@ async function errorBody(res: Response): Promise<ErrorBody | null> {
 /** The Error a read that ran past REQUEST_TIMEOUT_MS becomes. */
 function timeoutError(path: string, cause: unknown): Error {
   return new Error(`Request to ${path} timed out`, { cause });
+}
+
+/** Did this request fail by running out of time, as opposed to being answered or refused? */
+export function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.cause instanceof DOMException && err.cause.name === "TimeoutError";
 }
 
 /** The Error a non-2xx answer becomes, from its status and parsed body. */
@@ -420,6 +428,7 @@ export type IpcChannel =
   | "devices:claim"
   | "devices:list"
   | "devices:release"
+  | "devices:requestUpdate"
   | "devices:scan"
   | "displays:getPresence"
   | "displays:refresh"
@@ -518,7 +527,11 @@ export type IpcChannel =
   | "scores:getStatus"
   | "scores:listTeams"
   | "scores:setFavourites"
+  | "security:hostNames"
+  | "security:setHostNames"
   | "servicecue:getConfig"
+  | "servicecue:deployNow"
+  | "servicecue:getPublish"
   | "servicecue:listLayouts"
   | "servicecue:listRoles"
   | "servicecue:noteCategories"
@@ -526,6 +539,9 @@ export type IpcChannel =
   | "servicecue:saveLayouts"
   | "servicecue:saveRoles"
   | "servicecue:setConfig"
+  | "servicecue:setDeployCredentials"
+  | "servicecue:setPublish"
+  | "servicecue:testPublish"
   | "sensource:listLocations"
   | "sensource:listZones"
   | "serviceTimeline:delete"
@@ -565,6 +581,7 @@ export type IpcChannel =
   | "stage:setAllowedServiceTypes"
   | "stage:setBranding"
   | "stage:setKioskDiscovery"
+  | "stage:setAutoUpdateMachines"
   | "stage:setNdiEnabled"
   | "stage:setOnboardingDismissed"
   | "stage:setPlan"
@@ -584,12 +601,14 @@ export type IpcChannel =
   | "update:status"
   | "video:addFeed"
   | "video:feedUsage"
+  | "video:ffmpeg"
   | "video:importFeeds"
   | "video:newPushPassword"
   | "video:previewImport"
   | "video:probe"
   | "video:pushAddress"
   | "video:removeFeed"
+  | "video:setFfmpegPath"
   | "video:setPorts"
   | "video:state"
   | "video:updateFeed"
@@ -671,6 +690,29 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "servicecue:setConfig":
       return post<T>("/api/servicecue/config", { serviceTypeIds: p.serviceTypeIds });
+
+    // The public link: the settings and how publishing is going, the write, and a
+    // connection test. The test sends only what the form holds — see the route.
+    case "servicecue:getPublish":
+      return apiFetch<T>("/api/servicecue/publish");
+
+    case "servicecue:setPublish":
+      return post<T>("/api/servicecue/publish", p);
+
+    case "servicecue:testPublish":
+      return post<T>("/api/servicecue/publish/test", p);
+
+    // Keeping the page itself up to date: the Cloudflare account and token, and "Update the page now".
+    case "servicecue:setDeployCredentials":
+      return post<T>("/api/servicecue/publish/deploy-credentials", p);
+
+    case "servicecue:deployNow":
+      // The answer waits for the whole deploy, which runs well past the usual 15 s.
+      return apiFetch<T>("/api/servicecue/publish/deploy", {
+        method: "POST",
+        body: JSON.stringify(p),
+        signal: AbortSignal.timeout(DEPLOY_NOW_TIMEOUT_MS),
+      });
 
     case "servicecue:listRoles":
       return apiFetch<T>("/api/servicecue/roles");
@@ -955,6 +997,13 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "update:check":
       return post<T>("/api/update/check");
 
+    // ── Host names (Settings, Advanced) ──────────────────────────────────
+    case "security:hostNames":
+      return apiFetch<T>("/api/security/host-names");
+
+    case "security:setHostNames":
+      return post<T>("/api/security/host-names", params);
+
     case "update:apply":
       return post<T>("/api/update/apply", p);
 
@@ -1037,12 +1086,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/devices/claim", p);
     case "devices:release":
       return post<T>("/api/devices/release", p);
+    // Update now, or Try again, for one Mac helper or Windows kiosk.
+    case "devices:requestUpdate":
+      return post<T>("/api/machine-updates/request", p);
+    case "stage:setAutoUpdateMachines":
+      return post<T>("/api/machine-updates/auto", p);
 
     case "stage:setBranding":
       return post<T>("/api/branding", p);
 
     case "stage:getBrandingSource": {
-      const target = p.target === "empty" ? "empty" : p.target === "avatar" ? "avatar" : "app";
+      const target = p.target === "empty" || p.target === "avatar" || p.target === "icon" ? p.target : "app";
       return apiFetch<T>(`/api/branding/source?target=${target}`);
     }
 
@@ -1123,6 +1177,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
     case "video:setPorts":
       return patch<T>("/api/video/ports", p);
+    case "video:ffmpeg":
+      return apiFetch<T>("/api/video/ffmpeg");
+    case "video:setFfmpegPath":
+      return patch<T>("/api/video/ffmpeg", p);
     // The video feeds file: `bundle` is the parsed file as the operator picked it.
     case "video:previewImport":
       return post<T>("/api/video/import/preview", p.bundle);
@@ -1668,7 +1726,8 @@ const sseListeners: SseListener[] = [];
  */
 const POLL_TRANSPORT = (() => {
   try {
-    return typeof location !== "undefined" && new URLSearchParams(location.search).get("transport") === "poll";
+    // Not on the public page, whose host has no /api/events/poll.
+    return !isPublicMode() && typeof location !== "undefined" && new URLSearchParams(location.search).get("transport") === "poll";
   } catch {
     return false; // no DOM (worker, test harness, SSR) — there is no URL to opt in on
   }
@@ -1763,6 +1822,15 @@ function fanOut(
  *  frame once per listener. */
 const directHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
 
+/** What the public page's WebSocket needs from this module: the one dispatch
+ *  every transport ends in, and the one clock every surface renders from. */
+const PUBLIC_LIVE: PublicLiveDeps = {
+  deliver: (channel, data) => dispatch(channel, data, false),
+  observeClock: (edgeMs, rttMs) => {
+    serverClock.observe(edgeMs, rttMs);
+  },
+};
+
 /**
  * That one wire listener, by channel, so the LAST subscriber to leave can find
  * it.
@@ -1815,6 +1883,8 @@ const CLIENT_ID = genClientId();
 // server keeps sending everything — filtering is an optimization, never required.
 let reportTimer: ReturnType<typeof setTimeout> | null = null;
 function reportChannels(): void {
+  // The public page writes nothing to the Worker.
+  if (isPublicMode()) return;
   if (reportTimer) return;
   reportTimer = setTimeout(() => {
     reportTimer = null;
@@ -1853,8 +1923,9 @@ function reportChannels(): void {
 const SHARED_SSE_KEY = "stage:sharedSse";
 let sharedSse = (() => {
   // The worker exists to SHARE one EventSource across tabs. On the polling
-  // transport there is no stream to share, so it would open one nobody reads.
-  if (POLL_TRANSPORT) return false;
+  // transport there is no stream to share, so it would open one nobody reads, and
+  // the public page's transport is public-live.ts.
+  if (POLL_TRANSPORT || isPublicMode()) return false;
   return typeof SharedWorker !== "undefined" && readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false);
 })();
 
@@ -2387,7 +2458,12 @@ export function onNotification(
   // to matter. On the polling transport there is no stream; the poller is
   // already running from module scope, which is what makes the hydrate snapshot
   // available to a subscriber that mounts later.
-  if (first && !POLL_TRANSPORT) {
+  //
+  // The public page's one WebSocket carries every channel, so there is no
+  // listener per channel to attach (see public-live.ts).
+  if (isPublicMode()) {
+    startPublicLive(PUBLIC_LIVE);
+  } else if (first && !POLL_TRANSPORT) {
     const handler = (e: MessageEvent) => {
       try {
         dispatch(channel, JSON.parse(e.data), false);

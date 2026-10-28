@@ -160,3 +160,25 @@ export interface CalendarTagDTO {
    *  name for that bucket in its UI. Never empty, so a picker can group on it. */
   groupName: string;
 }
+
+/**
+ * An untrusted body value that is a list of `{ id, name }` strings. Shared by
+ * PATCH /api/views/:id and a config restore of views.json.
+ *
+ * A type PREDICATE, so the narrowing it performs is the thing handed on. The
+ * first draft returned a bare boolean and needed a second function to rebuild
+ * the list past a cast — two passes over the same value where one does, and the
+ * cast was the part that asserted rather than proved.
+ */
+export function isSelectionList(v: unknown): v is CalendarSelection[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        typeof (e as { id?: unknown }).id === "string" &&
+        typeof (e as { name?: unknown }).name === "string",
+    )
+  );
+}

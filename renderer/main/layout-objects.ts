@@ -17,6 +17,9 @@
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { CARD_HAIRLINE, IDIOM_TYPES } from "@main/types/readout-types";
 import { externKeyed } from "@main/types/extern-keyed";
+import { DEFAULT_WARN_AMBER_SEC, DEFAULT_WARN_RED_SEC } from "./pvp-now-config";
+import { readTimerConfig } from "./timer-config";
+import { LYRICS_DEFAULTS } from "./lyrics-config";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
@@ -28,7 +31,6 @@ export const PALETTE_GROUP_ORDER = [
   "Audio (SPL)",
   "Transcription",
   "People",
-  "Baptisms",
   "OBS",
   "REAPER",
   "ProVideoPlayer",
@@ -64,6 +66,13 @@ export interface LayoutObjectSpec {
    * dimming them would just be noise.
    */
   integration?: { id: string; label: string };
+  /**
+   * The style this widget starts with when it is added on HOME, where it has no
+   * card of its own and the theme decides the text colour. Absent: the ordinary
+   * style without its colour (see `defaultStyleFor`). For a widget whose whole
+   * wall style is wrong on Home, not only its ink.
+   */
+  homeStyle?: () => LayoutStyle;
   /** No per-object options; the inspector shows a "styling only" hint. */
   stylingOnly?: boolean;
   /**
@@ -282,6 +291,19 @@ export const EMBED_FONT_FRACTION = 0.016;
 
 // ── The registry ──────────────────────────────────────────────────────────────
 
+/**
+ * The retirement shared by the four widgets the Timer replaced.
+ *
+ * Unlike the others it offers no Convert button: the mapping runs wherever an
+ * object is read (timer-config.ts), so nothing ever shows an old one to convert.
+ * `convert` is the same mapping, there because the `retired` type requires one.
+ */
+const RETIRED_TIMER: NonNullable<LayoutObjectSpec["retired"]> = {
+  replacedBy: "timer",
+  why: "Timer reads the service clock, a ProPresenter timer or a baptism readout, and a saved one opens as a Timer on its own.",
+  convert: (old) => readTimerConfig(old) ?? old,
+};
+
 export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = externKeyed({
   // Layout
   container: {
@@ -340,10 +362,25 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontWeight: 600 }),
     homeSize: "s",
   },
+  timer: {
+    label: "Timer",
+    blurb: "A countdown or clock from the service, ProPresenter or a baptism",
+    group: "Text & time",
+    // The next item on, as the approved design defaults it: a Timer added on Home
+    // is the Service card again. Converted objects keep their own settings.
+    config: () => ({ type: "timer", source: "service", nextItem: true }),
+    style: () => READOUT(0.1),
+    // As the bare Service card it replaces: no ink of its own on Home, and its tile:
+    // extra large, drawn only while a service is live (LEGACY_HOME's home-live-status).
+    homeStyle: BARE,
+    homeSize: "xl",
+    homeWhen: "live",
+  },
   "countdown-timer": {
     label: "PCO countdown",
     blurb: "Time until the service starts, from Planning Center",
-    group: "Text & time",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "countdown-timer", caption: "Service starts in" }) as LayoutObjectConfig,
     style: () => READOUT(0.085),
   },
@@ -452,7 +489,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "home-live-status": {
     label: "Service timer",
     blurb: "The running item's clock, and what comes next",
-    group: "PCO / service",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "home-live-status" }),
     style: BARE,
     homeSize: "xl",
@@ -508,6 +546,18 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     stylingOnly: true,
     propInstance: true,
   },
+  lyrics: {
+    label: "Lyrics",
+    blurb: "The words on the slide, with its group as ProPresenter names it",
+    group: "ProPresenter",
+    config: () => ({ type: "lyrics", ...LYRICS_DEFAULTS }),
+    // White ink on the wall; Home drops it for the theme's ink, as for every widget.
+    // The type size is the object's own (Size), so only the colour is a style.
+    style: () => ({ color: "#ffffff" }),
+    homeSize: "l",
+    homeWhen: "live",
+    propInstance: true,
+  },
   "current-slide-notes": {
     label: "Slide notes",
     blurb: "The speaker notes on the slide showing now",
@@ -540,7 +590,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "pp-timer": {
     label: "ProPresenter timer",
     blurb: "A timer from ProPresenter, by name",
-    group: "ProPresenter",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" }),
     style: () => READOUT(0.1),
     homeSize: "s",
@@ -609,7 +660,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "home-spl": {
     homeCardFor: "spl-meter",
     label: "Sound level",
-    blurb: "The loudest meter right now, and which one",
+    blurb: "The loudest level right now, its metric and meter",
     group: "Audio (SPL)",
     config: () => ({ type: "home-spl" }),
     style: BARE,
@@ -657,7 +708,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "baptism-timer": {
     label: "Baptism timer",
     blurb: "The running baptism clock, or the session's totals",
-    group: "Baptisms",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" }),
     style: () => READOUT(0.14),
     homeSize: "s",
@@ -729,7 +781,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "What is on screen right now, and how long is left",
     group: "ProVideoPlayer",
     config: () => ({
-      type: "pvp-now", layerName: null, showProgress: true, showNextCue: true, compact: false, nowLabel: "cue",
+      type: "pvp-now", layerName: null, showProgress: true, showNextCue: true, layout: "full", nowLabel: "cue",
+      warnNearEnd: false, warnAmberSec: DEFAULT_WARN_AMBER_SEC, warnRedSec: DEFAULT_WARN_RED_SEC,
       countStills: false, stillHoldSec: null,
     }),
     style: () => CARD({ fontSize: 0.05 }),
@@ -744,7 +797,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "The one thing ProVideoPlayer has up, and how long is left",
     group: "ProVideoPlayer",
     config: () => ({
-      type: "home-pvp-now", showProgress: true, showNextCue: true, compact: false, nowLabel: "cue",
+      type: "home-pvp-now", showProgress: true, showNextCue: true, layout: "full", nowLabel: "cue",
+      warnNearEnd: false, warnAmberSec: DEFAULT_WARN_AMBER_SEC, warnRedSec: DEFAULT_WARN_RED_SEC,
       countStills: false,
     }),
     style: BARE,
@@ -771,10 +825,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  // One "Button" in the palette covers this and the cue button: the inspector's
+  // Does control switches a button between the two stored types. This one stays
+  // a full registry entry (every saved layout holds them, and the renderer, the
+  // capability table and the type union all key on it) but is not offered on its
+  // own, and carries the same label so the layer list and the inspector header
+  // read "Button" whichever way a widget is set.
   "action-button": {
-    label: "Action button",
+    label: "Button",
     blurb: "Runs one of the app's own actions",
-    group: "Control",
+    group: null,
     config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
     style: () => PILL({ fontSize: 0.045 }),
   },
@@ -795,12 +855,17 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
+  // The palette's Button: it arrives firing a cue, and the inspector's Does
+  // control turns it into an action button (and back). See action-button above.
   "cue-button": {
-    label: "Cue button",
-    blurb: "Fires a cue and shows whether its device is on",
+    label: "Button",
+    blurb: "Fires a cue, or runs an action, from a console",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
-    style: () => PILL({ fontSize: 0.12 }),
+    // The size every other button starts at, small enough that the lamp, label and
+    // room line fit the box a new button is placed in (default-size.test.tsx). The
+    // Ultritouch strips set their own, larger size.
+    style: () => PILL({ fontSize: 0.045 }),
   },
 
   // The newest three stage messages for the screen's groups. Sized so a message
@@ -901,7 +966,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming", platform: "any" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
   },
   "home-streaming-resi": {
     label: "Resi status",
@@ -915,7 +979,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming-resi" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
     integration: { id: "resi", label: "Resi" },
   },
   "home-streaming-youtube": {
@@ -930,7 +993,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming-youtube" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
     integration: { id: "youtube", label: "YouTube" },
   },
   "stream-status": {
@@ -1194,7 +1256,18 @@ export function defaultStyleFor(
   // function -- a readout added in the editor stored textAlign:"center"
   // permanently, and Reset look on an object from a newer build white-screened
   // the page.
+  const home = findLayoutObjectSpec(type)?.homeStyle;
+  if (opts.hostDrawsFrame && home) return home();
   const base = defaultStyle(type);
-  if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
+  if (opts.hostDrawsFrame) {
+    // No ink of its own on Home. A wall style names white for a black screen,
+    // and Home's card follows the theme, so on a light page that was white on
+    // white. Without a colour the widget draws Home's ink (DEFAULT_INK in
+    // layout-renderer.tsx). Only the colour goes: the size, weight and
+    // alignment still read right on a card, and Home drops the ground itself.
+    const { color: _forABlackWall, ...rest } = base;
+    return rest;
+  }
+  if (!HOST_FRAMED_TYPES.has(type)) return base;
   return { ...CARD_PRESETS.neutral, ...base };
 }

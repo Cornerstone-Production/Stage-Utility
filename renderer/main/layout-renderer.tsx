@@ -1,9 +1,10 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, isHomeCard } from "../app/home/cards";
+import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
+import { readConfig, timerSource } from "./timer-config";
+import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
-import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -33,7 +34,7 @@ import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
-import { useBaptismStatus, summarizeBaptism, fmtClock } from "./use-baptism-state";
+import { useBaptismStatus } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
@@ -60,12 +61,20 @@ import { Loader2Icon, ZapIcon } from "lucide-react";
 import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
 import { VideoObject } from "./video/video-object";
+import { LyricsObject } from "./lyrics-object";
+import { boxFits, useBoxFit } from "./fit-to-box";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
   state: StageState;
   propresenter: ProPresenterStatusDTO | null;
+  /** Whether ProPresenter's status has answered — a Timer reads a dash, not a
+   *  claim, until it has. */
+  propresenterKnown: boolean;
   pcoLive: PcoLiveDTO | null;
+  /** Whether PCO Live has answered. `pcoLive` is null both before it has and
+   *  when there is nothing live; only this tells them apart. */
+  pcoLiveKnown: boolean;
   /** All configured ProPresenter instances + their status — for per-object
    *  instance selection (two-auditorium setups). null until loaded. */
   propInstances: PropInstancesDTO | null;
@@ -349,15 +358,25 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
  * prose worse.
  */
 const TABULAR_TYPES = new Set<string>([
-  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "clock", "countdown-timer", "pp-timer", "baptism-timer", "timer",
   "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
 ]);
+
+/**
+ * The ink a widget draws when its style names none.
+ *
+ * White, which is right on a black wall. A host that paints its own ground sets
+ * `--layout-ink` instead: Home's card sets the theme's text colour, so a widget
+ * added on Home (which starts with no colour) reads on a light page as well as a
+ * dark one. A colour the operator picks still wins on either surface.
+ */
+export const DEFAULT_INK = "var(--layout-ink, #ffffff)";
 
 /** Text-level CSS for the inner span. */
 function textStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
   const css: CSSProperties = {
-    color: s.color ?? "#ffffff",
+    color: s.color ?? DEFAULT_INK,
     fontSize: `${(s.fontSize ?? 0.05) * H}px`,
     fontWeight: s.fontWeight ?? 400,
     lineHeight: 1.1,
@@ -523,64 +542,10 @@ export function RenderObject({
   );
 }
 
-/**
- * Shrink whatever is inside so it fits the box, instead of spilling out of it.
- *
- * The measured sweep across every object type found eight that overflowed their
- * box at a normal dashboard tile size (259x161) — the status objects by up to
- * 48px, because a dot plus "OBS: Recording 00:12:34" is simply wider than a
- * narrow tile and nothing was shrinking it. Clipping is not the fix either: a
- * status the operator cannot read is the same as no status.
- *
- * Converges in a pass or two by back-deriving the natural size from the live
- * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
- * never to "invisible".
- */
 /** How far a readout may grow beyond its designed size to fill its box. */
 const FIT_MAX_GROWTH = 3;
-
-function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
-  wrapRef: React.RefObject<HTMLDivElement | null>;
-  elRef: React.RefObject<T | null>;
-  scale: number;
-} {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const elRef = useRef<T | null>(null);
-  const [scale, setScale] = useState(1);
-  // The observer is subscribed once per dep change, so its callback would
-  // otherwise close over a stale `scale`.
-  const scaleRef = useLatestRef(scale);
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const el = elRef.current;
-    if (!wrap || !el) return;
-    const measure = () => {
-      const availW = wrap.clientWidth;
-      const availH = wrap.clientHeight;
-      if (availW <= 1 || availH <= 1) return;
-      const cur = scaleRef.current;
-      const natW = el.scrollWidth / cur;
-      const natH = el.scrollHeight / cur;
-      if (natW <= 0 || natH <= 0) return;
-      // Grows as well as shrinks. The base size is a fraction of the CANVAS, so
-      // capping at 1 meant a widget made twice as tall kept the same text and an
-      // operator reached for the font-size field to fix it — which is precisely
-      // the field this phase removes. Sizing from the widget's own box is what
-      // makes that field unnecessary rather than merely unavailable.
-      //
-      // The ceiling stops a two-character readout in a large tile becoming
-      // absurd, and the floor keeps a long string legible rather than vanishing.
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, FIT_MAX_GROWTH);
-      if (Math.abs(desired - cur) > 0.01) setScale(desired);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, scaleRef]);
-  return { wrapRef, elRef, scale };
-}
+/** How far it may shrink: small, never invisible. */
+const FIT_MIN_GROWTH = 0.3;
 
 /** Render one object's inner content (the positioned box wraps this). */
 // Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
@@ -604,20 +569,44 @@ function rfBarsGlyph(bars: number): string {
 // carries the colour, so "PCO / ONLINE" in green reads at a glance and still
 // reads without the green.
 
-// Shrinks the font so `text` fits its box (width + height) instead of clipping —
-// used by single-value text objects (current/next item) where a long title would
-// otherwise overflow. Converges in a pass or two by back-deriving the natural size
-// from the live scroll size (same approach as ServiceOrderObject's auto-fit).
+// Fits `text` to its box: a long title shrinks instead of clipping, and a short one
+// grows into the room it has, by the shared measurement (fit-to-box.ts), which
+// bisects between 0.3x and 3x of the base size.
+//
+// IT GROWS ONLY WHILE IT STAYS ON ONE LINE, and only if it was on one line at its
+// base size. Text that already wraps at its base size does not grow at all, and text
+// that fits on one line never grows onto two: without that, "Welcome and
+// Announcements" in a 600x300 box went from 65px to 111px on two lines, and every
+// wrapped slide filled its box, which is a change nobody has asked a wall to make.
+// Shrinking is never limited, so a long title still shrinks onto more lines if it
+// must.
 function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
   const basePx = parseFloat(String(ts.fontSize)) || 16;
-  // Same measurement as the status objects — one implementation, so a fix to how
-  // things fit their box cannot land in one of them and miss the others.
-  const { wrapRef, elRef, scale } = useFitScale([text, basePx, ts.fontWeight]);
+  const lineHeight = parseFloat(String(ts.lineHeight)) || 1.1;
+  const { wrapRef, contentRef, value } = useBoxFit<HTMLSpanElement>({
+    floor: basePx * FIT_MIN_GROWTH,
+    ceiling: basePx * FIT_MAX_GROWTH,
+    initial: basePx,
+    // Everything that changes the text's size or how it wraps.
+    contentKey: [text, basePx, ts.fontWeight, ts.textTransform, ts.letterSpacing, ts.fontStyle, ts.fontFamily].join("|"),
+    apply: (el, px) => {
+      el.style.fontSize = `${px}px`;
+    },
+    fits: (wrap, el, px) => {
+      if (!boxFits(wrap, el)) return false;
+      if (px <= basePx) return true;
+      const lines = Math.round(el.offsetHeight / (px * lineHeight));
+      el.style.fontSize = `${basePx}px`;
+      const baseLines = Math.round(el.offsetHeight / (basePx * lineHeight));
+      el.style.fontSize = `${px}px`;
+      return baseLines === 1 && lines === 1;
+    },
+  });
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
     <div ref={wrapRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: justify, alignItems: align, overflow: "hidden" }}>
-      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${basePx * scale}px` }}>{text}</span>
+      <span ref={contentRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${value}px` }}>{text}</span>
     </div>
   );
 }
@@ -759,8 +748,31 @@ const WALL_TWIN = externKeyed({
   "home-streaming-youtube": "YouTube",
 } as const);
 
+/** The wall's colour for a time that has earned one: the display palette's red
+ *  and amber, not Home's semantic tokens. */
+const TIMER_WALL_COLOR: Record<TimerTone, string> = { over: "var(--red-10)", warn: "var(--yellow-10)" };
+
+/** Home's Stat names the same two tones by its own words. */
+const TIMER_STAT_TONE = { over: "danger", warn: "warn" } as const satisfies Record<TimerTone, string>;
+
+/**
+ * The ProPresenter status an object reads, and whether it has answered: the
+ * default instance, or the one it names. A named instance whose list has not
+ * loaded has not answered, which is not the same as "not connected".
+ */
+function proFor(
+  ctx: Pick<LayoutRenderCtx, "propresenter" | "propresenterKnown" | "propInstances">,
+  named: string | null | undefined,
+): { pro: ProPresenterStatusDTO | null | undefined; known: boolean } {
+  return named
+    ? { pro: ctx.propInstances?.status[named], known: ctx.propInstances != null }
+    : { pro: ctx.propresenter, known: ctx.propresenterKnown };
+}
+
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
-  const c = o.config;
+  // An object saved as one of the four widgets the Timer replaced reads as the
+  // Timer from here on, so no arm below draws them and none can drift.
+  const c = readConfig(o.config);
   const ts = textStyle(o, ctx.H);
   // Every readout fits its box. This helper backs the plain-text objects
   // (text, slide text, slide notes), and routing it through FitText is what
@@ -782,6 +794,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       captionEnd?: ReactNode;
       upper?: boolean;
       dim?: boolean;
+      /** Overrides Home's uniform value size, for a widget that never took it. */
+      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -995,7 +1009,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         <HomeCard
           config={c}
           state={ctx.state}
-          pcoLive={ctx.pcoLive}
           now={ctx.now}
           onlineOutputIds={ctx.onlineOutputIds}
           onlineKnown={ctx.onlineKnown}
@@ -1020,16 +1033,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // clock deliberately put on a wall in 24h must not flip because someone
       // changed a preference for the operator app.
       return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? displayHourCycle(), c.showMeridiem ?? true));
-    case "countdown-timer": {
-      const t = computePcoTimer(ctx.pcoLive, ctx.now);
-      if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      // Red once the timer goes negative (item or service ran over), like the
-      // dashboard; amber once it drops to/below the configured warning; else keep
-      // the idiom's own value colour.
-      const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
-      const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
-      return readout(fmtDuration(t.seconds), { valueColor: color });
-    }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
       // right NOW. See servicePacing() in service-pacing.ts for the math (also
@@ -1088,22 +1091,26 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "current-slide-text": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.currentSlideText ?? pro?.currentItem ?? "");
     }
+    case "lyrics": {
+      const { pro, known } = proFor(ctx, c.propresenterInstanceId);
+      return <LyricsObject config={c} pro={pro} known={known} color={o.style?.color} fallbackH={ctx.H} />;
+    }
     case "next-slide-text": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.nextSlideText ?? pro?.nextItem ?? "");
     }
     case "current-service-item": {
       // Follow the PCO plan order (authoritative); fall back to ProPresenter's
       // active playlist only when PCO has no current item. Auto-fit so a long title
       // shrinks to the box instead of clipping.
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return <FitText text={ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "next-service-item": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return <FitText text={ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "service-order":
@@ -1113,11 +1120,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "screen-embed":
       return <ScreenEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.currentNotes ?? "");
     }
     case "section-chip": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const sec =
         c.which === "next"
           ? pro?.nextSection
@@ -1131,25 +1138,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // state, not a second design language.
       return readout(sec.name, { fill: sec.colorHex });
     }
-    case "pp-timer": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      const timers = pro?.timers ?? [];
-      const timer = c.timerName ? timers.find((t) => t.name === c.timerName) : timers[0];
-      if (!timer) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      // Color only on clearly-expired states; unknown/other states stay neutral.
-      const state = (timer.state ?? "").toLowerCase();
-      const danger = state.includes("over") || state.includes("expire");
-      const color = (c.warnStates ?? true) && danger ? "var(--red-10)" : null;
-      // The timer's NAME goes on the sub-line. It was an inline 0.6em span in
-      // front of the time — so a timer called "Sermon" pushed the number off
-      // centre and shrank with it. Under the value it stays a label.
-      return readout(timer.time, {
-        valueColor: color,
-        sub: (c.showLabel ?? true) ? timer.name : null,
-      });
-    }
     case "slide-progress": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const idx = pro?.slideIndex ?? null;
       const count = pro?.slideCount ?? null;
       const remaining = pro?.slidesRemaining ?? null;
@@ -1159,7 +1149,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         const pct = Math.min(100, Math.round((idx / count) * 100));
         return (
           <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center" }}>
-            <div style={{ width: "100%", height: `${0.02 * ctx.H}px`, background: "rgba(255,255,255,0.15)", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{ width: "100%", height: `${0.02 * ctx.H}px`, background: `color-mix(in srgb, ${DEFAULT_INK} 15%, transparent)`, borderRadius: 999, overflow: "hidden" }}>
               <div style={{ width: `${pct}%`, height: "100%", background: ts.color ?? "#fff", borderRadius: 999 }} />
             </div>
           </div>
@@ -1173,7 +1163,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return readout(text, { sub: (c.showLabel ?? false) && !dim ? "slides" : null });
     }
     case "slide-thumbnail": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const key = pro?.slidePreviewKey;
       if (!key) return null;
       const inst =
@@ -1284,7 +1274,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         </div>
       );
     case "video":
-      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} />;
+      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} listen={ctx.home && ctx.interactive} />;
     case "slots-grid": {
       // Resolved BY OBJECT wherever the server could do it -- inline grids, and
       // grids embedding a view. Both are free-dragged boxes on a custom layout,
@@ -1345,8 +1335,39 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
-    case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} known={ctx.baptismKnown} config={c} now={ctx.now} align={o.style?.textAlign} />;
+    case "timer": {
+      // The instance a ProPresenter timer reads: the default, or the one it
+      // names. A named instance that has not loaded is "not answering", not
+      // "no timers".
+      const named = c.propresenterInstanceId;
+      const { pro, known } = proFor(ctx, named);
+      const r = readTimer(c, {
+        now: ctx.now,
+        pcoLive: ctx.pcoLive,
+        pcoLiveKnown: ctx.pcoLiveKnown,
+        propresenter: pro,
+        propresenterKnown: known,
+        // Set up: the integration for the default machine, a listed instance for a
+        // named one. Only a ProPresenter that is set up can be "not answering".
+        propresenterConfigured: named
+          ? (ctx.propInstances?.list.some((i) => i.id === named) ?? false)
+          : ctx.integrations.some((i) => i.id === "propresenter" && i.configured),
+        baptism: ctx.baptism,
+        baptismKnown: ctx.baptismKnown,
+      });
+      if (r.hidden) return null;
+      // On Home a Timer that shows the next item is a Stat in Home's own colours.
+      // Every other Timer is the wall readout at Home's uniform size, aligned as
+      // the object says.
+      // A stored `home-live-status` is that Stat on a wall too: it drew Home's card
+      // wherever it was placed, and keeps its look off Home.
+      if ((ctx.home || o.config?.type === "home-live-status") && timerSource(c) === "service" && (c.nextItem ?? false)) {
+        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+      }
+      // The baptism readout never sized itself to Home's uniform tile, and still
+      // does not: its value fills the box as it did.
+      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: r.tone ? TIMER_WALL_COLOR[r.tone] : null, ...(timerSource(c) === "baptism" ? { uniform: false } : null) });
+    }
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
@@ -2035,7 +2056,8 @@ function PeopleGraph({
           style={{
             position: "absolute", left: `${hoverX}%`, top: `${PADT}%`,
             transform: hoverX > 60 ? "translate(-102%, 0)" : "translate(2%, 0)",
-            background: "rgba(0,0,0,0.78)", color: stroke, borderRadius: `${0.01 * H}px`,
+            // White whatever the ink: this ground is near-black on every surface.
+            background: "rgba(0,0,0,0.78)", color: stroke === DEFAULT_INK ? "#ffffff" : stroke, borderRadius: `${0.01 * H}px`,
             padding: `${0.008 * H}px ${0.012 * H}px`, fontSize: `${fontPx}px`, lineHeight: 1.25,
             fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2,
           }}
@@ -2071,7 +2093,7 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
           position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
           display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
           // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
-          background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+          background: down ? `color-mix(in srgb, ${DEFAULT_INK} 16%, transparent)` : hot ? `color-mix(in srgb, ${DEFAULT_INK} 8%, transparent)` : "transparent",
           color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
           padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
           fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
@@ -2127,11 +2149,6 @@ function PeoplePanel({
   const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
-  const {
-    wrapRef: fitWrapRef,
-    elRef: fitElRef,
-    scale: fitScale,
-  } = useFitScale<HTMLDivElement>([metrics.join(","), showLabels, col, valuePx, H]);
   // Each tile resolves to a display string + optional color override (vs-average
   // goes green/red). "—" when the underlying value isn't available.
   const tile = (k: string): { text: string; color: string } => {
@@ -2158,6 +2175,20 @@ function PeoplePanel({
       : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
+  // Scaled, not resized: the gaps and fonts are fractions of the canvas, so only the
+  // whole block can shrink with the box. It never grows: the block is at least as
+  // tall and as wide as its box, so a block that fits is already at scale 1. Its key
+  // is everything that changes its size, the tiles' own text included.
+  const { wrapRef: fitWrapRef, contentRef: fitElRef, value: fitScale } = useBoxFit<HTMLDivElement>({
+    floor: FIT_MIN_GROWTH,
+    ceiling: 1,
+    initial: 1,
+    contentKey: [metrics.map((k) => tile(k).text).join(","), metrics.join(","), showLabels, col, valuePx, H, ts.fontWeight].join("|"),
+    apply: (el, v) => {
+      el.style.transform = `scale(${v})`;
+    },
+    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.offsetHeight * v <= wrap.clientHeight + 1,
+  });
   return (
     // Scaled to fit like every other object: the measured sweep found this one
     // overflowing its box by 386px at a dashboard tile size, because the metrics
@@ -2173,7 +2204,10 @@ function PeoplePanel({
         flexWrap: "wrap",
         gap: `${0.04 * H}px ${0.06 * H}px`,
         width: "100%",
-        height: "100%",
+        // At least the box, and its own height when the tiles wrap taller: a fixed
+        // 100% let the extra rows overflow below, and the block, scaled about its
+        // centre, then ran off the bottom of the box.
+        minHeight: "100%",
         justifyContent: "space-evenly",
         alignItems: "center",
         transform: `scale(${fitScale})`,
@@ -2195,140 +2229,6 @@ function PeoplePanel({
       })}
     </div>
     </div>
-  );
-}
-
-// A baptism-timer readout. `live` shows the running segment clock (ticking off the
-// shared 1s `now`); the rest are session stats. Optional sub-label.
-function BaptismTimer({
-  state,
-  known,
-  config,
-  now,
-  align,
-}: {
-  state: BaptismState | null;
-  /** Whether the baptism channel has answered yet. See the note at the end. */
-  known: boolean;
-  config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
-  now: number;
-  align: LayoutHAlign | undefined;
-}) {
-  const field = config.field ?? "live";
-  const sum = summarizeBaptism(state);
-  let value = "—";
-  let fallback = "";
-  if (field === "live") {
-    if (state && state.phase !== "idle") {
-      // Same calculation as the operator page, so a paused timer on a display shows
-      // the held value rather than freezing at whatever it last happened to render.
-      value = fmtClock(segmentElapsedMs(state, now));
-      if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
-      // Armed reads identically to a just-started baptism otherwise — 0:00 over
-      // "Baptism 1" — which is exactly the ambiguity the operator panel's own
-      // "armed" readout exists to rule out. Same word, kept short for a wall
-      // rather than the panel's full sentence.
-      else if (state.armed) fallback = "armed";
-      else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
-    } else {
-      value = "0:00";
-      fallback = "ready";
-    }
-  } else if (field === "count") {
-    value = String(sum.count);
-    fallback = "baptized";
-  } else if (field === "total") {
-    value = fmtClock(sum.totalMs);
-    fallback = "total time";
-  } else if (field === "average") {
-    value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
-    fallback = "avg per person";
-  } else if (field === "last") {
-    // NOT the last entry in `people` — in grouped mode every testimony is
-    // pushed up front with `baptizeMs: 0`, so the last entry is the last person
-    // who TESTIFIED, not the last one baptized (they agree only on the final
-    // baptism of the session). "Last person" on a stage display has to mean
-    // the last one actually baptized, same rule as `count`'s source.
-    const baptized = state?.people.filter((p) => p.baptizeMs > 0) ?? [];
-    const last = baptized[baptized.length - 1];
-    value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
-    fallback = "last person";
-  } else if (field === "testimony") {
-    // This person's own testimony, once banked — NOT the live segment clock,
-    // which is `live`'s job. While their testimony is still running there is
-    // nothing banked yet, so this ticks the same running value `live` shows;
-    // once the phase moves on to baptizing them it holds at what was banked,
-    // independent of however long the baptism itself then runs.
-    if (!state || state.phase === "idle") {
-      value = "—";
-    } else if (state.phase === "testimony") {
-      value = fmtClock(segmentElapsedMs(state, now));
-    } else {
-      const bankedMs =
-        state.mode === "per-person" ? (state.pendingTestimonyMs ?? 0) : (state.people[state.baptismIndex]?.testimonyMs ?? 0);
-      value = fmtClock(bankedMs);
-    }
-    fallback = "testimony";
-  } else if (field === "session") {
-    // Wall clock since the session started — never paused, unlike the segment:
-    // a session that pauses through a long prayer still reads that time as part
-    // of the session. Freezes at the finished length once the session ends,
-    // rather than continuing to climb while idle before the next one starts.
-    if (!state?.sessionStartedAt) {
-      value = "—";
-    } else {
-      const started = Date.parse(state.sessionStartedAt);
-      const endedMs = state.finishedAt ? Date.parse(state.finishedAt) : now;
-      value = Number.isFinite(started) ? fmtClock(Math.max(0, endedMs - started)) : "—";
-    }
-    fallback = "session";
-  } else if (field === "phase") {
-    // The word, for a stage readout — armed reads as its own word rather than
-    // "baptism", the same distinction `live`'s fallback already draws: armed
-    // has no clock running, and saying "baptism" here would claim one does.
-    value = !state ? "—" : state.armed ? "armed" : state.phase;
-    fallback = "phase";
-  } else if (field === "person") {
-    // In grouped mode `personNumber` is the TESTIMONY counter and freezes once
-    // the baptism section arms — it is not who is being baptized. The person
-    // being baptized is `baptismIndex` (0-based) of `people.length`, which is
-    // only known once the testimony pass has filled `people`. Per-person mode
-    // never has a total, so it is always "Person N". Armed says so rather than
-    // "1 of 7" — indistinguishable from person 1 already being baptized, the
-    // same ambiguity `live`'s armed case already guards against.
-    if (!state || state.phase === "idle") {
-      value = "—";
-    } else if (state.armed) {
-      value = "armed";
-    } else if (state.phase === "testimony" || state.mode === "per-person") {
-      value = `Person ${state.personNumber}`;
-    } else {
-      value = `${state.baptismIndex + 1} of ${state.people.length}`;
-    }
-    fallback = "person";
-  }
-  // Not answered yet. Every field above reads a `null` state as a session with
-  // nothing in it — "0:00 ready", "0 baptized" — which on a wall that has just
-  // reloaded mid-baptism is a claim about a session that is running. The dash;
-  // the other fields' labels only name the box, but `live`'s "ready" is itself
-  // the claim, so it goes too.
-  if (!known) {
-    value = "—";
-    if (field === "live") fallback = "";
-  }
-  // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
-  // measured sweep, because the label rode on the end of the value and the pair
-  // was fitted as one string. Under the value it is a line of its own, and the
-  // value is sized from the box rather than from how long the label happens
-  // to be.
-  return (
-    <Readout
-      caption={config.caption}
-      value={value}
-      sub={config.showLabel ? config.label ?? fallback : null}
-      mono
-            align={align}
-    />
   );
 }
 
@@ -3130,7 +3030,7 @@ function ServiceOrderObject({
 
   const s = o.style ?? {};
   const base = (s.fontSize ?? 0.035) * H * fitScale;
-  const color = s.color ?? "#ffffff";
+  const color = s.color ?? DEFAULT_INK;
 
   if (items.length === 0) {
     // Three different nothings; see noPlanWord.
@@ -3260,8 +3160,18 @@ function collectLayoutTypes(
   };
 
   for (const o of objects ?? []) {
-    const config = o.config;
-    if (config?.type) into.add(config.type);
+    // Read as the renderer reads it: an object saved as one of the four retired
+    // timers is a Timer here too, so it opens the channels its source needs.
+    const config = readConfig(o.config);
+    // A Timer reads ProPresenter or the baptism timer only for those sources, so
+    // it is named by SOURCE: `timer:propresenter` opens the ProPresenter channels,
+    // `timer:baptism` the baptism one, and a service Timer opens neither. A bare
+    // `timer` would open both for any of them, and the ProPresenter channel is
+    // the one whose subscriber holds the server's fallback poll at full rate.
+    if (config?.type === "timer") {
+      const source = timerSource(config);
+      if (source !== "service") into.add(`timer:${source}`);
+    } else if (config?.type) into.add(config.type);
     if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
     if (config?.type === "view-embed") descend(config.viewId);
     // Resolved through the OUTPUT, exactly as the tile does, so a routing change
@@ -3312,7 +3222,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // The state comes FIRST, before the gates that used to be computed above it:
   // an embedded view's objects live in `state.views`, and a gate that cannot see
   // them leaves every widget inside a tile without a channel.
-  const { state, isLoading, error, pcoLive } = useDashboardState();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
   // `views`/`outputs` are fresh array identities on every state broadcast, so
@@ -3398,29 +3308,30 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     "current-service-item",
     "current-slide-notes",
     "current-slide-text",
+    "lyrics",
     "next-service-item",
     "next-slide-text",
-    "pp-timer",
     "section-chip",
     "slide-progress",
     "slide-thumbnail",
+    "timer:propresenter",
   ]);
   const propresenterStatus = useProPresenterStatus(proWanted);
   const propInstances = usePropInstances(proWanted);
-  const baptismStatus = useBaptismStatus(want(["baptism-timer"]));
+  const baptismStatus = useBaptismStatus(want(["timer:baptism"]));
   // service-pacing reads the rundown only for its projected-end mode, and is
   // named whatever its config says: a gate that followed config would open the
   // read one render after the operator flipped the switch, and the projection
   // would sit on a dash until it landed.
   const planItemsStatus = usePlanItemsStatus(want(["service-order", "service-pacing"]));
   const serviceTimeline = useServiceTimeline(want(["service-pacing", "people-graph"]));
-  const integrationsSnap = useIntegrations(want(["integration-status"]));
+  const integrationsSnap = useIntegrations(want(["integration-status", "timer:propresenter"]));
 
   // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3508,7 +3419,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, pcoLiveKnown, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3590,7 +3501,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propresenterKnown: propresenterStatus.known, propInstances, pcoLive, pcoLiveKnown, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

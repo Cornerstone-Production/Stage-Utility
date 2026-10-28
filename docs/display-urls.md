@@ -107,8 +107,8 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | `/baptism` | Baptism operator |
 | `/settings/integrations` | Connected devices and services |
 | `/settings/messages` | Groups of screens, quick messages and quick replies |
-| `/settings/branding` | App name, logos, accent colour |
-| `/settings/advanced` | Updates, network, backups, kiosk devices |
+| `/settings/branding` | App name, logos, accent color |
+| `/settings/advanced` | Updates, network, backups, kiosk devices; one address per tab, `/settings/advanced/<tab>` |
 
 Plus the pages reached from those: `/screens/<view id>/edit` (the layout
 editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
@@ -120,7 +120,7 @@ plan data survive a navigation.
 
 `/log` is not one of them. It is a plain page the server renders itself — an
 operator diagnostic rather than a destination, reachable from
-**Settings → Advanced → Open log**, and gated behind a token when one is set. It
+**Settings → Advanced → Server log**, and gated behind a token when one is set. It
 also answers on `/logs`, which redirects to `/log` with the query string intact;
 both spellings are reserved, so neither can be taken as a display slug. `/log`
 is canonical — it is what the app links to and what these docs quote.
@@ -150,7 +150,10 @@ whole window. The operator's copy of the launcher is `/servicecue/manage`, in th
 sidebar under Content, with the app's usual chrome; `/servicecue/presets`, which
 edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
 of that type without changing the one the app follows; see
-[Plan switcher](features/servicecue-and-baptisms.md#plan-switcher).
+[Plan switcher](features/servicecue-and-baptisms.md#plan-switcher). `?from=<path>`
+names the launcher a rundown was opened from, `/servicecue` or
+`/servicecue/manage`, which its back arrow returns to; without it, or with any
+other path, the arrow goes to `/servicecue`.
 
 ## Polling transport
 
@@ -213,13 +216,13 @@ displays**, and it is global rather than per screen.
 
 ## Icon colors
 
-Every display icon can be retinted by clicking it on the Screens page. The colour
+Every display icon can be retinted by clicking it on the Screens page. The color
 and the glyph are stored under one key, so a change made in one place shows
 everywhere the same thing is drawn. That key is the **view id** for a screen
 showing a control surface — the Screens card and the console's sidebar tab are one
 icon between them — and the **display id** for every other screen.
 
-A colour or glyph set before that key moved is still read off the display id, and
+A color or glyph set before that key moved is still read off the display id, and
 moves onto the current key the next time you change it.
 
 Untinted icons use the theme accent. Clearing a color returns it to that default.

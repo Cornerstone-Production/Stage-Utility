@@ -33,8 +33,11 @@ type Controller = {
 const poller = livePoller as unknown as Poller;
 const controller = stageController as unknown as Controller;
 
-/** The first allowlisted config filename — whichever it is, apply() writes it. */
-const TARGET = configFiles()[0];
+/** A config store, and a value its restore check accepts: a restore refuses a
+ *  file its settings routes would refuse, before anything is written. */
+const TARGET = "rosstalk-settings.json";
+const VALID = { simulate: false };
+assert.ok(configFiles().includes(TARGET));
 
 function snapshotOf(files: Record<string, unknown>) {
   return { kind: "stage-utility-config", version: 1, createdAt: "2026-07-26T00:00:00.000Z", files };
@@ -73,7 +76,7 @@ describe("configSnapshot.apply — failure path", () => {
     await fs.mkdir(path.join(TMP, TARGET, "occupied"), { recursive: true });
 
     await assert.rejects(
-      () => configSnapshot.apply(snapshotOf({ [TARGET]: { anything: true } })),
+      () => configSnapshot.apply(snapshotOf({ [TARGET]: VALID })),
       "a restore that cannot write must report the failure, not swallow it",
     );
 
@@ -90,7 +93,7 @@ describe("configSnapshot.apply — failure path", () => {
     poller.running = true; // poller only
     await fs.mkdir(path.join(TMP, TARGET, "occupied"), { recursive: true });
 
-    await assert.rejects(() => configSnapshot.apply(snapshotOf({ [TARGET]: { anything: true } })));
+    await assert.rejects(() => configSnapshot.apply(snapshotOf({ [TARGET]: VALID })));
 
     assert.equal(poller.running, true);
     assert.equal(controller.autoRefreshTimer, null, "a failed restore turned auto-refresh ON");
@@ -98,7 +101,7 @@ describe("configSnapshot.apply — failure path", () => {
   });
 
   it("leaves the writers stopped on success, because the process is about to exit", async () => {
-    const applied = await configSnapshot.apply(snapshotOf({ [TARGET]: { anything: true } }));
+    const applied = await configSnapshot.apply(snapshotOf({ [TARGET]: VALID }));
     assert.deepEqual(applied, [TARGET]);
     assert.equal(poller.running, false, "a successful restore must NOT resume the poller");
     assert.equal(controller.autoRefreshTimer, null);
@@ -260,5 +263,63 @@ describe("a hand-edited id floor cannot abort a restore half-written", () => {
       !Object.hasOwn(written.idFloors ?? {}, "constructor"),
       "a prototype name was written into settings.json as an id kind",
     );
+  });
+});
+
+// A backup left out what it could not read and reported success, and the
+// scheduler then pruned the older copies that still held it.
+describe("a backup of a config store that cannot be read", () => {
+  const file = path.join(TMP, TARGET);
+
+  afterEach(async () => {
+    await fs.rm(file, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the store out", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    // A directory where the file should be fails the read for root as well.
+    await fs.mkdir(file);
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it("still leaves out a store that has no file yet", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    const bundle = await configSnapshot.build();
+    assert.equal(Object.hasOwn(bundle.files, TARGET), false);
+  });
+});
+
+describe("a backup of an uploaded image that cannot be read", () => {
+  const dir = path.join(TMP, "layout-images");
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the image out", async () => {
+    // A directory where the image should be fails the read for root as well.
+    await fs.mkdir(path.join(dir, "abc.png"), { recursive: true });
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it(
+    "fails when the image directory cannot be listed",
+    { skip: process.getuid?.() === 0 && "running as root, which can list a mode-000 directory" },
+    async () => {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.chmod(dir, 0o000);
+      try {
+        await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EACCES" });
+      } finally {
+        await fs.chmod(dir, 0o700);
+      }
+    },
+  );
+
+  it("still carries an image it can read", async () => {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "abc.png"), "png");
+    const bundle = await configSnapshot.build();
+    assert.deepEqual(Object.keys(bundle.images ?? {}), ["layout-images/abc.png"]);
   });
 });

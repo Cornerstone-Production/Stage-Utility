@@ -74,3 +74,14 @@ test("inside a container, the composer and Messages arrive at their size, held i
     assert.deepEqual(nestedGeometry(type, { x: 0, y: 0, w: 0.2, h: 0.2 }), expected, `${type} depends on the container's size`);
   }
 });
+
+test("a Button arrives with its whole stack inside its box", () => {
+  // The palette's Button is a cue-button, whose face is a lamp, the label and a
+  // line for the room: about 2.5 type sizes tall (0.55em lamp + 1.05em label +
+  // 0.6em room line + two 0.15em gaps). Arithmetic over the real placement and the
+  // real default style; how it LOOKS is checked in a browser.
+  const o = makeObject("cue-button", 1);
+  const fontSize = o.style?.fontSize ?? 0;
+  assert.ok(fontSize > 0, "a Button must start with a font size");
+  assert.ok(fontSize * 2.5 <= o.h, `a Button at ${fontSize} of the canvas height does not fit a box ${o.h} tall`);
+});

@@ -8,6 +8,7 @@ import {
   SIZE_ORDER,
   addCard,
   defaultSize,
+  defaultWhen,
   removeCard,
   setSize,
   setWhen,
@@ -15,7 +16,7 @@ import {
   visibleCards,
   whenOf,
 } from "./home-cards.js";
-import { LAYOUT_OBJECTS } from "../../main/layout-objects.js";
+import { LAYOUT_OBJECTS, defaultStyleFor } from "../../main/layout-objects.js";
 import type { HomeCardSize, LayoutObject } from "@main/types/views";
 
 /** A card, with the geometry Home ignores. */
@@ -70,6 +71,13 @@ describe("defaults", () => {
   test("a card with nothing set falls back to its type's size", () => {
     assert.equal(sizeOf(card("a", "clock")), defaultSize("clock"));
     assert.equal(sizeOf(card("a", "clock", "xl")), "xl");
+  });
+
+  test("a Timer added from the Home picker is the Service card again: extra large, shown while live", () => {
+    assert.equal(defaultSize("timer"), "xl");
+    assert.equal(defaultWhen("timer"), "live");
+    assert.equal(defaultSize("timer"), defaultSize("home-live-status"));
+    assert.equal(defaultWhen("timer"), defaultWhen("home-live-status"));
   });
 
   test("every registry type has a size that exists", () => {
@@ -158,7 +166,58 @@ describe("editing", () => {
     const o = addCard(base, "countdown-timer", "new")[2];
     assert.equal(o.config.type, "countdown-timer");
     assert.deepEqual(o.config, LAYOUT_OBJECTS["countdown-timer"].config());
-    assert.deepEqual(o.style, LAYOUT_OBJECTS["countdown-timer"].style());
+    // The style the editor gives a widget placed on Home, which is the wall
+    // style less its ink: the readout keeps its size and weight.
+    assert.deepEqual(o.style, defaultStyleFor("countdown-timer", { hostDrawsFrame: true }));
+    const wall = LAYOUT_OBJECTS["countdown-timer"].style();
+    assert.equal(o.style.fontSize, wall.fontSize);
+    assert.equal(o.style.fontWeight, wall.fontWeight);
+  });
+
+  test("THE GUARD: no widget added on Home carries an explicit text colour", () => {
+    // A wall style names white for a black screen. Home's card follows the
+    // theme, so a white ink copied onto it is white on white in the light
+    // theme: every added Text, Clock and Current item drew a blank card.
+    // Every type, not a sample, so a new widget cannot bring it back.
+    const inked = Object.keys(LAYOUT_OBJECTS)
+      .filter((t) => (addCard(base, t, "new")[2].style as { color?: string }).color !== undefined)
+      .sort();
+    assert.deepEqual(inked, []);
+  });
+
+  test("a wall placement keeps its colour exactly", () => {
+    // The fix is Home's. On a black wall the white ink is right, and the blue
+    // of the People graph is a choice, so every wall style keeps its colour.
+    const lost = (Object.keys(LAYOUT_OBJECTS) as (keyof typeof LAYOUT_OBJECTS)[])
+      .filter((t) => !LAYOUT_OBJECTS[t].homeStyle)
+      .filter((t) => (defaultStyleFor(t, { hostDrawsFrame: false }) as { color?: string }).color !== (LAYOUT_OBJECTS[t].style() as { color?: string }).color)
+      .sort();
+    assert.deepEqual(lost, []);
+    assert.equal((defaultStyleFor("text", { hostDrawsFrame: false }) as { color?: string }).color, "#ffffff");
+    assert.equal((defaultStyleFor("people-graph", { hostDrawsFrame: false }) as { color?: string }).color, "#5b9cff");
+  });
+
+  test("a Timer added on Home carries no explicit text colour, so the theme's ink shows on Home's card", () => {
+    // The wall readout style names a white ink, which on Home's light card is
+    // white on white. The Service card this Timer replaces was bare.
+    const o = addCard(base, "timer", "new")[2];
+    assert.deepEqual(o.style, {});
+    assert.equal((o.style as { color?: string }).color, undefined);
+    // On a wall it keeps the readout style, white ink and card included.
+    assert.equal((LAYOUT_OBJECTS.timer.style() as { color?: string }).color, "#ffffff");
+    assert.equal((defaultStyleFor("timer", { hostDrawsFrame: false }) as { color?: string }).color, "#ffffff");
+    assert.deepEqual(defaultStyleFor("timer", { hostDrawsFrame: true }), {});
+  });
+
+  test("only the Timer has a Home style of its own; every other widget is its wall style less the ink", () => {
+    const differing = Object.entries(LAYOUT_OBJECTS)
+      .filter(([, spec]) => spec.homeStyle)
+      .map(([type]) => type)
+      .sort();
+    // Sorted, one per line: two branches adding a type each then merge cleanly.
+    assert.deepEqual(differing, [
+      "timer",
+    ]);
   });
 
   test("removing takes exactly one card", () => {

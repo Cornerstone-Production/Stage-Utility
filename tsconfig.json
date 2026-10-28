@@ -24,7 +24,12 @@
     "renderer",
     "server.ts",
     "vite.config.ts",
-    "main/**/*.test.ts"
+    "vite.servicecue.config.ts",
+    "scripts/servicecue-bundle.ts",
+    "scripts/servicecue-bundle*.test.ts",
+    "scripts/servicecue-deploy*.test.ts",
+    "main/**/*.test.ts",
+    "publish/servicecue/src/**/*.test.ts"
   ],
   "exclude": [
     "node_modules"

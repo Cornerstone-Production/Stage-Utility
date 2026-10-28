@@ -1,0 +1,32 @@
+# Functions whose result cannot carry a newline or a terminal escape into a log line.
+#
+# Only a function that removes or escapes EVERY control character belongs here,
+# because /log renders one record per line and a terminal reading the log obeys an
+# escape. js/log-injection stops at a model's barrier; it does not honour a
+# barrier GUARD, so a predicate such as isPcoId or isDisplayKind (which does
+# narrow a value to digits or to a fixed word) cannot be modelled for this query.
+#
+#   scrub, scrubError   escape C0, DEL, C1 and the Unicode line separators
+#   filenameSlug        keeps [a-z0-9-]
+#   slugForCue          keeps [a-z0-9_]
+#   layerSlug           keeps [a-z0-9_]
+#
+# sanitiseRaw (rosstalk-commands.ts) is deliberately absent. It strips CR and LF,
+# which the stock query already accepts, and leaves every other control character,
+# escape included, so a model would claim more than it does.
+#
+# scrub's own replace(/\n/g, "") already satisfies the stock query; the model keeps
+# it a barrier if that line goes.
+#
+# Tested by .github/codeql/tests/models (fixtures: main/services/log-barriers.ts)
+# and, for the paths, by scripts/codeql-workflow.test.ts.
+extensions:
+  - addsTo:
+      pack: codeql/javascript-all
+      extensible: barrierModel
+    data:
+      - ["file:main/services/scrub.ts", "Member[scrub].ReturnValue", "log-injection"]
+      - ["file:main/services/scrub.ts", "Member[scrubError].ReturnValue", "log-injection"]
+      - ["file:main/services/export-filename.ts", "Member[filenameSlug].ReturnValue", "log-injection"]
+      - ["file:main/services/companion-export.ts", "Member[slugForCue].ReturnValue", "log-injection"]
+      - ["file:main/services/builtin-cues.ts", "Member[layerSlug].ReturnValue", "log-injection"]

@@ -94,9 +94,10 @@ describe("the wall palette is unchanged", () => {
   });
 
   it("a Home card with no wall equivalent is NOT hidden", () => {
-    // Readiness, Next service, Service timer, Recent services, Screens online.
-    // Hiding these removes the reading rather than relocating it.
-    for (const t of ["home-readiness", "home-next-service", "home-live-status", "home-recent-services", "home-screens"]) {
+    // Readiness, Next service, Recent services, Screens online. Hiding these
+    // removes the reading rather than relocating it. (The Service timer is not
+    // here: it is the Timer now, which is offered on both surfaces.)
+    for (const t of ["home-readiness", "home-next-service", "home-recent-services", "home-screens"]) {
       assert.ok(!SUPERSEDED_ON_WALL.has(t as never), `${t} has no wall twin, so hiding it removes the reading`);
     }
   });
@@ -118,13 +119,26 @@ describe("the wall palette is unchanged", () => {
     // already has is the mirror of this question and has not been asked.
     const onWall = PALETTE_GROUPS.flatMap((g) => g.types as readonly string[]);
     //
-    // NINE until the per-source cards were retired. `home-streaming-resi` and
+    // The list was nine long until the per-source cards were retired. `home-streaming-resi` and
     // `home-streaming-youtube` have no wall twin, so they were never in
     // SUPERSEDED_ON_WALL and counted here — retiring them takes them out of the
     // palette entirely. The other two retirements were already excluded, having
     // twins in `obs-status` and `reaper-status`.
+    //
+    // `home-live-status` is retired into the Timer, so it is not here.
     const offered = onWall.filter((t) => t.startsWith("home-") && !SUPERSEDED_ON_WALL.has(t as never));
-    assert.equal(offered.length, 7, `expected 7 Home cards still offered on a wall, found ${offered.length}`);
+    assert.deepEqual(
+      offered.sort(),
+      [
+        "home-next-service",
+        "home-readiness",
+        "home-recent-services",
+        "home-scores",
+        "home-screens",
+        "home-streaming",
+      ],
+      "the Home cards a wall still offers changed — update this list deliberately",
+    );
   });
 });
 

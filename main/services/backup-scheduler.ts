@@ -13,7 +13,7 @@
 // per missed interval. And a run that fails leaves the previous backups untouched:
 // pruning happens after a successful write, never before.
 
-import { clamp } from "./clamp.js";
+import { clampSchedule } from "./settings-rules.js";
 import { errorMessage } from "./errors.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -56,14 +56,6 @@ const TICK_MS = 15 * 60_000;
 
 const CONFIG_PREFIX = "config-";
 const ARCHIVE_PREFIX = "archive-";
-
-function clampSchedule(s: Partial<BackupSchedule>): Partial<BackupSchedule> {
-  const out = { ...s };
-  if (out.intervalDays != null) out.intervalDays = clamp(Math.round(out.intervalDays), 1, 365);
-  if (out.keep != null) out.keep = clamp(Math.round(out.keep), 1, 100);
-  if (out.destination != null) out.destination = out.destination.trim();
-  return out;
-}
 
 /** A filename-safe stamp, so the newest sorts last and a name never collides. */
 function stamp(now: Date): string {
@@ -128,12 +120,13 @@ class BackupScheduler {
       await fs.mkdir(dir, { recursive: true });
       const at = stamp(new Date());
 
+      // Both built before either is written. The archive refuses while a
+      // recorded file cannot be read, and a run that had written its config
+      // first left one more unpruned copy behind on every retry.
       const bundle = await configSnapshot.build(`Automatic ${at}`);
+      const archive = sched.includeArchive ? await buildArchive() : null;
       await atomicWrite(path.join(dir, `${CONFIG_PREFIX}${at}.json`), JSON.stringify(bundle, null, 2));
-
-      if (sched.includeArchive) {
-        await atomicWrite(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(await buildArchive()));
-      }
+      if (archive) await atomicWrite(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(archive));
 
       // Only after a successful write — a failed run must not delete the copies
       // that are still good.

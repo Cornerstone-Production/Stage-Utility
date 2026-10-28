@@ -1,7 +1,13 @@
 // The Mac output helper's CI workflow (.github/workflows/helper-macos.yml).
 //
 // It has to run for every pull request that touches the helper and build and test
-// the Swift package there, on a Mac new enough for swift-testing. The workflow is
+// the Swift package there, on a Mac new enough for swift-testing. A gate job on Ubuntu
+// decides whether it does, from the files the change touched, which the shared
+// changed-files action lists (.github/actions/changed-files); the Mac job is skipped,
+// not queued, when the change leaves the helper alone. The gate's own shell is run
+// here after the action's, with a stand-in for `gh`, for each path the workflow used
+// to filter on, for an unrelated one, and for the release pull request (beta into
+// main), where a push is judged by the files that push changed. The workflow is
 // parsed, not searched, and its steps' own shell is run on a temporary tree with
 // `swift`, `sudo` and `xcode-select` stood in for, so a step that no longer builds,
 // no longer stops on a failed build, or picks an Xcode too old goes red.
@@ -21,10 +27,12 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 
+import { type Entry, type Event, RELEASE_PUSH, listChanged } from "./changed-files-test-helpers.js";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW = path.join(HERE, "..", ".github", "workflows", "helper-macos.yml");
 const RELEASE = path.join(HERE, "..", ".github", "workflows", "release.yml");
-const SELECT_XCODE = "./.github/actions/select-xcode";
+const SELECT_XCODE = "$/.github/actions/select-xcode";
 const SELECT_XCODE_FILE = path.join(HERE, "..", ".github", "actions", "select-xcode", "action.yml");
 
 interface Step {
@@ -34,6 +42,11 @@ interface Step {
   with?: Record<string, unknown>;
 }
 interface Job {
+  name?: string;
+  needs?: string;
+  if?: string;
+  permissions?: Record<string, string>;
+  outputs?: Record<string, string>;
   "runs-on"?: string;
   "timeout-minutes"?: number;
   steps?: Step[];
@@ -42,12 +55,14 @@ interface Action {
   runs: { using?: string; steps?: (Step & { shell?: string })[] };
 }
 interface Workflow {
-  on: Record<string, { paths?: string[] } | null>;
+  on: Record<string, unknown>;
   permissions?: Record<string, string>;
   jobs: Record<string, Job>;
 }
 const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as Workflow;
 const job = doc.jobs["swift"];
+const gateJob = doc.jobs["gate"];
+const LOCAL = SELECT_XCODE.replace("select-xcode", "changed-files");
 const action = parse(fs.readFileSync(SELECT_XCODE_FILE, "utf8")) as Action;
 const releaseHelper = (parse(fs.readFileSync(RELEASE, "utf8")) as Workflow).jobs["helper"];
 
@@ -70,32 +85,186 @@ function stubs(log: string, commands: Record<string, string>): string {
 }
 
 describe("the helper's CI workflow runs for every pull request that touches the helper", () => {
-  it("is triggered by pull requests on the helper, the installer script its tests read, or this workflow, and by hand, nothing else", () => {
+  it("is triggered by every pull request and by hand, nothing else; the gate job decides which touch the helper", () => {
     assert.deepEqual(Object.keys(doc.on).sort(), ["pull_request", "workflow_dispatch"]);
-    assert.deepEqual(doc.on.pull_request?.paths, [
-      "helper/**",
-      "scripts/kiosk/install-macos.sh",
-      ".github/workflows/helper-macos.yml",
-      ".github/actions/select-xcode/**",
-    ]);
+    // A workflow-level paths filter judges the whole pull request, which for the release pull request always holds the helper.
+    assert.equal(doc.on["pull_request"], null);
   });
 
-  it("reads the repository and nothing else", () => {
+  it("reads the repository and nothing else, the gate adding only the pull request", () => {
     assert.deepEqual(doc.permissions, { contents: "read" });
+    assert.deepEqual(gateJob.permissions, { contents: "read", "pull-requests": "read" });
   });
 
-  it("runs on a macOS 14 or later runner, with a bounded run", () => {
-    assert.deepEqual(Object.keys(doc.jobs), ["swift"]);
+  it("has a gate on Ubuntu and a build on macOS 14 or later, with bounded runs", () => {
+    assert.deepEqual(Object.keys(doc.jobs), ["gate", "swift"]);
+    assert.equal(gateJob["runs-on"], "ubuntu-latest");
+    assert.ok(typeof gateJob["timeout-minutes"] === "number" && gateJob["timeout-minutes"] <= 10);
     const runsOn = /^macos-(\d+)$/.exec(String(job["runs-on"]));
     assert.ok(runsOn, `runs-on is ${String(job["runs-on"])}`);
     assert.ok(Number(runsOn[1]) >= 14, "the helper needs macOS 14 or later");
     assert.ok(typeof job["timeout-minutes"] === "number" && job["timeout-minutes"] <= 60, "an unbounded macOS job");
   });
 
+  it("builds when the gate says so, when the gate did not succeed, and always on a manual run", () => {
+    assert.equal(job.needs, "gate");
+    // A gate that failed or was cancelled by an error runs the build rather than skipping it.
+    assert.equal(
+      job.if,
+      "${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.gate.result != 'success' || needs.gate.outputs.run == 'true') }}",
+    );
+    // The gate has nothing to list on a manual run, so it does not run there.
+    assert.equal(gateJob.if, "${{ github.event_name == 'pull_request' }}");
+    assert.deepEqual(gateJob.outputs, { run: "${{ steps.gate.outputs.run }}" });
+  });
+
+  it("names its jobs without an expression, because a skipped job shows its name unevaluated", () => {
+    for (const j of Object.values(doc.jobs)) assert.doesNotMatch(String(j.name), /\$\{\{/);
+  });
+
+  it("lists the files with the shared action, from a sparse checkout, before the gate reads them", () => {
+    const steps = gateJob.steps ?? [];
+    assert.deepEqual(
+      steps.map((s) => (s as { id?: string }).id ?? s.uses?.replace(/@.*/, "")),
+      ["actions/checkout", "files", "gate"],
+    );
+    assert.deepEqual(steps[0].with, { "sparse-checkout": ".github/actions", "persist-credentials": false });
+    assert.equal(steps[1].uses, LOCAL);
+    assert.deepEqual(steps[1].with, { token: "${{ github.token }}" });
+    assert.deepEqual((steps[2] as { env?: unknown }).env, { ALL: "${{ steps.files.outputs.all }}", FILES: "${{ steps.files.outputs.file }}" });
+  });
+
   it("pins every action to a commit, the one in this repository excepted", () => {
-    const uses = (job.steps ?? []).flatMap((s) => (s.uses && s.uses !== SELECT_XCODE ? [s.uses] : []));
+    const uses = [...(gateJob.steps ?? []), ...(job.steps ?? [])].flatMap((s) =>
+      s.uses && s.uses !== SELECT_XCODE && s.uses !== LOCAL ? [s.uses] : [],
+    );
     assert.ok(uses.length > 0);
     for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
+  });
+});
+
+describe("the gate runs the Mac build for the helper's paths and for nothing else", () => {
+  const gate = (gateJob.steps ?? []).find((s) => (s as { id?: string }).id === "gate");
+
+  /** The changed-files action's own shell, then the gate's own shell on what it wrote. */
+  function decide(c: Omit<Event, "via"> & { via?: Event["via"] }): { run: boolean; calls: string[]; log: string } {
+    assert.ok(gate?.run, "no gate step");
+    const listed = listChanged({ via: c.event === "pull_request" ? "pr" : "none", ...c });
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "su-helper-gate-"));
+    try {
+      const out = path.join(tmp, "output");
+      const file = path.join(tmp, "files.txt");
+      fs.writeFileSync(out, "");
+      fs.writeFileSync(file, listed.files.map((f) => `${f}\n`).join(""));
+      // Actions runs a `run:` step with no `shell:` as `bash -e {0}`.
+      const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", gate.run], {
+        encoding: "utf8",
+        env: { PATH: process.env["PATH"] ?? "", GITHUB_OUTPUT: out, ALL: String(listed.all), FILES: file },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      assert.ok(/^run=(true|false)\n$/.test(fs.readFileSync(out, "utf8")), fs.readFileSync(out, "utf8"));
+      return { run: fs.readFileSync(out, "utf8") === "run=true\n", calls: listed.calls, log: listed.log + r.stdout };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+  const pr = (...files: Entry[]) => decide({ event: "pull_request", files });
+
+  // The workflow's own paths filter, until the gate replaced it.
+  const RUNS = [
+    "helper/macos/Package.swift",
+    "helper/macos/Sources/DeckLinkKit/CardSink.swift",
+    "helper/README.md",
+    "scripts/kiosk/install-macos.sh",
+    ".github/workflows/helper-macos.yml",
+    ".github/actions/select-xcode/action.yml",
+  ];
+  const SKIPS = [
+    "main/server.ts",
+    "docs/contributing.md",
+    "package.json",
+    "scripts/kiosk/install-windows.sh",
+    "scripts/kiosk/install-macos.sh.bak",
+    "helper-notes.md",
+    "docs/helper/macos/x.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/helper-macos.yml.bak",
+    ".github/actions/changed-files/action.yml",
+    ".github/actions/select-xcode-notes.md",
+  ];
+
+  it("runs for a pull request that touches each path the helper's tests read", () => {
+    for (const f of RUNS) assert.equal(pr("docs/a.md", f).run, true, f);
+  });
+
+  it("skips for a pull request that touches none of them, look-alikes included", () => {
+    assert.deepEqual(pr(...SKIPS).run, false);
+    for (const f of SKIPS) assert.equal(pr(f).run, false, f);
+  });
+
+  it("counts the path a renamed file came from", () => {
+    assert.equal(pr({ filename: "docs/Moved.swift", previous_filename: "helper/macos/Sources/Moved.swift" }).run, true);
+  });
+
+  describe("on the release pull request, beta into main", () => {
+    const compare = [`repos/o/r/compare/${"1".repeat(40)}...${"2".repeat(40)}`];
+    const whole = ["repos/o/r/pulls/1/files"];
+
+    it("runs for a push that changed a helper path, and skips for one that did not", () => {
+      for (const f of RUNS) {
+        const r = decide({ ...RELEASE_PUSH, via: "compare", files: ["docs/a.md", f] });
+        assert.equal(r.run, true, f);
+        assert.deepEqual(r.calls, compare, f);
+      }
+      const r = decide({ ...RELEASE_PUSH, via: "compare", files: SKIPS });
+      assert.equal(r.run, false);
+      // The comparison, never the pull request's own files, which always hold the helper.
+      assert.deepEqual(r.calls, compare);
+    });
+
+    it("lists the whole pull request when it is opened or reopened", () => {
+      for (const action of ["opened", "reopened"]) {
+        const r = decide({ ...RELEASE_PUSH, action, via: "pr", files: ["docs/a.md", "helper/macos/Package.swift"] });
+        assert.equal(r.run, true, action);
+        assert.deepEqual(r.calls, whole, action);
+        assert.equal(decide({ ...RELEASE_PUSH, action, via: "pr", files: SKIPS }).run, false, action);
+      }
+    });
+
+    it("lists the whole pull request for any other branch, and for a fork's branch named beta", () => {
+      for (const head of [{ headRef: "feature/x", headRepo: "o/r" }, { headRef: "beta", headRepo: "someone/r" }, { headRef: "beta", headRepo: "" }]) {
+        const r = decide({ ...RELEASE_PUSH, ...head, via: "pr", files: ["docs/a.md", "helper/macos/Package.swift"] });
+        assert.equal(r.run, true, JSON.stringify(head));
+        assert.deepEqual(r.calls, whole, JSON.stringify(head));
+      }
+    });
+
+    it("lists the whole pull request when the event has no real previous commit", () => {
+      for (const before of ["", "0".repeat(40)]) {
+        const r = decide({ ...RELEASE_PUSH, before, via: "pr", files: ["docs/a.md"] });
+        assert.deepEqual(r.calls, whole, JSON.stringify(before));
+        assert.equal(r.run, false, JSON.stringify(before));
+      }
+    });
+  });
+
+  it("runs, and says why, when the files cannot be listed, none are listed, or the listing may be cut off", () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `docs/page-${i}.md`);
+    const cases: [string, Parameters<typeof decide>[0], RegExp][] = [
+      ["pull request, API failure", { event: "pull_request", files: "error" }, /could not list the pull request's files/],
+      ["pull request, empty", { event: "pull_request", files: [] }, /no files listed/],
+      ["pull request, 3000 files", { event: "pull_request", files: many(3000) }, /file list may be truncated/],
+      ["release push, API failure", { ...RELEASE_PUSH, via: "compare", files: "error" }, /could not compare the push to the release pull request/],
+      ["release push, empty", { ...RELEASE_PUSH, via: "compare", files: [] }, /no files listed/],
+      ["release push, 300 files", { ...RELEASE_PUSH, via: "compare", files: many(300) }, /file list may be truncated/],
+    ];
+    for (const [name, c, why] of cases) {
+      const r = decide(c);
+      assert.equal(r.run, true, name);
+      assert.match(r.log, why, name);
+    }
+    assert.equal(decide({ event: "pull_request", files: many(2999) }).run, false);
+    assert.equal(decide({ ...RELEASE_PUSH, via: "compare", files: many(299) }).run, false);
   });
 });
 

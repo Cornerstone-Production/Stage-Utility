@@ -71,6 +71,7 @@ describe("what the operator set is still there after a restart", () => {
     assert.deepEqual(keys, [
       "allowedServiceTypeIds",
       "autoUpdate",
+      "autoUpdateMachines",
       "baptismAutoStart",
       "captionChannelColors",
       "cardHairlineRaised",

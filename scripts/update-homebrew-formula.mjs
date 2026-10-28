@@ -6,17 +6,13 @@
 // skipped, and a formula with a stale checksum fails to install with an error
 // that reads like a corrupted download.
 //
-// Reads the checksums the release already publishes rather than re-hashing
-// anything, so the formula can only ever agree with what was actually shipped.
+// Reads the checksums scripts/build-artifacts.sh wrote rather than re-hashing
+// anything, so the formula can only ever agree with what was actually built.
 //
 //   node scripts/update-homebrew-formula.mjs <version> --sums path/to/SHA256SUMS
 //
-// The checksum file is always a local path, never fetched here. The release
-// workflow already has it — it built it — and a script that writes a file people
-// install from should not also be the thing deciding what to trust off the
-// network. To run this by hand, download it first:
-//
-//   gh release download v<version> --pattern SHA256SUMS
+// SHA256SUMS is local to the build (scripts/build-artifacts.sh writes it beside the
+// archives), not a release asset, and is always a path, never fetched here.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -29,7 +25,7 @@ const version = process.argv[2];
 const sumsArg = process.argv.indexOf("--sums");
 if (!version || sumsArg === -1 || !process.argv[sumsArg + 1]) {
   console.error("usage: update-homebrew-formula.mjs <version> --sums <SHA256SUMS>");
-  console.error("  get the file with: gh release download v<version> --pattern SHA256SUMS");
+  console.error("  the file is written by scripts/build-artifacts.sh, beside the archives it built");
   process.exit(1);
 }
 

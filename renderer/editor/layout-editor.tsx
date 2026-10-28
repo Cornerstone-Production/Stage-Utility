@@ -5,6 +5,7 @@ import { toast } from "../components/ui/toast";
 import { errorMessage } from "@main/services/errors";
 import { logToServer } from "../lib/client-log";
 import { UnsavedChangesDialog } from "./unsaved-changes-dialog";
+import { useLatestRef } from "../lib/use-latest-ref";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import {
   UndoIcon,
@@ -83,6 +84,7 @@ import {
   objectIntegration,
   typeLabel,
 } from "../main/layout-objects";
+import { displayType, readTimerObject } from "../main/timer-config";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
 import { HOME_VIEW_ID } from "@main/services/home-view";
@@ -435,7 +437,7 @@ function OverlayNode({
           }}
         >
           {locked && <LockIcon style={{ width: 9, height: 9 }} />}
-          {typeLabel(o.config.type)}
+          {typeLabel(displayType(o.config))}
         </span>
       )}
       {/* On a coarse pointer, the menu's only other way in is a 500ms hold —
@@ -451,7 +453,7 @@ function OverlayNode({
       {isCoarse && inSel && onContextMenu && (
         <button
           type="button"
-          aria-label={`${typeLabel(o.config.type)} options`}
+          aria-label={`${typeLabel(displayType(o.config))} options`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -1652,10 +1654,14 @@ export function LayoutEditor({
     if (parent) forEachWithRect(objects, (n) => { if (n.o.id === parent.id) selParentAbs = n.abs; });
   }
 
+  // The snapshot is read when pushHistory is CALLED, not when the callback was made: an
+  // async caller (Make it a cue, an image upload, Fit box to file) holds the pushHistory
+  // of the click and would otherwise push the layout as it was then, over edits made since.
+  const objectsNow = useLatestRef(objects);
   const pushHistory = useCallback(() => {
-    setHistory((h) => [...h.slice(-49), objects]);
+    setHistory((h) => [...h.slice(-49), objectsNow.current]);
     setDirty(true);
-  }, [objects]);
+  }, [objectsNow]);
 
   function update(id: string, patch: Partial<LayoutObject>) {
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...patch })));
@@ -1674,10 +1680,11 @@ export function LayoutEditor({
    * operator's separate decisions and are not this button's business.
    */
   function resetLook(id: string) {
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(o.config.type, { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(displayType(o.config), { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
+    // A retired timer is written as a Timer, with the Home slot it held pinned.
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...readTimerObject(o, view.id === HOME_VIEW_ID), config })));
   }
   // Geometry updates during a drag don't each push history (startDrag already did).
   const onGeom = useCallback((id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => {
@@ -2146,7 +2153,7 @@ export function LayoutEditor({
           onClick={() => setAlignOn((v) => !v)}
           aria-label="Toggle align to objects"
           aria-pressed={alignOn}
-          tooltip="Snap to other objects' edges, centres and spacing. Hold Alt while dragging to place freely."
+          tooltip="Snap to other objects' edges, centers and spacing. Hold Alt while dragging to place freely."
         >
           <AlignHorizontalDistributeCenterIcon className="size-3.5" /> Align
         </Button>
@@ -2228,9 +2235,9 @@ export function LayoutEditor({
                     so without min-w-0 the second field ran off the popover's
                     right edge. */}
                 <div className="flex items-center gap-1">
-                  <NumberField className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <NumberField aria-label="Canvas width" className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
                   <span className="text-caption2 text-fg-subtle">×</span>
-                  <NumberField className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                  <NumberField aria-label="Canvas height" className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -2331,6 +2338,7 @@ export function LayoutEditor({
           onConfirm={async () => { await onSaveTemplate(tplName.trim(), currentLayout()); setTplName(""); }}
         >
           <Input
+            aria-label="Layout name"
             value={tplName}
             onChange={(e) => setTplName(e.target.value)}
             placeholder="Layout name (e.g. Lyrics + Timer)"
@@ -2393,7 +2401,7 @@ export function LayoutEditor({
               // must preview what that surface will draw.
               // The editor's own canvas is never the real screen a switched-off
               // display would refuse HLS on, so a Video widget here always may.
-              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, screen: null }}
+              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, propresenterKnown: data.propresenterStatus.known, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, screen: null }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
@@ -2538,7 +2546,7 @@ export function LayoutEditor({
                   />
                 )}
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
-                  {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
+                  {typeLabel(displayType(o.config)) + (o.config.type === "container" ? ` (${o.children?.length ?? 0})` : "")}
                 </span>
                 {depth > 0 && (
                   <Tooltip label="Move out of container">
@@ -2704,6 +2712,7 @@ export function LayoutEditor({
             </DialogDescription>
           </DialogHeader>
           <Input
+            aria-label="Group name"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="Group name (e.g. Vocal notes panel)"

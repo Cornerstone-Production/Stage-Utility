@@ -12,7 +12,7 @@
 // SplitView needs the same values to size the panel and to decide between the
 // inline rail and the mobile drawer.
 
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { ConsoleRailIcon } from "../components/console-rail-icon";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -30,15 +30,16 @@ import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { ContextMenu } from "../components/ui/context-menu";
 import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
+import { plural } from "@main/services/plural";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
 import { consolePageFor, resolvePage, sidebarConsoleList } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
-import { isUpdateAvailable } from "@main/services/update/availability";
 import { useUpdateStatus } from "./queries";
 import { useNotSetUpCount } from "./screens/use-devices";
+import { advancedRailPath, useAdvancedSignals } from "./advanced-signals";
 import {
   ALL_DESTINATIONS,
   DESTINATIONS,
@@ -51,6 +52,8 @@ import { cn } from "../lib/cn";
 
 /** The Screens page's route: the row that carries the count of screens not set up. */
 const SCREENS_PATH = "/screens";
+/** The Advanced destination's route, whose row carries the update dot and the host names count. */
+const ADVANCED_PATH = "/settings/advanced";
 
 /** A count on a nav row. The row positions it; this is only what it looks like.
  *  Smaller in the collapsed rail, where the row is 40x32 and the badge sits in its
@@ -108,11 +111,15 @@ export function Rail({
   // the moment anything changed and stayed stale until a reload.
   const { data: updateStatus, error: updateError } = useUpdateStatus();
   const versionError = updateError ? errorMessage(updateError) : null;
-  const updateAvailable = isUpdateAvailable(updateStatus);
   // Devices heard on the network and not set up. From every page, not just
   // Screens: the server records them with no scan, and tells this tab on the
   // channel Screens already listens to, so a screen switched on is noticed here.
   const notSetUpCount = useNotSetUpCount();
+  // Names the server was reached by that wait for an accept or a dismiss, on the
+  // Host names card under Advanced. A count of NAMES, not requests: one display
+  // asks every few seconds, and the number to act on is how many need a decision.
+  const advancedSignals = useAdvancedSignals();
+  const { updateAvailable, hostNamesWaiting } = advancedSignals;
 
   // A rail entry per console View the operator has not hidden from the sidebar.
   // A hidden console is still a page — the shell titles it from the full list —
@@ -191,7 +198,10 @@ export function Rail({
           }
           // Crossfade between destinations. Feature-detected and skipped under
           // prefers-reduced-motion inside the helper.
-          withViewTransition(() => router.navigate({ to: d.path }));
+          // The Advanced row goes to the tab its mark is about (Updates for the
+          // dot, Network for the count), not to a page that opens on General.
+          const to = d.path === ADVANCED_PATH ? advancedRailPath(advancedSignals) : d.path;
+          withViewTransition(() => router.navigate({ to }));
         }}
         getItemKey={(d: Destination) => d.path}
       >
@@ -244,15 +254,25 @@ export function Rail({
           // Advanced is where an update is installed, so it is where the dot
           // goes. It follows AVAILABILITY, not whether the toast fired: dismiss
           // a toast and the dot stays until the update is actually taken.
-          const flagged = updateAvailable && d.path === "/settings/advanced";
+          // Host names waiting for a decision live there too, and take the
+          // badge as a count, the way Screens counts devices not set up.
+          const advanced = d.path === ADVANCED_PATH;
+          const flagged = updateAvailable && advanced;
+          const names = advanced ? hostNamesWaiting : 0;
+          const said: string[] = [];
+          if (flagged) said.push("update available");
+          if (names > 0) said.push(`${plural(names, "host name")} waiting`);
+          let badge: ReactNode;
+          if (names > 0) badge = <CountBadge count={names} compact={railed} />;
+          else if (flagged) badge = <span title="Update available" className="block size-1.5 rounded-full bg-accent" />;
           return (
             <SidebarListItem
               key={d.path}
               item={d}
               icon={d.icon}
               title={d.label}
-              ariaLabel={flagged ? `${d.label}, update available` : undefined}
-              badge={flagged ? <span title="Update available" className="block size-1.5 rounded-full bg-accent" /> : undefined}
+              ariaLabel={said.length > 0 ? `${d.label}, ${said.join(", ")}` : undefined}
+              badge={badge}
             />
           );
         })}

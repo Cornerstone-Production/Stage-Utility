@@ -388,7 +388,7 @@
      duration instead of pulsing. */
   @keyframes su-flash-pulse {
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
-    15%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent); }
+    15%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent) 55%, transparent); }
   }
   .su-flash {
     animation: su-flash-pulse 2s ease-in-out;
@@ -490,7 +490,7 @@
        a static ring rather than keeping one. */
     .su-flash {
       animation: none;
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent) 55%, transparent);
     }
   }
 
@@ -659,11 +659,24 @@
        --amber-11 (#ab6400) → 4.29:1, under the 4.5:1 floor for the 11px type
        the calendar states a failure in. The dark #ffca16 is 12.93:1.
 
+     --red-11 (#ce2c31) is the same trap for the "over" colour: on this ground it
+     is 3.5:1 on the #141414 card, where the dark #ff9592 is 8.7:1. ProVideoPlayer now turns its
+     time red near the end of a clip, and the layout editor's preview in the
+     light app drew a dimmer red than the wall does.
+
      Literals, matching the .dark values of the same Radix steps, for the same
      reason the eleven above are literals: redefining --gray-a5 here would reach
      everything else derived from it. */
   --color-fill-active:    rgba(255, 255, 255, 0.13);
   --color-warn-11:        #ffca16;
+  --color-danger-11:      #ff9592;
+
+  /* The same trap for the OK colour: --green-11 in the light theme (#218358) is a
+     dark green picked for #f7f8fa, and on this ground it is far under the 4.5:1
+     floor. The Listen button's "Listening" caption is drawn on a scrim over live
+     video inside a kiosk surface, in either theme. The dark value is Radix's own
+     green-11, the same literal rule as the others above. */
+  --color-ok-11:          #3dd68c;
 }
 
 /* The accent, on a kiosk surface embedded in the LIGHT app only.
@@ -729,14 +742,41 @@
 /* Printing a patch sheet — the copy that gets taped to the rack.
    Everything that is not the patch is chrome, and chrome wastes paper.
 
-   The app is a dark UI; printed as-is it is grey-on-grey and eats toner, so the
-   patch area is forced back to black on white. The table is a CSS grid of divs
-   rather than a <table>, so `display: table-header-group` is not available —
-   the column header instead repeats per rack group, which the layout already
-   does, and groups are kept off page boundaries. */
+   Two jobs. First, make the page BE the sheet: the operator shell is a
+   viewport-tall box that clips its overflow, with a rail and a context strip
+   beside the content, so printed as-is it is one cropped page with the sidebar
+   on it. When a `.patch-print-sheet` is on the page, every element that neither
+   holds the sheet nor sits inside it is dropped, and every element that holds it
+   is released from its height, clipping and flex/grid layout. This is keyed on
+   the sheet's presence, so no other page prints differently.
+
+   Second, ink. The app is a dark UI; printed as-is it is grey-on-grey and eats
+   toner, so the patch area is forced back to black on white. The sheet is a real
+   <table>, so each rack's header row repeats when a rack runs onto a second page.
+   Device colour survives as the small dot beside a hop and a rack's name, which
+   is all the colour a black-and-white printer needs to lose. */
 @media print {
+  /* Chrome inside the sheet (the ripple bar, "+ hop"). Elsewhere on the page it
+     is belt and braces: the rule below already drops what does not hold the sheet. */
   .patch-print-hide {
     display: none !important;
+  }
+
+  /* Only the sheet, and what holds it. */
+  :root:has(.patch-print-sheet) :not(:has(.patch-print-sheet)):not(.patch-print-sheet):not(.patch-print-sheet *) {
+    display: none !important;
+  }
+  :has(.patch-print-sheet) {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
   }
 
   /* Nothing sticky on paper — a fixed bar prints on top of the first rows. */
@@ -751,6 +791,26 @@
     box-shadow: none !important;
     /* Keep device colour coding legible as a border rather than a fill. */
     border-color: #999 !important;
+  }
+
+  /* An empty cell prints empty, not as its hint text. */
+  .patch-print-sheet ::placeholder {
+    color: transparent !important;
+  }
+
+  /* The device colour, kept on its dot. */
+  .patch-print-sheet .patch-dot {
+    background: var(--dot, #999) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* 48V: an off switch prints as an empty pill, an on switch as a filled one.
+     Without this both are white on white and the state is not on the paper. */
+  .patch-print-sheet [role="switch"][aria-checked="true"] {
+    background: #000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .patch-print-sheet {
@@ -835,7 +895,7 @@ body {
    items printed over the page beside them. */
 .context-strip {
   column-gap: 12px;
-  padding-inline: 20px;
+  padding-inline: 8px;
   overflow: hidden;
 }
 
@@ -919,8 +979,9 @@ body {
 }
 
 /* Level 2 — the compact bar. Every idle word becomes that item's own mark (the
-   `.bar-drop-2` rule above), gaps and edge padding tighten, and the capsule
-   gives up the space around its logos. Counts keep their digits: the plug
+   `.bar-drop-2` rule above), gaps tighten, and the capsule gives up the space
+   around its logos. The edge padding is already 8px from `sm` up, so it only
+   moves on a phone. Counts keep their digits: the plug
    appears BESIDE the 6, never instead of it. */
 .context-strip:is([data-fit="2"], [data-fit="3"]) {
   column-gap: 8px;

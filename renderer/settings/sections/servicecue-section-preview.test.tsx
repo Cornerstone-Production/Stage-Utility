@@ -26,6 +26,7 @@ const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
@@ -69,7 +70,7 @@ function stubFetch() {
 }
 
 async function mountOpen(): Promise<void> {
-  render(React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection)));
+  render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection))));
   for (let i = 0; i < 4; i++) await settle();
   fireEvent.click(screen.getByRole("button", { name: "Expand" }));
   await settle();

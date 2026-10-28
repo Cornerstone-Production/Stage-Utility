@@ -137,8 +137,8 @@ running, or only the rest of the week.
 
 On Home a widget wears Home's card — the app's radius, hairline and surface —
 rather than the dark ground and canvas-relative geometry its styling carries for
-a wall. Colour that reports STATE still shows (a recorder's red while recording);
-colour that is decoration does not, so one grid of tiles reads in both themes.
+a wall. Color that reports STATE still shows (a recorder's red while recording);
+color that is decoration does not, so one grid of tiles reads in both themes.
 
 A widget removed stays removed, including across a restart. A build that adds one
 gives it to installs that have never edited Home, and leaves an edited Home
@@ -366,10 +366,11 @@ class means for backups.
 | `presets.json` | config | Slot presets |
 | `rosstalk-settings.json` | config | The RossTalk simulate switch |
 | `rosstalk-targets.json` | config | [RossTalk](../integrations/rosstalk.md) targets |
-| `saved-colors.json` | config | Colours kept from the colour picker |
+| `saved-colors.json` | config | Colors kept from the color picker |
 | `scores-favourites.json` | config | Followed teams |
 | `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
 | `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
 | `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
@@ -379,6 +380,7 @@ class means for backups.
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `update-notices.json` | runtime | Which release has been announced |
 | `video-feeds.json` | config | [Video feeds](../integrations/video-feeds.md) and the relay's ports |
+| `video-ffmpeg.json` | runtime | The ffmpeg path set in Advanced; machine-specific, so never restored |
 | `video-seen.json` | runtime | When each feed was last confirmed live |
 | `views.json` | config | Views and their layouts |
 | `wireless-connections.json` | config | Receiver and charger connections (not their passwords) |
@@ -388,6 +390,17 @@ single-document file a pre-split install may still hold, and the live data is th
 folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
 Uploaded logos and layout images are files in `branding-images/` and
 `layout-images/`, named by content hash and carried by a config snapshot.
+
+The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
+(the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`
+(the upload and its crop, which the crop editor reopens on), `appIconBackground` (`#rrggbb`, `#000000`
+by default) and the four sizes served to browsers and phones, `appIconApple`
+(180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
+safe zone). The image fields are references into `branding-images/`. The icon is
+set or removed as a whole, so the seven image and crop fields are null until one is set; only
+`appIconOriginal` and `appIconCrop` may stay null in a set icon (one made through
+the API has no upload to adjust). The state carries `appIcon192`,
+`appIconMaskable` and `appIconBackground`, and nothing else of it.
 
 ## How state reaches a screen
 

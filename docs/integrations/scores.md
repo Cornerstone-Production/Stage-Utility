@@ -46,7 +46,7 @@ A team is stored by ESPN's numeric id together with its league, not by name or
 abbreviation — both of those move on a relocation or a rebrand, and the id
 survives it. The league is part of the key because the id alone is not unique:
 across these eight leagues, 267 ids name different clubs in different ones. The
-display name, the abbreviation, the logo and the team colour are cached alongside
+display name, the abbreviation, the logo and the team color are cached alongside
 it so a display never fetches anything from ESPN's CDN itself, and they are
 refreshed whenever the team list is read.
 
@@ -131,7 +131,7 @@ for a number nobody is timing anything against.
 
 ## Sports detail
 
-Each sport's centre shows what answers "what is happening right now" for that
+Each sport's center shows what answers "what is happening right now" for that
 sport, not one shape wearing different labels: bases and the count for baseball,
 down and distance and which team has the ball for football, the clock for
 basketball and hockey. A sport the app has not specialised falls back to ESPN's

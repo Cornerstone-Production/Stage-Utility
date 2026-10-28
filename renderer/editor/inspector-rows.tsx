@@ -13,7 +13,6 @@ import {
   Switch,
   Input,
   Button,
-  ButtonGroup,
   InfoHint,
   NumberInput as UiNumberInput,
   Select,
@@ -79,26 +78,68 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Label beside control — until the panel is too narrow for both, and then label
- * ABOVE control.
+ * The words of a label that still read beside a control. A 96px label column
+ * holds about this many characters at the inspector's label size, and a hint icon
+ * takes two characters' worth of it.
+ */
+const LABEL_FITS = 16;
+
+/**
+ * Label beside control — until the label is too long for its column or the panel
+ * is too narrow for both, and then label ABOVE control.
  *
  * A fixed 96px label in a 176px panel leaves 64px for the control, which is
  * narrower than a stepper field, so the row overflowed and the whole inspector
  * scrolled sideways. Stacking gives the control the full width instead, and the
  * controls wrap inside it, so nothing is ever cut off however far the panel is
- * dragged in.
+ * dragged in. A long label ("When the feed is offline") stacks for the same reason
+ * rather than truncating beside its control.
  *
  * A container query on the PANEL, not a media query: the inspector's width is
  * dragged, and the window's says nothing about it.
  */
-export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1">
-      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[288px]/insp:w-auto">
-        <span className="truncate">{label}</span>
+export function Row({
+  label,
+  hint,
+  description,
+  stacked,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  /** A sentence under the control, in full, for what an operator must read before
+   *  choosing and cannot be left behind an (i). */
+  description?: React.ReactNode;
+  /** Forces the label above the control. A label too long to sit beside it does
+   *  this on its own. */
+  stacked?: boolean;
+  children: React.ReactNode;
+}) {
+  const above = stacked || label.length + (hint ? 2 : 0) > LABEL_FITS;
+  const row = (
+    <div
+      className={cn(
+        "flex gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1",
+        above ? "flex-col items-stretch gap-1" : "items-center",
+      )}
+    >
+      <span
+        className={cn(
+          "text-caption2 text-fg-muted flex items-center gap-1 @max-[288px]/insp:w-auto",
+          above ? "w-auto" : "w-24 shrink-0",
+        )}
+      >
+        <span className={above ? "" : "truncate"} title={label}>{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
       <div className="flex-1 min-w-0 flex items-center gap-1 @max-[288px]/insp:flex-wrap">{children}</div>
+    </div>
+  );
+  if (!description) return row;
+  return (
+    <div className="flex flex-col gap-1">
+      {row}
+      <span className="text-caption2 text-fg-subtle leading-snug">{description}</span>
     </div>
   );
 }
@@ -161,15 +202,39 @@ export function AlignPad({
 // Thin label+control wrappers so each object's inspector block reads as a list
 // of options and every control is laid out consistently. Bespoke controls
 // (live-data selects, list editors) still use <Row> directly.
+//
+// Each helper names its control after its label (`aria-label`), because <Row>
+// only sits the label NEXT to the control and joins the two with nothing. A
+// control built directly from the ui primitives inside a <Row> has to pass its
+// own `aria-label`; inspector-names.test.tsx mounts every object type's
+// inspector (and the branches a default config does not draw) and fails on any
+// control it reaches that is left without one.
 
+/**
+ * A switch: the label at the start of the row and the switch at the far end of it,
+ * the label in the same size and colour as every other row's.
+ *
+ * The label is not held to the 96px column the other rows use. "Show what comes
+ * next" and "Warn at (seconds left)" are the point of the row, and a switch has no
+ * wide control to protect, so the label takes the room and wraps rather than
+ * truncating.
+ */
 export function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return <Row label={label} hint={hint}><Switch checked={checked} onCheckedChange={onChange} /></Row>;
+  return (
+    <div className="flex min-h-7 items-center justify-between gap-2">
+      <span className="text-caption2 text-fg-muted flex items-center gap-1 min-w-0">
+        <span>{label}</span>
+        {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
+      </span>
+      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
 }
 
 export function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
     <Row label={label} hint={hint}>
-      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
+      <Input aria-label={label} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
     </Row>
   );
 }
@@ -223,59 +288,77 @@ export function ImageConfig({ src, onChange }: { src: string; onChange: (v: stri
 
 /** `onUnset` and `placeholder` are NumberInput's: pass `onUnset` for a field
  *  where blank is a real setting, and `value: null` then shows the placeholder. */
-export function RowNumber({ label, hint, value, step, min, max, onChange, onUnset, placeholder }: { label: string; hint?: string; value: number | null; step?: number; min?: number; max?: number; onChange: (v: number) => void; onUnset?: () => void; placeholder?: string }) {
+export function RowNumber({ label, hint, value, step, min, max, suffix, onChange, onUnset, placeholder }: { label: string; hint?: string; value: number | null; step?: number; min?: number; max?: number; suffix?: string; onChange: (v: number) => void; onUnset?: () => void; placeholder?: string }) {
   // Straight to the themed field: the editor's own wrappers coerce a missing
   // value to 0, which is exactly what a blank-means-something field must not do.
   const shown = onUnset ? value : typeof value === "number" && Number.isFinite(value) ? value : 0;
   return (
     <Row label={label} hint={hint}>
-      <UiNumberInput value={shown} step={step ?? 0.01} min={min} max={max} onChange={onChange} onUnset={onUnset} placeholder={placeholder} />
+      <UiNumberInput aria-label={label} value={shown} step={step ?? 0.01} min={min} max={max} suffix={suffix} onChange={onChange} onUnset={onUnset} placeholder={placeholder} />
     </Row>
   );
 }
 
-/** A segmented (accent/filled) button toggle — the most repeated inspector control. */
+/**
+ * A choice from a list of words, drawn by one rule so no widget decides it for
+ * itself:
+ *
+ *  - up to four options whose words total TRACK_BESIDE characters or fewer: a
+ *    track beside the label;
+ *  - up to four whose words total TRACK_ABOVE or fewer: the same track on its own
+ *    line under the label, because the words cannot fit beside it;
+ *  - anything longer, or five or more options: a dropdown.
+ *
+ * Width decides where a track sits; it never decides between a track and a
+ * dropdown for a short list. Counted in characters, not measured, so the same
+ * options draw the same way on every machine and the test can say which they get.
+ */
+export const TRACK_BESIDE = 20;
+export const TRACK_ABOVE = 30;
+export const TRACK_MAX_OPTIONS = 4;
+
+export function choiceLayout(options: readonly { label: string }[]): "beside" | "above" | "dropdown" {
+  if (options.length > TRACK_MAX_OPTIONS) return "dropdown";
+  const chars = options.reduce((n, o) => n + o.label.length, 0);
+  if (chars <= TRACK_BESIDE) return "beside";
+  return chars <= TRACK_ABOVE ? "above" : "dropdown";
+}
+
 export function RowToggle<T extends string>({
   label,
   hint,
+  description,
   value,
   options,
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
+  description?: React.ReactNode;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
+  /** Inert for a moment the choice must not change (a write in flight), not a way
+   *  to say the choice does not apply: a control that does not apply is not drawn. */
+  disabled?: boolean;
 }) {
-  // TWO options stay a toggle; three or more become a dropdown.
-  //
-  // A binary choice reads better shown than hidden — Rect / Ellipse is one
-  // glance. Past two, a row of word buttons squeezes each label until it
-  // truncates, and it does it worst in a narrow panel, which is where the
-  // inspector spends most of its life. The rule lives HERE rather than at each
-  // of the seven call sites, so they cannot drift into disagreeing about it.
-  if (options.length > 2) {
+  const layout = choiceLayout(options);
+  if (layout === "dropdown") {
     return (
-      <Row label={label} hint={hint}>
-        <Select value={String(value)} onValueChange={(v: string) => onChange(v as T)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {options.map((o) => <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </Row>
+      <RowSelect
+        label={label}
+        hint={hint}
+        description={description}
+        value={String(value)}
+        options={options.map((o) => ({ value: String(o.value), label: o.label }))}
+        onChange={(v) => onChange(v as T)}
+      />
     );
   }
   return (
-    <Row label={label} hint={hint}>
-      <ButtonGroup>
-        {options.map((o) => (
-          <Button key={o.value} variant={value === o.value ? "accent" : "filled"} size="small" onClick={() => onChange(o.value)}>
-            {o.label}
-          </Button>
-        ))}
-      </ButtonGroup>
+    <Row label={label} hint={hint} description={description} stacked={layout === "above"}>
+      <Segmented label={label} compact disabled={disabled} value={value} options={options} onChange={onChange} />
     </Row>
   );
 }
@@ -291,23 +374,36 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  disabled,
+  compact,
 }: {
   /** Names the group for assistive tech; the visible label is the caller's. */
   label: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
+  /** Every segment inert, for a moment the choice must not change. Marked with
+   *  aria-disabled rather than the disabled attribute, so a segment that holds
+   *  keyboard focus keeps it. */
+  disabled?: boolean;
+  /** The inspector's height: 22px segments, so a track sits on a 28px row. Left
+   *  off, a segment is the taller one the other pages use. */
+  compact?: boolean;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-wrap gap-0.5 rounded-lg bg-fill p-0.5">
+    <div role="group" aria-label={label} className={cn("flex w-full flex-wrap gap-0.5 rounded-lg bg-fill p-0.5", disabled && "opacity-50")}>
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
+          aria-disabled={disabled || undefined}
+          onClick={() => {
+            if (!disabled) onChange(o.value);
+          }}
           className={cn(
-            "flex-1 whitespace-nowrap rounded-md px-2 py-1 text-caption1 font-medium transition-colors",
+            "flex-1 whitespace-nowrap rounded-md px-2 text-caption1 font-medium transition-colors",
+            compact ? "h-[22px]" : "py-1",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             value === o.value ? "bg-surface-raised text-fg shadow-[var(--su-shadow-1)]" : "text-fg-muted hover:text-fg",
           )}
@@ -319,12 +415,12 @@ export function Segmented<T extends string>({
   );
 }
 
-/** A labeled dropdown row (for when there are more options than fit a toggle). */
-export function RowSelect({ label, hint, value, options, onChange }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+/** A labeled dropdown row, for a long list of choices. */
+export function RowSelect({ label, hint, description, value, options, onChange }: { label: string; hint?: string; description?: React.ReactNode; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
   return (
-    <Row label={label} hint={hint}>
+    <Row label={label} hint={hint} description={description}>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           {options.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -337,13 +433,13 @@ export function RowSelect({ label, hint, value, options, onChange }: { label: st
 
 /** Thin wrappers over the shared themed NumberInput, kept so existing call sites
  *  and PixelField do not change. */
-export function NumberField({ value, onChange, step = 1, min, max, suffix, className }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string; className?: string }) {
-  return <UiNumberInput value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} className={className} />;
+export function NumberField({ value, onChange, step = 1, min, max, suffix, className, "aria-label": ariaLabel }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string; className?: string; "aria-label"?: string }) {
+  return <UiNumberInput aria-label={ariaLabel} value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} className={className} />;
 }
 
 /** Style-row number (fraction value). */
-export function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number }) {
-  return <NumberField value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} />;
+export function NumberInput({ value, onChange, step = 0.01, min, max, "aria-label": ariaLabel }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; "aria-label"?: string }) {
+  return <NumberField aria-label={ariaLabel} value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} />;
 }
 
 /** X/Y/W/H field shown as whole design-canvas pixels (stored as a 0..1 fraction). */
@@ -352,6 +448,7 @@ export function PixelField({ label, value, dim, onChange }: { label: string; val
     <label className="flex items-center gap-2">
       <span className="text-caption2 text-fg-muted w-3.5 shrink-0">{label}</span>
       <NumberField
+        aria-label={label}
         value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
         step={1}
         min={0}
@@ -395,6 +492,19 @@ export function sizesTypeFromItsBox(t: LayoutObjectType): boolean {
 }
 
 /**
+ * Does this type take its size, weight and alignment from settings of its own?
+ *
+ * Lyrics does: Size, Weight and Align are in its own section, and it reads none
+ * of `style.fontSize`, `fontWeight`, `textAlign` or `uppercase`. Offering them
+ * again under Look would be four controls that change nothing. It is not in
+ * IDIOM_TYPES because that set also means "draws through Readout", which Lyrics
+ * does not.
+ */
+export function setsOwnType(t: LayoutObjectType): boolean {
+  return t === "lyrics";
+}
+
+/**
  * Font size and weight — or, for a widget that sizes itself, the reason there
  * are none.
  *
@@ -416,11 +526,18 @@ export function TypeSizeRows({
   canvasHeight: number;
   onStyle: (patch: Partial<LayoutStyle>) => void;
 }) {
+  if (setsOwnType(type)) {
+    return (
+      <p className="text-caption2 text-fg-muted leading-snug">
+        This widget sets its own type: Size, Weight and Align are under Lyrics above. Color below still applies.
+      </p>
+    );
+  }
   if (sizesTypeFromItsBox(type)) {
     return (
       <p className="text-caption2 text-fg-muted leading-snug">
         This widget sets its own type: it fits its caption, value and sub-line to the box, so make the object bigger
-        to make the reading bigger. Colour and alignment below still apply.
+        to make the reading bigger. Color and alignment below still apply.
       </p>
     );
   }
@@ -431,22 +548,21 @@ export function TypeSizeRows({
   const px = Math.round((style.fontSize ?? defaultStyle(type).fontSize ?? 0.05) * canvasHeight * 10) / 10;
   return (
     <>
-      <Row label="Font size">
-        <NumberField
-          value={px}
-          step={1}
-          min={1}
-          max={Math.round(0.5 * canvasHeight)}
-          suffix="px"
-          onChange={(v) => onStyle({ fontSize: v / canvasHeight })}
-        />
-      </Row>
-      <Row label="Weight">
-        <Select value={String(style.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-        </Select>
-      </Row>
+      <RowNumber
+        label="Font size"
+        value={px}
+        step={1}
+        min={1}
+        max={Math.round(0.5 * canvasHeight)}
+        suffix="px"
+        onChange={(v) => onStyle({ fontSize: v / canvasHeight })}
+      />
+      <RowSelect
+        label="Weight"
+        value={String(style.fontWeight ?? 400)}
+        options={WEIGHTS.map((w) => ({ value: String(w), label: String(w) }))}
+        onChange={(v) => onStyle({ fontWeight: parseInt(v, 10) })}
+      />
     </>
   );
 }

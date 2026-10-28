@@ -6,6 +6,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
+import { isStringList } from "../is-record.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
@@ -13,11 +14,12 @@ import { updateNoticesStore } from "../update-notices-store.js";
 import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
+import { refuseUnansweredHost } from "./host-name-routes.js";
 import { splRecorder } from "../spl-recorder.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { zonedDateKey } from "../app-timezone.js";
-import type { UpdateMode } from "../../types/state.js";
+import { isUpdateMode, type UpdateMode } from "../../types/state.js";
 
 /** Whether a live service / active recording is in progress, and why. Used to lock
  *  self-updates (which restart the process and would interrupt a service mid-flight
@@ -138,7 +140,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && pathname === "/api/update/auto") {
       const body = await readBody(req) as Record<string, unknown>;
       const partial: { mode?: UpdateMode; enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};
-      if (body.mode === "manual" || body.mode === "auto-install" || body.mode === "auto-full") partial.mode = body.mode;
+      if (isUpdateMode(body.mode)) partial.mode = body.mode;
       if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
       if (body.dayOfWeek === null || typeof body.dayOfWeek === "number") partial.dayOfWeek = body.dayOfWeek;
       if (typeof body.hour === "number") partial.hour = body.hour;
@@ -176,12 +178,11 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // operator's choices and answered 200.
     if (method === "POST" && pathname === "/api/checklist-sources") {
       const body = await readBody(req) as Record<string, unknown>;
-      const names = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
-      if (body.categories !== undefined && !names(body.categories)) {
+      if (body.categories !== undefined && !isStringList(body.categories)) {
         error(res, "body.categories must be a string[]");
         return;
       }
-      if (body.teams !== undefined && !names(body.teams)) {
+      if (body.teams !== undefined && !isStringList(body.teams)) {
         error(res, "body.teams must be a string[]");
         return;
       }
@@ -231,6 +232,8 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     // Restore an uploaded config bundle, then restart to apply.
     if (method === "POST" && pathname === "/api/config/import") {
+      // A bundle restores host-names.json and the Public address, both answered names.
+      if (refuseUnansweredHost(req, res)) return;
       // A snapshot carries every config file and every uploaded image, base64'd,
       // so the ordinary JSON ceiling would refuse a bundle this app exported.
       const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
@@ -279,6 +282,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // Recall a saved snapshot (apply + restart).
     const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
     if (method === "POST" && snapRecallMatch) {
+      if (refuseUnansweredHost(req, res)) return;
       try {
         const applied = await configSnapshot.recall(snapRecallMatch[1]);
         json(res, restartResponse(applied, scheduleRestart()));

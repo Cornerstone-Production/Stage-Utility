@@ -24,7 +24,7 @@
 import type { PcoLiveDTO } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
-import { scrub } from "./scrub.js";
+import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 
 /**
@@ -49,6 +49,9 @@ import { stageController } from "./stage-controller.js";
  * see openItem in service-timeline-recorder.ts.
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
+
+/** How often a closed record that still cannot be saved is mentioned again. */
+const STILL_FAILING_LOG_MS = 10 * 60_000;
 
 /**
  * One airing of a plan item: its id, and Planning Center's own `live_start_at`
@@ -157,6 +160,8 @@ export interface ServiceRecord {
 export interface RecorderStore<T> {
   get(serviceKey: string): Promise<T | null>;
   upsert(record: T): Promise<void>;
+  /** Throws when this key's record is on disk and could not be read. */
+  assertReadable(serviceKey: string): Promise<void>;
 }
 
 /** Everything a fresh record needs that comes from the plan, not the recorder. */
@@ -201,6 +206,19 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   /** The airing already on when the current record was established — see
    *  captureOpeningItem. */
   private inheritedAiring: Airing | null = null;
+  /** Closed records whose save failed, by key — see saveClosed. */
+  private unsaved = new Map<string, T>();
+  /** Keys forget() was called for since ensureRecord last began establishing
+   *  a record. ensureRecord clears it before its awaits and checks its key
+   *  after: forget() of anything but `current` does not bump the generation, so
+   *  a delete landing while a held copy or a stored record is being resumed is
+   *  caught here, and so is not mistaken for a retry that saved a held copy
+   *  (both take it out of `unsaved`). Cleared on every establish, so it holds
+   *  only what was forgotten since the last one. */
+  private forgotten = new Set<string>();
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When retryUnsaved last said the saves are still failing. */
+  private stillFailingLoggedAt = 0;
 
   protected abstract readonly label: string;
   protected abstract readonly store: RecorderStore<T>;
@@ -254,10 +272,22 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * older copy from the store alone. A closed record is on disk as it closes,
    * and the store may since hold a newer copy (an archive import), so it is
    * never preferred. Every per-service read route answers through this.
+   *
+   * A closed record whose save failed is the exception: the store does not
+   * have it yet, so the copy saveClosed is holding answers instead.
+   *
+   * Throws, rather than answering null, for a record on disk that could not be
+   * read: null reads as "never recorded", and the baptism lane answered an
+   * unread service with no baptisms. The recorder's own lookup in ensureRecord
+   * does not come through here, so a recording is never stopped by it.
    */
   async getRecord(serviceKey: string): Promise<T | null> {
     const live = this.current;
-    return live?.serviceKey === serviceKey && live.endedAt == null ? live : this.store.get(serviceKey);
+    if (live?.serviceKey === serviceKey && live.endedAt == null) return live;
+    const unsaved = this.unsaved.get(serviceKey);
+    if (unsaved) return unsaved;
+    await this.store.assertReadable(serviceKey);
+    return this.store.get(serviceKey);
   }
 
   /**
@@ -281,16 +311,30 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     return this.lastLiveAt !== 0 && Date.now() - this.lastLiveAt < SERVICE_GAP_MS;
   }
 
+  /** Is this recorder holding a closed record for `serviceKey` that it could
+   *  not save yet? History edits refuse such a service — see history-edit.ts. */
+  isHolding(serviceKey: string): boolean {
+    return this.unsaved.has(serviceKey);
+  }
+
   /**
    * Drop an in-memory record so a delete of it is not undone.
    *
    * Deleting a record removes the file and the store's cache entry, but the
    * recorder still holds it; ensureRecord short-circuits on a matching key, keeps
    * appending, and the debounced persist recreates the file seconds later. The row
-   * reappears and the delete reads as broken. Merging had the same shape.
+   * reappears and the delete reads as broken. Merging had the same shape. A
+   * closed record still waiting on a retried save is dropped for the same reason.
+   *
+   * Only dropping `current` bumps the generation. A tick mid-split still holds
+   * the outgoing record as `current`, and a bump for a held copy alone made it
+   * abandon the split there, so the next service's items went into the closed
+   * one. ensureRecord guards its resume of a held copy or stored record itself.
    */
   forget(serviceKey: string): boolean {
-    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return false;
+    const wasUnsaved = this.unsaved.delete(serviceKey);
+    this.forgotten.add(serviceKey);
+    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return wasUnsaved;
     this.cancelPersist();
     this.current = null;
     this.currentKey = null;
@@ -324,6 +368,74 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
         .upsert(this.current)
         .catch((err) => console.error(`[${this.label}] persist failed:`, err));
     }, this.persistDebounceMs);
+  }
+
+  /**
+   * Save a record this recorder has just closed. Never throws.
+   *
+   * Every close is on the live tick: a write that threw at the split left
+   * currentKey unchanged, so every later tick threw again and the next service
+   * went unrecorded. A failed save is logged, the record is held here, and the
+   * save is retried every persistDebounceMs. Held in memory only: a restart
+   * before it lands loses it, and the log says so.
+   */
+  protected async saveClosed(record: T): Promise<void> {
+    // `record` is `current` at both callers, so forget() of it bumps this.
+    const gen = this.generation;
+    try {
+      await this.store.upsert(record);
+      this.unsaved.delete(record.serviceKey);
+    } catch (err) {
+      if (gen !== this.generation) {
+        // Deleted or edited in History while the write was out. Holding it
+        // would write it back over the operator's change once the disk recovers.
+        console.error(
+          `[${this.label}] could not save ${scrub(record.serviceKey)} (${scrubError(err)}), and it was changed in History meanwhile; not retried`,
+        );
+        return;
+      }
+      if (!this.unsaved.has(record.serviceKey)) {
+        this.stillFailingLoggedAt = Date.now();
+        console.error(
+          `[${this.label}] could not save ${scrub(record.serviceKey)} (${scrubError(err)}); recording carries on, and the save is retried every ${Math.round(this.persistDebounceMs / 1000)} s. A restart before it lands loses that service.`,
+        );
+      }
+      this.unsaved.set(record.serviceKey, record);
+      this.scheduleRetry();
+    }
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.retryUnsaved();
+    }, this.persistDebounceMs);
+  }
+
+  private async retryUnsaved(): Promise<void> {
+    let lastErr: unknown = null;
+    for (const [key, record] of [...this.unsaved]) {
+      // Re-read each time round: forget() or a resume may have taken it while
+      // the previous write was awaited.
+      if (this.unsaved.get(key) !== record) continue;
+      try {
+        await this.store.upsert(record);
+      } catch (err) {
+        lastErr = err; // still held, so still retried; said below, not per attempt
+        continue;
+      }
+      if (this.unsaved.get(key) === record) this.unsaved.delete(key);
+      console.log(`[${this.label}] saved ${scrub(key)} on retry`);
+    }
+    if (this.unsaved.size === 0) return;
+    if (lastErr && Date.now() - this.stillFailingLoggedAt >= STILL_FAILING_LOG_MS) {
+      this.stillFailingLoggedAt = Date.now();
+      console.error(
+        `[${this.label}] still could not save ${[...this.unsaved.keys()].map(scrub).join(", ")} (${scrubError(lastErr)}); still retrying`,
+      );
+    }
+    this.scheduleRetry();
   }
 
   private cancelPersist(): void {
@@ -500,25 +612,49 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       return;
     }
 
+    // Only one establish runs at a time (each recorder's busy latch), so what
+    // was forgotten before this one began cannot matter to it.
+    this.forgotten.clear();
+
     // Key changed → finalize + persist the outgoing record, then publish it on
     // this recorder's own channel — see publishClosed's doc above.
     if (this.current) {
       this.finalizeRecord();
       const outgoing = this.current;
-      await this.store.upsert(outgoing);
+      await this.saveClosed(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited
       this.publishClosed(outgoing);
     }
 
-    const existing = await this.store.get(key);
+    // A copy whose save failed is newer than anything the store has for it.
+    const held = this.unsaved.get(key);
+    const existing = held ?? (await this.store.get(key));
     if (gen !== this.generation) return; // forgotten while we waited
-    if (existing) {
-      const resumed = await this.resumeRecord(existing);
-      // Checked again: resumeRecord awaits too, and for SPL it is the expensive
-      // one — it reads the whole raw archive to rebuild. A delete landing during
-      // that rebuild would otherwise be undone by the record it produces, which
-      // is exactly what forget() exists to prevent.
-      if (gen !== this.generation) return;
+    // Checked again after: resumeRecord awaits too, and for SPL it is the
+    // expensive one — it reads the whole raw archive to rebuild. A delete
+    // landing during that rebuild would otherwise be undone by the record it
+    // produces, which is exactly what forget() exists to prevent.
+    const resumed = existing ? await this.resumeRecord(existing) : null;
+    if (gen !== this.generation) return;
+    // A held copy or stored record forgotten meanwhile does not bump the
+    // generation (see forget), so it is checked here. This tick is dropped and
+    // the next one reads the store again: a delete then starts afresh, and an
+    // edit resumes the edited record. Starting afresh here instead wrote an
+    // empty record over an edit. The outgoing record is already closed, saved
+    // and published, so dropping `current` loses nothing, and the airing is put
+    // back so the next tick does not take this one's opener as inherited.
+    // Asked of `forgotten`, not of `unsaved`: a retry that saves a held copy
+    // meanwhile takes it out of `unsaved` too.
+    if (this.forgotten.has(key)) {
+      console.log(`[${this.label}] ${scrub(key)} was changed in History while it was being resumed; read again on the next tick`);
+      this.cancelPersist();
+      this.current = null;
+      this.currentKey = null;
+      this.lastAiring = priorAiring;
+      return;
+    }
+    if (resumed) {
+      this.unsaved.delete(key); // open again: saved by the debounced persist from here
       this.current = resumed;
       this.current.endedAt = null; // reopened
     } else {

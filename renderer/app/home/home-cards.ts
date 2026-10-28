@@ -7,7 +7,7 @@
 // why Home keeps a layout it does not lay out.
 
 import type { HomeCardSize, HomeVisibility, LayoutObject, LayoutObjectConfig } from "@main/types/views";
-import { LAYOUT_OBJECTS } from "../../main/layout-objects";
+import { LAYOUT_OBJECTS, defaultStyleFor } from "../../main/layout-objects";
 import type { HomeMode, HomeModeOrUnknown } from "./home-mode";
 import { externKeyed } from "@main/types/extern-keyed";
 
@@ -119,7 +119,9 @@ export function addCard(
       z: objects.length + 1,
       home: { size: defaultSize(type), when: defaultWhen(type) },
       config: spec.config() as LayoutObjectConfig,
-      style: spec.style(),
+      // What the widget starts with ON HOME, which is not its wall style: the
+      // same answer the editor gives when it places a widget on Home.
+      style: defaultStyleFor(type as keyof typeof LAYOUT_OBJECTS, { hostDrawsFrame: true }),
     } as LayoutObject,
   ];
 }

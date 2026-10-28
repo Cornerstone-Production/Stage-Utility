@@ -70,6 +70,15 @@ broadcast on `propresenter:instances` so a layout object can pick which one it
 reads. Each instance holds its own stream with its own reconnect back-off, so
 one auditorium being switched off does not affect the other.
 
+The status also carries what the Lyrics widget needs beyond the slide: the words on
+the first slide of the next group (`nextGroupText`, empty for a group with no
+words) and the arrangement's groups in play order (`playOrderGroups`, with
+`playOrderGroupIndex` for where the slide is, null when the slide index is not
+known). All three come from the same presentation document as the section names,
+so the widget asks ProPresenter for nothing more. The groups stay listed while the
+index is unknown; when the document cannot be read they empty with the section
+names.
+
 ### What the log says
 
 ```
@@ -126,7 +135,7 @@ the **port** (default 1025). The machine must be on the same network as Stage.
 
 **Poll interval** applies only to the fallback: on a ProPresenter that supports
 `status/updates`, updates are pushed and there is no interval. Leave it blank —
-the field shows `1000` in grey — and the fallback polls at **1000 ms**, dropping
+the field shows `1000` in gray — and the fallback polls at **1000 ms**, dropping
 to a 5 s keepalive when nothing is reading the channel; open displays and
 in-process consumers such as an automation rule both count. **200 ms** is the
 floor the field accepts, because the poller ignores anything below it. Clearing
@@ -138,8 +147,8 @@ anything below 200 ms and falls back to 1000 ms. If the field reads under 200
 and updates look slow, that is why: type a value of 200 or more, or clear the
 field.
 
-**On a layout:** add slide objects — current/next slide text, current/next slide
-notes, current/next section, slide progress, slide thumbnail. Each can target a
+**On a layout:** add slide objects — current/next slide text, lyrics, current/next
+slide notes, current/next section, slide progress, slide thumbnail. Each can target a
 specific ProPresenter instance.
 
 ## Triggering a macro from a rule

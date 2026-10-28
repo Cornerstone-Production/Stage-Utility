@@ -101,8 +101,9 @@ describe("the helper job is gated on the build script being in the tree", () => 
     const probe = gate.steps?.find((s) => s.id === "probe");
     assert.ok(probe?.run, "the gate has no probe step");
     // The probe's own shell, run on a tree with and without the script. The
-    // workflow expression in its notice line is filled in the way Actions would.
-    const script = probe.run.replace(/\$\{\{\s*needs\.release\.outputs\.version\s*\}\}/g, "1.2.3");
+    // version reaches it through the step's env, as it does on a runner.
+    assert.equal(probe.env?.["V"], "${{ needs.release.outputs.version }}");
+    const script = probe.run;
     for (const [withScript, expected] of [[true, "true"], [false, "false"]] as const) {
       const tree = fs.mkdtempSync(path.join(os.tmpdir(), "su-gate-"));
       try {
@@ -112,7 +113,7 @@ describe("the helper job is gated on the build script being in the tree", () => 
         }
         const out = path.join(tree, "output");
         fs.writeFileSync(out, "");
-        const r = spawnSync("bash", ["-c", script], { cwd: tree, env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: out }, encoding: "utf8" });
+        const r = spawnSync("bash", ["-c", script], { cwd: tree, env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: out, V: "1.2.3" }, encoding: "utf8" });
         assert.equal(r.status, 0, r.stderr);
         assert.equal(fs.readFileSync(out, "utf8").trim(), `present=${expected}`, `with${withScript ? "" : "out"} the script`);
       } finally {
@@ -121,13 +122,12 @@ describe("the helper job is gated on the build script being in the tree", () => 
     }
   });
 
-  it("builds both architectures through build-app.sh --arch and writes a checksum for each", () => {
+  it("builds both architectures through build-app.sh --arch and zips each", () => {
     const build = helper.steps?.find((s) => s.run?.includes("build-app.sh"));
     assert.ok(build?.run);
     assert.match(build.run, /for arch in arm64 x86_64/);
     assert.match(build.run, /helper\/macos\/build-app\.sh --arch "\$arch"/);
     assert.match(build.run, /StageUtilityOutput-\$arch\.zip"/);
-    assert.match(build.run, /shasum -a 256 "StageUtilityOutput-\$arch\.zip" > "StageUtilityOutput-\$arch\.zip\.sha256"/);
   });
 });
 
@@ -150,8 +150,19 @@ describe("the release itself is unchanged by the helper", () => {
     const release = jobs["release"];
     assert.deepEqual(needsOf(release).sort(), ["verify-checks", "verify-tests"]);
     const push = release.steps?.find((s) => s.id === "push");
-    assert.ok(push?.run?.includes('git push origin "HEAD:${GITHUB_REF_NAME}"'), "the bump is still pushed fast-forward only");
+    assert.ok(push?.run?.includes('git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}"'), "the bump is still pushed fast-forward only");
     assert.ok(!push?.run?.includes("--force"));
+  });
+
+  it("keeps no credential after checkout, and hands the token to the push step alone", () => {
+    const steps = jobs["release"].steps ?? [];
+    const checkout = steps.find((s) => s.uses?.startsWith("actions/checkout@"));
+    assert.equal(checkout?.with?.["persist-credentials"], false, "the checkout keeps the token in git config");
+    // The only step in the job that pushes is the one given the token.
+    const pushers = steps.filter((s) => /\bgit push\b/.test(s.run ?? ""));
+    assert.deepEqual(pushers.map((s) => s.id), ["push"]);
+    assert.equal(pushers[0]?.env?.["GH_TOKEN"], "${{ github.token }}");
+    assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   });
 
   it("downloads the helper's artifact only from a helper that succeeded, under the name it was uploaded as", () => {
@@ -165,7 +176,7 @@ describe("the release itself is unchanged by the helper", () => {
   it("attaches the helper's files to the one release-create call", () => {
     const create = artifacts.steps?.find((s) => s.run?.includes("gh release create"));
     assert.ok(create?.run);
-    assert.match(create.run, /if \[ -d helper-dist \]; then assets\+=\(helper-dist\/\*\); fi/);
+    assert.match(create.run, /if \[ -d helper-dist \]; then assets\+=\(helper-dist\/StageUtilityOutput-\*\.zip\); fi/);
     assert.match(create.run, /gh release create "v\$V"[\s\S]*"\$\{assets\[@\]\}"/);
     assert.equal(create.run.match(/gh release create/g)?.length, 1);
     assert.equal(create.run.includes("gh release upload"), false, "a published release cannot be added to");
@@ -194,7 +205,9 @@ describe("the helper's download reaches the release", () => {
       const r = spawnSync("bash", ["-c", script], {
         cwd: tree,
         encoding: "utf8",
-        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true" },
+        // No signatures here (scripts/release-signing-workflow.test.ts covers them):
+        // the release is still created, which is what these test.
+        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true", RUNNER_TEMP: tree },
       });
       const args = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
       return { status: r.status, err: r.stderr, attached: args.filter((a) => !a.startsWith("-") && /\.(tar\.gz|zip|sha256)$/.test(a)).sort() };
@@ -204,15 +217,18 @@ describe("the helper's download reaches the release", () => {
     }
   }
 
-  const HELPER_FILES = ["StageUtilityOutput-arm64.zip", "StageUtilityOutput-arm64.zip.sha256", "StageUtilityOutput-x86_64.zip", "StageUtilityOutput-x86_64.zip.sha256"];
+  const HELPER_FILES = ["StageUtilityOutput-arm64.zip", "StageUtilityOutput-x86_64.zip"];
+  const STRAY_FILES = ["StageUtilityOutput-arm64.zip.sha256", "StageUtilityOutput-x86_64.zip.sha256", "Other.zip"];
   const TARBALLS = ["dist/stage-utility-1.2.3-darwin-arm64.tar.gz", "dist/stage-utility-1.2.3-linux-x64.tar.gz"];
 
-  it("attaches the zips and checksums the download step puts down, wherever that step is told to put them", () => {
+  it("attaches the zips the download step puts down, wherever that step is told to put them", () => {
     const dir = String(download?.with?.["path"]);
     assert.ok(dir && dir !== "undefined", "the download step has no path");
     const r = runCreate((tree) => {
       fs.mkdirSync(path.join(tree, dir), { recursive: true });
       for (const n of HELPER_FILES) fs.writeFileSync(path.join(tree, dir, n), "x");
+      // Whatever else lands beside them is not published: the old checksum files, or a stray zip.
+      for (const n of STRAY_FILES) fs.writeFileSync(path.join(tree, dir, n), "x");
     });
     assert.equal(r.status, 0, r.err);
     assert.deepEqual(r.attached, [...TARBALLS, ...HELPER_FILES.map((n) => `${dir}/${n}`)].sort());

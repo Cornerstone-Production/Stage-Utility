@@ -7,7 +7,10 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
+import { isStringList } from "../is-record.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
+import { hostNames } from "../host-names.js";
+import { refuseUnansweredHost } from "./host-name-routes.js";
 import { stageController } from "../stage-controller.js";
 
 export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
@@ -23,12 +26,11 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // rejected now that its absence is legal.
     if (method === "POST" && pathname === "/api/bar-items") {
       const body = await readBody(req) as Record<string, unknown>;
-      const ids = (v: unknown) => Array.isArray(v) && v.every((i) => typeof i === "string");
-      if (body.items !== undefined && !ids(body.items)) {
+      if (body.items !== undefined && !isStringList(body.items)) {
         error(res, "body.items must be a string[]");
         return;
       }
-      if (body.mobileItems !== undefined && !ids(body.mobileItems)) {
+      if (body.mobileItems !== undefined && !isStringList(body.mobileItems)) {
         error(res, "body.mobileItems must be a string[]");
         return;
       }
@@ -67,6 +69,17 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.setKioskDiscovery(body.enabled));
+      return;
+    }
+
+    // ── Mac helpers and Windows kiosks follow this server's version ───────
+    if (method === "POST" && pathname === "/api/machine-updates/auto") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      if (typeof body.enabled !== "boolean") {
+        error(res, "body.enabled (boolean) required");
+        return;
+      }
+      json(res, await stageController.setAutoUpdateMachines(body.enabled));
       return;
     }
 
@@ -139,9 +152,18 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Public URL (DNS) ────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/public-url") {
+      // The Public address is an answered name, so it changes only by a request whose own name already is.
+      if (refuseUnansweredHost(req, res)) return;
       const body = await readBody(req) as Record<string, unknown>;
       const url = typeof body.url === "string" ? body.url : null;
-      const state = await stageController.setPublicUrl(url);
+      let state;
+      try {
+        state = await stageController.setPublicUrl(url);
+      } catch (err) {
+        error(res, errorMessage(err));
+        return;
+      }
+      hostNames.publicUrlChanged();
       json(res, state);
       return;
     }

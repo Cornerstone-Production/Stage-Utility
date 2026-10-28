@@ -21,7 +21,7 @@ hide those: **Hide widgets whose integration is not set up**.
 
 A status readout also draws that dash on a screen that has just loaded, until its
 source answers for the first time. Offline, No recorder, No teams followed,
-ProPresenter offline, No live service, No service plan, a cue button's Unbound, a
+ProPresenter offline, No live service, No service plan, a Button's Unbound, a
 baptism count of 0 and a screen tile's dark dot are each a claim, and none is
 drawn before the answer that makes it true. A plan that could not be read says
 **Couldn't load the plan** rather than that there is none.
@@ -40,12 +40,51 @@ See also [Layout editor](layout-editor.md) for placement, sizing and styling, an
 |---|---|---|
 | **Text** | Words you type, unchanged | You |
 | **Clock** | The wall clock | The server's clock, in the app time zone |
-| **PCO countdown** | Time until the service starts | Planning Center plan time |
+| **Timer** | A countdown or clock from the service, ProPresenter or a baptism | Planning Center Live · ProPresenter · the baptism recorder |
 
 **Clock** follows the app-wide 12/24-hour setting unless you set one on the widget
 itself — a clock deliberately put on a wall in 24-hour does not flip when someone
 changes their preference in the app. **Seconds** (on by default) and **AM/PM** (on
 by default, and only offered in 12-hour format) are separate switches.
+
+**Timer** reads one of three sources, chosen at the top of its settings. A layout
+saved with a PCO countdown, Service timer, ProPresenter timer or Baptism timer
+opens as a Timer and draws the same.
+
+- **Service** — before the service, the time until it starts; while an item is
+  live, that item's time left, counting up when the item has no length. The
+  caption is the live item's name until you type one. The sub-line holds nothing
+  until **Show the next item** is on, which adds a `Next · <title>` line. That
+  is the service's only sub-line, so it has no separate sub-line switch.
+- **ProPresenter** — one timer by name, or the first running one, with the time
+  as ProPresenter reports it. The timer's name sits on the sub-line. Amber near the
+  end reads that time, so it is meant for a timer counting down.
+- **Baptism** — one of nine readouts of the baptism session: **The running
+  clock** (the running testimony or baptism clock, `0:00 ready` when idle),
+  **Testimony time** (this person's, once banked — frozen while their baptism
+  itself is timed), **Session time** (wall clock since the session started, never
+  paused), **Average per person**, **Last person**, **Phase** (the word — idle,
+  armed, testimony or baptism), **Person** (`Person 3`, or `3 of 7` in grouped
+  mode once the testimony pass has run — per-person mode never has a total),
+  **Count** and **Total**. Armed reads as its own word rather than a running
+  clock or a person number, on every readout. A baptism clock counts up from
+  zero, so it has no amber or red. See
+  [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
+
+A new Timer starts with its source's caption written in (`Stage timer`,
+`Baptisms`; the service has none, so it shows the item's name). Changing the
+source swaps the caption while it is still the old source's own, and clearing the
+field means no caption. A Service or ProPresenter Timer turns **red** once its
+time is over (**Red on overrun**, on) and **amber** from a number of seconds left
+(**Amber near the end**, off; 60 when switched on).
+
+Until a source has answered, a Timer reads a plain dash and says nothing. A
+ProPresenter that has answered and reports not connected reads as a dash with
+**ProPresenter isn't answering** on the sub-line, unless **Hide when idle** is on:
+then the Timer draws nothing, down or idle, and stays hidden through the first
+read. A ProPresenter that is not set up reads the plain dash, not the sentence.
+On Home a Timer is the wall readout, except a Service Timer with **Show the next
+item** on (how a new Timer starts), which is a stat card like the cards beside it.
 
 ## PCO / service
 
@@ -54,7 +93,6 @@ by default, and only offered in 12-hour format) are separate switches.
 | **Current item** | What the plan is on right now | Planning Center Live |
 | **Next item** | What comes after it | Planning Center Live |
 | **PCO Prev/Next** | Buttons that move the service on | Planning Center Live (writes) |
-| **Service timer** | The running item's clock, and what is next | Planning Center Live |
 | **Service pacing** | How far ahead or behind the whole plan the service is, or when it is projected to end | Recorded service timeline · Planning Center Live |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
 | **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
@@ -163,8 +201,10 @@ clock has drifted still marks the right day.
 | **Live scores** | Live score for a team you follow | ESPN public scoreboard |
 | **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
-**Streaming status** can be pinned to one platform, or left on **any**, where it
-answers for whichever is live. Where the platform reports one, it also shows the
+**Streaming status** and the Home **Streaming** object pick their platform with
+**Source** at the top of their settings: **Any**, **Resi**, **YouTube** or **OBS**.
+Any answers for whichever is live. OBS reports that it is streaming but not when it
+started, so pinned to OBS the widget says **LIVE** with no elapsed clock. Where the platform reports one, it also shows the
 live viewer count beside the elapsed clock, and turns amber when a scheduled
 broadcast is past its start time with nothing going out — only YouTube reports
 either, and only on its public path. See [YouTube](../integrations/youtube.md).
@@ -177,7 +217,7 @@ clock; turning it off leaves the score and the status line. The teams themselves
 are chosen in Settings, Integrations, Live scores — see
 [Live scores](../integrations/scores.md).
 
-The Home card is a quieter reading of the same thing: a chip in the team's colour,
+The Home card is a quieter reading of the same thing: a chip in the team's color,
 the name, the score, and the trailing side dimmed. It shows one matchup on a
 Medium tile and up to three as you make the tile taller. It stays on the page
 during a service by default — Sunday afternoon football overlaps the second
@@ -194,7 +234,7 @@ a widget answering the same kind of question in a different shape reads as a
 different app.
 
 Per widget you can turn that off (**Fill green when live** / **Fill when
-recording**, which colours just the word instead), hide the number, or make it a
+recording**, which colors just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
 
@@ -206,8 +246,10 @@ on both surfaces, while **Fill the card when live** and **Hide when idle** shape
 the screen presentation, which is the only one that fills or hides.
 
 Right-click a Home tile — or tap and hold it — to choose what it answers for:
-**Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
-**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**.
+**Platform** on **Streaming** (any, Resi, YouTube, OBS) and **Recorder** on
+**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**. A
+**Timer** offers **Red on overrun**, **Show the next item** (Service source) and
+**Hide when idle**; a Baptism Timer offers only the last.
 
 > Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
 > recording**, **Resi status** and **YouTube status**. Each was the general card
@@ -270,6 +312,11 @@ your own page. YouTube reports a real broadcast start, so its elapsed time is ex
 There is no preview image on any of them: ProVideoPlayer's network API offers no
 thumbnail or frame of any kind, so these report names, states and times only.
 
+**On screen now**'s right-click menu has the **Layout** choice (Full, Compact,
+Countdown only), **Label** while the layout is Compact, and the **Progress bar**,
+**Next cue**, **Warn near the end** and **Count down stills** switches. Next cue
+is offered only while the layout is Full, the one layout that draws it.
+
 ### The layer list
 
 One row per layer: the layer's name on the left, then the file it is holding and
@@ -314,7 +361,8 @@ layer list's Show uses (see above), or Any layer with content to follow whicheve
 layer has something on it. Naming a layer changes the caption itself: it reads
 `PVP · <layer name>` in every state, including empty and not found, so the tile
 says which one it is without waiting for content. With no layer named the
-caption is the fixed word "ProVideoPlayer" (compact: bare "PVP"). A named layer
+caption is the fixed word "ProVideoPlayer" (Compact: bare "PVP"; Countdown only
+draws no caption at all). A named layer
 PVP is not currently reporting reads **not found**, with its own sentence — never
 "empty", which is a different problem (the layer exists and has nothing on it).
 
@@ -330,16 +378,47 @@ this line is wrong until the next poll. It is the quietest line on the widget fo
 that reason, it is never drawn without a current cue to anchor it, and it can be
 switched off.
 
-**Compact** trades the composition above for two lines: the caption becomes
+**Layout** chooses how much the widget draws. **Full** is the composition above.
+**Compact** trades it for two lines: the caption becomes
 `PVP · <label>` (or `PVP · <layer name>` when a layer is pinned, in every state),
 and the value is the countdown alone while there is one. With nothing to count —
 a still, an ended clip, or an empty layer's dash — the value falls back to
 whichever of the cue name or the file name is NOT already the caption, so the
 tile never repeats itself and never reads the literal "no duration". **Label**
-chooses what the caption names when no layer is pinned: the layer's current cue,
-the media file's name with or without its extension, or the layer's own name. It
-falls back to the file name when there is no cue name to read, and it has no
-effect on a pinned tile, whose caption is always the layer's own name.
+chooses what the Compact caption names when no layer is pinned: the layer's
+current cue, the media file's name with or without its extension, or the
+layer's own name. It falls back to the file name when there is no cue name to
+read, and it has no effect on a pinned tile, whose caption is always the layer's
+own name. A widget saved before Layout existed with Compact switched on opens as
+Compact.
+
+**Countdown only** draws the time left and nothing else: no caption, no state
+word, no cue name, no sub-line, no next cue. The number fills the widget — as
+tall as 62% of its height allows, and never wider than its width allows for the
+digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
+an hour. With nothing counting — nothing on the layer, a layer PVP does not
+report, a still with **Count down stills** off — it shows a dim dash, so a blank
+widget never looks like a frozen one. An ended clip holds **0:00**, with a full
+bar and in red when **Warn near the end** is on, until the layer moves on. A paused clip is the
+reverse: it draws its frozen time with no state word, since there is no room for
+one here — switch to Full or Compact to see **paused**. **Progress bar**,
+**Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
+hairline along the bottom edge). **Next cue** and **Label** are not shown in
+the inspector, since neither is drawn in it. (Next cue is also unused by
+Compact, and Label by Full, and they are not shown there either.)
+
+**Warn near the end**, off by default so an existing widget is unchanged, turns
+the time and the progress hairline amber at **Amber at** seconds left (default
+30) and red at **Red at** (default 10), in every layout. Both are inclusive —
+the time is amber from 0:30, red from 0:10 — and judged on the second the digits
+show. **Red at** is never above **Amber at**: the field holds a higher number
+at the amber value, and a stored red above the amber is read as the amber, so
+the two colors arrive together. The thresholds are set in the layout editor's
+inspector; the Home card's right-click menu has the on/off switch only. The
+colors are the app's own caution and over tokens, the same ones a Home stat
+takes when it earns a state color. A still counted down from a short hold
+starts inside the amber threshold, so with Warn near the end on it reads amber
+from its first frame; lower **Amber at** if that is not wanted.
 
 **Count down stills**, off by default, counts a STILL down the way a rolling clip
 already counts down — the value slot, the progress bar and (in the normal
@@ -358,7 +437,7 @@ countdown holds at 0:00 with a full bar rather than switching to another state.
 With **Count down stills** off, a still still gets one line the countdown steals
 otherwise: the normal composition's sub line gains **on screen**, counting UP
 from when the file first appeared, on the same clock the layer list's own **on
-screen** reads (compact mode shows nothing extra).
+screen** reads (Compact and Countdown only show nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the
@@ -372,16 +451,43 @@ up even on a layer that is playing. See
 |---|---|---|
 | **Current slide** | The words on the slide showing now | ProPresenter |
 | **Next slide** | The words on the slide coming next | ProPresenter |
+| **Lyrics** | The words on the slide, with its group as ProPresenter names it | ProPresenter |
 | **Slide notes** | Speaker notes on the current slide | ProPresenter |
 | **Slide image** | A picture of the slide showing now | ProPresenter thumbnails |
 | **Slide progress** | How far through the presentation | ProPresenter |
 | **Section chip** | The part of the service running now, as a label | ProPresenter |
-| **ProPresenter timer** | One ProPresenter timer, by name | ProPresenter |
 
 **Slide progress** reads as a fraction, a count remaining, a percentage or a bar.
-**ProPresenter timer** finds its timer by name, so renaming it in ProPresenter
-breaks the link — and it can colour itself as the timer runs down. With more than
-one ProPresenter connected, both pick which instance they follow. See
+
+**Lyrics** draws the words on the current slide with the group the slide belongs to
+(Verse 1, Chorus, Bridge) as a tag, in ProPresenter's group color, and what comes
+next underneath. The group names and colors are ProPresenter's own, and the order
+the groups play in follows the presentation's arrangement, so a chorus played three
+times is three places in the strip. It has three layouts:
+
+- **Above**: the tag over the words. The default.
+- **Beside**: the tag in a column to the left of the words, so a run of slides lines
+  up down the screen.
+- **Arranged**: every group of the song in play order as a strip of short tags
+  (V1, C, B), the current one lit and the ones already played dimmed, with the words
+  under it.
+
+A slide with no words (an Intro or an Outro) shows its tag alone, or nothing, as
+set; a slide that belongs to no named group, such as a media slide, has no tag to
+show. Nothing is drawn underneath on the last slide. **Next group** underneath is
+the next group with a different name, so a chorus played twice in a row is skipped
+to the group after it, while the Arranged strip shows both. The widget draws
+nothing while ProPresenter has not answered yet, a dim dash when ProPresenter is
+not connected or has no presentation open, and never the words of a slide that has
+gone. **Short** tag text is derived: Verse 1 is V1, Chorus C, Pre-Chorus PC, Bridge
+B, Tag T, Intro and Outro stay whole, and any other name is the initials of its
+words or its first three letters, with a trailing number kept (Interlude 2 is IN2).
+On Home it is a card in the theme's own colors, large and shown during a service
+to start.
+
+A **Timer** on the ProPresenter source finds its timer by name, so renaming it in
+ProPresenter breaks the link. With more than one ProPresenter connected, these
+widgets and the Timer pick which instance they follow. See
 [ProPresenter](../integrations/propresenter.md).
 
 ## Mics & RF
@@ -420,15 +526,17 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 | Widget | What it shows | Source |
 |---|---|---|
 | **SPL meter** | The live sound level | Smaart |
-| **Sound level** *(Home)* | The loudest meter right now, and which one | Smaart |
+| **Sound level** *(Home)* | The loudest level right now, its metric and meter | Smaart |
 
-**SPL meter** picks its meter and which metric to read, and can colour itself past
+**SPL meter** picks its meter and which metric to read, and can color itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
 **Sound level** reads whichever meter is loudest. To watch one instead,
-right-click the tile — or tap and hold it — and pick it under **Meter**. A
-pinned meter that stops reporting says so rather than falling back to another
-one, so the number on the tile is always the channel it names.
+right-click the tile — or tap and hold it — and pick it under **Meter**; pick
+which Smaart metric it reads under **Metric** (Automatic prefers the A-weighted
+one). A pinned meter or metric that stops reporting says so rather than falling
+back to another one, so the number on the tile is always the channel and metric
+its caption names.
 
 ## People
 
@@ -455,24 +563,6 @@ and average are building-only — the zone endpoint does not report them. See
 many as the widget holds. **Channels shown** hides any channel from this widget, and lists
 the channels once captions have arrived.
 
-## Baptisms
-
-| Widget | What it shows | Source |
-|---|---|---|
-| **Baptism timer** | The running baptism clock, or the session's totals | The baptism recorder |
-
-**Baptism timer** picks one of nine fields: **Live** (the running testimony or
-baptism clock), **Testimony** (this person's testimony, once banked — frozen
-while their baptism itself is timed), **Session** (wall clock since the session
-started, never paused), **Phase** (the word — idle, armed, testimony or
-baptism), **Person** (`Person 3`, or `3 of 7` in grouped mode once the
-testimony pass has run — per-person mode never has a total), **Count**,
-**Total time**, **Average per person** and **Last person**. Armed reads as its
-own word rather than a running clock or a person number, on every field — the
-baptisms have begun but nobody has stepped up yet.
-
-See [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
-
 ## Control
 
 These do something when pressed, so they only act on a surface that accepts
@@ -483,8 +573,7 @@ nothing.
 |---|---|---|
 | **OSC button** | Sends an OSC message, and can reflect the device's state back | LAN gear over UDP |
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
-| **Action button** | Runs one of the app's own actions | This app |
-| **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
+| **Button** | Fires a cue, or runs one of the app's own actions. Set under **Does**: see [below](#control) | This app, via Companion for a cue |
 | **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 | **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
@@ -503,45 +592,89 @@ wherever it is placed.
 
 See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
-**Action button** picks an **Action** from the same registry the
-[automation rules editor](../automation.md) offers — every action in
-[Actions](../automation.md#actions), including advancing or stepping back
-through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
-one that takes parameters (a Companion button coordinate, a RossTalk command)
-shows the same fields the rule editor would show for it. **Label** is blank by
-default, which draws the action's own name; type one to override it. A button
-saved against an action that has since been removed or renamed still shows its
-stored id, marked as unknown, rather than doing nothing when pressed. One with
-a required field left blank — see [Needs setup](../automation.md#needs-setup)
-— shows a **Needs setup** marker over the tile in the layout editor's own
-canvas only; a live display or a console never shows it, and pressing the
-button there keeps refusing exactly as it always has. The layout still saves —
-a button is part of a screen, so a field it is missing marks the button, not
-the whole layout.
+A button's label is centered on it, in the middle both ways, and wraps inside it
+with a margin on every side. A word longer than the button breaks, and text that
+still does not fit is clipped at the button's edge rather than drawn over its
+neighbours. The OSC button, the RossTalk button and both kinds of Button draw it the same way.
 
-**Cue button** binds to a cue. The picker lists **Built in** first — the cues
-the app ships for OBS, REAPER, ProVideoPlayer and itself, which need no rule
-behind them ([built-in cues](../automation.md#built-in-cues)) — and then **Your
-cues**, from the rules list, including pairs hidden from Home Assistant. A pair
-shows on or off from its state variable; a tap presses the opposite half, and a
-pair whose reading is unknown presses ON. In the eight seconds after a press it
-shows what was asked for and says it is settling. A dashed amber ring means
-Companion has lost the device and the reading cannot be trusted. A cue that
+**Button** is one widget with a **Does** choice at the top of its settings.
+
+**Fire a cue** binds the button to a cue. The **Cue** dropdown lists **Your cues**
+first — the ones from the rules list, including those hidden from Home
+Assistant — and then **Built in**: the cues the app ships for OBS, REAPER,
+ProVideoPlayer and itself, which need no rule behind them
+([built-in cues](../automation.md#built-in-cues)). **+ New manual cue…** opens
+the [Automation](../automation.md#cues) page in a new tab, and a cue made there
+appears in the dropdown without reloading the editor. Two cues that would read
+the same show their cue name beside the entry. The button shows the cue's
+state: on, off, settling after a press, stale when Companion has lost the
+device, dimmed when the cue refuses.
+
+A pair shows on or off from its state variable; a tap presses the opposite half,
+and a pair whose reading is unknown presses ON. In the eight seconds after a
+press it shows what was asked for and says it is settling. A dashed amber ring
+means Companion has lost the device and the reading cannot be trusted. A cue that
 refuses — switched off, disarmed, not allowed during a service — says why on the
-button. One that needs a confirmation cannot be fired from a panel; the rules
-page has the Test button for that. A press is recorded in the
+button. In Automation's Simulate mode a press is accepted and sends nothing, and
+the button says *Simulated: nothing was sent*. One that needs a confirmation
+cannot be fired from a panel; the rules page has the Test button for that. A press is recorded in the
 [automation log](../automation.md) with the caller `console`.
 
-Two colour schemes, by what the switch means:
+Two color schemes, by what the switch means:
 
 | Scheme | On | Off |
 |---|---|---|
-| Ordinary | green ring and dot | grey dot, no ring |
+| Ordinary | green ring and dot | gray dot, no ring |
 | Live — on air or recording | red ring and dot | green ring, meaning connected and standing by |
 
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Run an action** picks an **Action** from the same registry the
+[automation rules editor](../automation.md) offers — every action in
+[Actions](../automation.md#actions), including advancing or stepping back
+through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
+one that takes parameters (a Companion button coordinate, a RossTalk command)
+shows the same fields the rule editor would show for it. The action belongs to
+this button alone; nothing else can fire it. A button saved against an action
+that has since been removed or renamed still shows its stored id, marked as
+unknown, rather than doing nothing when pressed. One with a required field left
+blank — see [Needs setup](../automation.md#needs-setup) — shows a **Needs setup**
+marker over the tile in the layout editor's own canvas only; a live display or a
+console never shows it, and pressing the button there keeps refusing exactly as
+it always has. The layout still saves — a button is part of a screen, so a field
+it is missing marks the button, not the whole layout.
+
+**Make it a cue**, under an action's fields, turns the action into a manual cue
+and points the button at it, so the Automation page's Run button, Home
+Assistant, voice and other consoles can fire it too. It is off until an action is
+chosen and its fields are complete. The cue is a **Called by name** rule named
+after the button's label (the action's name when the label is blank, or is the
+default "Action" that older buttons were saved with), with a
+`lower_snake_case` cue name that is made unique against every cue name and former
+name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
+read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
+with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
+Assistant** off; change any of that on the Automation page. A cue obeys what a Button
+set to Run an action does not: Simulate mode (the button then says it sent nothing),
+Disarm, the cooldown, and the service guard if it is switched back on. While the
+rule is being written, **Does** and **Make it a cue** are inert. If the server
+refuses the rule, the button is left as it was and the reason is shown under the
+button. The rule is written at once, but pointing the button at it is an edit like
+any other, so the layout still needs saving; if it is left unsaved, pressing
+**Make it a cue** again offers the enabled rule of that name, action and
+parameters that already exists instead of making a second.
+
+**Label** is blank by default, which draws the cue's name (or, for an action, the
+action's own name).
+
+Switching **Does** rewrites the widget in place. The label, the look and the
+position stay. Going to **Run an action** drops the cue and **Show device**;
+going to **Fire a cue** drops the action and its parameters. **Undo** brings them
+back. What **Does** shows is simply the widget's stored type, so nothing is
+migrated: a stored cue button opens on **Fire a cue**, a stored action button on
+**Run an action**.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and
@@ -595,9 +728,9 @@ NDI needs the native client. The web build ignores this widget.
 
 **Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
 page under Screens — renaming a feed there does not break a widget bound to it,
-since the binding is the feed's id, not its name. Always muted, with no
-controls, and it only opens a connection while it is actually on screen and the
-tab is visible. **Feed** picks which one it plays. **Fit** chooses between
+since the binding is the feed's id, not its name. Muted, with no controls
+(except Listen, below), and it only opens a connection while it is actually on
+screen and the tab is visible. **Feed** picks which one it plays. **Fit** chooses between
 showing the whole picture (letterboxed) and filling the box (cropped). **Show
 feed name** draws the feed's name over the picture. **When the feed is
 offline** picks what shows in its place: a message, your Branding logo, or
@@ -611,6 +744,35 @@ switching to the other, after a delay that starts at 1 second and doubles to
 30; playback that holds for 10 seconds starts the delay over. It never gives
 up on such a feed.
 
+**Listen.** On a Home card, the widget has a speaker button at the bottom right
+of its picture, as the preview on the Video feeds page does. It is never drawn on
+a wall, a kiosk, a console, the layout editor's preview or any other screen:
+those stay silent. It is off whenever a page loads, because a browser only lets
+sound start from a tap. Tapping it plays the feed's sound with its picture from
+one session, so they stay together (see
+[Listening to a feed's audio](../integrations/video-feeds.md#listening-to-a-feeds-audio));
+tapping again, hiding the tab, scrolling the card away or leaving the page
+stops it and returns the card to its picture-only session. One feed plays at a
+time per page: tapping Listen on another card moves the sound there.
+
+| Listen shows | When |
+|---|---|
+| Speaker, uncaptioned | The feed has audio and nobody is listening to it |
+| "Starting audio…" | A tap, until the sound arrives |
+| "Listening", a level meter and a volume slider | The sound is playing. The volume is kept per browser |
+| "Waiting for the source" | Listening was asked for and the feed is not sending yet |
+| "Audio stopped, retrying" | The listening session dropped; the picture shows Connecting meanwhile |
+| "Audio could not start: *reason*" | The listening session dropped three times in a row (a refused or dropped connection, no picture within 5 seconds of connecting, ICE failing before it connected, or the video element erroring; a session that plays for 10 seconds starts the count over), or the relay refused it outright (400, 406, 415 or 422), which gives up at once. The page gives the sound up and plays the picture alone; the next tap tries again. The caption goes when another control takes the sound or the feed's listen path changes |
+| "The browser would not play sound: *reason*" | The browser refused to start the element with sound after the tap |
+| "This feed has no audio" | The feed's source has no audio track. The button is disabled |
+| "Audio is not known until the feed has been seen" | The relay has not seen the feed yet. The button is disabled |
+| "Audio isn't available on this server: *reason*" | The conversion cannot run (no usable ffmpeg, say). The button is disabled |
+| "Audio needs WebRTC, and this feed is playing over HLS" | The picture is over HLS (B-frames, or WebRTC failed here), which carries no sound |
+| "Audio needs WebRTC, which this browser cannot play for this feed" | This browser has no player for the feed at all |
+
+A feed with no audio report (a YouTube, Resi or external-address feed) has no
+Listen button.
+
 | State | Shown as |
 |---|---|
 | No feed chosen | "Choose a feed" |
@@ -623,6 +785,18 @@ up on such a feed.
 | Offline | Your **When the feed is offline** setting |
 | Can't play here | "This screen can't play video" and "\<feed name\> plays on the other screens" |
 
+A picture that stops moving is not left frozen on its last frame. Once a
+playing widget has gone 5 seconds without a new frame (15 over HLS, whose
+segments can pause that long and catch up), it closes the session, shows
+**Offline**, and reconnects on the same delay as any other drop, whatever the
+connection itself reports: a source that stops sending, or a decoder that
+wedges, can leave a WebRTC connection reading "connected" for as long as it
+lasts. A screen whose browser does not count decoded frames for a feed is not
+watched this way. After WebRTC has shown a relay feed on a screen, a later
+session that connects but shows no frame is taken to be a silent source and
+retried over WebRTC rather than sent to HLS, up to 3 sessions in a row; a
+fourth falls back to HLS as below.
+
 A relay feed that falls back to HLS because WebRTC failed on this screen
 tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
 place, and moves over only once WebRTC is carrying frames — the picture never
@@ -633,8 +807,8 @@ resumes where it stopped, so the picture can fall behind. Slightly behind,
 with enough buffered, it plays a little fast (at most 1.25×) until it is back.
 More than 2 seconds past where it should sit, it jumps straight to live,
 holding for a moment while the new position loads. A jump is logged, and
-happens at most once every 10 seconds. iPhones and iPads before iOS 17.1 play
-HLS natively and do neither.
+happens at most once every 10 seconds. iPhones before iOS 17.1 play HLS natively
+and do neither.
 
 A pull feed reading standby is connected to all the same: the relay dials a
 pull feed's source only once something asks to watch it, so the widget's own
@@ -660,10 +834,10 @@ chooses which; with one, it is not shown.
 |---|---|
 | **Text** | **Text** |
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
-| **PCO countdown** | **Amber warning** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5, and it still goes red on overrun), **Hide when idle** (off: draws a dash) |
+| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
+| **Lyrics** | **Layout** (Above, Beside or Arranged; Above to start). **Group tag**: **Style** (Filled, Outline or Text), **Color** (ProPresenter's, or One, the app accent), **Text** (As named, Short or CAPS), **Width**, shown only when beside (Column, or Fit). **Lyrics**: **Size** (Fit, S, M or L; L to start. S, M and L are a share of the object's own height and come down when the words would not fit it; Fit is the largest size that does), **Weight** (Regular or Bold; Bold), **Align** (Left or Center; Left; not shown Beside, which is always left; Center also centers the Arranged strip), **No words** (Blank or Tag only; Tag only). **Underneath**: **Show what comes next** (on); while it is on, **Shows** the next slide or the next group (the next group), **Its lyrics** (off) and **Dimmed** (Less or More; Less). Switch it off and those three are not shown. **Song title** (off), the presentation's name in the corner. Its own Size, Weight and Align replace the Look section's type controls; the text color still applies |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
-| **ProPresenter timer** | **Timer name** (blank follows the first timer ProPresenter reports), **Color on overrun** (on), **Show timer name** (on), **Hide when idle** (off) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
 | **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |
 | **Embedded view** | **View** (any other view; a view cannot contain itself and nesting stops after three levels), **Show the view's header** (off), **Follow the live item** (on) |
@@ -678,18 +852,16 @@ chooses which; with one, it is not shown.
 | **People summary** | One switch per figure (in room, peak attendance, peak in room this service, peak attendance this service, entries this service, entries today, capacity, average, average service, versus average, lowest); In room, Peak att. and Entries (day) are on to start. **Layout**: Row or Stacked. **Show labels** (on) |
 | **People graph** | **Count** (Attendance or In room), **Show value** (on) and **Label**, **Source** Live or Recorded (with **Service**, *Most recent* by default), **Plan-item markers** (on), **Hover tooltip** (on), **Kiosk live/recorded toggle** (off) |
 | **Transcription** | **Mode**, **Lines**, **Channels shown**: see [Transcription](#transcription) |
-| **Baptism timer** | **Show** one of nine fields (see [Baptisms](#baptisms)), **Show label** (on) and **Label** |
 | **Record status** | **Recorder** (any, OBS only or REAPER only), **Recording text**, **Idle text**, **Offline text** (blank uses `RECORDING`, `STANDBY` and `NO RECORDER`), **Fill red while recording** (on), **Hide when idle** (off) |
 | **OBS status** | **Show** (Recording, Streaming or Virtual camera), **Active text**, **Idle text**, **Offline text**, **Fill red when active** (on), **Show timecode** (off; recording only), **Hide when idle** (off) |
 | **REAPER status** | **Recording text**, **Idle text**, **Offline text**, **Fill red when recording** (on), **Show position** (off), **Hide when idle** (off) |
-| **Streaming status** | **Platform** (Any, Resi or YouTube), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
+| **Streaming status** | **Source** (Any, Resi, YouTube or OBS), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
 | **Integration status** | **Integration** (First available, or one), **Show label** (on) and **Label** |
 | **Live scores** | **Game** (any followed team, or one), **Show sport detail** (on) |
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
 | **OSC button** | **Target**, **Label**, **Address**, **Arguments** (int, float, string, true or false, in order), **Feedback** (off; when on, **Watch address**, **Active when =** and **Active color**) |
 | **RossTalk button** | **Target**, **Command** and its parameters, **Label** |
-| **Action button** | **Action**, its parameters, **Label**: see [Control](#control) |
-| **Cue button** | **Cue**, **Label** (blank uses the cue's name), **Show device** (on) |
+| **Button** | **Does** (Fire a cue or Run an action). Fire a cue: **Cue**, **Show device** (on), **Label** (blank uses the cue's name). Run an action: **Action**, its parameters, **Make it a cue**, **Label** (blank uses the action's name). See [Control](#control) |
 | **Messages** | **Groups**: see [Control](#control) |
 | **Checklist**, **Notes** | Nothing beyond the look; their content is typed into the widget |
 | **Shape** | **Shape**: Rect or Ellipse |
@@ -716,7 +888,7 @@ offers only the one that belongs to it.
   though every tile had a caption and a sub-line — which is what makes a grid read
   as a grid.
 - **Anywhere else** the same widget wears the wall composition: one large word,
-  the number underneath, filled with colour while active.
+  the number underneath, filled with color while active.
 
 Putting a Home tile on a wall gets you the wall version automatically. You do not
 have to pick the right one.

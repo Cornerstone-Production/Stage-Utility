@@ -116,6 +116,33 @@ describe("POST /api/outputs — the guided creation fields", () => {
     assert.equal(screenIsControlSurface(made, views()), false);
   });
 
+  it("makes a Mic Slots view when the wall view's kind is slots, and answers a control surface of that kind with a 400", async () => {
+    const r = await post("/api/outputs", { name: "Lobby", newView: "wall", viewKind: "slots" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Lobby")!;
+    assert.equal(views().find((x) => x.id === made.viewId)!.kind, "slots");
+    const refused = await post("/api/outputs", { name: "Nope", newView: "control", viewKind: "slots" });
+    assert.equal(refused.status, 400);
+    assert.match((refused.json as { error: string }).error, /only as a custom layout/);
+    assert.equal(outputs().some((o) => o.name === "Nope"), false);
+  });
+
+  it("starts the view from the layout in the body", async () => {
+    const layoutBody = { version: 1, canvas: { width: 1280, height: 400 }, objects: [{ id: "a", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "text", text: "Hi" } }] };
+    const r = await post("/api/outputs", { name: "Strip", newView: "control", layout: layoutBody });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Strip")!;
+    assert.equal(views().find((x) => x.id === made.viewId)!.layout?.objects.length, 1);
+  });
+
+  it("refuses a viewKind or layout of the wrong shape", async () => {
+    for (const body of [{ newView: "wall", viewKind: "kiosk" }, { newView: "wall", viewKind: 3 }, { newView: "wall", layout: "blank" }, { newView: "wall", layout: { objects: [] } }]) {
+      const r = await post("/api/outputs", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(outputs().length, 4);
+  });
+
   it("shows an existing console of either kind: the screen is a control surface", async () => {
     const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", showInSidebar: false });
     assert.equal(r.status, 201, JSON.stringify(r.json));
@@ -475,6 +502,26 @@ describe("POST /api/devices/claim — a new screen", () => {
     assert.equal(made.slug, "wing");
     assert.equal(views().find((v) => v.id === made.viewId)?.showInSidebar, false);
     assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made.id);
+  });
+
+  it("makes a Mic Slots view when a claim asks for a wall view of that kind", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Lobby", newView: "wall", viewKind: "slots" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Lobby")!;
+    assert.equal(views().find((v) => v.id === made.viewId)?.kind, "slots");
+  });
+
+  it("refuses viewKind and layout beside an outputId: they describe a new screen, and the claim names an existing one", async () => {
+    recordSeen(device);
+    const before = views().length;
+    for (const extra of [{ viewKind: "slots" }, { layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] } }]) {
+      const r = await claim({ outputId: "display-1", ...extra });
+      assert.equal(r.status, 400, JSON.stringify(extra));
+      assert.match((r.json as { error: string }).error, /describe a new one/);
+    }
+    assert.equal(views().length, before);
+    assert.equal((await kioskDevicesStore.load()).some((d) => d.id === device.id), false, "the device was bound by a refused claim");
   });
 
   it("refuses a bad body with nothing created and the device still unclaimed", async () => {

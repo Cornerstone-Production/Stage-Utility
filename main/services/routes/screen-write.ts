@@ -8,13 +8,14 @@
 import type * as http from "node:http";
 
 import { ScreenWriteError, ViewSurfaceChangedError } from "../stage-controller.js";
-import type { CreateScreenInput } from "../../types/views.js";
+import { isLayoutShape, type CreateScreenInput } from "../../types/views.js";
+import { StoreReadError } from "../data-store.js";
 import { errorMessage } from "../errors.js";
-import { error, json } from "./context.js";
+import { error, isDisplayKind, json } from "./context.js";
 
 /** The creation fields a body may carry. A claim that names an existing screen
  *  carries none of them. */
-export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "slug", "showInSidebar", "expectSurface"] as const;
+export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "viewKind", "layout", "slug", "showInSidebar", "expectSurface"] as const;
 
 /**
  * Answer a body that carries a `mode` with a 400, and say whether it did. A
@@ -52,6 +53,14 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
     if (body.newView !== "wall" && body.newView !== "control") return { error: 'body.newView must be "wall" or "control"' };
     input.newView = body.newView;
   }
+  if ("viewKind" in body) {
+    if (!isDisplayKind(body.viewKind)) return { error: "body.viewKind must be a view kind" };
+    input.viewKind = body.viewKind;
+  }
+  if ("layout" in body) {
+    if (!isLayoutShape(body.layout)) return { error: "body.layout must be an object with an objects array and a canvas of numeric width and height" };
+    input.layout = body.layout;
+  }
   if ("expectSurface" in body) {
     if (body.expectSurface !== "display" && body.expectSurface !== "console") return { error: 'body.expectSurface must be "display" or "console"' };
     // Checked against the view in `viewId`, so it means nothing without one, or with
@@ -77,8 +86,12 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
  * through, so it is a 500 that says which step and what was and was not put back;
  * a view that is not the kind the caller expected is a 409; anything else a screen
  * write throws is a refusal made before anything was written, a 400 with the reason.
+ * A StoreReadError is rethrown, to be answered 503.
  */
 export function answerScreenWriteFailure(res: http.ServerResponse, err: unknown): void {
+  // A store the server cannot read is not the caller's mistake: it travels up to
+  // the dispatcher, which answers it 503 like every other route does.
+  if (err instanceof StoreReadError) throw err;
   // The view changed kind while the operator was deciding: nothing was made, and
   // `surface` is what the view is now to ask again with (as PATCH answers).
   if (err instanceof ViewSurfaceChangedError) {

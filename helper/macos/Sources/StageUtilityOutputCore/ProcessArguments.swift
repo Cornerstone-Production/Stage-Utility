@@ -35,4 +35,10 @@ public enum ProcessArguments {
   /// Chromium's GPU process, by its arguments: CEF 154 runs it from the plain helper
   /// app, not the "(GPU)" one, so its path does not say.
   public static func isGPUProcess(_ arguments: [String]) -> Bool { arguments.contains("--type=gpu-process") }
+
+  /// Chromium's network service, when it runs in a process of its own: a utility
+  /// process started for `network.mojom.NetworkService`.
+  public static func isNetworkServiceProcess(_ arguments: [String]) -> Bool {
+    arguments.contains("--utility-sub-type=network.mojom.NetworkService")
+  }
 }

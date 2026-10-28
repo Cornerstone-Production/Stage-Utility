@@ -5,6 +5,7 @@
 // that creates a view imports the templates without wanting the editor.
 
 import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
+import type { LayoutDTO } from "@main/types/stage";
 import { CARD_PRESETS, HAIRLINE_COLOR, PILL } from "../main/layout-objects";
 
 export function uid(): string {
@@ -41,7 +42,7 @@ export function dashboardTemplate(): LayoutObject[] {
   const rowH = 0.29, y1 = 0.03, y2 = y1 + rowH + g;
   return [
     tile(x1, y1, colW, rowH, "Current time", body({ type: "clock", showSeconds: true, format: "12h" }, "#ffffff", 0.09)),
-    tile(x2, y1, colW, rowH, "Service timer", body({ type: "countdown-timer" }, "#86efac", 0.09)),
+    tile(x2, y1, colW, rowH, "Service timer", body({ type: "timer", source: "service", caption: "" }, "#86efac", 0.09)),
     tile(x1, y2, colW, rowH, "Now", body({ type: "current-service-item" }, "#ffffff", 0.05)),
     tile(x2, y2, colW, rowH, "Up next", body({ type: "next-service-item" }, "rgba(255,255,255,0.7)", 0.05)),
     {
@@ -106,7 +107,7 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
     { id: uid(), x: 0.04, y: 0.06, w: 0.9, h: 0.06, z: 1, config: { type: "text", text: "Current" }, style: eyebrow() },
     { id: uid(), x: 0.04, y: 0.13, w: 0.92, h: 0.12, z: 2, config: { type: "current-service-item" }, style: { fontSize: 0.042, fontWeight: 500, color: FG, textAlign: "left", vAlign: "middle" } },
     // Huge Plex Mono countdown, on-pace green (Plex is inherited from the app).
-    { id: uid(), x: 0.04, y: 0.3, w: 0.92, h: 0.42, z: 3, config: { type: "countdown-timer" }, style: { fontSize: 0.22, fontWeight: 500, color: GREEN, textAlign: "left", vAlign: "middle" } },
+    { id: uid(), x: 0.04, y: 0.3, w: 0.92, h: 0.42, z: 3, config: { type: "timer", source: "service", caption: "" }, style: { fontSize: 0.22, fontWeight: 500, color: GREEN, textAlign: "left", vAlign: "middle" } },
     { id: uid(), x: 0.04, y: 0.73, w: 0.9, h: 0.05, z: 4, config: { type: "text", text: "Remaining" }, style: eyebrow(FG_MUTED) },
     // Service-progress bar (color drives the fill).
     { id: uid(), x: 0.04, y: 0.83, w: 0.92, h: 0.06, z: 5, config: { type: "slide-progress", display: "bar", showLabel: false }, style: { color: GREEN, vAlign: "middle" } },
@@ -239,18 +240,32 @@ export function ultritouchTemplate(model: UltritouchModel): LayoutObject[] {
     w: readoutW,
     h: 1 - pad * 2,
     z: 1,
-    config: { type: "countdown-timer", caption: "TO END OF SET", hideWhenIdle: false },
+    config: { type: "timer", source: "service", caption: "TO END OF SET", hideWhenIdle: false },
     style: { fontSize: model === "ultritouch-4" ? 0.25 : 0.32, fontWeight: 500, color: "#ededf0", textAlign: "left", vAlign: "middle" },
   });
   return objects;
 }
+/** What a new custom layout can start from, besides the blank canvas. */
+export type StartFrom = "blank" | "dashboard" | "confidence" | UltritouchModel;
 
+function isUltritouchModel(start: StartFrom): start is UltritouchModel {
+  return start === "ultritouch-2" || start === "ultritouch-2-hr" || start === "ultritouch-4";
+}
 
-
-
-
-
-
-// Recursive visual render for the editor canvas. Mirrors the renderer's
-// RenderObject but DIMS hidden objects (by their own flag only) instead of
-// removing them, so the editor still shows hidden layers faintly.
+/**
+ * The layout a new custom view starts with, or null for the blank canvas (which the
+ * server makes itself). The one place a starting choice becomes a layout: the New
+ * view dialog and the New screen panel both ask here, so the Ultritouch canvas and
+ * the template that goes with it cannot be paired differently in the two.
+ */
+export function startingLayout(start: StartFrom): LayoutDTO | null {
+  if (start === "blank") return null;
+  if (isUltritouchModel(start)) {
+    return { version: 1, canvas: ultritouchCanvas(start), objects: ultritouchTemplate(start) };
+  }
+  return {
+    version: 1,
+    canvas: { width: 1920, height: 1080, background: null },
+    objects: start === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate(),
+  };
+}

@@ -27,6 +27,8 @@
 // it returns undefined, which is the second way those columns ended up as
 // "Column1". The caller builds the sheets and already knows every heading.
 
+import { escapeHtml } from "./html-escape.js";
+
 function columnName(index: number): string {
   let out = "";
   let n = index;
@@ -37,9 +39,6 @@ function columnName(index: number): string {
   }
   return out;
 }
-
-const escapeAttr = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Excel requires distinct, non-empty column names within one table. */
 function uniqueNames(headers: string[]): string[] {
@@ -104,7 +103,7 @@ export function tableFeature(specs: readonly TableSpec[], namePrefix = "Data") {
               `name="${namePrefix}${id}" displayName="${namePrefix}${id}" ref="${ref}" totalsRowShown="0">` +
               `<autoFilter ref="${ref}"/>` +
               `<tableColumns count="${names.length}">` +
-              names.map((n, c) => `<tableColumn id="${c + 1}" name="${escapeAttr(n)}"/>`).join("") +
+              names.map((n, c) => `<tableColumn id="${c + 1}" name="${escapeHtml(n)}"/>`).join("") +
               `</tableColumns>` +
               `<tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" ` +
               `showRowStripes="1" showColumnStripes="0"/>` +

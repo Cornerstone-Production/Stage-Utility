@@ -3,7 +3,8 @@
 //
 // The route harness hands a handler a string-collecting response, which cannot
 // carry a binary body of this size, so this one listens. A second local server
-// stands in for GitHub, reached through the test-only release base.
+// stands in for GitHub, reached through the test-only release base: it serves the
+// zip and the releases API's record of the release, which is where the digest is.
 
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
@@ -15,6 +16,7 @@ import * as path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
+import { testSigningKey } from "../fixtures/test-signing-key.js";
 
 const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "su-helper-route-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
@@ -91,7 +93,7 @@ beforeEach(async () => {
 
 function publish(zip: Buffer, digest = sha(zip)): void {
   published.set(`/v${VERSION}/${ZIP}`, zip);
-  published.set(`/v${VERSION}/${ZIP}.sha256`, Buffer.from(`${digest}  ${ZIP}\n`));
+  published.set(`/api/releases/tags/v${VERSION}`, Buffer.from(JSON.stringify({ assets: [{ name: ZIP, digest: `sha256:${digest}` }] })));
 }
 
 describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
@@ -106,7 +108,7 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     assert.equal(first.headers.get("content-length"), String(zip.length));
     assert.deepEqual(Buffer.from(await first.arrayBuffer()), zip);
     const hits = githubHits.length;
-    assert.equal(hits, 2, "the checksum and the zip, and nothing else, are fetched");
+    assert.deepEqual(githubHits.sort(), [`/api/releases/tags/v${VERSION}`, `/v${VERSION}/${ZIP}`], "the release record and the zip, and nothing else, are fetched");
 
     const second = await fetch(`${appBase}/kiosk/${ZIP}`);
     assert.deepEqual(Buffer.from(await second.arrayBuffer()), zip);
@@ -117,12 +119,32 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     assert.equal(await sum.text(), `${sha(zip)}  ${ZIP}\n`);
   });
 
+  it("answers the .sha256 on its own from the release record, as one shasum line, without fetching the zip", async (t) => {
+    captureConsole(t, "log", "warn");
+    const zip = crypto.randomBytes(10_000);
+    publish(zip);
+    const res = await fetch(`${appBase}/kiosk/${ZIP}.sha256`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), `${sha(zip)}  ${ZIP}\n`);
+    assert.deepEqual(githubHits, [`/api/releases/tags/v${VERSION}`], "only the release record is read");
+  });
+
+  it("answers the .sha256 with 502 and the reason when the release lists no digest for the zip", async (t) => {
+    captureConsole(t, "log", "warn");
+    published.set(`/api/releases/tags/v${VERSION}`, Buffer.from(JSON.stringify({ assets: [{ name: ZIP }] })));
+    const res = await fetch(`${appBase}/kiosk/${ZIP}.sha256`);
+    assert.equal(res.status, 502);
+    assert.match(((await res.json()) as { error: string }).error, /lists StageUtilityOutput-arm64\.zip with no digest/);
+    assert.deepEqual(await fs.readdir(path.join(dataDir, "cache", "output-helper", VERSION)).catch(() => []), []);
+  });
+
   it("refuses a zip that does not match the published checksum, with 502 and nothing cached", async (t) => {
     captureConsole(t, "log", "warn");
     publish(crypto.randomBytes(10_000), sha(Buffer.from("not this")));
     const res = await fetch(`${appBase}/kiosk/${ZIP}`);
     assert.equal(res.status, 502);
-    assert.match(((await res.json()) as { error: string }).error, /did not match its published SHA-256/);
+    assert.match(((await res.json()) as { error: string }).error, /did not match the release's SHA-256/);
     const left = await fs.readdir(path.join(dataDir, "cache", "output-helper", VERSION)).catch(() => []);
     assert.deepEqual(left, []);
   });
@@ -145,6 +167,109 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     const res = await fetch(`${appBase}/kiosk/StageUtilityOutput-ppc.zip`);
     assert.equal(res.status, 404);
     assert.deepEqual(githubHits, []);
+  });
+});
+
+describe("GET /kiosk/<payload>.sig", () => {
+  const record = (assets: object[]) => published.set(`/api/releases/tags/v${VERSION}`, Buffer.from(JSON.stringify({ assets })));
+
+  for (const name of [`${ZIP}.sig`, "kiosk-windows.ps1.sig"]) {
+    it(`serves ${name} from the release, checked against its digest, and from the cache after`, async (t) => {
+      captureConsole(t, "log", "warn");
+      const sig = crypto.randomBytes(384);
+      published.set(`/v${VERSION}/${name}`, sig);
+      record([{ name, digest: `sha256:${sha(sig)}` }]);
+      const first = await fetch(`${appBase}/kiosk/${name}`);
+      assert.equal(first.status, 200);
+      assert.equal(first.headers.get("content-type"), "application/octet-stream");
+      assert.deepEqual(Buffer.from(await first.arrayBuffer()), sig);
+      assert.deepEqual(githubHits.sort(), [`/api/releases/tags/v${VERSION}`, `/v${VERSION}/${name}`]);
+      const hits = githubHits.length;
+      const second = await fetch(`${appBase}/kiosk/${name}`);
+      assert.deepEqual(Buffer.from(await second.arrayBuffer()), sig);
+      assert.equal(githubHits.length, hits, "the second request is served from the cache");
+    });
+  }
+
+  it("answers 404, with the reason, for a release that has no signature", async (t) => {
+    captureConsole(t, "log", "warn");
+    record([{ name: ZIP, digest: `sha256:${sha(Buffer.from("zip"))}` }]);
+    const res = await fetch(`${appBase}/kiosk/${ZIP}.sig`);
+    assert.equal(res.status, 404);
+    assert.equal(((await res.json()) as { error: string }).error, `the release for v${VERSION} has no ${ZIP}.sig`);
+  });
+
+  describe("the server's own launcher, against the signature it serves", () => {
+    const key = testSigningKey();
+    const launcher = () => fs.readFile(path.join(process.cwd(), "scripts", "kiosk", "kiosk-windows.ps1"));
+    const serveSig = (sig: Buffer) => {
+      published.set(`/v${VERSION}/kiosk-windows.ps1.sig`, sig);
+      record([{ name: "kiosk-windows.ps1.sig", digest: `sha256:${sha(sig)}` }]);
+    };
+    afterEach(() => {
+      delete process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE;
+    });
+    const mismatch = (lines: string[]) => lines.filter((l) => l.startsWith("[helper-update] this server's scripts/kiosk/kiosk-windows.ps1 is not the launcher the release signed"));
+
+    it("says nothing when the release signed these bytes", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = key.publicFile();
+      serveSig(key.sign(await launcher()));
+      assert.equal((await fetch(`${appBase}/kiosk/kiosk-windows.ps1.sig`)).status, 200);
+      assert.deepEqual(mismatch(lines), []);
+      assert.ok(!lines.some((l) => l.includes("could not check")), lines.join("\n"));
+    });
+
+    it("says once, on a tagged line, when they are not the bytes the release signed, and still serves the signature", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = key.publicFile();
+      // What a CRLF checkout of the launcher would be.
+      serveSig(key.sign(Buffer.from((await launcher()).toString("utf8").replace(/\n/g, "\r\n"))));
+      for (let i = 0; i < 2; i++) assert.equal((await fetch(`${appBase}/kiosk/kiosk-windows.ps1.sig`)).status, 200);
+      assert.equal(mismatch(lines).length, 1, lines.join("\n"));
+    });
+  });
+
+  it("does not serve the Windows updater's own script as a signature", async () => {
+    const res = await fetch(`${appBase}/kiosk/kiosk-update-windows.ps1.sig`);
+    assert.equal(res.status, 404);
+    assert.deepEqual(githubHits, []);
+  });
+});
+
+describe("GET /kiosk/release-signing.pub.pem and .xml", () => {
+  const key = testSigningKey();
+  afterEach(() => {
+    delete process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE;
+  });
+
+  it("serves this build's key as PEM, and the same key as .NET's RSAKeyValue", async (t) => {
+    captureConsole(t, "warn");
+    process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = key.publicFile();
+    const pem = await fetch(`${appBase}/kiosk/release-signing.pub.pem`);
+    assert.equal(pem.status, 200);
+    assert.equal(await pem.text(), key.publicPem);
+    const xml = await fetch(`${appBase}/kiosk/release-signing.pub.xml`);
+    assert.equal(xml.status, 200);
+    assert.equal(await xml.text(), key.publicXml);
+  });
+
+  it("answers 500, and says why on a tagged line, when the build's key is not usable", async (t) => {
+    const lines = captureConsole(t, "warn", "error");
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "su-bad-key-"));
+    try {
+      const file = path.join(dir, "release-signing.pub.pem");
+      await fs.writeFile(file, "PLACEHOLDER\n");
+      process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = file;
+      for (const ext of ["pem", "xml"]) {
+        const res = await fetch(`${appBase}/kiosk/release-signing.pub.${ext}`);
+        assert.equal(res.status, 500);
+        assert.equal(((await res.json()) as { error: string }).error, "this build has no usable release signing key");
+      }
+      assert.ok(lines.some((l) => l.startsWith("[helper-update] cannot give an installer the release signing key") && l.includes("is not usable: it is not a PEM public key")), lines.join("\n"));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -172,7 +297,9 @@ describe("GET /kiosk/install-macos.sh", () => {
     const r = await get('x"; id; "');
     assert.equal(r.status, 200);
     assert.ok(r.body.split("\n").includes('FETCHED_FROM=""'));
-    assert.ok(!r.body.includes("id; "));
+    // The header itself, verbatim, appears nowhere: not a fragment of it, which the
+    // script's own prose can contain ("no usable device id; run ...").
+    assert.ok(!r.body.includes('x"; id; "'));
   });
 });
 

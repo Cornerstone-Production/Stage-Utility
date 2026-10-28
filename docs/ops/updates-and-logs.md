@@ -21,6 +21,32 @@ result file, sleeps briefly, then **kills the server** — the service manager
 relaunches it on the new build. On failure it writes the result and leaves the
 server running on the old build.
 
+### Automatic updates
+
+Settings → Advanced → Updates can install a new release on its own: **Install**
+applies it and leaves the restart to the operator, **Install + restart** does
+both. Either runs only at the chosen hour (and day, if one is set) in the app's
+time zone, and never while Planning Center reports a service live. When Planning
+Center is not answering, its last reading may be out of date, so the updater
+falls back on the service windows worked out from the plans it last read: inside
+one it waits for the next scheduled time, outside one it goes ahead, so an outage
+holds an update only when the scheduled hour falls in a planned service. A plan
+whose times could not be read adds no window. Just after the server starts, before
+Planning Center has answered and before any window is known, the scheduled hour
+applies as it would with nothing planned.
+
+### The machines that show screens follow
+
+A Mac running the output helper, and a Windows kiosk, carry software of their own
+that the server's update does not replace: the helper app, and the kiosk's launcher.
+Each runs an updater that asks the server every five minutes and installs what the
+server runs, never during a service on a Mac (whose helper restarts for about three
+seconds), so updating the server is the whole job:
+[Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version).
+A machine installed before 1.27.0 needs its installer run once more to get the
+updater. Settings → Advanced → Updates → *Update Mac output helpers and Windows kiosks
+with this server* turns it off.
+
 ### The update lock
 
 While a Planning Center service is live, or any recorder is open (SPL, attendance,
@@ -68,13 +94,22 @@ A filename rule fires on that every time, so the skip never happened. Anything
 unreadable or unparseable is treated as changed, so an unknown state does the work
 rather than skipping it.
 
+Which files count is one list, `scripts/build-inputs.mjs`, used by both update scripts:
+the interface (`renderer/`, `main/`, `public/`, the HTML documents, the Vite, Tailwind,
+PostCSS and TypeScript config) and the public ServiceCue page's Worker source and config.
+A checkout with no `build/servicecue/deploy.json` reinstalls and rebuilds on the next
+update whatever changed, unless `build/servicecue.failed` says the last build failed to
+make it on the commit the update starts from: then only a change to a build input rebuilds
+([the marker](servicecue-on-the-web.md#the-copy-every-build-prepares)).
+
 ### What's new
 
 The panel lists the pending commits, filtered to what an operator could actually
-notice (`changelog.ts`). Types that produce no release — `chore`, `ci`, `build`,
-`docs`, `test`, `refactor`, `style` — are dropped, along with merge commits and the
-release workflow's own `chore(release): vX.Y.Z [skip ci]` bump. Without that filter
-the commonest thing on offer was an update whose only listed change was the version
+notice (`changelog.ts`). Types that change nothing an operator could notice — `chore`,
+`ci`, `build`, `docs`, `test`, `refactor`, and the legacy `style` — are dropped, along
+with merge commits and the release workflow's own `chore(release): vX.Y.Z [skip ci]`
+bump. A `revert` is kept whole: the word is the meaning. Without that filter the
+commonest thing on offer was an update whose only listed change was the version
 number being written down.
 
 A subject that does not parse as a conventional commit is kept rather than dropped:
@@ -149,7 +184,7 @@ from the `[tag]` each line opens with, a level filter, a text filter, and copy a
 download buttons. Only the newest 2,000 matching lines are drawn; filtering still
 runs over all of them, and the count says so.
 
-Timestamps are drawn in the **app time zone** (Settings → Advanced), which the
+Timestamps are drawn in the **app time zone** (Settings → Advanced → General), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
 
@@ -172,9 +207,10 @@ a path or a credential. If you see one, report it.
 | `[action]` | A control's or Companion press refused by the action registry, and why: [Actions](../automation.md#actions) |
 | `[app-paths]` | Recovering (or failing to recover) config from a legacy data-directory name across an upgrade |
 | `[app-root]` | An ignored or unusable `STAGE_UTILITY_ROOT` override: [Environment](install-and-config.md#environment) |
-| `[archive]` | A data-archive read, write or import failure: [Data archive](../data-archive.md) |
+| `[archive]` | A data-archive read, write or import failure: [Data archive](../data-archive.md). A raw CSV passed over because it could not be read or stopped taking rows, once per file, with recording going on in the next file: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
 | `[attachment-cache]` | Plan attachments cached from Planning Center: prunes, and fetch/redirect/size refusals; a file that will not download is one line per outage naming the file, its attachment id and why, a reminder if it keeps failing, and one when it downloads again: [Plan files](../integrations/planning-center.md#plan-files) |
-| `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist |
+| `[attendance-history]` | The attendance records, one file per service: the one-time split of the old single file, and a record, the folder or the old file that could not be read (left as it is), with a save for that service held beside it: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
+| `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist, and a closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[automation]` | Rules added, changed, removed, saved with issues, failing to fire, or run by hand from a Run button (who ran it, and what came of it); on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
 | `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
@@ -183,43 +219,45 @@ a path or a credential. If you see one, report it.
 | `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
 | `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
 | `[bar-config]` | The context bar's one-time migration splitting service type out of a plan item, on the one start that needed it: [The context bar](../features/context-bar.md) |
-| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`: [Branding](../features/operator-app.md#branding) |
+| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`; the custom tab and home-screen icon being set or removed, a custom icon whose stored file cannot be read, so the built-in one is served (once per file), and, from the browser, the Branding page failing to draw an icon or to open an image in the crop editor: [Branding](../features/operator-app.md#branding) |
 | `[broadcaster]` | A subscriber's own callback throwing while handling a broadcast — internal plumbing, not an operator signal |
 | `[cache-maintenance]` | The daily disk-cache prune (photos, attachments, layout images, the Mac output helper's cached zips) failing outright: [Under load](reliability.md#under-load) |
 | `[calendar]` | The pushed month-grid view folding or failing a refresh: [Calendar](../integrations/planning-center.md#calendar) |
 | `[checklist]` | A pre-service checklist tick failing to save: [Plan notes as a checklist](../integrations/planning-center.md#plan-notes-as-a-checklist) |
 | `[clock]` | Browser-side: the on-screen clock's own drift correction reporting a failure |
 | `[companion]` | A Companion button press or export fetch, and its result: [Companion](../integrations/companion.md) |
-| `[config-snapshot]` | Building or restoring a config snapshot: unreadable settings, id floors that could not carry forward, stores that could not be quieted, a backup listing one store under both its old and its current file name: [Backups](reliability.md#backups) |
+| `[config-snapshot]` | Building or restoring a config snapshot: a restore accepted (the files and images it wrote) or refused (each file or image and the rule it broke; nothing written), files, images and `settings.json` keys a restore skipped because this build does not keep them, config files on disk a save would refuse (checked at start-up, left in use), unreadable settings, id floors that could not carry forward, stores that could not be quieted, a backup listing one store under both its old and its current file name, and each stored credential a restore cleared because it would have gone to a new address (or its owner was removed): [Backups](reliability.md#backups) |
 | `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
-| `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did: [Under load](reliability.md#under-load) |
+| `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did; a store file that is there but cannot be read (the errno is named), so it runs on its defaults and saves to it are refused until a restart, and the same file reading again: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read) |
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
 | `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
-| `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
+| `[events]` | SSE and poll-transport clients connecting, closing, or expiring; channel reports no stream or poll client claimed, dropped and counted when a later report arrives (the first line at once, then at most one a minute): [Polling transport](../display-urls.md#polling-transport), [Channels](../reference/api.md#channels) |
+| `[helper-update]` | Mac output helpers and Windows kiosks following this server's version: each machine's decision when it changes (waiting and why, going ahead, up to date), what it reports it did (updated, failed and why, waiting for a login, the helper quit at the Mac, Local Network refused after an update), Update now pressed, a machine that stopped checking; when the server cannot give an installer the release signing key (`cannot give an installer the release signing key`, with why), which leaves no updater installable; and, once per signature, when the server's own `kiosk-windows.ps1` is not the launcher the release signed (`is not the launcher the release signed`), or could not be checked against it. A refused signature (`signature missing`, `signature invalid`, `signature not checked`) reaches this log as the failure a machine reports: [Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version) |
 | `[history]` | A time correction refused, a rebuild's outcome; on the browser, History or Home cards failing to load: [Attendance and service history](../features/attendance-and-history.md) |
 | `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
-| `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |
-| `[kiosk-responder]` | The UDP discovery responder starting, or a socket/reply error: [Discovery](../kiosk-devices.md#discovery) |
+| `[integration-manager]` | Config-key validation; credentials migrating (or failing to migrate) out of `settings.json`; a stored credential cleared because a save changed the address it is sent to, naming the old and new address and never the value: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson), [Credentials](../integrations/README.md#credentials) |
+| `[kiosk-responder]` | The UDP discovery responder starting, a socket/reply error, or the device bindings unreadable, so no probe is answered until they read again; and a device that names this server but is not set up here (released, or claimed on an install since wiped) being told so, once until it is set up here again: [Discovery](../kiosk-devices.md#discovery), [Bindings, and more than one server](../kiosk-devices.md#bindings-and-more-than-one-server) |
 | `[kiosk-presence]` | A device that is not a Mac helper output heard for the first time, or again after it aged out (its id, OS and host), whether or not anyone is on Screens; and the list reaching its 256-device limit, once per time it fills. A helper output logs under `[output-helper] output seen` instead: [Discovery](../kiosk-devices.md#discovery) |
 | `[last-update]` | The tail of `update.log` replayed at start-up, so the run that ended in this restart is readable: [Diagnosing a failed (or slow) update](#diagnosing-a-failed-or-slow-update) |
 | `[layout-defaults]` | The one-time card cleanups on load, with a count: a translucent or older card ground folded to the current card, and an 8% card border raised to 10%: [Layout editor](../reference/layout-editor.md) |
 | `[layout-editor]` | Browser-side: the layout editor's own reads (targets, commands, services, files, saved groups) failing, and a saved group failing to save or delete |
-| `[layout-images]` | Orphaned uploaded layout images pruned: [Under load](reliability.md#under-load) |
+| `[layout-images]` | Orphaned uploaded layout images pruned, or the prune skipped because a layout store could not be read: [Under load](reliability.md#under-load) |
 | `[live-poller]` | The live-service tick failing for one integration, and the poller starting: [Winding down between services](reliability.md#winding-down-between-services) |
 | `[messages]` | Stage messages: each one sent (to which groups, whether an alert, by whom, and the text cut to 120 characters), a send refused and why, an alert cleared and by whom, a reply (to which message, from whom, the text) and a reply refused and why, the walk that decides which views a screen draws stopping at its 256-view cap, a group deleted and from how many screens (and, at start-up and on every save, a group id a screen holds that the config does not have, and from how many it was taken), `saved the groups but could not take deleted groups off the screens` when that step failed after the config saved, `taking unknown groups off the screens was skipped at start-up` when `messaging.json` did not read whole and a screen holds a group (the screens are left alone), a save of the groups and quick messages refused because another window changed them first, the nightly clear and how many messages it removed, `the date moved back` when the time zone moved west and today's messages were kept, the 200-a-day cap dropping the oldest (once a day), the thread failing to save, `checking the day's thread at start-up failed` and `taking unknown groups off the screens at start-up failed` (the server boots regardless), `messaging.json` holding entries or fields that could not be read (each named with the rule it broke) or not being an object, `messages.json` holding messages that could not be read (a count only), and, from the browser, Settings → Messages failing to read or save the groups and quick messages, or being told they changed since the page loaded, and a console failing to send a reply. The browser-side lines are a message that would not send (`could not send that message`), a clear that failed (`could not clear that alert`), a reply that was refused or did not reach the server (`could not send that reply`), a read of the messages that failed (`could not read the stage messages`), and an alert banner that failed to draw and is hidden until the next update (`the alert banner failed to draw`). An alert running out is routine and is not logged: [Stage messages](../features/stage-messages.md) |
 | `[obs]` | Connection state, and recording/streaming/virtual-camera transitions: [OBS](../integrations/obs.md) |
 | `[osc]` | Target init, hostname resolution, and send-socket errors: [OSC](../integrations/osc.md) |
-| `[output-helper]` | A Mac's output heard for the first time (its id, kind and name), claimed (which screen it now shows, and any device it displaced) or released; a DeckLink output **struggling** (three reports running with frames dropped or 5% or more repeated) and **recovered**; an output that **stopped reporting health**. Ordinary reports are not logged. For the helper's download: a zip fetched from the release and verified against its SHA-256, or served from the cache; a cached zip hashed again and dropped for fetching again when it no longer matches; older cached releases removed, and a leftover partial download or old release that could not be; a transfer refused or failed, with why (bad checksum, over the size limit, stalled, no release reachable); and the one notice when `STAGE_UTILITY_TEST_RELEASE_BASE` points the fetch at a test server. Serving `install-macos.sh` logs `could not prepare install-macos.sh` with why when the server cannot put its own address into the script, and the request gets a 500: [Mac output helper](../kiosk-devices.md#mac-output-helper), [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+| `[output-helper]` | A Mac's output heard for the first time (its id, kind and name), claimed (which screen it now shows, and any device it displaced) or released; a bound output showing `/enroll` a token other than the one pinned (`showed a token other than the one pinned for screen …`, once until it matches again, is released or is set up: its token was replaced on the Mac, and it is set up again by releasing it and setting it up, see [Mac output helper](../kiosk-devices.md#mac-output-helper)); a DeckLink output **struggling** (three reports running with frames dropped or 5% or more repeated) and **recovered**; an output that **stopped reporting health**. Ordinary reports are not logged. For the helper's download: the zip's SHA-256 read from the release's API record; a zip fetched from the release and verified against it, or served from the cache; a cached zip hashed again and dropped for fetching again when it no longer matches; older cached releases removed, and a leftover partial download or old release that could not be; a transfer refused or failed, with why (no such release, the release lists no such asset or no digest for it, a malformed digest, GitHub's API rate limit (with when it resets), bad checksum, over the size limit, stalled, no release reachable); and the one notice when `STAGE_UTILITY_TEST_RELEASE_BASE` points the fetch at a test server. The same for a [release signature](../kiosk-devices.md#signed-updates) (`<payload>.sig`): fetched from the release and verified against its digest, or refused with why (the release has no signature, a mismatched digest, over 16 KiB). Serving `install-macos.sh` or `install-windows.ps1` logs `could not prepare <installer>` with why when the server cannot put its own address into the script, and the request gets a 500: [Mac output helper](../kiosk-devices.md#mac-output-helper), [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
 | `[patch]` | Browser-side: the patch sheet or its weekly variant failing to load |
-| `[pco]` | Planning Center rate-limit headroom, refused unsafe URLs, each read that failed after its retries, named (`[pco] plan items read failed: …`, and the same for the calendar, checklist, plans and the rest — a service order or SPL rundown then reads "Couldn't load the plan"), and (under `STAGE_UTILITY_DEBUG`) every request: [Planning Center](../integrations/planning-center.md) |
+| `[pco]` | Planning Center rate-limit headroom, refused unsafe URLs, each read that failed after its retries, named (`[pco] plan items read failed: …`, and the same for the calendar, checklist, plans and the rest — a service order or SPL rundown then reads "Couldn't load the plan"), a live read that failed (`live state unknown until Planning Center answers again`, once per run of failures; Mac helper and ServiceCue page updates wait until `live state known again`), and (under `STAGE_UTILITY_DEBUG`) every request: [Planning Center](../integrations/planning-center.md) |
 | `[pco-calendar]` | Calendar instances with no start time, left undrawn: [Calendar](../integrations/planning-center.md#calendar) |
 | `[photo-cache]` | Person photos cached from Planning Center: prunes, fetch/redirect/size refusals, and a smaller copy PCO would not give, with what was served instead: [Planning Center](../integrations/planning-center.md#photos) |
 | `[plan-export]` | A view bundle built for export to another install, and its counts: [Moving a view between installs](../moving-a-view.md) |
 | `[plan-file]` | Browser-side: a Plan file widget still failing to load after its quick retries, with the page it is on and the file name, once per outage rather than on every slow re-check, and one line when that file draws again: [Plan file](../reference/widgets.md#pco--service) |
-| `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
+| `[plans]` | The upcoming-plans list failing, or changing in size (an unchanged refresh is not said), and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |
 | `[propresenter]` | Macro triggers and their failures, and unsupported status endpoints: [ProPresenter](../integrations/propresenter.md) |
+| `[publish]` | [ServiceCue publishing to the web](../features/servicecue-and-baptisms.md#on-the-web): switched on (to which host) or off; the first request the page accepted; the page reached again, with how long it was out; a request failing and the page not accepting what is sent, once per outage with the wait before the next try; `publishing is held` when only a change of address or token can help (the token refused, a rule on the account blocking this server, an address that is not the page, another protocol version, a saved token or address that cannot be used); publishing starting again after the page was deployed from this server; a read for a document failing, so the page keeps its last copy; a document, image or frame the page refused, skipped until it changes; Planning Center's rate-limit headroom holding the refresh, and releasing it; the page no longer holding what it was sent; what the page removed because it is no longer wanted; and the page being asked to drop its copy, or not answering. Never the token |
 | `[pvp]` | Polling state, and playlist-tree fetch failures. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a request URL had to be moved back onto the configured ProVideoPlayer host (see [Code scanning](../reference/code-scanning.md#credentialed-requests)): [ProVideoPlayer](../integrations/provideoplayer.md) |
 | `[reaper]` | Polling state, and transport command results: [Reaper](../integrations/reaper.md) |
 | `[reconcile]` | Orphaned open recordings (attendance, SPL, service timeline) closed at boot: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
@@ -233,13 +271,16 @@ a path or a credential. If you see one, report it.
 | `[screens]` | Server-side. A one-time pass on the first start after an upgrade that takes the role an older build stored on each screen out of the data: one line for each screen it had to do something for (kept read-only behind a wall copy of a console, or kept live by making its view a console or giving it a control-surface copy, either of which is kept out of the sidebar and given the `contain` fit its layout had), `reused the copy left by an interrupted upgrade: "<name>"` for a copy a start that died part-way had already saved, then `role from view: N screens checked, M changed`, and nothing when no screen carries a stored role: [The view decides what a screen is](../reference/data-model.md#surfaces-displays-and-consoles). And one line whenever a write changes whether a screen's buttons work, from routing a screen to another view, from changing what a view is for, or from deleting a view a control surface was showing: `"Lobby TV" is now a control surface (shows "Booth controls")`, or `… is now read-only (shows …)` (`shows nothing` after a delete). Browser-side, the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
 | `[safespace]` | `BUG: a request URL for <origin> was sent to <origin> instead`, written when a SafeSpace request had to be moved back onto SafeSpace's own host. Never carries a path, which is the credential: [Code scanning](../reference/code-scanning.md#safespace) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
+| `[security]` | The host-name check: refusal on or off at start-up and when switched, and `host-names.json` unreadable (refusal then off until it reads); a name not on the list the first time it is answered (the request and the address it came from); a name's first refusal, then one line an hour with how many more, and a `Host` that is not a name refused the same way; the seen list reaching its 50-name cap and the name it forgot (these three share five lines a minute, and the rest are counted on one line); refusal turned on with how many names were kept and how many left out, and each name added to or taken off the list by that confirmation; event streams closed because their name is now refused; a name added, accepted, removed or dismissed by the operator; the seen list failing to save (it is retried each minute): [SECURITY.md](../../SECURITY.md) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a token or API request had to be moved back onto SenSource's own host: [SenSource](../integrations/sensource.md) |
 | `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
 | `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
-| `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
-| `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist |
+| `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded). The timing records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
+| `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist, and a closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[servicecue]` | A saved ServiceCue file moved in from its old name on upgrade (`scriptview-*.json` to `servicecue-*.json`), or both names found and the new one kept with the old left untouched; a move that failed; browser-side, ServiceCue's settings, types, note categories, rundown or plan list failing to load, a `?plan=` the service type does not have, or a display's text size the server would not keep |
+| `[servicecue-bundle]` | The build preparing the public ServiceCue page for upload (`build/servicecue/`): its failing, which leaves the update itself to go on and this server with nothing to upload: [The copy every build prepares](servicecue-on-the-web.md#the-copy-every-build-prepares) |
+| `[servicecue-deploy]` | Keeping the public ServiceCue page itself up to date ([Keeping it up to date](servicecue-on-the-web.md#keeping-it-up-to-date)): each decision once (deploying and why, the page current, left alone as newer or another build, waiting for a live service, the service window or the service times), the files uploaded and already held, the build deployed, a deploy that left the page on the old build, every failure with Cloudflare's code and words and when it is tried again, a token set or cleared, and the Cloudflare credentials removed with a change of page address. Never the token |
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
@@ -247,18 +288,19 @@ a path or a credential. If you see one, report it.
 | `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
 | `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |
 | `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |
-| `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels) |
+| `[spl-history]` | The SPL records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
+| `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, or resumed from its stored record because the archive could not be read, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels). A closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
-| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens) |
+| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens). An automatic update waiting because Planning Center's live state is unknown and a planned service window is open (`auto-update waits: …`): [Automatic updates](#automatic-updates). At startup, the migrations of views and screens skipped because `views.json` or `settings.json` could not be read: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
-| `[updater]` | The update flow described above, and (browser side) the update lock failing to read |
+| `[updater]` | The update flow described above; a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
-| `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
+| `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
 | `[view-import]` | Importing a view: plan retyping, patch variants, and preset counts: [Moving a view between installs](../moving-a-view.md) |
-| `[wireless]` | Connection setup, credential migration, and meter-rate changes: [Wireless](../integrations/wireless.md) |
+| `[wireless]` | Connection setup, credential migration, a stored password cleared because the connection's address or provider changed, and meter-rate changes: [Wireless](../integrations/wireless.md) |
 | `[youtube]` | The device-code connect flow: code issued, approved, or refused: [YouTube](../integrations/youtube.md) |
 
 ### Why a value on the page can read `\n`
@@ -272,8 +314,8 @@ at the moment the log matters most.
 
 So every outside value is escaped on its way into a log line. A control character
 is shown rather than obeyed: a newline reads `\n`, a tab `\t`, anything else
-`\x1b`. Long values are cut at 200 characters with an ellipsis, and a stack trace
-at 2,000. Seeing `\n` in the middle of a plan title on this page means the title
+`\x1b`. Long values are cut at 200 characters with an ellipsis, a stack trace
+at 2,000, and a raw ProdCom frame under `PRODCOM_DEBUG=1` at 10,000. Seeing `\n` in the middle of a plan title on this page means the title
 really contains one — not that the page is broken.
 
 ### Timestamps that run backwards
@@ -383,18 +425,26 @@ at the foot of the release notes is the complete list.
 
 **Fixed is bugs.** Work that made something quicker rather than repairing it —
 holding one stream open instead of polling, dropping a field from a
-once-per-second read — is listed under **Improved**, so it does not read as a
-report of something that had been broken on your install.
+once-per-second read, or giving a table a little more room (a `polish` commit) —
+is listed under **Improved**, so it does not read as a report of something that
+had been broken on your install.
+
+**A hand-written notice and the generated lists share a heading.** A release
+whose notice (the opening words above) carries its own **Breaking**, **New**,
+**Improved** or **Fixed** list gets one list under one heading: the written
+bullets first, then the generated ones, then anything the notice wrote under a
+sub-heading of its own.
 
 **A stable release does not list the fixes that built its own new features.** It
-folds in thirty-odd betas, so Fixed would otherwise fill with the polish commits
-behind whatever is announced under New — of no use to somebody meeting the
-feature whole, and enough of them to push out the fixes to things they already
-had. A fix is held back only where its scope both shipped a feature in the same
-release and had never appeared before it; a fix to anything that was already
-released is always listed. Fixed and Improved each state their own held-back
-count at the end of the section, so the filter is never silent. Prereleases list
-everything: on the beta track, the fix is the reason to update.
+folds in thirty-odd betas, so Fixed would otherwise fill with the small
+corrections behind whatever is announced under New — of no use to somebody
+meeting the feature whole, and enough of them to push out the fixes to things
+they already had. A fix or improvement is held back only where its scope both
+shipped a feature in the same release and had never appeared before it, or where
+its author marked it `Beta-only`; a change to anything that was already released
+is always listed. Fixed and Improved each state their own held-back count at the
+end of the section, so the filter is never silent. Prereleases list everything:
+on the beta track, the fix is the reason to update.
 
 Notes are captured **before** the update runs. Afterwards the update status
 describes the next pending release rather than the one just installed, so there

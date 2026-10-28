@@ -33,7 +33,8 @@ const has = (cmd: string): boolean => spawnSync("sh", ["-c", `command -v ${cmd}`
 
 /**
  * Stand-ins for the commands that read or change a real machine. `launchctl print
- * <target>` answers "loaded" (0) when the target contains a word of SHIM_LOADED,
+ * <target>` answers "loaded" (0) when the target is, or ends in "/" and, a word of
+ * SHIM_LOADED (whole labels: com.stageutility.output is not the updater's),
  * else "not loaded" (1); every call is appended to SHIM_LOG. `uname` says Darwin
  * (the script returns early elsewhere); brew, systemctl and pgrep find nothing.
  */
@@ -41,7 +42,7 @@ const SHIMS: Record<string, string> = {
   launchctl: `#!/bin/sh
 echo "launchctl $*" >>"$SHIM_LOG"
 if [ "$1" = print ]; then
-  for w in \${SHIM_LOADED:-}; do case "$2" in *"$w"*) exit 0 ;; esac; done
+  for w in \${SHIM_LOADED:-}; do case "$2" in "$w" | */"$w") exit 0 ;; esac; done
   exit 1
 fi
 exit 0
@@ -105,7 +106,7 @@ function uninstall(opts: { loaded?: string[]; consoleUser?: string; shell?: stri
 
 /** The paths install-macos.sh writes, read by sourcing it (which defines and runs nothing). */
 function installerPaths(root: string): Record<string, string> {
-  const vars = ["HELPER_LABEL", "HELPER_PLIST", "APP_NAME", "APPS_DIR", "STATE_DIR", "KIOSK_LABEL", "AGENT", "BIN"];
+  const vars = ["HELPER_LABEL", "HELPER_PLIST", "APP_NAME", "APPS_DIR", "STATE_DIR", "KIOSK_LABEL", "AGENT", "BIN", "UPDATER_LABEL", "UPDATER_PLIST", "UPDATER_DIR"];
   const r = spawnSync("sh", ["-c", `. "${INSTALLER}"; ${vars.map((v) => `printf '${v}=%s\\n' "$${v}"`).join("; ")}`], {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "", STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: root },
@@ -341,16 +342,24 @@ describe("the names uninstall.sh and install-macos.sh share", () => {
     put(path.join(p.APPS_DIR, p.APP_NAME, "x"));
     put(p.AGENT);
     put(p.BIN);
+    put(p.UPDATER_PLIST);
+    put(path.join(p.UPDATER_DIR, "install-macos.sh"));
     fs.mkdirSync(path.join(scratch, "Users", ME), { recursive: true });
-    const r = uninstall({ loaded: [p.HELPER_LABEL, p.KIOSK_LABEL] });
+    const r = uninstall({ loaded: [p.HELPER_LABEL, p.KIOSK_LABEL, `system/${p.UPDATER_LABEL}`] });
     const rel = (f: string) => f.split(scratch).join("<root>");
     assert.deepEqual(r.sorted, [
       `launchctl bootout gui/<uid>/${p.HELPER_LABEL}`,
       `launchctl bootout gui/<uid>/${p.KIOSK_LABEL}`,
+      `launchctl bootout system/${p.UPDATER_LABEL}`,
       `rm -f ${rel(p.AGENT)}`,
       `rm -f ${rel(p.BIN)}`,
       `rm -f ${rel(p.HELPER_PLIST)}`,
+      `rm -f ${rel(p.UPDATER_PLIST)}`,
       `rm -rf ${rel(path.join(p.APPS_DIR, p.APP_NAME))}`,
+      `rm -rf ${rel(p.UPDATER_DIR)}`,
     ].sort());
+    // Stopped and removed before the app, so a run mid-update cannot put it back.
+    const at = (needle: string) => r.actions.findIndex((a) => a.includes(needle));
+    assert.ok(at(`bootout system/${p.UPDATER_LABEL}`) < at(`rm -rf ${rel(path.join(p.APPS_DIR, p.APP_NAME))}`), r.actions.join("\n"));
   });
 });

@@ -43,10 +43,37 @@ export const CALL_TRIGGER_ID = "call.by-name";
  */
 export const MAX_ALIASES = 5;
 
-/** The former names in a cue's trigger params, in order, oldest first. */
-export function parseAliases(params: Record<string, string | number>): string[] {
+/**
+ * The cue name a rule answers to, normalised the way the engine compares it, or ""
+ * when the rule is not a cue.
+ */
+export function calledCueName(trigger: { id: string; params: Record<string, string | number> }): string {
+  return trigger.id === CALL_TRIGGER_ID ? String(trigger.params?.name ?? "").trim().toLowerCase() : "";
+}
+
+/**
+ * Every cue name in use, with its former names, and the built-ins — what a new
+ * cue's name must not be. The engine treats them as ONE namespace.
+ */
+export function takenCueNames(
+  rules: readonly { trigger: { id: string; params: Record<string, string | number> } }[],
+  reserved: Iterable<string> = [],
+): Set<string> {
+  const taken = new Set([...reserved].map((n) => n.toLowerCase()));
+  for (const r of rules) {
+    const name = calledCueName(r.trigger);
+    if (name) taken.add(name);
+    if (r.trigger.id === CALL_TRIGGER_ID) for (const alias of parseAliases(r.trigger.params)) taken.add(alias);
+  }
+  return taken;
+}
+
+/** The former names in a cue's trigger params, in order, oldest first. Params a
+ *  hand-edited rules file left out are none, so one bad cue cannot throw inside
+ *  every other cue's name check. */
+export function parseAliases(params: Record<string, string | number> | undefined): string[] {
   const seen = new Set<string>();
-  for (const part of String(params.aliases ?? "").split(",")) {
+  for (const part of String(params?.aliases ?? "").split(",")) {
     const name = part.trim().toLowerCase();
     if (name) seen.add(name);
   }

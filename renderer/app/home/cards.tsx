@@ -22,7 +22,7 @@ import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
-import type { LayoutObjectConfig } from "@main/types/views";
+import type { LayoutObjectConfig, PvpNowLayout } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a
  * new home-* type cannot be silently left out of the switch below.
@@ -33,7 +33,8 @@ import type { LayoutObjectConfig } from "@main/types/views";
  * distance, Home reads a row of three-line cards, and a streaming card that
  * wore the wall's composition was the odd one out on the page.
  */
-export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
+// Less `home-live-status`, which readConfig turns into a Timer first.
+export type HomeCardType = Exclude<Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"], "home-live-status">;
 
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
@@ -42,12 +43,13 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
-import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
+import { fmtDuration } from "../../main/pco-timer";
 import { useObsStatus } from "../../main/use-obs-state";
 import { usePvpState } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
-import { PvpNowObject, type PvpNowLabel } from "../../main/pvp-now";
+import { PvpNowObject, type PvpNowConfig, type PvpNowLabel } from "../../main/pvp-now";
+import { pvpNowLayout } from "../../main/pvp-now-config";
 import { useReaperStatus } from "../../main/use-reaper-state";
 import { useSplStatus } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
@@ -71,7 +73,6 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-readiness": true,
   "home-next-service": true,
   "home-recent-services": true,
-  "home-live-status": true,
   "home-recording": true,
   "home-recording-obs": true,
   "home-recording-reaper": true,
@@ -567,7 +568,7 @@ export function RecentServicesCard({
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
         </h2>
-        <AppLink to="/history" className="ml-auto text-caption1 text-accent hover:underline">
+        <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
           Open History
         </AppLink>
       </header>
@@ -593,38 +594,6 @@ export function RecentServicesCard({
         </>
       )}
     </section>
-  );
-}
-
-/**
- * The service timer — the running item's clock, what it is, and what is next.
- *
- * It used to carry recording, SPL, screens and history inside it, because Home
- * had no way to arrange four small things. The grid does, so those are their own
- * widgets now and this is one job again. The maths is NOT reimplemented:
- * computePcoTimer mirrors PCO's semantics and fmtDuration formats it, and the
- * dashboard, the stage display and the context bar all use that pair.
- */
-export function LiveStatusCard({
-  pcoLive,
-  now,
-}: {
-  pcoLive: PcoLiveDTO | null;
-  now: number;
-}) {
-  const timer = computePcoTimer(pcoLive, now);
-  // The idiom, like every other card. This was the last one drawing its own
-  // markup — a clamp()'d timer with its label sitting BESIDE it on the baseline
-  // and the next item below, which is the same three pieces of information the
-  // composition already has places for. The label is what the number is counting
-  // to, so it is the caption; the next item qualifies it, so it is the sub.
-  return (
-    <Stat
-      label={timer?.label ?? "Service"}
-      value={timer ? fmtDuration(timer.seconds) : "—"}
-      sub={pcoLive?.nextItemTitle ? `Next · ${pcoLive.nextItemTitle}` : undefined}
-      tone={timer?.over ? "danger" : undefined}
-    />
   );
 }
 
@@ -744,15 +713,17 @@ export function StreamingCard({
   );
 }
 
-/** The loudest meter right now, and which one. */
-export function SplCard({ meterId }: { meterId?: string | null } = {}) {
+/** The loudest meter right now, its metric and which meter it is — or the one meter and metric the operator pinned. */
+export function SplCard({ meterId, metricKey }: { meterId?: string | null; metricKey?: string | null } = {}) {
   const { value: spl, known } = useSplStatus();
   // Unknown is its own state: loudestSpl/pinnedSpl read "Smaart offline" off a
   // `null` spl, which is also what the hook returns before its first answer.
   if (!known) return <Stat label="SPL" value="—" />;
-  // Unpinned is the untouched path: same call, same output as before the setting
-  // existed. Pinning changes WHICH meter is read, never the composition.
-  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId) : loudestSpl(spl);
+  // Unpinned takes the loudest-meter path. Pinning a meter or a metric changes
+  // WHICH reading is taken, never how it is composed. An empty or null metric is
+  // Automatic.
+  const metric = metricKey ?? undefined;
+  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId, metric) : loudestSpl(spl, metric);
   return <Stat label="SPL" value={r.value} sub={r.sub} />;
 }
 
@@ -849,15 +820,18 @@ export function PvpNowCard({
   now,
   showProgress = true,
   showNextCue = true,
-  compact = false,
+  layout = "full",
   nowLabel,
+  warn,
   countStills = false,
 }: {
   now: number;
   showProgress?: boolean;
   showNextCue?: boolean;
-  compact?: boolean;
+  layout?: PvpNowLayout;
   nowLabel?: PvpNowLabel;
+  /** The Warn near the end switch and its thresholds. */
+  warn?: Pick<PvpNowConfig, "warnNearEnd" | "warnAmberSec" | "warnRedSec">;
   countStills?: boolean;
 }) {
   const pvp = usePvpState();
@@ -868,7 +842,7 @@ export function PvpNowCard({
           was what made this card render left while its Align pad said centre and
           every cell in that pad did nothing. */}
       <PvpNowObject
-        config={{ showProgress, showNextCue, compact, nowLabel, countStills }}
+        config={{ showProgress, showNextCue, layout, nowLabel, ...warn, countStills }}
         status={pvp}
         now={now}
         align="center"
@@ -1039,7 +1013,6 @@ export function ScreensCard({
 export function HomeCard({
   config,
   state,
-  pcoLive,
   now,
   onlineOutputIds,
   onlineKnown,
@@ -1056,7 +1029,6 @@ export function HomeCard({
    */
   config: Extract<LayoutObjectConfig, { type: HomeCardType }>;
   state: StageState;
-  pcoLive: PcoLiveDTO | null;
   now: number;
   /**
    * Output ids with a live heartbeat, from `useDisplayPresenceStatus` by way of
@@ -1078,8 +1050,6 @@ export function HomeCard({
 }) {
   const c = config;
   switch (c.type) {
-    case "home-live-status":
-      return <LiveStatusCard pcoLive={pcoLive} now={now} />;
     case "home-recording":
       return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
@@ -1101,7 +1071,7 @@ export function HomeCard({
     case "home-streaming-youtube":
       return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
-      return <SplCard meterId={c.meterId} />;
+      return <SplCard meterId={c.meterId} metricKey={c.metricKey} />;
     case "home-pvp":
       return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
     case "home-pvp-now":
@@ -1110,8 +1080,9 @@ export function HomeCard({
           now={now}
           showProgress={c.showProgress ?? true}
           showNextCue={c.showNextCue ?? true}
-          compact={c.compact ?? false}
+          layout={pvpNowLayout(c)}
           nowLabel={c.nowLabel}
+          warn={{ warnNearEnd: c.warnNearEnd, warnAmberSec: c.warnAmberSec, warnRedSec: c.warnRedSec }}
           countStills={c.countStills ?? false}
         />
       );

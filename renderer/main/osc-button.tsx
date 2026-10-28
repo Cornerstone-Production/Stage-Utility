@@ -3,6 +3,7 @@ import { useState, type CSSProperties } from "react";
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
 import { Loader2Icon } from "lucide-react";
+import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 
 // OscArg / OscFeedbackBind are ambient global types (see renderer/types.d.ts).
 interface OscButtonConfig {
@@ -66,20 +67,16 @@ export function OscButton({
       aria-label={config.label || config.address}
       style={{
         ...ts,
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        ...BUTTON_BASE_STYLE,
         gap: "0.4em",
-        border: "none",
-        borderRadius: "inherit",
         background,
         cursor: interactive ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
       }}
     >
-      {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : (config.label || config.address || "Button")}
+      <ButtonLabel>
+        {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : (config.label || config.address || "Button")}
+      </ButtonLabel>
     </button>
   );
 }

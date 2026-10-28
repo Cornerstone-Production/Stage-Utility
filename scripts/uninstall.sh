@@ -11,7 +11,8 @@
 #   linux    systemd unit + /opt/stage-utility + the stage-utility account
 #   macOS    launchd daemon + /usr/local/stage-utility
 #   macOS    the Mac output helper (or the Chrome kiosk) that kiosk/install-macos.sh
-#            installs: its LaunchAgent, its app, the kiosk launcher
+#            installs: its LaunchAgent, its app, its updater (a LaunchDaemon and
+#            its folder), the kiosk launcher
 #   brew     the formula and its launchd agent (run WITHOUT sudo)
 #
 # Detected, never assumed: each removal runs only if that thing is actually
@@ -56,6 +57,8 @@ HELPER_LABEL="com.stageutility.output"
 HELPER_APP="StageUtilityOutput.app"
 HELPER_EXEC="StageUtilityOutput"
 KIOSK_LABEL="com.stageutility.kiosk"
+UPDATER_LABEL="com.stageutility.output-updater"
+UPDATER_DIR="${ROOT}/Library/Application Support/StageUtilityUpdater"
 KIOSK_BIN="${ROOT}/usr/local/bin/stage-utility-kiosk"
 FORMULAE=("stage-utility" "stage-utility-beta")
 
@@ -293,11 +296,22 @@ note_mac_state() {
 remove_output_helper() {
   [ "$(uname -s)" = "Darwin" ] || return 0
   local plist="${AGENT_DIR}/${HELPER_LABEL}.plist" app="${APPS_DIR}/${HELPER_APP}" uid
+  local updater="${LAUNCHD_DIR}/${UPDATER_LABEL}.plist"
   find_gui_uids
-  [ -f "$plist" ] || [ -d "$app" ] || agent_loaded "$HELPER_LABEL" || return 0
+  [ -f "$plist" ] || [ -d "$app" ] || [ -f "$updater" ] || [ -d "$UPDATER_DIR" ] || agent_loaded "$HELPER_LABEL" || return 0
   FOUND=1
   POWER_CHANGED=1
   need_root "Removing the Mac output helper"
+
+  # The updater first: left running, its next check would find the app gone and
+  # have nothing to update, but one mid-update would put an app back. It holds no
+  # operator data, only its copy of the installer and what it last did.
+  if launchctl print "system/${UPDATER_LABEL}" >/dev/null 2>&1; then
+    log "launchd: stopping ${UPDATER_LABEL}"
+    run launchctl bootout "system/${UPDATER_LABEL}" || warn "could not stop ${UPDATER_LABEL}"
+  fi
+  remove_path "output helper updater" "$updater" -f
+  remove_path "output helper updater" "$UPDATER_DIR" -rf
 
   # Stopped first: removing the plist only keeps it from returning at the next login.
   boot_out_agent "$HELPER_LABEL"

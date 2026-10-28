@@ -27,6 +27,13 @@ download against the published checksums, register an auto-starting service, wai
 for the server to answer, and print the address to open. If any of that fails
 they stop before writing anything.
 
+Both install ffmpeg, which the Video relay's audio conversion needs (see
+[ffmpeg](../integrations/video-feeds.md#ffmpeg)), as a best-effort step that never
+fails the install: `install.sh` uses `apt-get`, `dnf` or `pacman` when it runs as
+root and ffmpeg is missing; `install.ps1` runs `winget install --id Gyan.FFmpeg -e`
+when `winget` exists. On macOS run `brew install ffmpeg` (the Homebrew formula
+installs it). Video works without it.
+
 | Platform | Architectures | Auto-start | Installs to |
 |---|---|---|---|
 | Linux (Pi or server) | x64, arm64 | systemd | `/opt/stage-utility` |
@@ -124,7 +131,7 @@ in its place, printing the data directory and port the old daemon used and
 warning if this run's differ. In-app updates leave the registration as it is.
 
 An install already running does **not** need reinstalling to change track:
-**Settings → Advanced → Update track** switches between main and beta in place,
+**Settings → Advanced → Updates → Update track** switches between main and beta in place,
 in either direction, and keeps your configuration. Use that unless the box is
 too old to update itself.
 
@@ -155,7 +162,7 @@ On macOS or a Linux workstation, [Homebrew](homebrew.md) is a supported
 alternative: it runs the app as a user agent that starts at login (port 8788),
 rather than a system service that starts at boot; port 80 is served only where
 that account may bind it. Updates work from
-**Settings → Advanced** the same way.
+**Settings → Advanced → Updates** the same way.
 
 ## Uninstalling
 
@@ -255,7 +262,7 @@ reinstalls, until something boots it out.
 Left intact by every command above, because it holds config, history, and the
 encryption key that makes stored secrets readable. Remove it only when you mean
 to, and take a backup first if the machine may be rebuilt
-(**Settings → Advanced → Data → Config snapshots**, or copy the directory).
+(**Settings → Advanced → Data → Backups → Config snapshot**, or copy the directory).
 
 | Install | Data directory |
 |---|---|
@@ -265,8 +272,8 @@ to, and take a backup first if the machine may be rebuilt
 | Homebrew | `$(brew --prefix)/var/stage-utility` |
 | Checkout / dev | `~/.stage-utility` |
 
-A custom `STAGE_DATA` at install time overrides these; the running server prints
-its own path in **Settings → Advanced**.
+A custom `STAGE_DATA` at install time overrides these; the running server reports
+its own path as `dataDir` at `/api/version`.
 
 If the main port is already held when the service tries to bind it, the log
 names the holder rather than just its pid: if it answers `/api/version` as
@@ -360,9 +367,23 @@ screens, each with its own URL.
 rules, recorded services, the baptism timer and the stage patch sheet.
 
 **Advanced** — updates and the update track, the server log, the context bar,
-kiosk devices, time zone and clock format, the public address, how integrations
-back off between services, backup and restore, automatic backups, and the data
-archive.
+kiosk devices, time zone and clock format, the public address, host names, how
+integrations back off between services, backup and restore, automatic backups, and
+the data archive.
+
+**Host names** lists the DNS names this server answers to, its defence against DNS
+rebinding ([SECURITY.md](../../SECURITY.md)). IP addresses, names with no dot and
+names under `.local` always work. A screen, panel or Home Assistant that opens the
+app by any other name, such as `stage.example.org`, needs that name on the list
+before **Refuse names not on the list** is turned on: names that reach the server
+wait on the card to be accepted or dismissed, and the sidebar counts them.
+Turning refusal on opens a confirmation listing every listed and waiting name
+with when it was first and last seen. Names already on the list are ticked and
+every waiting name is not; the list becomes exactly the names ticked, and
+Cancel changes nothing. The name you are using stays on the list, so you cannot
+lock yourself out. The server logs a `[security]` line with how many names were
+kept and how many left out. Change the list from the server's IP address or a
+name already on it.
 
 ### Time zone
 
@@ -433,11 +454,11 @@ own variables, set on the command line of the machine being set up:
 | `STAGE_SERVER` | Pin the device to one server's address, for a network where discovery does not reach it. All three installers |
 | `STAGE_KIOSK_PORT` | The UDP port the device broadcasts its discovery probe to. Default `8789` |
 | `STAGE_KIOSK_UID` | Linux only: the numeric id of the account the kiosk browser runs as. Default `1000` |
-| `STAGE_DOWNLOAD_FROM` | macOS only: the server to fetch the output helper from for this run only. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+| `STAGE_DOWNLOAD_FROM` | macOS and Windows: the server to download the output helper, or the Windows launcher, from, without pinning the device to it. The device's updater asks that server from then on. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) and [The Windows kiosk's launcher](../kiosk-devices.md#the-windows-kiosks-launcher) |
 
 **Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
-helper download at a test server instead of GitHub's releases, and the server
-logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+helper download, and the releases API call that gives its digest, at a test server
+instead of GitHub, and the server logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
 the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
 read by the public-hygiene check in CI, described in
 [Contributing](../contributing.md#public-hygiene). None of these has a use in

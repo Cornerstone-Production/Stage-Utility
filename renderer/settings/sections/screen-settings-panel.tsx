@@ -36,6 +36,7 @@ import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
+import { readUpdate, TONE_CLASS, UpdateButton, type UpdateReading } from "../../app/screens/machine-update";
 import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
 import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
 import type { DeviceOutput } from "@main/types/kiosk";
@@ -43,7 +44,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, Pill, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -245,13 +246,15 @@ function noHealthNote(online: boolean, reported: boolean): string {
  *
  * Format is DeckLink only: a display runs at whatever the Mac drives it at.
  */
-function OutputDeviceSection({ output, device, online, health, reported, actions }: {
+function OutputDeviceSection({ output, device, online, health, reported, update, actions }: {
   output: Output;
   device: { id: string; hostname?: string; ip?: string; label?: string; output: DeviceOutput };
   online: boolean;
   health: OutputHealth | undefined;
   /** Whether it has reported at any time since the page loaded. */
   reported: boolean;
+  /** The Mac helper's version and updates, when there is anything to say. */
+  update: UpdateReading | null;
   actions: ScreenPanelActions;
 }) {
   const [busy, setBusy] = useState(false);
@@ -270,6 +273,8 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
         </div>
         <OnlineBadge online={online} />
       </div>
+
+      {update && <MachineUpdateRow label="Helper" update={update} />}
 
       {device.output.kind === "decklink" && (
         <SettingRow label="Format" help="What the port sends. The house standard is the default.">
@@ -364,13 +369,27 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
   );
 }
 
+/** The machine's own software, and the button that changes what it was told. */
+function MachineUpdateRow({ label, update }: { label: string; update: UpdateReading }) {
+  return (
+    <SettingRow label={label} help={<span className={cn("[overflow-wrap:anywhere]", TONE_CLASS[update.tone])}>{update.text}</span>}>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Pill tone="muted">{update.badge}</Pill>
+        <UpdateButton reading={update} />
+      </div>
+    </SettingRow>
+  );
+}
+
 function DeviceSection({ output, online, actions }: { output: Output; online: boolean; actions: ScreenPanelActions }) {
   const outputId = output.id;
-  const { bound, health, reported } = useDevices();
+  const data = useDevices();
+  const { bound, health, reported } = data;
   const device = bound.find((d) => d.outputId === outputId);
   if (!device) {
     return <p className="text-caption1 text-fg-subtle">No device is set up for this screen.</p>;
   }
+  const update = readUpdate(device, data);
   if (device.output) {
     return (
       <OutputDeviceSection
@@ -379,6 +398,7 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
         online={online}
         health={health.find((h) => h.deviceId === device.id)}
         reported={reported.includes(device.id)}
+        update={update}
         actions={actions}
       />
     );
@@ -390,17 +410,22 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
       <div className="mt-px text-caption1 text-fg-subtle">
         {online ? "Online. The device follows this screen." : "Offline. The device follows this screen when it is on."}
       </div>
+      {update && <MachineUpdateRow label="Launcher" update={update} />}
     </div>
   );
 }
 
-/** The note after a screen is made: what happened, and the way into its layout. */
-function CreatedNote({ output, viewMade, onEditLayout }: { output: Output; viewMade: boolean; onEditLayout?: () => void }) {
+/** The note after a screen is made: what happened, and the way into its layout. A custom
+ *  layout is blank until laid out, or already filled from a template; any other kind
+ *  draws itself, so there is no layout to start from. */
+function CreatedNote({ output, viewMade, view, onEditLayout }: { output: Output; viewMade: boolean; view?: View; onEditLayout?: () => void }) {
+  const isCustom = viewMade && view?.kind === "custom";
+  const filled = (view?.layout?.objects.length ?? 0) > 0;
   return (
     <div role="status" className="mt-3 rounded-[9px] border border-ok-9/30 bg-ok-9/6 px-3 py-2.5 text-footnote text-fg">
       <b className="font-semibold">Created "{output.name}"{viewMade && " and its view"}</b>.
-      {viewMade && " The view is blank until you lay it out."}
-      {viewMade && onEditLayout && (
+      {isCustom && (filled ? " Its layout started from a template." : " The view is blank until you lay it out.")}
+      {isCustom && onEditLayout && (
         <div className="mt-2">
           <Button type="button" variant="accent" size="medium" onClick={onEditLayout}>
             Edit layout
@@ -449,7 +474,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
   return (
     <>
       <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
-        {created && <CreatedNote output={output} viewMade={created.viewMade} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
+        {created && <CreatedNote output={output} viewMade={created.viewMade} view={shown} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
         <Section title="What it shows">
           <ViewPicker
             groups={viewGroups(views)}

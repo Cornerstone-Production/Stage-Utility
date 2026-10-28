@@ -278,3 +278,50 @@ describe("a placed widget still gets its source", () => {
     }
   });
 });
+
+describe("a Timer pays only for the source it reads", () => {
+  // A Timer is named by SOURCE (`timer:propresenter`, `timer:baptism`), so each
+  // source opens its own channels and no other: the ProPresenter channel is the
+  // one whose subscriber holds the server's fallback poll at full rate, and a
+  // service Timer, the one that replaced the PCO countdown, opens neither.
+  const timerLayout = (source: string): LayoutDTO => ({
+    ...PLAIN(),
+    objects: [{ ...object("timer"), config: { type: "timer", source } as LayoutObjectConfig }],
+  });
+
+  test("a service Timer reads neither ProPresenter nor the baptism timer", async () => {
+    await mount(useViewData, timerLayout("service"));
+    assert.deepEqual(await unwanted(), []);
+  });
+
+  test("a ProPresenter Timer reads and subscribes ProPresenter", async () => {
+    await mount(useViewData, timerLayout("propresenter"));
+    assert.equal(count("/api/propresenter/status"), 1, "the ProPresenter Timer never read its status");
+    assert.ok((await subscribed()).has("propresenter:status"), "the ProPresenter Timer never subscribed its channel");
+    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("prop") && !x.startsWith("integrations")), [], "a ProPresenter Timer paid for another source");
+  });
+
+  test("a saved pp-timer opens what the ProPresenter Timer it reads as opens, the integration list included", async () => {
+    // The integration list is how a Timer tells "not set up" from "not answering",
+    // so a layout saved before the Timer existed needs it as much as a new one.
+    await mount(useViewData, layoutOf("pp-timer"));
+    assert.equal(count("/api/propresenter/status"), 1, "the saved pp-timer never read ProPresenter");
+    assert.equal(count("/api/integrations"), 1, "the saved pp-timer never read the integration list");
+  });
+
+  test("a baptism Timer reads and subscribes the baptism timer", async () => {
+    await mount(useViewData, timerLayout("baptism"));
+    assert.equal(count("/api/baptism"), 1, "the baptism Timer never read the session");
+    assert.ok((await subscribed()).has("baptism:state"), "the baptism Timer never subscribed its channel");
+    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("baptism")), [], "a baptism Timer paid for another source");
+  });
+
+  test("switching a Timer's source in an open layout opens the new source and closes the old", async () => {
+    const { rerender } = await mount(useViewData, timerLayout("service"));
+    const before = count("/api/baptism");
+    await rerender(timerLayout("baptism"));
+    assert.equal(count("/api/baptism") - before, 1, "switching to the baptism source never read it");
+    await rerender(timerLayout("service"));
+    assert.ok(!(await subscribed()).has("baptism:state"), "switching back left the baptism channel subscribed");
+  });
+});

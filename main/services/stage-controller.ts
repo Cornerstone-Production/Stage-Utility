@@ -20,16 +20,33 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
-import { clamp } from "./clamp.js";
+import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { isSafeKey } from "./safe-key.js";
+import {
+  CAPTION_COLOR,
+  ICON_COLOR,
+  ICON_GLYPH,
+  MAX_TESTIMONY_KEYWORD,
+  RECONNECT_RANGES,
+  TAPER_RANGES,
+  clampAutoUpdateDay,
+  clampAutoUpdateHour,
+  clampFields,
+  isHttpBaseUrl,
+  isIconKey,
+  normalizeBaseUrl,
+  normalizeCaptionColor,
+} from "./settings-rules.js";
 import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { isStringList } from "./is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
+  incompleteOf,
   isDefaultRundownPlan,
   planWindow,
   sameIds,
@@ -55,6 +72,8 @@ import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
+import { iconToSettings, type AppIconInput } from "./app-icon.js";
+import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
@@ -62,11 +81,12 @@ import { viewsStore } from "./views-store.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
+import { autoApplyDecision, migrateAutoUpdate, type AutoApplyDecision } from "./auto-apply-gate.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
-import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
+import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
@@ -133,26 +153,6 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
   return { views: next, changed };
 }
 
-/**
- * Read the persisted auto-update settings, migrating the pre-mode boolean.
- * `enabled: true` meant "apply and restart in the window", which is auto-full;
- * `false`/absent meant nothing automatic at all, which is manual.
- */
-function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
-  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
-  const mode: AutoUpdateSettings["mode"] =
-    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
-      ? o.mode
-      : o.enabled === true
-        ? "auto-full"
-        : "manual";
-  return {
-    mode,
-    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
-    hour: typeof o.hour === "number" ? o.hour : 3,
-  };
-}
-
 // Coalescing window (ms) for live device-status updates. Wireless metering arrives
 // ~1/sec per channel; we collapse bursts into one re-resolve+broadcast per window
 // so the event loop isn't saturated, while keeping the RF bars visually live.
@@ -176,17 +176,6 @@ const DEVICE_STATUS_FLUSH_MS = 150;
  * number and does not become an accident of whatever TTL a later release picks.
  */
 export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
-
-/** Deep-clone a layout, minting fresh object ids so copies stay independent. */
-/** Normalize a user-entered base URL: trim, default to http:// if no scheme,
- *  strip a trailing slash. Returns null for blank input. */
-function normalizeBaseUrl(url: string | null): string | null {
-  if (!url) return null;
-  let s = url.trim();
-  if (!s) return null;
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
-  return s.replace(/\/+$/, "");
-}
 
 /**
  * A layout save was built on a revision someone else has already replaced.
@@ -364,20 +353,18 @@ export class LayoutConflictError extends Error {
  * spread back out and gets written to disk again. It can never be a real icon
  * key — the shape check refuses to create one — so it is dropped, loudly.
  */
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
 export function writeIconEntry(
   current: Record<string, string> | undefined,
   key: string,
   value: string,
   label: string,
 ): Record<string, string> {
-  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+  if (!isIconKey(key)) {
     throw new Error(`${label} — key must be an id or a tool path`);
   }
   const next: Record<string, string> = Object.create(null);
   for (const [k, v] of Object.entries(current ?? {})) {
-    if (FORBIDDEN_KEYS.has(k)) {
+    if (!isSafeKey(k)) {
       // Both interpolations scrubbed. `label` is our own literal today, but this
       // file is request-facing and log-injection.test.ts holds every one of them
       // to scrub() so nobody has to judge that case by case.
@@ -420,6 +407,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
@@ -430,6 +418,9 @@ export class StageController {
     appLogoMonochrome: true,
     emptySlotLogo: null,
     defaultAvatar: null,
+    appIcon192: null,
+    appIconMaskable: null,
+    appIconBackground: DEFAULT_ICON_BACKGROUND,
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
@@ -502,9 +493,13 @@ export class StageController {
     days: number;
     allowed: string[];
     plans: UpcomingPlan[];
-    /** Some service type could not be read: reused for a shorter time. */
-    partial: boolean;
+    /** Service types whose plans could not be read in full (the type itself, or its
+     *  recent plans): reused for a shorter time, and named to the caller. */
+    incomplete: string[];
   } | null = null;
+  /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
+   *  said again every time its cache expires. */
+  private lastRefreshLine = "";
   /** Plan-list reads that keep failing, said once per outage. Keys:
    *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
   private readonly plansOutage = new OutageLog();
@@ -524,6 +519,10 @@ export class StageController {
 
   // Latest PCO live state (set by fetchLive) — used by the auto-update guard.
   private lastLive: PcoLiveDTO | null = null;
+  /** A live read has failed since the last one that succeeded. lastLive is
+   *  kept for the displays, but no longer says whether a service is live now:
+   *  serviceTimesKnown() answers false until a read succeeds. */
+  private liveStale = false;
   // Hourly self-update availability check (+ scheduled auto-apply).
   private updateCheckTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -615,6 +614,7 @@ export class StageController {
 
     const showQr = settings.showQr ?? true;
     const kioskDiscovery = settings.kioskDiscovery ?? false;
+    const autoUpdateMachines = settings.autoUpdateMachines ?? true;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
@@ -622,10 +622,15 @@ export class StageController {
     // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
     // was just loaded, is what stops the FIRST delete-then-create after an update
     // reissuing the highest id. Only kinds with no floor recorded are touched.
-    await settingsStore.seedIdFloors({
-      view: views.map((v) => v.id),
-      output: outputs.map((o) => o.id),
-    });
+    // Skipped once either file has failed a read: the views may be the
+    // defaults, and the save would be refused, which here, at a top-level
+    // await, would keep the server from starting.
+    if (!settingsStore.refusingSaves() && !viewsStore.refusingSaves()) {
+      await settingsStore.seedIdFloors({
+        view: views.map((v) => v.id),
+        output: outputs.map((o) => o.id),
+      });
+    }
 
     // An EMPTY list means "all allowed" and is passed through as such.
     //
@@ -658,6 +663,7 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
@@ -668,6 +674,9 @@ export class StageController {
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
       defaultAvatar: settings.defaultAvatar ?? null,
+      appIcon192: settings.appIcon192 ?? null,
+      appIconMaskable: settings.appIconMaskable ?? null,
+      appIconBackground: settings.appIconBackground ?? DEFAULT_ICON_BACKGROUND,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       // Both of these are written to settings.json by their setters and were
@@ -729,6 +738,19 @@ export class StageController {
     const storedViews = await viewsStore.load();
     const storedOutputs = settings.outputs;
 
+    // Either file unreadable is served as its defaults, which every pass below
+    // reads as a first run: it would rebuild the screens from the legacy
+    // displays and patch them over the real ones in settings.json. Show what
+    // could be read and change nothing; the passes run on the next start that
+    // reads both.
+    const unreadable = viewsStore.refusingSaves() ?? settingsStore.refusingSaves();
+    if (unreadable) {
+      console.error(
+        `[stage-controller] ${scrub(unreadable.message)}; start-up migrations of views and screens skipped until a restart reads it`,
+      );
+      return { views: storedViews, outputs: storedOutputs ?? [] };
+    }
+
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
       const { views, changed } = retuneEmbedFontSize(storedViews);
       if (changed > 0) await viewsStore.save(views);
@@ -736,17 +758,23 @@ export class StageController {
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
+    // Only a list of entries with an id is a legacy display list. Anything else
+    // (a hand edit) is read as none, rather than throwing out of init() and
+    // keeping the server from starting on every boot.
+    const entries: DisplayInfo[] = Array.isArray(settings.displays) ? settings.displays : [];
+    const listed = entries.filter((d) => typeof d?.id === "string" && typeof d?.name === "string");
+    if (settings.displays !== undefined && (!Array.isArray(settings.displays) || listed.length < entries.length)) {
+      console.warn("[stage-controller] settings.json's legacy displays list is not a list of displays; ignored");
+    }
     const legacy: DisplayInfo[] =
-      settings.displays && settings.displays.length > 0
-        ? settings.displays
-        : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
+      listed.length > 0 ? listed : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
 
     const now = new Date().toISOString();
     const views: View[] = legacy.map((d) => ({
       id: d.id,
       name: d.name,
-      kind: (d.kind ?? "slots") as ViewKind,
-      ndiSource: d.ndiSource ?? null,
+      kind: isDisplayKind(d.kind) ? d.kind : "slots",
+      ndiSource: typeof d.ndiSource === "string" ? d.ndiSource : null,
       createdAt: now,
     }));
     const outputs: Output[] = legacy.map((d) => ({
@@ -960,7 +988,7 @@ export class StageController {
     const k = key.trim();
     if (!k) throw new Error("icon-color — key required");
     const c = color.trim().toLowerCase();
-    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+    if (c !== "" && !ICON_COLOR.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
     const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
@@ -986,7 +1014,7 @@ export class StageController {
     const g = glyph.trim();
     // Name-shaped only. Anything else is a caller bug, and storing it would put
     // a value in settings.json that nothing can ever render.
-    if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
+    if (g !== "" && !ICON_GLYPH.test(g)) {
       throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
     }
     const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
@@ -999,6 +1027,8 @@ export class StageController {
 
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
+    // Opened by the Screens page as a link, so it has to be a web address.
+    if (normalized !== null && !isHttpBaseUrl(normalized)) throw new Error("The public URL must be an http or https address.");
     console.log(`[stage-controller] setPublicUrl → ${scrub(normalized ?? "(cleared)")}`);
     this.publicUrl = normalized;
     this.state = { ...this.state, publicUrl: normalized };
@@ -1093,20 +1123,34 @@ export class StageController {
    * that has already happened.
    */
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
+    return (await this.readPlans(serviceTypeId)).plans;
+  }
+
+  /**
+   * `listPlans`, and whether its recent half came back. A failed recent read still leaves
+   * the upcoming plans, which is what the picker wants; a caller that must not mistake the
+   * shorter list for the whole one reads `recentFailed`.
+   */
+  private async readPlans(serviceTypeId: string): Promise<{ plans: PlanDTO[]; recentFailed: boolean }> {
     this.assertPco();
+    let recentFailed = false;
     const [past, future] = await Promise.all([
-      pcoService
-        .listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId)
-        .catch(() => [] as PlanDTO[]),
+      pcoService.listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId).catch(() => {
+        recentFailed = true;
+        return [] as PlanDTO[];
+      }),
       pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
     ]);
     // Oldest → newest, and de-duplicated: a plan happening today can come back
     // from both filters depending on where PCO draws the line.
     const seen = new Set(future.map((p) => p.id));
-    return [
-      ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
-      ...future,
-    ];
+    return {
+      plans: [
+        ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
+        ...future,
+      ],
+      recentFailed,
+    };
   }
 
   /**
@@ -1124,7 +1168,9 @@ export class StageController {
    *
    * A type that fails on its own does NOT fail the list: its plans are missing
    * and the failure is logged, because one unreachable service type is not
-   * evidence about the other five.
+   * evidence about the other five. The types that could not be read in full, whether
+   * the type or only its recent plans, are named in `incompleteTypeIds`: a reader that
+   * keeps its own copy must not take their absent plans for deleted ones.
    */
   async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
     const now = Date.now();
@@ -1138,9 +1184,9 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
+      now - cached.at < (cached.incomplete.length > 0 ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
-      return { plans: cached.plans, cacheAgeMs: now - cached.at };
+      return { plans: cached.plans, cacheAgeMs: now - cached.at, ...incompleteOf(cached.incomplete) };
     }
 
     let types: ServiceTypeDTO[];
@@ -1153,11 +1199,14 @@ export class StageController {
     const w = planWindow(now, days);
     const currentPlanId = this.state.planId;
     const failures: string[] = [];
+    const incomplete: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
         const key = `upcoming:${t.id}`;
         try {
-          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const read = await this.readPlans(t.id);
+          if (read.recentFailed) incomplete.push(t.id);
+          const rows = toUpcoming(t, read.plans, w, currentPlanId);
           const recovered = this.plansOutage.ok(key, now);
           if (recovered.log) {
             console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
@@ -1169,6 +1218,7 @@ export class StageController {
           // logged so an operator with a missing type has something to read.
           const reason = errorMessage(err);
           failures.push(`${t.name}: ${reason}`);
+          incomplete.push(t.id);
           // Once per outage per type, not once per refresh: a partial list is
           // reused for only thirty seconds, so a type that stays down would
           // otherwise repeat this line every thirty seconds until it came back.
@@ -1195,12 +1245,16 @@ export class StageController {
       days,
       allowed: [...this.state.allowedServiceTypeIds],
       plans,
-      partial: failures.length > 0,
+      incomplete,
     };
-    console.log(
-      `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
-    );
-    return { plans, cacheAgeMs: 0 };
+    // Said when it changes, not every time the cache expires: a list nobody edited is the
+    // same line every five minutes, all week.
+    const shape = `${plans.length} plans across ${types.length} types`;
+    if (shape !== this.lastRefreshLine) {
+      this.lastRefreshLine = shape;
+      console.log(`[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`);
+    }
+    return { plans, cacheAgeMs: 0, ...incompleteOf(incomplete) };
   }
 
   /** The unavailable answer: the last good list when there is one, else nothing.
@@ -1293,19 +1347,34 @@ export class StageController {
   async fetchLive(): Promise<PcoLiveDTO | null> {
     if (!this.pcoAppId || !this.pcoSecret) {
       this.lastLive = null;
+      this.liveStale = false;
       return null;
     }
     if (!this.state.serviceTypeId || !this.state.planId) {
       this.lastLive = null;
+      this.liveStale = false;
       return null;
     }
-    const live = await pcoService.getLive(
-      this.pcoAppId,
-      this.pcoSecret,
-      this.state.serviceTypeId,
-      this.state.planId,
-      this.pcoCountdownTarget,
-    );
+    let live: PcoLiveDTO;
+    try {
+      live = await pcoService.getLive(
+        this.pcoAppId,
+        this.pcoSecret,
+        this.state.serviceTypeId,
+        this.state.planId,
+        this.pcoCountdownTarget,
+      );
+    } catch (err) {
+      // The poller keeps showing the last reading, but a service may have gone
+      // live since it: whatever waits for one to end treats this as unknown.
+      if (!this.liveStale) {
+        console.warn("[pco] live state unknown until Planning Center answers again; machine and page updates wait:", scrubError(err));
+      }
+      this.liveStale = true;
+      throw err;
+    }
+    if (this.liveStale) console.log("[pco] live state known again");
+    this.liveStale = false;
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;
     return live;
@@ -1314,6 +1383,27 @@ export class StageController {
   /** True when a PCO Services Live session is running (used to defer auto-updates). */
   isServiceLive(): boolean {
     return this.lastLive != null && this.lastLive.mode !== "none";
+  }
+
+  /** Whether Planning Center's live reading is current: always without Planning
+   *  Center or a followed plan; with them, once a read has succeeded and none has
+   *  failed since. */
+  liveKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    if (!this.state.serviceTypeId || !this.state.planId) return true;
+    return this.lastLive !== null && !this.liveStale;
+  }
+
+  /**
+   * Whether the service times and the live state are known well enough to restart
+   * a Mac's outputs on: always without Planning Center; with it, once the windows
+   * have been computed and, when a plan is followed, its live state read and
+   * not failed since. Just after a restart, and while Planning Center cannot be
+   * reached, they are not.
+   */
+  serviceTimesKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    return serviceWindow.isKnown() && this.liveKnown();
   }
 
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
@@ -1654,13 +1744,7 @@ export class StageController {
   }
 
   async saveServiceCueRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
-    const clean = (roles ?? [])
-      .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
-      .map((r) => ({
-        id: r.id,
-        name: r.name.trim(),
-        members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
-      }));
+    const clean = cleanRoles(roles ?? []);
     await serviceCueRolesStore.save(clean);
     this.broadcast();
     return clean;
@@ -2600,6 +2684,16 @@ export class StageController {
     return this.state;
   }
 
+  /** Let Mac output helpers and Windows kiosks update themselves, or stop them.
+   *  Read on every machine's next check; nothing is pushed. */
+  async setAutoUpdateMachines(on: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setAutoUpdateMachines → ${scrub(on)}`);
+    this.state = { ...this.state, autoUpdateMachines: on };
+    await settingsStore.patch({ autoUpdateMachines: on });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Dismiss (or restore) the first-run "Getting started" checklist, machine-wide. */
   async setOnboardingDismissed(dismissed: boolean): Promise<StageState> {
     this.state = { ...this.state, onboardingDismissed: dismissed };
@@ -2634,9 +2728,8 @@ export class StageController {
   async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
     const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
     // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
-    next.hour = clamp(Math.round(next.hour), 0, 23);
-    next.dayOfWeek =
-      next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
+    next.hour = clampAutoUpdateHour(next.hour);
+    next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
@@ -2647,10 +2740,7 @@ export class StageController {
   // ── Time-aware reconnect scheduling ───────────────────────────────────
 
   async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
-    const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
-    next.leadMin = clamp(Math.round(next.leadMin), 0, 1440);
-    next.tailMin = clamp(Math.round(next.tailMin), 0, 1440);
-    next.dormantMin = clamp(Math.round(next.dormantMin), 1, 1440);
+    const next = clampFields<ReconnectSchedule>({ ...this.state.reconnectSchedule, ...partial }, RECONNECT_RANGES);
     console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
@@ -2663,7 +2753,7 @@ export class StageController {
   /** The keyword that lets a plan item start the testimonies by itself. */
   async setBaptismAutoStart(partial: Partial<BaptismAutoStart>): Promise<StageState> {
     const cur = this.state.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
-    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, 80) };
+    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, MAX_TESTIMONY_KEYWORD) };
     this.state = { ...this.state, baptismAutoStart: next };
     await settingsStore.patch({ baptismAutoStart: next });
     this.broadcast();
@@ -2671,9 +2761,7 @@ export class StageController {
   }
 
   async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
-    const next: TaperWindow = { ...this.state.taperWindow, ...partial };
-    next.preMin = clamp(Math.round(next.preMin), 0, 240);
-    next.postMin = clamp(Math.round(next.postMin), 0, 240);
+    const next = clampFields<TaperWindow>({ ...this.state.taperWindow, ...partial }, TAPER_RANGES);
     console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });
@@ -2725,10 +2813,20 @@ export class StageController {
       const allowed = this.state.allowedServiceTypeIds;
       const types = allowed.length ? allTypes.filter((t) => allowed.includes(t.id)) : allTypes;
       const windows: { open: number; close: number }[] = [];
+      // A type or a plan whose times could not be read leaves a gap, not "nothing
+      // planned": the windows are still set, for reconnects, but counted as unknown,
+      // so what must not act blind (a Mac helper's restart) waits.
+      let gaps = 0;
       for (const t of types) {
-        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => [] as PlanDTO[]);
+        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => {
+          gaps++;
+          return [] as PlanDTO[];
+        });
         for (const p of plans.slice(0, 2)) { // next couple plans per type is plenty
-          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => []);
+          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => {
+            gaps++;
+            return [];
+          });
           const starts = times.map((x) => Date.parse(x.startsAt)).filter(Number.isFinite);
           if (!starts.length) continue;
           const ends = times.map((x) => (x.endsAt ? Date.parse(x.endsAt) : NaN)).filter(Number.isFinite);
@@ -2736,8 +2834,14 @@ export class StageController {
         }
       }
       serviceWindow.setWindows(windows);
-      console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      if (gaps > 0) {
+        serviceWindow.markUnknown();
+        console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh`);
+      } else {
+        console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      }
     } catch (err) {
+      serviceWindow.markUnknown();
       console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }
@@ -2762,7 +2866,11 @@ export class StageController {
       const status = await updater.checkForUpdate();
     // Once per available release, and only if somebody is connected to hear it.
     await announceIfNew(updater.getStatus());
-      if (this.shouldAutoApply(status.behind, new Date())) {
+      const decision = this.shouldAutoApply(status.behind, new Date());
+      if (!decision.apply && decision.why === "window") {
+        console.log("[stage-controller] auto-update waits: Planning Center's live state is unknown and a planned service window is open; it tries again at the next scheduled time");
+      }
+      if (decision.apply) {
         console.log("[stage-controller] auto-update window — applying update");
         // auto-install applies the build but leaves the restart to the operator,
         // so an update can land on Saturday and be taken on Monday.
@@ -2774,17 +2882,20 @@ export class StageController {
   }
 
   /** Auto-apply gate: enabled + something to pull + inside the scheduled
-   *  day/hour window + not mid-service. Exposed for unit testing. */
-  shouldAutoApply(behind: number, now: Date): boolean {
-    const cfg = this.state.autoUpdate;
-    if (cfg.mode === "manual" || behind <= 0) return false;
-    if (updater.phase === "updating") return false;
-    if (this.isServiceLive()) return false;
-    // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
-    // Chicago — i.e. an unattended restart in the middle of an evening service.
-    const p = zonedParts(now.getTime());
-    if (cfg.dayOfWeek != null && p.weekday !== cfg.dayOfWeek) return false;
-    return p.hour === cfg.hour;
+   *  day/hour window + not mid-service, falling back on the cached service
+   *  windows while the live state is unknown (auto-apply-gate.ts). */
+  shouldAutoApply(behind: number, now: Date): AutoApplyDecision {
+    return autoApplyDecision({
+      cfg: this.state.autoUpdate,
+      behind,
+      updating: updater.phase === "updating",
+      serviceLive: this.isServiceLive(),
+      liveKnown: this.liveKnown(),
+      windowUntil: serviceWindow.activeUntil(now.getTime()),
+      // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
+      // Chicago — i.e. an unattended restart in the middle of an evening service.
+      now: zonedParts(now.getTime()),
+    });
   }
 
   // ── Branding (app name + logo) ────────────────────────────────────────
@@ -2805,15 +2916,25 @@ export class StageController {
     avatar?: string | null;
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
+    /** The custom tab and home-screen icon, set as a whole; `null` removes it. */
+    icon?: AppIconInput | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar" | "appIcon192" | "appIconMaskable" | "appIconBackground">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
+    // One icon is five images that stand or fall together, so it is decided once
+    // here and fanned out to both halves below.
+    const iconSettings = partial.icon === undefined ? null : iconToSettings(partial.icon);
+    if (iconSettings) {
+      stateNext.appIcon192 = iconSettings.appIcon192;
+      stateNext.appIconMaskable = iconSettings.appIconMaskable;
+      stateNext.appIconBackground = iconSettings.appIconBackground;
+    }
 
     // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
     // but only for the copy it writes: merged into this.state as-is, the full data
@@ -2823,7 +2944,9 @@ export class StageController {
     const stored = await externalizeBrandingImages(stateNext);
 
     // Settings-only fields (originals + crops), never broadcast.
-    const settingsNext: Record<string, unknown> = { ...stored };
+    // The icon's sizes are already stored references in `stored`; they win over the
+    // data URLs they came from, so no image is written twice.
+    const settingsNext: Record<string, unknown> = { ...iconSettings, ...stored };
     if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
@@ -2862,6 +2985,12 @@ export class StageController {
     );
     this.state = { ...this.state, ...stored };
     await settingsStore.patch(settingsStored);
+    // After the write, so the line is only ever true. One per change, never per request.
+    if (partial.icon) {
+      console.log("[branding] custom tab and home-screen icon set, background", scrub(partial.icon.background));
+    } else if (partial.icon === null) {
+      console.log("[branding] custom tab and home-screen icon removed; the tab follows the logo and phones show the built-in icon");
+    }
     this.broadcast();
     return this.state;
   }
@@ -2870,14 +2999,15 @@ export class StageController {
    *  channel label. Persisted + broadcast so kiosks recolor live. */
   async setCaptionChannelColor(channel: string, color: string | null): Promise<StageState> {
     const key = channel.trim();
-    if (!key) return this.state;
-    const next = { ...this.state.captionChannelColors };
-    if (color && /^#?[0-9a-f]{3,8}$/i.test(color.trim())) {
-      const c = color.trim();
-      next[key] = c.startsWith("#") ? c : `#${c}`;
+    // A restore refuses these keys, so a save must never write one.
+    if (!key || !isSafeKey(key)) return this.state;
+    const colors = new Map(Object.entries(this.state.captionChannelColors));
+    if (color && CAPTION_COLOR.test(color.trim())) {
+      colors.set(key, normalizeCaptionColor(color));
     } else {
-      delete next[key]; // null/invalid → revert to auto
+      colors.delete(key); // null/invalid → revert to auto
     }
+    const next = Object.fromEntries(colors);
     this.state = { ...this.state, captionChannelColors: next };
     await settingsStore.patch({ captionChannelColors: next });
     this.broadcast();
@@ -2895,9 +3025,12 @@ export class StageController {
   }
 
   /** Original upload + saved crop transform for a brand image, for re-editing. */
-  async getBrandingSource(target: "app" | "empty" | "avatar" = "app"): Promise<{
+  async getBrandingSource(target: "app" | "empty" | "avatar" | "icon" = "app"): Promise<{
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
+    /** The icon only: the square art its sizes are drawn from, so a new background
+     *  can redraw them without the operator uploading again. */
+    art?: string | null;
   }> {
     const settings = await settingsStore.load();
     if (target === "empty") {
@@ -2910,6 +3043,13 @@ export class StageController {
       return {
         original: settings.defaultAvatarOriginal ?? null,
         crop: settings.defaultAvatarCrop ?? null,
+      };
+    }
+    if (target === "icon") {
+      return {
+        original: settings.appIconOriginal ?? null,
+        crop: settings.appIconCrop ?? null,
+        art: settings.appIcon ?? null,
       };
     }
     return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };
@@ -3656,7 +3796,13 @@ export class StageController {
       const allocated = await settingsStore.allocateIds(
         "output",
         (next): { output: Output; outputs: Output[] } => {
-          const id = next(this.state.outputs.map((o) => o.id));
+          // Not another screen's address either: `/<id>` and `/<address>` are
+          // one namespace, so an id equal to one would answer for two screens.
+          // A taken number is skipped, and the floor moves past it.
+          const ids = this.state.outputs.map((o) => o.id);
+          const addresses = new Set(this.state.outputs.flatMap((o) => (o.slug ? [o.slug.toLowerCase()] : [])));
+          let id = next(ids);
+          while (addresses.has(id)) id = next(ids);
           const num = parseInt(id.replace("display-", ""), 10);
           // Thrown before `this.state` is touched, so nothing has been assigned
           // or written when it fires.
@@ -3917,8 +4063,9 @@ export class StageController {
    *
    * The screen is a control surface when the view it shows is a console, so the
    * choice is the view: `viewId` names an existing one of either kind, or `newView`
-   * makes a blank custom one, a "wall" view (read-only) or a "control" surface.
-   * With neither the screen shows nothing yet.
+   * makes one: a "wall" view (read-only) of any `viewKind`, custom by default, or a
+   * "control" surface, which is always a custom layout. A custom view starts from
+   * `layout`, or blank. With neither the screen shows nothing yet.
    *
    * `last` is a caller's own write that belongs to the same screen (a device to
    * bind to it), run as the final step. If it fails, everything before it is put
@@ -3936,6 +4083,19 @@ export class StageController {
     }
     if (typeof input.viewId === "string" && newView !== undefined) {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
+    }
+    if (newView === undefined && (input.viewKind !== undefined || input.layout !== undefined)) {
+      throw new Error("outputs:add — viewKind and layout describe a view being made, so they need newView");
+    }
+    // A control surface is made only as a custom layout, the kind with a layout to
+    // put controls on. Refused rather than made a wall view: a caller asking for a
+    // Mic Slots control surface would otherwise get a screen whose buttons do nothing.
+    const viewKind: ViewKind = input.viewKind ?? "custom";
+    if (newView === "control" && viewKind !== "custom") {
+      throw new Error(`outputs:add — a control surface is made only as a custom layout, not "${viewKind}"`);
+    }
+    if (input.layout !== undefined && viewKind !== "custom") {
+      throw new Error(`outputs:add — layout is the starting layout of a custom view, and this one is "${viewKind}"`);
     }
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
     if (input.expectSurface !== undefined) {
@@ -3966,13 +4126,20 @@ export class StageController {
         ? [{
             label: "make the view",
             run: async () => {
-              // Custom: the guided creation makes a layout, which can be either kind of screen.
-              await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
+              await this.createViewRecord(name, viewKind, newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
               });
             },
             undo: async () => { if (!createdViewId) return false; await this.dropView(createdViewId); },
+          }]
+        : []),
+      // Its own step, after the view: the layout write also loads the raw slots of an
+      // inline Mic Slots object. The view's undo above drops it whole, layout and all.
+      ...(input.layout
+        ? [{
+            label: "lay out the view",
+            run: async () => { await this.setViewLayout(createdViewId!, input.layout!); },
           }]
         : []),
       {
@@ -4002,9 +4169,10 @@ export class StageController {
         : []),
       ...(last ? [{ label: last.label, run: () => last.run(output!) }] : []),
     ]);
+    const made = createdViewId ? ` (made for it: kind=${viewKind})` : "";
     console.log(
       `[stage-controller] createScreen id=${scrub(output!.id)} name="${scrub(output!.name)}" ` +
-        `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
+        `view=${scrub(viewId ?? "(none)")}${scrub(made)}${scrub(slug ? ` slug="${slug}"` : "")}`,
     );
     return { state: this.state, output: output!, createdViewId };
   }
@@ -4211,7 +4379,7 @@ export class StageController {
    */
   async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
     this.requireOutput(id, "outputs:setGroups");
-    if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
+    if (!isStringList(groups)) {
       throw new Error("outputs:setGroups — groups must be an array of group ids");
     }
     await messagingStore.init();

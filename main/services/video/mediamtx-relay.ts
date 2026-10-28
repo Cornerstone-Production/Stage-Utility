@@ -36,6 +36,8 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { errorMessage } from "../errors.js";
+import { relayPlayback } from "../../types/video.js";
+import { normalizeCodecName } from "./codec-name.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
@@ -67,7 +69,25 @@ interface GlobalConfig {
 const VIDEO_CODECS = new Set(["AV1", "VP9", "VP8", "H265", "H264", "MJPEG", "MPEG4VIDEO", "MPEG12VIDEO"]);
 
 function isVideoCodec(codec: string): boolean {
-  return VIDEO_CODECS.has(codec.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+  return VIDEO_CODECS.has(normalizeCodecName(codec));
+}
+
+/** MediaMTX's names for the audio codecs it can carry, compared like VIDEO_CODECS. */
+const AUDIO_CODECS = new Set([
+  "OPUS", "MPEG4AUDIO", "MPEG4AUDIOLATM", "MPEG12AUDIO", "AC3", "SPEEX", "VORBIS", "G711", "G722", "G726", "LPCM",
+]);
+
+/** The codec of the path's first audio track, as MediaMTX names it ("MPEG-4
+ *  Audio", "Opus", "G711"); null when the path is ready and lists none;
+ *  undefined when it is not ready or lists no tracks at all, which says nothing
+ *  about whether it has any. A track counts as audio when MediaMTX names it as
+ *  one or gives it a sample rate (a picture track has none). */
+function audioCodec(item: RuntimePathItem): string | null | undefined {
+  if (!item.ready || item.tracks2 === undefined) return undefined;
+  const track = item.tracks2.find(
+    (t) => AUDIO_CODECS.has(normalizeCodecName(t.codec)) || t.codecProps?.sampleRate !== undefined,
+  );
+  return track?.codec ?? null;
 }
 
 interface RuntimePathItem {
@@ -75,7 +95,7 @@ interface RuntimePathItem {
   ready: boolean;
   readyTime: string | null;
   source: { type: string; id: string } | null;
-  tracks2?: { codec: string; codecProps?: { width?: number; height?: number; profile?: string } }[];
+  tracks2?: { codec: string; codecProps?: { width?: number; height?: number; profile?: string; sampleRate?: number } }[];
   readers?: unknown[];
 }
 
@@ -227,14 +247,14 @@ export class MediaMtxRelay implements VideoRelay {
               profile: track.codecProps?.profile,
             }
           : null,
+        audio: audioCodec(item),
         readers: item.readers?.length ?? 0,
       };
     });
   }
 
   playback(feedId: string): { whep: string; hls: string } {
-    const base = `/video/${feedId}`;
-    return { whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+    return relayPlayback(feedId);
   }
 
   async kickPublisher(feedId: string): Promise<boolean> {

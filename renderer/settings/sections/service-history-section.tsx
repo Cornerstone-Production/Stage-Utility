@@ -1301,8 +1301,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         await invoke("history:recalcAttendance", { serviceKey: det.serviceKey });
         setReloadKey((k) => k + 1);
         toast.success("Attendance recalculated");
-      } catch {
-        toast.error("Recalculate failed");
+      } catch (e) {
+        // Say why: a service still recording, or one whose record could not be
+        // saved yet, is refused with a reason the operator can act on.
+        toast.error(`Recalculate failed: ${errorMessage(e)}`);
       }
     }
     async function rebuildFromRaw() {
@@ -1498,8 +1500,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
       try {
         await invoke("history:setItemCounted", { serviceKey: det.serviceKey, itemId: item.itemId, counted: !isCountedItem(item, det) });
-      } catch {
-        toast.error("Couldn't update");
+      } catch (e) {
+        toast.error(`Couldn't update: ${errorMessage(e)}`);
       }
     }
     // The include/exclude checkbox column only shows while editing times.

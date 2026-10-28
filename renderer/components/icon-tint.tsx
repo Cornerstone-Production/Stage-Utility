@@ -102,7 +102,7 @@ export function IconTint({
               })
               .catch((e: unknown) => {
                 console.error("[icon-tint:setColor]", itemKey, v, e);
-                toast.error(`Could not change the icon colour: ${errorMessage(e)}`);
+                toast.error(`Could not change the icon color: ${errorMessage(e)}`);
               });
           }}
           className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"

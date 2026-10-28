@@ -120,8 +120,8 @@ slot for a running number, and the switch owns it.
 
 A broadcast scheduled in YouTube that is past its start time with nothing live
 turns the widget amber and says how late it is — `Off air`, `6:12 late`. It is
-the one off-air state with a colour, because off air is what a wall sits in all
-week and a colour that is always there stops being read.
+the one off-air state with a color, because off air is what a wall sits in all
+week and a color that is always there stops being read.
 
 It waits a minute before saying anything, and stops after two hours: an upcoming
 broadcast that was cancelled rather than started keeps its scheduled time for as
@@ -163,18 +163,18 @@ one of them reads as one design:
 |---|---|
 | — | dimmed. The screen has just loaded and YouTube has not answered yet |
 | Offline | dimmed. YouTube is not set up, or cannot be reached |
-| Off air | grey — reachable, nothing going out |
+| Off air | gray — reachable, nothing going out |
 | Off air, late | amber, with how late beside it |
 | Live | green, with the elapsed time and the viewer count beside it |
 
 Green, not the red a recorder uses: red is what OBS and REAPER mean by rolling,
-and a wall carrying both should tell them apart by colour rather than by weight.
+and a wall carrying both should tell them apart by color rather than by weight.
 Late is amber for the same reason — a room carrying recorders and streams wants
 exactly one red.
 
 Live fills the whole widget by default, exactly as OBS status and REAPER status
 fill red while recording — the four sit side by side and are meant to read as one
-set. Turn **Fill green when live** off to colour just the word instead. **Hide
+set. Turn **Fill green when live** off to color just the word instead. **Hide
 when idle** makes it a tally light, drawing nothing at all until something is
 going out — except for a late start, which it still shows. A tally light that
 switches itself off exactly when the stream failed to start is a light that has

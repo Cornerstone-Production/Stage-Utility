@@ -29,6 +29,24 @@ if options.listOutputs {
   exit(0)
 }
 
+if let key = options.newTokenFor {
+  // The running copy holds outputs.json in memory and would write the old token back.
+  if SingleInstance.otherCopy() != nil {
+    FileHandle.standardError.write(
+      Data("StageUtilityOutput: quit Stage Utility Output first (Quit in its window), then run this again\n".utf8))
+    exit(1)
+  }
+  let result = TokenRotation.run(
+    store: OutputStateStore(directory: paths.userDir), key: key, macDeviceId: MacIdentity.stored(paths: paths)?.deviceId)
+  for line in result.lines { print(line) }
+  if result.succeeded {
+    Log.notice(.state, "\(key): given a new token from the command line; it is set up again on the server by releasing it and setting it up")
+  } else {
+    Log.error(.state, "--new-token \(key): \(result.lines.first ?? "failed")")
+  }
+  exit(result.succeeded ? 0 : 1)
+}
+
 if SingleInstance.handOverToRunningCopy() {
   FileHandle.standardError.write(Data("StageUtilityOutput: already running; its window was brought forward\n".utf8))
   exit(0)

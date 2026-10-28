@@ -12,6 +12,10 @@ import { TextSizeControl } from "./servicecue-text-size-control";
 import { useTextSize } from "./use-servicecue-text-size";
 import { useUpcomingPlans } from "../settings/sections/plan-switcher";
 import { useNavigateTo, useSearchParam } from "../lib/use-search-param";
+import { useBackHref } from "../lib/back-target";
+import { refreshWhileMounted } from "../lib/live-refresh";
+import { rundownKey } from "@main/types/servicecue-publish";
+import { RUNDOWN_NOT_SENT, SERVICES_NOT_SENT, notPublishedYet } from "../lib/public-mode";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
@@ -19,6 +23,9 @@ import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, serviceCueUrl } from "./servicecue-index-view";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
+
+/** The pages that open a rundown, which its back arrow may return to. */
+const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
 
 // A standalone ServiceCue rundown page: /servicecue/{type}/{layout}. Both path
 // parts are name slugs (e.g. /servicecue/weekend/audio) resolved to ids here, with
@@ -35,6 +42,9 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // On the public page, what the church has not sent yet (see notPublishedYet): said to a visitor, not as a failure.
+  const [typesNotSent, setTypesNotSent] = useState(false);
+  const [rundownNotSent, setRundownNotSent] = useState(false);
   // Which of the lists FAILED, as opposed to came back empty. Each failure used
   // to draw a plausible page that was wrong; see where they render.
   const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown" | "plans" | "plan">("servicecue");
@@ -43,6 +53,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [planParam, setPlanParam] = useSearchParam("plan");
   const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY, { syncAddress: true });
   const navigateTo = useNavigateTo();
+  // "All services" leads back to the launcher this was opened from, else the tablet's.
+  const backHref = useBackHref("/servicecue", SERVICECUE_LAUNCHERS);
 
   // The service types and the plan come from Planning Center, so they are asked
   // for only once it is connected (see pcoConnected), and until then the body
@@ -70,12 +82,19 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         .then((t) => {
           if (cancelled) return;
           setTypes(t);
+          setTypesNotSent(false);
           clear("types");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          const missing = notPublishedYet(err);
+          setTypesNotSent(missing);
+          if (missing) clear("types");
+          else fail("types", "the service types", err);
+        });
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, ["service-types"], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [pcoConfigured, fail, clear]);
   // Same reasoning for the layouts and roles: a transient failure at boot left
   // them empty for the life of the page (see servicecue-view.tsx's comment on this
@@ -99,8 +118,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles", err); });
     };
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, ["servicecue-layouts", "servicecue-roles"], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [fail, clear]);
 
   // Resolve the service-type slug (or raw id) to an id.
@@ -114,7 +133,10 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // Without the plan the body would spin for ever, so it says why instead:
   // quietly when Planning Center is simply not connected, as an error when a
   // read failed. A slug also needs the type list to resolve.
-  const notice = pcoConfigured === false ? "Planning Center isn't connected, so this page can't find its plan." : null;
+  let notice: string | null = null;
+  if (pcoConfigured === false) notice = "Planning Center isn't connected, so this page can't find its plan.";
+  else if (rundownNotSent) notice = RUNDOWN_NOT_SENT;
+  else if (!resolvedTypeId && typesNotSent) notice = SERVICES_NOT_SENT;
   const bodyError =
     error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
 
@@ -132,6 +154,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   useResyncOn([resolvedTypeId, planParam], () => {
     setRundown(null);
     setError(null);
+    setRundownNotSent(false);
     clear("rundown", "plan");
   });
 
@@ -159,15 +182,19 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           clear("plan");
           setRundown(r);
           setError(null);
+          setRundownNotSent(false);
         })
         .catch((e: unknown) => {
           if (cancelled) return;
-          setError(errorMessage(e));
-          fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
+          const missing = notPublishedYet(e);
+          setRundownNotSent(missing);
+          setError(missing ? null : errorMessage(e));
+          if (missing) clear("rundown");
+          else fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
         });
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, [rundownKey(resolvedTypeId, planParam) ?? ""], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [resolvedTypeId, planParam, pcoConfigured, fail, clear]);
 
   // The plans the switcher walks: the slots editor's own list, asked for only
@@ -175,7 +202,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const upcoming = useUpcomingPlans({ enabled: !!pcoConfigured });
   // The read failed (an Error), or answered that Planning Center could not be
   // reached (a string). Neither is an empty list, and each is said and logged.
-  const planListProblem = upcoming.error ?? upcoming.unavailable;
+  // A plan list the church has not sent yet offers no plans, and the body says why.
+  const planListProblem = (notPublishedYet(upcoming.error) ? null : upcoming.error) ?? upcoming.unavailable;
   useEffect(() => {
     if (planListProblem) fail("plans", "the plan list", planListProblem);
     else clear("plans");
@@ -221,7 +249,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     //
     // Chromeless since isSharedChromelessPath named this route: no rail and no
     // context bar, so h-full is the whole window.
-    <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-5 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-2 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* The bar and the rundown are shared with the ServiceCue view-kind and the
           layout object; only the two navigation slots are this page's own. */}
       <ServiceCueHeader
@@ -252,7 +280,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         }
         nav={
           <Tooltip label="All services">
-            <a href="/servicecue" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
+            <a href={backHref} className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
               <ArrowLeftIcon className="size-4 text-fg-muted" />
             </a>
           </Tooltip>

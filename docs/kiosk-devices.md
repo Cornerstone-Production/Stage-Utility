@@ -14,7 +14,7 @@ it becomes a line on that screen's own card.
 
 ## Setting one up
 
-**1. Turn discovery on.** Settings → Advanced → Server → *Answer devices
+**1. Turn discovery on.** Settings → Advanced → Network → *Answer devices
 looking for a server*. It is off until you switch it on, so a test instance on
 the same network cannot claim a screen meant for the real server. Restart the
 server afterwards.
@@ -31,7 +31,8 @@ address already in it, is under *Setting up a screen* on the same card — click
 
 On a Mac the same command installs the [Mac output helper](#installing-the-mac-output-helper)
 instead of a browser. For a Mac the helper cannot run on, `-s -- --browser` after
-`sh` installs a Chrome kiosk instead.
+`sh` installs a Chrome kiosk instead. On Windows it installs a launcher that follows
+the server's version on its own: see [The Windows kiosk's launcher](#the-windows-kiosks-launcher).
 
 **3. Set it up.** Open **Screens**. A screen that has been heard and not set up
 is named in a banner at the top of the page, with **Set up** beside it, and again
@@ -77,6 +78,7 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 | Option, after `sudo sh -s --` | |
 |---|---|
 | `--dry-run` | Prints every step and changes nothing. Needs no `sudo` |
+| `--replace-signing-key` | Take the server's [release signing key](#signed-updates) in place of the one this Mac has. A re-run without it keeps the installed key. For rotating the key |
 | `--browser` | The Chrome kiosk instead, one full-screen browser with the same identity files. For a Mac the helper cannot run on, such as one older than macOS 14 |
 
 **What it does:**
@@ -85,8 +87,10 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    `/Library/Application Support/StageUtility/`, and makes them as the Chrome kiosk
    did if they are missing. Running the installer again never makes a new id.
 2. Downloads `StageUtilityOutput-arm64.zip` or `StageUtilityOutput-x86_64.zip`,
-   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256. The app is a few hundred MB
-   because it carries Chromium.
+   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256 and the release's
+   [signature](#signed-updates) of it, against the release signing key it gets from
+   the server first. A zip whose signature is missing or does not verify is not
+   installed. The app is a few hundred MB because it carries Chromium.
 3. Unpacks it beside `/Applications`, checks it is the helper, then swaps it in. The
    old copy is kept until the new one is in place and put back if anything fails,
    so a Mac is never left without the app.
@@ -101,6 +105,11 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    nobody logged in the screen saver is left alone, since it is a per-account setting,
    and the token is readable by administrators until an account owns it: if the first
    account to log in is not one, run the installer again after it has.
+6. Installs the updater, with the release signing key the install verified the app
+   with, so the helper follows the server's version from then on (see
+   [Keeping the helper on the server's version](#keeping-the-helper-on-the-servers-version)).
+   A failure here is said plainly and leaves the helper installed; run the installer
+   again to add it.
 
 Running it again upgrades in place.
 
@@ -108,13 +117,17 @@ Running it again upgrades in place.
 `STAGE_DOWNLOAD_FROM` if set, else `STAGE_SERVER`, else the one the server stamped into
 the script when it served it, else the `server` file of an earlier install. A script
 saved and run by hand has no stamped address, so it needs one of the first two:
-`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server for
-this run and saves nothing. `STAGE_SERVER` is a different choice: it also writes the
+`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server to
+download from without pinning the Mac to it; the updater installed with the helper asks
+that server from then on, as it asks whichever server an install came from, so run it
+from the server the Mac belongs to. `STAGE_SERVER` is a different choice: it also writes the
 `server` file, which pins the Mac to that server and skips discovery for good, so the
 Mac does not follow the server if it moves. Use it only where discovery's broadcast
 does not cross. If that server cannot supply a zip
-that matches its checksum, it falls back to the GitHub release for the version in the
-server's `/api/update/status`. If neither works, it installs nothing and says what each
+that matches its checksum and its signature, it falls back to the GitHub release for the version in the
+server's `/api/update/status`, taking the digest from the releases API and the zip and
+its `.sig` from the release's downloads, and verifies both the same way. The API call carries no token, so GitHub allows 60 an hour per
+network; a refusal for that says so. If neither works, it installs nothing and says what each
 answered.
 A server that has not cached the zip yet sends nothing until it has all of it, so the
 installer waits on a server for up to 2 hours 10 minutes. A download from GitHub is given
@@ -122,8 +135,8 @@ up on after a minute below 1 KB/s, with the same overall limit.
 
 | Request | |
 |---|---|
-| `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the checksum the release publishes; later requests come from the cache |
-| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one line, which the installer compares its download with |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the SHA-256 the releases API lists for that asset; later requests come from the cache |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one `shasum` line the server builds from the release's digest, which the installer compares its download with. It is read once per version and cached beside the zip. A refusal is not cached, so each retry asks the releases API again, from the same 60-an-hour allowance the update check uses |
 
 The cache is `cache/output-helper/<version>/` in the data directory. It holds the
 running version only, is not part of a config backup, and costs one download to
@@ -146,12 +159,124 @@ with the reason. The installer then goes to GitHub from the Mac itself, so a Mac
 with internet still installs; a Mac with none cannot until the server has the file,
 which any request for the zip made while the server is online puts in its cache. A
 release made before the helper existed has no zip, and answers `404` the same way.
-Each release attaches the two zips and their `.sha256` files when the build ran for it;
-see [distribution](ops/distribution.md#what-a-release-contains).
+Each release attaches the two zips when the build ran for it, and GitHub lists a digest
+for each; see [distribution](ops/distribution.md#what-a-release-contains). A release
+whose zip has no digest cannot be verified: the server answers `502` and says so, and
+the installer's GitHub fallback refuses it the same way.
 
 A release whose helper build failed has no zips either, and the installer does not get
 around that: a Mac whose server runs that version cannot install the helper, from the
 server or from GitHub, until the server updates to a release that has them.
+
+### Keeping the helper on the server's version
+
+The helper's version is the server's, so a helper is up to date exactly when it runs
+the version in the server's `/api/update/status`. When the server updates, each Mac
+installs the same version on its own, with nobody at it.
+
+The installer leaves an updater beside the helper: in
+`/Library/Application Support/StageUtilityUpdater/`, a folder only root can write, a
+copy of the installer, the Mac's device id, the server the install downloaded
+from (the one `STAGE_SERVER` names, when the Mac is pinned), and the release signing
+key, `release-signing.pub.pem`; and a LaunchDaemon,
+`/Library/LaunchDaemons/com.stageutility.output-updater.plist`, that runs the copy with
+`--check-update` every five minutes and at boot. It reads nothing from the state
+folder, which the logged-in account owns. Each run:
+
+1. Asks that server whether to update (`GET /api/machine-updates/check`), saying which
+   Mac it is, what it runs and what it last did. A server that moves to another
+   address is followed by the helper (discovery) but not by the updater: run the
+   installer again from the new address.
+2. **The server decides when.** Never while Planning Center reports a service live,
+   and not within the window around a rehearsal or service (the same window integration
+   reconnects use, [Winding down between services](ops/reliability.md#winding-down-between-services):
+   *Lead time before rehearsal* and *Keep active after service ends* in Settings >
+   Advanced > Schedule). Not with *Update Mac output helpers and Windows kiosks with this
+   server* off (Settings > Advanced > Updates; on by default), and not again for a
+   version that already failed on that Mac. With Planning Center set up, not until its
+   service times and live state have been read: just after the server starts, and
+   while Planning Center cannot be reached, a Mac waits. **Update now** and **Try
+   again** override the switch, the window, not knowing and a past failure, never a
+   live service. With no Planning Center there is no window, and a Mac updates within
+   five minutes of the server.
+3. Downloads the zip, its SHA-256 and its signature from that server exactly as an
+   install does, and verifies the signature against the key in its own folder, never
+   one the server sends. Then it checks the app in it is the version the server
+   named, and clears any set-user-id bit (root unpacks it).
+4. Stops the helper, swaps the new app in keeping the old one, and starts it through
+   launchd. The download, the check and the unpacking all happen while the old helper
+   is still on air; only the restart takes the outputs off. Measured on an automatic
+   update on an M4 Mac mini with a DeckLink 8K Pro, the SDI port reopened 2.7 s after
+   launchd had the old helper gone, and the screen was showing again 0.1 s later.
+5. Waits up to 90 s for the new helper to say, in `helper-status.json` in the
+   logged-in account's `~/Library/Application Support/StageUtilityOutput/` (only a
+   regular file that account owns is read), that it is the new version, with the pid
+   launchd started, and that Chromium started. If it does not, the old app goes back
+   and is started again; if that one does not come back within 20 s the updater
+   restarts it itself, and says so if it still cannot.
+
+**When an update fails.** A failure that belongs to the version (the new helper did
+not start, the server sent another version, the zip is not the helper, no readable key
+is installed) holds that version until someone presses Try again. A failure that does
+not (the download did not finish, its checksum or signature did not hold, the Mac shut
+down in the middle) is tried again on its own, half an hour later,
+then an hour, two, four, and every six hours after, and Screens shows it as retrying.
+A failed update keeps the outputs off air longer than a good one: the new helper is
+given its chance to start before the old one goes back. Measured with a build whose
+browser host was missing, on the Mac above, it was 22 s from the old helper stopping to
+its picture being back. An install run by hand and an update never overlap: whichever
+starts second waits for the first (an install by hand up to three minutes).
+
+It does not update a Mac nobody is logged in to (the new helper could not be started
+and checked), nor start a helper someone quit at the Mac (to free a card for another
+app, say): each waits, and Screens says why. It never runs anything it downloaded as
+root: it swaps the app, which runs as the logged-in account. A change to the installer
+itself, the agent file it writes for instance, reaches a Mac only when the installer is
+run again by hand, and a release that needs that says so in its notes.
+
+**What it trusts.** The app is downloaded over the network from the server, and
+checked against the SHA-256 that same server publishes and against the release's
+signature, made in CI with a key the server never has. The checksum says the download
+is whole; the signature says it is the release's. A server, or anything that can answer
+as the server on its address, can still tell a Mac *when* to update, but not hand it a
+payload of its own: the signature is checked against the key installed with the
+updater, which an update never replaces. See [Signed updates](#signed-updates) for what
+the first install still trusts. The updater only ever asks the address recorded at
+install, in a folder only root can write, never one a logged-in account or the network
+can change (the state folder's `server` file, discovery); and what it installs runs as
+the logged-in account, as the helper always has.
+
+**Installed before this.** A helper installed by an installer older than 1.27.0 has no
+updater, and needs the installer run once more, at the Mac, to get it. Its screens say
+*Helper version unknown. Run the macOS installer once* once the server has been up
+longer than a check takes. An updater installed before signed updates verifies the
+checksum only, since the updater never replaces its own script; run the installer once
+more to give it the key and the signature check.
+
+**What Screens shows.** Each screen shown by a helper output has a line under its
+device saying what the Mac's helper runs and what it was told: up to date, waiting
+(with why, and until when), updating, retrying, updated, or failed and put back
+(with why).
+Screen settings > Device has the same as a **Helper** row, with **Update now** when
+automatic updates are off and **Try again** after a failure. Both act at the Mac's next
+check, within five minutes.
+
+**Local Network after an update.** macOS keeps the Local Network answer by bundle id,
+and the logs on a Mac running the helper show it kept across an ad hoc signed update.
+If it ever asks again, the helper says so in its window and on its outputs, and since it
+then cannot reach the server itself, the updater reports it: the screen's line and
+`/log` say someone at the Mac has to choose Allow.
+
+**Logs.** On the server, `[helper-update]` lines on `/log`: each Mac's decision when it
+changes (waiting and why, going ahead, up to date), what it reports it did (updated,
+failed and why, retrying and why, waiting for a login, the helper quit, Local Network
+refused), Update
+now pressed, and a Mac that stopped checking. Never one per check. On the Mac,
+`/Library/Logs/StageUtility/helper-update.log`, the same decisions as the updater saw
+them, with the download, the signature (`signature valid`, `signature missing`,
+`signature invalid`, or `signature not checked` when no key is installed) and the swap.
+A refused signature is reported to the server at the next check, so Screens shows it
+as retrying or failed with the reason.
 
 **Coming from the Chrome kiosk.** If the earlier agent is there
 (`com.stageutility.kiosk`), the installer writes
@@ -175,8 +300,10 @@ sudo ./scripts/uninstall.sh
 
 A Mac with no checkout fetches it:
 `curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/scripts/uninstall.sh | sudo bash`
-(`bash -s -- --dry-run` previews). It stops the helper with `launchctl bootout` in
-every account that has it loaded, then removes the LaunchAgent and the app. It also
+(`bash -s -- --dry-run` previews). It stops the updater and removes its LaunchDaemon
+and its folder first, so a run mid-update cannot put the app back, then stops the
+helper with `launchctl bootout` in every account that has it loaded, and removes the
+LaunchAgent and the app. It also
 removes the Chrome kiosk's agent and launcher where `--browser` installed them, and
 removes the Stage Utility server if one is on the same Mac (its launchd daemon,
 `com.stageutility.server`, or `com.cornerstone.stage-utility` from an install that
@@ -194,7 +321,10 @@ display sleep, system sleep and the screen saver's idle time and password, and d
 not record what they were. The script prints the commands to set them, or set them in
 System Settings > Lock Screen.
 
-By hand, as root: `launchctl bootout gui/<uid>/com.stageutility.output`, then remove
+By hand, as root: `launchctl bootout system/com.stageutility.output-updater` and remove
+`/Library/LaunchDaemons/com.stageutility.output-updater.plist` and
+`/Library/Application Support/StageUtilityUpdater`, then
+`launchctl bootout gui/<uid>/com.stageutility.output`, and remove
 `/Library/LaunchAgents/com.stageutility.output.plist` and
 `/Applications/StageUtilityOutput.app`. The plist is what starts the helper at every
 login, so removing only the app leaves an agent trying to launch a missing one.
@@ -207,8 +337,10 @@ rather than running them.
   needs a logged-in session;
 - answer the **Local Network** prompt the first time the helper opens ("Allow Stage
   Utility Output to find devices on local networks?"). Without it the helper cannot
-  find the server, and says so in its own window. The answer is tied to the app's
-  signature, so after an update macOS may ask again;
+  find the server or load its pages, and says so in its own window and on each output.
+  It is the helper's one entry in System Settings > Privacy & Security > Local Network.
+  macOS keeps the answer by bundle id, and the logs on a Mac running the helper show it
+  kept across an update;
 - check **Lock Screen**: require a password after the screen saver or display off is
   *Never*, and the screen saver and display-off times read *Never*. The installer sets
   them where macOS accepts it, and a managed Mac may not.
@@ -216,6 +348,167 @@ rather than running them.
 The installer prints this list when it finishes. On a Mac that is not coming from the
 Chrome kiosk, the main display, the one with the menu bar, is off until you turn it on
 in the helper's window.
+
+## The Windows kiosk's launcher
+
+The Windows installer writes the device's identity to `%PROGRAMDATA%\StageUtility\`
+as before, and downloads the launcher, `kiosk-windows.ps1`, from the server it was
+fetched from into that folder as `kiosk.ps1`. The download must be the one the server
+names: the installer asks `GET /api/machine-updates/check`, as the updater does, for
+the launcher's SHA-256 (updates held or not: the switch stops updates, not a first
+install), saying what it downloaded, and installs the file only when its SHA-256 is
+the one named and it parses. A server that does not answer, or names no SHA-256,
+leaves the launcher as it was (none, on a first install) and the installer stops. This
+shows the PC in Screens at once; the updater's first check takes over from there.
+That proves the file arrived whole from this server over the same plain-HTTP
+connection, not who sent it: anything that can answer as the server can name its own
+digest. The first launcher is not checked against the release's signature: the
+installer trusts the server it was run from in any case, and the launcher is served
+from the server's own tree, so a server with no internet can still install one. Every
+launcher the updater installs after it is. The updater script the installer also
+downloads is only checked to parse, since the server names no SHA-256 for it, and the
+release signing key it installs beside it (`release-signing.pub.xml`) is refused unless
+it is a 3072-bit RSA key. A key already there is kept, and held to the same check: one
+that fails it leaves the updater uninstalled, with a warning naming
+`STAGE_REPLACE_SIGNING_KEY`. The scheduled task `StageUtilityKiosk`
+runs it at every sign-in and every minute; it finds the server and opens the
+browser on the device's `/enroll` address. The discovery port is in the `port` file
+beside it (`STAGE_KIOSK_PORT` at install, 8789 by default).
+
+**Where it downloads from.** The address in `STAGE_DOWNLOAD_FROM` if set, else
+`STAGE_SERVER` (which also pins the PC to that server, as on a Mac), else the one the
+server stamped into the installer when it served it, else the `server` file of an
+earlier install. An installer saved and run by hand has no stamped address:
+`$env:STAGE_DOWNLOAD_FROM = 'http://<server>'` first. With none, it changes nothing
+and says so.
+
+**Keeping it on the server's version.** The installer also puts
+`kiosk-update-windows.ps1` in `%PROGRAMFILES%\StageUtility\kiosk-update.ps1` (only an
+administrator can write there; it runs as SYSTEM) and registers the task
+`StageUtilityKioskUpdate`, which runs it as SYSTEM every five minutes. Each run asks
+the server (`GET /api/machine-updates/check`, the same check a Mac's updater makes)
+whether its launcher, compared by SHA-256, is the server's. When the server says to
+replace it, it downloads `kiosk-windows.ps1` to a temporary file in
+`%PROGRAMFILES%\StageUtility`, checks its SHA-256 is the one the server named, checks
+the release's [signature](#signed-updates) of it, `kiosk-windows.ps1.sig`, against the
+key the installer left beside the updater, checks that it parses, and moves it over
+`kiosk.ps1`. Nothing restarts: the new launcher
+runs at the next sign-in, or the next time the browser exits. The installer stages
+its own downloads in the same folder, never in `%PROGRAMDATA%`, where any user can
+create files. Any failure leaves `kiosk.ps1` as it was. The switch *Update Mac output
+helpers and Windows kiosks with this server* (Settings > Advanced > Updates) holds
+it, and **Update now** overrides that. Service times do not, since a file replaced
+restarts nothing.
+
+How a failure is held depends on whether it would happen again:
+
+| Failure | Reported as | Then |
+|---|---|---|
+| The download of the launcher or its signature fails or times out, or the server has no signature to give (`signature missing`) | `retrying`, with the reason | Not downloaded again for 30 minutes, then 1, 2, 4 and at most 6 hours between tries while it keeps failing; the wait starts over on success or a new launcher. The PC still checks in every five minutes, so it stays listed |
+| The SHA-256 does not match, the signature does not verify (`signature invalid`), no readable key is installed (`signature not checked`), the download does not parse, the server named no SHA-256, or `kiosk.ps1` is a link | `failed` | The server does not offer that launcher again until someone presses **Try again** in Screen settings > Device |
+
+A launcher updated more than a day ago is reported as `idle` again, so Screens stops
+saying it takes effect at the next sign-in.
+
+The server it asks is the address in `update-from`, beside the updater in Program
+Files. The installer writes it from the address it downloaded from, which is
+`STAGE_SERVER` when that pins the PC, so a pinned PC asks its pinned server. The
+updater does not read the `server` file in `%PROGRAMDATA%`: it runs as SYSTEM, and
+that folder is writable by any user. What it last did is `status.json` beside the
+updater, and its log, `kiosk-update.log` beside it, says each decision when it
+changes, `[helper-update]`-tagged, as the server's `/log` does, including whether the
+launcher's signature was valid. A PC installed before 1.27.0 has no updater and a
+launcher written by the installer; run the installer once more to get both. An
+updater installed before signed updates checks the digest only and has no key: run the
+installer once more for both.
+
+**Removing it**, in an elevated PowerShell. The updater first, so it does not put the
+launcher back:
+
+```powershell
+Unregister-ScheduledTask -TaskName StageUtilityKioskUpdate -Confirm:$false
+Remove-Item -Recurse -Force "$env:ProgramFiles\StageUtility"
+Unregister-ScheduledTask -TaskName StageUtilityKiosk -Confirm:$false
+Remove-Item -Force "$env:ProgramData\StageUtility\kiosk.ps1", "$env:ProgramData\StageUtility\port"
+```
+
+That leaves the PC's `device-id` and `token` in `%PROGRAMDATA%\StageUtility`: with them
+kept, installing again keeps the PC's binding, and removing them makes it a new device
+whose screen is set up again.
+
+## Signed updates
+
+Every payload a machine updates itself from is signed in CI, as part of the release,
+by a key the server never has: each Mac output helper zip, and the Windows kiosk's
+launcher. The signature is RSA-3072 with PKCS#1 v1.5 over SHA-256, chosen because
+both machines can check it with what they already have, macOS's `/usr/bin/openssl` and
+Windows PowerShell 5.1.
+
+The server serves each signature beside its payload, fetched from the release for its
+own version and checked against the digest the releases API lists for it, like the zip:
+
+| Request | |
+|---|---|
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sig` | The release's signature of that zip |
+| `GET /kiosk/kiosk-windows.ps1.sig` | The release's signature of the launcher, which the server itself serves from its own `scripts/kiosk`. It verifies only when that file is byte for byte the one the release was built from (see below) |
+| `GET /kiosk/release-signing.pub.pem` \| `.xml` | The public key, from `scripts/kiosk/release-signing.pub.pem`, as PEM and as .NET's `<RSAKeyValue>` |
+
+Each signature is read once per version and cached beside the zips in
+`cache/output-helper/<version>/`. A release that lists no signature answers `404`, and
+the machine refuses the update. Each signature costs one more call to the releases API
+the first time it is asked for, from the same 60-an-hour allowance.
+
+**On a Mac**, a first install downloads the key from the server it was run from
+(`/kiosk/release-signing.pub.pem`), verifies the zip with it, and writes it to
+`/Library/Application Support/StageUtilityUpdater/release-signing.pub.pem`. The updater
+verifies every update with `/usr/bin/openssl dgst -sha256 -verify` against that file
+and never asks the server for a key. A key that is not a 3072-bit RSA public key is
+refused at install, and no such key there holds an update as failed.
+
+**On a Windows PC**, a first install downloads the key as `/kiosk/release-signing.pub.xml`
+and writes it to `%PROGRAMFILES%\StageUtility\release-signing.pub.xml`, beside the
+updater, where only an administrator can write. The updater verifies each new launcher
+with .NET's `RSA.VerifyData` (SHA-256, PKCS#1 v1.5) against that file, which Windows
+PowerShell 5.1 does with nothing installed, and never asks the server for a key. The
+launcher is served from the server's own `scripts/kiosk`, so its signature holds only
+while that file is the one the release was built from. `.gitattributes` marks it `-text`,
+so git checks it out as the committed bytes on every platform, whatever
+`core.autocrlf` says (Git for Windows would otherwise convert it to CRLF). A checkout
+made before that attribute has the file CRLF until it is checked out again; the in-app
+updater does that before it updates, for any file pinned this way that is byte for byte
+the committed file once every CRLF in it is made LF, and says so on an `[updater]` line.
+Any other change, a trailing space or a removed final newline included, is left for the
+operator, and the update is refused on the dirty tree as before. A local edit
+still breaks it: the server checks its own launcher against the release's signature the
+first time it serves that signature, and says on a `[helper-update]` line when they do
+not match, since every PC would then refuse the launcher as `signature invalid`.
+
+**What the first install trusts.** The installer itself, and the key it installs, come
+from the server it is run from, over plain HTTP. So the first install trusts that
+server, exactly as `curl ... | sudo sh` and `irm ... | iex` always have. From the first
+update on, the key on the machine decides: a server, or anything answering in its place,
+can still say *when* to update, but a payload it did not get from the release is
+refused. A signature covers a payload, not a version, so a server can still offer an
+older release that CI signed, and a machine installs it: a switch from the beta track
+to main lowers the version on purpose, so going down is not refused. It cannot offer
+bytes CI did not sign.
+
+The installed key survives every automatic update check. Running the genuine installer
+again keeps it too, and on a Mac verifies the new app against it, whatever server it
+downloads from; only an explicit choice takes the server's: `--replace-signing-key` on
+a Mac (`curl ... | sudo sh -s -- --replace-signing-key`), `$env:STAGE_REPLACE_SIGNING_KEY = '1'`
+before the installer on Windows. But a reinstall fetches the installer itself from the
+server (`curl http://<server>/kiosk/install-macos.sh | sudo sh`, `irm ... | iex`), and an
+installer served by something answering as the server can write any key it likes. So a
+reinstall from a server that is not trusted is a first install, with a first install's
+trust.
+
+**Rotating the key** is a new key pair, its public half committed in place of
+`scripts/kiosk/release-signing.pub.pem` and its private half set as the
+`RELEASE_SIGNING_KEY` secret (see [distribution](ops/distribution.md#the-release-signing-key)).
+A machine keeps the key it was installed with, so it refuses every release signed with
+the new one until its installer is run again with the replace choice above: on every
+Mac and PC, from a server on the first release signed with the new key.
 
 ## Size
 
@@ -265,7 +558,34 @@ other's way:
 
 - an **unclaimed** device shows on every server that hears it, which is harmless;
 - the moment you claim it on one, its probe says so and every **other** server
-  ignores it.
+  ignores it;
+- **release** it, and the next answer from that server says it is no longer set
+  up there. The device forgets that server, its probes stop naming it, and it
+  shows on every server again, ready to set up on any of them.
+
+A device learns all of this from the server's answer to its probe, which says
+whether the device is set up on the server answering. It remembers a server only
+once one says yes: a server that merely answered it, with a Screens page open, has
+claimed nothing. When more than one server answers the same probe, the answer from
+the server it remembers wins, then one from a server it is set up on.
+
+A Mac output helper output keeps probing every 30 s, so it hears a release within
+half a minute. A Pi, Linux, macOS or Windows kiosk probes only when it starts, and
+hands over to the browser once a server answers. To move one: release it, open
+Screens on the other server, and restart the screen. Told at that probe that it is
+released, it forgets the old server and probes again straight away, and the server
+with Screens open answers it. A helper output set up nowhere follows the first
+server that answered, so two Screens pages open at once do not pass its holding
+screen back and forth, until a server sets it up.
+
+A Mac output helper, macOS or Windows kiosk installed before servers said whether
+a device is set up there remembers any server that answers it. Re-run its
+installer (or update the helper) before releasing it, or it stays out of other
+servers' reach. An older Pi or Linux kiosk never sent a binding, so it is free as
+it is. Likewise a server that old is remembered on any answer by the helper and
+the macOS and Windows agents, never by the Linux agent, until it is updated or the
+device's `bound-to` file (`boundTo` in the helper's `outputs.json`) is removed by
+hand.
 
 No coordination between servers, and nothing to get out of sync.
 
@@ -284,17 +604,22 @@ installer on the device.
 
 ![The Screens page with two screens found on the network, each offered Set up or Dismiss, and the count beside Screens in the sidebar](images/screens-overview.png)
 
-- A device bound to **this** server is always answered, so a display re-finds its
+- A device bound to **this** server is answered, unless the bindings cannot be
+  read (below), so a display re-finds its
   server after an IP change with nobody present.
 - An **unclaimed** device is always **listed**: the server records every one it
   hears, with no scan to open, so the banner, *Not set up yet* and the sidebar
   count are filled the moment anyone looks. A device not heard for 90 seconds
   drops out, and the list holds at most 256 unclaimed devices: the first heard are the ones kept, and the log says when it is full.
 - An unclaimed device is **answered** only while a scan is open, which is for as
-  long as a Screens page is open. A device binds to the first server that answers
-  it, so a server answering every new device at all times would race any other
-  Stage Utility on the network for it. The answer is also what puts the holding
+  long as a Screens page is open. A device loads its holding screen from the
+  first server that answers it, so a server answering every new device at all
+  times would race any other Stage Utility on the network for it. The answer is also what puts the holding
   screen, with its id, address and MAC, on the physical screen.
+- While the server cannot read its record of which devices are bound to it,
+  it answers **nothing** and lists nothing, rather than taking every device
+  for unclaimed, and the device routes fail (`503`): a screen loading its page
+  gets an error rather than the holding screen. To the screens it looks like the server being down. See [When a store file cannot be read](ops/reliability.md#when-a-store-file-cannot-be-read).
 
 Where broadcast does not cross a VLAN, write the server address into a `server`
 file beside the device id and discovery is skipped.
@@ -447,13 +772,39 @@ output runs 20 ms behind its page at 1080p59.94, and its line in the window says
 far behind it is.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
-stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+stored state and exits), `--new-token <output key>` (below), `--dump-frames <dir>` (a PNG of every output and of the window
 every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
 and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
 offering every format, so the whole card path runs on any Mac), `--test-pattern
 latency` (a clock on every output, to photograph two side by side), `--frame-timings
 <file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
 `com.stageutility.output`.
+
+**Local Network permission.** One permission, for the app, covers the helper: it finds
+the server, loads every output's page and posts health under it. It is asked for the
+first time the helper reaches the network, and lives in System Settings > Privacy &
+Security > Local Network. A server on the same Mac does not need it.
+
+**When an output cannot load its page** it shows "Can't reach `<server host:port>`",
+and keeps trying (after 2, 4, 8, 16, then every 30 s). It never shows Chromium's error
+page, which printed the whole address, the output's secret token included. When the
+failure looks like Local Network access being off (no route to a server on the local
+network that has answered this output's probes since its loads began failing, or every
+broadcast probe refused), a second line says
+where to turn it on. The helper's log has one line per run of failures, with the error.
+
+**Replacing an output's token.** If an output's token has been seen (an older helper
+showed it on air in Chromium's error page), give that output a new one: quit the
+helper from its window, run
+`/Applications/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --new-token <output key>`
+(the key is the first column of `--list-outputs`), and start the helper again. The
+server still holds the old token, so the output shows the holding screen and the server
+logs `[output-helper] <device id> showed a token other than the one pinned`. **Release**
+the screen in its Screen settings, which drops the old token, then set the output up
+on that screen again when it appears under *Not set up yet*: the server pins the token
+the output showed it since the release. Until the release, the old token still opens
+the screen; if the output stays on the holding screen and the mismatch line comes
+back, something else showed the old token first, so release and set it up again.
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device

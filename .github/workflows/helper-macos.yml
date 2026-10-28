@@ -1,6 +1,13 @@
 # The Mac output helper's Swift package (helper/macos): built and tested on a macOS
 # runner, for every pull request that touches it.
 #
+# The gate job decides that, on Ubuntu, from the files the pull request changes
+# (.github/actions/changed-files), so the macOS job, which runners are scarce for,
+# is skipped otherwise. A push to the release pull request (beta into main, which
+# always holds the helper) is judged by the files that push changed, so a merge into
+# beta that left the helper alone queues no Mac job. A gate that cannot decide runs
+# the build. A skipped job shows as skipped, not pending.
+#
 # ci.yml runs on Ubuntu and never builds the helper, so its tests ran only on a
 # developer's Mac. This builds the package and runs ./test.sh: the core and
 # DeckLinkKit tests. Neither needs CEF (the browser host is opened at run time, not
@@ -9,19 +16,13 @@
 # that reason, rather than failing them.
 #
 # Tested by scripts/helper-macos-workflow.test.ts, which runs these steps' own shell
-# (the Xcode choice is in .github/actions/select-xcode).
+# (the Xcode choice is in .github/actions/select-xcode, the listing in
+# .github/actions/changed-files).
 
 name: Mac output helper
 
 on:
   pull_request:
-    paths:
-      - "helper/**"
-      # InstallerContractTests.swift reads this script, so a change to it alone
-      # must still run the guard.
-      - "scripts/kiosk/install-macos.sh"
-      - ".github/workflows/helper-macos.yml"
-      - ".github/actions/select-xcode/**"
   # Lets a specific commit be verified on demand.
   workflow_dispatch:
 
@@ -30,16 +31,60 @@ permissions:
   contents: read
 
 jobs:
+  # Does this pull request touch what the helper's tests read? The files are listed
+  # through the API, never a checkout of the whole history.
+  gate:
+    name: Does the change touch the helper?
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      # Only the composite action is needed from the repository, not the code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - name: List the changed files
+        id: files
+        uses: $/.github/actions/changed-files
+        with:
+          token: ${{ github.token }}
+      - name: Do they touch the helper?
+        id: gate
+        env:
+          ALL: ${{ steps.files.outputs.all }}
+          FILES: ${{ steps.files.outputs.file }}
+        run: |
+          set -uo pipefail
+          # InstallerContractTests.swift reads the installer script, so a change to it
+          # alone must still run the guard.
+          if [ "$ALL" = true ]; then run=true; reason="the changed files could not be listed"
+          elif grep -qE '^helper/|^scripts/kiosk/install-macos\.sh$|^\.github/workflows/helper-macos\.yml$|^\.github/actions/select-xcode/' "$FILES"; then run=true; reason="the change touches the helper"
+          else run=false; reason="the change leaves the helper alone"; fi
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+          echo "helper build: $run ($reason)"
+
   swift:
     name: helper swift build and tests
+    needs: gate
+    # A gate that did not succeed runs the build rather than skipping it, and a manual
+    # run always builds (the gate is skipped then).
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.gate.result != 'success' || needs.gate.outputs.run == 'true') }}
     runs-on: macos-14
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # swift-testing comes with Swift 6, which is Xcode 16; the image's default
       # Xcode may be older. The release workflow's helper build selects it the same way.
-      - uses: ./.github/actions/select-xcode
+      - uses: $/.github/actions/select-xcode
 
       - name: Build and test the helper
         run: cd helper/macos && swift build && ./test.sh

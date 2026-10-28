@@ -1,0 +1,62 @@
+{
+  // The public side of ServiceCue on the web. No account id and nothing about who
+  // deploys it: `wrangler login` decides the account, and the address is
+  // servicecue.<your workers.dev subdomain>.workers.dev.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "servicecue",
+  "main": "src/worker.ts",
+  // The newest date the pinned wrangler's local runtime accepts (a workerd build
+  // accepts dates up to a week past its own). Raise it with wrangler, not ahead of
+  // it: `wrangler dev` refuses to start on a date its runtime does not know.
+  "compatibility_date": "2026-10-13",
+
+  // The built viewer (npm run servicecue:build at the repository root writes it to
+  // ./public). The Worker runs first for every path but the build's own static files,
+  // which the asset service answers itself: they are most of a page load, and a request
+  // the Worker never sees is not one of the free plan's. Each exclusion names a file
+  // type the build writes, so nothing else in ./public (the page's document) can be
+  // reached through one. Not "single-page-application": that would answer an
+  // arbitrary path with the page.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/*",
+      "!/apple-touch-icon.png",
+      "!/assets/*.css",
+      "!/assets/*.js",
+      "!/assets/*.woff",
+      "!/assets/*.woff2",
+      "!/favicon.svg",
+      "!/icon-192.png",
+      "!/icon-512.png",
+      "!/icon-maskable-512.png",
+      "!/manifest.webmanifest"
+    ],
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+
+  // The one object that holds docs, assets, the latest frames and the viewers'
+  // sockets. SQLite-backed, which is the only kind the free plan allows.
+  "durable_objects": {
+    "bindings": [{ "name": "HUB", "class_name": "PublishHub" }]
+  },
+  "exports": {
+    "PublishHub": { "type": "durable-object", "storage": "sqlite" }
+  },
+
+  // Only the address wrangler prints. A preview URL is another public hostname for
+  // every version ever uploaded.
+  // A variable set on the Worker in the Cloudflare dashboard (MAX_VIEWERS_PER_ADDRESS
+  // raised for a building behind one address, say) survives a deploy, this one and the
+  // server's own: a variable named under "vars" here still replaces it.
+  "keep_vars": true,
+
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Wrangler sends the list of npm packages with every deploy unless told not to.
+  // Nothing here needs it sent.
+  "dependencies_instrumentation": { "enabled": false }
+}

@@ -1,13 +1,15 @@
-// Flags a fix/perf commit that LOOKS like it belongs to a feature built this
-// cycle, so the author is reminded to add the `Beta-only: true` trailer
-// documented in docs/contributing.md.
+// Flags a patch-level commit (fix, perf or polish) that LOOKS like it belongs to a
+// feature built this cycle, so the author is reminded to add the `Beta-only: true`
+// trailer documented in docs/contributing.md.
 //
-// The heuristic: for every non-merge `fix:`/`perf:` commit in `<base>..HEAD`
+// The heuristic: for every non-merge patch-level commit in `<base>..HEAD`
 // without the trailer already, look at the files it touches. If at least one
 // of them was ALSO touched by a `feat:` commit since the last stable tag
 // (highest `vX.Y.Z` with no `-`) — not just since `<base>`, because the
-// feature may have landed in an earlier PR this cycle — the fix is flagged as
-// probably belonging to that feature.
+// feature may have landed in an earlier PR this cycle — the commit is flagged as
+// probably belonging to that feature. A polish to a feature built in the same
+// cycle is as beta-only as a fix to it: nobody upgrading from stable ever saw
+// the unpolished version.
 //
 // What it CANNOT see: a fix to old code that happens to touch a file a
 // feature also edited is a false positive — sharing a file does not mean
@@ -24,10 +26,13 @@
 //   node scripts/check-beta-only.mjs <base-ref>
 
 import { execFileSync } from "node:child_process";
+import { isMain } from "./is-main.mjs";
+import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 const TRAILER_PATTERN = /^Beta-only:\s*(true|yes)\s*$/im;
-const FIX_PERF_SUBJECT = /^(fix|perf)(\([^)]+\))?!?:/;
-const FEAT_SUBJECT = /^feat(\([^)]+\))?!?:/;
+const subjectOf = (types) => new RegExp(`^(${types.join("|")})(\\([^)]+\\))?!?:`);
+const PATCH_SUBJECT = subjectOf(COMMIT_TYPE_FILE.patch);
+const FEAT_SUBJECT = subjectOf(COMMIT_TYPE_FILE.minor);
 
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8" });
@@ -78,7 +83,7 @@ export function findBetaOnlyCandidates(base, stableTag) {
   const flagged = [];
   for (const sha of shas) {
     const subject = git(["log", "-1", "--format=%s", sha]).trim();
-    if (!FIX_PERF_SUBJECT.test(subject)) continue;
+    if (!PATCH_SUBJECT.test(subject)) continue;
 
     const body = git(["log", "-1", "--format=%b", sha]);
     if (TRAILER_PATTERN.test(body)) continue;
@@ -118,7 +123,7 @@ function main() {
   const flagged = findBetaOnlyCandidates(base, stableTag);
 
   if (flagged.length === 0) {
-    console.log(`Checked every fix/perf commit against ${stableTag} — none looked beta-only.`);
+    console.log(`Checked every ${COMMIT_TYPE_FILE.patch.join("/")} commit against ${stableTag} — none looked beta-only.`);
     return;
   }
 
@@ -126,7 +131,7 @@ function main() {
     const line = `${sha} ${subject}`;
     console.log(line);
     for (const { sha: featSha, subject: featSubject, file } of sharedWith) {
-      const hint = `shares ${file} with feat ${featSha} "${featSubject}"; if the bug is in that feature, add the trailer "Beta-only: true"`;
+      const hint = `shares ${file} with feat ${featSha} "${featSubject}"; if this change belongs to that feature, add the trailer "Beta-only: true"`;
       console.log(`  ${hint}`);
       if (process.env.GITHUB_ACTIONS) {
         console.log(`::warning::${line} — ${hint}`);
@@ -136,4 +141,4 @@ function main() {
 }
 
 // Only when run directly, so findBetaOnlyCandidates can be imported by a test.
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) main();
+if (isMain(import.meta.url, process.argv[1])) main();

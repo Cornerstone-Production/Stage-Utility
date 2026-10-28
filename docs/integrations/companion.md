@@ -917,7 +917,7 @@ workflow), and three for stage messages (below).
 | Recorder / streaming platform disconnected | the chosen one of OBS, REAPER, Resi or YouTube is not connected |
 | Captions idle | no caption line has arrived for the number of seconds you set |
 | ProVideoPlayer now-layer is playing a video / remaining time at or under threshold | the now-layer is playing, or has the seconds you set or fewer left |
-| Baptism phase colour (*advanced*) / paused / running | the timer's phase colours the button, or it is paused, or a clock is counting |
+| Baptism phase color (*advanced*) / paused / running | the timer's phase colors the button, or it is paused, or a clock is counting |
 | Alert running | a stage message alert is running, for any group or one |
 | Automation signal equals / failed to resolve | see [Signals](#signals) |
 
@@ -989,7 +989,7 @@ yet, and after the nightly clear; `message_alert_active` reads `false`.
 addressed to Everyone and editable after it is placed, and a **Clear alerts**
 button that wears the **Alert running** feedback.
 
-The same two things are available to rules and to any console's Action button as
+The same two things are available to rules and to any console's Button, set to Run an action, as
 the automation actions **Send a stage message** and **Clear stage message
 alerts**; see [Automation](../automation.md#actions). Those send from
 `Automation`.

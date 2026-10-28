@@ -380,7 +380,7 @@ export function TrendsCard({
   // line rather than silently re-deriving a different assignment every visit.
   useEffect(() => {
     const err = writeColorAssignment(colorIndexes);
-    if (err) logToServer("history", `could not remember the trend colours: ${err.message}`);
+    if (err) logToServer("history", `could not remember the trend colors: ${err.message}`);
   }, [colorIndexes]);
 
   const series = useMemo<ChartSeries[]>(() => {

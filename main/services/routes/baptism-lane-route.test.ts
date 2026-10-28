@@ -144,9 +144,8 @@ describe("GET /api/baptism/lane", () => {
   });
 
   it("fails, rather than answering an empty lane, when the archive exists and cannot be read", async () => {
-    // readArchiveRows answers null for a file it cannot read, the same as for
-    // one that is not there. A directory where baptism.csv should be is the
-    // unreadable case, without depending on file permissions.
+    // A directory where baptism.csv should be is the unreadable case, without
+    // depending on file permissions.
     const key = "st1:plan1:2255";
     await serviceTimelineStore.upsert(timeline(key) as never);
     await fs.mkdir(path.join(serviceDirPath(key, DATE), "baptism.csv"), { recursive: true });
@@ -158,8 +157,8 @@ describe("GET /api/baptism/lane", () => {
       thrown = err;
     }
     assert.ok(thrown, "an unreadable archive answered as though the service had no baptisms");
-    assert.equal(handlerErrorStatus(thrown), 500);
-    assert.match((thrown as Error).message, /present for this service, and none could be read/);
+    assert.equal(handlerErrorStatus(thrown), 503);
+    assert.match((thrown as Error).message, /baptism\.csv in archive folder \S+ could not be read \(EISDIR\)/);
     assert.doesNotMatch((thrown as Error).message, /\//, "a path leaked into a LAN-visible response");
   });
 

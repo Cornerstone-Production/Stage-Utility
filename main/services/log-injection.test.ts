@@ -34,7 +34,9 @@
 // files that see HTTP REQUEST data. The wireless drivers log device replies from
 // the LAN — around 200 more interpolations — which is a different threat model
 // (a mic receiver, not a browser) and a different change. They are not covered
-// here and this file does not pretend otherwise.
+// here and this file does not pretend otherwise. ProdCom is the exception: its
+// frames carry text people type into an intercom, so prodcom-service.ts is
+// scanned.
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -79,6 +81,8 @@ const REQUEST_FACING = [
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
   "builtin-cues.ts",
+  // Fed by POST /api/events/subscribe with any cid; its one line is a count.
+  "channel-reports.ts",
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
   // Its lines name a cue pair's base — a rule param typed into an HTTP body —
@@ -105,11 +109,16 @@ const REQUEST_FACING = [
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
+  // Every line names a Host header: whatever name the sender chose, verbatim.
+  "host-names.ts",
   "integration-manager.ts",
   // Its lines name a device id and the figures of a health report, both taken from
   // POST /api/devices/:id/health (the path and the body), and an output name and
   // hostname taken from a UDP probe.
   "kiosk-presence.ts",
+  // An unauthenticated update check: a machine's own host name, versions and
+  // failure reason, off the query string.
+  "machine-updates.ts",
   // Its sent line names the groups, the sender and the TEXT of a message, all
   // typed into POST /api/messages; its refusal line carries the reason, which
   // can name an id off the wire.
@@ -134,6 +143,16 @@ const REQUEST_FACING = [
   // into Settings over HTTP.
   "pinned-origin.ts",
   "plan-export.ts",
+  // Its lines name a channel, a frame's type and keys, an entry's source, the raw
+  // PRODCOM_DEBUG frame and the error text ProdCom sends back, all off its socket
+  // or REST replies.
+  "prodcom-service.ts",
+  // Names a wireless connection or a feed out of a restored bundle, which
+  // POST /api/config/import takes from anyone on the LAN.
+  "restore-credentials.ts",
+  // The path is one of four fixed keys and the reference is read from settings,
+  // but both are scrubbed: settings.json is a file an operator can edit by hand.
+  "routes/app-icon-routes.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
   "routes/branding-routes.ts",
@@ -147,6 +166,7 @@ const REQUEST_FACING = [
   "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
+  "routes/host-name-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
   // Logs nothing: it redirects an API path and echoes the path and query into a
@@ -170,6 +190,9 @@ const REQUEST_FACING = [
   "routes/route-harness.ts",
   // Logs nothing: it reads a creation body and answers a failure.
   "routes/screen-write.ts",
+  // Logs nothing: it reads the page address and token off POST /api/servicecue/publish and
+  // hands them to servicecue-publisher.ts, whose lines are below.
+  "routes/servicecue-publish-routes.ts",
   "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
@@ -186,17 +209,35 @@ const REQUEST_FACING = [
   // Its one warning names the screen whose embedded views run past the cap; the id is
   // scrubbed, and a reply request is what asks the question.
   "screen-reach.ts",
-  // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
-  // carry-over lines. A title is typed into Planning Center and arrives here in
-  // an HTTP response body — outside data by every measure this file uses, and
-  // the same exposure pco-service.ts is scanned for.
+  // Both recorders (this one, and spl-recorder.ts after the next entry) name a
+  // Planning Center PLAN ITEM TITLE on their re-run and carry-over lines. A title
+  // is typed into Planning Center and arrives here in an HTTP response body —
+  // outside data by every measure this file uses, and the same exposure
+  // pco-service.ts is scanned for.
   "service-timeline-recorder.ts",
+  // Its lines name a build id and version read out of what Cloudflare holds, and Cloudflare's own
+  // error words, which echo what a request carried. It never names a token.
+  "servicecue-deployer.ts",
+  // Its lines name the host of the page address typed into POST /api/servicecue/publish,
+  // a document key built from Planning Center ids, and whatever the page or the network
+  // said back. It never names the token.
+  "servicecue-publisher.ts",
+  // Names the settings.json keys a restore dropped, out of a bundle anyone on the
+  // LAN can post to POST /api/config/import.
+  "settings-restore-check.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+  // "not found at" and "found at" log lines.
+  "video/ffmpeg-system.ts",
   // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
   // file's own "is live"/"went offline"/B-frames log lines on a transition.
   "video/video-service.ts",
   "view-import.ts",
+  // A connection's name and an update's patch keys arrive in the body of
+  // POST/PATCH /api/wireless/connections. It also logs what the drivers report,
+  // which is why it was filed under DEVICE until a body reached its lines.
+  "wireless-manager.ts",
   // The channel title on a successful Connect comes back from Google, not the
   // operator, but it is still external data reaching a log line.
   "youtube-connect.ts",
@@ -290,11 +331,12 @@ const NOT_SCANNED = new Map<string, string>([
   ["osc-manager.ts", DEVICE],
   ["pco-attachment-cache.ts", UNAUDITED],
   ["pco-calendar-service.ts", ELSEWHERE],
-  ["prodcom-service.ts", DEVICE],
   ["propresenter-service.ts", DEVICE],
   ["pvp-service.ts", DEVICE],
   ["reaper-service.ts", DEVICE],
   ["reconcile-records.ts", UNAUDITED],
+  // Its one line is a fixed sentence naming a test hook; no value reaches it.
+  ["release-signing-key.ts", "one fixed sentence, with nothing interpolated"],
   ["remote-server.ts", DEVICE],
   ["resi-service.ts", DEVICE],
   ["rosstalk-manager.ts", DEVICE],
@@ -308,6 +350,11 @@ const NOT_SCANNED = new Map<string, string>([
       "interpolates nothing. Audited, not just excused.",
   ],
   ["servicecue-layouts-store.ts", UNAUDITED],
+  [
+    "servicecue-publisher-instance.ts",
+    "logs one sentence, when the address STAGE_UTILITY_CLOUDFLARE_API names is not usable, naming only " +
+      "the fixed reason the address parser gives. An environment variable is the operator's, not a request's.",
+  ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   [
@@ -348,7 +395,6 @@ const NOT_SCANNED = new Map<string, string>([
       "route). The same shape as a device or provider talking back, since a LAN publisher's " +
       "stream key could in principle reach MediaMTX's own log — not audited line by line.",
   ],
-  ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
 
@@ -380,6 +426,9 @@ function requestFacingFiles(): string[] {
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
     path.join(HERE, "builtin-cues.ts"),
+    // Fed by POST /api/events/subscribe, which anyone on the LAN can call with
+    // any cid. Its one line carries only a count, scrubbed like everything else.
+    path.join(HERE, "channel-reports.ts"),
     // The plan id and the checklist row label both arrive in an HTTP body. It
     // reached beta AFTER this scan's coverage half was written, and the coverage
     // half caught it on its first run against a tree that had it — which is the
@@ -410,6 +459,9 @@ function requestFacingFiles(): string[] {
     // caller put on the /api/events/poll query string — an attacker's value,
     // verbatim, reaching /log.
     path.join(HERE, "event-poll.ts"),
+    // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+    // "not found at" and "found at" log lines.
+    path.join(HERE, "video/ffmpeg-system.ts"),
     // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
     // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
     // from the caller — and the rebuild it drives reaches plan item titles.
@@ -426,6 +478,9 @@ function requestFacingFiles(): string[] {
     // a `/log` entry. It is scrubbed at the logger.
     path.join(HERE, "history-milestones-store.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
+    // Its lines name a request's Host header, which the sender writes freely: a
+    // newline in one would forge a `/log` entry. Scrubbed at each line.
+    path.join(HERE, "host-names.ts"),
     // POST /api/integrations/:id/config checks only that `config` is an object,
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
@@ -435,6 +490,10 @@ function requestFacingFiles(): string[] {
     // figures come out of that request body; the output seen line names what a UDP
     // probe said. All scrubbed at the logger.
     path.join(HERE, "kiosk-presence.ts"),
+    // Every line names what a machine on the network said about itself in an
+    // unauthenticated update check: its host name, versions and why an update
+    // failed, all off the query string.
+    path.join(HERE, "machine-updates.ts"),
     // Its sent line names the groups, the sender and the TEXT of a message, all
     // typed into POST /api/messages; its refusal line carries the reason, which
     // can name an id off the wire.
@@ -460,6 +519,8 @@ function requestFacingFiles(): string[] {
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
+    // Off a ProdCom socket or REST reply; see REQUEST_FACING.
+    path.join(HERE, "prodcom-service.ts"),
     // Its one summary line names the serviceKey the replay was handed, which
     // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
     // — the same exposure history-edit.ts carries.
@@ -468,6 +529,9 @@ function requestFacingFiles(): string[] {
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
     path.join(HERE, "archive/rebuild.ts"),
+    // Its lines name a wireless connection or a feed out of a bundle that
+    // POST /api/config/import takes from anyone on the LAN.
+    path.join(HERE, "restore-credentials.ts"),
     // Its one warning names the screen whose embedded views run past the cap; the id is
     // scrubbed, and a reply request is what asks the question.
     path.join(HERE, "screen-reach.ts"),
@@ -475,6 +539,14 @@ function requestFacingFiles(): string[] {
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
+    // Its lines name what Cloudflare answered; see REQUEST_FACING.
+    path.join(HERE, "servicecue-deployer.ts"),
+    // Its lines name the host of the page address typed into POST /api/servicecue/publish
+    // and whatever the page or the network said back; see REQUEST_FACING.
+    path.join(HERE, "servicecue-publisher.ts"),
+    // Its one line names the settings.json keys it dropped, which arrive in a
+    // bundle POST /api/config/import takes from anyone on the LAN.
+    path.join(HERE, "settings-restore-check.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
@@ -485,6 +557,8 @@ function requestFacingFiles(): string[] {
     // logged nothing at all before the plan import, which is when it acquired
     // the exposure.
     path.join(HERE, "view-import.ts"),
+    // A connection's name and an update's patch keys arrive in an HTTP body.
+    path.join(HERE, "wireless-manager.ts"),
     // The channel title on a successful Connect is read back from Google over
     // HTTP, not typed by the operator, but it is still external data reaching
     // a log line the same way a device's reply would.

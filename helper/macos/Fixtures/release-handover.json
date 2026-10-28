@@ -1,0 +1,24 @@
+{
+  "about": "One helper output handed from server A to server B by releasing it on A, as exact datagrams. The server's responder test (main/services/kiosk-responder.test.ts) proves the server sends these replies to these probes; the helper's ReleaseHandoverTests proves the helper sends these probes and acts on these replies. Change one side and the other side's test says so.",
+  "device": {
+    "id": "booth-mac.sdi-1",
+    "macs": ["02:00:00:00:00:bb"],
+    "hostname": "booth-mini",
+    "output": { "kind": "decklink", "name": "SDI 1 - Card A", "port": "SDI 1" }
+  },
+  "servers": {
+    "a": { "serverId": "srv-a", "name": "Server A", "url": "http://192.0.2.10:8788" },
+    "b": { "serverId": "srv-b", "name": "Server B", "url": "http://192.0.2.20:8788" }
+  },
+  "probes": {
+    "boundToA": "{\"boundTo\":\"srv-a\",\"hostname\":\"booth-mini\",\"id\":\"booth-mac.sdi-1\",\"macs\":[\"02:00:00:00:00:bb\"],\"os\":\"macOS\",\"output\":{\"kind\":\"decklink\",\"name\":\"SDI 1 - Card A\",\"port\":\"SDI 1\"},\"stageUtility\":\"discover\",\"v\":1}",
+    "unbound": "{\"hostname\":\"booth-mini\",\"id\":\"booth-mac.sdi-1\",\"macs\":[\"02:00:00:00:00:bb\"],\"os\":\"macOS\",\"output\":{\"kind\":\"decklink\",\"name\":\"SDI 1 - Card A\",\"port\":\"SDI 1\"},\"stageUtility\":\"discover\",\"v\":1}",
+    "boundToB": "{\"boundTo\":\"srv-b\",\"hostname\":\"booth-mini\",\"id\":\"booth-mac.sdi-1\",\"macs\":[\"02:00:00:00:00:bb\"],\"os\":\"macOS\",\"output\":{\"kind\":\"decklink\",\"name\":\"SDI 1 - Card A\",\"port\":\"SDI 1\"},\"stageUtility\":\"discover\",\"v\":1}"
+  },
+  "replies": {
+    "aClaimed": "{\"stageUtility\":\"server\",\"v\":1,\"serverId\":\"srv-a\",\"name\":\"Server A\",\"url\":\"http://192.0.2.10:8788\",\"claimed\":true}",
+    "aReleased": "{\"stageUtility\":\"server\",\"v\":1,\"serverId\":\"srv-a\",\"name\":\"Server A\",\"url\":\"http://192.0.2.10:8788\",\"claimed\":false}",
+    "bUnclaimed": "{\"stageUtility\":\"server\",\"v\":1,\"serverId\":\"srv-b\",\"name\":\"Server B\",\"url\":\"http://192.0.2.20:8788\",\"claimed\":false}",
+    "bClaimed": "{\"stageUtility\":\"server\",\"v\":1,\"serverId\":\"srv-b\",\"name\":\"Server B\",\"url\":\"http://192.0.2.20:8788\",\"claimed\":true}"
+  }
+}

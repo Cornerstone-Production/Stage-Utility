@@ -17,6 +17,7 @@ import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.mjs";
 
 /** 5x7, row by row. `#` lit, `.` unlit. */
 const S = [".###.", "#...#", "#....", ".###.", "....#", "#...#", ".###."];
@@ -170,7 +171,7 @@ export function buildIcons() {
   };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url, process.argv[1])) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   for (const [name, data] of Object.entries(buildIcons())) {
     writeFileSync(path.join(publicDir, name), data);

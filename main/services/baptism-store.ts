@@ -56,6 +56,12 @@ class BaptismStore {
   /** The duplicate count listSessions last logged — see its doc comment. */
   private loggedDuplicateIds = 0;
 
+  /** Why a save here is refused, or null: see DataStore.refusingSaves. For a
+   *  caller that must know before it writes anything else. */
+  refusingSaves(): Error | null {
+    return this.store.refusingSaves();
+  }
+
   /**
    * Finished sessions, newest first — one per id, even when the FILE holds
    * more than one.
