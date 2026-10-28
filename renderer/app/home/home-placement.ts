@@ -77,11 +77,10 @@ export function boxesOf(cards: readonly LayoutObject[]): Box[] {
     const { w, h } = SIZES[sizeOf(o)];
     explicit.push({ id: o.id, col: clampCol(colOf(o)!, w), row: rowOf(o)!, w, h });
   }
-  // Two stored placements can overlap: a card grown to XL or Tall where it
-  // stands covers whatever was beside or below it, and a layout saved before
-  // resizing pushed anything still holds that. Honoured as stored, the grown
-  // card drew straight over its neighbours. Settled top to bottom instead, so
-  // the later of two overlapping cards moves down, as a drop would push it.
+  // Two stored placements can overlap: a layout saved before resizing pushed
+  // anything still holds a grown card on its neighbours' cells. Settled top to
+  // bottom, so the later of two overlapping cards moves down, as a drop would
+  // push it.
   const placed = settle(explicit);
   for (const o of cards) {
     if (isPlaced(o)) continue;
@@ -168,9 +167,8 @@ export function placeAt(
  * A card at a new size, holding its place.
  *
  * A card placed by hand keeps its cell and pushes whatever it grew onto
- * downward, exactly as dropping it there would. Setting the size alone left
- * both stored where they were, and a card grown to XL or Tall covered its
- * neighbours. A flowing card needs nothing: the flow routes around it.
+ * downward, exactly as dropping it there would. A flowing card needs nothing:
+ * the flow routes around it.
  */
 export function resizeCard(cards: readonly LayoutObject[], id: string, size: HomeCardSize): LayoutObject[] {
   const next = cards.map((o) => (o.id === id ? { ...o, home: { ...o.home, size } } : o));

@@ -117,10 +117,8 @@ function service(config: TimerConfig, i: TimerInputs, { hide }: Common): TimerRe
     hidden: false,
     caption: captionOf(config, t?.label ?? "Service"),
     value: t ? fmtDuration(t.seconds) : "\u2014",
-    // The next item IS the service's sub-line, with one switch of its own. Not
-    // gated on showLabel as well: the inspector no longer offers that switch for
-    // the service, and a layout saved with it off would tick Show the next item
-    // and draw nothing.
+    // The next item IS the service's sub-line, with one switch of its own, so a
+    // saved showLabel: false cannot hide it.
     sub: (config.nextItem ?? false) && next ? `Next \u00b7 ${next}` : null,
     tone,
     unanswered: false,

@@ -2,9 +2,8 @@
 //
 // Every dialog is the same shape: a short description, the image in its crop
 // editor (or a place to drop one), and a footer with Upload (Replace once set) and
-// Remove. The editor is in the dialog itself, open from the start: a separate
-// Adjust step meant a second dialog to reach the zoom an operator came for. The
-// icon dialog adds the size previews and the background swatches. Nothing here
+// Remove. The editor is in the dialog itself, open from the start. The icon dialog
+// adds the size previews and the background swatches. Nothing here
 // talks to the server: each action is a callback into branding-section.tsx, which
 // owns the file picker, the cropper's state and the writes.
 
@@ -19,7 +18,8 @@ import {
   FieldLabel,
 } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { AndroidIcon, Describe, DropVeil, IosIcon, TabIcon, useFileDrop, useImageSize, type Brand } from "./branding-cards";
+import { AndroidIcon, Describe, DropVeil, IosIcon, TabIcon, useImageSize, type Brand } from "./branding-cards";
+import { useFileDrop } from "../../lib/use-file-drop";
 import { ART_MAX } from "../../lib/app-icon-render";
 
 /** Behind-the-icon colours offered for transparent areas: black, two of the app's

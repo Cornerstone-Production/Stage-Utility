@@ -53,7 +53,7 @@ export function TimerInspector({
       </StackedField>
 
       {info.nextItem && (
-<StackedSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
+        <StackedSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
       )}
 
       {source === "propresenter" && (

@@ -1427,9 +1427,10 @@ export function Inspector({
       })()}
       {(c.type === "stream-status" || c.type === "home-streaming" || c.type === "home-streaming-resi" || c.type === "home-streaming-youtube") && (
         <>
-          {/* The same three switches obs-status offers, because these are the
-              same widget pointed at a different source. Only the general one
-              asks WHICH platform — the per-platform objects already answered. */}
+          {/* The Source picker, then the same three switches obs-status offers,
+              because these are the same widget pointed at a different source.
+              The retired per-platform objects have no picker: their type is
+              the platform. */}
           {(c.type === "stream-status" || c.type === "home-streaming") && (
             <StackedField
               label="Source"

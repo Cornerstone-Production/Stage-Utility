@@ -1173,11 +1173,8 @@ export function AdvancedSection({
         />
       </div>
 
-      {/* Two stacks, not a two-column grid. In a grid every row is as tall as its
-          tallest card, and Server is the length of the other three together: Host
-          names sat in a row beside it with a screen of empty space under it. Each
-          column now stacks on its own; on a narrow screen the two stacks follow
-          one another in the same order. */}
+      {/* Each column stacks on its own: Server is as tall as the other three
+          together, so shared grid rows would leave a gap under them. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
         <div className="flex min-w-0 flex-col gap-6">
           <div className="su-card">
