@@ -80,7 +80,7 @@ describe("refusal off, the default", () => {
         res.resume();
         setTimeout(() => resolve(false), 500);
       });
-    const [reboundEnded, ownEnded] = await Promise.all([ended(rebound), ended(own), hostNames.setEnforce(true)]);
+    const [reboundEnded, ownEnded] = await Promise.all([ended(rebound), ended(own), hostNames.turnRefusalOn([])]);
     assert.equal(reboundEnded, true, "the rebinding stream is still open");
     assert.equal(ownEnded, false, "the stream opened by IP was closed");
     own.destroy();
@@ -98,7 +98,7 @@ describe("refusal off, the default", () => {
 });
 
 describe("refusal on", () => {
-  beforeEach(() => hostNames.setEnforce(true));
+  beforeEach(() => hostNames.turnRefusalOn([]));
 
   test("a rebinding read gets a 403 that names the way back", async () => {
     const r = await server.send("GET", "/api/version", asRebind());
@@ -169,6 +169,65 @@ describe("the route", () => {
       body: JSON.stringify({ enforce: "yes" }),
     });
     assert.equal(r.status, 400);
+  });
+});
+
+describe("turning refusal on through the route", () => {
+  const json = { "Content-Type": "application/json" };
+  const post = (body: unknown, host?: string) =>
+    server.send("POST", "/api/security/host-names", { headers: { ...json, ...(host ? { Host: `${host}:${server.port}` } : {}) }, body: JSON.stringify(body) });
+
+  test("without the names to keep it is refused and refusal stays off", async () => {
+    const r = await post({ enforce: true });
+    assert.equal(r.status, 400);
+    assert.match(r.body, /needs `names`/);
+    assert.equal(hostNames.enforcing, false);
+  });
+
+  test("the list becomes exactly the names sent; one not sent is refused afterwards", async () => {
+    for (const host of ["ha.example.org", "tablet.example.org"]) await server.send("GET", "/api/version", { headers: { Host: `${host}:${server.port}` } });
+    const r = await post({ enforce: true, names: ["ha.example.org"] });
+    assert.equal(r.status, 200);
+    assert.equal((await server.send("GET", "/api/version", { headers: { Host: "ha.example.org" } })).status, 200);
+    assert.equal((await server.send("GET", "/api/version", { headers: { Host: "tablet.example.org" } })).status, 403);
+  });
+
+  test("a name that never reached the server cannot be kept", async () => {
+    const r = await post({ enforce: true, names: ["invented.example.org"] });
+    assert.equal(r.status, 400);
+    assert.equal(hostNames.enforcing, false);
+  });
+
+  test("from a listed name, leaving that name out is refused: the operator would be locked out", async () => {
+    await post({ add: "stage.example.org" });
+    const r = await post({ enforce: true, names: [] }, "stage.example.org");
+    assert.equal(r.status, 400);
+    assert.match(r.body, /lock you out/);
+    assert.equal(hostNames.enforcing, false);
+    assert.equal((await post({ enforce: true, names: ["stage.example.org"] }, "stage.example.org")).status, 200);
+  });
+
+  test("turning it on again while it is on is a 400 with a sentence", async () => {
+    assert.equal((await post({ enforce: true, names: [] })).status, 200);
+    const r = await post({ enforce: true, names: [] });
+    assert.equal(r.status, 400);
+    assert.match(r.body, /Refusal is already on/);
+  });
+
+  test("always-answered names in the list are ignored, not a 400", async () => {
+    await server.send("GET", "/api/version", { headers: { Host: `ha.example.org:${server.port}` } });
+    const r = await post({ enforce: true, names: ["10.0.0.5", "stage-display", "panel.local", "ha.example.org"] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(hostNames.view().accepted.map((a) => a.name), ["ha.example.org"]);
+  });
+
+  test("a rebinding page cannot turn it on with a list of its own", async () => {
+    const r = await server.send("POST", "/api/security/host-names", {
+      ...asRebind({ Origin: `http://${REBIND}:${server.port}`, ...json }),
+      body: JSON.stringify({ enforce: true, names: [REBIND] }),
+    });
+    assert.equal(r.status, 403);
+    assert.equal(hostNames.enforcing, false);
   });
 });
 

@@ -60,7 +60,6 @@ function complete(view: Partial<HostNamesView> | null | undefined): HostNamesVie
   };
   return {
     enforce: view.enforce === true,
-    seeded: view.seeded === true,
     automatic: list("automatic", view.automatic),
     accepted: list("accepted", view.accepted),
     waiting: list("waiting", view.waiting),
