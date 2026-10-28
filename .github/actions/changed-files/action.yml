@@ -1,0 +1,104 @@
+# Lists the files a workflow run should look at, or says it cannot and the run
+# should do everything.
+#
+# CodeQL (codeql.yml) and the Mac output helper's CI (helper-macos.yml) both gate
+# macOS jobs, which runners are scarce for, on whether a change touches the helper.
+# The listing comes through the API rather than a history (no fetch, nothing to
+# diff), and it is decided here once so the two cannot drift:
+#
+#   push                         the files the push changed, $BEFORE...$AFTER
+#   pull request                 every file in the pull request
+#   the release pull request,    the files that push changed, $BEFORE...$AFTER. The
+#   when a push lands on it      release pull request is beta into main and always
+#                                holds the helper, so its whole diff would queue the
+#                                macOS jobs for every merge into beta. It is a pull
+#                                request from this repository's own beta branch, on
+#                                a `synchronize` event with a real previous commit.
+#                                A fork's branch named beta, an `opened` or
+#                                `reopened` event and any other branch are listed
+#                                whole.
+#   anything else                no listing: everything counts
+#
+# It fails open. A listing it cannot read, an empty one (not ready, not "no files")
+# and one at the API's limit (the pull request listing stops at 3000 files, the
+# comparison at 300, so it may be cut off) all answer `all=true`, saying why in the
+# log, and the caller runs everything. A rename lists the path it came from as well,
+# so a file moved out of a directory counts as a change to it.
+#
+# Needs the repository's .github/actions checked out (a sparse checkout is enough),
+# and a token that can read the pull request.
+#
+# Tested by scripts/codeql-workflow.test.ts and scripts/helper-macos-workflow.test.ts,
+# which run this step's own shell with a stand-in for `gh`.
+
+name: Changed files
+description: Lists the files this event changed, or answers that every file should be treated as changed.
+
+inputs:
+  token:
+    description: A token that can read the repository's pull requests.
+    required: true
+
+outputs:
+  all:
+    description: "true when the caller should run everything, because the files could not be listed; the reason is in the log."
+    value: ${{ steps.list.outputs.all }}
+  file:
+    description: The path of a file holding the changed files, one to a line. Empty when all is true.
+    value: ${{ steps.list.outputs.file }}
+
+runs:
+  using: composite
+  steps:
+    - name: List the changed files
+      id: list
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        EVENT: ${{ github.event_name }}
+        EVENT_ACTION: ${{ github.event.action }}
+        HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BEFORE: ${{ github.event.before }}
+        AFTER: ${{ github.event.after }}
+      run: |
+        set -uo pipefail
+        list="$RUNNER_TEMP/changed-files.txt"
+        : >"$list"
+        echo "file=$list" >>"$GITHUB_OUTPUT"
+        everything() { echo "all=true" >>"$GITHUB_OUTPUT"; echo "every file counts: $1"; }
+        # The comparison's file list, for the files a push changed.
+        compare() {
+          # The comparison stops at 300 files.
+          limit=300
+          files=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[] | .filename, (.previous_filename // empty)') || return 1
+        }
+        zeros=0000000000000000000000000000000000000000
+
+        case "$EVENT" in
+          push)
+            # The first push of a branch has no previous commit to compare with.
+            [ "$BEFORE" = "$zeros" ] && { everything "no previous commit"; exit 0; }
+            compare || { everything "could not compare the push"; exit 0; }
+            ;;
+          pull_request)
+            if [ "$EVENT_ACTION" = synchronize ] && [ "$HEAD_REF" = beta ] && [ "$HEAD_REPO" = "$REPO" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "$zeros" ]; then
+              echo "release pull request: listing the files this push changed, not the whole pull request"
+              compare || { everything "could not compare the push to the release pull request"; exit 0; }
+            else
+              # The listing stops at 3000 files.
+              limit=3000
+              files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)') || { everything "could not list the pull request's files"; exit 0; }
+            fi
+            ;;
+          *) everything "$EVENT has no change list"; exit 0 ;;
+        esac
+
+        # An empty listing is a listing that was not ready, not a change with no files.
+        [ -z "$files" ] && { everything "no files listed"; exit 0; }
+        [ "$(grep -c . <<<"$files")" -ge "$limit" ] && { everything "file list may be truncated"; exit 0; }
+        printf '%s\n' "$files" >"$list"
+        echo "all=false" >>"$GITHUB_OUTPUT"
+        echo "$(grep -c . "$list") changed files listed"

@@ -12,7 +12,10 @@
 #
 # A change to this workflow, to codeql-language.yml or to the shared configuration
 # (.github/codeql/codeql-config.yml) runs every language. The model tests run when
-# .github/codeql changes. A language that does not run shows as skipped, not pending. On a pull request it also uploads
+# .github/codeql changes. A language that does not run shows as skipped, not pending.
+# What a change is: the files of the pull request, except a push to the release pull
+# request (beta into main), where it is the files that push changed
+# (.github/actions/changed-files). On a pull request a skipped language also uploads
 # an empty result under its own category (see codeql-language.yml), so code scanning
 # still finds every configuration it has on the base branch.
 #
@@ -44,9 +47,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Decides which languages have anything to look at. Lists the changed files through
-  # the API rather than a checkout (no history to fetch, nothing to diff), and fails
-  # open: a listing it cannot read, or one the API truncates, runs every language.
+  # Decides which languages have anything to look at. The changed-files action lists
+  # the files through the API (no history to fetch, nothing to diff), and fails open: a
+  # listing it cannot read, or one the API truncates, runs every language. On the
+  # release pull request (beta into main) a push is judged by the files that push
+  # changed, not by the whole pull request, which always holds the helper.
   changes:
     name: Detect changed languages
     runs-on: ubuntu-latest
@@ -61,16 +66,23 @@ jobs:
       actions: ${{ steps.gate.outputs.actions }}
       models: ${{ steps.gate.outputs.models }}
     steps:
+      # Only the composite action is needed from the repository, not the code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - name: List the changed files
+        id: files
+        uses: $/.github/actions/changed-files
+        with:
+          token: ${{ github.token }}
       - name: Which languages does this change touch?
         id: gate
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BEFORE: ${{ github.event.before }}
-          SHA: ${{ github.sha }}
+          ALL: ${{ steps.files.outputs.all }}
+          FILES: ${{ steps.files.outputs.file }}
         run: |
           set -uo pipefail
           emit() {
@@ -85,21 +97,9 @@ jobs:
             schedule:* | workflow_dispatch:* | push:refs/heads/main) emit true "$EVENT"; exit 0 ;;
           esac
 
-          if [ "$EVENT" = pull_request ]; then
-            # The listing stops at 3000 files.
-            limit=3000
-            # A rename lists the path it came from too, so a file moved out of the helper counts.
-            files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)') || { emit true "could not list the pull request's files"; exit 0; }
-          else
-            # The first push of a branch has no previous commit to compare with.
-            [ "$BEFORE" = 0000000000000000000000000000000000000000 ] && { emit true "no previous commit"; exit 0; }
-            # The comparison stops at 300 files.
-            limit=300
-            files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[] | .filename, (.previous_filename // empty)') || { emit true "could not compare the push"; exit 0; }
-          fi
-          # An empty listing is a listing that was not ready, not a change with no files.
-          [ -z "$files" ] && { emit true "no files listed"; exit 0; }
-          [ "$(grep -c . <<<"$files")" -ge "$limit" ] && { emit true "file list may be truncated"; exit 0; }
+          # The listing and its failures are the changed-files action's.
+          [ "$ALL" = true ] && { emit true "the changed files could not be listed"; exit 0; }
+          files=$(<"$FILES")
 
           # A change to the CodeQL workflows, or to the configuration every language reads,
           # runs every language.

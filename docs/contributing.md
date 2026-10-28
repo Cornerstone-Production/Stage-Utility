@@ -291,7 +291,14 @@ or to the configuration they share, runs all of them, and so does every push to
 the model tests. A language that does not run shows as skipped, and on a pull
 request uploads an empty result under its own category, so the `CodeQL` check still
 finds every configuration the base branch has instead of reporting "configurations
-not found". What the scanner flags, and what is dismissed, is in
+not found". A change is the pull request's files, except on the release
+pull request (`beta` into `main`), which always holds the helper: there a push is
+judged by the files that push changed, so a merge into `beta` that leaves the helper
+alone queues no macOS job. A pull request from a fork whose branch is named `beta`,
+and an opened or reopened release pull request, are judged by all their files. Any
+listing that cannot be read, comes back empty or may be cut off runs everything.
+`.github/actions/changed-files` does the listing for both this and the helper's build.
+What the scanner flags, and what is dismissed, is in
 [Code scanning](reference/code-scanning.md). No check is a required status check on
 `beta` or `main`: the release workflow pushes its version bump to both directly,
 which a required check would refuse, so a merge is gated by review of a green PR.
@@ -299,8 +306,11 @@ The build and tests skip a PR that touches only `docs/` and Markdown; dependency
 review runs only when `package.json` or the lockfile changes; the updater
 survival matrix runs only for the updater, the installers and its own scripts;
 and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
-macOS runner) run only when `helper/` changes, or the Xcode selection
-(`.github/actions/select-xcode`) that the release workflow's helper build shares.
+macOS runner) run only when `helper/`, the macOS kiosk installer script its tests
+read, or the Xcode selection (`.github/actions/select-xcode`) that the release
+workflow's helper build shares, changes. A gate job on Ubuntu decides that, and the
+build shows as skipped when it says no. On the release pull request the gate looks
+at the files of the latest push, as CodeQL does (above).
 A push to `beta` or `main` runs the gate once, in the release workflow, before it
 tags, and writes the result to the commit as a `build` status, red or green. The
 release PR from `beta` to `main` therefore shows no CI job of its own: its
