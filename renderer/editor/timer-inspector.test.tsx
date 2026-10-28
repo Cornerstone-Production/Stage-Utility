@@ -67,12 +67,15 @@ async function mount(config: Record<string, unknown>, timers = [{ name: "Stage t
 const labelsIn = (root: HTMLElement) => new Set([...root.querySelectorAll("[aria-label], span")].map((e) => e.getAttribute("aria-label") ?? e.textContent ?? ""));
 
 describe("what each source shows", () => {
-  test("Service: the next item, the caption and sub-line, and the warning settings", async () => {
+  test("Service: the next item, the caption and the warning settings", async () => {
     const m = await mount({ type: "timer", source: "service", warnSeconds: 60 });
     try {
-      for (const l of ["Source", "Show the next item", "Caption", "Show the sub-line", "Hide when idle", "Amber near the end", "Warn at (seconds left)", "Red on overrun"]) {
+      for (const l of ["Source", "Show the next item", "Caption", "Hide when idle", "Amber near the end", "Warn at (seconds left)", "Red on overrun"]) {
         assert.ok(labelsIn(m.container).has(l), `Service is missing "${l}"`);
       }
+      // The service's only sub-line is the next item, so a second switch for it
+      // did exactly what Show the next item does.
+      assert.ok(!labelsIn(m.container).has("Show the sub-line"), "Service offers a second switch for the next item");
       assert.equal(m.container.querySelector('[aria-label="Shows"]'), null, "Service offers the baptism picker");
       assert.equal(m.container.querySelector('[aria-label="Timer"]'), null, "Service offers the ProPresenter picker");
     } finally {
@@ -124,7 +127,20 @@ describe("each control writes the field it names", () => {
     const m = await mount({ type: "timer", source: "service" });
     try {
       fireEvent.click(sw(m, "Show the next item"));
-      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true });
+      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true, showLabel: true });
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("Show the next item on a layout saved with the sub-line off draws it again", async () => {
+    // The renderer still gates the service sub-line on showLabel, and the
+    // switch for that is gone: turning the next item on must clear it, or the
+    // switch ticks and nothing appears.
+    const m = await mount({ type: "timer", source: "service", showLabel: false });
+    try {
+      fireEvent.click(sw(m, "Show the next item"));
+      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true, showLabel: true });
     } finally {
       m.restore();
     }
@@ -162,14 +178,14 @@ describe("each control writes the field it names", () => {
   });
 
   test("Red on overrun, Hide when idle and the sub-line switch", async () => {
-    const m = await mount({ type: "timer", source: "service" });
+    const m = await mount({ type: "timer", source: "propresenter" });
     try {
       assert.equal(sw(m, "Red on overrun").getAttribute("aria-checked"), "true", "defaults on");
       fireEvent.click(sw(m, "Red on overrun"));
       assert.equal((m.writes.at(-1) as { redOnOverrun?: boolean }).redOnOverrun, false);
       fireEvent.click(sw(m, "Hide when idle"));
       assert.equal((m.writes.at(-1) as { hideWhenIdle?: boolean }).hideWhenIdle, true);
-      fireEvent.click(sw(m, "Show the sub-line"));
+      fireEvent.click(sw(m, "Show the timer\u2019s name"));
       assert.equal((m.writes.at(-1) as { showLabel?: boolean }).showLabel, false);
     } finally {
       m.restore();

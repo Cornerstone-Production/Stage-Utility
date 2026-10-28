@@ -53,15 +53,17 @@ export const TIMER_SOURCE_INFO: Record<
      *  source switch swaps in while the old source's default is still there.
      *  `undefined` is no key at all: the service draws the live item's name. */
     caption: string | undefined;
-    /** The wording of the sub-line switch. */
-    subSwitch: string;
+    /** The wording of the sub-line switch, or null when the source has no sub-line
+     *  of its own. The service's only sub-line IS the next item, so it has one
+     *  switch (`nextItem`), not that and a second that gated it. */
+    subSwitch: string | null;
     /** Ends, so it can go amber near the end and red once over. */
     warns: boolean;
     /** Has a next item to show under the time. */
     nextItem: boolean;
   }
 > = {
-  service: { label: "Service", caption: undefined, subSwitch: "Show the sub-line", warns: true, nextItem: true },
+  service: { label: "Service", caption: undefined, subSwitch: null, warns: true, nextItem: true },
   propresenter: { label: "ProPresenter", caption: "Stage timer", subSwitch: "Show the timer\u2019s name", warns: true, nextItem: false },
   baptism: { label: "Baptism", caption: "Baptisms", subSwitch: "Show the label", warns: false, nextItem: false },
 };

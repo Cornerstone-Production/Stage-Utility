@@ -53,7 +53,14 @@ export function TimerInspector({
       </StackedField>
 
       {info.nextItem && (
-        <StackedSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
+        <StackedSwitch
+          label="Show the next item"
+          checked={c.nextItem ?? false}
+          // The service sub-line is drawn only while showLabel is not false, and
+          // this source no longer offers that switch. A layout saved with it off
+          // would tick this and draw nothing, so turning this on clears it.
+          onChange={(v) => set(v ? { nextItem: true, showLabel: true } : { nextItem: false })}
+        />
       )}
 
       {source === "propresenter" && (
@@ -112,11 +119,13 @@ export function TimerInspector({
             onChange={(e) => set({ caption: e.target.value })}
           />
         </StackedField>
-        <StackedSwitch
-          label={info.subSwitch}
-          checked={c.showLabel ?? true}
-          onChange={(v) => set({ showLabel: v })}
-        />
+        {info.subSwitch && (
+          <StackedSwitch
+            label={info.subSwitch}
+            checked={c.showLabel ?? true}
+            onChange={(v) => set({ showLabel: v })}
+          />
+        )}
         {source === "baptism" && (c.showLabel ?? true) && (
           <StackedField label="Label">
             <Input
