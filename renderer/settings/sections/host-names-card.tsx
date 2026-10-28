@@ -4,16 +4,34 @@
 // reached the server and are not on the list wait here to be accepted or
 // dismissed; the rail counts them. The add field validates with the server's own
 // rules (host-name-rules.ts), so it never offers what the server would refuse.
+//
+// Turning refusal on opens a confirmation first: every name already listed or
+// waiting, with first and last seen, ticked or not. Listed names start ticked,
+// waiting ones do not, so a name a hostile page got a browser to send is never
+// kept by leaving the defaults alone. Confirm sends exactly the ticked names.
 
 import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { CheckIcon, Trash2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import { listableName } from "@main/services/host-name-rules";
+import { hostnameOf } from "@main/services/http-origin";
 import type { AcceptedSource, HostNamesView } from "@main/services/host-names";
 import { plural } from "@main/services/plural";
 
-import { Button, Input, Switch, toast } from "../../components/ui";
+import {
+  Button,
+  Checkbox,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogRoot,
+  DialogTitle,
+  Input,
+  Switch,
+  toast,
+} from "../../components/ui";
 import { useHostNames, useHostNamesChange } from "../../app/host-names-query";
 import { settingText, type AdvancedSettingId } from "./advanced-settings";
 
@@ -22,7 +40,7 @@ const SOURCE_LABEL: Record<AcceptedSource | HostNamesView["automatic"][number]["
   "public-address": "Public address",
   added: "Added",
   accepted: "Accepted",
-  seen: "Seen, 30 days",
+  seen: "Seen",
 };
 
 /** What the add field says under itself: why a name cannot be added, or what a pasted address adds. */
@@ -33,15 +51,6 @@ function hintFor(draft: string): string {
   if (!parsed.ok) return parsed.error;
   if (parsed.name !== typed.toLowerCase()) return `Adds ${parsed.name}`;
   return "";
-}
-
-/** What the refuse switch says about itself, from the position it is in and whether the list was seeded. */
-export function enforceDescription(enforce: boolean, seeded: boolean): string {
-  if (enforce) return "A request by any other name gets a 403. This server's IP address always works.";
-  if (seeded) {
-    return "Off: other names are answered and listed below. Turning it on again accepts nothing new: accept the names you want first.";
-  }
-  return "Off: other names are answered and listed below. Turning it on also accepts each name in use over at least a day in the last 30 days, unless you dismissed it.";
 }
 
 /** One name in a list: the name, then whatever acts on it. */
@@ -83,6 +92,8 @@ export function HostNamesCard({
   const change = useHostNamesChange();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  /** The names ticked in the turn-on confirmation; null while it is closed. */
+  const [chosen, setChosen] = useState<Set<string> | null>(null);
 
   /** One change; true when the server took it, false when it said why not (toasted). */
   async function send(body: Record<string, unknown>, done?: string): Promise<boolean> {
@@ -98,6 +109,30 @@ export function HostNamesCard({
       setBusy(false);
     }
   }
+
+  function openConfirm() {
+    setChosen(new Set((data?.accepted ?? []).map((a) => a.name)));
+  }
+
+  function tick(name: string, on: boolean) {
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(name);
+      else next.delete(name);
+      return next;
+    });
+  }
+
+  async function confirmOn() {
+    if (!chosen) return;
+    // Only names the card lists: a name that left the list while the dialog was open is not sent.
+    const offered = new Set([...(data?.accepted ?? []), ...(data?.waiting ?? [])].map((n) => n.name));
+    const names = [...chosen].filter((n) => offered.has(n));
+    if (await send({ enforce: true, names }, "Refusing names not on the list")) setChosen(null);
+  }
+
+  /** The name this page was opened by, normalised the way the server reads Host. */
+  const currentName = hostnameOf(window.location.hostname);
 
   const parsed = listableName(draft);
   const hint = hintFor(draft);
@@ -140,16 +175,17 @@ export function HostNamesCard({
             <span className="text-footnote font-medium leading-tight text-fg">{enforceText.name}</span>
             {/* Not enforceText.description: that is the registry's one sentence for
                 Search to match, covering both switch positions at once. The row says
-                only what the switch does from where it stands, and what turning it
-                on does depends on whether the list was already seeded. */}
+                only what the switch does from where it stands. */}
             <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">
-              {enforceDescription(enforce, data?.seeded === true)}
+              {enforce
+                ? "A request by any other name gets a 403. This server's IP address always works."
+                : "Off: other names are answered and listed below. Turning it on asks you which of them to keep."}
             </span>
           </div>
           <Switch
             checked={enforce}
             disabled={busy || !data}
-            onCheckedChange={(on) => void send({ enforce: on })}
+            onCheckedChange={(on) => (on ? openConfirm() : void send({ enforce: false }))}
             aria-label="Refuse names not on the list"
           />
         </div>
@@ -238,7 +274,7 @@ export function HostNamesCard({
           <div className="flex flex-col gap-1 px-4 py-3">
             <span className="text-footnote font-medium leading-tight text-fg">Dismissed</span>
             <span className="text-caption2 leading-tight text-fg-subtle">
-              Never accepted on their own, including when refusal turns on.
+              Never accepted on their own.
             </span>
             {dismissed.map((d) => (
               <NameRow key={d.name} name={d.name}>
@@ -250,6 +286,69 @@ export function HostNamesCard({
           </div>
         )}
       </div>
+      <DialogRoot open={chosen !== null} onOpenChange={(open) => !open && setChosen(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Turn on refusal</DialogTitle>
+            <DialogDescription>
+              Tick the names to keep. Any other name gets a 403. A name can be sent by any web page you open, so keep only
+              the ones your screens, panels and Home Assistant use.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 overflow-y-auto">
+            {automatic.map((a) => (
+              <NameRow key={a.name} name={a.name}>
+                <SourceTag source={a.source} />
+                <Checkbox checked disabled aria-label={`Keep ${a.name}`} />
+              </NameRow>
+            ))}
+            {accepted.map((a) => (
+              <NameRow key={a.name} name={a.name}>
+                <span className="text-caption2 text-fg-subtle">
+                  {a.name === currentName ? "You are using this name" : "Already on the list"}
+                </span>
+                <Checkbox
+                  checked={chosen?.has(a.name) ?? false}
+                  disabled={a.name === currentName}
+                  onCheckedChange={(on) => tick(a.name, on === true)}
+                  aria-label={`Keep ${a.name}`}
+                />
+              </NameRow>
+            ))}
+            {waiting.map((s) => (
+              <div key={s.name} className="flex items-center gap-2 border-b border-line py-1 last:border-0">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-mono text-caption1 text-fg">{s.name}</span>
+                  <span className="block text-caption2 text-fg-subtle">
+                    First seen {when(s.firstSeen)} · last seen {when(s.lastSeen)} · {plural(s.count, "request")}
+                  </span>
+                </span>
+                <Checkbox
+                  checked={chosen?.has(s.name) ?? false}
+                  onCheckedChange={(on) => tick(s.name, on === true)}
+                  aria-label={`Keep ${s.name}`}
+                />
+              </div>
+            ))}
+            {automatic.length + accepted.length + waiting.length === 0 && (
+              <p className="py-2 text-caption1 text-fg-muted">No other name has reached this server.</p>
+            )}
+          </div>
+          <p className="mt-3 text-caption2 text-fg-subtle">
+            IP addresses, <span className="font-mono">localhost</span>, names with no dot and names ending{" "}
+            <span className="font-mono">.local</span>, <span className="font-mono">.internal</span> or{" "}
+            <span className="font-mono">.home.arpa</span> are always answered, and so are this machine and the Public address.
+          </p>
+          <DialogFooter>
+            <Button variant="transparent" size="small" disabled={busy} onClick={() => setChosen(null)}>
+              Cancel
+            </Button>
+            <Button variant="accent" size="small" disabled={busy} onClick={() => void confirmOn()}>
+              Turn on refusal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
     </div>
   );
 }

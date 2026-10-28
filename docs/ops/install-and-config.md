@@ -376,10 +376,14 @@ rebinding ([SECURITY.md](../../SECURITY.md)). IP addresses, names with no dot an
 names under `.local` always work. A screen, panel or Home Assistant that opens the
 app by any other name, such as `stage.example.org`, needs that name on the list
 before **Refuse names not on the list** is turned on: names that reach the server
-wait on the card to be accepted or dismissed, and the sidebar counts them. The
-first time refusal is turned on it accepts each waiting name seen over at least a
-day in the last 30. Change the list from the server's IP address or a name
-already on it.
+wait on the card to be accepted or dismissed, and the sidebar counts them.
+Turning refusal on opens a confirmation listing every listed and waiting name
+with when it was first and last seen. Names already on the list are ticked and
+every waiting name is not; the list becomes exactly the names ticked, and
+Cancel changes nothing. The name you are using stays on the list, so you cannot
+lock yourself out. The server logs a `[security]` line with how many names were
+kept and how many left out. Change the list from the server's IP address or a
+name already on it.
 
 ### Time zone
 

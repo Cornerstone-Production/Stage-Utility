@@ -12,7 +12,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-host-names-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { HostNames, hostNamesConfigStore, hostNamesSeenStore, MAX_SEEN, SEED_WINDOW_MS } = await import("./host-names.js");
+const { HostNames, hostNamesConfigStore, hostNamesSeenStore, MAX_SEEN } = await import("./host-names.js");
 const { alwaysAnswered, listableName, HOST_NAMES_CHANNEL } = await import("./host-name-rules.js");
 const { hostnameOf } = await import("./http-origin.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
@@ -76,18 +76,18 @@ describe("answered with no list", () => {
     "2130706433",
   ]) {
     test(host, async () => {
-      await names.setEnforce(true);
+      await names.turnRefusalOn([]);
       assert.equal(names.check(host, req()).answer, true);
     });
   }
 
   test("a request with no Host at all, which no browser sends", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     assert.equal(names.check(undefined, req()).answer, true);
   });
 
   test("the Public address, in any case and with a trailing dot", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     assert.equal(names.check("StageUtility.Prod.Example.org.:8788", req()).answer, true);
   });
 
@@ -106,13 +106,13 @@ describe("a name not on the list", () => {
   });
 
   test("is refused while refusal is on, reads and writes alike", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     assert.deepEqual(names.check("rebind-7f3a.attacker.example:8788", req()), { answer: false, name: "rebind-7f3a.attacker.example" });
     assert.equal(names.check("rebind-7f3a.attacker.example", { ...req(), method: "POST" }).answer, false);
   });
 
   test("is answered once accepted, and refused again once removed", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     names.check("ha.example.org", req());
     assert.deepEqual(await names.add("ha.example.org", "accepted"), { ok: true });
     assert.equal(names.check("ha.example.org", req()).answer, true);
@@ -127,7 +127,7 @@ describe("a name not on the list", () => {
       names.add("a.example.org", "added"),
       names.add("b.example.org", "added"),
       names.dismiss("seen.example.org"),
-      names.setEnforce(true),
+      names.turnRefusalOn(["a.example.org", "b.example.org"]),
     ]);
     const held = (await hostNamesConfigStore.load()) as { accepted: { name: string }[]; dismissed: string[]; enforce?: boolean };
     for (const view of [names.view(), { accepted: held.accepted, dismissed: held.dismissed.map((name) => ({ name })), enforce: held.enforce === true }]) {
@@ -149,7 +149,7 @@ describe("a name not on the list", () => {
 
 describe("the refusal log", () => {
   test("a refused name: one line, then one an hour with the count", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     for (let i = 0; i < 5; i++) names.check("rebind-3.attacker.example", req());
     assert.equal(refusals(), 1, warned.join("\n"));
     clock += 61 * 60 * 1000;
@@ -163,20 +163,20 @@ describe("the refusal log", () => {
   test("a name seen and dismissed before refusal turned on still logs its first refusal", async () => {
     names.check("rebind-4.attacker.example", req());
     assert.deepEqual(await names.dismiss("rebind-4.attacker.example"), { ok: true });
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     names.check("rebind-4.attacker.example", req());
     assert.equal(refusals(), 1, warned.join("\n"));
   });
 
   test("a Host that is not a name is refused on a line too", async () => {
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
     assert.equal(names.check("a b", req()).answer, false);
     assert.equal(refusals(), 1, warned.join("\n"));
   });
 
   for (const enforce of [false, true]) {
     test(`a burst of names is logged a few at a time, then counted, with refusal ${enforce ? "on" : "off"}`, async () => {
-      await names.setEnforce(enforce);
+      await (enforce ? names.turnRefusalOn([]) : names.turnRefusalOff());
       // Past the seen list's cap, so the lines about forgotten names count too.
       for (let i = 0; i < 2 * MAX_SEEN; i++) names.check(`burst-${i}.attacker.example`, req());
       const lines = warned.filter((l) => l.includes(".attacker.example")).length;
@@ -188,43 +188,130 @@ describe("the refusal log", () => {
 });
 
 describe("turning refusal on", () => {
-  test("accepts names in use over a day in the last 30 days; never one seen once, a dismissed one or an older one", async () => {
-    established("old.example.org");
-    clock += SEED_WINDOW_MS + DAY;
-    names.check("ha.example.org", req());
+  test("takes exactly the names kept: a name left out, however long it was in use, is refused", async () => {
+    established("ha.example.org");
+    established("rebind-1.attacker.example");
     names.check("burst.attacker.example", req());
-    names.check("rebind-1.attacker.example", req());
-    clock += 2 * DAY;
-    names.check("ha.example.org", req());
-    names.check("rebind-1.attacker.example", req());
-    assert.deepEqual(await names.dismiss("rebind-1.attacker.example"), { ok: true });
-    await names.setEnforce(true);
-    assert.deepEqual(names.view().accepted.map((a) => [a.name, a.source]), [["ha.example.org", "seen"]]);
+    assert.deepEqual(await names.turnRefusalOn(["ha.example.org"]), { ok: true });
+    assert.deepEqual(names.view().accepted.map((a) => [a.name, a.source]), [["ha.example.org", "accepted"]]);
+    assert.equal(names.enforcing, true);
     assert.equal(names.check("ha.example.org", req()).answer, true);
-    for (const refused of ["rebind-1.attacker.example", "old.example.org", "burst.attacker.example"]) {
+    for (const refused of ["rebind-1.attacker.example", "burst.attacker.example"]) {
       assert.equal(names.check(refused, req()).answer, false, refused);
     }
   });
 
-  test("a flood of names cannot push out a name in use, nor get itself accepted", async () => {
+  test("accepts nothing by itself, whatever was seen over however many days", async () => {
     established("ha.example.org");
-    for (let i = 0; i < 4 * MAX_SEEN; i++) names.check(`r${i}.attacker.example`, req());
-    await names.setEnforce(true);
+    await names.turnRefusalOn([]);
+    assert.deepEqual(names.view().accepted, []);
+    assert.equal(names.check("ha.example.org", req()).answer, false);
+  });
+
+  test("a listed name left out comes off the list; one kept keeps its source", async () => {
+    await names.add("keep.example.org", "added");
+    await names.add("drop.example.org", "added");
+    await names.turnRefusalOn(["keep.example.org"]);
+    assert.deepEqual(names.view().accepted.map((a) => [a.name, a.source]), [["keep.example.org", "added"]]);
+  });
+
+  test("refuses, changing nothing, a name that never reached the server", async () => {
+    names.check("seen.example.org", req());
+    const r = await names.turnRefusalOn(["seen.example.org", "invented.example.org"]);
+    assert.equal(r.ok, false);
+    assert.equal(names.enforcing, false);
+    assert.deepEqual(names.view().accepted, []);
+  });
+
+  test("refuses, changing nothing, when the name in use would stop being answered", async () => {
+    await names.add("ha.example.org", "added");
+    const r = await names.turnRefusalOn([], "ha.example.org");
+    assert.deepEqual(r, { ok: false, error: 'You are using this server as "ha.example.org": keep it on the list, or turning refusal on would lock you out.' });
+    assert.equal(names.enforcing, false);
+    assert.deepEqual(names.view().accepted.map((a) => a.name), ["ha.example.org"]);
+    assert.deepEqual(await names.turnRefusalOn(["ha.example.org"], "ha.example.org"), { ok: true });
+  });
+
+  test("an IP address, or the machine's own name, in use needs no entry", async () => {
+    assert.deepEqual(await names.turnRefusalOn([], "192.168.1.9"), { ok: true });
+  });
+
+  test("a dismissed name that is kept comes off the dismissed list", async () => {
+    names.check("ha.example.org", req());
+    await names.dismiss("ha.example.org");
+    await names.turnRefusalOn(["ha.example.org"]);
+    assert.deepEqual(names.view().dismissed, []);
+    assert.equal(names.check("ha.example.org", req()).answer, true);
+  });
+
+  test("logs one [security] line saying how many names were kept and how many left out", async () => {
+    await names.add("drop.example.org", "added");
+    names.check("a.example.org", req());
+    names.check("b.example.org", req());
+    const logged: string[] = [];
+    console.log = (...a: unknown[]) => void logged.push(a.join(" "));
+    await names.turnRefusalOn(["a.example.org"]);
+    assert.ok(
+      logged.includes("[security] host names: refusing names not on the list; kept 1 name(s), left out 2"),
+      logged.join("\n"),
+    );
+  });
+
+  test("a second turn-on while refusal is on is refused with a sentence, and changes nothing", async () => {
+    await names.turnRefusalOn([]);
+    names.check("late.example.org", req());
+    const r = await names.turnRefusalOn(["late.example.org"]);
+    assert.deepEqual(r, { ok: false, error: "Refusal is already on. Turn it off to choose the names again." });
+    assert.deepEqual(names.view().accepted, []);
+  });
+
+  test("names that are always answered in the list are skipped, not refused", async () => {
+    names.check("ha.example.org", req());
+    const r = await names.turnRefusalOn(["192.168.1.9", "localhost", "stage-display", "panel.local", "HA.example.org"]);
+    assert.deepEqual(r, { ok: true });
     assert.deepEqual(names.view().accepted.map((a) => a.name), ["ha.example.org"]);
   });
 
-  test("accepts only the first time: off and on again accepts nothing it refused", async () => {
-    await names.setEnforce(true);
-    established("rebind-5.attacker.example");
-    await names.setEnforce(false);
-    await names.setEnforce(true);
-    assert.deepEqual(names.view().accepted, []);
-    assert.equal(names.check("rebind-5.attacker.example", req()).answer, false);
+  test("junk in the list is still refused", async () => {
+    assert.equal((await names.turnRefusalOn(["not a name!"])).ok, false);
+    assert.equal(names.enforcing, false);
+  });
+
+  test("more than 200 names is refused with a sentence, changing nothing", async () => {
+    const many = Array.from({ length: 201 }, (_, i) => `n${i}.example.org`);
+    await hostNamesConfigStore.save({ accepted: many.map((name) => ({ name, source: "added", at: "" })), dismissed: [] });
+    await names.stop();
+    names = make();
+    await names.init();
+    const r = await names.turnRefusalOn(many);
+    assert.deepEqual(r, { ok: false, error: "The list holds at most 200 names; untick some." });
+    assert.equal(names.enforcing, false);
+    assert.equal((await names.turnRefusalOn(many.slice(0, 200))).ok, true);
+  });
+
+  test("a listed name the Public address now answers for stays listed and is not logged as removed", async () => {
+    await hostNamesConfigStore.save({ accepted: [{ name: "stageutility.prod.example.org", source: "added", at: "" }], dismissed: [] });
+    await names.stop();
+    names = make();
+    await names.init();
+    const logged: string[] = [];
+    console.log = (...a: unknown[]) => void logged.push(a.join(" "));
+    assert.deepEqual(await names.turnRefusalOn([]), { ok: true });
+    assert.deepEqual(names.view().accepted.map((a) => a.name), ["stageutility.prod.example.org"]);
+    assert.ok(!logged.some((l) => l.includes("taken off the list")), logged.join("\n"));
+  });
+
+  test("the machine's own dotted name, in use, needs no entry", async () => {
+    const box = new HostNames(hostNamesConfigStore, hostNamesSeenStore, { now: () => clock, machineName: () => "box.prod.example.org", changeDelayMs: 0 });
+    await box.init();
+    assert.deepEqual(box.view().automatic.map((a) => a.name), ["box.prod.example.org"]);
+    assert.deepEqual(await box.turnRefusalOn([], "box.prod.example.org"), { ok: true });
+    await box.stop();
   });
 
   test("survives a restart: the switch and the list are config", async () => {
     established("ha.example.org");
-    await names.setEnforce(true);
+    await names.turnRefusalOn(["ha.example.org"]);
     await names.stop();
     const again = make();
     await again.init();
@@ -240,7 +327,7 @@ describe("a save that fails", () => {
     const save = hostNamesConfigStore.save.bind(hostNamesConfigStore);
     hostNamesConfigStore.save = () => Promise.reject(new Error("disk full"));
     try {
-      await assert.rejects(names.setEnforce(true), /disk full/);
+      await assert.rejects(names.turnRefusalOn([]), /disk full/);
       assert.equal(names.enforcing, false);
       await assert.rejects(names.add("new.example.org", "added"), /disk full/);
       assert.deepEqual(names.view().accepted, []);

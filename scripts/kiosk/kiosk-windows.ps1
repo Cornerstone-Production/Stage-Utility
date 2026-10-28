@@ -8,8 +8,9 @@
 # server), and the discovery port comes from the `port` file beside it.
 #
 # Plain ASCII with no byte-order mark, and it is served byte for byte: the digest
-# the server publishes for it is over exactly these bytes. See
-# scripts/lint-powershell.ps1.
+# the server publishes for it, and the release's signature of it, are over exactly
+# these bytes. .gitattributes pins it `-text` so no checkout converts its line
+# ends. See scripts/lint-powershell.ps1.
 $ErrorActionPreference = 'SilentlyContinue'
 $StateDir = $PSScriptRoot
 

@@ -10,12 +10,12 @@
 // by names nobody wrote down, a panel or a display set up months ago, and this is
 // how they surface before anything is refused.
 //
-// The first time refusal turns on it accepts the names that are plainly in use:
-// seen in the last 30 days, over at least a day, and not dismissed. A page can
-// make a browser send any name it likes, once, so a name seen in one burst is
-// left waiting for the operator, and so are names refused later: turning refusal
-// off and on again accepts nothing. Dismissing a name is the operator saying it
-// is not theirs; a dismissed name is never accepted on its own.
+// Turning refusal on is a confirmation, not a guess: the card lists every name
+// waiting and every name already listed, and the operator ticks the ones to keep.
+// The server takes exactly that list. A page can make a browser send any name it
+// likes, on any number of days, so no name is accepted because of how long or how
+// often it was seen; names refused later are left waiting too. Dismissing a name
+// is the operator saying it is not theirs.
 //
 // The list changes only by a request that is itself answered without it: a page
 // reaching the server by an unlisted name, while refusal is off, cannot put that
@@ -44,8 +44,6 @@ interface AcceptedName {
 interface HostNamesConfig {
   /** Refuse names not on the list. Absent is off. */
   enforce?: boolean;
-  /** When refusal first turned on and accepted the names in use; it does so once. */
-  seededAt?: string;
   accepted: AcceptedName[];
   dismissed: string[];
 }
@@ -63,8 +61,6 @@ export interface SeenName {
 
 export interface HostNamesView {
   enforce: boolean;
-  /** Whether refusal has already turned on once and accepted the names in use. */
-  seeded: boolean;
   /** This machine's own name and the Public address's host, when they need listing. */
   automatic: { name: string; source: "machine" | "public-address" }[];
   accepted: AcceptedName[];
@@ -79,10 +75,8 @@ export type HostNamesResult = { ok: true } | { ok: false; error: string };
 export const MAX_SEEN = 50;
 /** The most names on the list, and the most dismissed. */
 export const MAX_LISTED = 200;
-/** Turning refusal on accepts names seen within this long... */
-export const SEED_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-/** ...and seen over at least this long, which one page visit is not. */
-export const ESTABLISHED_MS = 24 * 60 * 60 * 1000;
+/** A seen name not heard from within this long is the first to be forgotten. */
+export const FORGET_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 /** A refused name is logged once, then at most this often, with a count. */
 const REFUSED_LOG_INTERVAL_MS = 60 * 60 * 1000;
 /** Lines about individual names (new, refused, forgotten) each minute; past it they are counted. */
@@ -167,7 +161,6 @@ export class HostNames {
     const unreadable = this.configStore.unreadable();
     this.config = {
       enforce: cfg.enforce === true ? true : undefined,
-      seededAt: typeof cfg.seededAt === "string" ? cfg.seededAt : undefined,
       accepted: Array.isArray(cfg.accepted) ? cfg.accepted.filter((a) => typeof a?.name === "string") : [],
       dismissed: Array.isArray(cfg.dismissed) ? cfg.dismissed.filter((d) => typeof d === "string") : [],
     };
@@ -285,7 +278,7 @@ export class HostNames {
    * its own, never a panel seen for weeks.
    */
   private forgetOne(): void {
-    const cutoff = this.now() - SEED_WINDOW_MS;
+    const cutoff = this.now() - FORGET_AFTER_MS;
     let victim: SeenName | null = null;
     const rank = (s: SeenName) => (Date.parse(s.lastSeen) < cutoff ? -1 : spanOf(s));
     for (const s of this.seen.values()) {
@@ -375,7 +368,6 @@ export class HostNames {
   view(): HostNamesView {
     return {
       enforce: this.enforcing,
-      seeded: this.config.seededAt !== undefined,
       automatic: this.automaticNames(),
       accepted: [...this.config.accepted],
       waiting: this.waitingNames(),
@@ -396,42 +388,67 @@ export class HostNames {
     this.changed();
   }
 
+  /** Turn refusal off. Every name is answered again; the list is kept. */
+  turnRefusalOff(): Promise<void> {
+    return this.changes.enqueue(async () => {
+      if (!this.enforcing) return;
+      await this.commit({ ...this.config, enforce: undefined });
+      console.log("[security] host names: refusal turned off; every name is answered");
+    });
+  }
+
   /**
-   * Turn refusal on or off. The first time it turns on it accepts the names in
-   * use (see the top of this file), each one logged.
+   * Turn refusal on with exactly the names in `keep` on the list: the operator
+   * confirmed them on the card. A listed name left out of `keep` comes off the
+   * list. Refused, changing nothing, when a name in `keep` has never reached this
+   * server, or when `currentHost`, the name this request arrived by, would stop
+   * being answered: nobody locks themselves out of Settings.
    */
-  setEnforce(on: boolean): Promise<void> {
-    return this.changes.enqueue(() => this.applyEnforce(on));
+  turnRefusalOn(keep: readonly string[], currentHost?: string | null): Promise<HostNamesResult> {
+    return this.changes.enqueue(() => this.applyRefusalOn(keep, currentHost ?? null));
   }
 
-  private async applyEnforce(on: boolean): Promise<void> {
-    if (on === this.enforcing) return;
+  private async applyRefusalOn(keep: readonly string[], currentHost: string | null): Promise<HostNamesResult> {
+    if (this.enforcing) return { ok: false, error: "Refusal is already on. Turn it off to choose the names again." };
+    const wanted = new Set<string>();
+    const automatic = new Set(this.automaticNames().map((a) => a.name));
+    for (const raw of keep) {
+      // Always answered, so there is nothing to keep: skipped, as an automatic name is.
+      const host = typeof raw === "string" ? hostnameOf(raw.trim()) : null;
+      if (host && alwaysAnswered(host)) continue;
+      const parsed = typeof raw === "string" ? listableName(raw) : { ok: false as const, error: "Names are text." };
+      if (!parsed.ok) return { ok: false, error: `"${String(raw).slice(0, 60)}": ${parsed.error}` };
+      if (automatic.has(parsed.name)) continue;
+      if (!this.seen.has(parsed.name) && !this.config.accepted.some((a) => a.name === parsed.name)) {
+        return { ok: false, error: `"${parsed.name}" has not reached this server and is not on the list, so it cannot be kept.` };
+      }
+      wanted.add(parsed.name);
+    }
+    // A name already on the list that the Public address or this machine now also
+    // answers for stays listed: the entry is still there if that address changes.
+    for (const a of this.config.accepted) if (automatic.has(a.name)) wanted.add(a.name);
+    if (wanted.size > MAX_LISTED) return { ok: false, error: `The list holds at most ${MAX_LISTED} names; untick some.` };
+    if (currentHost && !alwaysAnswered(currentHost) && !automatic.has(currentHost) && !wanted.has(currentHost)) {
+      return { ok: false, error: `You are using this server as "${currentHost}": keep it on the list, or turning refusal on would lock you out.` };
+    }
     const at = new Date(this.now()).toISOString();
-    const seeding = on && !this.config.seededAt;
-    const seeded = seeding ? this.namesInUse() : [];
-    const room = MAX_LISTED - this.config.accepted.length;
-    const next: HostNamesConfig = {
+    const priorByName = new Map(this.config.accepted.map((a) => [a.name, a]));
+    const added = [...wanted].filter((n) => !priorByName.has(n));
+    const removed = this.config.accepted.filter((a) => !wanted.has(a.name)).map((a) => a.name);
+    const leftWaiting = this.waitingNames().filter((s) => !wanted.has(s.name)).length;
+    await this.commit({
       ...this.config,
-      enforce: on ? true : undefined,
-      seededAt: seeding ? at : this.config.seededAt,
-      accepted: [...this.config.accepted, ...seeded.slice(0, room).map((s) => ({ name: s.name, source: "seen" as const, at }))],
-    };
-    await this.commit(next);
-    for (const s of seeded.slice(0, room)) {
-      console.log(`[security] host checking is on; accepted "${scrub(s.name)}", in use over ${scrub(Math.round(spanOf(s) / 3_600_000))} hours`);
-    }
-    if (seeding) {
-      const left = this.waitingNames().length;
-      if (left > 0) console.log(`[security] host checking is on; ${scrub(left)} name(s) left waiting: seen once, or not in the last 30 days`);
-    }
-    console.log(`[security] host names: ${scrub(on ? "refusing names not on the list" : "refusal turned off; every name is answered")}`);
-    if (on) for (const listener of this.refusalOnListeners) listener();
-  }
-
-  /** Waiting names seen in the last 30 days over at least a day. */
-  private namesInUse(): SeenName[] {
-    const cutoff = this.now() - SEED_WINDOW_MS;
-    return this.waitingNames().filter((s) => Date.parse(s.lastSeen) >= cutoff && spanOf(s) >= ESTABLISHED_MS);
+      enforce: true,
+      accepted: [...wanted].map((name) => priorByName.get(name) ?? { name, source: "accepted" as const, at }),
+      dismissed: this.config.dismissed.filter((d) => !wanted.has(d)),
+    });
+    for (const name of added) console.log(`[security] host name "${scrub(name)}" accepted by the operator when refusal turned on`);
+    for (const name of removed) console.log(`[security] host name "${scrub(name)}" taken off the list by the operator when refusal turned on`);
+    console.log(
+      `[security] host names: refusing names not on the list; kept ${scrub(wanted.size)} name(s), left out ${scrub(leftWaiting + removed.length)}`,
+    );
+    for (const listener of this.refusalOnListeners) listener();
+    return { ok: true };
   }
 
   /** Put a name on the list: typed (`added`) or picked from the waiting list (`accepted`). */
@@ -508,7 +525,6 @@ export class HostNames {
 const restoreCheck = checked((raw) => {
   const cfg = asObject(raw, "the host names");
   optional(cfg.enforce, "boolean", "enforce");
-  optional(cfg.seededAt, "string", "seededAt");
   const accepted = asArray(cfg.accepted ?? [], "the accepted host names");
   const dismissed = asArray(cfg.dismissed ?? [], "the dismissed host names");
   for (const [list, what] of [[accepted, "accepted"], [dismissed, "dismissed"]] as const) {

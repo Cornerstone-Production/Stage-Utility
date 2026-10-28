@@ -212,7 +212,7 @@ export const ADVANCED_SETTINGS = [
     card: "Host names",
     name: "Refuse names not on the list",
     description:
-      "Off: other names are answered and listed below, and this server's IP address always works. On: a request by any other name gets a 403. Turning it on accepts each name in use over at least a day in the last 30 days, unless you dismissed it.",
+      "Off: other names are answered and listed below, and this server's IP address always works. On: a request by any other name gets a 403. Turning it on asks you which of the names in use to keep.",
     keywords: ["host", "hostname", "dns rebinding", "security", "403", "refuse", "block", "enforce", "allowlist"],
   },
   {

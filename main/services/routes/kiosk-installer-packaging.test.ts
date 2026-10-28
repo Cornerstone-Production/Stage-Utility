@@ -46,7 +46,9 @@ describe("kiosk installers reach a real install", () => {
     // The other direction: an installer added to the folder and not to the
     // allowlist is a file nobody can fetch, which reads as a broken platform.
     const onDisk = readdirSync(path.join(REPO, "scripts", "kiosk"));
-    const served = new Set(servedNames());
+    // The release signing key is served by a route of its own, as PEM and as XML
+    // (kiosk-helper-download-route.test.ts fetches both), not from this allowlist.
+    const served = new Set([...servedNames(), "release-signing.pub.pem"]);
     const orphans = onDisk.filter((f) => !served.has(f));
     assert.deepEqual(orphans, [], `not reachable over HTTP: ${orphans.join(", ")}`);
   });

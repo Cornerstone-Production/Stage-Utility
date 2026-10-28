@@ -164,3 +164,43 @@ test("listenArgv has the program first and nothing in it is shell syntax", () =>
   assert.ok(argv.includes("rtsp://127.0.0.1:18554/cam"));
   assert.ok(argv.includes("rtsp://127.0.0.1:18554/cam-listen"));
 });
+
+// A pass-through path copies whatever the address carries; once its `-listen` path
+// has been seen carrying a codec a browser cannot play, the same address is read
+// again and its audio re-encoded.
+test("pass-through whose source was seen as AAC reads the same address and encodes to Opus", () => {
+  const r = resolveAudio(planAudio({ conversion: "auto", audio: undefined, sourceUrl: "http://192.0.2.28/0.ts", sourceCodec: AAC }, "cam"), "cam", CAP);
+  assert.equal(
+    r.listenCommand,
+    "'/usr/bin/ffmpeg' '-hide_banner' '-nostdin' '-nostats' '-loglevel' 'warning' '-fflags' 'nobuffer' '-flags' 'low_delay' " +
+      "'-probesize' '65536' '-analyzeduration' '500000' '-protocol_whitelist' 'http,https,tls,tcp' '-rw_timeout' '10000000' '-i' 'http://192.0.2.28/0.ts' " +
+      "'-c:v' 'copy' '-c:a' 'libopus' '-b:a' '128k' '-application' 'lowdelay' '-frame_duration' '20' " +
+      "'-f' 'rtsp' '-rtsp_transport' 'tcp' 'rtsp://127.0.0.1:8554/cam-listen'",
+  );
+  assert.deepEqual(r.status, { state: "pass-through", listenPath: "cam-listen" });
+});
+
+test("pass-through seen as Opus or another direct codec keeps copying; Off never runs ffmpeg", () => {
+  for (const codec of ["Opus", "G711"]) {
+    const r = resolveAudio(planAudio({ conversion: "auto", audio: undefined, sourceUrl: "http://192.0.2.28/0.ts", sourceCodec: codec }, "cam"), "cam", CAP);
+    assert.match(r.listenCommand ?? "", /'-c' 'copy'/, codec);
+  }
+  const off = resolveAudio(planAudio({ conversion: "off", audio: undefined, sourceUrl: "http://192.0.2.28/0.ts", sourceCodec: AAC }, "cam"), "cam", CAP);
+  assert.equal(off.listenCommand, undefined);
+});
+
+test("a source that needs encoding with no usable ffmpeg is unavailable, naming the codec", () => {
+  const r = resolveAudio(planAudio({ conversion: "auto", audio: undefined, sourceUrl: "http://192.0.2.28/0.ts", sourceCodec: "MPEG-1/2 Audio" }, "cam"), "cam", NO_FFMPEG);
+  assert.equal(r.listenCommand, undefined);
+  assert.deepEqual(r.status, {
+    state: "unavailable",
+    reason: "the audio source address carries MPEG-1/2 Audio, which a browser cannot play live, and it cannot be converted: ffmpeg is not installed on this server",
+  });
+});
+
+test("a pass-through source whose copy failed (codec unknown) is encoded, and unavailable without ffmpeg says so", () => {
+  const plan = planAudio({ conversion: "auto", audio: undefined, sourceUrl: "http://192.0.2.28/0.ts", sourceCodec: null }, "cam");
+  assert.equal(plan.converter?.mode, "encode-source");
+  const r = resolveAudio(plan, "cam", NO_FFMPEG);
+  assert.deepEqual(r.status, { state: "unavailable", reason: "copying the audio source address failed, and its audio cannot be converted: ffmpeg is not installed on this server" });
+});

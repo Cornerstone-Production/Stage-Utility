@@ -15,8 +15,13 @@
 #
 # The launcher (kiosk-windows.ps1) and an updater task (kiosk-update-windows.ps1) are
 # downloaded from the server this was fetched from, so the launcher follows the
-# server's version. From a copy that was not fetched from a server, say where to
+# server's version, with the release signing key the updater verifies every new
+# launcher against. From a copy that was not fetched from a server, say where to
 # download from:  $env:STAGE_DOWNLOAD_FROM = 'http://<server>:<port>'
+#
+# A PC that already has the release signing key keeps it when this runs again. To
+# take the server's in its place (rotating the key):
+#   $env:STAGE_REPLACE_SIGNING_KEY = '1'
 
 $ErrorActionPreference = 'Stop'
 
@@ -98,12 +103,60 @@ function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
   Save-KioskScript -From $From -Name 'kiosk-windows.ps1' -To $To -Accept $accept
 }
 
+# Whether this is what the updater verifies with: .NET's <RSAKeyValue> of a
+# 3072-bit RSA key.
+function Test-SigningKeyXml([string]$Xml) {
+  $rsa = [Security.Cryptography.RSA]::Create()
+  try {
+    $rsa.FromXmlString($Xml)
+    return $rsa.KeySize -eq 3072
+  } catch {
+    return $false
+  } finally {
+    $rsa.Dispose()
+  }
+}
+
+# The release signing key the updater checks every launcher's signature against,
+# in Program Files beside the updater. The updater never fetches one. A PC that
+# already has one keeps it, so this installer run again does not take the server's
+# (an installer fetched from a server that is not trusted is that server's to
+# write, and is a first install's trust again); $env:STAGE_REPLACE_SIGNING_KEY = '1'
+# takes the server's in its place,
+# for rotating the key. Otherwise, on a first install, it is the server's: the one
+# time the server is trusted with it. Refused unless .NET reads it as a 3072-bit
+# RSA key.
+function Save-SigningKey([string]$From) {
+  $to = Join-Path $AppDir 'release-signing.pub.xml'
+  if ((Test-Path -LiteralPath $to) -and $env:STAGE_REPLACE_SIGNING_KEY -ne '1') {
+    # Held to what the updater will need of it, so a broken key is said now rather
+    # than at the first update.
+    if (-not (Test-SigningKeyXml -Xml ([IO.File]::ReadAllText($to)))) {
+      throw "the release signing key installed at $to is not a 3072-bit RSA key. To take the server's in its place, set `$env:STAGE_REPLACE_SIGNING_KEY = '1' and run the installer again."
+    }
+    # Not Write-Output: Install-Updater's output is its answer, and '' means installed.
+    Write-Information -InformationAction Continue "    keeping the release signing key already installed ($to); set STAGE_REPLACE_SIGNING_KEY=1 to take the server's"
+    return
+  }
+  $temp = Join-Path $AppDir ('release-signing.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+  try {
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/release-signing.pub.xml" -OutFile $temp
+    if (-not (Test-SigningKeyXml -Xml ([IO.File]::ReadAllText($temp)))) {
+      throw "the release signing key from $From is not a 3072-bit RSA key"
+    }
+    Move-Item -Force -LiteralPath $temp -Destination $to
+  } finally {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp }
+  }
+}
+
 # The updater: a SYSTEM task, so its script is in Program Files, where only an
 # administrator can write. Returns why it could not be installed, or '' when it was.
 function Install-Updater([string]$From) {
   try {
     New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
     $updater = Join-Path $AppDir 'kiosk-update.ps1'
+    Save-SigningKey -From $From
     Save-KioskScript -From $From -Name 'kiosk-update-windows.ps1' -To $updater
     [IO.File]::WriteAllText((Join-Path $AppDir 'update-from'), $From)
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
