@@ -199,6 +199,10 @@ describe("the helper's download reaches the release", () => {
       fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       fs.mkdirSync(path.join(tree, "dist"));
       for (const n of ["stage-utility-1.2.3-linux-x64.tar.gz", "stage-utility-1.2.3-darwin-arm64.tar.gz"]) fs.writeFileSync(path.join(tree, "dist", n), "x");
+      // What the signing step leaves; without it no release is created
+      // (scripts/release-signing-workflow.test.ts), which is not what these test.
+      fs.mkdirSync(path.join(tree, "sig-dist"));
+      fs.writeFileSync(path.join(tree, "sig-dist", "kiosk-windows.ps1.sig"), "s");
       populate(tree);
       // The step writes its notes to /tmp/notes.md; keep that inside the temp tree.
       const script = create.run!.replaceAll("/tmp/notes.md", path.join(tree, "notes.md"));

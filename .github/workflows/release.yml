@@ -312,6 +312,18 @@ jobs:
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
           echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
+      # The artifacts job signs every payload a machine updates itself from (see
+      # scripts/sign-release-assets.sh), and a published release cannot be added
+      # to. So the key is proved here, before there is a tag: an absent secret, or
+      # one that is not the private half of scripts/kiosk/release-signing.pub.pem,
+      # stops the run with nothing pushed, rather than leaving a version that
+      # every updater refuses or one published unsigned.
+      - name: Check the release signing key
+        if: steps.version.outputs.skip == 'false'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: scripts/sign-release-assets.sh --check
+
       - name: Bump, tag and push
         id: push
         if: steps.version.outputs.skip == 'false'
@@ -512,7 +524,8 @@ jobs:
           ls -l helper-dist
           # For people reading the log. Not uploaded: GitHub serves each release
           # asset's SHA-256 as its `digest`, and that is what the server and the
-          # installer verify the zips against.
+          # installer verify the zips against. Their signatures are made in the
+          # artifacts job, which holds the signing key; this job does not.
           ( cd helper-dist && shasum -a 256 StageUtilityOutput-*.zip )
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -591,6 +604,20 @@ jobs:
         run: |
           echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
+      # Every payload a machine updates itself from, signed with the release key:
+      # the Windows kiosk's launcher, which servers serve from this tree, and the
+      # helper's zips when they were built. The script verifies each signature
+      # against the committed public key before it exits 0. A failure fails the
+      # job before the release is created: a release is never published unsigned.
+      - name: Sign the update payloads
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          payloads=(scripts/kiosk/kiosk-windows.ps1)
+          if [ -d helper-dist ]; then payloads+=(helper-dist/StageUtilityOutput-*.zip); fi
+          scripts/sign-release-assets.sh sig-dist "${payloads[@]}"
+
       - name: Smoke-test the Linux archive
         env:
           V: ${{ needs.release.outputs.version }}
@@ -644,6 +671,13 @@ jobs:
           # The Mac output helper's two zips, when the helper job made them. Named by
           # pattern, so nothing else that lands in helper-dist is published.
           if [ -d helper-dist ]; then assets+=(helper-dist/StageUtilityOutput-*.zip); fi
+          # The signatures the step above made. None is a release machines cannot
+          # update from, so it is not created.
+          shopt -s nullglob
+          sigs=(sig-dist/*.sig)
+          shopt -u nullglob
+          if [ "${#sigs[@]}" -eq 0 ]; then echo "::error::no signatures in sig-dist, so v$V is not published unsigned"; exit 1; fi
+          assets+=("${sigs[@]}")
           gh release create "v$V" \
             --title "v$V" \
             --notes-file /tmp/notes.md \

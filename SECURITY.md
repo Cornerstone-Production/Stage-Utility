@@ -183,6 +183,26 @@ When reporting, please include:
   `!secret`, never by value), `/api/companion/buttons` and `/api/companion/pairs`. Nothing
   there presses anything or reveals a secret.
 
+- **Machine updates are signed by the release, not vouched for by the server.** A Mac
+  running the output helper and a Windows kiosk each update themselves from the server:
+  the helper's zip, and the kiosk's launcher. The server's word is checked twice. The
+  SHA-256 it names proves the download is whole. The release's signature, made in CI
+  with a private key held only as the `RELEASE_SIGNING_KEY` Actions secret (RSA-3072,
+  PKCS#1 v1.5, SHA-256), proves it is what the release published. The updater checks the
+  signature against the public key its installer wrote beside it, in a folder only root
+  or an administrator can write, and never against one fetched at update time; a
+  missing or invalid signature is refused and reported. So something that answers in
+  the server's place on the LAN, or a compromised server, can still say *when* a
+  machine updates, but cannot hand it a payload of its own.
+
+  The first install is the exception: the installer and the key it installs come from
+  the server, over plain HTTP, so `curl ... | sudo sh` and `irm ... | iex` trust that
+  server as they always have, and so does any reinstall. An updater installed before
+  signing existed checks the SHA-256 only, until its installer is run again. See
+  [Signed updates](docs/kiosk-devices.md#signed-updates) and
+  [The release signing key](docs/ops/distribution.md#the-release-signing-key), which
+  covers rotation.
+
 ## Code scanning
 
 CodeQL runs on every pull request. Two of its rules, `js/file-access-to-http` and

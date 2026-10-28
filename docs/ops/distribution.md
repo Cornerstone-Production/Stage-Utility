@@ -89,6 +89,50 @@ error annotation, and Macs whose server runs that version cannot install the hel
 until the server updates. The assets are made before
 the release is created, because a published release cannot be added to.
 
+Every release also carries a signature of each payload a machine
+[updates itself from](../kiosk-devices.md#signed-updates):
+
+```
+kiosk-windows.ps1.sig              the Windows kiosk's launcher, as in scripts/kiosk
+StageUtilityOutput-arm64.zip.sig   when the helper was built
+StageUtilityOutput-x86_64.zip.sig  when the helper was built
+```
+
+Each is RSA-3072, PKCS#1 v1.5 over SHA-256, made by
+`scripts/sign-release-assets.sh` in the artifacts job with the private key in the
+`RELEASE_SIGNING_KEY` secret, and verified against the committed public key before the
+release is created. A release is never published without them: no secret, a secret
+that is not the committed key's private half, or no signature to attach fails the run.
+
+## The release signing key
+
+The private key exists only as the GitHub Actions secret `RELEASE_SIGNING_KEY`. The
+public half is `scripts/kiosk/release-signing.pub.pem`, the one copy in the tree; the
+server serves it to the installers and never has the private half.
+
+The release job checks the secret (`scripts/sign-release-assets.sh --check`) before it
+tags, so a missing or wrong key stops a release with nothing pushed, and the artifacts
+job signs with it. No other step sees it.
+
+To make a key pair (once, on a trusted machine) and set the secret:
+
+```sh
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out release-signing.key.pem
+openssl pkey -in release-signing.key.pem -pubout -out scripts/kiosk/release-signing.pub.pem
+gh secret set RELEASE_SIGNING_KEY --repo Cornerstone-Production/Stage-Utility < release-signing.key.pem
+```
+
+Commit the public key, then keep the private key offline (a password manager, or
+`openssl pkey -aes256` for an encrypted copy) or destroy it: the secret is what CI uses,
+and a lost key is replaced, not recovered.
+
+**Rotating it** (a leaked key, or a lost one) is the same three commands, with the new
+public key committed in place of the old. Releases from then on are signed with the new
+key. A machine's updater keeps the key it was installed with and refuses every release
+signed with another, so run the installer again on every Mac and Windows kiosk once
+their server runs the first release with the new key. Until then they stay on the
+version they have.
+
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a
 build toolchain — installed or to update. About 35 MB compressed, 115 MB on disk, of
 which the runtime is nearly all.
@@ -110,6 +154,10 @@ per asset. It has to come from outside the archive: a checksum shipped inside th
 file it describes proves nothing, because whoever alters the file alters the
 checksum with it. An installer that cannot obtain a digest refuses to install
 rather than proceeding unverified.
+
+The kiosk installers and the updaters they leave on a Mac or a Windows PC check one
+more thing: the release's signature of the payload, against the key installed with
+the updater. See [Signed updates](../kiosk-devices.md#signed-updates).
 
 Installers are distributed as a script rather than a `.pkg` or `.msi` because an
 unsigned installer bundle is worse than none: macOS Gatekeeper refuses to open an
