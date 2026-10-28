@@ -447,7 +447,7 @@ own version and checked against the digest the releases API lists for it, like t
 | Request | |
 |---|---|
 | `GET /kiosk/StageUtilityOutput-<arch>.zip.sig` | The release's signature of that zip |
-| `GET /kiosk/kiosk-windows.ps1.sig` | The release's signature of the launcher, which the server itself serves from its own `scripts/kiosk`. It verifies only when that file is byte for byte the one the release was built from |
+| `GET /kiosk/kiosk-windows.ps1.sig` | The release's signature of the launcher, which the server itself serves from its own `scripts/kiosk`. It verifies only when that file is byte for byte the one the release was built from (see below) |
 | `GET /kiosk/release-signing.pub.pem` \| `.xml` | The public key, from `scripts/kiosk/release-signing.pub.pem`, as PEM and as .NET's `<RSAKeyValue>` |
 
 Each signature is read once per version and cached beside the zips in
@@ -467,9 +467,12 @@ updater, where only an administrator can write. The updater verifies each new la
 with .NET's `RSA.VerifyData` (SHA-256, PKCS#1 v1.5) against that file, which Windows
 PowerShell 5.1 does with nothing installed, and never asks the server for a key. The
 launcher is served from the server's own `scripts/kiosk`, so its signature holds only
-while that file is the one the release was built from: a server whose checkout has a
-changed `kiosk-windows.ps1` (a local edit, or line endings converted by git) offers a
-launcher every PC refuses as `signature invalid`.
+while that file is the one the release was built from. `.gitattributes` marks it `-text`,
+so git checks it out as the committed bytes on every platform, whatever
+`core.autocrlf` says (Git for Windows would otherwise convert it to CRLF). A local edit
+still breaks it: the server checks its own launcher against the release's signature the
+first time it serves that signature, and says on a `[helper-update]` line when they do
+not match, since every PC would then refuse the launcher as `signature invalid`.
 
 **What the first install trusts.** The installer itself, and the key it installs, come
 from the server it is run from, over plain HTTP. So the first install trusts that

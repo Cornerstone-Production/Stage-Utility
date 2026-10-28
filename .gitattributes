@@ -1,0 +1,14 @@
+# Files whose bytes in the working tree must be the bytes in git, on every
+# platform and whatever core.autocrlf says.
+#
+# scripts/kiosk/kiosk-windows.ps1 is served by a server from its own checkout,
+# and the release signs the blob from the tagged tree (scripts/sign-release-assets.sh).
+# Git for Windows defaults to core.autocrlf=true, which would check it out with
+# CRLF line ends, and every Windows kiosk would then refuse every launcher that
+# server offers as "signature invalid". `-text` turns off all end-of-line
+# conversion for the file, in both directions, so the working tree is the blob
+# exactly; `eol=lf` would also check out LF, but it still marks the file as text
+# and so normalises what is committed, which is a conversion the signature does
+# not need. scripts/gitattributes.test.ts checks every file the release signs
+# from the tree is listed here.
+scripts/kiosk/kiosk-windows.ps1 -text

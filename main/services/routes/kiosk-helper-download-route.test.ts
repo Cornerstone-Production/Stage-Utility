@@ -199,6 +199,37 @@ describe("GET /kiosk/<payload>.sig", () => {
     assert.equal(((await res.json()) as { error: string }).error, `the release for v${VERSION} has no ${ZIP}.sig`);
   });
 
+  describe("the server's own launcher, against the signature it serves", () => {
+    const key = testSigningKey();
+    const launcher = () => fs.readFile(path.join(process.cwd(), "scripts", "kiosk", "kiosk-windows.ps1"));
+    const serveSig = (sig: Buffer) => {
+      published.set(`/v${VERSION}/kiosk-windows.ps1.sig`, sig);
+      record([{ name: "kiosk-windows.ps1.sig", digest: `sha256:${sha(sig)}` }]);
+    };
+    afterEach(() => {
+      delete process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE;
+    });
+    const mismatch = (lines: string[]) => lines.filter((l) => l.startsWith("[helper-update] this server's scripts/kiosk/kiosk-windows.ps1 is not the launcher the release signed"));
+
+    it("says nothing when the release signed these bytes", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = key.publicFile();
+      serveSig(key.sign(await launcher()));
+      assert.equal((await fetch(`${appBase}/kiosk/kiosk-windows.ps1.sig`)).status, 200);
+      assert.deepEqual(mismatch(lines), []);
+      assert.ok(!lines.some((l) => l.includes("could not check")), lines.join("\n"));
+    });
+
+    it("says once, on a tagged line, when they are not the bytes the release signed, and still serves the signature", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      process.env.STAGE_UTILITY_TEST_SIGNING_KEY_FILE = key.publicFile();
+      // What a CRLF checkout of the launcher would be.
+      serveSig(key.sign(Buffer.from((await launcher()).toString("utf8").replace(/\n/g, "\r\n"))));
+      for (let i = 0; i < 2; i++) assert.equal((await fetch(`${appBase}/kiosk/kiosk-windows.ps1.sig`)).status, 200);
+      assert.equal(mismatch(lines).length, 1, lines.join("\n"));
+    });
+  });
+
   it("does not serve the Windows updater's own script as a signature", async () => {
     const res = await fetch(`${appBase}/kiosk/kiosk-update-windows.ps1.sig`);
     assert.equal(res.status, 404);
