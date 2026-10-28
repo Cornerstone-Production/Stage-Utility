@@ -1240,13 +1240,13 @@ export function Inspector({
           </div>
           <Row label="Ahead color">
             <div className="flex items-center gap-2">
-              <ColorField label="Ahead colour" allowAlpha={false} value={c.aheadColor ?? "#30a46c"} onChange={(v) => onConfig({ ...c, aheadColor: v })} />
+              <ColorField label="Ahead color" allowAlpha={false} value={c.aheadColor ?? "#30a46c"} onChange={(v) => onConfig({ ...c, aheadColor: v })} />
               {c.aheadColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, aheadColor: null })}>Reset</button>}
             </div>
           </Row>
           <Row label="Behind color">
             <div className="flex items-center gap-2">
-              <ColorField label="Behind colour" allowAlpha={false} value={c.behindColor ?? "#e5484d"} onChange={(v) => onConfig({ ...c, behindColor: v })} />
+              <ColorField label="Behind color" allowAlpha={false} value={c.behindColor ?? "#e5484d"} onChange={(v) => onConfig({ ...c, behindColor: v })} />
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
@@ -1427,7 +1427,7 @@ export function Inspector({
           )}
           <RowSwitch
             label="Fill green when live"
-            hint="Off colours the word. On paints the whole widget — a signal that carries across a room."
+            hint="Off colors the word. On paints the whole widget — a signal that carries across a room."
             checked={c.fillWhenLive ?? FILL_WHEN_ACTIVE}
             onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
@@ -1735,7 +1735,7 @@ export function Inspector({
           its colour, the others are washed with one. */}
       <Row
         label={surfaceOf(s) === "solid" ? "Fill" : "Tint"}
-        hint="The colour on this surface. The swatches are washes made for a dark stage canvas; the picker takes any colour. On Glass they stay see-through, so tinted glass is still glass."
+        hint="The color on this surface. The swatches are washes made for a dark stage canvas; the picker takes any color. On Glass they stay see-through, so tinted glass is still glass."
       >
         <div role="group" aria-label="Tint" className="flex items-center gap-1.5 flex-wrap">
           {TINTS.map((t) => {
@@ -1791,7 +1791,7 @@ export function Inspector({
                 a ground is exactly where a translucent colour belongs, and the
                 native control could never express one. */}
             <ColorField
-              label="Custom colour"
+              label="Custom color"
               value={s.background ?? "#000000"}
               onChange={(v) => onStyle({ background: v })}
               className="absolute inset-0 [&>button]:size-6 [&>button]:rounded-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
@@ -1809,7 +1809,7 @@ export function Inspector({
           <TypeSizeRows type={c.type} style={s} canvasHeight={canvas.height} onStyle={onStyle} />
           {/* Text, so no opacity: a translucent word over a wall is not a
               softer word, it is a harder one to read. */}
-          <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
+          <Row label="Color"><ColorField label="Text color" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
           {/* One pad, not two rows of lettered buttons. What reads as active has
               to be the alignment the object will actually RENDER at, not a
               hard-coded guess: a readout with nothing stored aligns left, and
@@ -1832,7 +1832,7 @@ export function Inspector({
       <RowNumber label="Radius" value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} />
       <Row label="Border">
         <ColorField
-          label="Border colour"
+          label="Border color"
           value={s.borderColor ?? "#ffffff"}
           onChange={(v) => onStyle({ borderColor: v, borderWidth: s.borderWidth ?? 0 })}
         />

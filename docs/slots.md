@@ -18,7 +18,7 @@ Each slot row has:
 | Control | What it does |
 |---|---|
 | **Channel** | A short reference number for the slot, such as `01`. It is for the operator and is not drawn on the cell |
-| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a colour, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot colour**, takes no part in Planning Center matching, and can still carry a mic, IEM and charge bar. An empty slot is a blank cell, and has no further options |
+| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a color, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot color**, takes no part in Planning Center matching, and can still carry a mic, IEM and charge bar. An empty slot is a blank cell, and has no further options |
 | **Stack** | Puts the slot in the same on-screen column as the slot above it, as rows, for a dual-bay charger two people share. Off for the first slot |
 | Remove | Deletes the slot |
 

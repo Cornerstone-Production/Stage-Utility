@@ -208,7 +208,7 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = externKeyed({
 export const BAR_SPACER_ITEM: Omit<BarItem, "id"> = {
   label: "Flexible space",
   icon: MoveHorizontalIcon,
-  hint: "Pushes what follows it away from what comes before. Use two to centre a group.",
+  hint: "Pushes what follows it away from what comes before. Use two to center a group.",
 };
 
 /** How the fixed gap presents itself in the configurator. */

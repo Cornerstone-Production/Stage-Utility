@@ -137,8 +137,8 @@ running, or only the rest of the week.
 
 On Home a widget wears Home's card — the app's radius, hairline and surface —
 rather than the dark ground and canvas-relative geometry its styling carries for
-a wall. Colour that reports STATE still shows (a recorder's red while recording);
-colour that is decoration does not, so one grid of tiles reads in both themes.
+a wall. Color that reports STATE still shows (a recorder's red while recording);
+color that is decoration does not, so one grid of tiles reads in both themes.
 
 A widget removed stays removed, including across a restart. A build that adds one
 gives it to installs that have never edited Home, and leaves an edited Home
@@ -366,7 +366,7 @@ class means for backups.
 | `presets.json` | config | Slot presets |
 | `rosstalk-settings.json` | config | The RossTalk simulate switch |
 | `rosstalk-targets.json` | config | [RossTalk](../integrations/rosstalk.md) targets |
-| `saved-colors.json` | config | Colours kept from the colour picker |
+| `saved-colors.json` | config | Colors kept from the color picker |
 | `scores-favourites.json` | config | Followed teams |
 | `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
 | `servicecue-layouts.json` | config | ServiceCue column layouts |

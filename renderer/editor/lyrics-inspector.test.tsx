@@ -244,7 +244,7 @@ describe("the rest of the inspector, for this widget", () => {
       assert.ok(m.container.querySelector('[aria-label="Alignment"]') === null, "an Align pad that changes nothing");
       assert.match(m.container.textContent ?? "", /sets its own type: Size, Weight and Align are under Lyrics above/);
       // The text colour is the one style it reads, so it stays.
-      assert.ok(m.container.querySelector('[aria-label="Text colour"]'), "no text colour");
+      assert.ok(m.container.querySelector('[aria-label="Text color"]'), "no text color");
     } finally {
       m.restore();
     }

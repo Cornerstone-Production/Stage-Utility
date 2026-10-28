@@ -52,15 +52,15 @@ The other eight always have something true to say, so their resting state is a
 reading; scores would spend most of the year showing a word that never changed.
 See [Live scores](../integrations/scores.md).
 
-Colour carries the state instead:
+Color carries the state instead:
 
 | | |
 |---|---|
-| **Grey** | Resting. Nothing is running, and nothing is wrong. |
+| **Gray** | Resting. Nothing is running, and nothing is wrong. |
 | **Green** | A service is live, or a recorder is rolling. |
 | **Red** | Act now: an item has run past its length, the service start time has passed with nothing begun, or a connected recorder has stopped. |
 
-Red is deliberately scarce. An idle bar is grey, so red on this strip always
+Red is deliberately scarce. An idle bar is gray, so red on this strip always
 means something wants you.
 
 **Integration health** counts only integrations you have set up and enabled — one
@@ -150,7 +150,7 @@ Four things it may never do:
   character, a score is never shortened. A mark may replace a *word*, never a
   value. The clock's seconds are the one deliberate exception, and what they cost
   is precision, not a reading: `16:59` is still the time.
-- **Never remove a state colour.** Live green, overrun red and the amber on a
+- **Never remove a state color.** Live green, overrun red and the amber on a
   disconnected count survive every step.
 - **Never drop an item.** Every reading on the strip is one somebody put there on
   purpose — and shortening an item to nothing is dropping it, so no step takes an
@@ -239,7 +239,7 @@ follows it away from what comes before. It decides **alignment**.
 | None, or one at the end | Everything packs to the left |
 | One in the middle | A left group and a right group |
 | One at the very start | Everything packs to the right |
-| Two | The items between them are centred |
+| Two | The items between them are centered |
 
 **Space** is a fixed 24px gap — a deliberate break between two groups that does
 not push either to an edge. It decides **distance**. Put several side by side
@@ -248,7 +248,7 @@ apart without one.)
 
 Reach for a Space when you want a reading set slightly apart from its
 neighbours; reach for a Flexible space when you want a group pinned to an edge
-or centred.
+or centered.
 
 The bar is one row at every width. A Flexible space on a phone has very little
 slack to eat, but it still decides which side of the strip a group sits on, and

@@ -539,11 +539,11 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/taper-window` | any of `{preMin, postMin}`, whole minutes clamped to 0–240 |
 | `/api/update/auto` | any of `{mode: "manual" \| "auto-install" \| "auto-full", dayOfWeek: 0–6 \| null, hour: 0–23}`; out-of-range numbers are clamped, and `null` is any day |
 | `/api/baptism-auto-start` | `{enabled?: boolean, testimonyKeyword?: string}`, at least one; the keyword is cut at 80 characters |
-| `/api/saved-colors` | `{color: string, keep: boolean}` — save (`true`) or forget (`false`) one colour |
+| `/api/saved-colors` | `{color: string, keep: boolean}` — save (`true`) or forget (`false`) one color |
 | `/api/icon-color` | `{key, color}` — `color` is `#rrggbb`, or `""` to clear. `key` names a screen or page |
 | `/api/icon-glyph` | `{key, glyph}` — an icon name (a letter, then letters and digits, up to 64), or `""` to clear |
-| `/api/caption-colors` | `{channel, color}` — a hex colour for one transcription channel; anything else, or `null`, reverts it to automatic. Answers the state unchanged for a blank `channel` |
-| `/api/caption-colors/follow-prodcom` | `{on: boolean}` — whether a channel with no colour of its own follows ProdCom's |
+| `/api/caption-colors` | `{channel, color}` — a hex color for one transcription channel; anything else, or `null`, reverts it to automatic. Answers the state unchanged for a blank `channel` |
+| `/api/caption-colors/follow-prodcom` | `{on: boolean}` — whether a channel with no color of its own follows ProdCom's |
 | `/api/checklist-sources` | `{categories?, teams?}`, below |
 | `/api/bar-items` | `{items?, mobileItems?}`, above |
 

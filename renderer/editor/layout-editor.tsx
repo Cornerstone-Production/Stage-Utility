@@ -2153,7 +2153,7 @@ export function LayoutEditor({
           onClick={() => setAlignOn((v) => !v)}
           aria-label="Toggle align to objects"
           aria-pressed={alignOn}
-          tooltip="Snap to other objects' edges, centres and spacing. Hold Alt while dragging to place freely."
+          tooltip="Snap to other objects' edges, centers and spacing. Hold Alt while dragging to place freely."
         >
           <AlignHorizontalDistributeCenterIcon className="size-3.5" /> Align
         </Button>

@@ -61,7 +61,7 @@ const CASES: Record<string, Case> = {
   emptySlotLogoOriginal: { bad: [], says: "image" },
   followProdcomColors: { bad: "no", says: "true or false" },
   hourCycle: { bad: "13h", says: "one of" },
-  iconColors: { bad: { "tools/clock": "orange" }, says: "colour" },
+  iconColors: { bad: { "tools/clock": "orange" }, says: "color" },
   iconGlyphs: { bad: { "../x": "Clock" }, says: "not an id or a tool path" },
   idFloors: { bad: 4, says: "must be an object" },
   integrationConfigs: { in: { obs: { host: "192.0.2.4", password: "planted", "bad key": 1 } }, out: { obs: { host: "192.0.2.4" } } },
@@ -101,7 +101,7 @@ const CASES: Record<string, Case> = {
 const MORE_BAD: { settings: Record<string, unknown>; says: string }[] = [
   { settings: { autoUpdate: { mode: "whenever", hour: 3, dayOfWeek: null } }, says: "update mode" },
   { settings: { taperWindow: { preMin: "an hour" } }, says: "a number" },
-  { settings: { captionChannelColors: { Pastor: "red" } }, says: "hex colour" },
+  { settings: { captionChannelColors: { Pastor: "red" } }, says: "hex color" },
   { settings: { backupSchedule: { lastRunAt: "yesterday" } }, says: "lastRunAt" },
   // parseAppIcon takes all five images or none.
   { settings: { appIcon: "/branding-images/0123456789abcdef.png", appIcon192: null }, says: "not all of" },

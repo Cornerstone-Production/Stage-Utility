@@ -60,7 +60,7 @@ import {
  */
 const SWATCHES: { value: string; label: string }[] = [
   { value: "#ffffff", label: "White" },
-  { value: "#9a9aa2", label: "Grey" },
+  { value: "#9a9aa2", label: "Gray" },
   { value: "#141414", label: "Near black" },
   { value: "#e5484d", label: "Red" },
   { value: "#ffc53d", label: "Amber" },
@@ -364,7 +364,7 @@ function ColorPanel({
               pickingIcon ? "bg-fill text-fg" : "text-fg-muted",
             )}
           >
-            {pickingIcon ? "Back to colour" : "Change icon"}
+            {pickingIcon ? "Back to color" : "Change icon"}
           </button>
         </div>
       )}
@@ -482,8 +482,8 @@ function ColorPanel({
             type="button"
             onClick={() => void saved.toggle(swatchCss)}
             aria-pressed={saved.has(swatchCss)}
-            aria-label={saved.has(swatchCss) ? "Forget this colour" : "Save this colour"}
-            title={saved.has(swatchCss) ? "Forget this colour" : "Save this colour"}
+            aria-label={saved.has(swatchCss) ? "Forget this color" : "Save this color"}
+            title={saved.has(swatchCss) ? "Forget this color" : "Save this color"}
             className={cn(
               "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-caption2 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
@@ -499,7 +499,7 @@ function ColorPanel({
 
         {saved.colors.length === 0 ? (
           <p className="text-caption2 text-fg-subtle">
-            Colours you save are kept here, on every screen.
+            Colors you save are kept here, on every screen.
           </p>
         ) : (
           <div className="grid max-h-[4.5rem] grid-cols-8 gap-1.5 overflow-y-auto">
@@ -563,7 +563,7 @@ export function ColorField({
   onChange,
   allowAlpha = true,
   fallback = "#ffffff",
-  label = "Colour",
+  label = "Color",
   className,
   icon,
 }: {

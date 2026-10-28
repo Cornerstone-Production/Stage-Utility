@@ -298,7 +298,7 @@ const SPECS: {
   // `false` to agree with the renderer: absent means the pacing card leads with
   // the drift, which is what every card already on a Home page does.
   { key: "showProjectedEnd", label: "Projected end time", fallback: false },
-  { key: "warnStates", label: "Colour on warning", fallback: true },
+  { key: "warnStates", label: "Color on warning", fallback: true },
   { key: "redOnOverrun", label: "Red on overrun", fallback: true },
   { key: "nextItem", label: "Show the next item", fallback: false },
   { key: "hideWhenIdle", label: "Hide when idle", fallback: false },

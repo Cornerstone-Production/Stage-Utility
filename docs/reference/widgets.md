@@ -214,7 +214,7 @@ clock; turning it off leaves the score and the status line. The teams themselves
 are chosen in Settings, Integrations, Live scores — see
 [Live scores](../integrations/scores.md).
 
-The Home card is a quieter reading of the same thing: a chip in the team's colour,
+The Home card is a quieter reading of the same thing: a chip in the team's color,
 the name, the score, and the trailing side dimmed. It shows one matchup on a
 Medium tile and up to three as you make the tile taller. It stays on the page
 during a service by default — Sunday afternoon football overlaps the second
@@ -231,7 +231,7 @@ a widget answering the same kind of question in a different shape reads as a
 different app.
 
 Per widget you can turn that off (**Fill green when live** / **Fill when
-recording**, which colours just the word instead), hide the number, or make it a
+recording**, which colors just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
 
@@ -410,10 +410,10 @@ the time and the progress hairline amber at **Amber at** seconds left (default
 the time is amber from 0:30, red from 0:10 — and judged on the second the digits
 show. **Red at** is never above **Amber at**: the field holds a higher number
 at the amber value, and a stored red above the amber is read as the amber, so
-the two colours arrive together. The thresholds are set in the layout editor's
+the two colors arrive together. The thresholds are set in the layout editor's
 inspector; the Home card's right-click menu has the on/off switch only. The
-colours are the app's own caution and over tokens, the same ones a Home stat
-takes when it earns a state colour. A still counted down from a short hold
+colors are the app's own caution and over tokens, the same ones a Home stat
+takes when it earns a state color. A still counted down from a short hold
 starts inside the amber threshold, so with Warn near the end on it reads amber
 from its first frame; lower **Amber at** if that is not wanted.
 
@@ -457,8 +457,8 @@ up even on a layer that is playing. See
 **Slide progress** reads as a fraction, a count remaining, a percentage or a bar.
 
 **Lyrics** draws the words on the current slide with the group the slide belongs to
-(Verse 1, Chorus, Bridge) as a tag, in ProPresenter's group colour, and what comes
-next underneath. The group names and colours are ProPresenter's own, and the order
+(Verse 1, Chorus, Bridge) as a tag, in ProPresenter's group color, and what comes
+next underneath. The group names and colors are ProPresenter's own, and the order
 the groups play in follows the presentation's arrangement, so a chorus played three
 times is three places in the strip. It has three layouts:
 
@@ -479,7 +479,7 @@ not connected or has no presentation open, and never the words of a slide that h
 gone. **Short** tag text is derived: Verse 1 is V1, Chorus C, Pre-Chorus PC, Bridge
 B, Tag T, Intro and Outro stay whole, and any other name is the initials of its
 words or its first three letters, with a trailing number kept (Interlude 2 is IN2).
-On Home it is a card in the theme's own colours, large and shown during a service
+On Home it is a card in the theme's own colors, large and shown during a service
 to start.
 
 A **Timer** on the ProPresenter source finds its timer by name, so renaming it in
@@ -525,7 +525,7 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 | **SPL meter** | The live sound level | Smaart |
 | **Sound level** *(Home)* | The loudest level right now, its metric and meter | Smaart |
 
-**SPL meter** picks its meter and which metric to read, and can colour itself past
+**SPL meter** picks its meter and which metric to read, and can color itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
 **Sound level** reads whichever meter is loudest. To watch one instead,
@@ -589,7 +589,7 @@ wherever it is placed.
 
 See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
-A button's label is centred on it, in the middle both ways, and wraps inside it
+A button's label is centered on it, in the middle both ways, and wraps inside it
 with a margin on every side. A word longer than the button breaks, and text that
 still does not fit is clipped at the button's edge rather than drawn over its
 neighbours. The OSC button, the RossTalk button and both kinds of Button draw it the same way.
@@ -617,11 +617,11 @@ the button says *Simulated: nothing was sent*. One that needs a confirmation
 cannot be fired from a panel; the rules page has the Test button for that. A press is recorded in the
 [automation log](../automation.md) with the caller `console`.
 
-Two colour schemes, by what the switch means:
+Two color schemes, by what the switch means:
 
 | Scheme | On | Off |
 |---|---|---|
-| Ordinary | green ring and dot | grey dot, no ring |
+| Ordinary | green ring and dot | gray dot, no ring |
 | Live — on air or recording | red ring and dot | green ring, meaning connected and standing by |
 
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
@@ -885,7 +885,7 @@ offers only the one that belongs to it.
   though every tile had a caption and a sub-line — which is what makes a grid read
   as a grid.
 - **Anywhere else** the same widget wears the wall composition: one large word,
-  the number underneath, filled with colour while active.
+  the number underneath, filled with color while active.
 
 Putting a Home tile on a wall gets you the wall version automatically. You do not
 have to pick the right one.

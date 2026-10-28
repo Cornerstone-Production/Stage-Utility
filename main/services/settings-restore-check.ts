@@ -144,7 +144,7 @@ const captionColors: KeyCheck = (v, k) => {
   safeKeys(map, k);
   return Object.fromEntries(
     Object.entries(map).map(([channel, c]) => {
-      if (typeof c !== "string" || !CAPTION_COLOR.test(c.trim())) refuse(`${k}.${channel} must be a hex colour`);
+      if (typeof c !== "string" || !CAPTION_COLOR.test(c.trim())) refuse(`${k}.${channel} must be a hex color`);
       return [channel, normalizeCaptionColor(c)];
     }),
   );
@@ -383,7 +383,7 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   baptismAutoStart,
   baptismDefaultMode: oneOf("per-person", "grouped"),
   publicUrl,
-  iconColors: iconMap(ICON_COLOR, 'a "#rrggbb" colour'),
+  iconColors: iconMap(ICON_COLOR, 'a "#rrggbb" color'),
   iconGlyphs: iconMap(ICON_GLYPH, "a glyph name"),
   captionChannelColors: captionColors,
   // Plans and service types

@@ -3098,7 +3098,7 @@ export class ProdComService extends ConnectionLifecycle {
   private logChannelFailure(error: string): void {
     console.warn(
       `[prodcom] channel list unavailable (${scrub(error)}) — ` +
-        `captions fall back to per-channel colours chosen by the display`,
+        `captions fall back to per-channel colors chosen by the display`,
     );
   }
 

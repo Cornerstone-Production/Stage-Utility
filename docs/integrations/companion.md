@@ -917,7 +917,7 @@ workflow), and three for stage messages (below).
 | Recorder / streaming platform disconnected | the chosen one of OBS, REAPER, Resi or YouTube is not connected |
 | Captions idle | no caption line has arrived for the number of seconds you set |
 | ProVideoPlayer now-layer is playing a video / remaining time at or under threshold | the now-layer is playing, or has the seconds you set or fewer left |
-| Baptism phase colour (*advanced*) / paused / running | the timer's phase colours the button, or it is paused, or a clock is counting |
+| Baptism phase color (*advanced*) / paused / running | the timer's phase colors the button, or it is paused, or a clock is counting |
 | Alert running | a stage message alert is running, for any group or one |
 | Automation signal equals / failed to resolve | see [Signals](#signals) |
 

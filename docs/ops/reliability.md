@@ -74,7 +74,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
 | `wireless-connections.json` | receivers and chargers (never their passwords) |
 | `kiosk-devices.json` | which machine drives which screen |
-| `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
+| `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colors |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
@@ -321,7 +321,7 @@ Two backups exist in the app, and they cover different things:
 
 A restore is checked the way a save is. Every file in the snapshot goes through
 the rules its settings page applies — a video feed's address, a cue's name, a
-screen's address, a port range, a colour. Where a save trims, lowercases, clamps
+screen's address, a port range, a color. Where a save trims, lowercases, clamps
 or leaves out a value rather than refusing it, the restore does the same to that
 value; where a save refuses, the restore refuses. A value of a type no settings
 page sends (text where a number belongs, say) is refused. Every uploaded image in it must

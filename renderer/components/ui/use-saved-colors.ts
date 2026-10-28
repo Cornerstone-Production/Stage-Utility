@@ -53,7 +53,7 @@ export function useSavedColors(): SavedColors {
       // discarding something the operator saved is not ours to do.
       if (!next) return;
       const gone = colors.find((c: string) => c !== color && !next.savedColors.includes(c));
-      if (keep && gone) toast.info(`Saved colours are full — ${gone} was dropped`);
+      if (keep && gone) toast.info(`Saved colors are full — ${gone} was dropped`);
     },
   };
 }

@@ -22,7 +22,7 @@ How it works is in [ServiceCue publishing protocol](../reference/servicecue-publ
   guessed. The page tells search engines to leave it out (`noindex`), which asks them
   and hides nothing from a person or a script that finds or guesses the address.
 - The Worker holds no Planning Center access, no settings and no network addresses: of
-  the app's state it keeps six fields (accent colour, logo, logo recolouring, hour cycle,
+  the app's state it keeps six fields (accent color, logo, logo recoloring, hour cycle,
   whether Planning Center is connected, time zone) and drops the rest on arrival.
 
 To stop sharing, delete the Worker (see [Taking it down](#rotating-the-token-and-taking-it-down)).

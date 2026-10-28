@@ -162,7 +162,7 @@ an edited Home alone.
 
 **Screens** has a card for every physical screen, with a live preview of what it
 shows, running edge to edge across the card. The card keeps what an operator changes while working: its name, the view
-it shows, the colour and icon, the message groups it is in, and the way into its
+it shows, the color and icon, the message groups it is in, and the way into its
 layout. Its menu (the vertical dots) is actions only:
 
 ![The Screens page: a live preview card per screen, the banner naming screens found on the network, and the sidebar count](../images/screens-overview.png)
@@ -206,7 +206,7 @@ screen**.
 **While the panel is open it follows the click.** A click anywhere on a screen
 card moves it to that screen's settings, and a click on a view card moves it to
 that view's settings. The card's own controls keep doing their own job and do not
-move it: the view picker, **Open**, the menu and the icon colour. Clicking the
+move it: the view picker, **Open**, the menu and the icon color. Clicking the
 name still focuses it for renaming, and moves the panel too. Clicking the preview
 moves the panel; a Cmd (Ctrl on Windows and Linux), Shift or middle click on a screen's
 preview opens its display in a new tab, and the small button in the preview's corner goes to
@@ -461,7 +461,7 @@ Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP (512 x 512 o
 or press **Use my logo** to build it from the logo already set. Smaller art is never refused: the editor, and the dialog for **Use my logo**, say when it is smaller than 512 x 512 and may look soft. Stage Utility draws
 every size from that one square in your browser: 180 px for the iPhone and iPad
 home screen, 192 and 512 px for Android and the tab, and a second 512 px version
-for Android's round and rounded-square masks with the art kept inside the centre
+for Android's round and rounded-square masks with the art kept inside the center
 80%. The dialog previews it at tab, iPhone and Android sizes.
 
 **Background** fills the transparent areas of your art (black, two blues or white);
