@@ -62,7 +62,7 @@ jobs:
       - name: Select Xcode
         if: ${{ inputs.build-mode == 'manual' }}
         uses: $/.github/actions/select-xcode
-      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ inputs.language }}
           build-mode: ${{ inputs.build-mode }}
@@ -79,7 +79,7 @@ jobs:
         if: ${{ inputs.build-mode == 'manual' && inputs.language == 'c-cpp' }}
         working-directory: helper/macos
         run: swift build --target DeckLinkShim
-      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         env:
           # The model pack targets codeql/javascript-all, so only the JavaScript run
           # loads it. A second --additional-packs is added to whatever the action
@@ -103,7 +103,7 @@ jobs:
           cat >empty.sarif <<'SARIF'
           {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"CodeQL","informationUri":"https://codeql.github.com/"}},"results":[]}]}
           SARIF
-      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: empty.sarif
           category: "/language:${{ inputs.language }}"
