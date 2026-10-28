@@ -30,7 +30,7 @@ server runs, never during a service on a Mac (whose helper restarts for about th
 seconds), so updating the server is the whole job:
 [Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version).
 A machine installed before 1.27.0 needs its installer run once more to get the
-updater. Settings → Advanced → Server → *Update Mac output helpers and Windows kiosks
+updater. Settings → Advanced → Updates → *Update Mac output helpers and Windows kiosks
 with this server* turns it off.
 
 ### The update lock

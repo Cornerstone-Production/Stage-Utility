@@ -18,6 +18,7 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../lib/api";
+import { settingText } from "./advanced-settings";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import {
   Button,
@@ -126,14 +127,15 @@ export function HistoryMilestonesPanel() {
     }
   }
 
+  const text = settingText("history-milestones");
   const typeName = (id: string | null) => (id ? types.find((t) => t.id === id)?.name ?? id : "Every service type");
 
   return (
-    <div data-testid="history-milestones" className="flex flex-col gap-2 px-4 pb-4">
-      <p className="text-caption2 text-fg-subtle">
-        Dates marked under the Trends chart on History → All services, so a step in attendance has a
-        reason beside it. The chart also marks where a plan&apos;s series title changes on its own.
-      </p>
+    <div data-testid="history-milestones" data-setting-id="history-milestones" className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col">
+        <span className="text-footnote font-medium leading-tight text-fg">{text.name}</span>
+        <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">{text.description}</span>
+      </div>
 
       <div className="flex flex-col gap-1">
         {list.map((m) => (

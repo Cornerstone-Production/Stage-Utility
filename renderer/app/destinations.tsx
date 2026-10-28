@@ -47,6 +47,7 @@ import {
 } from "./servicecue-routes";
 import {
   AdvancedRoute,
+  AdvancedTabRoute,
   BrandingRoute,
   MessagesRoute,
   PlanRoute,
@@ -297,6 +298,10 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   { path: SERVICECUE_PLAN_PATH, Component: ServiceCuePlanRoute },
   { path: "/servicecue/presets", Component: ServiceCueSection },
   { path: "/patch/edit", Component: PatchSection },
+  // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
+  // page draws its own heading, as the other child routes do. The segment is read by
+  // the page, which shows General for one it does not know.
+  { path: "/settings/advanced/$tab", Component: AdvancedTabRoute },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
   // A console, in the shell. Phase 3 gave a View a surface but gave a console

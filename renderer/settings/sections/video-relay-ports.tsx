@@ -15,7 +15,8 @@ import type { VideoPorts } from "@main/types/video";
 
 import { invoke } from "../../lib/api";
 import { useVideoState } from "../../main/video/use-video-state";
-import { Button, ErrorNote, Field, FieldContent, FieldGroup, FieldLabel, NumberInput } from "../../components/ui";
+import { Button, ErrorNote, Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, NumberInput } from "../../components/ui";
+import { settingText } from "./advanced-settings";
 
 /** The card's own `data-flash-id`, named here (rather than in
  *  advanced-section.tsx, which just renders it) so the Video feeds page's
@@ -70,7 +71,11 @@ function PortRow({
 export function VideoRelayPortsPanel() {
   const state = useVideoState();
   if (!state?.ports) {
-    return <p className="px-4 py-3 text-caption1 text-fg-muted">Loading…</p>;
+    return (
+      <p data-setting-id="video-relay-ports" className="px-4 py-3 text-caption1 text-fg-muted">
+        Loading…
+      </p>
+    );
   }
   return <VideoRelayPortsForm initialPorts={state.ports} />;
 }
@@ -80,6 +85,7 @@ function VideoRelayPortsForm({ initialPorts }: { initialPorts: VideoPorts }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const text = settingText("video-relay-ports");
 
   function setField(key: keyof VideoPorts, value: number) {
     setSaved(false);
@@ -100,7 +106,11 @@ function VideoRelayPortsForm({ initialPorts }: { initialPorts: VideoPorts }) {
   }
 
   return (
-    <FieldGroup>
+    <FieldGroup data-setting-id="video-relay-ports">
+      <div className="flex flex-col px-4 py-3">
+        <FieldLabel>{text.name}</FieldLabel>
+        <FieldDescription>{text.description}</FieldDescription>
+      </div>
       <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
         On the network
       </p>

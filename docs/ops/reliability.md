@@ -43,7 +43,7 @@ nothing planned — the schedule counts as unknown, so reconnects keep the 2-min
 cap and the Planning Center poll stays at 4 seconds rather than going quiet. The
 switch into and out of that mode is logged on the `[reconnect]` tag.
 
-Tunable under **Settings → Advanced → Server**, where switching **Wake around service
+Tunable under **Settings → Advanced → Schedule**, where switching **Wake around service
 times** off gives every integration a fixed 2-minute retry instead.
 
 ## Where your data lives

@@ -483,6 +483,45 @@ app name, read by iOS when the app is added, so renaming the app does not rename
 icon already on a home screen; adding it again does. The manifest and icon files
 behind this are listed in the [API](../reference/api.md).
 
+## Advanced
+
+**Settings → Advanced** holds the settings you touch rarely. It is split into tabs, and
+each tab has its own address, `/settings/advanced/<tab>`, so a tab can be bookmarked or
+sent to someone. `/settings/advanced` opens General; an address that is not a tab shows
+General too. The sidebar keeps **Advanced** lit on every tab. **Server log** at the
+right of the heading opens the raw log, `/log`, in a new tab.
+
+| Tab (`<tab>`) | Cards | Holds |
+|---|---|---|
+| **General** (`general`) | General | **Time zone**, **Clock format**, **Context bar** |
+| **Updates** (`updates`) | Updates | the update status with **Check now**, **Update now** and **Restart**, **Update track**, how updates are applied and the **Update window**, and whether Mac output helpers and Windows kiosks follow the server |
+| **Schedule** (`schedule`) | Reconnects, Attendance sampling | **Wake around service times** and its three timings; the **Pre-service ramp** and **Post-service taper** |
+| **Network** (`network`) | Addresses, Host names | the **Public address (DNS)**, whether the server **answers devices looking for a server**, the commands that set up a screen; the host-name list and its refusal switch |
+| **Data** (`data`) | Backups, Records | **Automatic backups** and the **Config snapshot**; the **Data archive** and **History milestones** |
+| **Video relay** (`video`) | Video relay | the relay's ports and the ffmpeg path |
+| **Search** (`search`) | | every setting, below |
+
+A tab with two cards draws them side by side on a wide screen and one above the other on
+a narrow one.
+
+### Search
+
+**Search** is the last tab. Press **Cmd-F** (**Ctrl-F** on Windows and Linux) anywhere
+on the page to open it with the cursor in the box and any earlier text selected. The
+page takes the key only while it is open. The query stays when you move between tabs.
+
+Every word you type must match the setting, in any order, in its name, the card it sits
+in, its description or words people use for it that the page does not print (`dns` finds
+the public address, `branch` the update track). A word matches the start of a word, so
+`recon` finds the reconnect settings. A word of four letters or more also forgives a typo
+in a setting's **name** or its card's: one slip up to seven letters, two from eight. A name match ranks above a hidden
+word, which ranks above the description, which ranks above a typo.
+
+Results are the settings themselves, working, in cards headed with the tab and the card
+(**Data › Backups**). Click the tab name to go there. A line above them counts the matches.
+Searching `log` also offers the **Server log**. A setting the page is not drawing, such as the reconnect timings while **Wake around
+service times** is off, is not searched.
+
 ## Read-only links to hand out
 
 Two pages are meant to be sent to people outside Production, and are read-only

@@ -15,6 +15,7 @@ import { plural } from "@main/services/plural";
 
 import { Button, Input, Switch, toast } from "../../components/ui";
 import { useHostNames, useHostNamesChange } from "../../app/host-names-query";
+import { settingText, type AdvancedSettingId } from "./advanced-settings";
 
 const SOURCE_LABEL: Record<AcceptedSource | HostNamesView["automatic"][number]["source"], string> = {
   machine: "This machine",
@@ -57,7 +58,18 @@ function when(iso: string): string {
   return Number.isFinite(t) ? new Date(t).toLocaleString() : "";
 }
 
-export function HostNamesCard() {
+/**
+ * `title` replaces the card's heading (the Search tab names the tab it came from),
+ * and `show` narrows the card to the rows a search matched; both default to the
+ * card as it sits on the Network tab.
+ */
+export function HostNamesCard({
+  title = "Host names",
+  show = () => true,
+}: {
+  title?: ReactNode;
+  show?: (id: AdvancedSettingId) => boolean;
+} = {}) {
   const { data, error } = useHostNames();
   const change = useHostNamesChange();
   const [draft, setDraft] = useState("");
@@ -89,6 +101,8 @@ export function HostNamesCard() {
     });
   }
 
+  const enforceText = settingText("host-names-enforce");
+  const listText = settingText("host-names-list");
   const enforce = data?.enforce ?? false;
   const waiting = data?.waiting ?? [];
   const automatic = data?.automatic ?? [];
@@ -98,7 +112,7 @@ export function HostNamesCard() {
   return (
     <div className="su-card">
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <h3 className="text-callout font-semibold text-fg">Host names</h3>
+        <h3 className="text-callout font-semibold text-fg">{title}</h3>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-line-strong px-2 py-0.5 text-caption1 text-fg-muted">
           <span className={`inline-block size-2 rounded-full ${enforce ? "bg-ok-9" : "bg-warn-9"}`} />
           {enforce ? "Refusing other names" : "Warn only"}
@@ -108,16 +122,20 @@ export function HostNamesCard() {
       {error && <p className="px-4 py-3 text-caption1 text-danger-11">Could not read the host names: {errorMessage(error)}</p>}
 
       <div className="divide-y divide-gray-a4">
-        <div className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
+        {show("host-names-enforce") && (
+        <div
+          className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
+          data-setting-id="host-names-enforce"
+        >
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-footnote font-medium leading-tight text-fg">Refuse names not on the list</span>
-            <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">
-              {enforce
-                ? "A request by any other name gets a 403. This server's IP address always works."
-                : data?.seeded
-                  ? "Off: other names are answered and listed below. Turning it on again accepts nothing new: accept the names you want first."
-                  : "Off: other names are answered and listed below. Turning it on also accepts each name in use over at least a day in the last 30 days, unless you dismissed it."}
-            </span>
+            <span className="text-footnote font-medium leading-tight text-fg">{enforceText.name}</span>
+            <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">{enforceText.description}</span>
+            {/* What turning it on does depends on whether the list was already seeded. */}
+            {!enforce && data?.seeded && (
+              <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">
+                The list is already seeded, so turning it on again accepts nothing new: accept the names you want first.
+              </span>
+            )}
           </div>
           <Switch
             checked={enforce}
@@ -126,8 +144,9 @@ export function HostNamesCard() {
             aria-label="Refuse names not on the list"
           />
         </div>
+        )}
 
-        {waiting.length > 0 && (
+        {show("host-names-list") && waiting.length > 0 && (
           <div className="px-4 py-3">
             <div
               className={`flex flex-col gap-1.5 rounded-md border p-2 ${enforce ? "border-red-6 bg-red-3/60" : "border-amber-6 bg-amber-2/60"}`}
@@ -160,13 +179,10 @@ export function HostNamesCard() {
           </div>
         )}
 
-        <div className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-footnote font-medium leading-tight text-fg">Names this server answers to</span>
-          <span className="text-caption2 leading-tight text-fg-subtle">
-            Any IP address, <span className="font-mono">localhost</span>, a name with no dot and names ending{" "}
-            <span className="font-mono">.local</span>, <span className="font-mono">.internal</span> or{" "}
-            <span className="font-mono">.home.arpa</span> are always answered and need no entry.
-          </span>
+        {show("host-names-list") && (
+        <div className="flex flex-col gap-1.5 px-4 py-3" data-setting-id="host-names-list">
+          <span className="text-footnote font-medium leading-tight text-fg">{listText.name}</span>
+          <span className="text-caption2 leading-tight text-fg-subtle">{listText.description}</span>
           <div>
             {automatic.map((a) => (
               <NameRow key={a.name} name={a.name}>
@@ -207,8 +223,9 @@ export function HostNamesCard() {
           </form>
           {hint && <span className="text-caption2 text-fg-subtle" aria-live="polite">{hint}</span>}
         </div>
+        )}
 
-        {dismissed.length > 0 && (
+        {show("host-names-list") && dismissed.length > 0 && (
           <div className="flex flex-col gap-1 px-4 py-3">
             <span className="text-footnote font-medium leading-tight text-fg">Dismissed</span>
             <span className="text-caption2 leading-tight text-fg-subtle">
