@@ -335,6 +335,8 @@ const NOT_SCANNED = new Map<string, string>([
   ["pvp-service.ts", DEVICE],
   ["reaper-service.ts", DEVICE],
   ["reconcile-records.ts", UNAUDITED],
+  // Its one line is a fixed sentence naming a test hook; no value reaches it.
+  ["release-signing-key.ts", "one fixed sentence, with nothing interpolated"],
   ["remote-server.ts", DEVICE],
   ["resi-service.ts", DEVICE],
   ["rosstalk-manager.ts", DEVICE],

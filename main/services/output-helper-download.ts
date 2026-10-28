@@ -32,6 +32,15 @@
 // A release with no digest for the asset is refused with that reason, never
 // verified some other way.
 //
+// Each payload a machine updates itself from also has a signature on the release,
+// `<payload>.sig`, made in CI with a key this server never has (see
+// release-signing-key.ts): one per helper zip, and one for the Windows kiosk's
+// launcher, which the server serves from its own tree. The server fetches each
+// once, checks it against the digest the release lists for it, the same way as
+// the zip, caches it beside the zip and serves it as it is. It does not judge the
+// signature: the machine does, against the key it was installed with. A release
+// with no signature asset is a 404, and the machine then refuses the update.
+//
 // This is a cache, not a store: nothing here is the operator's work, and losing
 // it costs one download. It lives under cache/ in the data directory, beside the
 // photo cache, and is not part of a config backup.
@@ -51,22 +60,32 @@ import { isRecord } from "./is-record.js";
 export const HELPER_ARCHES = ["arm64", "x86_64"] as const;
 export type HelperArch = (typeof HELPER_ARCHES)[number];
 
-/** A file this module will serve: the zip for one architecture, or its checksum line. */
-export interface HelperAsset {
-  arch: HelperArch;
-  kind: "zip" | "sha256";
-  /** The file's name, which is also its name in the cache. The zip is also its name
-   *  on the release; the checksum line is built here and is not a release asset. */
-  name: string;
-}
+/**
+ * A file this module will serve: the zip for one architecture, its checksum line,
+ * or the release's signature of a payload. `name` is the file's name, which is
+ * also its name in the cache. The zip and a signature are also their names on the
+ * release; the checksum line is built here and is not a release asset.
+ */
+export type HelperAsset =
+  | { kind: "zip" | "sha256"; arch: HelperArch; name: string }
+  | { kind: "sig"; name: string };
+
+/** The zip or its checksum line: the assets that belong to one architecture. */
+type ArchAsset = Extract<HelperAsset, { arch: HelperArch }>;
 
 /** Every file this route serves, by name. The request path is only ever compared
  *  with these: the name that goes into the cache path and the outgoing URL is the
  *  table's own string, never text taken from the request. */
-const HELPER_ASSETS: readonly HelperAsset[] = HELPER_ARCHES.flatMap((arch) => [
-  { arch, kind: "zip" as const, name: `StageUtilityOutput-${arch}.zip` },
-  { arch, kind: "sha256" as const, name: `StageUtilityOutput-${arch}.zip.sha256` },
-]);
+const HELPER_ASSETS: readonly HelperAsset[] = [
+  ...HELPER_ARCHES.flatMap((arch): HelperAsset[] => [
+    { arch, kind: "zip", name: `StageUtilityOutput-${arch}.zip` },
+    { arch, kind: "sha256", name: `StageUtilityOutput-${arch}.zip.sha256` },
+    { kind: "sig", name: `StageUtilityOutput-${arch}.zip.sig` },
+  ]),
+  // The Windows kiosk's launcher is served from scripts/kiosk, not the release;
+  // only its signature comes from there.
+  { kind: "sig", name: "kiosk-windows.ps1.sig" },
+];
 
 /** The asset a request path names, or null when it names none of them. */
 export function parseHelperPath(pathname: string): HelperAsset | null {
@@ -87,6 +106,8 @@ const DEFAULT_ZIP_IDLE_MS = 60 * 1000;
  *  idle. About 145 MB per architecture, so this is ~20 kB/s. */
 const DEFAULT_ZIP_TOTAL_MS = 2 * 60 * 60 * 1000;
 const DIGEST_TIMEOUT_MS = 15 * 1000;
+/** An RSA-3072 signature is 384 bytes; this is headroom, not the expectation. */
+const MAX_SIG_BYTES = 16 * 1024;
 /** A leftover temporary file older than this belongs to a fetch that died. */
 const STALE_PART_MS = 60 * 60 * 1000;
 
@@ -261,9 +282,10 @@ export class OutputHelperDownloads {
     const file = path.join(this.versionDir(version), asset.name);
     try {
       const have = await statFile(file);
-      if (have !== null && (asset.kind === "sha256" || (await this.zipStillMatches(file, have, version, asset)))) {
+      if (have !== null && (asset.kind !== "zip" || (await this.zipStillMatches(file, have, version, asset)))) {
         return { ok: true, file, size: have.size, source: "cache" };
       }
+      if (asset.kind === "sig") return await this.fetchSignature(asset, file, version);
       return asset.kind === "sha256" ? await this.fetchChecksum(asset, file, version) : await this.fetchZip(asset, file, version);
     } catch (err) {
       const refusal =
@@ -365,7 +387,39 @@ export class OutputHelperDownloads {
     return { ok: true, file, size: Buffer.byteLength(line), source: "release" };
   }
 
-  private async fetchZip(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
+  /** A payload's signature, fetched from the release and kept only once its
+   *  SHA-256 matched the digest the release lists for it, as the zip is. */
+  private async fetchSignature(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
+    // One limit over the record and the signature together: two small reads.
+    const signal = AbortSignal.timeout(this.digestTimeoutMs);
+    const record = await readCapped(await this.getRelease(asset.name, version, signal), MAX_RELEASE_JSON_BYTES);
+    if (!record) throw new Refusal(502, `the release record for v${version} is larger than ${MAX_RELEASE_JSON_BYTES} bytes; refusing it`);
+    // A release that lists no signature is a 404 from here, which the machine
+    // reads as "missing" and refuses the update for.
+    const expected = assetDigest(record.toString("utf8"), version, asset.name);
+    const res = await this.get(`${this.hosts().download}/v${version}/${asset.name}`, {
+      zipName: asset.name,
+      version,
+      subject: asset.name,
+      missing: `the release for v${version} has no ${asset.name}`,
+      signal,
+    });
+    let sig: Buffer | null;
+    try {
+      sig = await readCapped(res, MAX_SIG_BYTES);
+    } catch (err) {
+      throw new Refusal(502, `${asset.name} did not finish downloading: ${fetchFailureMessage(err, "the release host")}`);
+    }
+    if (!sig) throw new Refusal(502, `${asset.name} is larger than ${MAX_SIG_BYTES} bytes; refusing it`);
+    const got = crypto.createHash("sha256").update(sig).digest("hex");
+    if (got !== expected) throw new Refusal(502, `${asset.name} did not match the release's SHA-256 (expected ${expected}, got ${got}); not stored`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await atomicWrite(file, sig, { mode: 0o644 });
+    console.log(`[output-helper] fetched ${scrub(asset.name)} from the release for v${scrub(version)} and verified its SHA-256`);
+    return { ok: true, file, size: sig.byteLength, source: "release" };
+  }
+
+  private async fetchZip(asset: ArchAsset, file: string, version: string): Promise<Resolution> {
     const sumName = `${asset.name}.sha256`;
     const sumFile = path.join(this.versionDir(version), sumName);
     // The digest first, and through the same one-flight path, so a Mac that

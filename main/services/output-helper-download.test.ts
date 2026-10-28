@@ -20,6 +20,8 @@ import { assetDigest, OutputHelperDownloads, parseChecksum, parseHelperPath, pru
 const VERSION = "1.2.3-beta.4";
 const ZIP = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip") as HelperAsset;
 const SUM = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip.sha256") as HelperAsset;
+const ZIP_SIG = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip.sig") as HelperAsset;
+const LAUNCHER_SIG = parseHelperPath("/kiosk/kiosk-windows.ps1.sig") as HelperAsset;
 const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest("hex");
 
 const API_PATH = `/api/releases/tags/v${VERSION}`;
@@ -104,6 +106,15 @@ describe("the helper download path", () => {
   it("names exactly the two architectures and the checksum beside each", () => {
     assert.deepEqual(parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip"), { arch: "arm64", kind: "zip", name: "StageUtilityOutput-arm64.zip" });
     assert.deepEqual(parseHelperPath("/kiosk/StageUtilityOutput-x86_64.zip.sha256"), { arch: "x86_64", kind: "sha256", name: "StageUtilityOutput-x86_64.zip.sha256" });
+  });
+
+  it("names a signature beside each zip, and one for the Windows launcher, and no other", () => {
+    assert.deepEqual(parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip.sig"), { kind: "sig", name: "StageUtilityOutput-arm64.zip.sig" });
+    assert.deepEqual(parseHelperPath("/kiosk/StageUtilityOutput-x86_64.zip.sig"), { kind: "sig", name: "StageUtilityOutput-x86_64.zip.sig" });
+    assert.deepEqual(parseHelperPath("/kiosk/kiosk-windows.ps1.sig"), { kind: "sig", name: "kiosk-windows.ps1.sig" });
+    for (const p of ["/kiosk/StageUtilityOutput-arm64.zip.sha256.sig", "/kiosk/kiosk-update-windows.ps1.sig", "/kiosk/install-macos.sh.sig", "/kiosk/kiosk-windows.ps1.sig.sig"]) {
+      assert.equal(parseHelperPath(p), null, p);
+    }
   });
 
   it("refuses everything else, traversal included", () => {
@@ -254,6 +265,92 @@ describe("fetching the helper from the release", () => {
       const r = await refused(t, make({ digestTimeoutMs: 50 }));
       assert.equal(r.status, 404);
       assert.match(r.message, /not in the cache and could not be fetched/);
+    });
+  });
+
+  describe("a payload's signature", () => {
+    const signature = crypto.randomBytes(384);
+
+    for (const asset of [ZIP_SIG, LAUNCHER_SIG]) {
+      it(`fetches ${asset.name} once, checked against the release's digest for it, then serves it from the cache`, async (t) => {
+        const lines = captureConsole(t, "log");
+        release.publish(asset.name, signature);
+        const dl = make();
+        const first = await dl.resolve(asset);
+        assert.ok(first.ok && first.source === "release", JSON.stringify(first));
+        assert.deepEqual(await fs.readFile(first.file), signature);
+        assert.equal(first.size, 384);
+        assert.equal(release.count(`/${asset.name}`), 1);
+        assert.equal(release.apiCalls(), 1, "its digest comes from the release record");
+        assert.ok(lines.includes(`[output-helper] fetched ${asset.name} from the release for v${VERSION} and verified its SHA-256`), lines.join("\n"));
+
+        const asked = release.requests.length;
+        release.offline = true;
+        const restarted = make(); // a new process, with no internet
+        const again = await restarted.resolve(asset);
+        assert.ok(again.ok && again.source === "cache", JSON.stringify(again));
+        assert.equal(release.requests.length, asked, "a cached signature does not go back to the network");
+      });
+    }
+
+    it("answers 404 when the release lists no signature, fetches nothing else, and stores nothing", async (t) => {
+      const lines = captureConsole(t, "warn");
+      release.publish(ZIP.name, Buffer.from("zip")); // a release from before signing
+      const r = await make().resolve(ZIP_SIG);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 404);
+      assert.equal(r.message, `the release for v${VERSION} has no ${ZIP_SIG.name}`);
+      assert.equal(release.count(".sig"), 0, "no digest, no download");
+      assert.deepEqual(await listCache(), []);
+      assert.ok(lines.some((l) => l.startsWith(`[output-helper] ${ZIP_SIG.name} failed: the release for v${VERSION} has no`)), lines.join("\n"));
+    });
+
+    it("refuses a signature that does not match the release's digest for it, and stores nothing", async (t) => {
+      captureConsole(t, "warn");
+      release.publish(LAUNCHER_SIG.name, signature, sha("another file"));
+      const r = await make().resolve(LAUNCHER_SIG);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 502);
+      assert.match(r.message, /^kiosk-windows\.ps1\.sig did not match the release's SHA-256 \(expected [0-9a-f]{64}, got [0-9a-f]{64}\); not stored$/);
+      assert.deepEqual(await listCache(), []);
+    });
+
+    it("refuses a signature over 16 KiB without storing it", async (t) => {
+      captureConsole(t, "warn");
+      release.publish(ZIP_SIG.name, Buffer.alloc(16 * 1024 + 1, 1));
+      const r = await make().resolve(ZIP_SIG);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 502);
+      assert.match(r.message, /is larger than 16384 bytes; refusing it/);
+      assert.deepEqual(await listCache(), []);
+    });
+
+    it("gives up on a signature download that never answers, and stores nothing", { timeout: 3000 }, async (t) => {
+      captureConsole(t, "warn");
+      release.publish(ZIP_SIG.name, signature);
+      const real = release.fetch;
+      release.fetch = (input, init) =>
+        new URL(String(input)).pathname.endsWith(".sig")
+          ? new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))
+          : real(input, init);
+      const r = await make({ digestTimeoutMs: 50 }).resolve(ZIP_SIG);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 404);
+      assert.match(r.message, /not in the cache and could not be fetched/);
+      assert.deepEqual(await listCache(), []);
+    });
+
+    it("shares one fetch between concurrent requests", async (t) => {
+      captureConsole(t, "log");
+      release.publish(ZIP_SIG.name, signature);
+      let open!: () => void;
+      release.gate = new Promise<void>((r) => (open = r));
+      const dl = make();
+      const both = Promise.all([dl.resolve(ZIP_SIG), dl.resolve(ZIP_SIG)]);
+      open();
+      const [a, b] = await both;
+      assert.ok(a.ok && b.ok);
+      assert.equal(release.count(".sig"), 1);
     });
   });
 

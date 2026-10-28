@@ -410,6 +410,28 @@ That leaves the PC's `device-id` and `token` in `%PROGRAMDATA%\StageUtility`: wi
 kept, installing again keeps the PC's binding, and removing them makes it a new device
 whose screen is set up again.
 
+## Signed updates
+
+Every payload a machine updates itself from is signed in CI, as part of the release,
+by a key the server never has: each Mac output helper zip, and the Windows kiosk's
+launcher. The signature is RSA-3072 with PKCS#1 v1.5 over SHA-256, chosen because
+both machines can check it with what they already have, macOS's `/usr/bin/openssl` and
+Windows PowerShell 5.1.
+
+The server serves each signature beside its payload, fetched from the release for its
+own version and checked against the digest the releases API lists for it, like the zip:
+
+| Request | |
+|---|---|
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sig` | The release's signature of that zip |
+| `GET /kiosk/kiosk-windows.ps1.sig` | The release's signature of the launcher, which the server itself serves from its own `scripts/kiosk`. It verifies only when that file is byte for byte the one the release was built from |
+| `GET /kiosk/release-signing.pub.pem` \| `.xml` | The public key, from `scripts/kiosk/release-signing.pub.pem`, as PEM and as .NET's `<RSAKeyValue>` |
+
+Each is read once per version and cached beside the zips in
+`cache/output-helper/<version>/`. A release that lists no signature answers `404`, and
+the machine refuses the update. Each signature costs one more call to the releases API
+the first time it is asked for, from the same 60-an-hour allowance.
+
 ## Size
 
 Two things say how big a screen is, and they can disagree:

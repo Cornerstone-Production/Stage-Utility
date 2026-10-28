@@ -27,6 +27,7 @@ import { APP_ROOT } from "../app-root.js";
 import { getUserDataPath } from "../app-paths.js";
 import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
 import { pkgVersion } from "../updater.js";
+import { readSigningKey } from "../release-signing-key.js";
 import { scrub } from "../scrub.js";
 import { isStamped, originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
@@ -201,11 +202,31 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
-  // ── The Mac output helper, and the checksum its installer verifies ──────
+  // ── The release signing key, for an installer to install ────────────────
+  // The public half, from this build's tree: PEM for a Mac's openssl, XML for
+  // Windows PowerShell's RSA. The installer writes it beside the updater, which
+  // verifies every payload against that copy from then on. See
+  // release-signing-key.ts.
+  if (method === "GET" && (pathname === "/kiosk/release-signing.pub.pem" || pathname === "/kiosk/release-signing.pub.xml")) {
+    let key;
+    try {
+      key = await readSigningKey();
+    } catch (err) {
+      console.error(`[helper-update] cannot give an installer the release signing key, so no updater can be installed: ${scrub(errorMessage(err))}`);
+      error(res, "this build has no usable release signing key", 500);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end(pathname.endsWith(".pem") ? key.pem : key.xml);
+    return;
+  }
+
+  // ── The Mac output helper, the checksum its installer verifies, and the
+  //    release's signature of each payload a machine updates from ──────────
   // A Mac on a network with no internet gets the app from here. The first
   // request fetches it from the release this server is running; see
   // output-helper-download.ts for what is bounded and why.
-  if (method === "GET" && pathname.startsWith("/kiosk/StageUtilityOutput-")) {
+  if (method === "GET" && (pathname.startsWith("/kiosk/StageUtilityOutput-") || pathname === "/kiosk/kiosk-windows.ps1.sig")) {
     const asset = parseHelperPath(pathname);
     if (!asset) {
       error(res, "unknown download", 404);
@@ -217,7 +238,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     res.writeHead(200, {
-      "content-type": asset.kind === "zip" ? "application/zip" : "text/plain; charset=utf-8",
+      "content-type": asset.kind === "zip" ? "application/zip" : asset.kind === "sig" ? "application/octet-stream" : "text/plain; charset=utf-8",
       "content-length": String(got.size),
       "content-disposition": `attachment; filename="${asset.name}"`,
       "cache-control": "no-store",
