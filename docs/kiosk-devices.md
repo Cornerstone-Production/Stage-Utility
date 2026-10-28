@@ -459,7 +459,8 @@ the first time it is asked for, from the same 60-an-hour allowance.
 (`/kiosk/release-signing.pub.pem`), verifies the zip with it, and writes it to
 `/Library/Application Support/StageUtilityUpdater/release-signing.pub.pem`. The updater
 verifies every update with `/usr/bin/openssl dgst -sha256 -verify` against that file
-and never asks the server for a key. No readable key there holds the update as failed.
+and never asks the server for a key. A key that is not a 3072-bit RSA public key is
+refused at install, and no such key there holds an update as failed.
 
 **On a Windows PC**, the installer downloads the key as `/kiosk/release-signing.pub.xml`
 and writes it to `%PROGRAMFILES%\StageUtility\release-signing.pub.xml`, beside the

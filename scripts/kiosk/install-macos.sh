@@ -555,9 +555,12 @@ try_source() {
   fi
 }
 
-# Whether a file is a public key openssl can read: a regular file, not a link.
+# Whether a file is the kind of key releases are signed with: a regular file, not a
+# link, holding an RSA public key of 3072 bits. LibreSSL says "RSA Public-Key:
+# (3072 bit)", OpenSSL 3 "Public-Key: (3072 bit)".
 usable_key() {
-  [ -f "$1" ] && [ ! -L "$1" ] && "$OPENSSL" pkey -pubin -in "$1" -noout >/dev/null 2>&1
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  "$OPENSSL" rsa -pubin -in "$1" -noout -text 2>/dev/null | head -n 1 | grep -Eq 'Public-Key: \(3072 bit\)'
 }
 
 # The key an install verifies with, and leaves for the updater: the server's. The
@@ -569,7 +572,7 @@ fetch_signing_key() { # origin
   if ! fetch_to "$1/kiosk/release-signing.pub.pem" "$SIGNING_KEY" 60 0; then
     die "could not get the release signing key: $1/kiosk/release-signing.pub.pem $WHY. Every download is checked against it, so nothing was installed."
   fi
-  usable_key "$SIGNING_KEY" || die "the release signing key from $1 is not a public key $OPENSSL can read, so nothing was installed."
+  usable_key "$SIGNING_KEY" || die "the release signing key from $1 is not a 3072-bit RSA public key $OPENSSL can read, so nothing was installed."
 }
 
 # The release's signature of the zip at $WORK/$ZIP_NAME, checked against SIGNING_KEY.

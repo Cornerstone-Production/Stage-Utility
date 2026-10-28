@@ -720,7 +720,9 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
 
     for (const [label, route, why] of [
       ["the server has no usable key", { status: 500, body: '{"error":"this build has no usable release signing key"}' }, /could not get the release signing key: .*\/kiosk\/release-signing\.pub\.pem answered 500: this build has no usable release signing key\. Every download is checked against it, so nothing was installed\./],
-      ["what the server sends is not a key", { body: "PLACEHOLDER" }, /the release signing key from .* is not a public key \/usr\/bin\/openssl can read, so nothing was installed\./],
+      ["what the server sends is not a key", { body: "PLACEHOLDER" }, /the release signing key from .* is not a 3072-bit RSA public key \/usr\/bin\/openssl can read, so nothing was installed\./],
+      ["what the server sends is a 2048-bit key", { body: testSigningKey(2048).publicPem }, /is not a 3072-bit RSA public key/],
+      ["what the server sends is an Ed25519 key", { body: crypto.generateKeyPairSync("ed25519").publicKey.export({ format: "pem", type: "spki" }).toString() }, /is not a 3072-bit RSA public key/],
     ] as const) {
       it(`stops before downloading anything when ${label}`, async () => {
         publish(stageServer, "/kiosk", zipA);
@@ -1324,6 +1326,7 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     for (const [label, plant] of [
       ["there is no key installed", () => fs.rmSync(keyFile())],
       ["the installed key is not a key", () => fs.writeFileSync(keyFile(), "not a key\n")],
+      ["the installed key is 2048-bit", () => fs.writeFileSync(keyFile(), testSigningKey(2048).publicPem)],
       ["the installed key is a link", () => {
         const real = path.join(scratch, "elsewhere.pem");
         fs.writeFileSync(real, KEY.publicPem);
