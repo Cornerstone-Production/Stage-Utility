@@ -9,7 +9,8 @@
 // applies the same end-of-line conversion a checkout does, under each setting a
 // machine might have, and the result must be the blob. The files are read from
 // the release workflow's signing step, so a payload signed from the tree and not
-// pinned in .gitattributes goes red.
+// pinned in .gitattributes goes red. (The server serves its own checkout of each,
+// so the tagged blob and the bytes served must be the same.)
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -23,14 +24,12 @@ import { parse } from "yaml";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = path.join(REPO, ".github", "workflows", "release.yml");
 
-/** The payloads the signing step names that live in the tree (not build output). */
+/** The files the sign job signs as tagged blobs: each `git show "v$V:<path>"` in its signing step. */
 function signedFromTree(): string[] {
   const jobs = (parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, { steps?: { name?: string; run?: string }[] }> }).jobs;
-  const step = jobs["artifacts"].steps?.find((s) => s.name === "Sign the update payloads");
-  assert.ok(step?.run, "no signing step in the artifacts job");
-  const m = /payloads=\(([^)]*)\)/.exec(step.run);
-  assert.ok(m, "the signing step no longer starts its list as payloads=(...)");
-  return m[1].split(/\s+/).filter((p) => p.startsWith("scripts/"));
+  const step = jobs["sign"]?.steps?.find((s) => s.name === "Sign the update payloads");
+  assert.ok(step?.run, "no signing step in the sign job");
+  return [...step.run.matchAll(/git show "v\$V:([^"]+)"/g)].map((m) => m[1]).sort();
 }
 
 const git = (args: string[]) => spawnSync("git", args, { cwd: REPO, encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
