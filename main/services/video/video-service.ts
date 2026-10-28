@@ -23,7 +23,7 @@ import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
 import { audioFieldsOf, resolveAudioFields } from "./audio-input.js";
-import { planAudio, resolveAudio, type ConverterWhy, type ListenCapability } from "./audio-listen.js";
+import { classifyAudio, listenPathName, planAudio, resolveAudio, type ConverterWhy, type ListenCapability } from "./audio-listen.js";
 import { systemFfmpegFinder, type FfmpegFinder } from "./ffmpeg-system.js";
 import { AudioMemory } from "./audio-memory.js";
 import { embedSrc } from "./embed.js";
@@ -103,6 +103,8 @@ export const RTSP_OFF: RelayRtsp = { on: false, why: null };
 
 /** A feed's audio as one reconcile settled it, for reportAudio. */
 interface SettledAudio {
+  /** sourceCodecKey of the feed this was settled for. */
+  key: string;
   name: string;
   status: FeedAudioStatus;
   why?: ConverterWhy;
@@ -289,6 +291,19 @@ function mergedFeedPatch(
     audioConversion: obj.audioConversion !== undefined ? obj.audioConversion : existing.audioConversion,
     audioSourceUrl: obj.audioSourceUrl !== undefined ? obj.audioSourceUrl : existing.audioSourceUrl,
   };
+}
+
+/** What ffmpeg prints when it opened the input and cannot write it to the relay
+ *  as it is (raw ADTS AAC: "Could not write header (incorrect codec parameters
+ *  ?)"), as opposed to an input it could not open or a relay that did not answer (the same
+ *  "Could not write header" line, ending "Connection refused"). */
+const COPY_CANNOT_WORK = /Could not write header[^\n]*Invalid data found|incorrect codec parameters \?\): Invalid data|not currently supported in container|Could not find tag for codec/i;
+
+/** The audio settings a remembered source codec belongs to: a changed address or
+ *  conversion no longer matches it. */
+function sourceCodecKey(feed: VideoFeed): string {
+  const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+  return `${audioConversion}\n${audioSourceUrl ?? ""}`;
 }
 
 class VideoService {
@@ -1191,6 +1206,8 @@ class VideoService {
         audioChanged = true;
       }
 
+      if (this.observeSourceCodec(feed, this.lastPaths.get(listenPathName(feed.id)))) audioChanged = true;
+
       if (this.pendingBFrames.has(feed.id)) {
         const pendingSince = this.pendingBFramesAt.get(feed.id) ?? 0;
         if (now - pendingSince >= PENDING_MARK_TTL_MS) {
@@ -1424,6 +1441,7 @@ class VideoService {
     const now = Date.now();
     const state = this.audio.get(id);
     if (event.kind === "listen-started") {
+      state.replacedUntilStart = false;
       if (state.running) return;
       state.running = true;
       this.audio.outage.forget(id);
@@ -1435,6 +1453,7 @@ class VideoService {
       // A converter that cannot even launch (the ffmpeg file moved, say) is a
       // reason to look for ffmpeg again, not only to log.
       if (LAUNCH_ERROR.test(event.reason)) this.recheckFfmpeg(now);
+      else await this.noteCopyFailed(id, event.lastOutput);
       const decision = this.audio.outage.fail(id, event.reason, now);
       if (!decision.log) return;
       const output = event.lastOutput ? ` — ffmpeg said: ${event.lastOutput}` : "";
@@ -1671,7 +1690,7 @@ class VideoService {
         continue;
       }
       const resolved = await this.resolveFeedAudio(feed);
-      audio.set(feed.id, { name: feed.name, status: resolved.status, why: resolved.why });
+      audio.set(feed.id, { key: sourceCodecKey(feed), name: feed.name, status: resolved.status, why: resolved.why });
       const listen = resolved.listenCommand !== undefined ? { listenCommand: resolved.listenCommand } : {};
       if (s.kind === "pull") {
         out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, await this.storedPassword(feed.id)), ...listen });
@@ -1701,11 +1720,67 @@ class VideoService {
     return { ok: true, ffmpegPath: ffmpeg.resolvedPath, rtspPort: this.attachedPorts.rtsp };
   }
 
+  /** A pass-through `-listen` path copies its audio source address, so whatever
+   *  that carries reaches the browser as it is. When the path reports a codec a
+   *  browser cannot play, remember it for this address and conversion so the next
+   *  plan encodes instead; a memory for other settings is dropped. True when the
+   *  plan changed. */
+  private observeSourceCodec(feed: VideoFeed, listen: RelayPath | undefined): boolean {
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const state = this.audio.peek(feed.id);
+    const key = sourceCodecKey(feed);
+    if (state?.sourceCodec && state.sourceCodec.key !== key) {
+      state.sourceCodec = undefined;
+      return true;
+    }
+    if (!audioSourceUrl || audioConversion === "off" || state?.sourceCodec) return false;
+    // The path describes the settings it was planned from, which an edit since may have changed.
+    if (state?.plannedKey !== key) return false;
+    if (!listen?.ready || typeof listen.audio !== "string" || classifyAudio(listen.audio) === "direct") return false;
+    this.audio.get(feed.id).sourceCodec = { key, codec: listen.audio };
+    console.log(`[video] ${scrub(feed.name)}: the audio source address carries ${scrub(listen.audio)}, not Opus; its audio is re-encoded to Opus`);
+    return true;
+  }
+
+  /** The relay now holds the `-listen` command planned from these settings. A path
+   *  seen before the change described the old ones, so it is dropped. */
+  private notePlanned(audio: Map<string, SettledAudio>): void {
+    for (const [id, { key }] of audio) {
+      const state = this.audio.get(id);
+      if (state.plannedKey === key) continue;
+      if (state.plannedKey !== undefined) state.replacedUntilStart = true;
+      state.plannedKey = key;
+      this.lastPaths.delete(listenPathName(id));
+    }
+  }
+
+  /** A pass-through converter that fails to run: ffmpeg cannot always copy a source
+   *  into the relay (raw AAC has no usable codec parameters), and then the path
+   *  never comes up to be observed. Remember that, so the same address is read
+   *  again with its audio encoded. Only a failure that says ffmpeg opened the
+   *  input and could not write the output counts: an unreachable or reset source
+   *  says nothing about its codec. A failure while already encoding is not this,
+   *  nor is one from a command planned from other settings than the feed has now. */
+  private async noteCopyFailed(feedId: string, lastOutput: string | null): Promise<void> {
+    if (!lastOutput || !COPY_CANNOT_WORK.test(lastOutput)) return;
+    const feed = (await loadFeedsFile()).feeds.find((f) => f.id === feedId);
+    if (!feed) return;
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const state = this.audio.get(feedId);
+    const key = sourceCodecKey(feed);
+    if (!audioSourceUrl || audioConversion === "off" || state.plannedKey !== key || state.replacedUntilStart || state.sourceCodec?.key === key) return;
+    state.sourceCodec = { key, codec: null };
+    console.log(`[video] ${scrub(feed.name)}: copying the audio source address failed, so its audio is re-encoded to Opus`);
+    void this.background.track(this.reconcileRelay());
+  }
+
   /** A feed's audio, settled: the rule table (audio-listen.ts) against what the
    *  relay last reported of the feed and what ffmpeg can do. */
   private async resolveFeedAudio(feed: VideoFeed) {
     const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
-    const plan = planAudio({ conversion: audioConversion, sourceUrl: audioSourceUrl, audio: this.audio.peek(feed.id)?.codec }, feed.id);
+    const seen = this.audio.peek(feed.id);
+    const sourceCodec = seen?.sourceCodec?.key === sourceCodecKey(feed) ? seen.sourceCodec.codec : undefined;
+    const plan = planAudio({ conversion: audioConversion, sourceUrl: audioSourceUrl, audio: seen?.codec, sourceCodec }, feed.id);
     return plan.converter ? resolveAudio(plan, feed.id, await this.listenCapability()) : { status: plan.status };
   }
 
@@ -1817,6 +1892,7 @@ class VideoService {
       feeds = planned.feeds;
       await this.relay.reconcile(feeds);
       this.reportAudio(planned.audio);
+      this.notePlanned(planned.audio);
       // Both are facts about the process that was current when this
       // started; a respawn in between gets its own reconcile from the
       // readiness poll.

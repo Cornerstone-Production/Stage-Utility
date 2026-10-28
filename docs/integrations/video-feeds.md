@@ -325,13 +325,25 @@ path a listener should read:
 | `unknown` | The feed has not been seen yet, so its audio is not known | nothing |
 | `direct` | Opus, G.711, G.722 or LPCM: playable as the relay has it | the feed's own path |
 | `converted` | AAC, re-encoded to Opus on demand | `<id>-listen` |
-| `pass-through` | Read from the audio source address and copied | `<id>-listen` |
+| `pass-through` | Read from the audio source address and copied, or re-encoded to Opus when the address does not carry Opus | `<id>-listen` |
 | `unavailable` | Cannot be heard; `reason` says why | nothing |
 
 The status names the path. The playback proxy serves a feed's own path, and,
 for a `converted` or `pass-through` feed only, `/video/<id>-listen/whep`: WHEP
 and nothing else, never HLS or WHIP, and never the `-listen` path of a feed
 whose status is anything else.
+
+A pass-through `-listen` path copies the address as it is, so it assumes Opus.
+When the relay reports that path carrying another codec (AAC, MP3, anything
+WebRTC cannot play), or the copy fails because ffmpeg cannot write that source
+to the relay as it is (raw AAC, say, which leaves the path never coming up), the
+server remembers it for that address and Audio conversion and re-plans the path
+to read the same address and re-encode the audio to Opus; a listener reconnects
+onto it. A source that is unreachable or resets the connection is not taken as
+that. Changing the address or Audio conversion, or removing the feed, forgets
+it. A failure while already encoding does not switch back. If ffmpeg cannot run,
+the status is `unavailable` and the reason names the codec, or says copying
+failed.
 
 The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
 not installed on this server."). The codec is learned from the relay's track
@@ -817,10 +829,18 @@ from the server:
   SIGKILL` — and when it restarts; a failing streak's start and its recovery,
   each once, not on every retry. `relay could not rewrite its config` when a
   restart cannot write `mediamtx.yml`, retried the same way.
+- `<feed>: the audio source address carries <codec>, not Opus; its audio is
+  re-encoded to Opus` once, when a pass-through `-listen` path is seen carrying a
+  codec a browser cannot play, and `<feed>: copying the audio source address
+  failed, so its audio is re-encoded to Opus` when ffmpeg cannot write the source
+  to the relay as it is. If it cannot be converted, the `audio unavailable: ...`
+  line names the codec.
 - `relay stopped`, and why: video switched off, or no pull or push feed left.
 - `<feed>: audio converter started (<why>)` when a feed's ffmpeg starts for its
   first listener (why: the feed's audio is AAC, Audio conversion is Always, or
-  audio source address copied as it is), once, not again for a restart after a
+  audio source address copied as it is, the audio source address does not carry
+  Opus so its audio is re-encoded, or it could not be copied as it is so its audio
+  is re-encoded), once, not again for a restart after a
   failure; `audio converter stopped (not needed by anyone)` when the last
   listener has gone; `audio converter failed: <reason> — ffmpeg said: <its last
   line>` once per failing session, not on each of the relay's retries every 5

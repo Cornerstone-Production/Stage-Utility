@@ -15,7 +15,10 @@
 //                two stay in sync.
 //   pass-through ffmpeg reads the audio source address the operator named (an
 //                encoder's HTTP stream that already carries Opus) and republishes
-//                it with `-c copy`. No re-encode.
+//                it with `-c copy`. No re-encode. When the `-listen` path then
+//                reports a codec a browser cannot play (the source was AAC, MP3,
+//                ...), the planner is told (`sourceCodec`) and the same address is
+//                read again with the audio re-encoded to Opus instead.
 //
 // Everything here is pure. video-service.ts feeds it what the relay reports and
 // what ffmpeg-system.ts found; reconcile-plan.ts turns the command into a path.
@@ -54,25 +57,43 @@ export const WHY_AAC = "the feed's audio is AAC";
 export const WHY_ALWAYS = "Audio conversion is Always";
 export const WHY_PASS_THROUGH = "audio source address, copied as it is";
 export const WHY_UNKNOWN = "the feed's audio was not known when it was set up";
-export type ConverterWhy = typeof WHY_AAC | typeof WHY_ALWAYS | typeof WHY_PASS_THROUGH | typeof WHY_UNKNOWN;
+export const WHY_SOURCE_CODEC = "the audio source address does not carry Opus, so its audio is re-encoded";
+export const WHY_COPY_FAILED = "the audio source address could not be copied as it is, so its audio is re-encoded";
+export type ConverterWhy =
+  | typeof WHY_AAC
+  | typeof WHY_ALWAYS
+  | typeof WHY_PASS_THROUGH
+  | typeof WHY_UNKNOWN
+  | typeof WHY_SOURCE_CODEC
+  | typeof WHY_COPY_FAILED;
 
 export interface AudioInput {
   conversion: AudioConversion;
   sourceUrl?: string;
   audio: RelayAudio;
+  /** The audio codec the feed's `-listen` path was seen to carry while it copied
+   *  the audio source address, remembered for this address and conversion only. */
+  sourceCodec?: string | null;
 }
 
 export interface AudioPlan {
   status: FeedAudioStatus;
   /** What the feed's `-listen` path would run, or null when it needs none. It
    *  still waits on ffmpeg being usable: see resolveAudio. */
-  converter: { mode: "convert"; why: ConverterWhy } | { mode: "pass-through"; url: string; why: typeof WHY_PASS_THROUGH } | null;
+  converter:
+    | { mode: "convert"; why: ConverterWhy }
+    | { mode: "pass-through"; url: string; why: typeof WHY_PASS_THROUGH }
+    /** The audio source address again, its audio re-encoded to Opus; `codec` is what it carried, null when copying it failed without saying. */
+    | { mode: "encode-source"; url: string; codec: string | null; why: typeof WHY_SOURCE_CODEC | typeof WHY_COPY_FAILED }
+    | null;
 }
 
 /**
  * The rule table, as if ffmpeg were available.
  *
- *  - An audio source address, with the conversion not Off: pass-through.
+ *  - An audio source address, with the conversion not Off: pass-through, or,
+ *    once its `-listen` path was seen carrying a codec a browser cannot play
+ *    (`sourceCodec`), or copying it failed (null), the same address re-encoded to Opus.
  *  - Off never runs ffmpeg for the feed, address or not.
  *  - A feed known to have no audio track has none to convert.
  *  - A codec browsers receive as it is is read directly, unless the setting is
@@ -85,8 +106,14 @@ export interface AudioPlan {
  *    which path a listener reads once the feed shows up.
  */
 export function planAudio(input: AudioInput, id: string): AudioPlan {
-  const { conversion, sourceUrl, audio } = input;
+  const { conversion, sourceUrl, audio, sourceCodec } = input;
   if (sourceUrl && conversion !== "off") {
+    if (sourceCodec !== undefined && (sourceCodec === null || classifyAudio(sourceCodec) !== "direct")) {
+      return {
+        status: { state: "pass-through", listenPath: listenPathName(id) },
+        converter: { mode: "encode-source", url: sourceUrl, codec: sourceCodec, why: sourceCodec === null ? WHY_COPY_FAILED : WHY_SOURCE_CODEC },
+      };
+    }
     return {
       status: { state: "pass-through", listenPath: listenPathName(id) },
       converter: { mode: "pass-through", url: sourceUrl, why: WHY_PASS_THROUGH },
@@ -148,15 +175,11 @@ export function listenArgv(
     "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "65536", "-analyzeduration", "500000",
   ];
   const out = ["-f", "rtsp", "-rtsp_transport", "tcp", `${relay}/${listenPathName(id)}`];
-  if (converter.mode === "pass-through") {
-    return [ffmpegPath, ...common, "-protocol_whitelist", PASS_THROUGH_PROTOCOLS, "-rw_timeout", "10000000", "-i", converter.url, "-c", "copy", ...out];
-  }
-  return [
-    ffmpegPath, ...common,
-    "-protocol_whitelist", RELAY_PROTOCOLS, "-rtsp_transport", "tcp", "-i", `${relay}/${id}`,
-    "-c:v", "copy", "-c:a", "libopus", "-b:a", "128k", "-application", "lowdelay", "-frame_duration", "20",
-    ...out,
-  ];
+  const opus = ["-c:v", "copy", "-c:a", "libopus", "-b:a", "128k", "-application", "lowdelay", "-frame_duration", "20"];
+  const fromSource = ["-protocol_whitelist", PASS_THROUGH_PROTOCOLS, "-rw_timeout", "10000000"];
+  if (converter.mode === "pass-through") return [ffmpegPath, ...common, ...fromSource, "-i", converter.url, "-c", "copy", ...out];
+  if (converter.mode === "encode-source") return [ffmpegPath, ...common, ...fromSource, "-i", converter.url, ...opus, ...out];
+  return [ffmpegPath, ...common, "-protocol_whitelist", RELAY_PROTOCOLS, "-rtsp_transport", "tcp", "-i", `${relay}/${id}`, ...opus, ...out];
 }
 
 /** An argv as the one string MediaMTX's runOnDemand takes. MediaMTX 1.21.1 does
@@ -190,13 +213,21 @@ export function resolveAudio(
   const { converter } = plan;
   if (!converter) return { status: plan.status };
   const speculative = converter.why === WHY_UNKNOWN;
-  const fail = (reason: string) => ({ status: speculative ? plan.status : ({ state: "unavailable", reason } as FeedAudioStatus) });
+  // An address whose audio is known not to be Opus cannot be left as it was: the
+  // reason names the codec instead of leaving the listener over silence.
+  const named = (reason: string) =>
+    converter.mode !== "encode-source"
+      ? reason
+      : converter.codec === null
+        ? `copying the audio source address failed, and its audio cannot be converted: ${reason}`
+        : `the audio source address carries ${converter.codec}, which a browser cannot play live, and it cannot be converted: ${reason}`;
+  const fail = (reason: string) => ({ status: speculative ? plan.status : ({ state: "unavailable", reason: named(reason) } as FeedAudioStatus) });
   if (!capability.ok) return fail(capability.reason);
   if (!FEED_ID_PATTERN.test(id) || isReservedFeedId(id)) return fail("the feed's id cannot be used as a relay path");
   // The one choke point for an address: a store restored or edited by hand is not
   // validated on load, and `file:`, `tcp://...?listen=1` or `udp://` must never
   // reach ffmpeg.
-  if (converter.mode === "pass-through") {
+  if (converter.mode !== "convert") {
     const problem = audioSourceUrlProblem(converter.url);
     if (problem) return fail(problem);
   }

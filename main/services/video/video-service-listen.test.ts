@@ -463,3 +463,247 @@ test("a relay that goes takes with it what was learned from it: codecs, and whic
   await videoService.whenBackgroundIdle();
   assert.equal(logs.filter((l) => l.includes("audio converter started")).length, 2, "a converter of the old relay still counted as running");
 });
+
+// A pass-through `-listen` path copies the audio source address. When the relay
+// reports that path carrying AAC, the feed is re-planned to encode that address.
+const SRC = "http://192.0.2.28/0.ts";
+const listenCommandOf = (reconciled: RelayFeed[][], id: string) => reconciled.at(-1)!.find((f) => f.id === id)?.listenCommand ?? "";
+
+/** A poll the relay's new answer reaches, and the reconcile it starts. One may already be in flight with the old answer, so wait it out first. */
+async function seen() {
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  await within(videoService.whenBackgroundIdle(), "the reconcile a poll starts");
+}
+
+test("a pass-through source seen as AAC on the -listen path is re-planned to encode Opus, and logged", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const logs = captureConsole(t, "log");
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  let listenAudio: string | null = null;
+  const reconciled: RelayFeed[][] = [];
+  await attachWith(() => [ready(id, "H264-only"), ...(listenAudio ? [ready(`${id}-listen`, listenAudio)] : [])], reconciled);
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-c' 'copy'/);
+
+  listenAudio = MPEG4;
+  await seen();
+  assert.match(listenCommandOf(reconciled, id), new RegExp(`'-i' '${SRC.replaceAll(".", "\\.")}' '-c:v' 'copy' '-c:a' 'libopus'`));
+  assert.deepEqual(await audioOf(id), { state: "pass-through", listenPath: `${id}-listen` });
+  assert.equal(logs.filter((l) => l.includes("not Opus") && l.includes(MPEG4)).length, 1, logs.join("\n"));
+
+  // Once encoding, the path carries Opus; that must not undo it.
+  listenAudio = "Opus";
+  await seen();
+  assert.match(listenCommandOf(reconciled, id), /'-c:a' 'libopus'/);
+});
+
+test("a pass-through source seen as Opus stays a copy", async () => {
+  useFfmpeg(FFMPEG_OK);
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  const reconciled: RelayFeed[][] = [];
+  await attachWith(() => [ready(id, MPEG4), ready(`${id}-listen`, "Opus")], reconciled);
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-c' 'copy'/);
+});
+
+test("changing the audio source address clears what was seen of the old source", async () => {
+  useFfmpeg(FFMPEG_OK);
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  let listenAudio: string | null = MPEG4;
+  const reconciled: RelayFeed[][] = [];
+  await attachWith(() => [ready(id, "H264-only"), ...(listenAudio ? [ready(`${id}-listen`, listenAudio)] : [])], reconciled);
+  await videoService.reconcileRelay();
+  await seen();
+  assert.match(listenCommandOf(reconciled, id), /'-c:a' 'libopus'/);
+
+  listenAudio = "Opus";
+  const moved = await videoService.updateFeed(id, { audioSourceUrl: "http://192.0.2.29/0.ts" });
+  assert.ok(moved.ok, JSON.stringify(moved));
+  await seen();
+  assert.match(listenCommandOf(reconciled, id), /'-i' 'http:\/\/192\.0\.2\.29\/0\.ts' '-c' 'copy'/);
+});
+
+test("a source that needs encoding with no usable ffmpeg is unavailable naming the codec, and the reason is logged", async (t) => {
+  useFfmpeg(FFMPEG_MISSING);
+  const warns = captureConsole(t, "warn");
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  // ffmpeg missing means pass-through is unavailable too, so the path is never
+  // up to observe; seed it as if it had been up before ffmpeg went missing.
+  await attachWith(() => [ready(id, "H264-only"), ready(`${id}-listen`, MPEG4)]);
+  await videoService.reconcileRelay();
+  const audio = await audioOf(id);
+  assert.equal(audio?.state, "unavailable");
+  assert.match(audio?.state === "unavailable" ? audio.reason : "", /MPEG-4 Audio.*cannot be converted/);
+  assert.equal(warns.filter((l) => l.includes("audio unavailable") && l.includes("MPEG-4 Audio")).length, 1, warns.join("\n"));
+});
+
+const HEADER_FAILURE = "[out#0/rtsp @ 0xc72c48000] Could not write header (incorrect codec parameters ?): Invalid data found when processing input";
+// ffmpeg cannot always copy a source into the relay (raw ADTS AAC: "Could not
+// write header"), so the -listen path never comes up and no codec is ever seen.
+test("a pass-through converter that fails is re-planned to encode the same address, once, and a failure while encoding does not loop", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const logs = captureConsole(t, "log");
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  const sup = new FakeSupervisor();
+  const reconciled: RelayFeed[][] = [];
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay({ status: async () => [ready(id, "H264-only")], reconcile: async (f) => void reconciled.push(f) }), sup as never, DEFAULT_VIDEO_PORTS, { on: true });
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-c' 'copy'/);
+
+  const failed = `2026/10/22 21:01:12 INF [path ${id}-listen] runOnDemand command exited: command exited with code 183`;
+  line(sup, HEADER_FAILURE);
+  line(sup, failed);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), new RegExp(`'-i' '${SRC.replaceAll(".", "\\.")}' '-c:v' 'copy' '-c:a' 'libopus'`));
+  assert.deepEqual(await audioOf(id), { state: "pass-through", listenPath: `${id}-listen` });
+  assert.equal(logs.filter((l) => l.includes("copying the audio source address failed, so its audio is re-encoded to Opus")).length, 1, logs.join("\n"));
+
+  // Failing again while already encoding stays encoding.
+  line(sup, HEADER_FAILURE);
+  line(sup, failed);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-c:a' 'libopus'/);
+  assert.equal(logs.filter((l) => l.includes("copying the audio source address failed")).length, 1);
+});
+
+test("a converter that fails on a feed with no audio source address is not re-planned", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const logs = captureConsole(t, "log");
+  const id = await addFeed({ name: "Plain" });
+  const sup = new FakeSupervisor();
+  const reconciled: RelayFeed[][] = [];
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay({ status: async () => [ready(id, MPEG4)], reconcile: async (f) => void reconciled.push(f) }), sup as never, DEFAULT_VIDEO_PORTS, { on: true });
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  await videoService.reconcileRelay();
+  line(sup, HEADER_FAILURE);
+  line(sup, `2026/10/22 21:01:12 INF [path ${id}-listen] runOnDemand command exited: command exited with code 1`);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-i' 'rtsp:\/\/127\.0\.0\.1:8554\//);
+  assert.deepEqual(logs.filter((l) => l.includes("copying the audio source address")), []);
+});
+
+/** A pass-through feed with its first reconcile applied. `reported` is what the relay says its -listen path carries: set by the test, and dropped whenever a reconcile changes the command (the relay replaces the path). `gate` holds a reconcile open, as the relay can be for a moment. */
+async function passThroughFeed(reported: string | null) {
+  const id = await addFeed({ name: "Utility", audioSourceUrl: SRC });
+  const sup = new FakeSupervisor();
+  const reconciled: RelayFeed[][] = [];
+  const control = { reported, gate: null as Promise<void> | null };
+  let lastCommand: string | undefined;
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(
+    fakeRelay({
+      status: async () => [ready(id, "H264-only"), ...(control.reported ? [ready(`${id}-listen`, control.reported)] : [])],
+      reconcile: async (f) => {
+        if (control.gate) await control.gate;
+        reconciled.push(f);
+        const command = f.find((x) => x.id === id)?.listenCommand;
+        if (command !== lastCommand) control.reported = null;
+        lastCommand = command;
+      },
+    }),
+    sup as never,
+    DEFAULT_VIDEO_PORTS,
+    { on: true },
+  );
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  await videoService.reconcileRelay();
+  control.reported = reported;
+  await seen();
+  return { id, sup, reconciled, control };
+}
+
+test("a failure that is not ffmpeg unable to copy the source (refused, 404, reset, relay down) does not re-plan", async () => {
+  useFfmpeg(FFMPEG_OK);
+  const { id, sup, reconciled } = await passThroughFeed(null);
+  for (const out of [
+    "[tcp @ 0xc72c48000] Connection to tcp://192.0.2.28:80?timeout=0 failed: Connection refused",
+    "[in#0 @ 0xc72c48000] Error opening input: Server returned 404 Not Found",
+    "[in#0/aac @ 0xc72c48000] Error during demuxing: Connection reset by peer",
+    "[out#0/rtsp @ 0xc72c48000] Could not write header (incorrect codec parameters ?): Connection refused",
+  ]) {
+    line(sup, out);
+    line(sup, `2026/10/22 21:01:12 INF [path ${id}-listen] runOnDemand command exited: command exited with code 183`);
+    await videoService.whenBackgroundIdle();
+    await videoService.reconcileRelay();
+    assert.match(listenCommandOf(reconciled, id), /'-c' 'copy'/, out);
+  }
+});
+
+const NEW_SRC = "http://192.0.2.29/0.ts";
+const COPIES_NEW = /'-i' 'http:\/\/192\.0\.2\.29\/0\.ts' '-c' 'copy'/;
+
+test("a -listen path seen after an address edit, before the relay has replaced it, describes the old address and is not remembered for the new one", async () => {
+  useFfmpeg(FFMPEG_OK);
+  const { id, reconciled, control } = await passThroughFeed(null);
+  assert.match(listenCommandOf(reconciled, id), /'-c' 'copy'/);
+  // The relay is slow to take the edit; the old address's path still reports AAC meanwhile.
+  let release!: () => void;
+  control.gate = new Promise<void>((r) => (release = r));
+  control.reported = MPEG4;
+  const moving = videoService.updateFeed(id, { audioSourceUrl: NEW_SRC });
+  for (let i = 0; i < 3; i++) {
+    await pollsIdle();
+    await poll();
+  }
+  await pollsIdle();
+  control.gate = null;
+  release();
+  const moved = await moving;
+  assert.ok(moved.ok, JSON.stringify(moved));
+  await videoService.reconcileRelay();
+  await seen();
+  assert.match(listenCommandOf(reconciled, id), COPIES_NEW);
+});
+
+test("an exit of the old address's converter around an address edit is not remembered for the new one, a failure of the new one is", async () => {
+  useFfmpeg(FFMPEG_OK);
+  const { id, sup, reconciled, control } = await passThroughFeed(null);
+  line(sup, `2026/10/22 21:00:42 INF [path ${id}-listen] runOnDemand command started`);
+  // The relay is slow to take the edit.
+  let release!: () => void;
+  control.gate = new Promise<void>((r) => (release = r));
+  const moving = videoService.updateFeed(id, { audioSourceUrl: NEW_SRC });
+  for (let i = 0; i < 2; i++) {
+    await pollsIdle();
+    await poll();
+  }
+  await pollsIdle();
+  const exit = `2026/10/22 21:01:12 INF [path ${id}-listen] runOnDemand command exited: command exited with code 183`;
+  // Before the relay is given the edit...
+  line(sup, HEADER_FAILURE);
+  line(sup, exit);
+  await pollsIdle();
+  control.gate = null;
+  release();
+  assert.ok((await moving).ok);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), COPIES_NEW);
+  // ...and as the relay replaces the path, the old process going.
+  line(sup, HEADER_FAILURE);
+  line(sup, exit);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), COPIES_NEW);
+  // The new command starts, then fails to copy.
+  line(sup, `2026/10/22 21:02:00 INF [path ${id}-listen] runOnDemand command started`);
+  line(sup, HEADER_FAILURE);
+  line(sup, exit);
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.match(listenCommandOf(reconciled, id), /'-c:a' 'libopus'/);
+});
