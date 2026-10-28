@@ -16,6 +16,7 @@ import {
   placeAt,
   pushAway,
   resetPlacement,
+  resizeCard,
   rowsNeeded,
   type Box,
 } from "./home-placement.js";
@@ -122,6 +123,71 @@ describe("dropping onto something", () => {
         assert.ok(!overlaps(x, y), `${x.id} and ${y.id} overlap after a push`);
       }
     }
+  });
+});
+
+const noOverlap = (boxes: readonly Box[], when: string) => {
+  for (const x of boxes) {
+    for (const y of boxes) {
+      if (x.id !== y.id) assert.ok(!overlaps(x, y), `${x.id} and ${y.id} overlap ${when}`);
+    }
+  }
+};
+
+describe("resizing a card placed by hand", () => {
+  // The bug: a placed Medium grown to Tall where it stood drew straight over the
+  // cards below and beside it, because only drops pushed anything.
+  const page = () => [
+    card("timer", "m", { col: 1, row: 1 }),
+    card("side", "s", { col: 3, row: 1 }),
+    card("below", "xl", { col: 1, row: 2 }),
+  ];
+
+  test("keeps its cell and pushes what it grew onto downward", () => {
+    const next = resizeCard(page(), "timer", "tall");
+    // The STORED cells, not only the drawn ones: boxesOf also settles overlap
+    // when drawing, and would hide a resize that saved two cards on one cell.
+    const stored = (id: string) => next.find((o) => o.id === id)!.home;
+    assert.deepEqual([stored("timer")?.col, stored("timer")?.row], [1, 1]);
+    assert.equal(stored("side")?.row, 5);
+    assert.equal(stored("below")?.row, 6);
+    const boxes = boxesOf(next);
+    assert.deepEqual(at(boxes, "timer"), { id: "timer", col: 1, row: 1, w: 3, h: 4 });
+    assert.equal(at(boxes, "side").row, 5);
+    assert.equal(at(boxes, "below").row, 6);
+    noOverlap(boxes, "after growing a card");
+  });
+
+  test("writes the size it was given", () => {
+    const next = resizeCard(page(), "timer", "xl");
+    assert.equal(next.find((o) => o.id === "timer")!.home?.size, "xl");
+  });
+
+  test("a flowing card is only resized: the flow already routes around it", () => {
+    const flowing = [card("a", "s"), card("b", "s")];
+    const next = resizeCard(flowing, "a", "tall");
+    assert.equal(next.find((o) => o.id === "b")!.home?.col, undefined, "a flowing page got frozen");
+    noOverlap(boxesOf(next), "on a flowing page");
+  });
+});
+
+describe("placements saved overlapping", () => {
+  test("draw without overlap: the later card moves down", () => {
+    // What a page resized before the fix holds on disk. It must draw clean
+    // without the operator touching anything.
+    const boxes = boxesOf([
+      card("timer", "tall", { col: 1, row: 1 }),
+      card("side", "s", { col: 3, row: 1 }),
+      card("below", "xl", { col: 1, row: 2 }),
+    ]);
+    assert.deepEqual(at(boxes, "timer"), { id: "timer", col: 1, row: 1, w: 3, h: 4 });
+    noOverlap(boxes, "as drawn");
+  });
+
+  test("a page that never overlapped draws exactly where it was put", () => {
+    const boxes = boxesOf([card("a", "s", { col: 2, row: 4 }), card("b", "m", { col: 1, row: 1 })]);
+    assert.deepEqual(at(boxes, "a"), { id: "a", col: 2, row: 4, w: 1, h: 1 });
+    assert.deepEqual(at(boxes, "b"), { id: "b", col: 1, row: 1, w: 2, h: 1 });
   });
 });
 
