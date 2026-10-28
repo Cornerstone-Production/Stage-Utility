@@ -1414,22 +1414,18 @@ export function Inspector({
               The retired per-platform objects have no picker: their type is
               the platform. */}
           {(c.type === "stream-status" || c.type === "home-streaming") && (
-            <StackedField
+            <RowToggle
               label="Source"
               description="Which platform to report. Any answers every one at once: live if anything is going out."
-            >
-              {/* Built from STREAMER_FOR, the one table that says which platforms
-                  exist and what each is called. Written out here as well, this list
-                  and the renderer's lookup were two places to add a platform and
-                  one to forget. */}
-              <Segmented
-                label="Source"
-                value={c.platform ?? "any"}
-                options={sourceOptions(STREAMER_FOR, "Any")}
-                // Every value comes from STREAMER_FOR, so it is one the union names.
-                onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" | "obs" })}
-              />
-            </StackedField>
+              value={c.platform ?? "any"}
+              // Built from STREAMER_FOR, the one table that says which platforms
+              // exist and what each is called. Written out here as well, this list
+              // and the renderer's lookup were two places to add a platform and
+              // one to forget.
+              options={sourceOptions(STREAMER_FOR, "Any")}
+              // Every value comes from STREAMER_FOR, so it is one the union names.
+              onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" | "obs" })}
+            />
           )}
           <RowSwitch
             label="Fill green when live"
