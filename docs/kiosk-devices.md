@@ -483,7 +483,10 @@ from the server it is run from, over plain HTTP. So the first install trusts tha
 server, exactly as `curl ... | sudo sh` and `irm ... | iex` always have. From the first
 update on, the key on the machine decides: a server, or anything answering in its place,
 can still say *when* to update, but a payload it did not get from the release is
-refused. Running the installer again keeps the key already installed, and on a Mac
+refused. A signature covers a payload, not a version, so a server can still offer an
+older release that CI signed, and a machine installs it: a switch from the beta track
+to main lowers the version on purpose, so going down is not refused. It cannot offer
+bytes CI did not sign. Running the installer again keeps the key already installed, and on a Mac
 verifies the new app against it, so a server cannot swap the key by being run from
 again. Only an explicit choice takes the server's: `--replace-signing-key` on a Mac
 (`curl ... | sudo sh -s -- --replace-signing-key`), `$env:STAGE_REPLACE_SIGNING_KEY = '1'`

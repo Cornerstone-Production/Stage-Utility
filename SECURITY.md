@@ -195,6 +195,12 @@ When reporting, please include:
   the server's place on the LAN, or a compromised server, can still say *when* a
   machine updates, but cannot hand it a payload of its own.
 
+  It can also say *which* release: a signature is bound to a payload, not to a version,
+  so a server can make a machine install an older release that CI signed (a known
+  helper bug, say). It can never make it install bytes CI did not sign. This is
+  deliberate: a legitimate track switch from beta to main lowers the version, so a
+  machine cannot refuse to go down.
+
   The first install is the exception: the installer and the key it installs come from
   the server, over plain HTTP, so `curl ... | sudo sh` and `irm ... | iex` trust that
   server as they always have. A reinstall keeps the key already on the machine unless it
