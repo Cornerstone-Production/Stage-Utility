@@ -232,6 +232,12 @@ export function BrandingSection({
     setEdit(null);
   }
 
+  /** Close the dialog a write was started from, unless the operator has since
+   *  closed it or opened another: a slow save must not shut the next one. */
+  function closeAfter(seq: number) {
+    if (editSeq.current === seq) closeDialog();
+  }
+
   /** What an icon is made from. `art` is any square image; it is brought down to 512. */
   interface IconSpec {
     art: string;
@@ -296,6 +302,7 @@ export function BrandingSection({
   async function onCropSave(result: { logo: string; original: string; crop: Crop }) {
     if (!edit) return;
     const target = edit.target;
+    const seq = editSeq.current;
     if (target === "icon") {
       const ok = await makeIcon(async () => ({
         art: result.logo,
@@ -303,7 +310,7 @@ export function BrandingSection({
         crop: result.crop,
         background: iconBackground,
       }));
-      if (ok) closeDialog();
+      if (ok) closeAfter(seq);
       return;
     }
     let saved: Parameters<typeof handlers.handleSetBranding>[0];
@@ -319,20 +326,26 @@ export function BrandingSection({
         break;
     }
     // The editor stays open when the server refuses, so the work is not lost with the toast.
-    if (await handlers.handleSetBranding(saved)) closeDialog();
+    if (await handlers.handleSetBranding(saved)) closeAfter(seq);
   }
 
   async function remove(field: "logo" | "emptyLogo" | "avatar") {
-    if (await handlers.handleSetBranding({ [field]: null })) closeDialog();
+    const seq = editSeq.current;
+    if (await handlers.handleSetBranding({ [field]: null })) closeAfter(seq);
   }
 
   async function removeIcon() {
-    if (await handlers.handleSetBranding({ icon: null })) closeDialog();
+    const seq = editSeq.current;
+    if (await handlers.handleSetBranding({ icon: null })) closeAfter(seq);
   }
 
   /** What `target`'s dialog shows where the image goes. */
   function editorFor(target: Target): EditorSlot {
-    if (edit?.target !== target) return savedImage[target] ? { kind: "loading" } : { kind: "empty" };
+    // No edit for an open dialog means it opened with nothing saved: openDialog
+    // sets "loading" itself whenever it starts a read. An image saved meanwhile,
+    // from another browser, keeps the drop area rather than a "loading" line no
+    // read will ever finish.
+    if (edit?.target !== target) return { kind: "empty" };
     if (edit.status === "loading") return { kind: "loading" };
     if (edit.status === "error") return { kind: "error", message: edit.message };
     return {
