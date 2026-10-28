@@ -473,8 +473,10 @@ while that file is the one the release was built from. `.gitattributes` marks it
 so git checks it out as the committed bytes on every platform, whatever
 `core.autocrlf` says (Git for Windows would otherwise convert it to CRLF). A checkout
 made before that attribute has the file CRLF until it is checked out again; the in-app
-updater does that before it updates, for any file pinned this way whose only difference
-is its line ends, and says so on an `[updater]` line. A local edit
+updater does that before it updates, for any file pinned this way that is byte for byte
+the committed file once every CRLF in it is made LF, and says so on an `[updater]` line.
+Any other change, a trailing space or a removed final newline included, is left for the
+operator, and the update is refused on the dirty tree as before. A local edit
 still breaks it: the server checks its own launcher against the release's signature the
 first time it serves that signature, and says on a `[helper-update]` line when they do
 not match, since every PC would then refuse the launcher as `signature invalid`.

@@ -38,7 +38,7 @@ import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./upda
 import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { ApplyWatchdog } from "./update/apply-watchdog.js";
-import { restorePinnedLineEnds } from "./update/pinned-line-ends.js";
+import { pinnedDepsFor, restorePinnedLineEnds, type PinnedDeps, type PinnedResult } from "./update/pinned-line-ends.js";
 import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
@@ -91,6 +91,9 @@ interface UpdaterDeps {
   spawn?: typeof spawn;
   /** Shortened in tests; production waits the full STALL_TIMEOUT_MS. */
   stallMs?: number;
+  /** The raw git and file reads update/pinned-line-ends.ts needs. Tests only;
+   *  production uses the checkout at the app root. */
+  pinned?: PinnedDeps;
 }
 
 export class Updater {
@@ -135,17 +138,21 @@ export class Updater {
   private readonly watchdog = new ApplyWatchdog();
 
   /** Before the dirty-tree check: a file pinned `-text` that differs only in its
-   *  line ends is put back, and said, rather than blocking every update (see
-   *  update/pinned-line-ends.ts). A failure here is the operator's to see in the
-   *  dirty-tree refusal that follows, so it is logged and not thrown. */
-  private async restorePinned(): Promise<void> {
-    try {
-      const restored = await restorePinnedLineEnds((args) => this.git(args));
-      if (restored.length > 0) {
-        this.logEvent(`checked out ${restored.join(", ")} again: only its line ends differed from git, which .gitattributes pins`);
-      }
-    } catch (err) {
-      this.logEvent(`could not check the pinned files' line ends: ${errorMessage(err)}`);
+   *  line ends is put back rather than blocking every update (see
+   *  update/pinned-line-ends.ts). What it restored and what failed are returned;
+   *  the caller says both and goes on to the dirty-tree check, which refuses a
+   *  tree that is still dirty. */
+  private restorePinned(): Promise<PinnedResult> {
+    return restorePinnedLineEnds(this.deps.pinned ?? pinnedDepsFor(REPO_ROOT));
+  }
+
+  /** Say what restorePinned did: what it put back, and each path it could not. */
+  private reportPinned(r: PinnedResult): void {
+    if (r.restored.length > 0) {
+      this.logEvent(`checked out ${r.restored.join(", ")} again: only its line ends differed from git, which .gitattributes pins`);
+    }
+    for (const f of r.failed) {
+      this.logEvent(`could not check ${f.file || "the modified files"} for line ends .gitattributes pins: ${f.error}`);
     }
   }
 
@@ -615,7 +622,7 @@ export class Updater {
     // tree, and running git here read whatever repository happened to be up the
     // directory tree — on Homebrew, /opt/homebrew's own.
     if (this.status.isGitRepo) {
-      await this.restorePinned();
+      this.reportPinned(await this.restorePinned());
       const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
       if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
     }
@@ -703,7 +710,7 @@ export class Updater {
     }
     // Git-only, for the same reason as applyUpdate.
     if (this.status.isGitRepo) {
-      await this.restorePinned();
+      this.reportPinned(await this.restorePinned());
       const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
       if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
     }
