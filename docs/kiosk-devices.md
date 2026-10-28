@@ -469,7 +469,10 @@ PowerShell 5.1 does with nothing installed, and never asks the server for a key.
 launcher is served from the server's own `scripts/kiosk`, so its signature holds only
 while that file is the one the release was built from. `.gitattributes` marks it `-text`,
 so git checks it out as the committed bytes on every platform, whatever
-`core.autocrlf` says (Git for Windows would otherwise convert it to CRLF). A local edit
+`core.autocrlf` says (Git for Windows would otherwise convert it to CRLF). A checkout
+made before that attribute has the file CRLF until it is checked out again; the in-app
+updater does that before it updates, for any file pinned this way whose only difference
+is its line ends, and says so on an `[updater]` line. A local edit
 still breaks it: the server checks its own launcher against the release's signature the
 first time it serves that signature, and says on a `[helper-update]` line when they do
 not match, since every PC would then refuse the launcher as `signature invalid`.

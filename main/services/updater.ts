@@ -38,6 +38,7 @@ import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./upda
 import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { ApplyWatchdog } from "./update/apply-watchdog.js";
+import { restorePinnedLineEnds } from "./update/pinned-line-ends.js";
 import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
@@ -132,6 +133,21 @@ export class Updater {
   /** Bounds an apply that dies without reporting — the UI must always be
    *  able to leave the "updating" phase. */
   private readonly watchdog = new ApplyWatchdog();
+
+  /** Before the dirty-tree check: a file pinned `-text` that differs only in its
+   *  line ends is put back, and said, rather than blocking every update (see
+   *  update/pinned-line-ends.ts). A failure here is the operator's to see in the
+   *  dirty-tree refusal that follows, so it is logged and not thrown. */
+  private async restorePinned(): Promise<void> {
+    try {
+      const restored = await restorePinnedLineEnds((args) => this.git(args));
+      if (restored.length > 0) {
+        this.logEvent(`checked out ${restored.join(", ")} again: only its line ends differed from git, which .gitattributes pins`);
+      }
+    } catch (err) {
+      this.logEvent(`could not check the pinned files' line ends: ${errorMessage(err)}`);
+    }
+  }
 
   /** Log an update lifecycle event to stdout (captured live in the /log buffer)
    *  and to the persisted update.log (survives the post-update restart). */
@@ -599,6 +615,7 @@ export class Updater {
     // tree, and running git here read whatever repository happened to be up the
     // directory tree — on Homebrew, /opt/homebrew's own.
     if (this.status.isGitRepo) {
+      await this.restorePinned();
       const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
       if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
     }
@@ -686,6 +703,7 @@ export class Updater {
     }
     // Git-only, for the same reason as applyUpdate.
     if (this.status.isGitRepo) {
+      await this.restorePinned();
       const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
       if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
     }
