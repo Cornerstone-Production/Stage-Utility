@@ -8,10 +8,12 @@
 // ServiceCue) need no wrapper and are routed directly.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useParams, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
+import { advancedTabPath, DEFAULT_ADVANCED_TAB } from "../settings/sections/advanced-settings";
 import { PlanSection } from "../settings/sections/plan-section";
 import { MESSAGING_CONFIG_KEY } from "../lib/messaging-config";
 import { MessagesSection } from "../settings/sections/messages-section";
@@ -50,7 +52,25 @@ export function MessagesRoute() {
   );
 }
 
+/**
+ * Bare `/settings/advanced`, which is the General tab. It replaces itself with that
+ * tab's own URL rather than drawing the page: the shell titles an exact destination
+ * path, and the page draws its own heading, so drawing it here would put "Advanced"
+ * twice on screen. Nothing is read or consumed first, so the post-restart banner
+ * waits for the page that actually draws.
+ */
 export function AdvancedRoute() {
+  const router = useRouter();
+  useEffect(() => {
+    router.navigate({ to: advancedTabPath(DEFAULT_ADVANCED_TAB), replace: true });
+  }, [router]);
+  return <Loading />;
+}
+
+/** `/settings/advanced/<tab>`: one page, whose tab is the last segment of the URL. */
+export function AdvancedTabRoute() {
+  const router = useRouter();
+  const { tab } = useParams({ strict: false }) as { tab?: string };
   const s = useStageSettings();
   // Read once, on mount: the banner left behind by the pre-restart page must
   // show exactly once, not on every navigation back to Advanced.
@@ -58,6 +78,8 @@ export function AdvancedRoute() {
   if (s.stageLoading || !s.stageState) return <Loading />;
   return (
     <AdvancedSection
+      tab={tab}
+      onTabChange={(next) => void router.navigate({ to: advancedTabPath(next) })}
       stageState={s.stageState}
       updateStatus={s.updateStatus}
       handlers={s.handlers}

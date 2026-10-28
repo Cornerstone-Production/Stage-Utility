@@ -28,6 +28,7 @@ const React = (await import("react")).default;
 const { createRootRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { Rail } = await import("./rail.js");
+const { TooltipProvider } = await import("../components/ui/index.js");
 const { __resetHostNamesForTests: resetHostNamesLog } = await import("./host-names-query.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -39,14 +40,20 @@ const waitingName = (name: string) => ({ name, firstSeen: "", lastSeen: "", coun
 let waiting: ReturnType<typeof waitingName>[];
 /** What the server answers the host names read with; null is the well-formed answer. */
 let malformed: unknown;
+/** What the server answers the update status read with. */
+let updateStatus: unknown;
+let routerSeen: { state: { location: { pathname: string } } } | null;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
 
 beforeEach(() => {
   waiting = [];
   malformed = null;
+  updateStatus = {};
+  routerSeen = null;
   resetHostNamesLog();
   fetchStub = stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok({ views: [], outputs: [], appName: APP });
+    if (url.startsWith("/api/update/status")) return ok(updateStatus);
     if (url.startsWith("/api/security/host-names")) {
       return ok(malformed ?? { enforce: false, automatic: [], accepted: [], waiting, dismissed: [] });
     }
@@ -67,10 +74,16 @@ async function renderRail(): Promise<HTMLElement> {
       React.createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
-        React.createElement(Rail, { onToggleCollapsed() {}, dragging: false, onStartResize() {}, onResetWidth() {} }),
+        // The footer's version label is a Tooltip, drawn once an update status has arrived.
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(Rail, { onToggleCollapsed() {}, dragging: false, onStartResize() {}, onResetWidth() {} }),
+        ),
       ),
   });
   const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: ["/"] }) });
+  routerSeen = router;
   const { container } = render(React.createElement(RouterProvider, { router }));
   await eventually(() => assert.ok((container.textContent ?? "").includes(APP), "the rail never read the state"));
   return container;
@@ -141,5 +154,44 @@ describe("the Advanced row's count of host names", () => {
     }
     await eventually(() => assert.equal(readFailures().length, 1, "a run of failures was not one line"));
     assert.equal(countOn(c), "2", "a failed read took the count away");
+  });
+});
+
+describe("the Advanced row leads to the tab its mark is about", () => {
+  // tagBased with releasesBehind > 0 is what availableCount reads as an update waiting.
+  const UPDATE_WAITING = { tagBased: true, releasesBehind: 1, version: "1.0.0" };
+  const clickAdvanced = async (c: HTMLElement) => {
+    await act(async () => {
+      advancedRow(c).click();
+      await settle();
+    });
+    return routerSeen!.state.location.pathname;
+  };
+
+  test("an update waiting opens the Updates tab", async () => {
+    updateStatus = UPDATE_WAITING;
+    const c = await renderRail();
+    await eventually(() => assert.equal(advancedRow(c).getAttribute("aria-label"), "Advanced, update available"));
+    assert.equal(await clickAdvanced(c), "/settings/advanced/updates");
+  });
+
+  test("names waiting open the Network tab", async () => {
+    waiting = [waitingName("stage.example.org")];
+    const c = await renderRail();
+    await eventually(() => assert.equal(countOn(c), "1"));
+    assert.equal(await clickAdvanced(c), "/settings/advanced/network");
+  });
+
+  test("both at once: the update wins, and the row still says both", async () => {
+    updateStatus = UPDATE_WAITING;
+    waiting = [waitingName("stage.example.org")];
+    const c = await renderRail();
+    await eventually(() => assert.equal(advancedRow(c).getAttribute("aria-label"), "Advanced, update available, 1 host name waiting"));
+    assert.equal(await clickAdvanced(c), "/settings/advanced/updates");
+  });
+
+  test("with nothing to say it goes to the page's own address, which opens General", async () => {
+    const c = await renderRail();
+    assert.equal(await clickAdvanced(c), "/settings/advanced");
   });
 });

@@ -77,6 +77,7 @@ function mount() {
         TooltipProvider,
         null,
         React.createElement(AdvancedSection, {
+          tab: "network",
           stageState: { kioskDiscovery: false } as unknown as StageState,
           updateStatus: null,
           handlers: {} as unknown as SectionHandlers,

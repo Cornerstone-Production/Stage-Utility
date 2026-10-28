@@ -393,7 +393,7 @@ Uploaded logos and layout images are files in `branding-images/` and
 
 The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
 (the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`
-(the upload and its crop, for Adjust), `appIconBackground` (`#rrggbb`, `#000000`
+(the upload and its crop, which the crop editor reopens on), `appIconBackground` (`#rrggbb`, `#000000`
 by default) and the four sizes served to browsers and phones, `appIconApple`
 (180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
 safe zone). The image fields are references into `branding-images/`. The icon is

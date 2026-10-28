@@ -22,7 +22,7 @@
 // has to be right, and a grid engine that can only be checked by dragging
 // things around a screen is a grid engine nobody can check.
 
-import type { LayoutObject } from "@main/types/views";
+import type { HomeCardSize, LayoutObject } from "@main/types/views";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 
 /** One card's footprint. `col`/`row` are 1-based, like CSS grid lines. */
@@ -69,14 +69,19 @@ export function overlaps(a: Box, b: Box): boolean {
  * lays out exactly as it always has.
  */
 export function boxesOf(cards: readonly LayoutObject[]): Box[] {
-  const placed: Box[] = [];
   // Explicit ones first: they own their cells, and the flowing cards have to
   // route around them rather than the other way about.
+  const explicit: Box[] = [];
   for (const o of cards) {
     if (!isPlaced(o)) continue;
     const { w, h } = SIZES[sizeOf(o)];
-    placed.push({ id: o.id, col: clampCol(colOf(o)!, w), row: rowOf(o)!, w, h });
+    explicit.push({ id: o.id, col: clampCol(colOf(o)!, w), row: rowOf(o)!, w, h });
   }
+  // Two stored placements can overlap: a layout saved before resizing pushed
+  // anything still holds a grown card on its neighbours' cells. Settled top to
+  // bottom, so the later of two overlapping cards moves down, as a drop would
+  // push it.
+  const placed = settle(explicit);
   for (const o of cards) {
     if (isPlaced(o)) continue;
     const { w, h } = SIZES[sizeOf(o)];
@@ -108,20 +113,23 @@ function firstFit(taken: readonly Box[], id: string, w: number, h: number): Box 
  * order it settles into is the order you saw while dragging.
  */
 export function pushAway(boxes: readonly Box[], moved: Box): Box[] {
-  const out = boxes.map((b) => (b.id === moved.id ? moved : { ...b }));
-  const settled: Box[] = [out.find((b) => b.id === moved.id)!];
-  // Everything else, nearest-first, so a card just below the drop moves before
-  // one further down and the cascade cannot leapfrog.
-  const rest = out
-    .filter((b) => b.id !== moved.id)
-    .sort((a, b) => a.row - b.row || a.col - b.col);
+  const rest = boxes.filter((b) => b.id !== moved.id);
+  return settle(rest, [moved]);
+}
 
-  for (const box of rest) {
-    let candidate = box;
-    // Keep sliding down while it sits on anything already settled. Bounded by
-    // the number of cards: each pass moves this box strictly downward past one
-    // more of them, so it cannot loop.
-    for (let guard = 0; guard <= boxes.length; guard++) {
+/**
+ * `boxes` laid down nearest-first on top of `fixed`, each slid straight down
+ * until it sits on nothing already laid. Nearest-first so a card just below
+ * moves before one further down and the cascade cannot leapfrog.
+ */
+function settle(boxes: readonly Box[], fixed: readonly Box[] = []): Box[] {
+  const settled: Box[] = [...fixed];
+  const order = [...boxes].sort((a, b) => a.row - b.row || a.col - b.col);
+  for (const box of order) {
+    let candidate = { ...box };
+    // Bounded by the number of cards: each pass moves this box strictly
+    // downward past one more of them, so it cannot loop.
+    for (let guard = 0; guard <= settled.length; guard++) {
       const hit = settled.find((s) => overlaps(s, candidate));
       if (!hit) break;
       candidate = { ...candidate, row: hit.row + hit.h };
@@ -153,6 +161,20 @@ export function placeAt(
     const b = byId.get(o.id);
     return b ? { ...o, home: { ...o.home, col: b.col, row: b.row } } : o;
   });
+}
+
+/**
+ * A card at a new size, holding its place.
+ *
+ * A card placed by hand keeps its cell and pushes whatever it grew onto
+ * downward, exactly as dropping it there would. A flowing card needs nothing:
+ * the flow routes around it.
+ */
+export function resizeCard(cards: readonly LayoutObject[], id: string, size: HomeCardSize): LayoutObject[] {
+  const next = cards.map((o) => (o.id === id ? { ...o, home: { ...o.home, size } } : o));
+  const card = next.find((o) => o.id === id);
+  if (!card || !isPlaced(card)) return next;
+  return placeAt(next, id, colOf(card)!, rowOf(card)!);
 }
 
 /** Clear every hand placement, so the page packs itself again. */

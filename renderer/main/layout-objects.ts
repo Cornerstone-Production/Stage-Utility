@@ -966,7 +966,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming", platform: "any" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
   },
   "home-streaming-resi": {
     label: "Resi status",
@@ -980,7 +979,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming-resi" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
     integration: { id: "resi", label: "Resi" },
   },
   "home-streaming-youtube": {
@@ -995,7 +993,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "home-streaming-youtube" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
     integration: { id: "youtube", label: "YouTube" },
   },
   "stream-status": {

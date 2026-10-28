@@ -167,7 +167,7 @@ In this order:
 
 1. Something of that type is **still recording** — not finished.
 2. The date is **not today** in the app's time zone — finished. The setting
-   under Advanced, falling back to the **server's** clock when it is left on
+   under Advanced → General, falling back to the **server's** clock when it is left on
    "follow server clock" — never the zone of the browser you happen to be
    looking from. Most Linux images run UTC, where the calendar date rolls at
    7pm in Chicago, and a laptop in Chicago reading a UTC server would otherwise
@@ -743,7 +743,7 @@ unreachable, not that the room emptied.
 Recording covers more than the service proper. Sampling starts during the arrival
 ramp — the lead window before the service time, default 60 minutes — and continues
 through a taper after the last item, also 60 minutes by default, so the curve shows
-the room emptying. Both windows are set in Advanced.
+the room emptying. Both windows are set in Advanced → Schedule.
 
 Only the service proper feeds peak, low, average and last; the ramp and taper
 would otherwise drag those figures toward an empty room — far enough that an

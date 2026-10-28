@@ -14,7 +14,7 @@ it becomes a line on that screen's own card.
 
 ## Setting one up
 
-**1. Turn discovery on.** Settings → Advanced → Server → *Answer devices
+**1. Turn discovery on.** Settings → Advanced → Network → *Answer devices
 looking for a server*. It is off until you switch it on, so a test instance on
 the same network cannot claim a screen meant for the real server. Restart the
 server afterwards.
@@ -191,8 +191,8 @@ folder, which the logged-in account owns. Each run:
    and not within the window around a rehearsal or service (the same window integration
    reconnects use, [Winding down between services](ops/reliability.md#winding-down-between-services):
    *Lead time before rehearsal* and *Keep active after service ends* in Settings >
-   Advanced > Server). Not with *Update Mac output helpers and Windows kiosks with this
-   server* off (Settings > Advanced > Server; on by default), and not again for a
+   Advanced > Schedule). Not with *Update Mac output helpers and Windows kiosks with this
+   server* off (Settings > Advanced > Updates; on by default), and not again for a
    version that already failed on that Mac. With Planning Center set up, not until its
    service times and live state have been read: just after the server starts, and
    while Planning Center cannot be reached, a Mac waits. **Update now** and **Try
@@ -396,7 +396,7 @@ key the installer left beside the updater, checks that it parses, and moves it o
 runs at the next sign-in, or the next time the browser exits. The installer stages
 its own downloads in the same folder, never in `%PROGRAMDATA%`, where any user can
 create files. Any failure leaves `kiosk.ps1` as it was. The switch *Update Mac output
-helpers and Windows kiosks with this server* (Settings > Advanced > Server) holds
+helpers and Windows kiosks with this server* (Settings > Advanced > Updates) holds
 it, and **Update now** overrides that. Service times do not, since a file replaced
 restarts nothing.
 

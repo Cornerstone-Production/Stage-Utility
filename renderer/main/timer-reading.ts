@@ -94,7 +94,7 @@ interface Common {
   showSub: boolean;
 }
 
-function service(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common): TimerReading {
+function service(config: TimerConfig, i: TimerInputs, { hide }: Common): TimerReading {
   const t = computePcoTimer(i.pcoLive, i.now);
   if (!i.pcoLiveKnown) {
     // Not heard from yet: the plain dash and no sentence, the house rule for a
@@ -117,7 +117,9 @@ function service(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common)
     hidden: false,
     caption: captionOf(config, t?.label ?? "Service"),
     value: t ? fmtDuration(t.seconds) : "\u2014",
-    sub: showSub && (config.nextItem ?? false) && next ? `Next \u00b7 ${next}` : null,
+    // The next item IS the service's sub-line, with one switch of its own, so a
+    // saved showLabel: false cannot hide it.
+    sub: (config.nextItem ?? false) && next ? `Next \u00b7 ${next}` : null,
     tone,
     unanswered: false,
   };

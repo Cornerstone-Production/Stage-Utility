@@ -210,7 +210,7 @@ Conditions only **hold** or don't — unlike a trigger they never fire on their 
 way to act the moment recording begins. Use the matching trigger for that.
 
 A time window may cross midnight, and day-of-week and time-of-day both read the
-app's time zone (Settings → Advanced), not the server's clock. An unconfigured
+app's time zone (Settings → Advanced → General), not the server's clock. An unconfigured
 condition holds rather than blocking, so a half-built rule does not silently never
 fire — with one deliberate exception: a ProVideoPlayer layer condition with no
 layer named does **not** hold, because "some layer, I did not say which" would

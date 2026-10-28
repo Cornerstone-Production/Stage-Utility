@@ -99,8 +99,8 @@ who has it can read your occupancy from anywhere.
 
 So it is held in the encrypted secret store beside the Vea client secret, not in
 `settings.json`. The field on the card is masked like a password, and the ID is
-**not carried in a config snapshot** (Settings → Advanced → Data → Config
-snapshots, or the automatic backups) — the same rule every API key and password
+**not carried in a config snapshot** (Settings → Advanced → Data → Backups →
+Config snapshot, or the automatic backups) — the same rule every API key and password
 follows. A box upgrading from a build that stored it as ordinary config moves it
 into the secret store on the next start and says so on `/log`.
 

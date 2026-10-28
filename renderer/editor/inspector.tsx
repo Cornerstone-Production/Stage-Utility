@@ -1427,21 +1427,27 @@ export function Inspector({
       })()}
       {(c.type === "stream-status" || c.type === "home-streaming" || c.type === "home-streaming-resi" || c.type === "home-streaming-youtube") && (
         <>
-          {/* The same three switches obs-status offers, because these are the
-              same widget pointed at a different source. Only the general one
-              asks WHICH platform — the per-platform objects already answered. */}
-          {c.type === "stream-status" && (
-            <RowSelect
-              label="Platform"
-              hint="Which platform to report. Any answers every one at once — live if anything is going out."
-              value={c.platform ?? "any"}
-              // Built from STREAMER_FOR, the one table that says which platforms
-              // exist and what each is called. Written out here as well, this list
-              // and the renderer's lookup were two places to add a platform and
-              // one to forget.
-              options={sourceOptions(STREAMER_FOR, "Any platform")}
-              onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
-            />
+          {/* The Source picker, then the same three switches obs-status offers,
+              because these are the same widget pointed at a different source.
+              The retired per-platform objects have no picker: their type is
+              the platform. */}
+          {(c.type === "stream-status" || c.type === "home-streaming") && (
+            <StackedField
+              label="Source"
+              description="Which platform to report. Any answers every one at once: live if anything is going out."
+            >
+              {/* Built from STREAMER_FOR, the one table that says which platforms
+                  exist and what each is called. Written out here as well, this list
+                  and the renderer's lookup were two places to add a platform and
+                  one to forget. */}
+              <Segmented
+                label="Source"
+                value={c.platform ?? "any"}
+                options={sourceOptions(STREAMER_FOR, "Any")}
+                // Every value comes from STREAMER_FOR, so it is one the union names.
+                onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" | "obs" })}
+              />
+            </StackedField>
           )}
           <RowSwitch
             label="Fill green when live"

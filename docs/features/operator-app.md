@@ -144,7 +144,8 @@ and it takes a cell — and so does everything else on the page at that moment, 
 the move stays local instead of rearranging the page behind it. Nothing re-packs
 afterwards, which is what lets you leave a deliberate gap between two widgets.
 Dropping onto an occupied cell pushes what was there downward rather than
-covering it.
+covering it, and so does growing a placed card, from its size chips or its
+right-click menu: it keeps its cell and the cards it grows onto move down.
 
 **Pack tight**, beside the pencil while editing, throws every placement away and
 lets the page flow again. It appears only once something has actually been
@@ -440,16 +441,21 @@ a wall, in a different page entirely.
 and in its own chrome. The page opens on the app's identity: the logo large on a
 stage-black canvas with the name beneath it, as a display draws them. Beside it sit
 the settings that style them. Below are the images, each drawn where it is used;
-click the logo or any image to edit it in a dialog.
+click the logo or any image to edit it in a dialog, or drop an image file on it to
+replace it. The dialog opens with the image already in its crop editor: drag to
+reposition, zoom with the slider, then **Save**. A new image, from **Upload** or
+**Replace** or dropped on the dialog, takes its place in the editor and is not
+saved until **Save**. With nothing set, the editor is a place to drop the first
+image.
 
 | | |
 |---|---|
 | **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
 | **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
-| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set), **Adjust** (pan and zoom a square crop) and **Remove**. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
+| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set) and **Remove**, and the square crop edited in the dialog. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
 | **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
-| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Adjust** and **Remove** |
+| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Remove** and crop editor |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
 The connect QR toggle is the last card on this page — see
@@ -466,7 +472,8 @@ for Android's round and rounded-square masks with the art kept inside the centre
 
 **Background** fills the transparent areas of your art (black, two blues or white);
 phones would otherwise fill them with black. Changing it redraws every size at once.
-Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it puts
+Once set, the dialog opens with the icon's square in the crop editor, and offers
+**Replace** and **Remove**. Removing it puts
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
 A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.
@@ -475,6 +482,60 @@ stored file is ever missing, so the tab is never blank. The home-screen label is
 app name, read by iOS when the app is added, so renaming the app does not rename an
 icon already on a home screen; adding it again does. The manifest and icon files
 behind this are listed in the [API](../reference/api.md).
+
+## Advanced
+
+**Settings → Advanced** holds the settings you touch rarely. It is split into tabs, and
+each tab has its own address, `/settings/advanced/<tab>`, so a tab can be bookmarked or
+sent to someone. `/settings/advanced` opens General; an address that is not a tab shows
+General too. The sidebar keeps **Advanced** lit on every tab. **Server log** at the
+right of the heading opens the raw log, `/log`, in a new tab.
+
+The tabs follow the keyboard pattern for tab strips: only the selected tab is reached with
+**Tab**, and the arrow keys, **Home** and **End** move to another tab and open it. While an
+update is waiting the **Updates** tab carries a dot, and while host names wait for an accept
+or a dismiss the **Network** tab carries their count. The sidebar's Advanced row shows the
+same two marks, and clicking it then opens the tab they are about (**Updates** when both
+apply). After an update restarts the server, a note saying so appears above the tabs, on
+whichever tab you land on, until you dismiss it.
+
+| Tab (`<tab>`) | Cards | Holds |
+|---|---|---|
+| **General** (`general`) | General | **Time zone**, **Clock format**, **Context bar** |
+| **Updates** (`updates`) | Updates | the update status with **Check now**, **Update now** and **Restart**, **Update track**, how updates are applied and the **Update window**, and whether Mac output helpers and Windows kiosks follow the server |
+| **Schedule** (`schedule`) | Reconnects, Attendance sampling | **Wake around service times** and its three timings; the **Pre-service ramp** and **Post-service taper** |
+| **Network** (`network`) | Addresses, Host names | the **Public address (DNS)**, whether the server **answers devices looking for a server**, the commands that set up a screen; the host-name list and its refusal switch |
+| **Data** (`data`) | Backups, Records | **Automatic backups** and the **Config snapshot**; the **Data archive** and **History milestones** |
+| **Video relay** (`video`) | Video relay | the relay's ports and the ffmpeg path |
+| **Search** (`search`) | | every setting, below |
+
+A tab with two cards draws them side by side on a wide screen and one above the other on
+a narrow one.
+
+### Search
+
+**Search** is the last tab. Press **Cmd-F** (**Ctrl-F** on Windows and Linux) anywhere
+on the page to open it with the cursor in the box and any earlier text selected. The
+page takes the key only while it is open, and leaves it alone while a dialog is open or
+something else on the page has already used it. The query stays when you move between tabs.
+
+Every word you type must match the setting, in any order, in its name, the card it sits
+in, the name of its tab, its description or words people use for it that the page does
+not print (`dns` finds the public address, `branch` the update track, `network` every
+setting on the Network tab). A word matches the start of a word, so `recon` finds the
+reconnect settings, and a longer word finds a short name word it starts with:
+`reconnecting` finds `reconnect`. A word of four letters or more also forgives a typo in a
+setting's **name**, its card's or its tab's: one slip up to seven letters, two from
+eight. A name match ranks above a card or tab name or a hidden word, which rank above the
+description, which ranks above a typo.
+
+Results are the settings themselves, working, in cards headed with the tab and the card
+(**Data › Backups**). Click the tab name to go there. A line above them counts the matches.
+Cards are ordered by their best match, best first, and cards whose best matches rank
+alike keep the order of the tabs and then of the page. The rows inside a card keep the
+card's own order, whatever each one's rank. Searching `log` also offers the **Server
+log** (a word needs two letters to do that). A setting the page is not drawing, such as
+the reconnect timings while **Wake around service times** is off, is not searched.
 
 ## Read-only links to hand out
 

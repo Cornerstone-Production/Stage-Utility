@@ -43,7 +43,7 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { ROW_PX, GRID_GAP_PX } from "./home-grid";
 import { COLUMNS } from "./home-cards";
 import {
-  boxesOf, clampCol, isPlaced, placeAt, placeNewCard, pushAway, resetPlacement, type Box,
+  boxesOf, clampCol, isPlaced, placeAt, placeNewCard, pushAway, resetPlacement, resizeCard, type Box,
 } from "./home-placement";
 import { HomeGrid } from "./home-grid";
 import { AddWidgetSheet, CardChrome } from "./home-editor";
@@ -477,7 +477,7 @@ export function HomeRoute() {
                   <CardChrome
                     card={o}
                     dragging={dragId === o.id}
-                    onSize={(size) => save((objs) => setSize(objs, o.id, size))}
+                    onSize={(size) => save((objs) => resizeCard(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
                     onRemove={() => save((objs) => removeCard(objs, o.id))}
                     onDragPointerDown={(e) => startDrag(e, o.id, cancelPress)}

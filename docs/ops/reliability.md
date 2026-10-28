@@ -43,13 +43,13 @@ nothing planned — the schedule counts as unknown, so reconnects keep the 2-min
 cap and the Planning Center poll stays at 4 seconds rather than going quiet. The
 switch into and out of that mode is logged on the `[reconnect]` tag.
 
-Tunable under **Settings → Advanced → Server**, where switching **Wake around service
+Tunable under **Settings → Advanced → Schedule**, where switching **Wake around service
 times** off gives every integration a fixed 2-minute retry instead.
 
 ## Where your data lives
 
 `$STAGE_UTILITY_DATA` if set. Otherwise it depends on how the app was installed —
-the running server prints its own path in **Settings → Advanced**:
+the running server reports its own path as `dataDir` at `/api/version`:
 
 | Install | Data directory |
 |---|---|
@@ -311,7 +311,7 @@ cannot be recovered — you would re-enter every one.
 
 Two backups exist in the app, and they cover different things:
 
-- **Settings → Advanced → Data → Config snapshots** — a config snapshot, saved
+- **Settings → Advanced → Data → Backups → Config snapshot** — a config snapshot, saved
   in-app or downloaded as a file, for moving a configuration between machines.
   Credentials are deliberately excluded, so the file is safe to store.
 - **Settings → Advanced → Data → Data archive** — recorded services and their

@@ -36,7 +36,7 @@ both cost a request's worth of payload every second and let `label` (fresh) and
 
 A **service window** is the same one the integration reconnect schedule uses:
 PCO's rehearsal and service times widened by the lead and tail configured under
-Settings → Advanced (`service-window.ts`). It compares instants against plan
+Settings → Advanced → Schedule (`service-window.ts`). It compares instants against plan
 times, so there is no calendar-date or hour-of-day question in it. The MEDIUM TTL
 is resolved when a cache entry is read rather than when it is written, so a window
 opening shortens entries that are already cached.

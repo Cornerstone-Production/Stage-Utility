@@ -112,11 +112,13 @@ export function TimerInspector({
             onChange={(e) => set({ caption: e.target.value })}
           />
         </StackedField>
-        <StackedSwitch
-          label={info.subSwitch}
-          checked={c.showLabel ?? true}
-          onChange={(v) => set({ showLabel: v })}
-        />
+        {info.subSwitch && (
+          <StackedSwitch
+            label={info.subSwitch}
+            checked={c.showLabel ?? true}
+            onChange={(v) => set({ showLabel: v })}
+          />
+        )}
         {source === "baptism" && (c.showLabel ?? true) && (
           <StackedField label="Label">
             <Input
