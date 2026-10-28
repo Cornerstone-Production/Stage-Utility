@@ -487,11 +487,17 @@ can still say *when* to update, but a payload it did not get from the release is
 refused. A signature covers a payload, not a version, so a server can still offer an
 older release that CI signed, and a machine installs it: a switch from the beta track
 to main lowers the version on purpose, so going down is not refused. It cannot offer
-bytes CI did not sign. Running the installer again keeps the key already installed, and on a Mac
-verifies the new app against it, so a server cannot swap the key by being run from
-again. Only an explicit choice takes the server's: `--replace-signing-key` on a Mac
-(`curl ... | sudo sh -s -- --replace-signing-key`), `$env:STAGE_REPLACE_SIGNING_KEY = '1'`
-before the installer on Windows. That run trusts the server as a first install does.
+bytes CI did not sign.
+
+The installed key survives every automatic update check. Running the genuine installer
+again keeps it too, and on a Mac verifies the new app against it, whatever server it
+downloads from; only an explicit choice takes the server's: `--replace-signing-key` on
+a Mac (`curl ... | sudo sh -s -- --replace-signing-key`), `$env:STAGE_REPLACE_SIGNING_KEY = '1'`
+before the installer on Windows. But a reinstall fetches the installer itself from the
+server (`curl http://<server>/kiosk/install-macos.sh | sudo sh`, `irm ... | iex`), and an
+installer served by something answering as the server can write any key it likes. So a
+reinstall from a server that is not trusted is a first install, with a first install's
+trust.
 
 **Rotating the key** is a new key pair, its public half committed in place of
 `scripts/kiosk/release-signing.pub.pem` and its private half set as the

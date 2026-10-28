@@ -105,8 +105,10 @@ function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
 
 # The release signing key the updater checks every launcher's signature against,
 # in Program Files beside the updater. The updater never fetches one. A PC that
-# already has one keeps it, so running the installer again does not let a server
-# swap it; $env:STAGE_REPLACE_SIGNING_KEY = '1' takes the server's in its place,
+# already has one keeps it, so this installer run again does not take the server's
+# (an installer fetched from a server that is not trusted is that server's to
+# write, and is a first install's trust again); $env:STAGE_REPLACE_SIGNING_KEY = '1'
+# takes the server's in its place,
 # for rotating the key. Otherwise, on a first install, it is the server's: the one
 # time the server is trusted with it. Refused unless .NET reads it as a 3072-bit
 # RSA key.

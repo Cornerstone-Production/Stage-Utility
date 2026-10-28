@@ -573,10 +573,12 @@ usable_key() {
 }
 
 # The key an install verifies with, and leaves for the updater. On a Mac that has
-# one installed, that one, unless --replace-signing-key: a re-run is then held to
-# the key the first install trusted, and a server cannot swap it by being run
-# from again. Otherwise the server's, so the first install trusts the server it
-# was run from, as `curl ... | sudo sh` does.
+# one installed, that one, unless --replace-signing-key: a re-run of this script
+# is then held to the key the first install trusted, whatever server it downloads
+# from. (A copy of the script fetched from a server that is not trusted is that
+# server's to write, so it is a first install's trust again.) Otherwise the
+# server's, so the first install trusts the server it was run from, as
+# `curl ... | sudo sh` does.
 choose_signing_key() { # origin
   if [ "$REPLACE_KEY" -ne 1 ] && { [ -e "$UPDATER_KEY" ] || [ -L "$UPDATER_KEY" ]; }; then
     usable_key "$UPDATER_KEY" ||
