@@ -294,7 +294,9 @@ finds every configuration the base branch has instead of reporting "configuratio
 not found". A change is the pull request's files, except on the release
 pull request (`beta` into `main`), which always holds the helper: there a push is
 judged by the files that push changed, so a merge into `beta` that leaves the helper
-alone queues no macOS job. A pull request from a fork whose branch is named `beta`,
+alone queues no macOS job. Its CodeQL runs are therefore never cancelled by a newer
+push, since each covers only its own; a run that fails or never gets a runner is
+re-run by hand. A pull request from a fork whose branch is named `beta`,
 and an opened or reopened release pull request, are judged by all their files. Any
 listing that cannot be read, comes back empty or may be cut off runs everything.
 `.github/actions/changed-files` does the listing for both this and the helper's build.

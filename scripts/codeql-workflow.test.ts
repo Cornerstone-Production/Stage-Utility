@@ -90,10 +90,14 @@ describe("codeql.yml's shape", () => {
     assert.deepEqual(caller.jobs["models"].permissions, { contents: "read" });
   });
 
-  it("lets a newer push replace an older pull request run, and gives every other run a group of its own", () => {
+  it("lets a newer push replace an older pull request run, and gives every other run, the release pull request's too, a group of its own", () => {
     // A pending run is replaced by a newer one in its group; the replaced push may be the one that changed Swift.
+    // A release pull request run judges only its own push, so it is never replaced.
     const c = (caller as unknown as { concurrency: { group: string; "cancel-in-progress": string } }).concurrency;
-    assert.equal(c.group, "codeql-${{ github.event.pull_request.number || github.run_id }}");
+    assert.equal(
+      c.group,
+      "codeql-${{ (github.head_ref != 'beta' || github.event.pull_request.head.repo.full_name != github.repository) && github.event.pull_request.number || github.run_id }}",
+    );
     assert.equal(c["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
   });
 

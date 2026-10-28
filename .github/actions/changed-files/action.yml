@@ -76,6 +76,8 @@ runs:
           files=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[] | .filename, (.previous_filename // empty)') || return 1
         }
         zeros=0000000000000000000000000000000000000000
+        # Set by whichever listing runs; the checks after the case read both.
+        files="" limit=""
 
         case "$EVENT" in
           push)

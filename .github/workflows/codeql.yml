@@ -41,9 +41,11 @@ permissions:
 
 # A newer push to the same pull request makes the older run's result moot. Every
 # other run has a group of its own: a pending run is replaced by a newer one in its
-# group, and the replaced run may be the one that changed the Swift.
+# group, and the replaced run may be the one that changed the Swift. The release pull
+# request is one of those others: each of its runs judges only the files its own push
+# changed, so a run replaced by the next merge's would leave that merge unscanned.
 concurrency:
-  group: codeql-${{ github.event.pull_request.number || github.run_id }}
+  group: codeql-${{ (github.head_ref != 'beta' || github.event.pull_request.head.repo.full_name != github.repository) && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
