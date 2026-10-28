@@ -29,8 +29,11 @@ both. Either runs only at the chosen hour (and day, if one is set) in the app's
 time zone, and never while Planning Center reports a service live. When Planning
 Center is not answering, its last reading may be out of date, so the updater
 falls back on the service windows worked out from the plans it last read: inside
-one it waits for the next hour, outside one it goes ahead. An outage therefore
-never holds updates for longer than it overlaps a planned service.
+one it waits for the next scheduled time, outside one it goes ahead, so an outage
+holds an update only when the scheduled hour falls in a planned service. A plan
+whose times could not be read adds no window. Just after the server starts, before
+Planning Center has answered and before any window is known, the scheduled hour
+applies as it would with nothing planned.
 
 ### The machines that show screens follow
 

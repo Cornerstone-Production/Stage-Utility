@@ -22,7 +22,6 @@ import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { isSafeKey } from "./safe-key.js";
-import { isUpdateMode } from "../types/state.js";
 import {
   CAPTION_COLOR,
   ICON_COLOR,
@@ -82,7 +81,7 @@ import { viewsStore } from "./views-store.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
-import { autoApplyDecision, type AutoApplyDecision } from "./auto-apply-gate.js";
+import { autoApplyDecision, migrateAutoUpdate, type AutoApplyDecision } from "./auto-apply-gate.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
@@ -152,26 +151,6 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
     );
   }
   return { views: next, changed };
-}
-
-/**
- * Read the persisted auto-update settings, migrating the pre-mode boolean.
- * `enabled: true` meant "apply and restart in the window", which is auto-full;
- * `false`/absent meant nothing automatic at all, which is manual.
- */
-function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
-  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
-  const mode: AutoUpdateSettings["mode"] =
-    isUpdateMode(o.mode)
-      ? o.mode
-      : o.enabled === true
-        ? "auto-full"
-        : "manual";
-  return {
-    mode,
-    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
-    hour: typeof o.hour === "number" ? o.hour : 3,
-  };
 }
 
 // Coalescing window (ms) for live device-status updates. Wireless metering arrives
@@ -2889,7 +2868,7 @@ export class StageController {
     await announceIfNew(updater.getStatus());
       const decision = this.shouldAutoApply(status.behind, new Date());
       if (!decision.apply && decision.why === "window") {
-        console.log("[stage-controller] auto-update waits: Planning Center's live state is unknown and a planned service window is open; it tries again next hour");
+        console.log("[stage-controller] auto-update waits: Planning Center's live state is unknown and a planned service window is open; it tries again at the next scheduled time");
       }
       if (decision.apply) {
         console.log("[stage-controller] auto-update window — applying update");

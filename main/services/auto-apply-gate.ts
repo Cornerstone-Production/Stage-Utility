@@ -9,9 +9,11 @@
 // Waiting for Planning Center itself would hold every update for as long as an
 // outage, or bad credentials, lasted.
 //
-// Pure: stage-controller.ts gathers the inputs.
+// Pure: stage-controller.ts gathers the inputs. The settings it reads come
+// through migrateAutoUpdate, here so its tests call the real one.
 
 import type { AutoUpdateSettings } from "../types/stage.js";
+import { isUpdateMode } from "../types/state.js";
 import type { ZonedParts } from "./app-timezone.js";
 
 export interface AutoApplyInput {
@@ -40,4 +42,24 @@ export function autoApplyDecision(input: AutoApplyInput): AutoApplyDecision {
   if (input.serviceLive) return { apply: false, why: "live" };
   if (!input.liveKnown && input.windowUntil !== null) return { apply: false, why: "window" };
   return { apply: true };
+}
+
+/**
+ * Read the persisted auto-update settings, migrating the pre-mode boolean.
+ * `enabled: true` meant "apply and restart in the window", which is auto-full;
+ * `false`/absent meant nothing automatic at all, which is manual.
+ */
+export function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
+  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
+  const mode: AutoUpdateSettings["mode"] =
+    isUpdateMode(o.mode)
+      ? o.mode
+      : o.enabled === true
+        ? "auto-full"
+        : "manual";
+  return {
+    mode,
+    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
+    hour: typeof o.hour === "number" ? o.hour : 3,
+  };
 }

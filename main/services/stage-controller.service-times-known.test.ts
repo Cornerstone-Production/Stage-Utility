@@ -21,6 +21,7 @@ const { pcoService } = await import("./pco-service.js");
 const { serviceWindow } = await import("./service-window.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { zonedParts } = await import("./app-timezone.js");
+const { updater } = await import("./updater.js");
 
 type Mutable = {
   state: Record<string, unknown>;
@@ -164,6 +165,30 @@ describe("shouldAutoApply while the live state is unknown", () => {
     assert.equal(stageController.shouldAutoApply(1, now).apply, true, "a current reading of nothing live, at the chosen hour");
     await liveReadFails(t);
     assert.deepEqual(stageController.shouldAutoApply(1, now), { apply: false, why: "window" });
+  });
+
+  it("says once, on a tagged line, that it is waiting", async (t) => {
+    serviceWindow.setWindows([{ open: now.getTime() - 60_000, close: now.getTime() + 3_600_000 }]);
+    await liveReadFails(t);
+    const lines = captureConsole(t, "log", "warn", "error");
+    const u = updater as unknown as Record<string, unknown>;
+    const realCheck = u.checkForUpdate;
+    const realApply = u.applyUpdate;
+    let applied = 0;
+    u.checkForUpdate = async () => ({ behind: 1 });
+    u.applyUpdate = async () => { applied++; };
+    t.after(() => { u.checkForUpdate = realCheck; u.applyUpdate = realApply; });
+    await (stageController as unknown as { updateCheckTick(): Promise<void> }).updateCheckTick();
+    assert.equal(applied, 0);
+    assert.equal(lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:")).length, 1, lines.join("\n"));
+  });
+
+  it("applies at boot, before Planning Center has answered or any window is known", () => {
+    // As before this change: nothing says a service is on, and waiting for
+    // Planning Center would hold updates through an outage that began before boot.
+    ctl.lastLive = null;
+    serviceWindow.setWindows([]);
+    assert.equal(stageController.shouldAutoApply(1, now).apply, true);
   });
 
   it("applies outside every cached window", async (t) => {

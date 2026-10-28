@@ -10,24 +10,10 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import type { AutoUpdateSettings, UpdateMode } from "../types/stage.js";
-import { autoApplyDecision } from "./auto-apply-gate.js";
+import type { UpdateMode } from "../types/stage.js";
+import { autoApplyDecision, migrateAutoUpdate } from "./auto-apply-gate.js";
 
-/** Mirrors migrateAutoUpdate in stage-controller.ts. */
-function migrate(saved: unknown): AutoUpdateSettings {
-  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
-  const mode: UpdateMode =
-    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
-      ? o.mode
-      : o.enabled === true
-        ? "auto-full"
-        : "manual";
-  return {
-    mode,
-    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
-    hour: typeof o.hour === "number" ? o.hour : 3,
-  };
-}
+const migrate = migrateAutoUpdate;
 
 /** The gate, from the fields these tests vary. `now` is the app-zone weekday and hour. */
 function shouldAutoApply(opts: {
