@@ -1,8 +1,12 @@
 // host-name-routes.ts — the names this server answers to (Settings, Advanced).
 //
 //   GET  /api/security/host-names   the list, the names waiting, the switch
-//   POST /api/security/host-names   one change: {enforce} | {add} | {accept} |
-//                                   {remove} | {dismiss} | {undismiss}
+//   POST /api/security/host-names   one change: {enforce: false} | {enforce: true,
+//                                   names: [...]} | {add} | {accept} | {remove} |
+//                                   {dismiss} | {undismiss}
+//
+// Turning refusal on takes the names to keep, as the operator confirmed them on
+// the card; the list becomes exactly those names.
 //
 // A write like every other setting, and the cross-origin gate applies. It also
 // has to arrive by a name answered without the list: otherwise a page reaching
@@ -12,6 +16,7 @@
 import type * as http from "http";
 
 import { hostNames } from "../host-names.js";
+import { hostnameOf } from "../http-origin.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 
 const PATH = "/api/security/host-names";
@@ -47,7 +52,15 @@ export async function hostNameRoutes({ req, res, pathname, method }: RouteCtx): 
   const undismiss = text(body.undismiss);
 
   let result: { ok: true } | { ok: false; error: string } = { ok: true };
-  if (typeof body.enforce === "boolean") await hostNames.setEnforce(body.enforce);
+  if (body.enforce === false) await hostNames.turnRefusalOff();
+  else if (body.enforce === true) {
+    const names = body.names;
+    if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
+      result = { ok: false, error: "Turning refusal on needs `names`: the names to keep on the list." };
+    } else {
+      result = await hostNames.turnRefusalOn(names as string[], hostnameOf(req.headers.host));
+    }
+  }
   else if (add !== null) result = await hostNames.add(add, "added");
   else if (accept !== null) result = await hostNames.add(accept, "accepted");
   else if (remove !== null) await hostNames.remove(remove);
