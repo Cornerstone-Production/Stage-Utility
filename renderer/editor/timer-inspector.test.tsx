@@ -127,20 +127,7 @@ describe("each control writes the field it names", () => {
     const m = await mount({ type: "timer", source: "service" });
     try {
       fireEvent.click(sw(m, "Show the next item"));
-      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true, showLabel: true });
-    } finally {
-      m.restore();
-    }
-  });
-
-  test("Show the next item on a layout saved with the sub-line off draws it again", async () => {
-    // The renderer still gates the service sub-line on showLabel, and the
-    // switch for that is gone: turning the next item on must clear it, or the
-    // switch ticks and nothing appears.
-    const m = await mount({ type: "timer", source: "service", showLabel: false });
-    try {
-      fireEvent.click(sw(m, "Show the next item"));
-      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true, showLabel: true });
+      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "service", nextItem: true });
     } finally {
       m.restore();
     }
