@@ -14,6 +14,20 @@ The target is a **release tag**, not the tip of the branch — see
 [distribution.md](distribution.md). The merge is `--ff-only`, so a checkout that has
 somehow diverged fails loudly instead of having its history rewritten underneath it.
 
+The release workflow pushes a tag first and publishes its GitHub release (the notes
+and the signed helper and kiosk assets) last, so a tag can exist for a while without
+one. A checkout waits: it takes a tag only once its release is published, and the
+tagged commits show as waiting to be released until then. The wait applies to a tag
+newer than the newest published release on the track, so a fork that has never
+published a release, or a tag older than the first page of the releases list, is never
+held. When the releases cannot be read (offline, rate limited) nothing is held, so a
+checkout can then take a tag whose release is still being built. Nor is a tag held
+when no published release is among the checkout's tags, since nothing older would be
+left to update to. The
+`[updater]` log says `v1.28.0 is tagged but its release is not published yet; waiting
+for it` once per tag, and `could not read the published releases; choosing among all
+tags` once per outage.
+
 The server stays alive through pull/install/build, polling two files the script
 writes (`update-progress.json`, `update-result.json`) and broadcasting sub-phase
 progress on the `update:status` SSE channel. On success the script writes the
@@ -295,7 +309,7 @@ a path or a credential. If you see one, report it.
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
-| `[updater]` | The update flow described above; a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read |
+| `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |

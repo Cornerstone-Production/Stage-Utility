@@ -105,3 +105,27 @@ export function newerThan(tags: string[], track: string, current: string | null)
     .filter((t) => from === null || compareTags(t, from) > 0)
     .sort((a, b) => compareTags(b, a));
 }
+
+/**
+ * Tags on the track that are tagged but whose release is not published yet.
+ *
+ * The release workflow pushes the tag first and publishes the release, with its
+ * notes and signed assets, at the end. A checkout that took the tag in between
+ * would show a dialog with no notes and point helpers at assets that do not
+ * exist. `published` is the tags the releases API lists.
+ *
+ * A tag is held only when it is NOT published AND newer than the newest
+ * published tag on the track. With nothing published on the track (a fork that
+ * never released) nothing is held, and an old tag that fell off the API's first
+ * page is older than the newest published one, so it is not held either.
+ */
+export function unpublishedTags(tags: string[], track: string, published: string[]): ParsedTag[] {
+  const newest = latestOnTrack(published, track);
+  if (newest === null) return [];
+  const have = new Set(published);
+  return tags
+    .map(parseTag)
+    .filter((t): t is ParsedTag => t !== null && isOnTrack(t, track))
+    .filter((t) => !have.has(t.tag) && compareTags(t, newest) > 0)
+    .sort((a, b) => compareTags(b, a));
+}

@@ -43,7 +43,7 @@ import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
 import { plural } from "./plural.js";
-import { latestOnTrack, newerThan } from "./release-tags.js";
+import { latestOnTrack, newerThan, unpublishedTags } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
 
 const execFileAsync = promisify(execFile);
@@ -252,6 +252,53 @@ export class Updater {
     return (this.deps.fetchReleases ?? fetchReleases)();
   }
 
+  /** Tags whose hold has been logged, so an hourly check says it once. */
+  private heldLogged = new Set<string>();
+  private publishedReadFailed = false;
+
+  /**
+   * The tags a checkout may choose from: those whose GitHub release is
+   * published. The release workflow tags first and publishes the release (notes
+   * and signed assets) last, so a tag can exist for ~15 minutes with neither.
+   * Fails open: when the releases cannot be read nothing is held, and the
+   * failure is logged. `releases` is returned so the caller reuses the one
+   * request for the notes.
+   */
+  private async publishedTags(
+    tags: string[],
+    branch: string,
+  ): Promise<{ tags: string[]; releases: ReleaseInfo[] | null }> {
+    let releases: ReleaseInfo[];
+    try {
+      releases = await this.fetchReleases();
+    } catch (err) {
+      if (!this.publishedReadFailed) {
+        this.logEvent(
+          `could not read the published releases; choosing among all tags — ${errorMessage(err)}`,
+        );
+      }
+      this.publishedReadFailed = true;
+      return { tags, releases: null };
+    }
+    this.publishedReadFailed = false;
+    const held = unpublishedTags(tags, branch, releases.map((r) => r.tag));
+    for (const h of held) {
+      if (this.heldLogged.has(h.tag)) continue;
+      this.heldLogged.add(h.tag);
+      this.logEvent(`${h.tag} is tagged but its release is not published yet; waiting for it`);
+    }
+    const heldSet = new Set(held.map((h) => h.tag));
+    const kept = tags.filter((t) => !heldSet.has(t));
+    // Holding every tag on the track would leave no target, and no target means
+    // following the branch tip, unpinned: worse than the held tag. Take the tags
+    // as they are then, and say so.
+    if (held.length > 0 && latestOnTrack(kept, branch) === null) {
+      this.logEvent(`no published release on ${branch} is in this checkout's tags; not holding ${held[0].tag}`);
+      return { tags, releases };
+    }
+    return { tags: kept, releases };
+  }
+
   /** Read the detached updater's last result file (written by scripts/update.*). */
   private readResult(): UpdateStatus["lastResult"] {
     try {
@@ -341,12 +388,16 @@ export class Updater {
 
       // Only tags actually reachable from this track. A tag cut on main is not a
       // candidate for a beta box until it lands in beta's history.
-      const tags = (
+      const allTags = (
         await this.git(["tag", "--list", "v[0-9]*", "--merged", upstream]).catch(() => "")
       )
         .split("\n")
         .map((t) => t.trim())
         .filter(Boolean);
+      // One request per check serves both the hold and the notes below. A track
+      // with no tags at all needs neither.
+      const { tags, releases } =
+        allTags.length > 0 ? await this.publishedTags(allTags, branch) : { tags: allTags, releases: null };
 
       const target = latestOnTrack(tags, branch);
       const tagBased = target !== null;
@@ -379,7 +430,7 @@ export class Updater {
       // ever coming, which is exactly the false alarm this line exists to avoid.
       const unreleasedCommits = tagBased
         ? summarizeChangelog(
-            (await this.git(["log", "--format=%s", `${targetRef}..${upstream}`]).catch(() => "")).split("\n"),
+            (await this.git(["log", "--no-merges", "--format=%s", `${targetRef}..${upstream}`]).catch(() => "")).split("\n"),
           ).length
         : 0;
       // Curated, not raw: see changelog.ts for why the release workflow's own
@@ -396,7 +447,7 @@ export class Updater {
       // news to an operator, because Update will not bring them.
       const pending =
         behind > 0
-          ? summarizeChangelog((await this.git(["log", "--format=%s", `HEAD..${targetRef}`])).split("\n"))
+          ? summarizeChangelog((await this.git(["log", "--no-merges", "--format=%s", `HEAD..${targetRef}`])).split("\n"))
           : [];
       const behindUserFacing = pending.length;
       const changelog = pending.slice(0, CHANGELOG_CAP);
@@ -420,9 +471,11 @@ export class Updater {
       // release-check.ts.
       let changelogSections: ReleaseSection[] = [];
       let changelogIntro: string | null = null;
-      if (tagBased && behindUserFacing > 0) {
+      // `releases` is null when the read failed, which was logged above and
+      // costs the grouping only.
+      if (tagBased && behindUserFacing > 0 && releases) {
         try {
-          const byTag = new Map((await this.fetchReleases()).map((r) => [r.tag, r]));
+          const byTag = new Map(releases.map((r) => [r.tag, r]));
           // Same anchor question as the version calculation: everything newer
           // than what is installed, or just the target when this box is on no
           // tag at all.
@@ -687,10 +740,13 @@ export class Updater {
       return (await this.fetchReleases()).map((r) => r.tag);
     }
     await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
-    return (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
+    const tags = (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
       .split("\n")
       .map((t) => t.trim())
       .filter(Boolean);
+    // The same hold the check applies, so the pin cannot name a tag the check
+    // would not offer.
+    return (await this.publishedTags(tags, branch)).tags;
   }
 
   /**
