@@ -661,9 +661,10 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
         [
           "-Command",
           `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
-            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-SigningKey' }, $true);` +
-            `if (-not $fn) { throw 'Save-SigningKey is gone' };` +
-            `$ErrorActionPreference = 'Stop'; $AppDir = $env:APP_DIR; Invoke-Expression $fn.Extent.Text;` +
+            `foreach ($name in 'Test-SigningKeyXml','Save-SigningKey') {` +
+            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true);` +
+            `if (-not $fn) { throw "$name is gone" }; Invoke-Expression $fn.Extent.Text };` +
+            `$ErrorActionPreference = 'Stop'; $AppDir = $env:APP_DIR;` +
             `$o = @(Save-SigningKey -From $env:FROM); Write-Output "OUTPUT:$($o.Count)"`,
         ],
         { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base, ...env },
@@ -699,9 +700,24 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.deepEqual(leftovers(), []);
     });
 
+    for (const [label, installed] of [
+      ["is not a key", "not a key"],
+      ["is a 2048-bit key", testSigningKey(2048).publicXml],
+    ] as const) {
+      it(`refuses to keep an installed key that ${label}, naming STAGE_REPLACE_SIGNING_KEY, and asks the server for none`, async () => {
+        const f = await serve();
+        fs.writeFileSync(keyFile(), installed);
+        const r = await saveKey(f.base);
+        assert.notEqual(r.status, 0, r.out);
+        assert.match(r.out + r.err, /is not a 3072-bit RSA key\. To take the server's in its place, set \$env:STAGE_REPLACE_SIGNING_KEY = '1'/);
+        assert.equal(fs.readFileSync(keyFile(), "utf8"), installed, "left as it was");
+        assert.ok(!f.paths.includes("/kiosk/release-signing.pub.xml"));
+      });
+    }
+
     for (const [label, xml, why] of [
-      ["is not a key", "PLACEHOLDER", /is not an RSA key/],
-      ["is a 2048-bit key", testSigningKey(2048).publicXml, /is a 2048-bit key, not 3072-bit/],
+      ["is not a key", "PLACEHOLDER", /is not a 3072-bit RSA key/],
+      ["is a 2048-bit key", testSigningKey(2048).publicXml, /is not a 3072-bit RSA key/],
     ] as const) {
       it(`refuses a key that ${label}, and keeps the one already installed`, async () => {
         const f = await serve();

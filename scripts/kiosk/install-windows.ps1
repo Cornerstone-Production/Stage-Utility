@@ -103,6 +103,20 @@ function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
   Save-KioskScript -From $From -Name 'kiosk-windows.ps1' -To $To -Accept $accept
 }
 
+# Whether this is what the updater verifies with: .NET's <RSAKeyValue> of a
+# 3072-bit RSA key.
+function Test-SigningKeyXml([string]$Xml) {
+  $rsa = [Security.Cryptography.RSA]::Create()
+  try {
+    $rsa.FromXmlString($Xml)
+    return $rsa.KeySize -eq 3072
+  } catch {
+    return $false
+  } finally {
+    $rsa.Dispose()
+  }
+}
+
 # The release signing key the updater checks every launcher's signature against,
 # in Program Files beside the updater. The updater never fetches one. A PC that
 # already has one keeps it, so this installer run again does not take the server's
@@ -115,6 +129,11 @@ function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
 function Save-SigningKey([string]$From) {
   $to = Join-Path $AppDir 'release-signing.pub.xml'
   if ((Test-Path -LiteralPath $to) -and $env:STAGE_REPLACE_SIGNING_KEY -ne '1') {
+    # Held to what the updater will need of it, so a broken key is said now rather
+    # than at the first update.
+    if (-not (Test-SigningKeyXml -Xml ([IO.File]::ReadAllText($to)))) {
+      throw "the release signing key installed at $to is not a 3072-bit RSA key. To take the server's in its place, set `$env:STAGE_REPLACE_SIGNING_KEY = '1' and run the installer again."
+    }
     # Not Write-Output: Install-Updater's output is its answer, and '' means installed.
     Write-Information -InformationAction Continue "    keeping the release signing key already installed ($to); set STAGE_REPLACE_SIGNING_KEY=1 to take the server's"
     return
@@ -122,12 +141,8 @@ function Save-SigningKey([string]$From) {
   $temp = Join-Path $AppDir ('release-signing.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
   try {
     Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/release-signing.pub.xml" -OutFile $temp
-    $rsa = [Security.Cryptography.RSA]::Create()
-    try {
-      try { $rsa.FromXmlString([IO.File]::ReadAllText($temp)) } catch { throw "the release signing key from $From is not an RSA key" }
-      if ($rsa.KeySize -ne 3072) { throw "the release signing key from $From is a $($rsa.KeySize)-bit key, not 3072-bit" }
-    } finally {
-      $rsa.Dispose()
+    if (-not (Test-SigningKeyXml -Xml ([IO.File]::ReadAllText($temp)))) {
+      throw "the release signing key from $From is not a 3072-bit RSA key"
     }
     Move-Item -Force -LiteralPath $temp -Destination $to
   } finally {

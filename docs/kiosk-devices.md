@@ -368,7 +368,9 @@ from the server's own tree, so a server with no internet can still install one. 
 launcher the updater installs after it is. The updater script the installer also
 downloads is only checked to parse, since the server names no SHA-256 for it, and the
 release signing key it installs beside it (`release-signing.pub.xml`) is refused unless
-it is a 3072-bit RSA key. The scheduled task `StageUtilityKiosk`
+it is a 3072-bit RSA key. A key already there is kept, and held to the same check: one
+that fails it leaves the updater uninstalled, with a warning naming
+`STAGE_REPLACE_SIGNING_KEY`. The scheduled task `StageUtilityKiosk`
 runs it at every sign-in and every minute; it finds the server and opens the
 browser on the device's `/enroll` address. The discovery port is in the `port` file
 beside it (`STAGE_KIOSK_PORT` at install, 8789 by default).
