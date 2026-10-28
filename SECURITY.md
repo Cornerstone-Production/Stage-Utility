@@ -115,10 +115,12 @@ When reporting, please include:
   logged once on a `[security]` line and listed on that card to accept or dismiss, and the
   sidebar's Advanced entry counts the names waiting. With **Refuse names not on the list** on,
   such a request gets a `403`, reads and writes alike, and an event stream opened by such a
-  name is closed. The first time it is turned on it accepts the names plainly in use: seen in
-  the last 30 days, over at least a day, and not dismissed. A page can make a browser send any
-  name once, so a name seen in one burst is left waiting, and so is every name refused later:
-  turning refusal off and on again accepts nothing. The list itself changes only by a request
+  name is closed. Turning it on shows the list to confirm
+  first: every listed and waiting name with its first and last seen, the listed ones ticked and
+  the waiting ones not, and the server takes exactly the names ticked. A page can make a browser
+  send any name on any number of days, so nothing is accepted because it was seen often or for
+  long; a name refused later is left waiting too. The name the operator is using cannot be left
+  off, so confirming never locks them out. The list itself changes only by a request
   whose name is already answered, so a page cannot list its own name for later. The same holds for
   the other routes that can set an answered name: the **Public address**, a config import and a
   snapshot recall. Until refusal
