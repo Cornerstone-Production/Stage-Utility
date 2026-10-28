@@ -280,12 +280,12 @@ describe("the asset cards", () => {
 });
 
 describe("the dialogs", () => {
-  test("the logo dialog: Upload only until there is a logo, then Replace, Adjust and Remove", async () => {
+  test("the logo dialog: Upload only until there is a logo, then Replace and Remove, never Adjust", async () => {
     mount();
     await press(screen.getByRole("button", { name: "Add a logo" }));
     let d = within(await dialog("Logo"));
     assert.ok(button(d, "Upload"));
-    absent(d.queryByRole("button", { name: "Adjust" }), "Adjust is offered with no logo");
+    assert.ok(d.getByText("Drop an image here, or click to choose one"), "no place to drop the first logo");
     absent(d.queryByRole("button", { name: /Remove/ }), "Remove is offered with no logo");
     cleanup();
     await settle();
@@ -293,8 +293,9 @@ describe("the dialogs", () => {
     await press(screen.getByRole("button", { name: "Change logo" }));
     d = within(await dialog("Logo"));
     assert.ok(button(d, "Replace"));
-    assert.ok(button(d, "Adjust"));
     assert.ok(button(d, "Remove logo"));
+    // The editor is the dialog's body now; a button to reach it is a second step.
+    absent(d.queryByRole("button", { name: "Adjust" }), "Adjust is still a separate step");
   });
 
   test("Remove writes null and closes; a refused write leaves the dialog open", async () => {
@@ -333,7 +334,7 @@ describe("the dialogs", () => {
     let d = within(await dialog("Tab and home-screen icon"));
     assert.ok(button(d, "Upload"));
     assert.equal((button(d, "Use my logo") as HTMLButtonElement).disabled, true);
-    absent(d.queryByRole("button", { name: "Adjust" }), "Adjust is offered with no icon");
+    absent(d.queryByRole("slider", { name: "Zoom" }), "an editor is offered with no icon to edit");
     assert.ok(d.getByText("Stage Utility", { selector: "b" }), "the home-screen label names the app");
     cleanup();
     await settle();
@@ -397,9 +398,13 @@ describe("the dialogs", () => {
         appIconBackground: "#2e6691",
       });
       await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
-      await press(button(within(await dialog("Tab and home-screen icon")), "Background #2e6691"));
+      const d = within(await dialog("Tab and home-screen icon"));
       await act(async () => settle());
-      assert.deepEqual([asked.length, writes.length], [0, 0]);
+      // Opening reads the source for the editor; the swatch must read nothing more.
+      const opened = asked.length;
+      await press(button(d, "Background #2e6691"));
+      await act(async () => settle());
+      assert.deepEqual([asked.length - opened, writes.length], [0, 0]);
     } finally {
       globalThis.fetch = before;
     }
@@ -459,7 +464,7 @@ describe("the dialogs", () => {
     }
   });
 
-  test("with an icon set the dialog offers Replace, Adjust and Remove, and the saved background is pressed", async () => {
+  test("with an icon set the dialog offers Replace and Remove, and the saved background is pressed", async () => {
     const { writes } = mount({
       appIcon192: "/branding-images/aaaaaaaaaaaaaaaa.png",
       appIconMaskable: "/branding-images/bbbbbbbbbbbbbbbb.png",
@@ -468,10 +473,126 @@ describe("the dialogs", () => {
     await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
     const d = within(await dialog("Tab and home-screen icon"));
     assert.ok(button(d, "Replace"));
-    assert.ok(button(d, "Adjust"));
+    absent(d.queryByRole("button", { name: "Adjust" }), "Adjust is still a separate step");
     absent(d.queryByRole("button", { name: "Use my logo" }), "Use my logo is offered once an icon exists");
     assert.equal(button(d, "Background #2e6691").getAttribute("aria-pressed"), "true");
     await press(button(d, "Remove tab and home-screen icon"));
     assert.deepEqual(writes, [{ icon: null }]);
+  });
+});
+
+describe("editing in the dialog itself", () => {
+  // installRenderDom does not put jsdom's FileReader on the global, and the page
+  // reads a picked or dropped file with one.
+  const g = globalThis as unknown as Record<string, unknown>;
+  const hadReader = g.FileReader;
+  before(() => {
+    g.FileReader = (window as unknown as Record<string, unknown>).FileReader;
+  });
+  after(() => {
+    g.FileReader = hadReader;
+  });
+  /** fetch answering the branding source read with `source`, recording what was asked. */
+  function stubSource(source: Partial_) {
+    const before = globalThis.fetch;
+    const beforeTimeout = AbortSignal.timeout;
+    AbortSignal.timeout = () => new AbortController().signal;
+    const asked: string[] = [];
+    globalThis.fetch = (async (url: unknown) => {
+      asked.push(String(url));
+      return { ok: true, status: 200, json: async () => source };
+    }) as unknown as typeof fetch;
+    return {
+      asked,
+      restore: () => {
+        globalThis.fetch = before;
+        AbortSignal.timeout = beforeTimeout;
+      },
+    };
+  }
+
+  /** A real File, as a drop or the file chooser hands one over. */
+  // jsdom's File, not Node's: jsdom's FileReader only reads its own Blobs.
+  const png = (name = "slot.png", type = "image/png") =>
+    new (window as unknown as { File: typeof File }).File([new Uint8Array([137, 80, 78, 71])], name, { type });
+
+  /** Drop `file` on `el` the way a browser does: enter, over, drop. */
+  async function dropOn(el: Element, file: File) {
+    const dataTransfer = { types: ["Files"], files: [file], dropEffect: "none" };
+    await act(async () => {
+      fireEvent.dragEnter(el, { dataTransfer });
+      fireEvent.dragOver(el, { dataTransfer });
+      fireEvent.drop(el, { dataTransfer });
+      // FileReader and the editor's image load are both a turn or two away.
+      await new Promise((r) => setTimeout(r, 30));
+    });
+  }
+
+  for (const [card, title, field] of [
+    [/Empty slot image/, "Empty slot image", "emptyLogo"],
+    [/Default avatar/, "Default avatar", "avatar"],
+  ] as const) {
+    test(`${title}: opening it shows the saved image in the editor, with no second step`, async () => {
+      const source = stubSource({ original: LOGO, crop: { scale: 1, x: 0, y: 0 } });
+      const restoreCanvas = fakeCanvas();
+      try {
+        mount({ [field === "emptyLogo" ? "emptySlotLogo" : "defaultAvatar"]: LOGO });
+        await press(screen.getByRole("button", { name: card }));
+        const d = within(await dialog(title));
+        await act(async () => new Promise((r) => setTimeout(r, 30)));
+        assert.ok(d.getByRole("slider", { name: "Zoom" }), "the zoom is not in the dialog");
+        assert.ok(source.asked.some((u) => u.includes("/api/branding/source")), "the saved original was never read");
+      } finally {
+        restoreCanvas();
+        source.restore();
+      }
+    });
+
+    test(`${title}: an image dropped on the card opens the dialog with it, and Save writes it`, async () => {
+      const restoreCanvas = fakeCanvas();
+      try {
+        const { writes } = mount();
+        await dropOn(screen.getByRole("button", { name: card }), png());
+        const d = within(await dialog(title));
+        assert.ok(d.getByRole("slider", { name: "Zoom" }), "the dropped image is not in the editor");
+        await press(d.getByRole("button", { name: /^Save / }));
+        assert.equal(writes.length, 1, `expected one write, got ${writes.length}`);
+        assert.ok(writes[0]![field], `the drop did not write ${field}`);
+      } finally {
+        restoreCanvas();
+      }
+    });
+  }
+
+  test("an image dropped on an open dialog replaces the one in its editor", async () => {
+    const restoreCanvas = fakeCanvas();
+    try {
+      mount();
+      await press(screen.getByRole("button", { name: /Empty slot image/ }));
+      const el = await dialog("Empty slot image");
+      absent(within(el).queryByRole("slider", { name: "Zoom" }), "an editor with nothing to edit");
+      await dropOn(el, png());
+      assert.ok(within(el).getByRole("slider", { name: "Zoom" }), "the dropped image is not in the editor");
+    } finally {
+      restoreCanvas();
+    }
+  });
+
+  test("the logo takes a drop on the stage it is drawn on", async () => {
+    const restoreCanvas = fakeCanvas();
+    try {
+      mount();
+      await dropOn(screen.getByRole("button", { name: "Add a logo" }), png("logo.png"));
+      assert.ok(within(await dialog("Logo")).getByRole("slider", { name: "Zoom" }));
+    } finally {
+      restoreCanvas();
+    }
+  });
+
+  test("a file that is not an image is refused, and nothing opens", async () => {
+    const { writes } = mount();
+    await dropOn(screen.getByRole("button", { name: /Default avatar/ }), png("notes.txt", "text/plain"));
+    absent(screen.queryByRole("dialog"), "a dialog opened for a text file");
+    assert.equal(writes.length, 0);
   });
 });

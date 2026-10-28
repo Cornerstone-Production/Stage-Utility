@@ -440,16 +440,21 @@ a wall, in a different page entirely.
 and in its own chrome. The page opens on the app's identity: the logo large on a
 stage-black canvas with the name beneath it, as a display draws them. Beside it sit
 the settings that style them. Below are the images, each drawn where it is used;
-click the logo or any image to edit it in a dialog.
+click the logo or any image to edit it in a dialog, or drop an image file on it to
+replace it. The dialog opens with the image already in its crop editor: drag to
+reposition, zoom with the slider, then **Save**. A new image, from **Upload** or
+**Replace** or dropped on the dialog, takes its place in the editor and is not
+saved until **Save**. With nothing set, the editor is a place to drop the first
+image.
 
 | | |
 |---|---|
 | **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
 | **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
-| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set), **Adjust** (pan and zoom a square crop) and **Remove**. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
+| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set) and **Remove**, and the square crop edited in the dialog. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
 | **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
-| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Adjust** and **Remove** |
+| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Remove** and crop editor |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
 The connect QR toggle is the last card on this page — see
@@ -466,7 +471,8 @@ for Android's round and rounded-square masks with the art kept inside the centre
 
 **Background** fills the transparent areas of your art (black, two blues or white);
 phones would otherwise fill them with black. Changing it redraws every size at once.
-Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it puts
+Once set, the dialog opens with the icon's square in the crop editor, and offers
+**Replace** and **Remove**. Removing it puts
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
 A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.

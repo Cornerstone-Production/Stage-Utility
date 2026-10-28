@@ -11,7 +11,8 @@ import { DEFAULT_ICON_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
 import { ART_MAX, renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
-import { AvatarDialog, CropDialog, EmptySlotDialog, IconDialog, LogoDialog } from "./branding-dialogs";
+import { AvatarDialog, EmptySlotDialog, IconDialog, LogoDialog, type EditorSlot } from "./branding-dialogs";
+import { LogoCropper } from "./logo-cropper";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
 // Kept non-generic: a considered blue plus a few distinct hues. Semantic status
@@ -22,6 +23,7 @@ const ACCENT_PRESETS = ["#2e6691", "#3b82a6", "#5b9bd8", "#6e56cf", "#0d9488", "
 // leaves headroom under the 2 MB data-URL limit).
 const MAX_LOGO_BYTES = 1_500_000;
 const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
+const ACCEPTED_TYPES = ACCEPTED.split(",");
 
 
 type Crop = { scale: number; x: number; y: number };
@@ -30,6 +32,13 @@ type Target = "app" | "empty" | "avatar" | "icon";
 /** The word the crop editor uses for each thing it can crop. */
 const NOUN: Record<Target, string> = { app: "logo", empty: "image", avatar: "image", icon: "icon" };
 
+/** What the open dialog's crop editor holds: the saved original being read, the
+ *  reason it could not be, or the image to edit and where it was last left. */
+type Edit =
+  | { target: Target; status: "loading" }
+  | { target: Target; status: "error"; message: string }
+  | { target: Target; status: "ready"; src: string; initial: Crop | null };
+
 export function BrandingSection({
   stageState,
   handlers,
@@ -37,8 +46,11 @@ export function BrandingSection({
   const [name, setName] = useState(stageState.appName);
   /** Which asset's dialog is open. */
   const [dialog, setDialog] = useState<Target | null>(null);
-  /** The crop editor, when one is open: the image, where it was last left, and what it is for. */
-  const [crop, setCrop] = useState<{ src: string; initial: Crop | null; target: Target } | null>(null);
+  /** The open dialog's crop editor. */
+  const [edit, setEdit] = useState<Edit | null>(null);
+  /** Bumped on every open, close and new file, so a saved original that arrives
+   *  after the operator has moved on is dropped rather than shown over their pick. */
+  const editSeq = useRef(0);
   /** An icon is being drawn and saved: its controls wait. */
   const [iconBusy, setIconBusy] = useState(false);
   /** The same fact for the handlers: state would still read false in a second click's closure. */
@@ -90,6 +102,21 @@ export function BrandingSection({
     [],
   );
 
+  // A file dropped anywhere else on this page — between the cards, or on the dim
+  // around an open dialog — would make the browser leave the app and open the file
+  // in the tab. The cards and dialogs take theirs; everything else is refused.
+  useEffect(() => {
+    const refuse = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", refuse);
+    window.addEventListener("drop", refuse);
+    return () => {
+      window.removeEventListener("dragover", refuse);
+      window.removeEventListener("drop", refuse);
+    };
+  }, []);
+
   useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
   });
@@ -112,15 +139,18 @@ export function BrandingSection({
     fileRef.current?.click();
   }
 
-  function onPickFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  /** Open `target`'s dialog with `file` in its crop editor: from Upload or Replace,
+   *  or dropped on the card or the dialog. Nothing is saved until Save. */
+  function loadFile(target: Target, file: File) {
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      toast.error("That is not a PNG, JPG, SVG or WebP image.");
+      return;
+    }
     if (file.size > MAX_LOGO_BYTES) {
       toast.error("Image is too large — please use one under 1.5 MB.");
       return;
     }
-    const target = pickTarget.current;
+    const seq = ++editSeq.current;
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === "string" ? reader.result : null;
@@ -128,11 +158,18 @@ export function BrandingSection({
         toast.error("Could not read that image.");
         return;
       }
-      setDialog(null);
-      setCrop({ src: dataUrl, initial: null, target }); // fresh upload
+      if (editSeq.current !== seq) return;
+      setDialog(target);
+      setEdit({ target, status: "ready", src: dataUrl, initial: null }); // fresh upload
     };
     reader.onerror = () => toast.error("Could not read that image.");
     reader.readAsDataURL(file);
+  }
+
+  function onPickFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) loadFile(pickTarget.current, file);
   }
 
   /** The saved background once an icon exists, else the pick for the one about to be made. */
@@ -150,28 +187,49 @@ export function BrandingSection({
     }
   }
 
-  // Re-open the editor on the ORIGINAL upload, restoring saved zoom/position.
-  async function onAdjust(target: Target) {
-    const current: Record<Target, string | null> = {
-      app: stageState.appLogo,
-      empty: stageState.emptySlotLogo,
-      avatar: stageState.defaultAvatar,
-      icon: null, // a 192 px thumbnail with its background baked in is no source for an icon
-    };
-    let source: BrandingSource;
-    try {
-      source = await sourceOf(target);
-    } catch (err) {
-      toast.error(`Could not open the editor: ${errorMessage(err)}`);
+  /** The image each target has saved now, or null when it has none. */
+  const savedImage: Record<Target, string | null> = {
+    app: stageState.appLogo,
+    empty: stageState.emptySlotLogo,
+    avatar: stageState.defaultAvatar,
+    icon: stageState.appIcon192,
+  };
+
+  /**
+   * Open a dialog with its editor already on the ORIGINAL upload, at the saved zoom
+   * and position. The editor is the dialog's body, so there is no second step to
+   * reach it; with nothing saved the body is a place to drop the first image.
+   */
+  function openDialog(target: Target) {
+    const seq = ++editSeq.current;
+    setDialog(target);
+    if (!savedImage[target]) {
+      setEdit(null);
       return;
     }
-    const src = source.original ?? source.art ?? current[target];
-    if (!src) {
-      toast.error("There is nothing to adjust.");
-      return;
-    }
+    setEdit({ target, status: "loading" });
+    sourceOf(target).then(
+      (source) => {
+        if (editSeq.current !== seq) return;
+        // The icon's 192 px thumbnail has its background baked in: no source for an icon.
+        const src = source.original ?? source.art ?? (target === "icon" ? null : savedImage[target]);
+        setEdit(
+          src
+            ? { target, status: "ready", src, initial: source.crop ?? null }
+            : { target, status: "error", message: `The saved ${NOUN[target]} has no original to edit. Replace it to change it.` },
+        );
+      },
+      (err: unknown) => {
+        if (editSeq.current !== seq) return;
+        setEdit({ target, status: "error", message: `Could not open the saved ${NOUN[target]} to edit: ${errorMessage(err)}` });
+      },
+    );
+  }
+
+  function closeDialog() {
+    editSeq.current++;
     setDialog(null);
-    setCrop({ src, initial: source.crop ?? null, target });
+    setEdit(null);
   }
 
   /** What an icon is made from. `art` is any square image; it is brought down to 512. */
@@ -218,7 +276,7 @@ export function BrandingSection({
       const source = await sourceOf("app");
       return { art: logo, original: source.original, crop: source.crop, background: iconBackground };
     });
-    if (ok) setDialog(null);
+    if (ok) closeDialog();
   }
 
   /** A swatch: redraw the saved icon over the new colour, or just remember it for the next one. */
@@ -236,8 +294,8 @@ export function BrandingSection({
   }
 
   async function onCropSave(result: { logo: string; original: string; crop: Crop }) {
-    if (!crop) return;
-    const target = crop.target;
+    if (!edit) return;
+    const target = edit.target;
     if (target === "icon") {
       const ok = await makeIcon(async () => ({
         art: result.logo,
@@ -245,7 +303,7 @@ export function BrandingSection({
         crop: result.crop,
         background: iconBackground,
       }));
-      if (ok) setCrop(null);
+      if (ok) closeDialog();
       return;
     }
     let saved: Parameters<typeof handlers.handleSetBranding>[0];
@@ -261,15 +319,42 @@ export function BrandingSection({
         break;
     }
     // The editor stays open when the server refuses, so the work is not lost with the toast.
-    if (await handlers.handleSetBranding(saved)) setCrop(null);
+    if (await handlers.handleSetBranding(saved)) closeDialog();
   }
 
   async function remove(field: "logo" | "emptyLogo" | "avatar") {
-    if (await handlers.handleSetBranding({ [field]: null })) setDialog(null);
+    if (await handlers.handleSetBranding({ [field]: null })) closeDialog();
   }
 
   async function removeIcon() {
-    if (await handlers.handleSetBranding({ icon: null })) setDialog(null);
+    if (await handlers.handleSetBranding({ icon: null })) closeDialog();
+  }
+
+  /** What `target`'s dialog shows where the image goes. */
+  function editorFor(target: Target): EditorSlot {
+    if (edit?.target !== target) return savedImage[target] ? { kind: "loading" } : { kind: "empty" };
+    if (edit.status === "loading") return { kind: "loading" };
+    if (edit.status === "error") return { kind: "error", message: edit.message };
+    return {
+      kind: "editor",
+      node: (
+        <LogoCropper
+          // One editor per image: a new file starts over at cover, not at the last zoom.
+          key={edit.src}
+          src={edit.src}
+          initial={edit.initial}
+          noun={NOUN[target]}
+          // The empty-slot image and the avatar are always drawn recoloured; the
+          // logo follows the toggle; the icon is drawn exactly as it is.
+          monochrome={target === "app" ? stageState.appLogoMonochrome : target !== "icon"}
+          // An icon is drawn up to 512 px: a smaller crop is scaled up and looks soft.
+          sharpFrom={target === "icon" ? ART_MAX : undefined}
+          className="border-0 bg-transparent p-0"
+          onCancel={closeDialog}
+          onSave={(r) => void onCropSave(r)}
+        />
+      ),
+    };
   }
 
   return (
@@ -286,7 +371,7 @@ export function BrandingSection({
 
       {/* ── Identity: the logo and name as a display draws them, and the settings that style them ── */}
       <div className={cn(CARD, "grid overflow-hidden md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]")}>
-        <IdentityStage brand={stageState} onLogo={() => setDialog("app")} />
+        <IdentityStage brand={stageState} onLogo={() => openDialog("app")} onFile={(f) => loadFile("app", f)} />
         <div className="flex flex-col gap-[18px] px-6 py-[22px]">
           <div className="flex flex-col">
             <FieldLabel>App name</FieldLabel>
@@ -383,9 +468,17 @@ export function BrandingSection({
 
       {/* ── The images, each drawn where it is used ── */}
       <div className="grid gap-3 md:grid-cols-3">
-        <IconCard brand={stageState} onOpen={() => setDialog("icon")} />
-        <EmptySlotCard image={stageState.emptySlotLogo} onOpen={() => setDialog("empty")} />
-        <AvatarCard image={stageState.defaultAvatar} onOpen={() => setDialog("avatar")} />
+        <IconCard brand={stageState} onOpen={() => openDialog("icon")} onFile={(f) => loadFile("icon", f)} />
+        <EmptySlotCard
+          image={stageState.emptySlotLogo}
+          onOpen={() => openDialog("empty")}
+          onFile={(f) => loadFile("empty", f)}
+        />
+        <AvatarCard
+          image={stageState.defaultAvatar}
+          onOpen={() => openDialog("avatar")}
+          onFile={(f) => loadFile("avatar", f)}
+        />
       </div>
 
       <QrCard checked={stageState.showQr ?? false} onChange={handlers.handleShowQrChange} />
@@ -393,9 +486,10 @@ export function BrandingSection({
       <LogoDialog
         open={dialog === "app"}
         brand={stageState}
-        onClose={() => setDialog(null)}
+        editor={editorFor("app")}
+        onClose={closeDialog}
         onUpload={() => openPicker("app")}
-        onAdjust={() => void onAdjust("app")}
+        onFile={(f) => loadFile("app", f)}
         onRemove={() => void remove("logo")}
       />
       <IconDialog
@@ -403,46 +497,31 @@ export function BrandingSection({
         brand={stageState}
         background={iconBackground}
         busy={iconBusy}
+        editor={editorFor("icon")}
         onBackground={(hex) => void pickBackground(hex)}
         onUseLogo={() => void buildIconFromLogo()}
-        onClose={() => setDialog(null)}
+        onClose={closeDialog}
         onUpload={() => openPicker("icon")}
-        onAdjust={() => void onAdjust("icon")}
+        onFile={(f) => loadFile("icon", f)}
         onRemove={() => void removeIcon()}
       />
       <EmptySlotDialog
         open={dialog === "empty"}
         isSet={!!stageState.emptySlotLogo}
-        onClose={() => setDialog(null)}
+        editor={editorFor("empty")}
+        onClose={closeDialog}
         onUpload={() => openPicker("empty")}
-        onAdjust={() => void onAdjust("empty")}
+        onFile={(f) => loadFile("empty", f)}
         onRemove={() => void remove("emptyLogo")}
       />
       <AvatarDialog
         open={dialog === "avatar"}
         isSet={!!stageState.defaultAvatar}
-        onClose={() => setDialog(null)}
+        editor={editorFor("avatar")}
+        onClose={closeDialog}
         onUpload={() => openPicker("avatar")}
-        onAdjust={() => void onAdjust("avatar")}
+        onFile={(f) => loadFile("avatar", f)}
         onRemove={() => void remove("avatar")}
-      />
-
-      {/* Crop / zoom editor — shared by every image. */}
-      <CropDialog
-        crop={
-          crop && {
-            src: crop.src,
-            initial: crop.initial,
-            noun: NOUN[crop.target],
-            // The empty-slot image and the avatar are always drawn recoloured; the
-            // logo follows the toggle; the icon is drawn exactly as it is.
-            monochrome: crop.target === "app" ? stageState.appLogoMonochrome : crop.target !== "icon",
-            // An icon is drawn up to 512 px: a smaller crop is scaled up and looks soft.
-            sharpFrom: crop.target === "icon" ? ART_MAX : undefined,
-          }
-        }
-        onCancel={() => setCrop(null)}
-        onSave={(r) => void onCropSave(r)}
       />
     </div>
   );
