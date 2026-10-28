@@ -361,8 +361,13 @@ leaves the launcher as it was (none, on a first install) and the installer stops
 shows the PC in Screens at once; the updater's first check takes over from there.
 That proves the file arrived whole from this server over the same plain-HTTP
 connection, not who sent it: anything that can answer as the server can name its own
-digest. The updater script the installer also downloads is only checked to parse,
-since the server names no SHA-256 for it. The scheduled task `StageUtilityKiosk`
+digest. The first launcher is not checked against the release's signature: the
+installer trusts the server it was run from in any case, and the launcher is served
+from the server's own tree, so a server with no internet can still install one. Every
+launcher the updater installs after it is. The updater script the installer also
+downloads is only checked to parse, since the server names no SHA-256 for it, and the
+release signing key it installs beside it (`release-signing.pub.xml`) is refused unless
+it is a 3072-bit RSA key. The scheduled task `StageUtilityKiosk`
 runs it at every sign-in and every minute; it finds the server and opens the
 browser on the device's `/enroll` address. The discovery port is in the `port` file
 beside it (`STAGE_KIOSK_PORT` at install, 8789 by default).
@@ -381,8 +386,10 @@ administrator can write there; it runs as SYSTEM) and registers the task
 the server (`GET /api/machine-updates/check`, the same check a Mac's updater makes)
 whether its launcher, compared by SHA-256, is the server's. When the server says to
 replace it, it downloads `kiosk-windows.ps1` to a temporary file in
-`%PROGRAMFILES%\StageUtility`, checks its SHA-256 is the one the server named and
-that it parses, and moves it over `kiosk.ps1`. Nothing restarts: the new launcher
+`%PROGRAMFILES%\StageUtility`, checks its SHA-256 is the one the server named, checks
+the release's [signature](#signed-updates) of it, `kiosk-windows.ps1.sig`, against the
+key the installer left beside the updater, checks that it parses, and moves it over
+`kiosk.ps1`. Nothing restarts: the new launcher
 runs at the next sign-in, or the next time the browser exits. The installer stages
 its own downloads in the same folder, never in `%PROGRAMDATA%`, where any user can
 create files. Any failure leaves `kiosk.ps1` as it was. The switch *Update Mac output
@@ -394,8 +401,8 @@ How a failure is held depends on whether it would happen again:
 
 | Failure | Reported as | Then |
 |---|---|---|
-| The download itself fails or times out | `retrying`, with the reason | Not downloaded again for 30 minutes, then 1, 2, 4 and at most 6 hours between tries while it keeps failing; the wait starts over on success or a new launcher. The PC still checks in every five minutes, so it stays listed |
-| The SHA-256 does not match, the download does not parse, the server named no SHA-256, or `kiosk.ps1` is a link | `failed` | The server does not offer that launcher again until someone presses **Try again** in Screen settings > Device |
+| The download of the launcher or its signature fails or times out, or the server has no signature to give (`signature missing`) | `retrying`, with the reason | Not downloaded again for 30 minutes, then 1, 2, 4 and at most 6 hours between tries while it keeps failing; the wait starts over on success or a new launcher. The PC still checks in every five minutes, so it stays listed |
+| The SHA-256 does not match, the signature does not verify (`signature invalid`), no readable key is installed (`signature not checked`), the download does not parse, the server named no SHA-256, or `kiosk.ps1` is a link | `failed` | The server does not offer that launcher again until someone presses **Try again** in Screen settings > Device |
 
 A launcher updated more than a day ago is reported as `idle` again, so Screens stops
 saying it takes effect at the next sign-in.
@@ -406,9 +413,11 @@ Files. The installer writes it from the address it downloaded from, which is
 updater does not read the `server` file in `%PROGRAMDATA%`: it runs as SYSTEM, and
 that folder is writable by any user. What it last did is `status.json` beside the
 updater, and its log, `kiosk-update.log` beside it, says each decision when it
-changes, `[helper-update]`-tagged, as the server's `/log` does. A PC installed before
-1.27.0 has no updater and a launcher written by the installer; run the installer once
-more to get both.
+changes, `[helper-update]`-tagged, as the server's `/log` does, including whether the
+launcher's signature was valid. A PC installed before 1.27.0 has no updater and a
+launcher written by the installer; run the installer once more to get both. An
+updater installed before signed updates checks the digest only and has no key: run the
+installer once more for both.
 
 **Removing it**, in an elevated PowerShell. The updater first, so it does not put the
 launcher back:
@@ -451,6 +460,31 @@ the first time it is asked for, from the same 60-an-hour allowance.
 `/Library/Application Support/StageUtilityUpdater/release-signing.pub.pem`. The updater
 verifies every update with `/usr/bin/openssl dgst -sha256 -verify` against that file
 and never asks the server for a key. No readable key there holds the update as failed.
+
+**On a Windows PC**, the installer downloads the key as `/kiosk/release-signing.pub.xml`
+and writes it to `%PROGRAMFILES%\StageUtility\release-signing.pub.xml`, beside the
+updater, where only an administrator can write. The updater verifies each new launcher
+with .NET's `RSA.VerifyData` (SHA-256, PKCS#1 v1.5) against that file, which Windows
+PowerShell 5.1 does with nothing installed, and never asks the server for a key. The
+launcher is served from the server's own `scripts/kiosk`, so its signature holds only
+while that file is the one the release was built from: a server whose checkout has a
+changed `kiosk-windows.ps1` (a local edit, or line endings converted by git) offers a
+launcher every PC refuses as `signature invalid`.
+
+**What the first install trusts.** The installer itself, and the key it installs, come
+from the server it is run from, over plain HTTP. So the first install trusts that
+server, exactly as `curl ... | sudo sh` and `irm ... | iex` always have. From the first
+update on, the key on the machine decides: a server, or anything answering in its place,
+can still say *when* to update, but a payload it did not get from the release is
+refused. Running the installer again replaces the key with the server's, so a reinstall
+is a first install again.
+
+**Rotating the key** is a new key pair, its public half committed in place of
+`scripts/kiosk/release-signing.pub.pem` and its private half set as the
+`RELEASE_SIGNING_KEY` secret (see [distribution](ops/distribution.md#the-release-signing-key)).
+A machine's updater keeps the key it was installed with, so it refuses every release
+signed with the new one until its installer is run again: run it on every Mac and PC,
+from a server on the first release signed with the new key.
 
 ## Size
 

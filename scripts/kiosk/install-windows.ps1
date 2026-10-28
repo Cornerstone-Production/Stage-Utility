@@ -15,7 +15,8 @@
 #
 # The launcher (kiosk-windows.ps1) and an updater task (kiosk-update-windows.ps1) are
 # downloaded from the server this was fetched from, so the launcher follows the
-# server's version. From a copy that was not fetched from a server, say where to
+# server's version, with the release signing key the updater verifies every new
+# launcher against. From a copy that was not fetched from a server, say where to
 # download from:  $env:STAGE_DOWNLOAD_FROM = 'http://<server>:<port>'
 
 $ErrorActionPreference = 'Stop'
@@ -98,12 +99,35 @@ function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
   Save-KioskScript -From $From -Name 'kiosk-windows.ps1' -To $To -Accept $accept
 }
 
+# The release signing key the updater checks every launcher's signature against,
+# from the server this install came from, in Program Files beside the updater. The
+# updater never fetches one, so this install is the one time the server is trusted
+# with it. Refused unless .NET reads it as a 3072-bit RSA key.
+function Save-SigningKey([string]$From) {
+  $to = Join-Path $AppDir 'release-signing.pub.xml'
+  $temp = Join-Path $AppDir ('release-signing.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+  try {
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/release-signing.pub.xml" -OutFile $temp
+    $rsa = [Security.Cryptography.RSA]::Create()
+    try {
+      try { $rsa.FromXmlString([IO.File]::ReadAllText($temp)) } catch { throw "the release signing key from $From is not an RSA key" }
+      if ($rsa.KeySize -ne 3072) { throw "the release signing key from $From is a $($rsa.KeySize)-bit key, not 3072-bit" }
+    } finally {
+      $rsa.Dispose()
+    }
+    Move-Item -Force -LiteralPath $temp -Destination $to
+  } finally {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp }
+  }
+}
+
 # The updater: a SYSTEM task, so its script is in Program Files, where only an
 # administrator can write. Returns why it could not be installed, or '' when it was.
 function Install-Updater([string]$From) {
   try {
     New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
     $updater = Join-Path $AppDir 'kiosk-update.ps1'
+    Save-SigningKey -From $From
     Save-KioskScript -From $From -Name 'kiosk-update-windows.ps1' -To $updater
     [IO.File]::WriteAllText((Join-Path $AppDir 'update-from'), $From)
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
