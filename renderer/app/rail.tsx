@@ -37,10 +37,9 @@ import { resetCurrentRoute } from "./route-reset";
 import { consolePageFor, resolvePage, sidebarConsoleList } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
-import { isUpdateAvailable } from "@main/services/update/availability";
 import { useUpdateStatus } from "./queries";
 import { useNotSetUpCount } from "./screens/use-devices";
-import { useHostNamesWaiting } from "./host-names-query";
+import { advancedRailPath, useAdvancedSignals } from "./advanced-signals";
 import {
   ALL_DESTINATIONS,
   DESTINATIONS,
@@ -53,6 +52,8 @@ import { cn } from "../lib/cn";
 
 /** The Screens page's route: the row that carries the count of screens not set up. */
 const SCREENS_PATH = "/screens";
+/** The Advanced destination's route, whose row carries the update dot and the host names count. */
+const ADVANCED_PATH = "/settings/advanced";
 
 /** A count on a nav row. The row positions it; this is only what it looks like.
  *  Smaller in the collapsed rail, where the row is 40x32 and the badge sits in its
@@ -110,7 +111,6 @@ export function Rail({
   // the moment anything changed and stayed stale until a reload.
   const { data: updateStatus, error: updateError } = useUpdateStatus();
   const versionError = updateError ? errorMessage(updateError) : null;
-  const updateAvailable = isUpdateAvailable(updateStatus);
   // Devices heard on the network and not set up. From every page, not just
   // Screens: the server records them with no scan, and tells this tab on the
   // channel Screens already listens to, so a screen switched on is noticed here.
@@ -118,7 +118,8 @@ export function Rail({
   // Names the server was reached by that wait for an accept or a dismiss, on the
   // Host names card under Advanced. A count of NAMES, not requests: one display
   // asks every few seconds, and the number to act on is how many need a decision.
-  const hostNamesWaiting = useHostNamesWaiting();
+  const advancedSignals = useAdvancedSignals();
+  const { updateAvailable, hostNamesWaiting } = advancedSignals;
 
   // A rail entry per console View the operator has not hidden from the sidebar.
   // A hidden console is still a page — the shell titles it from the full list —
@@ -197,7 +198,10 @@ export function Rail({
           }
           // Crossfade between destinations. Feature-detected and skipped under
           // prefers-reduced-motion inside the helper.
-          withViewTransition(() => router.navigate({ to: d.path }));
+          // The Advanced row goes to the tab its mark is about (Updates for the
+          // dot, Network for the count), not to a page that opens on General.
+          const to = d.path === ADVANCED_PATH ? advancedRailPath(advancedSignals) : d.path;
+          withViewTransition(() => router.navigate({ to }));
         }}
         getItemKey={(d: Destination) => d.path}
       >
@@ -252,7 +256,7 @@ export function Rail({
           // a toast and the dot stays until the update is actually taken.
           // Host names waiting for a decision live there too, and take the
           // badge as a count, the way Screens counts devices not set up.
-          const advanced = d.path === "/settings/advanced";
+          const advanced = d.path === ADVANCED_PATH;
           const flagged = updateAvailable && advanced;
           const names = advanced ? hostNamesWaiting : 0;
           const said: string[] = [];

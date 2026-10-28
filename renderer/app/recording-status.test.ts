@@ -239,7 +239,7 @@ describe("the source vocabularies", () => {
     // Spread, not the table itself: both are externKeyed(), so they have no
     // prototype and deepStrictEqual compares prototypes. extern-keyed.test.ts
     // is what asserts the missing prototype; this asserts the contents.
-    assert.deepEqual({ ...STREAMER_FOR }, { any: null, resi: "Resi", youtube: "YouTube" });
+    assert.deepEqual({ ...STREAMER_FOR }, { any: null, resi: "Resi", youtube: "YouTube", obs: "OBS" });
     assert.deepEqual({ ...RECORDER_FOR }, { any: null, obs: "OBS", reaper: "REAPER" });
   });
 

@@ -250,10 +250,13 @@ describe("the Timer itself", () => {
     assert.equal(d.sub, null, "Show the next item is off until switched on");
   });
 
-  test("Show the next item adds the line, and Show the sub-line off removes it", () => {
+  test("Show the next item is the service's one sub-line switch", () => {
     const live = { pcoLive: item(48) };
     assert.equal(draw({ type: "timer", source: "service", nextItem: true }, live).sub, "Next · Announcements");
-    assert.equal(draw({ type: "timer", source: "service", nextItem: true, showLabel: false }, live).sub, null);
+    // A layout saved with the old sub-line switch off: the inspector no longer
+    // offers that switch, so it must not leave Show the next item ticked and blank.
+    assert.equal(draw({ type: "timer", source: "service", nextItem: true, showLabel: false }, live).sub, "Next · Announcements");
+    assert.equal(draw({ type: "timer", source: "service", nextItem: false }, live).sub, null);
   });
 
   test("Red on overrun off leaves an overrun neutral", () => {

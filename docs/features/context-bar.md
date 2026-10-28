@@ -14,7 +14,7 @@ is an item and neither can be configured — the readings below are what you
 arrange.
 
 **Right-click the bar and choose "Configure bar"** — or tap and hold it — or use
-**Settings → Advanced → Server → Context bar**. All three open the same thing.
+**Settings → Advanced → General → Context bar**. All three open the same thing.
 On a touch device the bar also carries a **⋯ button** at its right edge, since
 there is no right-click to discover. There are two arrangements, both shared by
 everybody: the one above a desktop page, and the one a phone shows.
@@ -214,7 +214,7 @@ it gives up is words the ladder was built to give up.
 
 ## 12-hour or 24-hour
 
-**Settings → Advanced → Server → Clock format**, beside the time
+**Settings → Advanced → General → Clock format**, beside the time
 zone. It sets how *every* clock in the app reads — the context bar, service
 times in History and Home's Recent services card, the rundown, the automation log, and stage
 displays.

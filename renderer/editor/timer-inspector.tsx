@@ -100,7 +100,9 @@ export function TimerInspector({
           placeholder={source === "service" && c.caption === undefined ? "The item\u2019s name" : "No caption"}
           onChange={(v) => set({ caption: v })}
         />
-        <RowSwitch label={info.subSwitch} checked={c.showLabel ?? true} onChange={(v) => set({ showLabel: v })} />
+        {info.subSwitch && (
+          <RowSwitch label={info.subSwitch} checked={c.showLabel ?? true} onChange={(v) => set({ showLabel: v })} />
+        )}
         {source === "baptism" && (c.showLabel ?? true) && (
           <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => set({ label: v })} />
         )}

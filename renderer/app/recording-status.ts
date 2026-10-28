@@ -177,6 +177,7 @@ export const STREAMER_FOR: Readonly<Record<string, StreamerName | null>> = exter
   any: null,
   resi: "Resi",
   youtube: "YouTube",
+  obs: "OBS",
 });
 
 /** The recorder a `recorder` value names, or null for "every recorder at once".

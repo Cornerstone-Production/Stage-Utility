@@ -120,3 +120,26 @@ describe("the right-click menu of a retired timer card", () => {
     assert.deepEqual(shape(buildCardMenu(b, page().deps(b))), ["Hide when idle", "-", "Size", "Show", "-", "Remove Timer"]);
   });
 });
+
+describe("Size on a page arranged by hand", () => {
+  test("a card grown where it stands pushes the card below down, as the edit chips do", () => {
+    // The menu was a second way to resize, and the fix to the chips missed it:
+    // Tall stored over the cells of the card beneath, on top of it on screen.
+    const at = (id: string, size: string, col: number, row: number) =>
+      ({ id, x: 0, y: 0, w: 1, h: 1, z: 0, home: { size, col, row }, config: { type: "home-spl" } }) as unknown as LayoutObject;
+    const timer = at("timer", "m", 1, 1);
+    const pageCards = [timer, at("below", "xl", 1, 2)];
+    let written: LayoutObject[] = [];
+    const menu = buildCardMenu(timer, {
+      scoresFavourites: [],
+      spl,
+      splSummary: undefined,
+      save: (update) => (written = update(pageCards)),
+      close: () => {},
+    });
+    menu.find((i) => i.label === "Size")!.items!.find((i) => i.label === "Tall")!.onSelect!();
+    const home = (id: string) => written.find((o) => o.id === id)!.home!;
+    assert.deepEqual([home("timer").size, home("timer").row], ["tall", 1]);
+    assert.equal(home("below").row, 5, "the card below was left under the grown one");
+  });
+});

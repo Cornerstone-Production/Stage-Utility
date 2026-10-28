@@ -53,6 +53,7 @@ const PARAMS: Record<string, string> = {
   $viewId: CONSOLE_ID,
   $serviceType: "weekend-gathering",
   $layout: "audio",
+  $tab: "network",
 };
 
 function fill(pattern: string): string {
@@ -91,7 +92,7 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly three dynamic routes", () => {
+  test("there are exactly four dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
@@ -100,6 +101,7 @@ describe("the route table", () => {
       "/consoles/$viewId",
       "/screens/$viewId/edit",
       "/servicecue/$serviceType/$layout",
+      "/settings/advanced/$tab",
     ]);
   });
 });
@@ -150,6 +152,7 @@ describe("every registered route resolves a title", () => {
         "/servicecue/presets",
         "/settings",
         "/settings/advanced",
+        "/settings/advanced/$tab",
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
@@ -183,6 +186,7 @@ describe("every registered route resolves a title", () => {
         "/servicecue/manage",
         "/servicecue/presets",
         "/settings/advanced",
+        "/settings/advanced/$tab",
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
@@ -227,6 +231,7 @@ describe("exact versus prefix", () => {
       ["/screens/$viewId/edit", "Screens"],
       ["/servicecue/$serviceType/$layout", "ServiceCue"],
       ["/patch/edit", "Patch"],
+      ["/settings/advanced/$tab", "Advanced"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
       assert.equal(active?.page.label, section, `${pattern} lost its section name`);

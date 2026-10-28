@@ -30,6 +30,7 @@ import { useIntegrations } from "../../main/use-integration-states";
 import { useVideoProbe, useVideoState } from "../../main/video/use-video-state";
 import { flashTarget } from "../flash";
 import { VIDEO_PORTS_FLASH_ID } from "../../settings/sections/video-relay-ports";
+import { advancedTabPath } from "../../settings/sections/advanced-settings";
 import { FeedEditor, type DraftRow } from "./feed-editor";
 import { ExportPanel, ImportPanel } from "./feed-transfer-panels";
 import { FeedList } from "./feed-list";
@@ -38,7 +39,7 @@ import { RelayDetailRow, RelayPill, RelaySwitch } from "./relay-status";
 /** Typed as string — the generated route union does not satisfy a bare
  *  literal (see integrations-panel.tsx's own VIDEO_FEEDS_ROUTE for the same
  *  reason, the other direction). */
-const ADVANCED_ROUTE: string = "/settings/advanced";
+const ADVANCED_ROUTE: string = advancedTabPath("video");
 
 export function VideoFeedsRoute() {
   const state = useVideoState();

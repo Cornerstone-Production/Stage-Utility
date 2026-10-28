@@ -108,7 +108,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | `/settings/integrations` | Connected devices and services |
 | `/settings/messages` | Groups of screens, quick messages and quick replies |
 | `/settings/branding` | App name, logos, accent color |
-| `/settings/advanced` | Updates, network, backups, kiosk devices |
+| `/settings/advanced` | Updates, network, backups, kiosk devices; one address per tab, `/settings/advanced/<tab>` |
 
 Plus the pages reached from those: `/screens/<view id>/edit` (the layout
 editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
@@ -120,7 +120,7 @@ plan data survive a navigation.
 
 `/log` is not one of them. It is a plain page the server renders itself — an
 operator diagnostic rather than a destination, reachable from
-**Settings → Advanced → Open log**, and gated behind a token when one is set. It
+**Settings → Advanced → Server log**, and gated behind a token when one is set. It
 also answers on `/logs`, which redirects to `/log` with the query string intact;
 both spellings are reserved, so neither can be taken as a display slug. `/log`
 is canonical — it is what the app links to and what these docs quote.

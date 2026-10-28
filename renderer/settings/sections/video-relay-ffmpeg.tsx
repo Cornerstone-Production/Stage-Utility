@@ -10,6 +10,7 @@ import type { FfmpegStatus } from "@main/types/video";
 
 import { invoke } from "../../lib/api";
 import { Button, ErrorNote, Field, FieldContent, FieldDescription, FieldLabel, Input } from "../../components/ui";
+import { settingText } from "./advanced-settings";
 
 const SOURCE_TEXT: Record<Extract<FfmpegStatus, { ok: true }>["source"], string> = {
   automatic: "found automatically",
@@ -75,15 +76,13 @@ export function VideoRelayFfmpegPanel() {
   const loading = !loaded && loadError === null;
 
   const checkingText = loading ? "Checking…" : "";
+  const text = settingText("video-relay-ffmpeg");
 
   return (
-    <Field orientation="vertical">
+    <Field orientation="vertical" data-setting-id="video-relay-ffmpeg">
       <FieldContent>
-        <FieldLabel>ffmpeg</FieldLabel>
-        <FieldDescription>
-          The Video relay&apos;s audio conversion needs the system&apos;s ffmpeg. It is found automatically; set a path
-          only if it is installed somewhere unusual.
-        </FieldDescription>
+        <FieldLabel>{text.name}</FieldLabel>
+        <FieldDescription>{text.description}</FieldDescription>
         <FieldDescription role="status" className="mt-1 break-words">{status ? ffmpegStatusLine(status) : checkingText}</FieldDescription>
       </FieldContent>
       <Input

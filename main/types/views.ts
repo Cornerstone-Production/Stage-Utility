@@ -695,7 +695,7 @@ export type LayoutObjectConfig =
    *  through streamers(); a named one reports just that platform. */
   | {
       type: "stream-status";
-      platform?: "any" | "resi" | "youtube";
+      platform?: "any" | "resi" | "youtube" | "obs";
       showElapsed?: boolean;
       hideWhenIdle?: boolean;
       /** Paint the whole widget green while live, rather than colouring the

@@ -112,3 +112,17 @@ test("a refused save shows the rule inline, rather than swallowing it", async ()
     c.restore();
   }
 });
+
+test("the Loading placeholder does not carry the setting id: only the real form does", async () => {
+  const realFetch = globalThis.fetch;
+  // A read that never answers: the panel stays on its placeholder.
+  globalThis.fetch = (() => new Promise(() => {})) as typeof fetch;
+  try {
+    const { container } = render(<VideoRelayPortsPanel />);
+    await settle();
+    assert.match(container.textContent ?? "", /Loading…/);
+    assert.equal(container.querySelector("[data-setting-id]"), null, "the placeholder is counted as the ports row");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

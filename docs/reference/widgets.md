@@ -54,7 +54,8 @@ opens as a Timer and draws the same.
 - **Service** — before the service, the time until it starts; while an item is
   live, that item's time left, counting up when the item has no length. The
   caption is the live item's name until you type one. The sub-line holds nothing
-  until **Show the next item** is on, which adds a `Next · <title>` line.
+  until **Show the next item** is on, which adds a `Next · <title>` line. That
+  is the service's only sub-line, so it has no separate sub-line switch.
 - **ProPresenter** — one timer by name, or the first running one, with the time
   as ProPresenter reports it. The timer's name sits on the sub-line. Amber near the
   end reads that time, so it is meant for a timer counting down.
@@ -200,8 +201,10 @@ clock has drifted still marks the right day.
 | **Live scores** | Live score for a team you follow | ESPN public scoreboard |
 | **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
-**Streaming status** can be pinned to one platform, or left on **any**, where it
-answers for whichever is live. Where the platform reports one, it also shows the
+**Streaming status** and the Home **Streaming** object pick their platform with
+**Source** at the top of their settings: **Any**, **Resi**, **YouTube** or **OBS**.
+Any answers for whichever is live. OBS reports that it is streaming but not when it
+started, so pinned to OBS the widget says **LIVE** with no elapsed clock. Where the platform reports one, it also shows the
 live viewer count beside the elapsed clock, and turns amber when a scheduled
 broadcast is past its start time with nothing going out — only YouTube reports
 either, and only on its public path. See [YouTube](../integrations/youtube.md).
@@ -243,7 +246,7 @@ on both surfaces, while **Fill the card when live** and **Hide when idle** shape
 the screen presentation, which is the only one that fills or hides.
 
 Right-click a Home tile — or tap and hold it — to choose what it answers for:
-**Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
+**Platform** on **Streaming** (any, Resi, YouTube, OBS) and **Recorder** on
 **Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**. A
 **Timer** offers **Red on overrun**, **Show the next item** (Service source) and
 **Hide when idle**; a Baptism Timer offers only the last.
@@ -852,7 +855,7 @@ chooses which; with one, it is not shown.
 | **Record status** | **Recorder** (any, OBS only or REAPER only), **Recording text**, **Idle text**, **Offline text** (blank uses `RECORDING`, `STANDBY` and `NO RECORDER`), **Fill red while recording** (on), **Hide when idle** (off) |
 | **OBS status** | **Show** (Recording, Streaming or Virtual camera), **Active text**, **Idle text**, **Offline text**, **Fill red when active** (on), **Show timecode** (off; recording only), **Hide when idle** (off) |
 | **REAPER status** | **Recording text**, **Idle text**, **Offline text**, **Fill red when recording** (on), **Show position** (off), **Hide when idle** (off) |
-| **Streaming status** | **Platform** (Any, Resi or YouTube), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
+| **Streaming status** | **Source** (Any, Resi, YouTube or OBS), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
 | **Integration status** | **Integration** (First available, or one), **Show label** (on) and **Label** |
 | **Live scores** | **Game** (any followed team, or one), **Show sport detail** (on) |
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |

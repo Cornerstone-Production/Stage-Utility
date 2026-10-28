@@ -4,7 +4,8 @@
 // Each asset card draws its image where it is used, on stage black, so the card is
 // the preview: the tab icon in a browser tab and on two home screens, the
 // empty-slot image in an empty slot, the default avatar beside a name. Clicking a
-// card opens that asset's dialog (branding-dialogs.tsx); nothing here edits.
+// card opens that asset's dialog (branding-dialogs.tsx); dropping an image file on
+// one opens it with that file in the crop editor. Nothing here edits.
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ImageIcon, UploadIcon, UserRoundIcon } from "lucide-react";
@@ -13,6 +14,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import { FieldDescription, FieldLabel, Switch } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { customIconHref } from "../../lib/apply-favicon";
+import { useFileDrop } from "../../lib/use-file-drop";
 
 /** The card chrome every block on this page shares: the same material as a FieldSet. */
 export const CARD = "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]";
@@ -30,6 +32,23 @@ export type Brand = Pick<
   StageState,
   "appName" | "appLogo" | "appLogoMonochrome" | "appIcon192" | "appIconMaskable"
 >;
+
+// ── Dropping a file ───────────────────────────────────────────────────────────
+
+/** What a drop target shows while a file is over it. */
+export function DropVeil({ label = "Drop to use this image" }: { label?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit]",
+        "border-2 border-dashed border-focus bg-black/70 text-[13px] font-medium text-white",
+      )}
+    >
+      {label}
+    </div>
+  );
+}
 
 // ── The icon, as it appears in each place ─────────────────────────────────────
 
@@ -85,10 +104,23 @@ export function AndroidIcon({ brand, size }: { brand: Brand; size: number }) {
 
 /** The logo large on a stage-black canvas, and the name beneath it: how the app
  *  introduces itself on a display. The logo is the control that changes the logo. */
-export function IdentityStage({ brand, onLogo }: { brand: Brand; onLogo: () => void }) {
+export function IdentityStage({
+  brand,
+  onLogo,
+  onFile,
+}: {
+  brand: Brand;
+  onLogo: () => void;
+  onFile: (file: File) => void;
+}) {
   const hasLogo = !!brand.appLogo;
+  const drop = useFileDrop(onFile);
   return (
-    <div className="relative flex min-h-[300px] flex-col items-center justify-center gap-[18px] bg-black p-7">
+    <div
+      className="relative flex min-h-[300px] flex-col items-center justify-center gap-[18px] bg-black p-7"
+      {...drop.handlers}
+    >
+      {drop.over && <DropVeil label="Drop to use as the logo" />}
       <button
         type="button"
         onClick={onLogo}
@@ -128,7 +160,7 @@ export function IdentityStage({ brand, onLogo }: { brand: Brand; onLogo: () => v
         {brand.appName}
       </div>
       <span className="absolute bottom-3 left-3.5 text-[11px] text-white/40">
-        How it appears on a stage display. Click the logo to change it.
+        How it appears on a stage display. Click the logo, or drop an image here, to change it.
       </span>
     </div>
   );
@@ -158,24 +190,29 @@ function AssetCard({
   description,
   state,
   onOpen,
+  onFile,
   children,
 }: {
   title: string;
   description: string;
   state: string;
   onOpen: () => void;
+  onFile: (file: File) => void;
   children: ReactNode;
 }) {
+  const drop = useFileDrop(onFile);
   return (
     <button
       type="button"
       onClick={onOpen}
+      {...drop.handlers}
       className={cn(
         CARD,
-        "group flex flex-col overflow-hidden text-left transition-colors hover:border-line-strong",
+        "group relative flex flex-col overflow-hidden text-left transition-colors hover:border-line-strong",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
       )}
     >
+      {drop.over && <DropVeil />}
       <div className="relative grid h-[170px] place-items-center overflow-hidden bg-black">{children}</div>
       <div className="flex flex-col gap-[3px] px-3.5 py-3">
         <b className="text-[14px] font-semibold text-fg">{title}</b>
@@ -191,7 +228,7 @@ function setLine(size: { w: number; h: number } | null): string {
   return size ? `Set · ${size.w} × ${size.h}` : "Set";
 }
 
-export function IconCard({ brand, onOpen }: { brand: Brand; onOpen: () => void }) {
+export function IconCard({ brand, onOpen, onFile }: { brand: Brand; onOpen: () => void; onFile: (file: File) => void }) {
   return (
     <AssetCard
       title="Tab and home-screen icon"
@@ -202,6 +239,7 @@ export function IconCard({ brand, onOpen }: { brand: Brand; onOpen: () => void }
           : "Not set: the tab shows your logo, and phones show the built-in Stage Utility icon."
       }
       onOpen={onOpen}
+      onFile={onFile}
     >
       <div className="absolute left-4 right-4 top-[22px] flex h-[34px] items-end rounded-t-[9px] bg-[#202020] px-2">
         <div className="flex h-7 w-[170px] items-center gap-[7px] rounded-t-[7px] bg-[#2e2e2e] px-2.5 text-[11.5px] text-[#ededf0]">
@@ -225,7 +263,7 @@ export function IconCard({ brand, onOpen }: { brand: Brand; onOpen: () => void }
   );
 }
 
-export function EmptySlotCard({ image, onOpen }: { image: string | null; onOpen: () => void }) {
+export function EmptySlotCard({ image, onOpen, onFile }: { image: string | null; onOpen: () => void; onFile: (file: File) => void }) {
   const size = useImageSize(image);
   return (
     <AssetCard
@@ -233,6 +271,7 @@ export function EmptySlotCard({ image, onOpen }: { image: string | null; onOpen:
       description="Centered in empty mic slots on the kiosk, recolored to the display's gray."
       state={image ? setLine(size) : "Not set"}
       onOpen={onOpen}
+      onFile={onFile}
     >
       <div className="grid h-[118px] w-[150px] place-items-center rounded-lg border border-white/10 bg-white/[.03]">
         {image ? (
@@ -245,7 +284,7 @@ export function EmptySlotCard({ image, onOpen }: { image: string | null; onOpen:
   );
 }
 
-export function AvatarCard({ image, onOpen }: { image: string | null; onOpen: () => void }) {
+export function AvatarCard({ image, onOpen, onFile }: { image: string | null; onOpen: () => void; onFile: (file: File) => void }) {
   const size = useImageSize(image);
   return (
     <AssetCard
@@ -253,6 +292,7 @@ export function AvatarCard({ image, onOpen }: { image: string | null; onOpen: ()
       description="For scheduled people with no Planning Center photo, in place of their initials."
       state={image ? setLine(size) : "Not set · built-in silhouette"}
       onOpen={onOpen}
+      onFile={onFile}
     >
       <div className="flex gap-3">
         <div className="grid h-[104px] w-[84px] place-items-center rounded-lg border border-white/10 text-white/35">
