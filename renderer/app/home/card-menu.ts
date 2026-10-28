@@ -15,7 +15,8 @@ import { preferredSplMetric } from "../../settings/sections/overview-data";
 import { metricOptions, meterOptions, sourceOptions, type SplMeters } from "../recording-status";
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { pvpNowMenuItems } from "./pvp-now-menu";
-import { SIZES, SIZE_ORDER, WHEN_LABELS, removeCard, replaceCard, setSize, setWhen, sizeOf, whenOf } from "./home-cards";
+import { SIZES, SIZE_ORDER, WHEN_LABELS, removeCard, replaceCard, setWhen, sizeOf, whenOf } from "./home-cards";
+import { resizeCard } from "./home-placement";
 
 /** What the menu reads from, and writes through, the page that opened it. */
 export interface CardMenuDeps {
@@ -177,7 +178,9 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
       label: SIZES[s].label,
       checked: sizeOf(card) === s,
       onSelect: () => {
-        save((objs) => setSize(objs, card.id, s as HomeCardSize));
+        // The same resize as the edit-mode chips: a placed card pushes what it
+        // grows onto downward rather than storing both on one cell.
+        save((objs) => resizeCard(objs, card.id, s as HomeCardSize));
         close();
       },
     })),
