@@ -78,6 +78,7 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 | Option, after `sudo sh -s --` | |
 |---|---|
 | `--dry-run` | Prints every step and changes nothing. Needs no `sudo` |
+| `--replace-signing-key` | Take the server's [release signing key](#signed-updates) in place of the one this Mac has. A re-run without it keeps the installed key. For rotating the key |
 | `--browser` | The Chrome kiosk instead, one full-screen browser with the same identity files. For a Mac the helper cannot run on, such as one older than macOS 14 |
 
 **What it does:**
