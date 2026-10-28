@@ -29,11 +29,16 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { testSigningKey } from "../main/services/fixtures/test-signing-key.js";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KIOSK = path.join(HERE, "kiosk");
 const UPDATER = path.join(KIOSK, "kiosk-update-windows.ps1");
 const hasPwsh = spawnSync("sh", ["-c", "command -v pwsh"]).status === 0;
 const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest("hex");
+/** The release signing key these tests sign with, made for this run; and another. */
+const KEY = testSigningKey();
+const OTHER_KEY = testSigningKey(3072, "other");
 
 /** The launcher a PC has, and the one the server has. Both parse. */
 const OLD = Buffer.from("Write-Output 'old launcher'\r\n");
@@ -54,13 +59,26 @@ interface Fake {
   failDownload: boolean;
   /** Called as the launcher is requested, before it is answered. */
   onDownload?: () => void;
+  /** The launcher's signature: the release key's over `launcher` unless set; null for none (404). */
+  sig?: Buffer | null;
+  /** The key served at /kiosk/release-signing.pub.xml. */
+  keyXml: string;
+  /** Every path asked for, in order. */
+  paths: string[];
 }
 
 async function fakeServer(): Promise<Fake> {
-  const fake = { checks: [], downloads: 0, answer: {}, launcher: NEW, failDownload: false } as unknown as Fake;
+  const fake = { checks: [], downloads: 0, answer: {}, launcher: NEW, failDownload: false, keyXml: KEY.publicXml, paths: [] } as unknown as Fake;
   fake.server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
-    if (url.pathname === "/api/machine-updates/check") {
+    fake.paths.push(url.pathname);
+    if (url.pathname === "/kiosk/kiosk-windows.ps1.sig" && fake.sig !== null) {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(fake.sig ?? KEY.sign(fake.launcher));
+    } else if (url.pathname === "/kiosk/release-signing.pub.xml") {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(fake.keyXml);
+    } else if (url.pathname === "/api/machine-updates/check") {
       fake.checks.push(Object.fromEntries(url.searchParams));
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(fake.answer));
@@ -124,6 +142,8 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
     fs.mkdirSync(app, { recursive: true });
     fs.writeFileSync(path.join(state, "device-id"), "11111111-2222-3333-4444-555555555555");
     fs.writeFileSync(path.join(state, "kiosk.ps1"), OLD);
+    // The key the installer left beside the updater.
+    fs.writeFileSync(path.join(app, "release-signing.pub.xml"), KEY.publicXml);
   });
   afterEach(async () => {
     fs.rmSync(root, { recursive: true, force: true });
@@ -269,6 +289,8 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.deepEqual(launcher(), NEW, "kiosk.ps1 is exactly what was served, CRLF and all");
       assert.deepEqual(leftovers(), []);
       assert.match(log().join("\n"), /updated kiosk\.ps1; the new launcher runs at the next sign-in/);
+      assert.match(log().join("\n"), /\[helper-update\] signature valid: kiosk-windows\.ps1\.sig, against the release signing key installed on this PC/);
+      assert.ok(f.paths.includes("/kiosk/kiosk-windows.ps1.sig"));
 
       f.answer = { version: sha(NEW), update: false, reason: "This PC is on the server's launcher." };
       await runUpdater();
@@ -307,6 +329,81 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.ok(at > Date.now() / 1000 - 600 && at <= Date.now() / 1000 + 5, `at: ${f.checks[1].at}`);
     });
 
+    describe("the release's signature", () => {
+      const keyFile = () => path.join(app, "release-signing.pub.xml");
+
+      for (const [label, sig] of [
+        ["made by another key", () => OTHER_KEY.sign(NEW)],
+        ["of other bytes", () => KEY.sign("Write-Output 'another launcher'\r\n")],
+        ["that is not a signature at all", () => Buffer.from("<html>502 Bad Gateway</html>")],
+        // .NET throws on an empty signature rather than answering false: the path
+        // where the check itself fails must still refuse.
+        ["that is empty", () => Buffer.alloc(0)],
+      ] as const) {
+        it(`one ${label} is refused, though the digest matches: kiosk.ps1 is untouched, and the next check says why`, async () => {
+          const f = await serve();
+          f.answer = updateToNew();
+          f.sig = sig();
+          pointAt(f.base);
+          const r = await runUpdater();
+          assert.equal(r.status, 0, r.out + r.err);
+          assert.deepEqual(launcher(), OLD);
+          assert.deepEqual(leftovers(), []);
+          assert.match(log().join("\n"), /the update to [0-9a-f]{64} failed: signature invalid: kiosk-windows\.ps1\.sig does not verify against the release signing key installed on this PC\. kiosk\.ps1 is unchanged/);
+          assert.equal(readStatus().state, "failed", "a signature that does not verify would not verify again");
+          f.answer = { ...upToDate("This version failed here before."), version: sha(NEW) };
+          await runUpdater();
+          assert.equal(f.checks[1].state, "failed");
+          assert.equal(f.checks[1].detail, "signature invalid: kiosk-windows.ps1.sig does not verify against the release signing key installed on this PC");
+        });
+      }
+
+      it("is checked against the key installed on this PC, never one the server offers", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.keyXml = OTHER_KEY.publicXml;
+        f.sig = OTHER_KEY.sign(NEW);
+        pointAt(f.base);
+        await runUpdater();
+        assert.deepEqual(launcher(), OLD);
+        assert.ok(!f.paths.includes("/kiosk/release-signing.pub.xml"), "the updater never asks for a key");
+        assert.match(String(readStatus().detail), /^signature invalid/);
+      });
+
+      it("missing is retrying, with the reason, and the launcher is untouched", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.sig = null;
+        pointAt(f.base);
+        await runUpdater();
+        assert.deepEqual(launcher(), OLD);
+        assert.deepEqual(leftovers(), []);
+        const saved = readStatus();
+        assert.equal(saved.state, "retrying", "a server may have the signature later");
+        assert.match(String(saved.detail), /^signature missing: /);
+        assert.match(log().join("\n"), /could not download the launcher or its signature \(signature missing: .+\); trying again after \d\d:\d\d UTC/);
+      });
+
+      for (const [label, plant] of [
+        ["there is no key installed", () => fs.rmSync(keyFile())],
+        ["the installed key is not a key", () => fs.writeFileSync(keyFile(), "not a key")],
+        ["the installed key is not 3072-bit", () => fs.writeFileSync(keyFile(), testSigningKey(2048).publicXml)],
+      ] as const) {
+        it(`holds the update, downloading nothing, when ${label}`, async () => {
+          const f = await serve();
+          f.answer = updateToNew();
+          pointAt(f.base);
+          plant();
+          await runUpdater();
+          assert.equal(f.downloads, 0, "nothing is downloaded with nothing to verify it by");
+          assert.deepEqual(launcher(), OLD);
+          const saved = readStatus();
+          assert.equal(saved.state, "failed");
+          assert.match(String(saved.detail), /^signature not checked: no readable release signing key is installed/);
+        });
+      }
+    });
+
     describe("a download that fails on the network", () => {
       it("is retrying, with the reason and a retryAfter 30 minutes on, tells the server, and downloads nothing before then", async () => {
         const f = await serve();
@@ -326,7 +423,7 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
         assert.ok(String(saved.detail).length > 0, "the reason is kept");
         assert.equal(saved.failures, 1);
         assert.ok(Math.abs(Number(saved.retryAfter) - (nowSec() + 1800)) < 120, `retryAfter ${saved.retryAfter} is not about 30 minutes on`);
-        assert.equal(log().filter((l) => /could not download the launcher \(.+\); trying again after \d\d:\d\d UTC$/.test(l)).length, 1, log().join("\n"));
+        assert.equal(log().filter((l) => /could not download the launcher or its signature \(.+\); trying again after \d\d:\d\d UTC$/.test(l)).length, 1, log().join("\n"));
 
         // Before retryAfter: it checks in, so the PC stays listed, and does not download.
         for (let i = 0; i < 2; i++) assert.equal((await runUpdater()).status, 0);
@@ -552,6 +649,101 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.notEqual(fs.statSync(planted).ino, fs.statSync(path.join(state, "kiosk.ps1")).ino, "kiosk.ps1 is not the file that was planted");
       assert.deepEqual(fs.readdirSync(state).filter((n) => /\.(download|tmp)$/.test(n) && n !== "kiosk.ps1.download"), [], "nothing else was staged in the state folder");
       assert.deepEqual(fs.readdirSync(app), [], "the staging file is gone afterwards");
+    });
+  });
+
+  describe("install-windows.ps1's Save-SigningKey", () => {
+    const keyFile = () => path.join(app, "release-signing.pub.xml");
+    // Its pipeline output is printed after OUTPUT:, since Install-Updater reads its
+    // own output as its answer and anything there reads as a failure.
+    const saveKey = (base: string, env: Record<string, string> = {}) =>
+      pwsh(
+        [
+          "-Command",
+          `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
+            `foreach ($name in 'Test-SigningKeyXml','Save-SigningKey') {` +
+            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true);` +
+            `if (-not $fn) { throw "$name is gone" }; Invoke-Expression $fn.Extent.Text };` +
+            `$ErrorActionPreference = 'Stop'; $AppDir = $env:APP_DIR;` +
+            `$o = @(Save-SigningKey -From $env:FROM); Write-Output "OUTPUT:$($o.Count)"`,
+        ],
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base, ...env },
+      );
+    const REPLACE = { STAGE_REPLACE_SIGNING_KEY: "1" };
+
+    it("keeps a key already installed, asks the server for none, and returns nothing", async () => {
+      const f = await serve();
+      f.keyXml = OTHER_KEY.publicXml;
+      const r = await saveKey(f.base);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicXml);
+      assert.ok(!f.paths.includes("/kiosk/release-signing.pub.xml"));
+      assert.match(r.out, /keeping the release signing key already installed/);
+      assert.match(r.out, /OUTPUT:0/, "nothing on the pipeline, or Install-Updater would read it as a failure");
+    });
+
+    it("takes the server's key over the installed one with STAGE_REPLACE_SIGNING_KEY=1", async () => {
+      const f = await serve();
+      f.keyXml = OTHER_KEY.publicXml;
+      const r = await saveKey(f.base, REPLACE);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(fs.readFileSync(keyFile(), "utf8"), OTHER_KEY.publicXml);
+      assert.match(r.out, /OUTPUT:0/);
+    });
+
+    it("writes the server's key beside the updater, as served", async () => {
+      const f = await serve();
+      fs.rmSync(keyFile());
+      const r = await saveKey(f.base);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicXml);
+      assert.deepEqual(leftovers(), []);
+    });
+
+    for (const [label, installed] of [
+      ["is not a key", "not a key"],
+      ["is a 2048-bit key", testSigningKey(2048).publicXml],
+    ] as const) {
+      it(`refuses to keep an installed key that ${label}, naming STAGE_REPLACE_SIGNING_KEY, and asks the server for none`, async () => {
+        const f = await serve();
+        fs.writeFileSync(keyFile(), installed);
+        const r = await saveKey(f.base);
+        assert.notEqual(r.status, 0, r.out);
+        assert.match(r.out + r.err, /is not a 3072-bit RSA key\. To take the server's in its place, set \$env:STAGE_REPLACE_SIGNING_KEY = '1'/);
+        assert.equal(fs.readFileSync(keyFile(), "utf8"), installed, "left as it was");
+        assert.ok(!f.paths.includes("/kiosk/release-signing.pub.xml"));
+      });
+    }
+
+    for (const [label, xml, why] of [
+      ["is not a key", "PLACEHOLDER", /is not a 3072-bit RSA key/],
+      ["is a 2048-bit key", testSigningKey(2048).publicXml, /is not a 3072-bit RSA key/],
+    ] as const) {
+      it(`refuses a key that ${label}, and keeps the one already installed`, async () => {
+        const f = await serve();
+        f.keyXml = xml;
+        const r = await saveKey(f.base, REPLACE);
+        assert.notEqual(r.status, 0, r.out);
+        assert.match(r.out + r.err, why);
+        assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicXml, "the installed key is untouched");
+        assert.deepEqual(leftovers(), []);
+      });
+    }
+
+    it("is part of installing the updater, before the task is registered", async () => {
+      const r = await pwsh(
+        [
+          "-Command",
+          `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
+            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Install-Updater' }, $true);` +
+            `$fn.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() }`,
+        ],
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1") },
+      );
+      assert.equal(r.status, 0, r.err);
+      const names = r.out.split("\n").map((l) => l.trim()).filter(Boolean);
+      assert.ok(names.includes("Save-SigningKey"), r.out);
+      assert.ok(names.indexOf("Save-SigningKey") < names.indexOf("Register-ScheduledTask"), r.out);
     });
   });
 

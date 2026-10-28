@@ -11,15 +11,25 @@
 # operator's switch, and a version that already failed here); this does what the
 # answer says. Replacing a file restarts nothing, so service times do not hold it. To replace it, it
 # downloads kiosk-windows.ps1, checks its SHA-256 against the one the server
-# named, checks that it parses, and only then moves it over kiosk.ps1. Nothing is
-# restarted: the new launcher runs at the next sign-in or when the browser exits.
-# Any failure leaves kiosk.ps1 as it was and is reported on the next check.
+# named, checks the release's signature of it (kiosk-windows.ps1.sig) against the
+# release signing key the installer left beside this script, checks that it
+# parses, and only then moves it over kiosk.ps1. Nothing is restarted: the new
+# launcher runs at the next sign-in or when the browser exits. Any failure leaves
+# kiosk.ps1 as it was and is reported on the next check.
+#
+# The key is release-signing.pub.xml in Program Files, written by the installer
+# from the server it was run from, and never fetched here: a server, or whatever
+# answers in its place, can say when to update but cannot sign a launcher of its
+# own. RSA-3072, PKCS#1 v1.5, SHA-256, which .NET Framework's RSA verifies with no
+# module installed (see main/services/release-signing-key.ts).
 #
 # Two kinds of failure. One that would happen again (a digest that does not match,
-# a download that does not parse, no digest named, a launcher that is a link) is
+# a signature that does not verify, no readable key installed, a download that
+# does not parse, no digest named, a launcher that is a link) is
 # state failed, after which the server does not offer that version again until
-# someone asks from Screens. One that may pass (the download itself failing or
-# timing out) is state retrying with the reason as its detail, and the download is not
+# someone asks from Screens. One that may pass (the download of the launcher or its
+# signature failing or timing out, a server with no signature to give yet) is
+# state retrying with the reason as its detail, and the download is not
 # tried again until retryAfter: 30 minutes after the first, doubling each time in
 # a row up to 6 hours, starting over on success or on a new target. The check
 # still goes to the server meanwhile, so this PC stays listed.
@@ -62,6 +72,7 @@ if ($env:STAGE_KIOSK_TEST_ROOT) {
 $Launcher   = Join-Path $StateDir 'kiosk.ps1'
 $StatusFile = Join-Path $AppDir 'status.json'
 $LogFile    = Join-Path $AppDir 'kiosk-update.log'
+$KeyFile    = Join-Path $AppDir 'release-signing.pub.xml'
 $Utf8       = New-Object System.Text.UTF8Encoding $false
 
 # One line in the log, and on the console for a person running this by hand. Only
@@ -148,17 +159,47 @@ function Invoke-Check([string]$Origin, [string]$Have, [string]$Machine, $Status)
   return ($response.Content | ConvertFrom-Json)
 }
 
+# The release signing key the installer left in Program Files, or a throw: without
+# it nothing can be verified, and nothing is installed unverified.
+function Read-SigningKey {
+  $rsa = [Security.Cryptography.RSA]::Create()
+  try {
+    if (-not (Test-Path -LiteralPath $KeyFile -PathType Leaf)) { throw 'no key file' }
+    $rsa.FromXmlString([IO.File]::ReadAllText($KeyFile))
+    if ($rsa.KeySize -ne 3072) { throw "a $($rsa.KeySize)-bit key" }
+  } catch {
+    $rsa.Dispose()
+    throw "signature not checked: no readable release signing key is installed ($KeyFile); run the installer again"
+  }
+  return $rsa
+}
+
+# Whether the release's signature in $Signature is over the bytes in $File. A
+# signature that is not one at all (the wrong length, say) is invalid, not an error.
+function Test-ReleaseSignature($Key, [string]$File, [string]$Signature) {
+  try {
+    return $Key.VerifyData([IO.File]::ReadAllBytes($File), [IO.File]::ReadAllBytes($Signature),
+      [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+  } catch [Security.Cryptography.CryptographicException] {
+    return $false
+  }
+}
+
 # Replace the launcher with the one the server serves, or throw why not: a
-# System.Net.WebException when the download itself failed, anything else when what
-# arrived was refused. The old kiosk.ps1 is not touched until the new one has been
-# downloaded, matched the digest the server named, and parsed.
+# System.Net.WebException when the download of the launcher or its signature
+# failed, anything else when what arrived was refused. The old kiosk.ps1 is not
+# touched until the new one has been downloaded, matched the digest the server
+# named, verified against the installed key, and parsed.
 function Install-NewLauncher([string]$Origin, [string]$Want) {
   if ($Want -notmatch '^[0-9a-f]{64}$') { throw 'the server said to update but did not name a SHA-256 for the new launcher' }
   $item = Get-Item -LiteralPath $Launcher -Force
   if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
     throw "$Launcher is a link, not a file, and is not replaced"
   }
-  $temp = Join-Path $AppDir ('kiosk-windows.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+  $key = Read-SigningKey
+  $id = [guid]::NewGuid().ToString('N')
+  $temp = Join-Path $AppDir ('kiosk-windows.{0}.tmp' -f $id)
+  $sigTemp = Join-Path $AppDir ('kiosk-windows.{0}.sig.tmp' -f $id)
   try {
     # -OutFile writes the bytes exactly as served, which the digest is over.
     try {
@@ -171,13 +212,27 @@ function Install-NewLauncher([string]$Origin, [string]$Want) {
     $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $temp).Hash.ToLowerInvariant()
     # Short enough that the whole of it fits in the 200 characters the server keeps.
     if ($got -ne $Want) { throw "the download has SHA-256 $got, expected $Want" }
+    try {
+      Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri "$Origin/kiosk/kiosk-windows.ps1.sig" -OutFile $sigTemp
+    } catch {
+      # Retried later, like a failed download: a server that cannot reach the
+      # release yet may have it next time.
+      throw (New-Object System.Net.WebException "signature missing: $($_.Exception.Message)")
+    }
+    if (-not (Test-ReleaseSignature -Key $key -File $temp -Signature $sigTemp)) {
+      throw 'signature invalid: kiosk-windows.ps1.sig does not verify against the release signing key installed on this PC'
+    }
+    Write-UpdateLog 'signature valid: kiosk-windows.ps1.sig, against the release signing key installed on this PC'
     $tokens = $null
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($temp, [ref]$tokens, [ref]$errors)
     if ($errors -and $errors.Count -gt 0) { throw "the launcher downloaded from $Origin does not parse: $($errors[0].Message)" }
     Move-Item -Force -LiteralPath $temp -Destination $Launcher
   } finally {
-    if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp }
+    $key.Dispose()
+    foreach ($leftover in @($temp, $sigTemp)) {
+      if (Test-Path -LiteralPath $leftover) { Remove-Item -Force -LiteralPath $leftover }
+    }
   }
 }
 
@@ -236,7 +291,7 @@ function Invoke-Updater {
       $retryAfter = (Get-UnixNow) + [long]$delay
       Write-Status -State 'retrying' -Target $want -Detail $why -Answer $reason -At (Get-UnixNow) -RetryAfter $retryAfter -Failures $failures
       $when = [DateTimeOffset]::FromUnixTimeSeconds($retryAfter).ToString('HH:mm')
-      Write-UpdateLog "could not download the launcher ($why); trying again after $when UTC"
+      Write-UpdateLog "could not download the launcher or its signature ($why); trying again after $when UTC"
       return
     }
     Write-Status -State 'failed' -Target $want -Detail $why -Answer $reason -At (Get-UnixNow)

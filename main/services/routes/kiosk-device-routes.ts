@@ -27,6 +27,7 @@ import { APP_ROOT } from "../app-root.js";
 import { getUserDataPath } from "../app-paths.js";
 import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
 import { pkgVersion } from "../updater.js";
+import { readSigningKey } from "../release-signing-key.js";
 import { scrub } from "../scrub.js";
 import { isStamped, originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
@@ -59,6 +60,41 @@ const kioskScript = (name: string): string => path.join(APP_ROOT, "scripts", "ki
  *  kiosk compares its own copy against. */
 async function windowsLauncherDigest(): Promise<string> {
   return crypto.createHash("sha256").update(await readFile(kioskScript("kiosk-windows.ps1"))).digest("hex");
+}
+
+type LauncherCheck = "verified" | "mismatch" | "unchecked";
+
+/** Each pairing of signature and launcher already checked, by their digests, so
+ *  each outcome is said once, not on every Windows kiosk's request. A Map: the key
+ *  is derived from files a request caused to be fetched. */
+const launcherChecks = new Map<string, LauncherCheck>();
+
+/**
+ * Whether the launcher this server serves is the one the release signed, checked
+ * against the key in this build. A mismatch is said on a tagged line: every
+ * Windows kiosk would refuse that launcher as "signature invalid", and nothing
+ * else on the server would show why. The signature is served whatever this
+ * finds, since the kiosk is the judge; the outcome is returned, not thrown, so a
+ * check that cannot be made does not fail the download.
+ */
+async function checkLauncherSignature(sigFile: string): Promise<LauncherCheck> {
+  let id = "";
+  try {
+    const [sig, launcher] = await Promise.all([readFile(sigFile), readFile(kioskScript("kiosk-windows.ps1"))]);
+    id = `${crypto.createHash("sha256").update(sig).digest("hex")}:${crypto.createHash("sha256").update(launcher).digest("hex")}`;
+    const known = launcherChecks.get(id);
+    if (known) return known;
+    const outcome: LauncherCheck = crypto.verify("sha256", launcher, (await readSigningKey()).pem, sig) ? "verified" : "mismatch";
+    launcherChecks.set(id, outcome);
+    if (outcome === "mismatch") {
+      console.warn("[helper-update] this server's scripts/kiosk/kiosk-windows.ps1 is not the launcher the release signed (changed in this checkout, or its line ends converted), so every Windows kiosk will refuse it as signature invalid; check it out as the release has it");
+    }
+    return outcome;
+  } catch (err) {
+    if (id) launcherChecks.set(id, "unchecked");
+    console.warn(`[helper-update] could not check this server's kiosk-windows.ps1 against the release's signature: ${scrub(errorMessage(err))}`);
+    return "unchecked";
+  }
 }
 
 /** The Mac output helper's zips, fetched from the release on first request and
@@ -201,11 +237,31 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
-  // ── The Mac output helper, and the checksum its installer verifies ──────
+  // ── The release signing key, for an installer to install ────────────────
+  // The public half, from this build's tree: PEM for a Mac's openssl, XML for
+  // Windows PowerShell's RSA. The installer writes it beside the updater, which
+  // verifies every payload against that copy from then on. See
+  // release-signing-key.ts.
+  if (method === "GET" && (pathname === "/kiosk/release-signing.pub.pem" || pathname === "/kiosk/release-signing.pub.xml")) {
+    let key;
+    try {
+      key = await readSigningKey();
+    } catch (err) {
+      console.error(`[helper-update] cannot give an installer the release signing key, so no updater can be installed: ${scrub(errorMessage(err))}`);
+      error(res, "this build has no usable release signing key", 500);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end(pathname.endsWith(".pem") ? key.pem : key.xml);
+    return;
+  }
+
+  // ── The Mac output helper, the checksum its installer verifies, and the
+  //    release's signature of each payload a machine updates from ──────────
   // A Mac on a network with no internet gets the app from here. The first
   // request fetches it from the release this server is running; see
   // output-helper-download.ts for what is bounded and why.
-  if (method === "GET" && pathname.startsWith("/kiosk/StageUtilityOutput-")) {
+  if (method === "GET" && (pathname.startsWith("/kiosk/StageUtilityOutput-") || pathname === "/kiosk/kiosk-windows.ps1.sig")) {
     const asset = parseHelperPath(pathname);
     if (!asset) {
       error(res, "unknown download", 404);
@@ -216,8 +272,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, got.message, got.status);
       return;
     }
+    if (asset.name === "kiosk-windows.ps1.sig") await checkLauncherSignature(got.file);
     res.writeHead(200, {
-      "content-type": asset.kind === "zip" ? "application/zip" : "text/plain; charset=utf-8",
+      "content-type": asset.kind === "zip" ? "application/zip" : asset.kind === "sig" ? "application/octet-stream" : "text/plain; charset=utf-8",
       "content-length": String(got.size),
       "content-disposition": `attachment; filename="${asset.name}"`,
       "cache-control": "no-store",

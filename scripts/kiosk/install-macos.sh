@@ -6,13 +6,18 @@
 # By default this installs the Stage Utility Output helper (macOS 14 or later): a
 # menu bar app that makes each of the Mac's displays, and each DeckLink port, a
 # screen device of its own. It downloads the app from this server, falls back to
-# the GitHub release for the server's version, checks the release's SHA-256, puts it
-# in /Applications and starts it at login, for whichever account logs in.
+# the GitHub release for the server's version, checks the release's SHA-256 and its
+# signature, puts it in /Applications and starts it at login, for whichever account
+# logs in.
 #
 #   --browser    the earlier Chrome kiosk instead: one full-screen browser. For a
 #                Mac the helper cannot run on.
 #                curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --browser
 #   --dry-run    print every step and change nothing. Needs no sudo.
+#   --replace-signing-key
+#                take the server's release signing key even though this Mac already
+#                has one installed. Without it a re-run keeps the installed key and
+#                verifies the new app against it. For rotating the key.
 #   --check-update
 #                what the updater this installs runs every five minutes, as root:
 #                ask the server whether to update the helper, and do it. Not for
@@ -39,7 +44,8 @@
 # com.stageutility.output-updater, that runs it with --check-update every five
 # minutes. That asks the server whether to update (the server decides: never while a
 # service is live or near one), downloads and verifies the new app exactly as an
-# install does, swaps it in keeping the old one, restarts the helper, and puts the
+# install does, but against the release signing key the install left beside it, never
+# one the server sends at update time; swaps it in keeping the old one, restarts the helper, and puts the
 # old one back if the new one does not say it started. It never runs anything it
 # downloaded as root: it swaps the app, which runs as the logged-in user. A change to
 # this script itself reaches a Mac only when the installer is run again by hand.
@@ -97,6 +103,13 @@ UPDATER_DIR="$ROOT/Library/Application Support/StageUtilityUpdater"
 UPDATER_SCRIPT="$UPDATER_DIR/install-macos.sh"
 UPDATER_ORIGIN="$UPDATER_DIR/server"
 UPDATER_STATUS="$UPDATER_DIR/status"
+# The public key every download's signature is checked against. Written here at
+# install, from the server the install came from, and never fetched by the updater:
+# a server, or whatever answers in its place, cannot hand an update a key of its own.
+UPDATER_KEY="$UPDATER_DIR/release-signing.pub.pem"
+# macOS's own, LibreSSL. Its command line verifies an RSA signature and has no
+# Ed25519, which is why releases are signed with RSA-3072 (release-signing-key.ts).
+OPENSSL=/usr/bin/openssl
 UPDATER_PLIST="$ROOT/Library/LaunchDaemons/$UPDATER_LABEL.plist"
 UPDATE_LOG="$ROOT/Library/Logs/StageUtility/helper-update.log"
 UPDATE_EVERY=300
@@ -119,6 +132,8 @@ ZIP_CEILING=7800
 
 MODE=helper
 DRY=0
+# --replace-signing-key: take the server's key over the one already installed.
+REPLACE_KEY=0
 # Set in --check-update: the update in progress, so a failure records itself;
 # whether a failure from here holds that version (see record_update_failure);
 # whether a signal ended the run; and what the status file carries alongside.
@@ -132,6 +147,9 @@ ST_RETRY=""
 ST_FAILS=0
 ARCH=""
 ZIP_NAME=""
+# The release signing key this run verifies with, and where it came from (for the log).
+SIGNING_KEY=""
+KEY_FROM=""
 WHY=""
 HTTP_CODE=""
 CONSOLE_USER=""
@@ -172,12 +190,15 @@ would() { printf '    [dry-run] %s\n' "$*"; }
 
 usage() {
   cat <<'USAGE'
-Usage: install-macos.sh [--browser] [--dry-run] [--check-update]
+Usage: install-macos.sh [--browser] [--dry-run] [--replace-signing-key] [--check-update]
 
   (default)   install the Stage Utility Output helper (macOS 14 or later), and
               the updater that keeps it on the server's version
   --browser   install the Chrome kiosk instead
   --dry-run   print every step and change nothing; needs no sudo
+  --replace-signing-key
+              take the server's release signing key in place of the one
+              installed; without it a re-run keeps the installed key
   --check-update
               what the updater runs every five minutes; not for typing
   --help      this text
@@ -513,8 +534,9 @@ expected_is_a_digest() {
   return 1
 }
 
-# One download source, after `expected` is known: the zip, then the comparison.
-# Returns non-zero with the reason in WHY, and leaves no zip it would trust behind.
+# One download source, after `expected` is known: the zip, the comparison, then the
+# release's signature of it. Returns non-zero with the reason in WHY, and leaves no
+# zip it would trust behind.
 try_source() {
   label="$1"
   zip_url="$2"
@@ -536,6 +558,63 @@ try_source() {
     return 1
   fi
   say "    verified SHA-256 $expected"
+  if ! verify_signature "$label" "$zip_url.sig"; then
+    rm -f "$WORK/$ZIP_NAME"
+    return 1
+  fi
+}
+
+# Whether a file is the kind of key releases are signed with: a regular file, not a
+# link, holding an RSA public key of 3072 bits. LibreSSL says "RSA Public-Key:
+# (3072 bit)", OpenSSL 3 "Public-Key: (3072 bit)".
+usable_key() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  "$OPENSSL" rsa -pubin -in "$1" -noout -text 2>/dev/null | head -n 1 | grep -Eq 'Public-Key: \(3072 bit\)'
+}
+
+# The key an install verifies with, and leaves for the updater. On a Mac that has
+# one installed, that one, unless --replace-signing-key: a re-run of this script
+# is then held to the key the first install trusted, whatever server it downloads
+# from. (A copy of the script fetched from a server that is not trusted is that
+# server's to write, so it is a first install's trust again.) Otherwise the
+# server's, so the first install trusts the server it was run from, as
+# `curl ... | sudo sh` does.
+choose_signing_key() { # origin
+  if [ "$REPLACE_KEY" -ne 1 ] && { [ -e "$UPDATER_KEY" ] || [ -L "$UPDATER_KEY" ]; }; then
+    usable_key "$UPDATER_KEY" ||
+      die "the release signing key installed at $UPDATER_KEY is not a 3072-bit RSA public key. To take the server's in its place, run the installer again with --replace-signing-key."
+    SIGNING_KEY="$UPDATER_KEY"
+    KEY_FROM="installed on this Mac"
+    say "    keeping the release signing key installed on this Mac (--replace-signing-key takes the server's)"
+    return 0
+  fi
+  fetch_signing_key "$1"
+}
+
+fetch_signing_key() { # origin
+  SIGNING_KEY="$WORK/release-signing.pub.pem"
+  KEY_FROM="from $1"
+  rm -f "$SIGNING_KEY"
+  if ! fetch_to "$1/kiosk/release-signing.pub.pem" "$SIGNING_KEY" 60 0; then
+    die "could not get the release signing key: $1/kiosk/release-signing.pub.pem $WHY. Every download is checked against it, so nothing was installed."
+  fi
+  usable_key "$SIGNING_KEY" || die "the release signing key from $1 is not a 3072-bit RSA public key $OPENSSL can read, so nothing was installed."
+}
+
+# The release's signature of the zip at $WORK/$ZIP_NAME, checked against SIGNING_KEY.
+# Missing and invalid are both a refusal: nothing is installed unsigned.
+verify_signature() { # label url
+  sig="$WORK/$ZIP_NAME.sig"
+  rm -f "$sig"
+  if ! fetch_to "$2" "$sig" 60 0; then
+    WHY="$1: signature missing: $ZIP_NAME.sig $WHY, and nothing is installed unsigned"
+    return 1
+  fi
+  if ! "$OPENSSL" dgst -sha256 -verify "$SIGNING_KEY" -signature "$sig" "$WORK/$ZIP_NAME" >/dev/null 2>&1; then
+    WHY="$1: signature invalid: $ZIP_NAME.sig does not verify against the release signing key $KEY_FROM"
+    return 1
+  fi
+  say "    signature valid: $ZIP_NAME.sig, against the release signing key $KEY_FROM"
 }
 
 # The server's own release version, for the GitHub fallback. /api/update/status
@@ -551,6 +630,11 @@ fetch_helper() {
   [ -n "$origin" ] || no_server_address
   origin="${origin%/}"
   ZIP_NAME="StageUtilityOutput-$ARCH.zip"
+  # The updater has set the key it installed; it never asks for one.
+  if [ -z "$SIGNING_KEY" ]; then
+    [ "$MODE" != check ] || die "no release signing key to verify the update with; run the installer by hand"
+    choose_signing_key "$origin"
+  fi
   # No idle limit on the server: a server that has not fetched the zip yet sends
   # nothing until it has all of it from GitHub, which curl would count as idle.
   label="this server ($origin)"
@@ -903,6 +987,12 @@ updater_files() {
     return 1
   fi
   copy_updater_script || { WHY="could not put a copy of this installer in $UPDATER_DIR${WHY:+ ($WHY)}"; return 1; }
+  # The key this install verified the app with, which the updater verifies every
+  # update against from now on. Replaced only by running the installer again.
+  usable_key "$SIGNING_KEY" || { WHY="there is no release signing key to install"; return 1; }
+  if [ "$SIGNING_KEY" != "$UPDATER_KEY" ]; then
+    put_file "$UPDATER_KEY" 644 <"$SIGNING_KEY" || { WHY="could not write $UPDATER_KEY"; return 1; }
+  fi
   printf '%s\n' "$origin" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
   printf '%s\n' "$machine" | put_file "$UPDATER_DIR/device-id" 644 || { WHY="could not write $UPDATER_DIR/device-id"; return 1; }
   write_updater_plist "$UPDATER_PLIST" || { WHY="could not write $UPDATER_PLIST"; return 1; }
@@ -1248,6 +1338,11 @@ check_update() {
   # that may be days off, unchecked.
   HOLD=1
   [ -f "$HELPER_PLIST" ] || die "$HELPER_PLIST is missing, so the new helper could not be started; run the installer by hand"
+  # Only the key root was given at install. Without it nothing can be verified, and
+  # nothing is installed unverified.
+  usable_key "$UPDATER_KEY" || die "signature not checked: no readable release signing key is installed, so no update can be verified; run the installer by hand (looked for $UPDATER_KEY)"
+  SIGNING_KEY="$UPDATER_KEY"
+  KEY_FROM="installed on this Mac"
   # A failed download is the network's, and is tried again later; everything after
   # it is this version's.
   HOLD=0
@@ -1284,12 +1379,17 @@ install_helper() {
   if [ "$DRY" -eq 1 ]; then
     origin="$(server_origin)"
     [ -n "$origin" ] || no_server_address
-    would "download $origin/kiosk/StageUtilityOutput-$ARCH.zip and its .sha256"
-    would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip"
-    would "refuse a zip whose SHA-256 differs from the release's"
+    if [ "$REPLACE_KEY" -ne 1 ] && [ -e "$UPDATER_KEY" ]; then
+      would "verify every download against the release signing key already installed at $UPDATER_KEY (--replace-signing-key takes the server's)"
+    else
+      would "download $origin/kiosk/release-signing.pub.pem, the key every download is verified against"
+    fi
+    would "download $origin/kiosk/StageUtilityOutput-$ARCH.zip, its .sha256 and its .sig"
+    would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip and its .sig"
+    would "refuse a zip whose SHA-256 differs from the release's, or whose signature is missing or does not verify"
     would "unpack beside $APPS_DIR/$APP_NAME, check it is $HELPER_LABEL, then swap it in, keeping the old copy until that worked"
     would "write $HELPER_PLIST, root-owned, which starts the helper at every login"
-    would "copy this installer to $UPDATER_SCRIPT and write $UPDATER_PLIST, a LaunchDaemon that runs it with --check-update every five minutes: the helper then follows $origin's version, never during a service"
+    would "copy this installer to $UPDATER_SCRIPT, the signing key to $UPDATER_KEY, and write $UPDATER_PLIST, a LaunchDaemon that runs it with --check-update every five minutes: the helper then follows $origin's version, never during a service"
     if [ -n "$CONSOLE_USER" ]; then
       would "start the helper now for $CONSOLE_USER"
     else
@@ -1520,6 +1620,7 @@ main() {
     case "$arg" in
       --browser) MODE=browser ;;
       --dry-run) DRY=1 ;;
+      --replace-signing-key) REPLACE_KEY=1 ;;
       --check-update) MODE=check ;;
       -h | --help)
         usage

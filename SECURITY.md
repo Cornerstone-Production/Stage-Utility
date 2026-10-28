@@ -185,6 +185,39 @@ When reporting, please include:
   `!secret`, never by value), `/api/companion/buttons` and `/api/companion/pairs`. Nothing
   there presses anything or reveals a secret.
 
+- **Machine updates are signed by the release, not vouched for by the server.** A Mac
+  running the output helper and a Windows kiosk each update themselves from the server:
+  the helper's zip, and the kiosk's launcher. The server's word is checked twice. The
+  SHA-256 it names proves the download is whole. The release's signature, made in CI
+  with a private key held only as the `RELEASE_SIGNING_KEY` Actions secret (RSA-3072,
+  PKCS#1 v1.5, SHA-256), proves it is what the release published. The updater checks the
+  signature against the public key its installer wrote beside it, in a folder only root
+  or an administrator can write, and never against one fetched at update time; a
+  missing or invalid signature is refused and reported. So something that answers in
+  the server's place on the LAN, or a compromised server, can still say *when* a
+  machine updates, but cannot hand it a payload of its own.
+
+  It can also say *which* release: a signature is bound to a payload, not to a version,
+  so a server can make a machine install an older release that CI signed (a known
+  helper bug, say). It can never make it install bytes CI did not sign. This is
+  deliberate: a legitimate track switch from beta to main lowers the version, so a
+  machine cannot refuse to go down.
+
+  The first install is the exception: the installer and the key it installs come from
+  the server, over plain HTTP, so `curl ... | sudo sh` and `irm ... | iex` trust that
+  server as they always have. So is any reinstall whose installer comes from a server that
+  is not trusted: a reinstall is `curl http://<server>/kiosk/install-macos.sh | sudo sh` or
+  `irm .../install-windows.ps1 | iex`, and a script served by something answering as the
+  server can write a key of its own. What the installed key does survive is every
+  automatic update check, and a reinstall run with the genuine installer, which keeps
+  the key already on the machine unless told to replace it (`--replace-signing-key`,
+  `STAGE_REPLACE_SIGNING_KEY=1`) even when the server it downloads from is hostile. An
+  updater installed before
+  signing existed checks the SHA-256 only, until its installer is run again. See
+  [Signed updates](docs/kiosk-devices.md#signed-updates) and
+  [The release signing key](docs/ops/distribution.md#the-release-signing-key), which
+  covers rotation.
+
 ## Code scanning
 
 CodeQL runs on every pull request. Two of its rules, `js/file-access-to-http` and

@@ -22,11 +22,17 @@ import * as path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { testSigningKey } from "../main/services/fixtures/test-signing-key.js";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "kiosk", "install-macos.sh");
 
 const has = (cmd: string): boolean => spawnSync("sh", ["-c", `command -v ${cmd}`]).status === 0;
 const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest("hex");
+/** The release signing key these tests sign with, made for this run; and another
+ *  one, for a signature that is well formed and not the release's. */
+const KEY = testSigningKey();
+const OTHER_KEY = testSigningKey(3072, "other");
 
 interface Result {
   status: number | null;
@@ -210,7 +216,9 @@ describe("--dry-run", () => {
       const r = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: arch });
       assert.equal(r.status, 0, r.err);
       assert.match(r.out, new RegExp(`this Mac: ${arch}`));
-      assert.match(r.out, new RegExp(`download http://192\\.0\\.2\\.10:8788/kiosk/StageUtilityOutput-${arch}\\.zip and its \\.sha256`));
+      assert.match(r.out, new RegExp(`download http://192\\.0\\.2\\.10:8788/kiosk/StageUtilityOutput-${arch}\\.zip, its \\.sha256 and its \\.sig`));
+      assert.match(r.out, /download http:\/\/192\.0\.2\.10:8788\/kiosk\/release-signing\.pub\.pem, the key every download is verified against/);
+      assert.match(r.out, /or whose signature is missing or does not verify/);
       assert.match(r.out, /GitHub release's StageUtilityOutput/);
       assert.match(r.out, /refuse a zip whose SHA-256 differs/);
       assert.match(r.out, /com\.stageutility\.output\.plist/);
@@ -359,6 +367,18 @@ describe("--dry-run", () => {
     assert.deepEqual(fs.readdirSync(scratch), []);
   });
 
+  it("plans to keep an installed signing key, and to take the server's with --replace-signing-key", async () => {
+    const key = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "release-signing.pub.pem");
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, KEY.publicPem);
+    const keep = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(keep.status, 0, keep.err);
+    assert.match(keep.out, /verify every download against the release signing key already installed at .*release-signing\.pub\.pem \(--replace-signing-key takes the server's\)/);
+    const replace = await dryRun(scratch, ["--replace-signing-key"], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(replace.status, 0, replace.err);
+    assert.match(replace.out, /download http:\/\/192\.0\.2\.10:8788\/kiosk\/release-signing\.pub\.pem, the key every download is verified against/);
+  });
+
   it("answers an unknown option with 2, and --help with the usage", async () => {
     const bad = await sh('exec sh "$@"', {}, [SCRIPT, "--bogus"]);
     assert.equal(bad.status, 2);
@@ -434,20 +454,25 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     stageServer.hits.length = 0;
     github.routes.clear();
     github.hits.length = 0;
+    // Every install asks its server for the key first.
+    stageServer.routes.set("/kiosk/release-signing.pub.pem", { body: KEY.publicPem });
     zipA = makeZip(scratch, "build-a");
     zipB = makeZip(scratch, "build-b");
   });
 
-  const publish = (host: Fake, prefix: string, zip: { bytes: Buffer }, digest = sha(zip.bytes)) => {
+  /** The server's zip, its checksum and its release signature, and the key it hands an install. */
+  const publish = (host: Fake, prefix: string, zip: { bytes: Buffer }, digest = sha(zip.bytes), sig = KEY.sign(zip.bytes)) => {
     host.routes.set(`${prefix}/StageUtilityOutput-arm64.zip`, { body: zip.bytes });
     host.routes.set(`${prefix}/StageUtilityOutput-arm64.zip.sha256`, { body: `${digest}  StageUtilityOutput-arm64.zip\n` });
+    host.routes.set(`${prefix}/StageUtilityOutput-arm64.zip.sig`, { body: sig });
   };
 
   /** The GitHub release for `version`: the zip on the download host, and the release's JSON
    *  on the API host with each asset's digest. There is no .sha256 asset on a release.
    *  `assets` replaces the JSON's asset list, to publish a release with no digest or none. */
-  const publishRelease = (version: string, zip: { bytes: Buffer }, digest = sha(zip.bytes), assets?: object[]) => {
+  const publishRelease = (version: string, zip: { bytes: Buffer }, digest = sha(zip.bytes), assets?: object[], sig = KEY.sign(zip.bytes)) => {
     github.routes.set(`/releases/v${version}/StageUtilityOutput-arm64.zip`, { body: zip.bytes });
+    github.routes.set(`/releases/v${version}/StageUtilityOutput-arm64.zip.sig`, { body: sig });
     github.routes.set(`/api/releases/tags/v${version}`, {
       body: JSON.stringify({
         tag_name: `v${version}`,
@@ -640,6 +665,87 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       assert.equal(calls.length, 1, spy.zipCalls().join("\n"));
       assert.match(calls[0], /--max-time 7800 --speed-time 60 --speed-limit 1024 /);
     });
+  });
+
+  describe("the release's signature", () => {
+    const viaGithub = () => stageServer.routes.set("/api/update/status", { body: '{"version":"9.9.9"}' });
+
+    it("is verified with the server's key, and said to be valid", async () => {
+      publish(stageServer, "/kiosk", zipA);
+      const r = await install(`${FLOW}; FINISHED=1`);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(r.out, new RegExp(`signature valid: StageUtilityOutput-arm64\\.zip\\.sig, against the release signing key from ${stageServer.base.replace(/\./g, "\\.")}`));
+      assert.ok(stageServer.hits.includes("/kiosk/release-signing.pub.pem"));
+      assert.ok(stageServer.hits.includes("/kiosk/StageUtilityOutput-arm64.zip.sig"));
+    });
+
+    it("is refused when missing, from the server and from GitHub, and nothing is installed", async () => {
+      publish(stageServer, "/kiosk", zipA);
+      stageServer.routes.delete("/kiosk/StageUtilityOutput-arm64.zip.sig");
+      viaGithub();
+      publishRelease("9.9.9", zipA);
+      github.routes.delete("/releases/v9.9.9/StageUtilityOutput-arm64.zip.sig");
+      const r = await install(FLOW);
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.match(r.err, /this server \(.*\): signature missing: StageUtilityOutput-arm64\.zip\.sig answered 404: unknown, and nothing is installed unsigned/);
+      assert.match(r.err, /the GitHub release v9\.9\.9: signature missing: StageUtilityOutput-arm64\.zip\.sig answered 404: unknown, and nothing is installed unsigned/);
+      assert.ok(!fs.existsSync(app()));
+      assert.deepEqual(fs.existsSync(path.join(scratch, "Applications")) ? leftovers() : [], []);
+    });
+
+    for (const [label, bad] of [
+      ["made by another key", () => OTHER_KEY.sign(zipA.bytes)],
+      ["of other bytes", () => KEY.sign(Buffer.from("another zip"))],
+      ["that is not a signature at all", () => Buffer.from("<html>502 Bad Gateway</html>")],
+    ] as const) {
+      it(`is refused when it is one ${label}, though the zip matches its SHA-256`, async () => {
+        publish(stageServer, "/kiosk", zipA, undefined, bad());
+        const r = await install(FLOW);
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.out, new RegExp(`verified SHA-256 ${sha(zipA.bytes)}`), "the checksum alone passed");
+        assert.match(r.err, /this server \(.*\): signature invalid: StageUtilityOutput-arm64\.zip\.sig does not verify against the release signing key from /);
+        assert.ok(!fs.existsSync(app()));
+      });
+    }
+
+    it("from GitHub is verified too, when the server's is not good", async () => {
+      publish(stageServer, "/kiosk", zipA, undefined, OTHER_KEY.sign(zipA.bytes));
+      viaGithub();
+      publishRelease("9.9.9", zipB);
+      const r = await install(`${FLOW}; FINISHED=1`);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(r.out, /this server \(.*\): signature invalid/);
+      assert.match(r.out, /signature valid: StageUtilityOutput-arm64\.zip\.sig/);
+      assert.ok(github.hits.includes("/releases/v9.9.9/StageUtilityOutput-arm64.zip.sig"));
+      assert.equal(marker(), "build-b");
+    });
+
+    it("from GitHub is refused when it does not verify", async () => {
+      stageServer.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sha256", { status: 404, body: '{"error":"not cached"}' });
+      viaGithub();
+      publishRelease("9.9.9", zipB, undefined, undefined, OTHER_KEY.sign(zipB.bytes));
+      const r = await install(FLOW);
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.match(r.err, /the GitHub release v9\.9\.9: signature invalid: StageUtilityOutput-arm64\.zip\.sig does not verify/);
+      assert.ok(!fs.existsSync(app()));
+    });
+
+    for (const [label, route, why] of [
+      ["the server has no usable key", { status: 500, body: '{"error":"this build has no usable release signing key"}' }, /could not get the release signing key: .*\/kiosk\/release-signing\.pub\.pem answered 500: this build has no usable release signing key\. Every download is checked against it, so nothing was installed\./],
+      ["what the server sends is not a key", { body: "PLACEHOLDER" }, /the release signing key from .* is not a 3072-bit RSA public key \/usr\/bin\/openssl can read, so nothing was installed\./],
+      ["what the server sends is a 2048-bit key", { body: testSigningKey(2048).publicPem }, /is not a 3072-bit RSA public key/],
+      ["what the server sends is an Ed25519 key", { body: crypto.generateKeyPairSync("ed25519").publicKey.export({ format: "pem", type: "spki" }).toString() }, /is not a 3072-bit RSA public key/],
+    ] as const) {
+      it(`stops before downloading anything when ${label}`, async () => {
+        publish(stageServer, "/kiosk", zipA);
+        stageServer.routes.set("/kiosk/release-signing.pub.pem", route);
+        const r = await install(FLOW);
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.err, why);
+        assert.ok(!stageServer.hits.some((h) => h.includes(".zip")), "nothing is downloaded without a key to check it");
+        assert.ok(!fs.existsSync(app()));
+      });
+    }
   });
 
   it("names both reasons when neither source works", async () => {
@@ -908,6 +1014,9 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         assert.ok(fs.readFileSync(path.join(updaterDir(), "install-macos.sh")).equals(script), "the copy is the installer, byte for byte");
         assert.equal(fs.statSync(path.join(updaterDir(), "install-macos.sh")).mode & 0o777, 0o755);
         assert.equal(fs.readFileSync(path.join(updaterDir(), "server"), "utf8"), `${stageServer.base}\n`);
+        // The key the install verified the app with, which every update is checked against.
+        assert.equal(fs.readFileSync(path.join(updaterDir(), "release-signing.pub.pem"), "utf8"), KEY.publicPem);
+        assert.equal(fs.statSync(path.join(updaterDir(), "release-signing.pub.pem")).mode & 0o777, 0o644);
         const plist = fs.readFileSync(daemon(), "utf8");
         assert.match(plist, /<key>Label<\/key><string>com\.stageutility\.output-updater<\/string>/);
         assert.match(plist, /<string>\/bin\/sh<\/string><string>\/Library\/Application Support\/StageUtilityUpdater\/install-macos\.sh<\/string><string>--check-update<\/string>/);
@@ -920,6 +1029,56 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         // Root's own copies: the state folder is the console user's to rewrite.
         assert.equal(fs.readFileSync(path.join(updaterDir(), "device-id"), "utf8"), fs.readFileSync(path.join(stateDir(), "device-id"), "utf8"));
         assert.match(r.out, /every five minutes whether to update, and never/);
+      });
+
+      describe("a re-run, and the key it was installed with", () => {
+        const keyFile = () => path.join(updaterDir(), "release-signing.pub.pem");
+        /** First install with the release key; then a server offering another key, and an app signed by it. */
+        const installedThenSwapped = async () => {
+          publish(stageServer, "/kiosk", zipA);
+          stageServer.routes.set("/kiosk/install-macos.sh", { body: fs.readFileSync(SCRIPT) });
+          assert.equal((await whole(ME)).status, 0);
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem);
+          publish(stageServer, "/kiosk", zipB, undefined, OTHER_KEY.sign(zipB.bytes));
+          stageServer.routes.set("/kiosk/release-signing.pub.pem", { body: OTHER_KEY.publicPem });
+          stageServer.hits.length = 0;
+        };
+
+        it("keeps the installed key, and holds the new app to it", async () => {
+          await installedThenSwapped();
+          const r = await whole(ME);
+          assert.equal(r.status, 1, r.out + r.err);
+          assert.match(r.out, /keeping the release signing key installed on this Mac/);
+          assert.match(r.err, /signature invalid: StageUtilityOutput-arm64\.zip\.sig does not verify against the release signing key installed on this Mac/);
+          assert.ok(!stageServer.hits.includes("/kiosk/release-signing.pub.pem"), "the server's key is not asked for");
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem, "the installed key is unchanged");
+          assert.equal(marker2(), "build-a");
+        });
+
+        it("installs an app the installed key verifies, and leaves that key whole", async () => {
+          await installedThenSwapped();
+          publish(stageServer, "/kiosk", zipB); // signed by the installed key this time
+          const r = await whole(ME);
+          assert.equal(r.status, 0, r.out + r.err);
+          assert.equal(marker2(), "build-b");
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem, "the key was not rewritten from itself");
+        });
+
+        it("takes the server's key with --replace-signing-key", async () => {
+          await installedThenSwapped();
+          const r = await whole(ME, {}, "REPLACE_KEY=1");
+          assert.equal(r.status, 0, r.out + r.err);
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), OTHER_KEY.publicPem);
+          assert.equal(marker2(), "build-b");
+        });
+
+        it("refuses to install over a key that is not usable, and says how to replace it", async () => {
+          await installedThenSwapped();
+          fs.writeFileSync(keyFile(), "not a key\n");
+          const r = await whole(ME);
+          assert.equal(r.status, 1, r.out + r.err);
+          assert.match(r.err, /is not a 3072-bit RSA public key\. To take the server's in its place, run the installer again with --replace-signing-key/);
+        });
       });
 
       it("says plainly when it cannot, and leaves the helper installed", async () => {
@@ -1119,6 +1278,9 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     fs.writeFileSync(path.join(scratch, "Library", "LaunchAgents", "com.stageutility.output.plist"), "<plist/>");
     server.routes.set("/kiosk/StageUtilityOutput-arm64.zip", { body: next.bytes });
     server.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sha256", { body: `${sha(next.bytes)}  StageUtilityOutput-arm64.zip\n` });
+    server.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sig", { body: KEY.sign(next.bytes) });
+    // The key the install left for the updater.
+    fs.writeFileSync(path.join(updater, "release-signing.pub.pem"), KEY.publicPem);
   });
 
   const run = (extra: Record<string, string> = {}) =>
@@ -1181,6 +1343,70 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     await run();
     assert.equal(checks().at(-1)?.get("state"), "updated");
     assert.equal(checks().at(-1)?.get("have"), "1.27.0");
+  });
+
+  describe("the release's signature", () => {
+    const keyFile = () => path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "release-signing.pub.pem");
+
+    it("is checked against the key installed on this Mac, never one the server offers", async () => {
+      answer({ update: true });
+      // A server, or whatever answers in its place, with a key and a signature of its own.
+      server.routes.set("/kiosk/release-signing.pub.pem", { body: OTHER_KEY.publicPem });
+      server.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sig", { body: OTHER_KEY.sign(next.bytes) });
+      const r = await run();
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.equal(which(), "build-old");
+      assert.deepEqual(launchctl(), [], "the helper was never stopped");
+      assert.ok(!server.hits.includes("/kiosk/release-signing.pub.pem"), "the updater never asks for a key");
+      assert.match(r.err, /\[helper-update\] install-macos\.sh: could not get the helper\. this server \(.*\): signature invalid: StageUtilityOutput-arm64\.zip\.sig does not verify against the release signing key installed on this Mac/);
+      assert.match(updaterStatus(), /^state=retrying$/m);
+      assert.match(updaterStatus(), /^detail=could not get the helper\. this server \(.*\): signature invalid/m);
+      // The next check reports it, so Screens shows it.
+      answer({ update: false });
+      await run();
+      assert.match(checks().at(-1)?.get("detail") ?? "", /signature invalid/);
+      assert.equal(checks().at(-1)?.get("state"), "retrying");
+    });
+
+    it("says it is valid when it is", async () => {
+      answer({ update: true });
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(r.out, /\[helper-update\]\s+signature valid: StageUtilityOutput-arm64\.zip\.sig, against the release signing key installed on this Mac/);
+      assert.equal(which(), "build-new");
+    });
+
+    it("refuses an update with no signature, and says it is missing", async () => {
+      answer({ update: true });
+      server.routes.delete("/kiosk/StageUtilityOutput-arm64.zip.sig");
+      const r = await run();
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.equal(which(), "build-old");
+      assert.match(updaterStatus(), /^detail=could not get the helper\. this server \(.*\): signature missing: StageUtilityOutput-arm64\.zip\.sig answered 404/m);
+    });
+
+    for (const [label, plant] of [
+      ["there is no key installed", () => fs.rmSync(keyFile())],
+      ["the installed key is not a key", () => fs.writeFileSync(keyFile(), "not a key\n")],
+      ["the installed key is 2048-bit", () => fs.writeFileSync(keyFile(), testSigningKey(2048).publicPem)],
+      ["the installed key is a link", () => {
+        const real = path.join(scratch, "elsewhere.pem");
+        fs.writeFileSync(real, KEY.publicPem);
+        fs.rmSync(keyFile());
+        fs.symlinkSync(real, keyFile());
+      }],
+    ] as const) {
+      it(`holds the update, downloading nothing, when ${label}`, async () => {
+        answer({ update: true });
+        plant();
+        const r = await run();
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.equal(which(), "build-old");
+        assert.ok(!server.hits.some((h) => h.includes(".zip") || h.includes("release-signing")), "nothing downloaded, no key asked for");
+        assert.match(updaterStatus(), /^state=failed$/m);
+        assert.match(updaterStatus(), /^detail=signature not checked: no readable release signing key is installed, so no update can be verified; run the installer by hand \(looked for .*/m);
+      });
+    }
   });
 
   it("puts the previous helper back, and starts it, when the new one says Chromium did not start", async () => {

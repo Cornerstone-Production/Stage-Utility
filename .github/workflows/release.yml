@@ -312,6 +312,19 @@ jobs:
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
           echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
+      # The sign job signs every payload a machine updates itself from (see
+      # scripts/sign-release-assets.sh), and a published release cannot be added
+      # to. So the key is proved here, before there is a tag: an absent secret, or
+      # one that is not the private half of scripts/kiosk/release-signing.pub.pem,
+      # stops the run with nothing pushed, rather than leaving a version that
+      # every updater refuses. Nothing from npm runs in this job before it
+      # (scripts/release-signing-workflow.test.ts lists the steps that may).
+      - name: Check the release signing key
+        if: steps.version.outputs.skip == 'false'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: scripts/sign-release-assets.sh --check
+
       - name: Bump, tag and push
         id: push
         if: steps.version.outputs.skip == 'false'
@@ -512,13 +525,67 @@ jobs:
           ls -l helper-dist
           # For people reading the log. Not uploaded: GitHub serves each release
           # asset's SHA-256 as its `digest`, and that is what the server and the
-          # installer verify the zips against.
+          # installer verify the zips against. Their signatures are made in the
+          # sign job, which holds the signing key; this job does not.
           ( cd helper-dist && shasum -a 256 StageUtilityOutput-*.zip )
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-helper
           path: helper-dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The release's signature of every payload a machine updates itself from.
+  #
+  # A job of its own so the signing key is in a job that installs and runs
+  # nothing from npm: it checks out the tag, signs the Windows launcher as the
+  # tagged blob (`git show`, not the workspace) and the helper's zips from the
+  # helper job's artifact, verifies each against the committed public key
+  # (scripts/sign-release-assets.sh), and hands the .sig files on as an
+  # artifact. Only its signing step is given RELEASE_SIGNING_KEY. A failure here
+  # does not stop the release: the artifacts job publishes without signatures,
+  # and says so, since a tag with no release is a deployment that cannot update.
+  sign:
+    needs: [release, helper]
+    if: ${{ always() && needs.release.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: v${{ needs.release.outputs.version }}
+          # For `git show v<version>:...`, which needs the tag itself.
+          fetch-depth: 0
+
+      - name: Fetch the Mac output helper
+        if: ${{ needs.helper.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: output-helper
+          path: helper-dist
+
+      - name: Sign the update payloads
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p payloads
+          # The bytes in the tag, which is what every server's checkout of it has
+          # (.gitattributes pins them).
+          git show "v$V:scripts/kiosk/kiosk-windows.ps1" > payloads/kiosk-windows.ps1
+          payloads=(payloads/kiosk-windows.ps1)
+          if [ -d helper-dist ]; then payloads+=(helper-dist/StageUtilityOutput-*.zip); fi
+          scripts/sign-release-assets.sh sig-dist "${payloads[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-signatures
+          path: sig-dist/
           if-no-files-found: error
           retention-days: 1
 
@@ -535,7 +602,7 @@ jobs:
     # delay it: the archives wait for the helper job to finish, up to its 60
     # minute timeout plus any wait for a macOS runner. A failed or cancelled
     # helper is announced by the error step below.
-    needs: [release, helper]
+    needs: [release, helper, sign]
     # `always()`, not the default success(): once the tag is pushed the
     # archives must follow whatever happens to the release job afterwards — a
     # failed status write, or a hand on the cancel button — because a tag with
@@ -591,6 +658,15 @@ jobs:
         run: |
           echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
+      - name: Fetch the release signatures
+        # Only from a sign job that succeeded. Without them the release is still
+        # created, and the create step says machines will hold the update.
+        if: ${{ needs.sign.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signatures
+          path: sig-dist
+
       - name: Smoke-test the Linux archive
         env:
           V: ${{ needs.release.outputs.version }}
@@ -644,6 +720,45 @@ jobs:
           # The Mac output helper's two zips, when the helper job made them. Named by
           # pattern, so nothing else that lands in helper-dist is published.
           if [ -d helper-dist ]; then assets+=(helper-dist/StageUtilityOutput-*.zip); fi
+          # The sign job's signatures: exactly one per payload a machine updates
+          # from, each verifying against the committed public key, or none at all.
+          # A set that is missing one or does not verify is not attached, and
+          # neither is no set: the release is still published, since the tag is
+          # out, and machines hold the update until a signed release.
+          want=("kiosk-windows.ps1")
+          if [ -d helper-dist ]; then
+            for zip in helper-dist/StageUtilityOutput-*.zip; do want+=("$(basename "$zip")"); done
+          fi
+          mkdir -p "$RUNNER_TEMP/payloads"
+          signed=true
+          why=""
+          if ! git show "v$V:scripts/kiosk/kiosk-windows.ps1" > "$RUNNER_TEMP/payloads/kiosk-windows.ps1"; then
+            signed=false
+            why="the launcher could not be read from v$V to check its signature"
+          fi
+          shopt -s nullglob
+          sigs=(sig-dist/*.sig)
+          shopt -u nullglob
+          if [ "$signed" = true ] && [ "${#sigs[@]}" -ne "${#want[@]}" ]; then
+            signed=false
+            why="the sign job left ${#sigs[@]} signature(s) for ${#want[@]} payload(s)"
+          fi
+          if [ "$signed" = true ]; then
+            for name in "${want[@]}"; do
+              file="helper-dist/$name"
+              if [ "$name" = kiosk-windows.ps1 ]; then file="$RUNNER_TEMP/payloads/$name"; fi
+              if ! openssl dgst -sha256 -verify scripts/kiosk/release-signing.pub.pem -signature "sig-dist/$name.sig" "$file" >/dev/null 2>&1; then
+                signed=false
+                why="sig-dist/$name.sig is missing or does not verify against scripts/kiosk/release-signing.pub.pem"
+                break
+              fi
+            done
+          fi
+          if [ "$signed" = true ]; then
+            assets+=("${sigs[@]}")
+          else
+            echo "::error title=Release signing::v$V is published WITHOUT signatures: $why. Every Mac helper and Windows kiosk refuses an unsigned update, so they stay on the version they have until a signed release."
+          fi
           gh release create "v$V" \
             --title "v$V" \
             --notes-file /tmp/notes.md \
