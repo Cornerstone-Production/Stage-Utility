@@ -389,10 +389,14 @@ describe("Make it automatic, saved over an issue", () => {
     assert.equal(rules()[0].enabled, false, "the server should have saved it turned off");
 
     const before = patches().length;
+    // The rule lands in the store before the save's answer reaches the editor,
+    // which reads "Saving…" until it does.
+    await eventually(() => assert.ok(button("Save"), "the first save never finished"));
     await press(button("Save"), "Save again");
     await settle();
     assert.equal(askOpen(), false, "the second save asked again whether the cue goes away, though it already has");
     assert.ok(patches().length > before, "the second save sent nothing");
+    await eventually(() => assert.ok(button("Save"), "the second save never finished"));
   });
 });
 
