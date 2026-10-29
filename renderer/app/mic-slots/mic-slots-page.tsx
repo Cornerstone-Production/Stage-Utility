@@ -26,22 +26,20 @@ import { useBlocker } from "@tanstack/react-router";
 import { Loader2Icon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { Button, EmptyState, ErrorNote, confirm, toast } from "../../components/ui";
-import { invoke as ipc } from "../../lib/api";
+import { Button, EmptyState, ErrorNote, confirm } from "../../components/ui";
 import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
-import { useStageState } from "../../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 import { useSlotPresets, useWirelessChannels } from "../queries";
 import { applyDrop, itemsOf, isSpacer, stackState } from "./board-model";
 import { ChargerLayoutDialog, CopyFromDialog, DeleteBoardDialog, NewBoardDialog } from "./board-dialogs";
-import { BoardSection, FALLBACK_DISPLAY_WIDTH_IN, type BoardDialogs } from "./board-section";
+import { BoardSection, type BoardDialogs } from "./board-section";
 import type { DragData, DropData } from "./board-preview";
 import { PlanCheck } from "./plan-check";
 import { SlotInspector, SpacerInspector } from "./slot-inspector";
 import { makeSharesWith } from "./shares-with";
 import { TopBar } from "./top-bar";
-import { showTargets, useMicSlots } from "./use-mic-slots";
+import { displayWidthOf, showTargets, useMicSlots, type ShowTarget } from "./use-mic-slots";
 
 /** The slot zones win over a card's own, and a pointer picks by where it is; a
  *  keyboard drag has no pointer, so it goes by the nearest zone. */
@@ -58,7 +56,7 @@ const collide: CollisionDetection = (args) => {
 
 /** Leaving the page with unsaved work asks first, for a link, Back and a closing
  *  tab alike. Rendered only under a router: useBlocker needs one. */
-function LeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
+export function LeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
   const blocker = useBlocker({
     shouldBlockFn: () => dirty,
     enableBeforeUnload: () => dirty,
@@ -84,7 +82,6 @@ function LeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
 
 export function MicSlotsPage() {
   const mic = useMicSlots();
-  const { state } = useStageState();
   const { data: presets = [] } = useSlotPresets();
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const router = useRouterHandle();
@@ -151,23 +148,10 @@ export function MicSlotsPage() {
   const sel = mic.selection;
   const selBoard = sel ? mic.boards.find((b) => b.id === sel.boardId) : undefined;
 
-  async function applyChargers(boardId: string, columnWidthIn: number | null) {
+  async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) {
     await mic.setColumnWidth(boardId, columnWidthIn);
-    if (columnWidthIn === null) return;
-    // Alignment needs the screen's display width as well. A screen with none gets
-    // the width a 37 inch panel has, the same default the old toggle used, so
-    // turning alignment on does something at once; each screen's own is then set
-    // in its screen settings.
-    const board = mic.boards.find((b) => b.id === boardId);
-    for (const s of board?.shownOn ?? []) {
-      const view = mic.views.find((v) => v.id === s.viewId);
-      if (s.kind !== "view" || !view || view.slotsLayout?.displayWidthIn) continue;
-      try {
-        await ipc("views:setSlotsLayout", { id: view.id, slotsLayout: { displayWidthIn: FALLBACK_DISPLAY_WIDTH_IN } });
-      } catch (err) {
-        toast.error(`Couldn't set ${view.name}'s display width: ${errorMessage(err)}`);
-      }
-    }
+    // Only what the operator applied: each screen and widget has its own display width.
+    for (const w of displayWidths) await mic.setDisplayWidth(w.target, w.widthIn);
   }
 
   const where = (() => {
@@ -305,6 +289,7 @@ export function MicSlotsPage() {
         }}
       />
       <DeleteBoardDialog
+        key={deleting?.id ?? "none"}
         board={deleting}
         others={mic.boards.filter((b) => b.id !== deleting?.id)}
         onClose={() => setDeleting(null)}
@@ -313,10 +298,11 @@ export function MicSlotsPage() {
         }}
       />
       <ChargerLayoutDialog
+        key={chargers?.id ?? "none"}
         board={chargers}
-        screens={(chargers?.shownOn ?? [])
-          .filter((s) => s.kind === "view")
-          .map((s) => ({ name: s.name, displayWidthIn: (state?.views ?? []).find((v) => v.id === s.id)?.slotsLayout?.displayWidthIn ?? null }))}
+        screens={targets
+          .filter((t) => chargers !== null && t.boardId === chargers.id)
+          .map((t) => ({ target: t, displayWidthIn: displayWidthOf(t, mic.views) }))}
         onClose={() => setChargers(null)}
         onApply={applyChargers}
       />
@@ -326,8 +312,8 @@ export function MicSlotsPage() {
           description={`Replaces ${copying.name}'s layout for ${mic.side === "plan" ? mic.label : `${mic.typeName ?? "the service type"} default`}. A service type means its default; a plan means that plan's own layout.`}
           boards={mic.boards.filter((b) => b.id !== copying.id)}
           onClose={() => setCopying(null)}
-          onCopy={async (from) => {
-            await mic.copyInto(copying.id, from);
+          onCopy={async (from, sourceName) => {
+            await mic.copyInto(copying.id, from, sourceName);
           }}
         />
       )}

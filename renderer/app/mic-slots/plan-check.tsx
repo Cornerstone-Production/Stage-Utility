@@ -4,9 +4,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { Button, ErrorNote } from "../../components/ui";
+import { Button, ErrorNote, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { plural } from "@main/services/plural";
+import { locate } from "./board-model";
 import { checkKey, type MicSlots } from "./use-mic-slots";
 
 export function PlanCheck({ mic }: { mic: MicSlots }) {
@@ -17,6 +18,23 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
     enabled: !!serviceTypeId && mic.boards.length > 0,
   });
   if (mic.boards.length === 0 || !serviceTypeId) return null;
+
+  /**
+   * Select and ring these slots. The check reads the layouts for the plan, so on the
+   * Default side the slots may exist only in the plan's own layout, where nothing on
+   * the page is them: move to that side, or say so. Never do nothing.
+   */
+  async function showThem(slotIds: string[]): Promise<void> {
+    if (slotIds.some((id) => locate(mic.boardsMap, id))) {
+      mic.showSlots(slotIds);
+      return;
+    }
+    if (mic.hasPlan && mic.side === "default" && (await mic.setSide("plan"))) {
+      mic.showSlots(slotIds);
+      return;
+    }
+    toast.info(`${slotIds.length === 1 ? "That slot is" : "Those slots are"} on ${mic.hasPlan ? `${mic.label}'s layout` : "a layout this page is not showing"}. Switch to it to see ${slotIds.length === 1 ? "it" : "them"}.`);
+  }
   const check = q.data;
   const problems = (check?.unplaced.length ?? 0) + (check?.noPosition.length ?? 0) + (check?.noCapsule.length ?? 0);
 
@@ -80,7 +98,7 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
               <span>
                 {plural(check.noCapsule.length, "person", "people")} on slots with a mic {check.noCapsule.length === 1 ? "has" : "have"} no Capsule tag yet
               </span>
-              <Button variant="filled" size="small" onClick={() => mic.showSlots(check.noCapsule.map((n) => n.slotId))}>
+              <Button variant="filled" size="small" onClick={() => void showThem(check.noCapsule.map((n) => n.slotId))}>
                 Show them
               </Button>
             </div>

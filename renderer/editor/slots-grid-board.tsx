@@ -29,6 +29,17 @@ export function pointedAt(c: GridConfig, boardId: string | null): GridConfig {
   return { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
 }
 
+/** Which other screens and widgets show the board: editing it changes them too. */
+function AlsoOn({ board, objectId }: { board: SlotBoardDTO | undefined; objectId: string }) {
+  const others = (board?.shownOn ?? []).filter((s) => !(s.kind === "object" && s.id === objectId));
+  if (others.length === 0) return null;
+  return (
+    <p className="text-caption2 text-fg-muted leading-snug" data-also-on>
+      Also on: {others.map((s) => (s.kind === "object" ? `${s.name} (widget)` : s.name)).join(", ")}. Editing this board changes them too.
+    </p>
+  );
+}
+
 export function SlotsGridBoard({
   objectId,
   config,
@@ -86,9 +97,12 @@ export function SlotsGridBoard({
           }
         }}
       />
+      {current && (
+        <AlsoOn board={boards.find((b) => b.id === current)} objectId={objectId} />
+      )}
       {error != null && <p className="text-caption2 text-danger-11">Couldn't load the boards: {errorMessage(error)}.</p>}
       {naming && (
-        <Row label="Name">
+        <Row label="Name" hint="The board is made now, and stays if you discard this layout">
           <div className="flex items-center gap-1.5">
             <Input
               value={name}

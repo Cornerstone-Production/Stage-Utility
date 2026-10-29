@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { invoke as ipc } from "../../lib/api";
 import { useResyncOn } from "../../lib/use-resync-on";
+import { errorMessage } from "@main/services/errors";
 
 /** How long to wait after the last edit before asking the server. */
 const DEBOUNCE_MS = 250;
@@ -17,6 +18,9 @@ const DEBOUNCE_MS = 250;
 export interface BoardPreview {
   /** The draft, with the resolved people and devices laid over it. */
   slots: Slot[];
+  /** Why the people could not be loaded, while that is so. The cards then show the
+   *  saved rows without names. */
+  failure: string | null;
   /** Which week's people filled it, for the line under the preview. */
   resolution: SlotsPreviewDTO | null;
   /** The resolved row for a slot id, for the inspector's "this plan". */
@@ -25,12 +29,16 @@ export interface BoardPreview {
 
 export function useBoardPreview(slots: Slot[], target: SlotsPreviewTarget | null): BoardPreview {
   const [resolution, setResolution] = useState<SlotsPreviewDTO | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const serviceTypeId = target?.serviceTypeId ?? null;
   const planId = target?.planId ?? null;
 
   // Cleared the moment the target moves, during render: left in place, the
   // previous week's people stayed on the cards until the new answer landed.
-  useResyncOn([serviceTypeId, planId], () => setResolution(null));
+  useResyncOn([serviceTypeId, planId], () => {
+    setResolution(null);
+    setFailure(null);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -42,9 +50,15 @@ export function useBoardPreview(slots: Slot[], target: SlotsPreviewTarget | null
         .then((r) => {
           // The switcher can be stepped faster than one round trip; the cleanup
           // below has already flipped this flag for the target that was left.
-          if (!cancelled) setResolution(r);
+          if (cancelled) return;
+          setResolution(r);
+          setFailure(null);
         })
-        .catch((err) => console.error("[mic-slots] preview", err));
+        // Said on the board, not just logged: the cards would otherwise sit there
+        // without names and read as a week nobody is scheduled for.
+        .catch((err) => {
+          if (!cancelled) setFailure(errorMessage(err));
+        });
     }, DEBOUNCE_MS);
     return () => {
       cancelled = true;
@@ -60,6 +74,6 @@ export function useBoardPreview(slots: Slot[], target: SlotsPreviewTarget | null
       // The draft owns structure; the resolver owns who and what is live.
       return { ...r, order: s.order, stackWithPrevious: s.stackWithPrevious, widthIn: s.widthIn, link: s.link, channel: s.channel };
     });
-    return { slots: merged, resolution, resolved };
-  }, [slots, resolution]);
+    return { slots: merged, resolution, resolved, failure };
+  }, [slots, resolution, failure]);
 }

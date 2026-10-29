@@ -120,6 +120,26 @@ describe("the Board picker", () => {
     assert.equal(link.getAttribute("href"), "/mic-slots?board=b-right");
   });
 
+  test("says which other screens and widgets show the board, leaving this widget out", async () => {
+    boards = [
+      { id: "b-left", name: "Left wall", columnWidthIn: null, createdAt: "", shownOn: [
+        { kind: "view", id: "v-left", name: "Left Display", viewId: "v-left" },
+        { kind: "object", id: "g-1", name: "Stage Layout", viewId: "pad" },
+        { kind: "object", id: "g-2", name: "Lobby Layout", viewId: "lobby" },
+      ] },
+    ] as unknown as SlotBoardDTO[];
+    await mount({ type: "slots-grid", boardId: "b-left" });
+    const line = document.querySelector("[data-also-on]")?.textContent ?? "";
+    assert.ok(line.includes("Left Display, Lobby Layout (widget)"), line);
+    assert.ok(!line.includes("Stage Layout"), "this widget is not 'also' anything");
+  });
+
+  test("a board only this widget shows has no 'also on' line", async () => {
+    boards = [{ id: "b-left", name: "Left wall", columnWidthIn: null, createdAt: "", shownOn: [{ kind: "object", id: "g-1", name: "Stage Layout", viewId: "pad" }] }] as unknown as SlotBoardDTO[];
+    await mount({ type: "slots-grid", boardId: "b-left" });
+    assert.equal(document.querySelector("[data-also-on]"), null);
+  });
+
   test("a widget showing nothing has no link to follow", async () => {
     await mount({ type: "slots-grid", boardId: null });
     assert.equal(screen.queryByRole("link", { name: "Edit in Mic slots" }) !== null, false);

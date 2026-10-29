@@ -16,7 +16,7 @@ import { SlotsPreviewNote } from "../../settings/sections/slots-preview-target";
 import { namedType } from "../../settings/sections/slots-target-pill";
 import { plural } from "@main/services/plural";
 import { groupColumns, isSpacerColumn } from "../../components/slots-columns";
-import { BoardPreview, chargerBanks } from "./board-preview";
+import { BoardPreview, EmptyBoardDrop, chargerBanks } from "./board-preview";
 import { slotCount } from "./board-model";
 import { showLabel } from "./board-dialogs";
 import { useBoardPreview } from "./use-board-preview";
@@ -84,6 +84,8 @@ function BoardMenu({
 }) {
   const t = mic.targetsById.get(board.id);
   const canRevert = mic.side === "plan" && t?.overrideSlots != null;
+  // A plan layout to promote: the saved one, or unsaved edits, which are saved first.
+  const canPromote = mic.side === "plan" && (t?.overrideSlots != null || mic.dirtyIds.includes(board.id));
   const name = (id: string | null) => (id ? (mic.boards.find((b) => b.id === id)?.name ?? null) : null);
   return (
     <DropdownMenu.Root>
@@ -138,6 +140,9 @@ function BoardMenu({
           <DropdownMenu.Item className={MENU_ITEM} onSelect={() => dialogs.copyFrom(board)}>Copy this board from…</DropdownMenu.Item>
           <DropdownMenu.Item className={cn(MENU_ITEM, "data-[disabled]:opacity-40")} disabled={!canRevert} onSelect={() => void mic.revertBoard(board.id)}>
             Revert this board to the default
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={cn(MENU_ITEM, "data-[disabled]:opacity-40")} disabled={!canPromote} onSelect={() => void mic.promoteBoard(board.id)}>
+            Set this board as the default
           </DropdownMenu.Item>
           <DropdownMenu.Item className={MENU_ITEM} onSelect={() => dialogs.chargers(board)}>Charger layout…</DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-line" />
@@ -273,6 +278,7 @@ export function BoardSection({
       <div className="flex flex-col items-center gap-2 bg-black/[0.04] p-4 dark:bg-black/25">
         <div className="kiosk-surface aspect-video w-full max-w-[1056px] rounded-md p-3 shadow-[0_0_0_6px_#1b1b1b,0_0_0_7px_rgba(255,255,255,0.10)]">
           {empty ? (
+            <EmptyBoardDrop boardId={board.id}>
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center" data-mic-empty={board.id}>
               <span className="text-subheadline font-medium text-fg">
                 {mic.hasPlan || typeName ? `No ${typeName ? `${typeName} ` : ""}layout for this board yet` : "No layout for this board yet"}
@@ -284,7 +290,7 @@ export function BoardSection({
               </span>
               <div className="flex flex-wrap justify-center gap-1.5">
                 {other && (
-                  <Button variant="accent" size="medium" onClick={() => void mic.copyInto(board.id, { fromServiceTypeId: other.id })}>
+                  <Button variant="accent" size="medium" onClick={() => void mic.copyInto(board.id, { fromServiceTypeId: other.id }, `${other.name} default`)}>
                     Copy {namedType(other.name)} layout
                   </Button>
                 )}
@@ -292,6 +298,7 @@ export function BoardSection({
                 <Button variant="filled" size="medium" onClick={() => mic.addSlot(board.id)}>Start blank</Button>
               </div>
             </div>
+            </EmptyBoardDrop>
           ) : (
             <BoardPreview
               boardId={board.id}
@@ -305,6 +312,11 @@ export function BoardSection({
             />
           )}
         </div>
+        {preview.failure && (
+          <span role="alert" data-mic-preview-failed className="text-caption1 text-danger-11" title={preview.failure}>
+            {"Couldn't load this week's people, so the cards show the saved rows without names."}
+          </span>
+        )}
         {!empty && <SlotsPreviewNote resolution={preview.resolution} planLabel={mic.label} serviceTypeName={typeName} />}
         {banks.length > 0 && (
           <div className="relative h-3.5 w-full max-w-[1056px]" aria-hidden>

@@ -262,13 +262,13 @@ export function SlotInspector(props: SlotInspectorProps) {
           </Row>
           {(slot.deviceBinding != null || slot.deviceLabel != null) && (
             <Row label="Shows as" hint="Blank shows the frequency">
-              <div className="flex items-center gap-1">
+              <div className="flex flex-col items-end gap-1">
                 <Input
                   value={slot.deviceLabel ?? ""}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => set({ deviceLabel: e.target.value })}
                   placeholder="e.g. VOX 3"
                   aria-label="Mic label"
-                  className="w-32 font-mono"
+                  className="w-36 font-mono"
                 />
                 {receiverName && (
                   <Button variant="transparent" size="small" onClick={() => set({ deviceLabel: receiverName })} tooltip={`Use the receiver's own channel name (${receiverName})`}>

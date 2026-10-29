@@ -107,7 +107,7 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
         {view.kind === "slots" && (
           <Section title="Mic slots">
             <div className="flex items-center gap-2">
-              <label htmlFor="view-display-width" className="flex-1 text-footnote text-fg">Display width</label>
+              <span className="flex-1 text-footnote text-fg">Display width</span>
               <NumberInput
                 value={view.slotsLayout?.displayWidthIn ?? null}
                 step={0.25}

@@ -73,6 +73,16 @@ let checkNoCapsule: { boardId: string; boardName: string; slotId: string; name: 
 let planId: string | null = null;
 let requests: { url: string; method: string; body: string | null }[] = [];
 let failSave: string | null = null;
+/** Layouts of a service type other than the one being edited, "board|type". */
+let typeLayouts: Record<string, Slot[]> = {};
+/** What the switcher lists: the copy dialogs read their service types and plans from it. */
+let upcomingPlans: unknown[] = [];
+/** Requests whose "METHOD path-suffix" is in here answer 500. */
+let failing = new Set<string>();
+/** What the screens' views carry: the left screen's own display width. */
+let leftDisplayWidth: number | null = null;
+/** Boards deleted from another tab: the list drops them and saving one is a 404. */
+let goneBoards = new Set<string>();
 
 const STATE = () =>
   ({
@@ -86,7 +96,7 @@ const STATE = () =>
     slotsByLayoutObject: {},
     chargerBays: [],
     views: [
-      { id: "v-left", name: "Left Display", kind: "slots", boardId: "b-left", createdAt: "" },
+      { id: "v-left", name: "Left Display", kind: "slots", boardId: "b-left", createdAt: "", ...(leftDisplayWidth ? { slotsLayout: { displayWidthIn: leftDisplayWidth } } : {}) },
       { id: "v-right", name: "Right Display", kind: "slots", boardId: "b-right", createdAt: "" },
     ],
   }) as unknown as StageState;
@@ -101,8 +111,12 @@ const STATE = () =>
   let status = 200;
   let out: unknown = {};
   const targets = path.match(/^\/api\/boards\/([^/]+)\/targets$/);
-  if (path === "/api/state") out = STATE();
-  else if (path === "/api/boards" && method === "GET") out = boards;
+  const fails = [...failing].some((f) => `${method} ${path}`.endsWith(f));
+  if (fails) {
+    status = 500;
+    out = { error: "the stub was told to fail" };
+  } else if (path === "/api/state") out = STATE();
+  else if (path === "/api/boards" && method === "GET") out = boards.filter((b) => !goneBoards.has(b.id));
   else if (targets) {
     out = {
       scope: "board",
@@ -113,21 +127,31 @@ const STATE = () =>
       planId: new URL(url, "http://x").searchParams.get("planId"),
       planDates: "September 13, 2026",
       planSortDate: new URL(url, "http://x").searchParams.get("planId") ? "2026-09-13T14:00:00Z" : null,
-      defaultSlots: layouts[targets[1]!] ?? [],
+      defaultSlots: (new URL(url, "http://x").searchParams.get("serviceTypeId") === "st-1" ? layouts[targets[1]!] : typeLayouts[`${targets[1]}|${new URL(url, "http://x").searchParams.get("serviceTypeId")}`]) ?? [],
       overrideSlots: new URL(url, "http://x").searchParams.get("planId") ? (overrides[targets[1]!] ?? null) : null,
     };
-  } else if (path === "/api/plans/upcoming") out = { plans: [], cacheAgeMs: 0 };
+  } else if (path === "/api/plans/upcoming") out = { plans: upcomingPlans, cacheAgeMs: 0 };
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
   else if (path === "/api/integrations/wireless/statuses") out = [];
-  else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
+  else if (path === "/api/views/resolve-slots" && failing.has("resolve")) {
+    status = 500;
+    out = { error: "the roster could not be read" };
+  } else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
   else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule };
   else if (path === "/api/boards/slots" && method === "POST") {
-    if (failSave) {
+    const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string }[];
+    const dead = asked.find((b) => goneBoards.has(b.boardId));
+    if (dead) {
+      status = 404;
+      out = { error: `Board "${dead.boardId}": There is no board ${dead.boardId}.` };
+    } else if (failSave) {
       status = 400;
       out = { error: failSave };
     } else out = STATE();
   } else if (/^\/api\/boards\/[^/]+$/.test(path) && method === "DELETE") out = STATE();
+  else if (/\/copy-from$|\/promote$|\/override\/[^/]+$/.test(path)) out = STATE();
+  else if (/^\/api\/boards\/[^/]+$/.test(path) && method === "PATCH") out = boards;
   return {
     ok: status < 400,
     status,
@@ -145,6 +169,8 @@ const { registerTargetGuard, __setEditingTargetForTests } = await import("../../
 const { __resetForTests } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
+const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
+const { Toaster } = await import("../../components/ui/toast.js");
 
 const settle = async () => {
   for (let i = 0; i < 8; i++) {
@@ -157,7 +183,7 @@ const settle = async () => {
 let client: InstanceType<typeof QueryClient> | null = null;
 async function mount() {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null))));
+  render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null), React.createElement(Toaster, null))));
   await settle();
 }
 
@@ -170,6 +196,11 @@ beforeEach(() => {
   boards = BOARDS();
   layouts = { "b-left": board("a | b+c | ~s | d"), "b-right": board("x | y") };
   overrides = {};
+  typeLayouts = {};
+  upcomingPlans = [];
+  failing = new Set();
+  leftDisplayWidth = null;
+  goneBoards = new Set();
   presets = [];
   resolvedExtras = {};
   checkNoCapsule = [];
@@ -712,5 +743,351 @@ describe("prep from Planning Center", () => {
   test("no such people, no row", async () => {
     await mount();
     assert.ok(!document.querySelector("[data-check-no-capsule]"));
+  });
+});
+
+// ── copying, and what it must never do ──────────────────────────────────────
+
+const PLANS_TWO_TYPES = () => [
+  { serviceTypeId: "st-1", serviceTypeName: "Weekend", planId: "p1", title: "Sunday", sortDate: "2026-09-13T14:00:00Z", dates: "September 13, 2026", isCurrent: true },
+  { serviceTypeId: "st-2", serviceTypeName: "Youth Night", planId: "y1", title: "Youth", sortDate: "2026-09-16T23:00:00Z", dates: "September 16, 2026", isCurrent: false },
+];
+const copyPosts = () => requests.filter((r) => r.method === "POST" && r.url.endsWith("/copy-from"));
+const alertDialog = () => screen.getByRole("alertdialog");
+const pickOption = async (label: string, value: string) => {
+  const select = screen.getAllByLabelText(label).find((el) => el.tagName === "SELECT")!;
+  await act(async () => {
+    fireEvent.change(select, { target: { value } });
+  });
+};
+
+async function copyEveryBoardFromYouth() {
+  await openMenu(screen.getByRole("button", { name: "Plan board actions" }));
+  await choose(screen.getByRole("menuitem", { name: /Copy every board/ }));
+  await click(within(screen.getByRole("dialog")).getByRole("button", { name: "A service type" }));
+  await pickOption("Copy from", "st-2");
+  await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Copy" }));
+}
+
+describe("copying a layout over boards", () => {
+  test("a board whose source has no layout is skipped and named, never blanked", async () => {
+    upcomingPlans = PLANS_TWO_TYPES();
+    typeLayouts = { "b-left|st-2": board("m | n") }; // Right wall has nothing for Youth Night
+    await mount();
+    await copyEveryBoardFromYouth();
+    // Both boards have saved rows here, so it asks first, and says what is left alone.
+    const text = alertDialog().textContent ?? "";
+    assert.ok(text.includes("Left wall (its saved layout)"), text);
+    assert.ok(text.includes("Right wall: Youth Night default has no layout"), "the skipped board is named");
+    await click(within(alertDialog()).getByRole("button", { name: "Copy" }));
+    assert.deepEqual(copyPosts().map((r) => r.url.split("/")[3]), ["b-left"], "Right wall was not written to");
+  });
+
+  test("nothing to copy anywhere writes nothing and says so", async () => {
+    upcomingPlans = PLANS_TWO_TYPES();
+    await mount();
+    await copyEveryBoardFromYouth();
+    assert.equal(copyPosts().length, 0, "a copy of nothing was sent");
+    assert.equal(document.querySelector("[role=alertdialog]"), null, "and nothing was asked about replacing");
+  });
+
+  test("replacing saved rows asks first, naming the target, and Cancel writes nothing", async () => {
+    upcomingPlans = PLANS_TWO_TYPES();
+    typeLayouts = { "b-left|st-2": board("m"), "b-right|st-2": board("n") };
+    await mount();
+    await copyEveryBoardFromYouth();
+    assert.ok((alertDialog().textContent ?? "").includes("Weekend default on Left wall, Right wall is replaced"));
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.equal(copyPosts().length, 0);
+  });
+
+  test("one board, from another board with no layout, is left as it was", async () => {
+    layouts["b-right"] = [];
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: /Copy this board from/ }));
+    await pickOption("Copy from", "b-right");
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Copy" }));
+    assert.equal(copyPosts().length, 0);
+    assert.equal(shape("b-left"), "a | b+c | ~s | d");
+  });
+});
+
+// ── Save all and a board deleted elsewhere ──────────────────────────────────
+
+describe("a board deleted in another tab", () => {
+  test("Save all drops it, says whose edits went, and still saves the others", async () => {
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await click(screen.getAllByRole("button", { name: "Slot" })[1]!);
+    goneBoards = new Set(["b-right"]);
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const sent = posts("/api/boards/slots").map((r) => (JSON.parse(r.body!) as { boards: { boardId: string }[] }).boards.map((b) => b.boardId));
+    assert.deepEqual(sent, [["b-left", "b-right"], ["b-left"]], "the second request is the surviving board alone");
+    assert.ok(!unsaved(), "Left wall saved");
+    assert.equal(section("b-right"), null, "the page dropped the vanished board");
+    assert.ok(document.body.textContent!.includes("Right wall was deleted elsewhere, so its unsaved changes were dropped"));
+  });
+
+  test("a deletion noticed before saving says so rather than quietly shrinking the count", async () => {
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[1]!);
+    assert.ok(unsaved());
+    goneBoards = new Set(["b-right"]);
+    await act(async () => {
+      await client!.invalidateQueries({ queryKey: ["boards:list"] });
+    });
+    await settle();
+    assert.ok(!unsaved(), "its edits went with it");
+    assert.ok(document.body.textContent!.includes("Right wall was deleted elsewhere"));
+  });
+
+  test("deleting a board here does not read its layouts again afterwards", async () => {
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Right wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Delete board…" }));
+    const at = requests.length;
+    goneBoards = new Set(["b-right"]);
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete board" }));
+    await settle();
+    const after = requests.slice(at).filter((r) => r.url.includes("/api/boards/b-right/targets"));
+    assert.equal(after.length, 0, "a read of the deleted board's layouts is a 404 per plan");
+  });
+});
+
+describe("Discard", () => {
+  test("throws away the unsaved work, after asking", async () => {
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    assert.ok(unsaved());
+    await click(screen.getByRole("button", { name: "Discard" }));
+    assert.ok((alertDialog().textContent ?? "").includes("Left wall"), "it names the boards");
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.ok(unsaved(), "Cancel keeps it");
+    await click(screen.getByRole("button", { name: "Discard" }));
+    await click(within(alertDialog()).getByRole("button", { name: "Discard" }));
+    assert.ok(!unsaved());
+    assert.equal(shape("b-left"), "a | b+c | ~s | d");
+  });
+});
+
+// ── an empty board is still a place to drop ─────────────────────────────────
+
+describe("an empty board", () => {
+  test("takes a card dragged onto it from another board", async () => {
+    layouts["b-right"] = [];
+    await mount();
+    assert.ok(document.querySelector('[data-mic-empty="b-right"]'), "it shows its empty state");
+    await drag(card("d"), gap("b-right", 0));
+    assert.equal(shape("b-left"), "a | b+c | ~s");
+    assert.equal(shape("b-right"), "d");
+  });
+});
+
+// ── dialogs forget what was not applied ─────────────────────────────────────
+
+describe("the charger layout dialog", () => {
+  const open = async (board = "Left wall") => {
+    await openMenu(screen.getByRole("button", { name: `Board actions for ${board}` }));
+    await choose(screen.getByRole("menuitem", { name: "Charger layout…" }));
+  };
+
+  test("starts fresh each time it is opened", async () => {
+    await mount();
+    await open();
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    assert.equal(screen.getByRole("switch", { name: "Align to chargers" }).getAttribute("aria-checked"), "true");
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await open();
+    assert.equal(screen.getByRole("switch", { name: "Align to chargers" }).getAttribute("aria-checked"), "false", "an unapplied switch was kept");
+  });
+
+  test("lists every screen showing the board, and writes only what is applied", async () => {
+    leftDisplayWidth = null;
+    await mount();
+    await open();
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    const input = screen.getByLabelText("Display width of Left Display (inches)") as HTMLInputElement;
+    assert.equal(input.value, "32.25", "prefilled with a 37 inch panel's width");
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    const writes = requests.filter((r) => r.method !== "GET" && /\/api\/(views|boards)\/(v-left|b-left)$/.test(new URL(r.url, "http://x").pathname));
+    assert.deepEqual(writes.map((w) => [w.method, new URL(w.url, "http://x").pathname.split("/")[3], JSON.parse(w.body!)]), [
+      ["PATCH", "b-left", { columnWidthIn: 3.49 }],
+      ["PATCH", "v-left", { slotsLayout: { displayWidthIn: 32.25 } }],
+    ]);
+  });
+
+  test("a screen that already has a width keeps it unless the operator changes it", async () => {
+    leftDisplayWidth = 40;
+    await mount();
+    await open();
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    assert.equal(requests.filter((r) => r.method === "PATCH" && r.url.endsWith("/api/views/v-left")).length, 0, "its own width was overwritten");
+  });
+});
+
+describe("the delete dialog", () => {
+  test("forgets a replacement that was chosen and cancelled", async () => {
+    await mount();
+    const openDelete = async () => {
+      await openMenu(screen.getByRole("button", { name: "Board actions for Right wall" }));
+      await choose(screen.getByRole("menuitem", { name: "Delete board…" }));
+    };
+    await openDelete();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Show instead"), { target: { value: "b-left" } });
+    });
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await openDelete();
+    assert.equal((screen.getByLabelText("Show instead") as HTMLSelectElement).value, "__nothing__");
+  });
+});
+
+// ── Revert and Set as default with unsaved work ─────────────────────────────
+
+describe("Revert and Set as default", () => {
+  const withPlanLayout = () => {
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+  };
+  const planMenu = async (item: RegExp) => {
+    await openMenu(screen.getByRole("button", { name: "Plan board actions" }));
+    await choose(screen.getByRole("menuitem", { name: item }));
+  };
+  const deletes = () => requests.filter((r) => r.method === "DELETE" && r.url.includes("/override/"));
+  const promotes = () => requests.filter((r) => r.method === "POST" && r.url.endsWith("/promote"));
+
+  test("Revert says it throws the unsaved edits away, and Cancel keeps them", async () => {
+    withPlanLayout();
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await planMenu(/^Revert/);
+    assert.ok((alertDialog().textContent ?? "").includes("Unsaved changes to Left wall are thrown away"));
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.ok(unsaved(), "the edits survive a Cancel");
+    assert.equal(deletes().length, 0);
+  });
+
+  test("Revert drops the edits only once the request has landed: a refusal loses nothing", async () => {
+    withPlanLayout();
+    failing = new Set(["DELETE /api/boards/b-left/override/p1"]);
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await planMenu(/^Revert/);
+    await click(within(alertDialog()).getByRole("button", { name: "Revert and discard changes" }));
+    await settle();
+    assert.equal(deletes().length, 1, "it was tried");
+    assert.ok(unsaved(), "a refused revert must not have thrown the work away first");
+    failing = new Set();
+    await planMenu(/^Revert/);
+    await click(within(alertDialog()).getByRole("button", { name: "Revert and discard changes" }));
+    await settle();
+    assert.ok(!unsaved(), "after it lands, they go");
+  });
+
+  test("Set as default saves the unsaved edits first, then promotes", async () => {
+    withPlanLayout();
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await planMenu(/^Set .* as/);
+    assert.ok((alertDialog().textContent ?? "").includes("Unsaved changes to Left wall are saved first"));
+    await click(within(alertDialog()).getByRole("button", { name: "Save, then set as default" }));
+    await settle();
+    const order = requests.filter((r) => r.method === "POST" && (r.url.endsWith("/api/boards/slots") || r.url.endsWith("/promote"))).map((r) => r.url.split("/").slice(3).join("/"));
+    assert.deepEqual(order, ["slots", "b-left/promote"], "promoting before saving would promote the old layout");
+  });
+
+  test("a save that is refused promotes nothing", async () => {
+    withPlanLayout();
+    failSave = "Board \"Left wall\": nope";
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await planMenu(/^Set .* as/);
+    await click(within(alertDialog()).getByRole("button", { name: "Save, then set as default" }));
+    await settle();
+    assert.equal(promotes().length, 0);
+    assert.ok(unsaved());
+  });
+
+  test("one board has its own Set as default, and Revert, in its menu", async () => {
+    withPlanLayout();
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Set this board as the default" }));
+    await click(within(alertDialog()).getByRole("button", { name: "Set as default" }));
+    await settle();
+    assert.deepEqual(promotes().map((r) => r.url.split("/")[3]), ["b-left"], "only the board whose menu it was");
+    await openMenu(screen.getByRole("button", { name: "Board actions for Right wall" }));
+    assert.equal(screen.getByRole("menuitem", { name: "Set this board as the default" }).getAttribute("aria-disabled"), "true", "Right wall has no plan layout to promote");
+  });
+});
+
+// ── smaller things ──────────────────────────────────────────────────────────
+
+describe("when the preview cannot read the plan's people", () => {
+  test("the board says so instead of showing names-less cards as a week with nobody", async () => {
+    failing = new Set(["resolve"]);
+    await mount();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    await settle();
+    assert.ok(section("b-left").querySelector("[data-mic-preview-failed]"), "no word that the people could not be loaded");
+  });
+});
+
+describe("Show them on the Default side", () => {
+  test("moves to the plan's own layout when the slots only exist there", async () => {
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+    checkNoCapsule = [{ boardId: "b-left", boardName: "Left wall", slotId: "o1", name: "Ana" }];
+    await mount();
+    await click(screen.getByRole("button", { name: /Weekend default/ }));
+    assert.equal(card("o1"), null, "on the default the slot is not there");
+    await click(within(document.querySelector("[data-check-no-capsule]") as HTMLElement).getByRole("button", { name: "Show them" }));
+    assert.equal(card("o1")?.getAttribute("data-selected"), "true", "it went to the plan and selected the slot");
+  });
+
+  test("with no plan to go to, it says where they are rather than doing nothing", async () => {
+    checkNoCapsule = [{ boardId: "b-left", boardName: "Left wall", slotId: "gone-slot", name: "Ana" }];
+    await mount();
+    await click(within(document.querySelector("[data-check-no-capsule]") as HTMLElement).getByRole("button", { name: "Show them" }));
+    assert.ok(document.body.textContent!.includes("Switch to it to see it"));
+  });
+});
+
+describe("Overwrite on a saved layout", () => {
+  const preset = () => ({ id: "p1", name: "Opening", slots: board("q"), createdAt: "2026-04-02T00:00:00Z", boardId: "b-right" }) as SlotPreset;
+  const patches = () => requests.filter((r) => r.method === "PATCH" && r.url.endsWith("/api/presets/p1"));
+
+  test("records the board it now comes from", async () => {
+    presets = [preset()];
+    await mount();
+    await click(screen.getByRole("button", { name: "Saved layouts" }));
+    // The Save picker names the board; Overwrite uses it, and the layout now comes from it.
+    await openMenu(screen.getByRole("button", { name: "More for Opening" }));
+    await choose(screen.getByRole("menuitem", { name: /^Overwrite with/ }));
+    await click(within(alertDialog()).getByRole("button", { name: "Overwrite" }));
+    await settle();
+    assert.equal(JSON.parse(patches()[0]!.body!).boardId, "b-left");
+  });
+
+  test("refuses an empty board, as Save does", async () => {
+    presets = [preset()];
+    layouts["b-left"] = [];
+    await mount();
+    await click(screen.getByRole("button", { name: "Saved layouts" }));
+    await openMenu(screen.getByRole("button", { name: "More for Opening" }));
+    await choose(screen.getByRole("menuitem", { name: /^Overwrite with/ }));
+    assert.equal(document.querySelector("[role=alertdialog]"), null, "no confirm for an overwrite that cannot happen");
+    assert.equal(patches().length, 0);
+  });
+
+  test("the reorder grip can be reached from the keyboard", async () => {
+    presets = [preset()];
+    await mount();
+    await click(screen.getByRole("button", { name: "Saved layouts" }));
+    assert.notEqual(screen.getByRole("button", { name: "Reorder Opening" }).getAttribute("tabindex"), "-1");
   });
 });

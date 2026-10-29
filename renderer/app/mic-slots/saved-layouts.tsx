@@ -6,8 +6,8 @@
 // before I change it" means; it goes to the server as an import carrying the
 // board it came from.
 
-import { closestCenter, DndContext, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookmarkIcon, ChevronDownIcon, DownloadIcon, GripVerticalIcon, MoreHorizontalIcon, UploadIcon } from "lucide-react";
 import { DropdownMenu, Popover as PopoverPrimitive } from "radix-ui";
@@ -79,8 +79,7 @@ function PresetRow({
         {...attributes}
         {...listeners}
         className="shrink-0 cursor-grab p-0.5 active:cursor-grabbing touch-pan-y"
-        aria-label={`Drag to reorder ${preset.name}`}
-        tabIndex={-1}
+        aria-label={`Reorder ${preset.name}`}
       >
         <GripVerticalIcon className="size-4 text-gray-7" />
       </button>
@@ -191,6 +190,8 @@ export function SavedLayouts({
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    // Space on a row's grip lifts it, the arrows move it, Space drops it.
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const saveBoard = mic.boards.find((b) => b.id === (pickedBoard ?? boardId))?.id ?? mic.boards[0]?.id ?? null;
@@ -232,9 +233,14 @@ export function SavedLayouts({
   async function overwrite(preset: SlotPreset) {
     if (!saveBoard) return;
     const slots = mic.boardsMap[saveBoard] ?? [];
+    // As Save does: an empty board would empty a layout the operator meant to keep.
+    if (slots.length === 0) {
+      toast.error("That board has no slots to save.");
+      return;
+    }
     const boardName = mic.boards.find((b) => b.id === saveBoard)?.name ?? "the board";
     if (!(await confirm({ title: "Overwrite saved layout?", message: `Overwrite "${preset.name}" with ${boardName} as the editor shows it?`, confirmLabel: "Overwrite" }))) return;
-    await bank("overwrite the layout", () => ipc<SlotPreset[]>("presets:overwrite", { id: preset.id, slots }));
+    await bank("overwrite the layout", () => ipc<SlotPreset[]>("presets:overwrite", { id: preset.id, slots, boardId: saveBoard }));
   }
 
   async function remove(preset: SlotPreset) {

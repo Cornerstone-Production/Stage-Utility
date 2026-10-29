@@ -73,6 +73,24 @@ export function showTargets(views: readonly View[]): ShowTarget[] {
   return out;
 }
 
+export interface CopyFrom {
+  fromBoardId?: string;
+  fromServiceTypeId?: string;
+  fromPlanId?: string;
+}
+
+/** The display width a screen or widget has set, or null for none. */
+export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | null {
+  const v = views.find((x) => x.id === t.viewId);
+  if (!v) return null;
+  if (t.kind === "view") return v.slotsLayout?.displayWidthIn ?? null;
+  let found: number | null = null;
+  forEachSlotsGrid([v], (oid, config) => {
+    if (oid === t.id) found = config.displayWidthIn ?? config.slotsLayout?.displayWidthIn ?? null;
+  });
+  return found;
+}
+
 export interface Selection {
   boardId: string;
   slotId: string;
@@ -183,13 +201,16 @@ export function useMicSlots() {
     return () => registerTargetGuard("mic-slots", null);
   }, [dirty]);
 
-  async function setSide(next: SlotsTargetSide): Promise<void> {
-    if (next === effectiveSide) return;
+  /** Move to the other side. False when it did not move (already there, or the
+   *  operator kept their unsaved work). */
+  async function setSide(next: SlotsTargetSide): Promise<boolean> {
+    if (next === effectiveSide) return false;
     if (dirty) {
-      if (!(await confirmDiscardSlotEdits())) return;
+      if (!(await confirmDiscardSlotEdits())) return false;
       setEdits({});
     }
     setOwnSide(next);
+    return true;
   }
 
   // ── Save all ─────────────────────────────────────────────────────────
@@ -198,7 +219,18 @@ export function useMicSlots() {
   const [saveError, setSaveError] = useState<{ message: string; boardId: string | null } | null>(null);
 
   async function saveAll(): Promise<boolean> {
-    const ids = dirtyIds;
+    return submitSave(dirtyIds, false);
+  }
+
+  /**
+   * Write these boards' edits in one request.
+   *
+   * A board deleted from another tab makes the whole request a 404 (it is all or
+   * nothing). The page then re-reads the boards, drops what vanished, says whose
+   * edits went, and saves the rest once, so one dead board does not strand the
+   * others' work.
+   */
+  async function submitSave(ids: string[], retried: boolean): Promise<boolean> {
     if (ids.length === 0) return true;
     setSaving(true);
     setSaveError(null);
@@ -212,12 +244,26 @@ export function useMicSlots() {
         })),
       });
       takeState(next);
-      setEdits({});
+      setEdits((prev) => {
+        const rest = { ...prev };
+        for (const id of ids) delete rest[id];
+        return rest;
+      });
       await refresh();
       pageTarget.announceSaved(plural(ids.length, "board"));
       return true;
     } catch (err) {
       const message = errorMessage(err);
+      if (!retried) {
+        const fresh = await qc.fetchQuery({ queryKey: BOARDS_KEY, queryFn: () => ipc<SlotBoardDTO[]>("boards:list"), staleTime: 0 }).catch(() => null);
+        const gone = fresh ? ids.filter((id) => !fresh.some((b) => b.id === id)) : [];
+        if (gone.length > 0) {
+          const names = gone.map((id) => boards.find((b) => b.id === id)?.name ?? id);
+          dropEditsOf(gone);
+          toast.error(`${names.join(", ")} ${names.length === 1 ? "was" : "were"} deleted elsewhere, so ${names.length === 1 ? "its" : "their"} unsaved changes were dropped.`);
+          return submitSave(ids.filter((id) => !gone.includes(id)), true);
+        }
+      }
       // The server names the board it refused: `Board "Left wall": …`.
       const named = boards.find((b) => message.startsWith(`Board "${b.name}"`));
       setSaveError({ message, boardId: named?.id ?? null });
@@ -228,9 +274,44 @@ export function useMicSlots() {
     }
   }
 
+  function dropEditsOf(boardIds: readonly string[]): void {
+    setEdits((prev) => {
+      const rest = { ...prev };
+      for (const id of boardIds) delete rest[id];
+      return rest;
+    });
+  }
+
+  // A board deleted elsewhere while it has unsaved work: its edits go, and the
+  // operator is told whose, rather than the work quietly vanishing from the count.
+  const knownNames = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const b of boards) knownNames.current.set(b.id, b.name);
+    if (!boardsQ.isSuccess) return;
+    const gone = Object.keys(edits).filter((id) => !boards.some((b) => b.id === id));
+    if (gone.length === 0) return;
+    dropEditsOf(gone);
+    const names = gone.map((id) => knownNames.current.get(id) ?? id);
+    toast.error(`${names.join(", ")} ${names.length === 1 ? "was" : "were"} deleted elsewhere, so ${names.length === 1 ? "its" : "their"} unsaved changes were dropped.`);
+  }, [boards, boardsQ.isSuccess, edits]);
+
   function discardAll(): void {
     setEdits({});
     setSaveError(null);
+  }
+
+  /** Throw away every board's unsaved edits, after asking. */
+  async function discard(): Promise<boolean> {
+    if (dirtyIds.length === 0) return true;
+    const names = dirtyIds.map((id) => boards.find((b) => b.id === id)?.name ?? id).join(", ");
+    const ok = await confirm({
+      title: "Discard unsaved changes?",
+      message: `The edits to ${names} that are not saved yet are lost, and each board goes back to what is saved.`,
+      confirmLabel: "Discard",
+      destructive: true,
+    });
+    if (ok) discardAll();
+    return ok;
   }
 
   // ── layout edits ─────────────────────────────────────────────────────
@@ -386,6 +467,33 @@ export function useMicSlots() {
     if (list) qc.setQueryData(BOARDS_KEY, list);
   }
 
+  /**
+   * Change a widget's config in its view's layout and save that layout. `layoutRev`
+   * makes a layout somebody else changed a refusal instead of an overwrite.
+   */
+  async function rewriteGrid(
+    t: ShowTarget,
+    what: string,
+    change: (c: Extract<LayoutObjectConfig, { type: "slots-grid" }>) => LayoutObjectConfig,
+  ): Promise<boolean> {
+    const view = (state?.views ?? []).find((v) => v.id === t.viewId);
+    if (!view?.layout) {
+      toast.error(`Couldn't ${what}: its layout is not available.`);
+      return false;
+    }
+    const layout = structuredClone(view.layout);
+    const walk = (objs: LayoutObject[]): void => {
+      for (const o of objs) {
+        if (o.id === t.id && o.config.type === "slots-grid") o.config = change(o.config);
+        if (o.children?.length) walk(o.children);
+      }
+    };
+    walk(layout.objects);
+    const next = await attempt(what, () => ipc<StageState>("views:setLayout", { id: t.viewId, layout, layoutRev: view.layoutRev }));
+    if (next) takeState(next);
+    return !!next;
+  }
+
   /** Point a screen, or a widget, at a board. */
   async function showOn(t: ShowTarget, boardId: string | null): Promise<boolean> {
     if (t.kind === "view") {
@@ -393,86 +501,130 @@ export function useMicSlots() {
       if (next) takeState(next);
       return !!next;
     }
-    // A widget's board lives in its view's layout, so pointing it means saving
-    // that layout. `layoutRev` makes a layout somebody else changed a refusal
-    // instead of an overwrite.
-    const view = (state?.views ?? []).find((v) => v.id === t.viewId);
-    if (!view?.layout) {
-      toast.error(`Couldn't show the board on ${t.name}: its layout is not available.`);
+    return rewriteGrid(t, `show the board on ${t.name}`, (c) => {
+      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
+      const displayWidthIn = c.displayWidthIn ?? c.slotsLayout?.displayWidthIn;
+      return { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
+    });
+  }
+
+  /** A screen's or a widget's own display width, the other half of charger alignment. */
+  async function setDisplayWidth(t: ShowTarget, displayWidthIn: number): Promise<boolean> {
+    if (t.kind === "view") {
+      const next = await attempt(`set the display width of ${t.name}`, () =>
+        ipc<StageState>("views:setSlotsLayout", { id: t.id, slotsLayout: { displayWidthIn } }),
+      );
+      if (next) takeState(next);
+      return !!next;
+    }
+    return rewriteGrid(t, `set the display width of ${t.name}`, (c) => {
+      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
+      return { ...rest, displayWidthIn };
+    });
+  }
+
+  /**
+   * Copy a layout over boards, at the target being edited. Written at once.
+   *
+   * What each copy would do is READ first: a source with no layout is skipped and
+   * named (writing its empty list would blank a live wall), and the operator is
+   * asked before anything replaces saved or unsaved rows, with the boards and the
+   * target named. Edits are dropped only for a board whose copy landed.
+   */
+  async function copyLayouts(boardIds: string[], from: CopyFrom, sourceName: string): Promise<boolean> {
+    const targetName = effectiveSide === "plan" ? `${label} only` : `${namedType(typeName)} default`;
+    const copies: SlotBoardDTO[] = [];
+    const skipped: string[] = [];
+    const replaces: string[] = [];
+    try {
+      for (const id of boardIds) {
+        const b = boards.find((x) => x.id === id);
+        if (!b) continue;
+        const asked: { serviceTypeId: string | null; planId: string | null } = from.fromPlanId
+          ? { serviceTypeId: from.fromServiceTypeId ?? serviceTypeId, planId: from.fromPlanId }
+          : from.fromServiceTypeId
+            ? { serviceTypeId: from.fromServiceTypeId, planId: null }
+            : { serviceTypeId, planId: effectiveSide === "plan" ? planId : null };
+        const t = await ipc<SlotTargetsDTO>("boards:targets", { id: from.fromBoardId ?? b.id, ...asked });
+        const rows = asked.planId ? (t.overrideSlots ?? t.defaultSlots) : t.defaultSlots;
+        if (rows.length === 0) {
+          skipped.push(`${b.name}: ${sourceName} has no layout, left as it was`);
+          continue;
+        }
+        copies.push(b);
+        const here = targetsById.get(b.id);
+        const saved = effectiveSide === "plan" ? (here?.overrideSlots ?? here?.defaultSlots ?? []) : (here?.defaultSlots ?? []);
+        if (b.id in edits) replaces.push(`${b.name} (unsaved changes)`);
+        else if (saved.length > 0) replaces.push(`${b.name} (its saved layout)`);
+      }
+    } catch (err) {
+      toast.error(`Couldn't read what to copy: ${errorMessage(err)}`);
       return false;
     }
-    const layout = structuredClone(view.layout);
-    const walk = (objs: LayoutObject[]): void => {
-      for (const o of objs) {
-        if (o.id === t.id && o.config.type === "slots-grid") {
-          const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = o.config;
-          const displayWidthIn = o.config.displayWidthIn ?? o.config.slotsLayout?.displayWidthIn;
-          o.config = { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
-        }
-        if (o.children?.length) walk(o.children);
+    if (copies.length === 0) {
+      toast.info(`Nothing copied. ${skipped.join("; ")}.`);
+      return false;
+    }
+    if (replaces.length > 0) {
+      const ok = await confirm({
+        title: `Copy ${sourceName} over ${plural(copies.length, "board")}?`,
+        message:
+          `${targetName} on ${copies.map((c) => c.name).join(", ")} is replaced. That throws away: ${replaces.join(", ")}.` +
+          (skipped.length > 0 ? ` Left as they are: ${skipped.join("; ")}.` : ""),
+        confirmLabel: "Copy",
+        destructive: true,
+      });
+      if (!ok) return false;
+    }
+    const failed: { name: string; message: string }[] = [];
+    const landed: string[] = [];
+    for (const b of copies) {
+      try {
+        takeState(await ipc<StageState>("boards:copyFrom", { id: b.id, ...from, target: wireTarget() }));
+        landed.push(b.id);
+      } catch (err) {
+        failed.push({ name: b.name, message: errorMessage(err) });
       }
-    };
-    walk(layout.objects);
-    const next = await attempt(`show the board on ${t.name}`, () =>
-      ipc<StageState>("views:setLayout", { id: t.viewId, layout, layoutRev: view.layoutRev }),
-    );
-    if (next) takeState(next);
-    return !!next;
+    }
+    dropEditsOf(landed);
+    reportPartial("Copy", { done: landed.length, failed });
+    await refresh();
+    if (failed.length === 0) {
+      toast.success(`Copied onto ${plural(landed.length, "board")}.`);
+      if (skipped.length > 0) toast.info(`${skipped.join("; ")}.`);
+    }
+    return failed.length === 0;
   }
 
-  /** Copy a layout onto one board at the target being edited. Written at once. */
-  async function copyInto(
-    boardId: string,
-    from: { fromBoardId?: string; fromServiceTypeId?: string; fromPlanId?: string },
-  ): Promise<boolean> {
-    if (!(await confirmReplace(boardId, "Copying replaces the layout."))) return false;
-    const next = await attempt("copy the layout", () =>
-      ipc<StageState>("boards:copyFrom", { id: boardId, ...from, target: wireTarget() }),
-    );
-    if (!next) return false;
-    takeState(next);
-    await refresh();
-    toast.success("Layout copied.");
-    return true;
+  async function copyInto(boardId: string, from: CopyFrom, sourceName: string): Promise<boolean> {
+    return copyLayouts([boardId], from, sourceName);
   }
 
-  /** Revert one board's plan to the default. */
-  async function revertBoard(boardId: string): Promise<boolean> {
-    if (!planId) return false;
-    const name = boards.find((b) => b.id === boardId)?.name ?? "this board";
-    const ok = await confirm({
-      title: `Revert ${name} to the default?`,
-      message: `The layout saved for ${label} on ${name} is deleted, and it goes back to ${namedType(typeName)} default.`,
-      confirmLabel: "Revert",
-      destructive: true,
-    });
-    if (!ok) return false;
-    dropEdits(boardId);
-    const next = await attempt("revert the board", () => ipc<StageState>("boards:clearOverride", { id: boardId, planId }));
-    if (!next) return false;
-    takeState(next);
-    await refresh();
-    return true;
+  async function copyIntoAll(from: CopyFrom, sourceName: string): Promise<boolean> {
+    return copyLayouts(boards.map((b) => b.id), from, sourceName);
   }
 
   /** Every board that has a layout of its own for this plan, as the plan-level
    *  actions act on it. */
   const overridden = boards.filter((b) => targetsById.get(b.id)?.overrideSlots != null);
 
-  async function eachOverridden(
+  /** Run a write per board; which landed, and which did not. Each landed board's
+   *  state is taken as it comes. */
+  async function eachBoard(
+    ids: readonly string[],
     run: (id: string) => Promise<StageState>,
-  ): Promise<{ done: number; failed: { name: string; message: string }[] }> {
+  ): Promise<{ landed: string[]; failed: { name: string; message: string }[] }> {
     const failed: { name: string; message: string }[] = [];
-    let done = 0;
-    for (const b of overridden) {
+    const landed: string[] = [];
+    for (const id of ids) {
       try {
-        takeState(await run(b.id));
-        done++;
+        takeState(await run(id));
+        landed.push(id);
       } catch (err) {
-        failed.push({ name: b.name, message: errorMessage(err) });
+        failed.push({ name: boards.find((b) => b.id === id)?.name ?? id, message: errorMessage(err) });
       }
     }
-    return { done, failed };
+    return { landed, failed };
   }
 
   function reportPartial(what: string, r: { done: number; failed: { name: string; message: string }[] }): void {
@@ -481,69 +633,74 @@ export function useMicSlots() {
     toast.error(`${what}: ${r.done} of ${r.done + r.failed.length} boards done. Not done: ${names}`);
   }
 
-  async function revertPlan(): Promise<boolean> {
-    if (!planId || overridden.length === 0) return false;
+  const nameOf = (id: string) => boards.find((b) => b.id === id)?.name ?? id;
+
+  /** Revert plans to the default for these boards. Their unsaved edits go with the
+   *  plan's layout, but only once the request has landed: a refused revert loses
+   *  nothing. */
+  async function revertBoards(ids: string[], what: string): Promise<boolean> {
+    if (!planId || ids.length === 0) return false;
+    const unsaved = ids.filter((id) => id in edits);
     const ok = await confirm({
-      title: `Revert ${label} to the default?`,
-      message: `The layouts saved for ${label} on ${plural(overridden.length, "board")} are deleted, and they go back to ${namedType(typeName)} default.`,
-      confirmLabel: "Revert",
+      title: `Revert ${what} to the default?`,
+      message:
+        `The layout saved for ${label} on ${ids.map(nameOf).join(", ")} is deleted, and ${ids.length === 1 ? "it goes" : "they go"} back to ${namedType(typeName)} default.` +
+        (unsaved.length > 0 ? ` Unsaved changes to ${unsaved.map(nameOf).join(", ")} are thrown away with it.` : ""),
+      confirmLabel: unsaved.length > 0 ? "Revert and discard changes" : "Revert",
       destructive: true,
     });
     if (!ok) return false;
-    setEdits({});
-    const r = await eachOverridden((id) => ipc<StageState>("boards:clearOverride", { id, planId }));
-    reportPartial("Revert", r);
-    setOwnSide("default");
+    const r = await eachBoard(ids, (id) => ipc<StageState>("boards:clearOverride", { id, planId }));
+    dropEditsOf(r.landed);
+    reportPartial("Revert", { done: r.landed.length, failed: r.failed });
+    if (r.landed.length > 0 && ids.length > 1) setOwnSide("default");
     await refresh();
     if (r.failed.length === 0) toast.success(`Reverted ${label} to the default.`);
     return r.failed.length === 0;
   }
 
-  async function promotePlan(): Promise<boolean> {
-    if (!planId || overridden.length === 0) return false;
+  async function revertBoard(boardId: string): Promise<boolean> {
+    return revertBoards([boardId], nameOf(boardId));
+  }
+
+  async function revertPlan(): Promise<boolean> {
+    return revertBoards(overridden.map((b) => b.id), label);
+  }
+
+  /**
+   * Make plan layouts the default for these boards. The plan's layout is the SAVED
+   * one, so unsaved edits are saved first (the confirm says so), and nothing is
+   * promoted if that save is refused.
+   */
+  async function promoteBoards(ids: string[], what: string): Promise<boolean> {
+    if (!planId) return false;
+    const unsaved = effectiveSide === "plan" ? ids.filter((id) => id in edits) : [];
+    const targets = [...new Set([...ids.filter((id) => overridden.some((b) => b.id === id)), ...unsaved])];
+    if (targets.length === 0) return false;
     const ok = await confirm({
-      title: `Make ${label} the default?`,
-      message: `${namedType(typeName, true)} default is replaced by the layouts saved for ${label}, and ${label} stops being an exception.`,
-      confirmLabel: "Set as default",
+      title: `Make ${what} the default?`,
+      message:
+        `${namedType(typeName, true)} default is replaced by the layouts saved for ${label} on ${targets.map(nameOf).join(", ")}, and ${label} stops being an exception.` +
+        (unsaved.length > 0 ? ` Unsaved changes to ${unsaved.map(nameOf).join(", ")} are saved first.` : ""),
+      confirmLabel: unsaved.length > 0 ? "Save, then set as default" : "Set as default",
       destructive: true,
     });
     if (!ok) return false;
-    setEdits({});
-    const r = await eachOverridden((id) => ipc<StageState>("boards:promote", { id, planId }));
-    reportPartial("Set as default", r);
-    setOwnSide("default");
+    if (unsaved.length > 0 && !(await submitSave(unsaved, false))) return false;
+    const r = await eachBoard(targets, (id) => ipc<StageState>("boards:promote", { id, planId }));
+    reportPartial("Set as default", { done: r.landed.length, failed: r.failed });
+    if (r.landed.length > 0) setOwnSide("default");
     await refresh();
     if (r.failed.length === 0) toast.success(`${label} is now ${namedType(typeName)} default.`);
     return r.failed.length === 0;
   }
 
-  /** Copy one source over every board at the target being edited. */
-  async function copyIntoAll(from: { fromServiceTypeId?: string; fromPlanId?: string }): Promise<boolean> {
-    const clobbers = dirtyIds.length;
-    if (clobbers > 0) {
-      const ok = await confirm({
-        title: "Replace the unsaved changes?",
-        message: "Copying replaces every board's layout, and the edits that are not saved yet are lost.",
-        confirmLabel: "Replace",
-        destructive: true,
-      });
-      if (!ok) return false;
-      setEdits({});
-    }
-    const failed: { name: string; message: string }[] = [];
-    let done = 0;
-    for (const b of boards) {
-      try {
-        takeState(await ipc<StageState>("boards:copyFrom", { id: b.id, ...from, target: wireTarget() }));
-        done++;
-      } catch (err) {
-        failed.push({ name: b.name, message: errorMessage(err) });
-      }
-    }
-    reportPartial("Copy", { done, failed });
-    await refresh();
-    if (failed.length === 0) toast.success(`Copied onto ${plural(done, "board")}.`);
-    return failed.length === 0;
+  async function promoteBoard(boardId: string): Promise<boolean> {
+    return promoteBoards([boardId], nameOf(boardId));
+  }
+
+  async function promotePlan(): Promise<boolean> {
+    return promoteBoards(boards.map((b) => b.id), label);
   }
 
   return {
@@ -573,6 +730,7 @@ export function useMicSlots() {
     saving,
     saveError,
     saveAll,
+    discard,
     discardAll,
     // layout edits
     selection,
@@ -598,9 +756,11 @@ export function useMicSlots() {
     deleteBoard,
     setColumnWidth,
     showOn,
+    setDisplayWidth,
     copyInto,
     copyIntoAll,
     revertBoard,
+    promoteBoard,
     revertPlan,
     promotePlan,
     confirmReplace,

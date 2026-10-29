@@ -298,7 +298,23 @@ export function DeleteBoardDialog({
 // ── Charger layout ──────────────────────────────────────────────────────────
 
 export const DEFAULT_COLUMN_WIDTH_IN = 3.49;
+/** The width a 37 inch 16:9 panel has, offered for a screen that has none set. */
+export const DEFAULT_DISPLAY_WIDTH_IN = 32.25;
 
+export interface ChargerScreen {
+  target: ShowTarget;
+  /** What it has now; null for none. */
+  displayWidthIn: number | null;
+}
+
+/**
+ * A board's charger layout: align on or off, the column width, and the display
+ * width of every screen and widget showing it. Alignment needs both halves, and
+ * the display width is each one's own, so each is listed with an input (prefilled
+ * with what it has, else a 37 inch panel's) and only what the operator applies is
+ * written. Mounted per board and per opening: nothing typed and not applied is
+ * kept for next time.
+ */
 export function ChargerLayoutDialog({
   board,
   screens,
@@ -306,16 +322,30 @@ export function ChargerLayoutDialog({
   onApply,
 }: {
   board: SlotBoardDTO | null;
-  /** Each slots screen showing the board, with the display width it sets. */
-  screens: { name: string; displayWidthIn: number | null }[];
+  screens: ChargerScreen[];
   onClose: () => void;
-  onApply: (boardId: string, columnWidthIn: number | null) => Promise<void>;
+  onApply: (boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) => Promise<void>;
 }) {
   const [width, setWidth] = useState<number | null | undefined>(undefined);
+  const [screenWidths, setScreenWidths] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState(false);
   if (!board) return null;
   const current = width === undefined ? board.columnWidthIn : width;
   const aligned = current !== null;
-  const changed = current !== board.columnWidthIn;
+  const widthFor = (s: ChargerScreen) => screenWidths[s.target.id] ?? s.displayWidthIn ?? DEFAULT_DISPLAY_WIDTH_IN;
+  // Written: the ones whose input differs from what is stored, and any with none stored.
+  const displayWrites = aligned ? screens.filter((s) => s.displayWidthIn === null || widthFor(s) !== s.displayWidthIn) : [];
+  const changed = current !== board.columnWidthIn || displayWrites.length > 0;
+
+  async function apply() {
+    setBusy(true);
+    try {
+      await onApply(board!.id, current, displayWrites.map((s) => ({ target: s.target, widthIn: widthFor(s) })));
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <DialogRoot open onOpenChange={(o) => !o && onClose()}>
@@ -346,24 +376,35 @@ export function ChargerLayoutDialog({
               />
             </label>
           )}
-          {aligned && screens.length > 0 && (
-            <p className="text-caption1 text-fg-muted">
-              Each screen keeps its own display width, set in its screen settings:{" "}
-              {screens.map((s) => `${s.name} ${s.displayWidthIn != null ? `${s.displayWidthIn} in` : "not set"}`).join(", ")}.
-            </p>
+          {aligned && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-footnote font-medium text-fg">Display width, where it is shown</span>
+              {screens.length === 0 ? (
+                <span className="text-caption1 text-fg-muted">Nothing shows this board yet. Each screen sets its own display width when it does.</span>
+              ) : (
+                screens.map((s) => (
+                  <label key={s.target.id} className="flex items-center gap-2 text-footnote text-fg">
+                    <span className="flex-1 truncate">{showLabel(s.target)}</span>
+                    <NumberInput
+                      value={widthFor(s)}
+                      step={0.25}
+                      min={1}
+                      suffix="in"
+                      className="w-32"
+                      aria-label={`Display width of ${showLabel(s.target)} (inches)`}
+                      onChange={(n) => setScreenWidths((prev) => ({ ...prev, [s.target.id]: n }))}
+                    />
+                  </label>
+                ))
+              )}
+              <span className="text-caption2 text-fg-subtle">A screen with no display width is not aligned. Only the widths you change, or ones not set yet, are written.</span>
+            </div>
           )}
-          <p className="text-caption2 text-fg-subtle">The width is the board's, so every screen showing it shares it.</p>
+          <p className="text-caption2 text-fg-subtle">The column width is the board's, so every screen showing it shares it.</p>
         </div>
         <DialogFooter>
           <Button variant="transparent" size="small" onClick={onClose}>Cancel</Button>
-          <Button
-            variant="accent"
-            size="small"
-            disabled={!changed}
-            onClick={() => {
-              void onApply(board.id, current).then(onClose);
-            }}
-          >
+          <Button variant="accent" size="small" disabled={!changed || busy} onClick={() => void apply()}>
             Apply
           </Button>
         </DialogFooter>
@@ -399,7 +440,8 @@ export function CopyFromDialog({
   /** Boards that can be the source; none when copying over every board. */
   boards: SlotBoardDTO[];
   onClose: () => void;
-  onCopy: (from: CopySource) => Promise<void>;
+  /** `sourceName` is how the source reads in a sentence: a board, "Weekend default", a plan. */
+  onCopy: (from: CopySource, sourceName: string) => Promise<void>;
 }) {
   const { plans } = useUpcomingPlans();
   const { state } = useStageState();
@@ -427,9 +469,10 @@ export function CopyFromDialog({
   async function go() {
     const from = source();
     if (!from) return;
+    const sourceName = options.find((o) => o.value === chosen)?.label ?? "that layout";
     setBusy(true);
     try {
-      await onCopy(from);
+      await onCopy(from, sourceName);
       onClose();
     } finally {
       setBusy(false);

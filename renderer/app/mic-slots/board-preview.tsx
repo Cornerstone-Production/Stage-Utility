@@ -117,6 +117,28 @@ function StackZone({ slot }: { slot: Slot }) {
   );
 }
 
+/**
+ * An empty board's whole frame, as its one gap: a card dropped anywhere on it
+ * becomes the board's first column. Without it an empty board has no zones, and
+ * the first card could only reach it by a button.
+ */
+export function EmptyBoardDrop({ boardId, children }: { boardId: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `gap:${boardId}:0`,
+    data: { drop: { kind: "gap", boardId, index: 0 } } satisfies DropData,
+  });
+  const { active } = useDragging();
+  return (
+    <div
+      ref={setNodeRef}
+      data-mic-gap={`${boardId}:0`}
+      className={cn("h-full rounded-md border-2 border-transparent", active && "border-dashed border-accent/40", isOver && "border-solid border-accent bg-accent/10")}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** What the page can do to a card from the keyboard or its handles. */
 export interface BoardPreviewActions {
   select: (slotId: string) => void;

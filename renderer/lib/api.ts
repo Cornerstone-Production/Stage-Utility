@@ -1115,8 +1115,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
 
     // ── Slot boards (the Mic slots page) ───────────────────────────────
-    // A board is named by its own id here, never by a screen's: `slots:*` above
-    // are the per-screen aliases the older editors used.
+    // A board is named by its own id here, never by a screen's.
     case "boards:list":
       return apiFetch<T>("/api/boards");
 
@@ -1195,7 +1194,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "presets:overwrite": {
       const id = p.id as string;
       // Pass explicit `slots` (inline mic-slots) when present, else overwrite from a view.
-      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, p.slots ? { slots: p.slots } : { overwriteFromDisplayId: p.displayId });
+      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, p.slots ? { slots: p.slots, ...(p.boardId ? { boardId: p.boardId } : {}) } : { overwriteFromDisplayId: p.displayId });
     }
 
     // ── Video feeds ────────────────────────────────────────────────────

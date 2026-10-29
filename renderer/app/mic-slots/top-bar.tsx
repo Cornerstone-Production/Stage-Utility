@@ -80,7 +80,14 @@ export function TopBar({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       <span className="flex-1" />
-      {mic.dirty && <span className="text-caption1 text-fg-muted" data-mic-unsaved="true">Unsaved changes</span>}
+      {mic.dirty && (
+        <>
+          <span className="text-caption1 text-fg-muted" data-mic-unsaved="true">Unsaved changes</span>
+          <Button variant="transparent" size="small" disabled={mic.saving} onClick={() => void mic.discard()}>
+            Discard
+          </Button>
+        </>
+      )}
       <SavedLayouts mic={mic} open={savedOpen} onOpenChange={onSavedOpen} boardId={savedBoardId} />
       <Button variant="accent" size="medium" disabled={!mic.dirty || mic.saving} onClick={() => void mic.saveAll()}>
         {mic.saving ? "Saving…" : "Save all"}
@@ -91,8 +98,8 @@ export function TopBar({
           description={`Copies a layout onto every board for ${mic.hasPlan && mic.side === "plan" ? mic.label : `${namedType(mic.typeName)} default`}. Each board keeps its own columns and charger width.`}
           boards={[]}
           onClose={() => setCopyAll(false)}
-          onCopy={async (from) => {
-            await mic.copyIntoAll(from);
+          onCopy={async (from, sourceName) => {
+            await mic.copyIntoAll(from, sourceName);
           }}
         />
       )}
