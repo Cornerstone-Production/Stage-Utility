@@ -19,6 +19,30 @@ const EMPTY_DEVICE: SlotDevice = {
   iemLabel: null,
 };
 
+/**
+ * A slot as it is STORED: the resolver's output taken back off it.
+ *
+ * resolveSlots fills in displayName, photoUrl, shownPositions, prep and device
+ * from Planning Center and the device list. The editors work on the resolved
+ * slots they were sent (seeding a new board from a view's current rows, copying
+ * an arrangement), so a save can carry last Sunday's names and this minute's
+ * battery readings. Written to slots.json they are never read back as anything
+ * but noise, and a stale `prep` once even looked like a live capsule. Every
+ * write of slots to disk goes through here so what is stored is only what an
+ * operator authored. Null/empty values are what the editors write for a new slot,
+ * so a stripped slot is one the editors already know how to read.
+ *
+ * Entries that are not objects pass through unchanged: this is not the place to
+ * validate a board.
+ */
+export function stripResolvedFields(slots: Slot[]): Slot[] {
+  return slots.map((slot) => {
+    if (typeof slot !== "object" || slot === null) return slot;
+    const { prep: _prep, shownPositions: _shown, ...authored } = slot;
+    return { ...authored, displayName: null, photoUrl: null, device: { ...EMPTY_DEVICE } };
+  });
+}
+
 
 /**
  * Coerce a provider's audio level to the documented 0–1 contract.

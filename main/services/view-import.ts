@@ -13,6 +13,7 @@ import { collectRefsFrom } from "./view-refs.js";
 import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
+import { stripResolvedFields } from "./slot-resolver.js";
 import { patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
@@ -475,7 +476,9 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   if (incomingPresets.length) {
     const current = await presetsStore.load();
     const byId = new Map(current.map((p) => [p.id, p]));
-    for (const p of incomingPresets) {
+    for (const incoming of incomingPresets) {
+      // A bundle from an older build can carry resolved names and readings.
+      const p = Array.isArray(incoming.slots) ? { ...incoming, slots: stripResolvedFields(incoming.slots) } : incoming;
       if (!byId.has(p.id)) {
         byId.set(p.id, p);
         presets.added++;

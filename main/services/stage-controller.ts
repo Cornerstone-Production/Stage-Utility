@@ -71,7 +71,7 @@ import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { PrepTagBook } from "./pco-prep-tags.js";
-import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
+import { resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
 import { iconToSettings, type AppIconInput } from "./app-icon.js";
 import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
@@ -2419,7 +2419,7 @@ export class StageController {
       } else {
         console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
       }
-      map.set(key, slots);
+      map.set(key, stripResolvedFields(slots));
     } else {
       // scrub() is spelled out INSIDE each interpolation, not hoisted into a
       // local. log-injection.test.ts reads source and only recognises the
@@ -3111,7 +3111,7 @@ export class StageController {
       id: randomUUID(),
       name,
       // Deep-clone with fresh slot ids so preset slots are independent.
-      slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })),
+      slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })),
       createdAt: new Date().toISOString(),
     };
     const updated = [...presets, newPreset];
@@ -3172,7 +3172,7 @@ export class StageController {
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name: name.trim() || "Imported",
-      slots: slots.map((s, i) => ({ ...s, id: randomUUID(), order: i })),
+      slots: stripResolvedFields(slots).map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
     };
     console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${scrub(newPreset.slots.length)} slots)`);
@@ -3221,7 +3221,7 @@ export class StageController {
     const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
-      p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
+      p.id === id ? { ...p, slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
     await presetsStore.save(updated);
     return updated;
