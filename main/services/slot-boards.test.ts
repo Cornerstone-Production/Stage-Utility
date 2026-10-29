@@ -75,6 +75,24 @@ const gridOf = (views: View[], viewId: string, objectId: string) => {
   return found!.config as Record<string, unknown>;
 };
 
+describe("which identical board survives", () => {
+  test("a screen's board survives over a widget's even when the widget's id sorts first", () => {
+    // Widget ids are random UUIDs, so one can sort before "display-1". The merged
+    // board must keep the screen's id and name, not "… · widget".
+    const rename = (x: string) => x.replaceAll("g-left-copy", "0a1b2c3d");
+    const views = JSON.parse(rename(JSON.stringify(henryViews()))) as View[];
+    const file = henryFile();
+    for (const half of [file.defaults, file.overrides] as Map<string, unknown>[]) {
+      half.set("0a1b2c3d", half.get("g-left-copy"));
+      half.delete("g-left-copy");
+    }
+    const result = migrateBoards(views, file, NOW);
+    assert.equal(result.file.boards.get("display-1")?.name, "Left Display");
+    assert.equal(result.file.boards.has("0a1b2c3d"), false);
+    assert.equal(gridOf(result.views, "view-3", "0a1b2c3d").boardId, "display-1");
+  });
+});
+
 describe("migrating an install shaped like a real one", () => {
   const result = migrateBoards(henryViews(), henryFile(), NOW);
 

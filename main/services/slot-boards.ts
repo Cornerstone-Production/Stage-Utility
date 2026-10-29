@@ -159,7 +159,8 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
  *    widths stay where they were. A "view" grid takes the embedded view's
  *    display width, which is the one it was drawn with.
  * 4. Boards made in THIS run collapse when identical in every layout and in
- *    column width, slot ids aside. The lowest id survives, every pointer moves
+ *    column width, slot ids aside. A screen's board survives over a widget's,
+ *    then the lowest id; every pointer moves
  *    to it, and the other's entries go. A board made before is never merged:
  *    two identical boards an operator kept are two boards.
  * 5. A key nothing points at is kept, named "Unused board N".
@@ -280,8 +281,13 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
   }
 
   // Collapse identical boards made in this run.
+  // A screen's board survives over a widget's, so a merged board keeps the
+  // screen's name ("Left Display"), then the lowest id breaks ties.
+  const viewIds = new Set(views.map((v) => v.id));
+  const survivorOrder = (a: string, b: string): number =>
+    Number(!viewIds.has(a)) - Number(!viewIds.has(b)) || (a < b ? -1 : a > b ? 1 : 0);
   const bySignature = new Map<string, string[]>();
-  for (const id of [...created].sort()) {
+  for (const id of [...created].sort(survivorOrder)) {
     const sig = boardSignature(file, id, file.boards.get(id)?.columnWidthIn ?? null);
     if (sig === null) continue;
     const group = bySignature.get(sig) ?? [];
