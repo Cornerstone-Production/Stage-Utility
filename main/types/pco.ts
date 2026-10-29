@@ -270,11 +270,11 @@ export interface SlotDevice {
    *  scales (Shure against its own dB range, Sennheiser raw), so it is coerced to
    *  one unit in slot-resolver.ts — never assume it is dB. */
   audioLevel: number | null;
-  /** Resolved level for the charge bar, from the slot's chargeSource: the bound
+  /** Resolved level for the mic row's battery, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
   charge: number | null;
   /** Resolved battery for a second device (e.g. a vocalist's IEM/PSM pack),
-   *  shown as a second bar beneath the primary. Null when no IEM is bound. */
+   *  shown on the IEM row beneath the mic's. Null when no IEM is bound. */
   iemCharge: number | null;
   /** Static label for the primary device when it has no live telemetry — i.e. an
    *  OFFLINE/manual device (a networkless PSM/mic) or a per-slot label override.
@@ -298,15 +298,15 @@ export interface Slot {
   order: number;
   link: SlotLink;
   deviceBinding?: { providerId: string; channelId: string } | null;
-  /** Where the charge bar reads its level: "mic" = the bound device's battery
-   *  (default), "charger" = the SBC bay in `chargeBayId`, "off" = no charge bar. */
+  /** Where the mic row's battery reads its level: "mic" = the bound device's battery
+   *  (default), "charger" = the SBC bay in `chargeBayId`, "off" = no battery shown. */
   chargeSource?: "mic" | "charger" | "off";
   /** ChargerBay id (connectionId::bay) when chargeSource === "charger". */
   chargeBayId?: string | null;
-  /** Hide the RF bars on this slot and show only the charge bar. */
+  /** Hide the RF bars on this slot and show only the battery. */
   hideRf?: boolean;
-  /** Optional second device whose battery shows as a second bar beneath the
-   *  primary charge bar — e.g. a vocalist who also wears an IEM/PSM pack. */
+  /** Optional second device whose battery shows on its own row beneath the
+   *  mic's — e.g. a vocalist who also wears an IEM/PSM pack. */
   iemBinding?: { providerId: string; channelId: string } | null;
   /** Optional custom label override for the primary (mic) device, shown when it's
    *  an offline/manual device with no telemetry. Defaults to the device's name. */

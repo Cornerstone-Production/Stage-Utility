@@ -425,15 +425,15 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
         <Collapsible label="Options" summary={optionsSummary} className="pl-4 sm:pl-9">
           {/* Device channel — a live wireless channel, or "Offline" for a manual
               label (a networkless mic/pack, e.g. a PSM 900). Picking Offline
-              reveals the label field; on the display it shows a pill in place of
-              the RF pill. */}
+              reveals the label field; on the display the mic row shows that label
+              in place of the RF bars and frequency. */}
           <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
             <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
               Device channel:
               <InfoHint>
                 Bind this slot&apos;s mic to a live wireless channel (shows RF + battery), or pick Offline to
-                just show a typed label for a networkless mic/pack. Offline shows a name pill in place of the
-                RF bars.
+                just show a typed label for a networkless mic/pack. Offline shows the label in the mic row, with
+                no RF bars.
               </InfoHint>
             </span>
             <Select
@@ -456,7 +456,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
                 Mic label:
                 <InfoHint>
                   Shown on the cell in place of the frequency. Leave blank to keep the frequency. On an
-                  offline mic this is the whole pill, since there is no telemetry to show.
+                  offline mic this is the whole row, since there is no telemetry to show.
                 </InfoHint>
               </span>
               <Input
@@ -478,13 +478,13 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
             </div>
           )}
 
-          {/* IEM pack — a live channel (second battery bar) or "Offline" for a
+          {/* IEM pack — a live channel (its own row, with its battery) or "Offline" for a
               manual label. Available on any slot (vocalist, musician, etc.). */}
           <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
             <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
               IEM pack:
               <InfoHint>
-                Adds a second battery bar for an in-ear pack. Pick a live channel, or Offline for a typed
+                Adds an in-ear row with its battery. Pick a live channel, or Offline for a typed
                 label. Available on any slot, not just vocals.
               </InfoHint>
             </span>
@@ -520,10 +520,10 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
             </div>
           )}
 
-          {/* Charge bar source: the bound mic's battery, a specific SBC charger
-              bay, or off — plus a hide-RF (charge-only) toggle. */}
+          {/* Where the mic row's battery reads from: the bound mic, a specific SBC
+              charger bay, or off — plus a hide-RF (charge-only) toggle. */}
           <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-            <span className="text-caption1 text-gray-9 shrink-0">Charge bar:</span>
+            <span className="text-caption1 text-gray-9 shrink-0">Battery from:</span>
             <Select
               value={slot.chargeSource ?? "mic"}
               onValueChange={(v: string) =>
@@ -570,10 +570,10 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
           </div>
           <p className="text-caption2 text-gray-8">
             {slot.chargeSource === "off"
-              ? "Charge bar hidden. The pill shows RF only."
+              ? "Battery hidden. The mic row shows RF only."
               : slot.chargeSource === "charger"
-                ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in one pill."
-                : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in one pill."}
+                ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in the mic row."
+                : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in the mic row."}
           </p>
         </Collapsible>
       )}

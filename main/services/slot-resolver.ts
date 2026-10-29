@@ -97,7 +97,7 @@ function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>): numb
 
 // Resolve the charge-bar level for a slot from its configured source. Defaults
 // to the bound mic's battery (current behavior); "charger" reads a chosen SBC
-// bay (independent of any bound mic); "off" hides the charge bar.
+// bay (independent of any bound mic); "off" hides the battery.
 function resolveCharge(
   slot: Slot,
   device: SlotDevice,
