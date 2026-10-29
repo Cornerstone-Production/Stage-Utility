@@ -239,11 +239,12 @@ is logged once on the `[pco-tags]` tag.
 The read is tag-first, because Planning Center ignores `include=person.tags` on team
 members and `where[]` filters on people. It costs one request for the tag groups,
 one per person group for its tags, and one per matching tag for the people holding
-it (each paginated), whatever the plan's size. The result is cached for 15 minutes
-and refreshed when the plan changes and on the hourly refresh. If a read fails the
-last good tags stay and no slot goes blank; a failed read with no earlier result
-means no prep is shown. The token needs the same read access it already has for
-people.
+it (each paginated), whatever the plan's size. The tags belong to the account, not
+to a plan, so the result is cached for 15 minutes and read again by the next
+refresh after that, whichever plan is selected. The read runs beside the roster's,
+never ahead of it. If a read fails the last good tags stay and no slot goes
+blank; a failed read with no earlier result means no prep is shown. The token
+needs the same read access it already has for people.
 
 ## Item times
 
