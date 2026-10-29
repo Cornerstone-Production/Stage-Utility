@@ -807,9 +807,14 @@ export class StageController {
       }
     } catch (err) {
       const viewsSaved = step.startsWith("slots.json,");
+      const runsOn = viewsSaved ? "the migrated views" : "the views as they were";
+      // The file and the outcome stay OUT of the format string, as values do
+      // everywhere a console call has an error beside it.
       console.error(
-        `[slots-store] could not save the slot boards migration (writing ${scrub(step)}); nothing is lost, the next boot finishes it, ` +
-          `and this boot runs on ${viewsSaved ? "the migrated views" : "the views as they were"}:`,
+        "[slots-store] could not save the slot boards migration; nothing is lost and the next boot finishes it. Writing",
+        scrub(step),
+        "failed; this boot runs on",
+        `${scrub(runsOn)}:`,
         scrubError(err),
       );
       return viewsSaved ? result.views : views;
