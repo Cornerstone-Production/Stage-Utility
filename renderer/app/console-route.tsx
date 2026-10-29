@@ -214,7 +214,6 @@ function ConsoleEditor({
       // Done returns the operator to the live console. Without it the editor
       // dropped into its own preview and the console never came back.
       onExit={onExit}
-      slotsViews={(settings.stageState?.views ?? []).filter((v) => v.kind === "slots")}
       templates={settings.layoutTemplates}
       onSave={async (layout) => {
         const r = await settings.handlers.handleSetViewLayout(view.id, layout, sessionRev);

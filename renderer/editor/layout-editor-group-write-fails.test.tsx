@@ -99,7 +99,6 @@ async function mount(): Promise<void> {
           null,
           React.createElement(LayoutEditor, {
             view: VIEW,
-            slotsViews: [],
             templates: [],
             startEditing: true,
             onSave: async () => {},

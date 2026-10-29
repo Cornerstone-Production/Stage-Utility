@@ -1,43 +1,8 @@
-// What the layout editor shows for a slots widget: "Define here" or "Embed a
-// view", and whether the slot editor below the canvas may edit its board.
-//
-// A widget now points at a board, and a board can be the one a slots screen
-// shows. Read as "Define here", a widget on a screen's board would let the
-// editor below the canvas rewrite that screen's live wall as if it were the
-// widget's own. So a widget on a screen's board reads as embedding that screen,
-// and the editor below appears only for a board no screen shows. Choosing
-// "Define here" for one gives it its own copy of the board when the layout is
-// saved (the server's pointLayoutGrids); until then there is nothing of its own
-// to edit.
+// A slots widget the layout editor saved in the shape before boards ("Define here"
+// or "Embed a view") comes back from the server pointed at a board; the editor
+// adopts that pointer so the widget does not keep the old shape until reopened.
 
-import { viewBoardId } from "@main/services/slot-boards";
-import type { LayoutObject, LayoutObjectConfig, View } from "@main/types/stage";
-
-type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
-
-export interface SlotsGridSource {
-  mode: "inline" | "view";
-  /** The slots screen it embeds, by its pick or by sharing its board. */
-  embeds: View | null;
-  /** "Define here" picked over a screen's board, waiting for a save to copy it. */
-  awaitingCopy: boolean;
-  /** The slot editor below the canvas may edit this widget's board. */
-  editsBelow: boolean;
-}
-
-export function slotsGridSource(c: GridConfig, slotsViews: readonly View[]): SlotsGridSource {
-  const screenOf = (boardId: unknown): View | null =>
-    typeof boardId === "string" && boardId ? (slotsViews.find((v) => viewBoardId(v) === boardId) ?? null) : null;
-  if (c.source === "view") {
-    return { mode: "view", embeds: slotsViews.find((v) => v.id === c.sourceViewId) ?? null, awaitingCopy: false, editsBelow: false };
-  }
-  const screen = screenOf(c.boardId);
-  if (c.source === "inline") return { mode: "inline", embeds: null, awaitingCopy: screen !== null, editsBelow: screen === null };
-  if (typeof c.boardId === "string" && c.boardId && !screen) {
-    return { mode: "inline", embeds: null, awaitingCopy: false, editsBelow: true };
-  }
-  return { mode: "view", embeds: screen, awaitingCopy: false, editsBelow: false };
-}
+import type { LayoutObject, LayoutObjectConfig } from "@main/types/stage";
 
 /**
  * The editor's objects with each slots widget it sent in the shape before boards

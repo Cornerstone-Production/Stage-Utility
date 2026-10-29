@@ -80,7 +80,7 @@ describe("Make it a cue, landing after the operator typed", () => {
           React.createElement(QueryClientProvider, { client },
             React.createElement(TooltipProvider, null,
               React.createElement(LayoutEditor as never, {
-                view, slotsViews: [], templates: [], startEditing: true,
+                view, templates: [], startEditing: true,
                 onSave: async (l: never) => { saved.push(l); },
                 onSaveTemplate: async () => {}, onUpdateTemplate: async () => {}, onDeleteTemplate: async () => {},
               })))),

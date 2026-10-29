@@ -244,7 +244,6 @@ export function ViewDetail({
             key={`${view.id}:${editorEpoch}`}
             view={view}
             startEditing={startEditing}
-            slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
             onSave={async (layout) => {
               const r = await handlers.handleSetViewLayout(view.id, layout, sessionRev);

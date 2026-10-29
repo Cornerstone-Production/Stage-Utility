@@ -48,7 +48,7 @@ async function mount(config: Record<string, unknown>, instances = [{ id: "defaul
         null,
         React.createElement(Inspector, {
           o, canvas: { width: 1920, height: 1080 }, parentW: 1920, parentH: 1080, nested: false, locked: false,
-          slotsViews: [], onGeom: noop, onStyle: noop, onResetLook: noop,
+          onGeom: noop, onStyle: noop, onResetLook: noop,
           onConfig: (c: LayoutObjectConfig) => writes.push(c),
           onReorder: noop, onDuplicate: noop, onRemove: noop, onReparentOut: noop, onToggleLock: noop, onSaveGroup: noop, onSnapToGrid: noop,
         }),

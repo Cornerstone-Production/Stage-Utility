@@ -95,7 +95,7 @@ import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
-import { adoptSavedGridPointers, slotsGridSource } from "./slots-grid-source";
+import { adoptSavedGridPointers } from "./slots-grid-source";
 import { Palette } from "./palette";
 import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
@@ -113,10 +113,6 @@ import {
   NumberField, 
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel };
-import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
-import { PlanSwitcher } from "../settings/sections/plan-switcher";
-import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
-import { canvasRowFlexClass } from "./canvas-row-fit";
 import { readHideUnconfigured, writeHideUnconfigured } from "./hide-unconfigured";
 
 // ── object metadata ──────────────────────────────────────────────────────────
@@ -1239,7 +1235,6 @@ export function EditorCanvas({
 
 export function LayoutEditor({
   view,
-  slotsViews,
   templates,
   onSave,
   onSaveTemplate,
@@ -1249,7 +1244,6 @@ export function LayoutEditor({
   onExit,
 }: {
   view: View;
-  slotsViews: View[];
   templates: LayoutTemplate[];
   onSave: (layout: LayoutDTO) => Promise<void>;
   onSaveTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
@@ -1328,16 +1322,6 @@ export function LayoutEditor({
     const adopted = adoptSavedGridPointers(objects, view.layout.objects);
     if (adopted !== objects) setObjects(adopted);
   }
-  /**
-   * Unsaved work held by something INSIDE the editor that the layout comparison
-   * cannot see — today the inline mic-slots editor, whose slots live on the
-   * server per service type rather than in the layout. Arranging mics and
-   * pressing the editor's Save saved the layout and left the arrangement behind.
-   *
-   * Same registry the integration dialog's sub-panels report into, rather than a
-   * second mechanism for the same job.
-   */
-  const panels = useUnsavedWork();
   // The effective fit, not just the stored one: a console with nothing set is
   // responsive, and a toolbar showing "Letterbox" selected would tell the
   // operator the opposite of what they see.
@@ -1399,8 +1383,8 @@ export function LayoutEditor({
   // enableBeforeUnload covers closing the tab as well, which no in-app dialog
   // can: the browser's own prompt is the only thing that fires there.
   const leaveBlocker = useBlocker({
-    shouldBlockFn: () => dirty || panels.dirty,
-    enableBeforeUnload: () => dirty || panels.dirty,
+    shouldBlockFn: () => dirty,
+    enableBeforeUnload: () => dirty,
     withResolver: true,
   });
   // Reusable object/container groups (loaded from the global library).
@@ -1507,16 +1491,7 @@ export function LayoutEditor({
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-    // selectedIds is in here because SELECTING an inline slots-grid changes this
-    // row's layout -- it drops `flex-1` so the row stays preview-tall and the
-    // editor below stays reachable. A layout change with no re-measure leaves
-    // canvasH describing the previous arrangement, and the canvas then paints to
-    // a height the row is not reserving.
-    //
-    // The selection rather than `inlineGrid` itself, which is derived further
-    // down the component. Re-measuring on any selection is cheap: it reads two
-    // layout properties, and setState with an unchanged number does not render.
-  }, [isEditing, selectedIds, canvas.width, canvas.height, canvas.fit]);
+  }, [isEditing, canvas.width, canvas.height, canvas.fit]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
@@ -1538,7 +1513,7 @@ export function LayoutEditor({
 
   // Leaving edit mode: confirm if there are unsaved changes, else just exit.
   function leaveEditMode() {
-    if (dirty || panels.dirty) setConfirmLeave(true);
+    if (dirty) setConfirmLeave(true);
     else exitEditing();
   }
   function loadTemplate(t: LayoutTemplate) {
@@ -1646,14 +1621,6 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
-  // The selected object iff it's a mic-slots grid with slots to edit here (config
-  // narrowed so the slot editor below the canvas gets its id + alignment): only
-  // one whose board is its own. A widget on a slots screen's board would edit
-  // that screen's live wall from here (see slots-grid-source.ts).
-  const inlineGrid =
-    selected && selected.config.type === "slots-grid" && slotsGridSource(selected.config, slotsViews).editsBelow
-      ? { id: selected.id, config: selected.config }
-      : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
 
@@ -2008,16 +1975,10 @@ export function LayoutEditor({
   async function save() {
     setSaving(true);
     try {
-      // The panels FIRST. A layout save that succeeded while a panel's save
-      // failed would clear the pill and leave that work stranded with nothing
-      // left on screen to say so — and saveThen closes the editor on a resolved
-      // save, so the throw has to reach it.
-      const panelsOk = await panels.saveAll();
       setAdoptAfterRev(view.layoutRev ?? 0);
       await onSave({ version: 1, canvas, objects });
       setDirty(false);
       setHistory([]);
-      if (!panelsOk) throw new Error("Some changes could not be saved");
     } finally {
       setSaving(false);
     }
@@ -2052,7 +2013,7 @@ export function LayoutEditor({
           STICKY anchor: it stays pinned to the top as the editor scrolls (always
           visible) yet reserves no layout space, so it never shifts content down.
           pointer-events pass through the empty anchor; only the pill is clickable. */}
-      {(dirty || panels.dirty) && (
+      {dirty && (
         <div className="sticky top-1 z-30 h-0 flex justify-end pr-1 pointer-events-none">
           <div className="pointer-events-auto">
             <UnsavedBanner
@@ -2089,7 +2050,7 @@ export function LayoutEditor({
           // it; 1920 hid "Done" itself). Reserving this row's own right edge
           // while dirty keeps every row's wrap point clear of that column,
           // for whichever buttons land there.
-          (dirty || panels.dirty) && "pr-64",
+          dirty && "pr-64",
         )}
       >
         {/* One button for one job. It replaces a dropdown, a Widgets toggle and
@@ -2361,13 +2322,6 @@ export function LayoutEditor({
           />
         </Dialog>
 
-        {/* Which plan's mic board the inline grid below the canvas is editing.
-            Here as well as in that grid's own header because the grid is a full
-            canvas-height scroll away, and an operator comparing two weeks on the
-            canvas should not have to leave it to change week. Only while a grid
-            is selected — nothing else in this editor is plan-dependent. */}
-        {inlineGrid && <PlanSwitcher />}
-
         <div className="flex-1" />
         {/* Save/Discard live in the floating unsaved pill when dirty — no separate
             toolbar Save button (it duplicated the pill's Save). "Done" exits (and
@@ -2378,12 +2332,8 @@ export function LayoutEditor({
       </div>
       )}
 
-      {/* Fill the editor height so the side panel can use the full window height —
-          except while editing an inline slots-grid, where the row stays preview-tall
-          so the InlineSlotsEditor below it stays reachable without a huge gap, and
-          must be told not to shrink. See canvas-row-fit.ts for what happens when
-          it is not. */}
-      <div className={`flex gap-3 @max-4xl/editor:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
+      {/* Fill the editor height so the side panel can use the full window height. */}
+      <div className="flex flex-1 gap-3 @max-4xl/editor:flex-col min-h-0">
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
@@ -2515,7 +2465,7 @@ export function LayoutEditor({
               inspectorDragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
             )}
           />
-        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto overflow-x-hidden quiet-scroll pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
+        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto overflow-x-hidden quiet-scroll pl-2" style={{ maxHeight: availH ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
@@ -2626,7 +2576,6 @@ export function LayoutEditor({
                 parentH={selParentAbs.h * canvas.height}
                 nested={selDepth > 0}
                 locked={isLockedInTree(objects, selected.id)}
-                slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
                 onResetLook={withHistory(() => resetLook(selected.id))}
@@ -2673,25 +2622,6 @@ export function LayoutEditor({
         </div>
         )}
       </div>
-
-      {/* Inline mic-slots editor — full width below the canvas when an inline
-          slots-grid object is selected (scroll down to reach it). */}
-      {isEditing && inlineGrid && (
-        <div className="pb-[40vh]">
-          <Separator />
-          <div className="pt-3">
-            {/* The provider wraps only the panel that reports into it. */}
-            <UnsavedWorkProvider registry={panels.registry}>
-            <InlineSlotsEditor
-              key={inlineGrid.id}
-              objectId={inlineGrid.id}
-              slotsLayout={inlineGrid.config.slotsLayout ?? null}
-              onSetLayout={(next) => { pushHistory(); updateConfig(inlineGrid.id, { ...inlineGrid.config, slotsLayout: next }); }}
-            />
-            </UnsavedWorkProvider>
-          </div>
-        </div>
-      )}
 
       {/* Leaving edit mode with unsaved changes. */}
       <UnsavedChangesDialog
