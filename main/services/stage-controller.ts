@@ -13,7 +13,7 @@ import {
   positiveOrNull,
   viewBoardId,
 } from "./slot-boards.js";
-import { checkBoards } from "./board-check.js";
+import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { asMigratedConsole, findLeftoverCopy, planScreenRoles } from "./screen-role-migration.js";
@@ -2969,7 +2969,13 @@ export class StageController {
       }
     }
     const { unplaced, noPosition } = checkBoards(boards, members, this.personDirectory.people);
-    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition };
+    // Nothing is known to be missing until a tag has been read, or with nobody on
+    // the plan to be missing one.
+    const noCapsule =
+      members.length > 0 && this.prepTags.map.size > 0
+        ? noCapsuleSlots(boards.map((b) => ({ id: b.id, name: b.name, slots: this.resolve(b.slots, members) })))
+        : [];
+    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition, noCapsule };
   }
 
   /** How long an override outlives its plan before the daily sweep drops it. */

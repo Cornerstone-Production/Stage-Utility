@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { checkBoards } from "./board-check.js";
+import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import type { Slot, TeamMemberDTO } from "../types/stage.js";
 
 const pos = (id: string, names: (string | { name?: string; notesStartsWith?: string })[]): Slot =>
@@ -59,5 +59,34 @@ describe("slots that accept no position", () => {
     const other = (kind: string): Slot => ({ id: kind, channel: "", order: 0, link: { kind } }) as unknown as Slot;
     const byPerson = { id: "p", channel: "", order: 0, link: { kind: "pco", matchBy: "person", personId: "1" } } as unknown as Slot;
     assert.deepEqual(checkBoards([{ id: "b", name: "B", slots: [other("spacer"), other("static"), other("empty"), byPerson] }], []).noPosition, []);
+  });
+});
+
+describe("filled slots with a mic and no Capsule tag", () => {
+  const filled = (id: string, over: Record<string, unknown>): Slot =>
+    ({ id, channel: id, order: 0, link: { kind: "pco", matchBy: "position", positions: [{ name: "Vocals" }] }, displayName: `Person ${id}`, ...over }) as unknown as Slot;
+  const board = (slots: Slot[]) => [{ id: "b", name: "Board", slots }];
+
+  test("names a filled slot with a bound mic and no capsule", () => {
+    const out = noCapsuleSlots(board([filled("a", { deviceBinding: { providerId: "w", channelId: "1" } })]));
+    assert.deepEqual(out, [{ boardId: "b", boardName: "Board", slotId: "a", name: "Person a" }]);
+  });
+
+  test("an offline mic counts, one with a capsule does not", () => {
+    const out = noCapsuleSlots(board([
+      filled("off", { deviceLabel: "VOX 2" }),
+      filled("ok", { deviceBinding: { providerId: "w", channelId: "2" }, prep: { capsule: "KSM9", ownIems: false } }),
+      filled("noCap", { deviceBinding: { providerId: "w", channelId: "3" }, prep: { capsule: null, ownIems: true } }),
+    ]));
+    assert.deepEqual(out.map((o) => o.slotId), ["off", "noCap"]);
+  });
+
+  test("a slot with no mic, nobody in it, or a typed label is left out", () => {
+    const out = noCapsuleSlots(board([
+      filled("nomic", {}),
+      filled("empty", { deviceBinding: { providerId: "w", channelId: "4" }, displayName: null }),
+      filled("label", { deviceBinding: { providerId: "w", channelId: "5" }, link: { kind: "static", label: "Backup", color: "#fff" } }),
+    ]));
+    assert.deepEqual(out, []);
   });
 });

@@ -5,11 +5,12 @@
 // from slot-resolver's matchMembers, the same rule the screens use, so the check
 // cannot report somebody missing who is on a screen, or the other way round.
 //
-// Not here yet: filled slots with a mic but no Capsule tag. That needs the
-// Planning Center prep tags, and arrives with them.
+// Filled slots with a mic but no Capsule tag are found from slots the resolver has
+// already filled (and given `prep`), so they are judged by the same rule the screens
+// draw the capsule plate by.
 
 import { claimKey, matchMembers, positionMatches } from "./slot-resolver.js";
-import type { BoardCheckNoPosition, BoardCheckUnplaced, PersonCardDTO, Slot, TeamMemberDTO } from "../types/stage.js";
+import type { BoardCheckNoCapsule, BoardCheckNoPosition, BoardCheckUnplaced, PersonCardDTO, Slot, TeamMemberDTO } from "../types/stage.js";
 
 export interface CheckedBoard {
   id: string;
@@ -67,4 +68,23 @@ export function checkBoards(
     unplaced.set(key, { personId: m.personId, name: m.name, position: m.teamPositionName, boards: boardsNaming });
   }
   return { unplaced: [...unplaced.values()], noPosition };
+}
+
+/**
+ * Slots with a mic, filled by somebody, whose person carries no Capsule tag.
+ *
+ * `resolved` is each board's slots after the resolver (names and `prep` set). A
+ * mic is a bound receiver or an offline mic label; a static label or an unfilled
+ * slot is nobody's capsule to forget.
+ */
+export function noCapsuleSlots(resolved: readonly { id: string; name: string; slots: readonly Slot[] }[]): BoardCheckNoCapsule[] {
+  const out: BoardCheckNoCapsule[] = [];
+  for (const board of resolved) {
+    for (const s of board.slots) {
+      const hasMic = !!s.deviceBinding || (s.deviceLabel !== undefined && s.deviceLabel !== null);
+      if (s.link.kind !== "pco" || !s.displayName || !hasMic || s.prep?.capsule) continue;
+      out.push({ boardId: board.id, boardName: board.name, slotId: s.id, name: s.displayName });
+    }
+  }
+  return out;
 }

@@ -341,7 +341,27 @@ describe("GET /api/boards/check", () => {
       roster: "none",
       unplaced: [],
       noPosition: [{ boardId: "b-right", boardName: "Right", slotId: "bare", channel: "01", index: 2 }],
+      noCapsule: [],
     });
+  });
+
+  it("lists filled slots with a mic and no Capsule tag, but only once some tag has been read", async () => {
+    const live = ctl as unknown as { teamMembers: unknown[]; prepTags: { current: Map<string, unknown> } };
+    ctl.state = { ...ctl.state, planId: PLAN };
+    live.teamMembers = [{ id: "tm-1", personId: "p-ana", name: "Ana Rivera", photoUrl: null, teamPositionName: "Vocals", teamName: "Band", status: "C", notes: null }];
+    await slotsStore.setDefault("b-right", TYPE, [{ ...slot("mic"), deviceBinding: { providerId: "wireless", channelId: "c1" } } as unknown as Slot]);
+    await ctl.loadAllViewRawSlots(TYPE, PLAN);
+    const url = `/api/boards/check?serviceTypeId=${TYPE}&planId=${PLAN}`;
+    live.prepTags.current = new Map();
+    const none = (await call(boardRoutes, url)).json as { noCapsule: unknown[] };
+    assert.deepEqual(none.noCapsule, [], "no tag has been read, so nothing is known to be missing");
+    live.prepTags.current = new Map([["p-someone-else", { capsule: "KSM9", ownIems: false }]]);
+    const some = (await call(boardRoutes, url)).json as { noCapsule: { slotId: string; name: string }[] };
+    assert.deepEqual(some.noCapsule.map((n) => [n.slotId, n.name]), [["mic", "Ana Rivera"]]);
+    live.prepTags.current = new Map([["p-ana", { capsule: "KSM9", ownIems: false }]]);
+    assert.deepEqual(((await call(boardRoutes, url)).json as { noCapsule: unknown[] }).noCapsule, [], "tagged");
+    live.prepTags.current = new Map();
+    live.teamMembers = [];
   });
 
   it("reads only the boards a screen or widget shows", async () => {
