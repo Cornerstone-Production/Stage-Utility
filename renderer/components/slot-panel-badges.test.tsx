@@ -69,6 +69,17 @@ describe("channel badge", () => {
   });
 });
 
+describe("a slot with no channel at all", () => {
+  test("draws no badge and does not throw", () => {
+    // Nothing validates a channel on save, so the field can be missing.
+    for (const channel of [undefined, null]) {
+      const { container } = render(<SlotPanel slot={slot({ channel: channel as unknown as string })} />);
+      assert.equal(has(container, "channel"), false, String(channel));
+      cleanup();
+    }
+  });
+});
+
 describe("prep badges", () => {
   test("a capsule and own in-ears draw the plate and the ears", () => {
     const { container } = render(<SlotPanel slot={slot({ prep: { capsule: "KSM9", ownIems: true } })} />);
@@ -157,10 +168,68 @@ describe("rows", () => {
     cleanup();
   });
 
+  test("a charger bay's level with no mic bound is a battery row with no bars and no label", () => {
+    const { container } = render(<SlotPanel slot={slot({ device: { status: "none", charge: 72 } })} />);
+    assert.deepEqual(rows(container), ["mic"]);
+    const row = container.querySelector('[data-slot-row="mic"]')!;
+    assert.match(row.textContent ?? "", /^72%$/);
+    assert.equal(row.querySelectorAll("span.block.shrink-0").length, 0, "RF bars drawn for a device that is not answering");
+    cleanup();
+  });
+
+  test("a bound mic that is not answering, on a charger bay, shows the level and no bars", () => {
+    const { container } = render(<SlotPanel slot={slot({ device: { status: "error", charge: 72 } })} />);
+    const row = container.querySelector('[data-slot-row="mic"]')!;
+    assert.match(row.textContent ?? "", /^72%$/);
+    assert.equal(row.querySelectorAll("span.block.shrink-0").length, 0, "RF bars drawn for a device that is not answering");
+    cleanup();
+  });
+
+  test("an IEM with Offline picked and no label reads Offline, not blank", () => {
+    for (const device of [{ ...LIVE, iemLabel: "" }, { status: "error", iemLabel: "" }] as const) {
+      const { container } = render(<SlotPanel slot={slot({ device })} />);
+      assert.equal(container.querySelector('[data-slot-row="iem"]')?.textContent, "Offline", JSON.stringify(device));
+      cleanup();
+    }
+  });
+
+  test("an IEM with a live charge and no label is called IEM", () => {
+    const { container } = render(<SlotPanel slot={slot({ device: { ...LIVE, iemCharge: 76, iemLabel: "" } })} />);
+    assert.match(container.querySelector('[data-slot-row="iem"]')!.textContent ?? "", /^IEM.*76%$/);
+    cleanup();
+  });
+
   test("nothing bound draws no rows", () => {
     const { container } = render(<SlotPanel slot={slot()} />);
     assert.equal(container.querySelector("[data-slot-rows]") === null, true);
     cleanup();
+  });
+});
+
+describe("battery colours", () => {
+  // green >=60, amber 25-59, red <25: one set of thresholds, on the mic row and the
+  // IEM row alike.
+  const level = (c: HTMLElement, row: string) => {
+    const spans = c.querySelectorAll(`[data-slot-row="${row}"] > span`);
+    const cls = spans[spans.length - 1]?.className ?? "";
+    return /text-green-10/.test(cls) ? "green" : /text-yellow-10/.test(cls) ? "amber" : /text-red-10/.test(cls) ? "red" : `none (${cls})`;
+  };
+  const cases: [number, string][] = [[100, "green"], [60, "green"], [59, "amber"], [25, "amber"], [24, "red"], [0, "red"]];
+
+  test("the mic row", () => {
+    for (const [charge, want] of cases) {
+      const { container } = render(<SlotPanel slot={slot({ device: { ...LIVE, charge } })} />);
+      assert.equal(level(container, "mic"), want, `${charge}%`);
+      cleanup();
+    }
+  });
+
+  test("the IEM row", () => {
+    for (const [iemCharge, want] of cases) {
+      const { container } = render(<SlotPanel slot={slot({ device: { ...LIVE, iemCharge, iemLabel: "IEM 1" } })} />);
+      assert.equal(level(container, "iem"), want, `${iemCharge}%`);
+      cleanup();
+    }
   });
 });
 

@@ -20,9 +20,16 @@ import { EarIcon, HeadphonesIcon, MicIcon } from "lucide-react";
 export const PX_UNIT = { ["--px" as string]: "0.388cqmin" } as CSSProperties;
 const px = (n: number) => `calc(var(--px) * ${n})`;
 /** Text never drops under this, however small the preview. */
-const text = (n: number) => `max(0.6rem, ${px(n)})`;
+const TEXT_FLOOR_REM = 0.6;
+const text = (n: number) => `max(${TEXT_FLOOR_REM}rem, ${px(n)})`;
+/** A badge box of `n` mockup pixels holding text of `textN` pixels. Text has the
+ *  floor above and a box that is pure cqmin does not, so on a very small cell the
+ *  text outgrew its badge; the box gets the same floor at the same ratio, and the
+ *  text always fits. */
+const box = (n: number, textN: number) => `max(${+(TEXT_FLOOR_REM * (n / textN)).toFixed(3)}rem, ${px(n)})`;
 
-/** A mic or IEM battery under this puts a red edge on the whole card. */
+/** The MIC's battery under this puts a red edge on the whole card. An IEM pack
+ *  that is low shows red in its own row and does not touch the edge. */
 export const LOW_BATTERY = 25;
 
 // One set of thresholds everywhere: green >=60, amber 25-59, red <25.
@@ -75,7 +82,11 @@ interface StatusRowsProps {
  */
 export function StatusRows({ device, mode, hideRf }: StatusRowsProps) {
   const offline = mode === "offline";
-  const showRf = !offline && device.status !== "none" && !hideRf;
+  // Bars are for a device that is answering. A charger bay's level reaches a slot
+  // with no live mic (status "none", or a bound one that is not answering), and
+  // that is a battery row without bars.
+  const live = device.status === "ok" || device.status === "warn";
+  const showRf = !offline && live && !hideRf;
   const charge = offline ? null : device.charge;
   const iemCharge = offline ? null : device.iemCharge;
 
@@ -98,7 +109,7 @@ export function StatusRows({ device, mode, hideRf }: StatusRowsProps) {
     ? device.iemLabel !== null
       ? device.iemLabel || "Offline"
       : null
-    : (device.iemLabel ?? (iemCharge !== null ? "IEM" : null));
+    : device.iemLabel || (iemCharge !== null ? "IEM" : device.iemLabel === "" ? "Offline" : null);
   const showIemRow = iemLabel !== null;
   if (!showMicRow && !showIemRow) return null;
 
@@ -144,7 +155,7 @@ export function CapsulePlate({ capsule, style }: { capsule: string; style?: CSSP
       className="inline-flex max-w-full items-center"
       style={{
         ...PX_UNIT,
-        height: px(36),
+        height: box(36, 18),
         gap: px(7),
         padding: `0 ${px(12)} 0 ${px(10)}`,
         borderRadius: px(10),
@@ -178,7 +189,8 @@ export function PhotoBadges({
   /** Draw the plate here. False when the card puts it in its scrim instead. */
   plate: boolean;
 }) {
-  const ch = channel.trim();
+  // Nothing validates a channel on save, so a slot can arrive without one.
+  const ch = (channel ?? "").trim();
   return (
     <div className="pointer-events-none absolute inset-0 z-[1]" style={PX_UNIT} data-slot-badges="">
       {ch !== "" && (
@@ -188,8 +200,8 @@ export function PhotoBadges({
           style={{
             top: px(12),
             left: px(12),
-            height: px(30),
-            minWidth: px(30),
+            height: box(30, 15),
+            minWidth: box(30, 15),
             maxWidth: "45%",
             padding: `0 ${px(9)}`,
             borderRadius: px(9),

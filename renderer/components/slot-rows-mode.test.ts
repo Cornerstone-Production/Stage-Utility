@@ -55,6 +55,22 @@ describe("slotRowsMode", () => {
     assert.equal(slotRowsMode(device({ status: "none", rf: null, battery: null, freq: null, charge: null }), true), "none");
   });
 
+  test("a charger bay's level on a slot with no mic bound still shows a battery row", () => {
+    // chargeSource "charger" resolves a charge onto a slot whose device is status
+    // "none". The strip it replaced showed this as a charge-only pill.
+    const bay = { status: "none" as const, rf: null, battery: null, freq: null, charge: 72 };
+    assert.equal(slotRowsMode(device(bay)), "live");
+    assert.equal(slotRowsMode(device(bay), true), "live", "hideRf keeps the charge");
+  });
+
+  test("an IEM pack's level beside an unbound mic shows its row", () => {
+    assert.equal(slotRowsMode(device({ status: "none", rf: null, battery: null, freq: null, charge: null, iemCharge: 55 })), "live");
+  });
+
+  test("a label on a slot with no live device still wins over a charge level", () => {
+    assert.equal(slotRowsMode(device({ status: "none", rf: null, battery: null, freq: null, charge: 72, label: "VOX 3" })), "offline");
+  });
+
   test("an offline device with no labels at all shows nothing", () => {
     // Device bound but unreachable, nothing manually labeled — the cell stays bare
     // rather than rendering an empty row.
