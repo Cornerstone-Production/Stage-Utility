@@ -385,11 +385,11 @@ export function useStageSettings(pinnedViewId?: string) {
     // own or shares them. The answer always goes with the request, so what the
     // server does by default does not decide it.
     const view = stageState?.views?.find((v) => v.id === id);
-    const how = view ? await askDuplicateView(view) : { copyBoards: false };
+    const how = view ? await askDuplicateView(view) : {};
     if (!how) return null;
     try {
       // The answer is the state and the id of the copy this call made.
-      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id, copyBoards: how.copyBoards });
+      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id, ...how });
       queryClient.setQueryData(["stage:getState"], next);
       if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");

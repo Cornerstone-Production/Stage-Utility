@@ -113,12 +113,13 @@ export function showsBoards(view: View): boolean {
  * Ask how a duplicate of a view treats its mic slot boards. Null when the operator
  * backs out; otherwise whether the copy gets boards of its own.
  *
- * A view that shows no board has nothing to ask, and its copy gets none either way.
+ * A view that shows no board has nothing to ask and sends nothing: its copy gets no
+ * board either way.
  * The default is a copy with its own boards, so editing the copy cannot change the
  * original's slots; sharing is the choice to make, with the box.
  */
-export async function askDuplicateView(view: View): Promise<{ copyBoards: boolean } | null> {
-  if (!showsBoards(view)) return { copyBoards: false };
+export async function askDuplicateView(view: View): Promise<{ copyBoards?: boolean } | null> {
+  if (!showsBoards(view)) return {};
   const { ok, checked } = await confirmWith({
     title: `Duplicate "${view.name}"?`,
     message: "The copy gets its own copy of each mic slot board this view shows, so changing one does not change the other.",

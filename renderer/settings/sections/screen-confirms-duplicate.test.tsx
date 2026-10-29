@@ -32,9 +32,9 @@ const widgetView = {
 } as unknown as View;
 const plainView = { id: "v3", name: "Clock", kind: "custom", createdAt: "", layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] } } as unknown as View;
 
-async function ask(view: View, answer: (() => void) | null): Promise<{ copyBoards: boolean } | null> {
+async function ask(view: View, answer: (() => void) | null): Promise<{ copyBoards?: boolean } | null> {
   render(React.createElement(TooltipProvider, null, React.createElement(ConfirmHost, null)));
-  let result: { copyBoards: boolean } | null | undefined;
+  let result: { copyBoards?: boolean } | null | undefined;
   await act(async () => {
     void askDuplicateView(view).then((r) => (result = r));
   });
@@ -52,7 +52,7 @@ describe("duplicating a view that shows boards", () => {
   });
 
   test("a view with no board has nothing to ask", async () => {
-    assert.deepEqual(await askDuplicateView(plainView), { copyBoards: false });
+    assert.deepEqual(await askDuplicateView(plainView), {}, "and sends no copyBoards");
   });
 
   test("the default is a copy with boards of its own", async () => {
