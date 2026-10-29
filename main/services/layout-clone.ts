@@ -10,7 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { LayoutDTO, LayoutObject, View, ViewKind } from "../types/stage.js";
+import type { LayoutDTO, LayoutObject, ViewKind } from "../types/stage.js";
 import { externKeyed } from "../types/extern-keyed.js";
 
 // Deep-clone an object and its whole subtree, minting a fresh id at every depth.
@@ -35,7 +35,7 @@ export function cloneLayout(l: LayoutDTO): LayoutDTO {
 }
 
 // Like cloneLayoutObject, but records each old→new id so callers can carry
-// per-object side data (e.g. inline mic-slots stored by object id) to the copy.
+// per-object side data (notes, a widget's board pointer) to the copy.
 function cloneLayoutObjectMapped(o: LayoutObject, idMap: Map<string, string>): LayoutObject {
   const id = randomUUID();
   idMap.set(o.id, id);
@@ -52,45 +52,6 @@ export function cloneLayoutWithMap(l: LayoutDTO): { layout: LayoutDTO; idMap: Ma
   const idMap = new Map<string, string>();
   const layout: LayoutDTO = { version: 1, canvas: { ...l.canvas }, objects: l.objects.map((o) => cloneLayoutObjectMapped(o, idMap)) };
   return { layout, idMap };
-}
-
-// Visit every inline mic-slots object id across all custom views' layouts (a
-// `slots-grid` with source "inline"); recurses into container children.
-export function forEachInlineSlotsGrid(views: View[], cb: (objectId: string) => void): void {
-  const walk = (objs: LayoutObject[]): void => {
-    for (const o of objs) {
-      if (o.config.type === "slots-grid" && o.config.source === "inline") cb(o.id);
-      if (o.children?.length) walk(o.children);
-    }
-  };
-  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
-}
-
-/**
- * Every slots-grid object that draws ANOTHER view's slots, with the view it
- * draws.
- *
- * Its slots come from the source view, but its BOX does not: it is a free-dragged
- * rectangle on a custom layout, the same as an inline grid, so nothing
- * server-side knows the shape its photos will be drawn at. Only a standalone
- * slots display knows that. Resolving these separately is what lets them ask for
- * the whole image while the display keeps its column crop.
- *
- * `source` is optional and predates the inline option, so anything that is not
- * explicitly "inline" is a view-sourced grid — the same test the renderer makes.
- */
-export function forEachViewSourcedSlotsGrid(
-  views: View[],
-  cb: (objectId: string, sourceViewId: string) => void,
-): void {
-  const walk = (objs: LayoutObject[]): void => {
-    for (const o of objs) {
-      const c = o.config;
-      if (c.type === "slots-grid" && c.source !== "inline" && c.sourceViewId) cb(o.id, c.sourceViewId);
-      if (o.children?.length) walk(o.children);
-    }
-  };
-  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
 }
 
 /**

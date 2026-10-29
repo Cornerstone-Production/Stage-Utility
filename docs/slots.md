@@ -4,6 +4,12 @@ A slot is one cell on the mic board. It links to a person, optionally binds a
 wireless mic and an IEM pack, and shows a name, photo and live telemetry.
 Slots are edited on a Mic Slots view's own page, opened from Screens.
 
+Slots live on named **boards**, and a Mic Slots view, or a mic-slots object in a
+custom layout, shows one. Several can show the same board: editing the slots of
+any one of them edits every screen showing that board. A copy of a view shows
+the same boards as the original. See [Slots](reference/data-model.md#slots) and
+the [board routes](reference/api.md#slot-boards).
+
 ## The slot editor
 
 The editor is a list of slots in board order, with **Add slot** and **Add spacer**
@@ -42,7 +48,8 @@ width**, 32.25 in to start) so the cells line up with the chargers below them.
 banks and the side margins. A stacked column counts once, by its first slot. The
 panel says how many inches are used of the display's and turns red when the row is
 wider. Without it every column, a spacer's included, takes an equal share of the
-width.
+width. The charger width belongs to the board, so it is shared by every screen
+showing it; the display width is this screen's own.
 
 **Copy slots from**, above the editor, fills this board from another Mic Slots view.
 

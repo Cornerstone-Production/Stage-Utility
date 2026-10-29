@@ -1256,7 +1256,9 @@ export function Inspector({
         </>
       )}
       {c.type === "slots-grid" && (() => {
-        const isInline = (c.source ?? "view") === "inline";
+        // A widget pointing at a board edits that board below the canvas, so it
+        // reads as "Define here" until a view is picked to embed instead.
+        const isInline = (c.source ?? (typeof c.boardId === "string" ? "inline" : "view")) === "inline";
         return (
           <>
             <RowSelect

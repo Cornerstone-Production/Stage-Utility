@@ -284,6 +284,11 @@ async function blankPatch(over: Record<string, unknown> = {}): Promise<void> {
   await patchStore.save({ sheets: [sheet(over)], updatedAt: "" } as never);
 }
 
+/** The board an imported view shows: a fresh id, not the view's. */
+async function boardOf(viewId: string): Promise<string | null | undefined> {
+  return (await viewsStore.load()).find((v) => v.id === viewId)?.boardId;
+}
+
 describe("landing a plan under a different service type", () => {
   beforeEach(async () => {
     await viewsStore.save([] as never);
@@ -293,7 +298,7 @@ describe("landing a plan under a different service type", () => {
 
   test("the boards move to the chosen type, and the report says where from", async () => {
     const report = await applyViewBundle(planBundle(), { serviceTypeId: "st-dst" });
-    const key = report.views[0]!.id;
+    const key = (await boardOf(report.views[0]!.id))!;
     const landed = (await slotsStore.allDefaults())[key]!;
     assert.deepEqual(Object.keys(landed), ["st-dst"], "the board stayed under the file's own type id");
     assert.equal(landed["st-dst"]!.length, 2);
@@ -315,7 +320,7 @@ describe("landing a plan under a different service type", () => {
       { slots: { "view-1": { "st-src": [slotRow("a")], "st-other": [slotRow("b"), slotRow("c")] } } },
     );
     const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.deepEqual(Object.keys(landed).sort(), ["st-dst", "st-other"]);
     assert.equal(landed["st-dst"]!.length, 1, "st-dst got the wrong type's board");
     assert.equal(landed["st-other"]!.length, 2);
@@ -330,7 +335,7 @@ describe("landing a plan under a different service type", () => {
       { slots: { "view-1": { "st-src": [slotRow("a")], "st-dst": [slotRow("b"), slotRow("c")] } } },
     );
     const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.equal(landed["st-dst"]!.length, 1, "the file's own st-dst board overwrote the exported one");
     // And the report counts what is ON DISK, not what was written. Counting
     // writes reported two boards and three rows for one board of one row —
@@ -343,10 +348,10 @@ describe("landing a plan under a different service type", () => {
     // A view export carries every type's boards and names no plan. Re-keying one
     // of them would be picking which, and the file does not say.
     const report = await applyViewBundle(
-      bundle({ sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, serviceCueLayouts: [] } }),
+      bundle({ views: [slotsView("view-1", "Mic Board")], sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, serviceCueLayouts: [] } }),
       { serviceTypeId: "st-dst" },
     );
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.deepEqual(Object.keys(landed), ["st-src"]);
     assert.equal(report.plan, undefined);
   });

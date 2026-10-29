@@ -1,97 +1,73 @@
-// A slots-grid draws in a box only the browser can measure — whichever source
-// it reads.
+// A slots widget draws in a box only the browser can measure — whichever board
+// it shows.
 //
 // PCO's crop is centred and irreversible, so it may only be aimed at a shape
-// something actually knows. A standalone slots DISPLAY is a row of tall columns
-// and the crop is modelled on exactly that. A slots-grid OBJECT on a custom
-// layout is a free-dragged rectangle, and that is true whether it defines its
-// own slots or embeds another view's.
+// something actually knows. A standalone slots SCREEN is a row of tall columns
+// and the crop is modelled on exactly that. A slots WIDGET on a custom layout is
+// a free-dragged rectangle, and that stays true when it shows the same board as
+// a screen does: the two must resolve differently from one set of rows.
 //
-// The first pass gave "whole" only to inline grids, which left a view-sourced
-// grid strictly worse than before: still cropped to a column, and no longer
-// rescued by the `contain` rule that had been removed in the same change. A
-// 158x1000 strip drawn with cover in a 260x175 cell shows about a tenth of a
-// face.
-//
-// `source` is optional and predates the inline option, so "not inline" is the
-// test — an older grid carrying no source at all is view-sourced.
+// Driven through the controller's real resolution rather than by reading its
+// source: an earlier version of this file matched a regex over
+// stage-controller.ts, which a comment naming the right call could satisfy.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, test } from "node:test";
 
-import { forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
-import type { View } from "../types/views.js";
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-grid-crop-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
 
-const grid = (id: string, source: string | undefined, sourceViewId: string | null) => ({
-  id, x: 0, y: 0, w: 0.5, h: 0.3, z: 1,
-  config: { type: "slots-grid", ...(source ? { source } : {}), sourceViewId },
-});
+const { stageController } = await import("./stage-controller.js");
 
-const views = [{
-  id: "v", name: "V", kind: "custom", ndiSource: null, createdAt: "", surface: "console",
-  layout: { version: 1, canvas: { width: 1920, height: 1080, background: null }, objects: [
-    grid("inline-1", "inline", null),
-    grid("view-1", "view", "slots-a"),
-    grid("legacy-1", undefined, "slots-b"),          // predates `source`
-    { id: "wrap", x: 0, y: 0, w: 1, h: 1, z: 2, config: { type: "container" },
-      children: [grid("nested-view", "view", "slots-c")] },
-  ] },
-}] as unknown as View[];
-
-const collect = (fn: (v: View[], cb: (id: string, src: string) => void) => void) => {
-  const out: string[] = [];
-  fn(views, (id) => out.push(id));
-  return out.sort();
+type Held = {
+  state: StageState;
+  rawSlotsByBoard: Map<string, Slot[]>;
+  teamMembers: TeamMemberDTO[];
+  recomputeResolved: () => void;
 };
+const ctl = stageController as unknown as Held;
 
-describe("which grids get the whole image", () => {
-  test("inline grids are found, and only those", () => {
-    assert.deepEqual(collect(forEachInlineSlotsGrid as never), ["inline-1"]);
-  });
+const PHOTO = "https://avatars.example.com/people/1/face.jpg";
+const vocalsSlot = { id: "s1", channel: "1", order: 0, link: { kind: "pco", matchBy: "position", positions: [{ name: "Vocals" }] } } as unknown as Slot;
+const grid = (id: string, boardId: string) => ({ id, x: 0, y: 0, w: 0.5, h: 0.3, z: 1, config: { type: "slots-grid", boardId } });
 
-  test("a grid embedding a view is found too — it is the same free-dragged box", () => {
-    assert.deepEqual(collect(forEachViewSourcedSlotsGrid as never), ["legacy-1", "nested-view", "view-1"]);
-  });
+function resolveWith(views: View[]): StageState {
+  ctl.teamMembers = [{ id: "tm1", personId: "p1", name: "Ana", photoUrl: PHOTO, teamPositionName: "Vocals", teamName: "Band", status: "C", notes: null }];
+  ctl.rawSlotsByBoard.set("b-shared", [vocalsSlot]);
+  ctl.state = { ...ctl.state, views };
+  ctl.recomputeResolved();
+  return ctl.state;
+}
 
-  test("a grid with no `source` counts as view-sourced, matching the renderer", () => {
-    assert.ok(collect(forEachViewSourcedSlotsGrid as never).includes("legacy-1"));
+describe("which slots get the whole image", () => {
+  const views = [
+    { id: "wall", name: "Wall", kind: "slots", ndiSource: null, createdAt: "", boardId: "b-shared" },
+    {
+      id: "pad", name: "Pad", kind: "custom", ndiSource: null, createdAt: "", surface: "console",
+      layout: { version: 1, canvas: { width: 1920, height: 1080, background: null }, objects: [
+        grid("top", "b-shared"),
+        { id: "wrap", x: 0, y: 0, w: 1, h: 1, z: 2, config: { type: "container" }, children: [grid("nested", "b-shared")] },
+      ] },
+    },
+  ] as unknown as View[];
+
+  test("a widget asks for the whole image, keyed by its object", () => {
+    const state = resolveWith(views);
+    const url = state.slotsByLayoutObject.top?.[0]?.photoUrl ?? "";
+    assert.match(url, /g=1000x1000(?!%23)/, "a widget is cropped to a guessed column shape");
   });
 
   test("nesting does not hide one", () => {
-    assert.ok(collect(forEachViewSourcedSlotsGrid as never).includes("nested-view"));
+    const state = resolveWith(views);
+    assert.match(state.slotsByLayoutObject.nested?.[0]?.photoUrl ?? "", /g=1000x1000(?!%23)/);
   });
 
-  test("the two walks never claim the same object", () => {
-    const a = new Set(collect(forEachInlineSlotsGrid as never));
-    for (const id of collect(forEachViewSourcedSlotsGrid as never)) {
-      assert.ok(!a.has(id), `${id} would be resolved twice, and the second write wins silently`);
-    }
-  });
-
-  test("the source view is reported, or its slots cannot be found", () => {
-    const pairs: string[] = [];
-    forEachViewSourcedSlotsGrid(views, (id, src) => pairs.push(`${id}->${src}`));
-    assert.deepEqual(pairs.sort(), ["legacy-1->slots-b", "nested-view->slots-c", "view-1->slots-a"]);
-  });
-});
-
-describe("the controller wires both to the whole image", () => {
-  // Without this, either walk can be dropped from recomputeResolved and every
-  // test above stays green while the photos go back to being column-cropped.
-  test("resolves view-sourced grids by object id, with \"whole\"", () => {
-    const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
-    const call = /forEachViewSourcedSlotsGrid\(([\s\S]*?)\n {4}\}\);/.exec(src);
-    assert.ok(call, "view-sourced grids are not resolved at all");
-    assert.match(call[1], /slotsByLayoutObject\[oid\]/, "not keyed by object, so it cannot differ from the display");
-    assert.match(call[1], /"whole"/, "view-sourced grids are still cropped to a guessed shape");
-  });
-
-  test("and the display keeps its column crop", () => {
-    const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
-    // Every resolution goes through the controller's resolve() helper.
-    const call = /slotsByView\[view\.id\] = this\.resolve\(([^;]*)\)/.exec(src);
-    assert.ok(call, "could not find the view slots resolution");
-    assert.doesNotMatch(call[1], /"whole"/, "a display should keep its byte saving");
+  test("a screen showing the same board keeps its column crop", () => {
+    const state = resolveWith(views);
+    assert.match(state.slotsByView.wall?.[0]?.photoUrl ?? "", /%23/, "a display lost its byte-saving column crop");
   });
 });

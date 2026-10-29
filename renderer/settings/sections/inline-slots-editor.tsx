@@ -209,7 +209,7 @@ export function InlineSlotsEditor({
     const view = slotsViews.find((v) => v.id === viewId);
     const src = state?.slotsByView?.[viewId] ?? [];
     setLocalSlots(src.map((s, i) => ({ ...s, id: freshSlotId(), order: i })));
-    onSetLayout(view?.slotsLayout ?? null);
+    onSetLayout(view ? (state?.slotsLayoutByView?.[view.id] ?? null) : null);
     setDirty(true);
   }
 
@@ -321,7 +321,9 @@ export function InlineSlotsEditor({
         </div>
       )}
 
-      <AlignmentPanel layout={slotsLayout} slots={localSlots} onChange={onSetLayout} />
+      {/* The widget's own unsaved alignment, else what the server resolved for it:
+          its display width with its board's column width. */}
+      <AlignmentPanel layout={slotsLayout ?? state?.slotsLayoutByLayoutObject?.[objectId] ?? null} slots={localSlots} onChange={onSetLayout} />
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={groups.map((g) => g.slots[0].id)} strategy={verticalListSortingStrategy}>

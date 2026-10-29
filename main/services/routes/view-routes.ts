@@ -24,7 +24,7 @@ import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BY
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, ViewSlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
 import { isSelectionList } from "../../types/calendar.js";
@@ -360,9 +360,29 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name);
+      // `copyBoards: true` gives the copy boards of its own; by default it shows
+      // the same boards as the original.
+      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name, { copyBoards: body.copyBoards === true });
       // The copy this call made, beside the state, as POST /api/outputs answers.
       json(res, { ...state, viewId: view.id }, 201);
+      return;
+    }
+
+    // PUT /api/views/:id/board — { boardId: string | null }: point a slots screen
+    // at a board, or at none.
+    const viewBoardMatch = pathname.match(/^\/api\/views\/([^/]+)\/board$/);
+    if (method === "PUT" && viewBoardMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      const boardId = body?.boardId;
+      if (boardId !== null && (typeof boardId !== "string" || !boardId)) {
+        error(res, "body.boardId (a board id, or null for none) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setViewBoard(decodeURIComponent(viewBoardMatch[1]), boardId));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
@@ -516,6 +536,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
             json(res, { error: err.message, code: err.code, currentRev: err.currentRev }, 409);
             return;
           }
+          // A slots widget pointing at a board that does not exist.
+          if (err instanceof SlotsNotFoundError) {
+            error(res, err.message, err.status);
+            return;
+          }
           throw err;
         }
       }
@@ -527,7 +552,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       if (hasSurface) state = await stageController.setViewSurface(id, surface);
       if (surface !== "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
-      if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
+      if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as ViewSlotsLayout | null);
       if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (hasShowInSidebar) state = await stageController.setViewShowInSidebar(id, body.showInSidebar as boolean);

@@ -1635,10 +1635,14 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
-  // The selected object iff it's an inline mic-slots grid (config narrowed so the
-  // inline slot editor below the canvas gets its id + alignment).
+  // The selected object iff it's a mic-slots grid with slots to edit here (config
+  // narrowed so the slot editor below the canvas gets its id + alignment): one
+  // set to "Define here", or one pointing at a board, whose board the editor
+  // below edits through the widget.
   const inlineGrid =
-    selected && selected.config.type === "slots-grid" && (selected.config.source ?? "view") === "inline"
+    selected &&
+    selected.config.type === "slots-grid" &&
+    (selected.config.source === "inline" || (selected.config.source === undefined && typeof selected.config.boardId === "string"))
       ? { id: selected.id, config: selected.config }
       : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).

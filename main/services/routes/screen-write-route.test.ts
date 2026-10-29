@@ -749,41 +749,42 @@ describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen 
   });
 
   it("a delete that fails releases the view: it can be pointed at again afterwards", async () => {
-    // The reservation must not outlive the delete. The view's inline slots fail to be
-    // cleaned up, so the delete rejects before the view leaves the state.
+    // The reservation must not outlive the delete. The notes its objects held fail
+    // to be cleaned up, so the delete rejects before the view leaves the state.
     const inline = {
       id: "inline-f", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
       layout: { ...layout, objects: [{ id: "grid-f", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
     };
     ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
-    const { slotsStore } = await import("../slots-store.js");
-    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
-    const real = store.removeDisplay.bind(slotsStore);
-    store.removeDisplay = async () => { throw new Error("disk full"); };
+    const { notesStore } = await import("../notes-store.js");
+    const store = notesStore as unknown as { forget: (ids: string[]) => Promise<unknown> };
+    const real = store.forget.bind(notesStore);
+    store.forget = async () => { throw new Error("disk full"); };
     try {
       await assert.rejects(() => stageController.deleteView("inline-f", { ifUnshown: true }), /disk full/);
     } finally {
-      store.removeDisplay = real;
+      store.forget = real;
     }
     assert.equal(views().some((v) => v.id === "inline-f"), true, "the view was removed by a delete that failed");
     const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline-f" } });
     assert.equal(routed.status, 200, `the view is still reserved after its delete failed: ${JSON.stringify(routed.json)}`);
   });
 
-  it("a view being deleted cannot be pointed at while its inline slots are cleaned up: not by routing, not by a new screen", async () => {
+  it("a view being deleted cannot be pointed at while its objects are cleaned up: not by routing, not by a new screen", async () => {
     // The window is the await in deleteView before the view leaves the state. A
-    // view with an inline slots grid has one; hold it open and try both writes.
+    // view with layout objects has one (their notes are forgotten); hold it open
+    // and try both writes.
     const inline = {
       id: "inline", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
       layout: { ...layout, objects: [{ id: "grid-1", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
     };
     ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
-    const { slotsStore } = await import("../slots-store.js");
-    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
-    const real = store.removeDisplay.bind(slotsStore);
+    const { notesStore } = await import("../notes-store.js");
+    const store = notesStore as unknown as { forget: (ids: string[]) => Promise<unknown> };
+    const real = store.forget.bind(notesStore);
     let release!: () => void;
     const held = new Promise<void>((r) => { release = r; });
-    store.removeDisplay = async (id: string) => { await held; return real(id); };
+    store.forget = async (ids: string[]) => { await held; return real(ids); };
     const deleting = del("/api/views/inline?ifUnshown=1");
     try {
       await new Promise((r) => setTimeout(r, 5));
@@ -794,7 +795,7 @@ describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen 
       assert.equal(made.status, 400, JSON.stringify(made.json));
     } finally {
       release();
-      store.removeDisplay = real;
+      store.forget = real;
     }
     assert.equal((await deleting).status, 200);
     assert.equal(outputs().find((o) => o.id === "display-1")?.viewId, "wall-a", "a screen was pointed at a view that is gone");

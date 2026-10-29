@@ -1,7 +1,19 @@
 // Single source of truth for all stage state.
 // Every mutating method ends with broadcast("stage:state-changed").
 
-import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
+import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName } from "./layout-clone.js";
+import {
+  effectiveSlotsLayout,
+  forEachSlotsGrid,
+  gridBoardId,
+  gridDisplayWidthIn,
+  hasLegacyGridFields,
+  migrateBoards,
+  positiveOrNull,
+  viewBoardId,
+} from "./slot-boards.js";
+import { checkBoards } from "./board-check.js";
+import { walkLayoutObjects } from "./view-refs.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { asMigratedConsole, findLeftoverCopy, planScreenRoles } from "./screen-role-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
@@ -65,7 +77,7 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -77,7 +89,7 @@ import { iconToSettings, type AppIconInput } from "./app-icon.js";
 import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
-import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
+import { slotsStore, describeSlotsTarget, type SlotsOverride, type SlotsTarget, type SlotsWrite } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
@@ -400,6 +412,8 @@ export class StageController {
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
+    slotsLayoutByView: {},
+    slotsLayoutByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
     pcoConfigured: false,
@@ -477,12 +491,13 @@ export class StageController {
     // reads the roster through.
     return Array.isArray(this.teamMembers) ? this.teamMembers.map((m) => ({ ...m })) : [];
   }
-  // Raw (un-resolved) slot configs per VIEW id, resolved for the ACTIVE service
-  // type AND the current plan (a board can be saved against one plan).
-  private rawSlotsByView = new Map<string, Slot[]>();
-  // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,
-  // for the same target. Resolved into state.slotsByLayoutObject.
-  private rawSlotsByObject = new Map<string, Slot[]>();
+  // Raw (un-resolved) slots per BOARD id, for the ACTIVE service type AND the
+  // current plan (a board can have a layout saved against one plan). Every
+  // screen and widget showing a board is resolved from its one entry here.
+  private rawSlotsByBoard = new Map<string, Slot[]>();
+  // Every board's name and column width, as slots.json holds them. Read at boot
+  // and after every board write; recomputeResolved reads it synchronously.
+  private boards = new Map<string, SlotBoardMeta>();
   /** The current plan's PCO `sort_date`, stamped onto any override saved for it
    *  so pruning can date the override without asking PCO. Set by applyPlan, so
    *  it is null between a cold start and the first plan selection or refresh —
@@ -624,7 +639,10 @@ export class StageController {
     const kioskDiscovery = settings.kioskDiscovery ?? false;
     const autoUpdateMachines = settings.autoUpdateMachines ?? true;
 
-    const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
+    const loaded = await this.loadOrMigrateViewsAndOutputs(settings);
+    const outputs = loaded.outputs;
+    // After every views pass, so the boards migration sees the final list.
+    const views = await this.migrateSlotBoards(loaded.views);
 
     // Every install that predates id floors has ids and no floor, and a missing
     // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
@@ -710,6 +728,7 @@ export class StageController {
     this.startUpdateChecks();
     this.startSlotsPruning();
 
+    this.boards = await slotsStore.listBoards();
     await this.loadAllViewRawSlots(settings.serviceTypeId, settings.planId);
     this.recomputeResolved();
 
@@ -729,6 +748,67 @@ export class StageController {
         600,
       ),
     );
+  }
+
+  /**
+   * Move slots.json and the views onto named boards (slot-boards.ts), and save
+   * both — views first, then slots — only once the whole migration has been
+   * worked out. Idempotent, so it runs every boot and costs nothing once done.
+   *
+   * Views first because that order survives a crash between the two writes: the
+   * views then point at board ids that are still the v3 keys, and the next boot
+   * migrates the v3 slots onto them exactly as before. The other order could
+   * leave a view pointing (by its v3 shape) at a key a merge had removed.
+   *
+   * A failure leaves both files as they were, says so, and boots on the old
+   * shapes, which the pointer helpers read the way the migration would point them.
+   */
+  private async migrateSlotBoards(views: View[]): Promise<View[]> {
+    const unreadable = viewsStore.refusingSaves() ?? slotsStore.refusingSaves();
+    if (unreadable) {
+      console.error(
+        `[slots-store] ${scrub(unreadable.message)}; the slot boards migration is skipped until a restart reads it`,
+      );
+      return views;
+    }
+    const before = await slotsStore.loadFile();
+    let result: ReturnType<typeof migrateBoards>;
+    try {
+      result = migrateBoards(views, before, new Date().toISOString());
+    } catch (err) {
+      console.error(
+        "[slots-store] could not work out the slot boards migration; slots.json and views.json are unchanged and this boot runs on the old shapes:",
+        scrubError(err),
+      );
+      return views;
+    }
+    if (!result.changed) return views;
+    try {
+      await viewsStore.save(result.views);
+      try {
+        await slotsStore.replaceFile(result.file);
+      } catch (err) {
+        // Put the views back, so neither file is half-migrated. If that fails
+        // too, the views point at board ids that are still the v3 keys, which
+        // the next boot migrates onto as usual (see above) — and the line below
+        // says which of the two happened.
+        const putBack = await viewsStore.save(views).then(() => null, (e: unknown) => e);
+        if (!putBack) throw err;
+        throw new Error(
+          `${errorMessage(err)}; views.json could not be put back either (${errorMessage(putBack)}), ` +
+            "so it already points at the boards and the next boot finishes the migration",
+          { cause: err },
+        );
+      }
+    } catch (err) {
+      console.error(
+        "[slots-store] could not save the slot boards migration; slots.json and views.json are unchanged and this boot runs on the old shapes:",
+        scrubError(err),
+      );
+      return views;
+    }
+    for (const line of result.log) console.log(`[slots-store] ${scrub(line)}`);
+    return result.views;
   }
 
   /**
@@ -935,8 +1015,9 @@ export class StageController {
       if (copy) {
         reused.push(`reused the copy left by an interrupted upgrade: "${copy.name}"`);
       } else {
+        // The copy shows the same boards as the view it copies, as any
+        // duplicate does: it is the same content on another screen.
         const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
-        await this.copyViewSlotConfig(src, cloned.copy, cloned.cloned);
         copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" };
         nextViews = [...nextViews, copy];
       }
@@ -2321,28 +2402,36 @@ export class StageController {
   }
 
   /**
-   * Throw unless `key` names something that exists.
+   * The board a slot write or read names, or a throw saying why there is none.
    *
-   * Every slots route took an arbitrary id and answered 200, so `POST
+   * "board" must name a board. "view" and "object" are the older aliases, kept
+   * for the phone control page, Companion and every script written against them:
+   * a slots screen or a slots widget, meaning the board it shows. Every slots
+   * route used to take an arbitrary id and answer 200, so `POST
    * /api/views/typo/slots` wrote a board under a key nothing would ever read and
-   * reported success. A view id is checked against the view list; an object id
-   * against every inline slots-grid on every custom layout, which is the only
-   * place an inline board legitimately comes from.
+   * reported success; an unknown id is still refused here.
    */
-  private assertSlotsKey(scope: SlotsScope, key: string): void {
+  private boardFor(scope: SlotsScope, key: string): string {
+    if (scope === "board") {
+      if (!this.boards.has(key)) throw new SlotsNotFoundError(`There is no board ${key}.`);
+      return key;
+    }
     if (scope === "view") {
-      if (!this.state.views.some((v) => v.id === key)) {
-        throw new SlotsNotFoundError(`There is no view ${key}.`);
-      }
-      return;
+      const view = this.state.views.find((v) => v.id === key);
+      if (!view) throw new SlotsNotFoundError(`There is no view ${key}.`);
+      const boardId = viewBoardId(view);
+      if (!boardId) throw new SlotsNotFoundError(`View ${key} is not a slots screen, so it shows no board.`);
+      return boardId;
     }
-    let found = false;
-    forEachInlineSlotsGrid(this.state.views, (oid) => {
-      if (oid === key) found = true;
+    let found: string | null | undefined;
+    forEachSlotsGrid(this.state.views, (oid, config) => {
+      if (oid === key) found = gridBoardId(config, oid);
     });
-    if (!found) {
-      throw new SlotsNotFoundError(`There is no inline mic-slots object ${key} on any layout.`);
+    if (found === undefined) {
+      throw new SlotsNotFoundError(`There is no mic-slots object ${key} on any layout.`);
     }
+    if (found === null) throw new SlotsNotFoundError(`Mic-slots object ${key} shows no board.`);
+    return found;
   }
 
   /**
@@ -2389,15 +2478,17 @@ export class StageController {
   }
 
   /**
-   * Persist a slot set to one target, then re-read what the screens should show.
+   * Persist a slot set to one target of one board, then re-read what the
+   * screens should show.
    *
    * The in-memory rows are RE-RESOLVED from the store rather than set to what was
    * just written: saving the service type's default while a plan override is in
    * effect must not change a single screen, and assigning the written rows
    * straight into the map is exactly how it would have.
    *
-   * One body for both the view-keyed and object-keyed cases — they were two
-   * copies of this that had already drifted in their log lines.
+   * One body for the board and both of its aliases — the view-keyed and
+   * object-keyed cases were two copies of this that had already drifted in their
+   * log lines.
    */
   private async persistSlots(
     scope: SlotsScope,
@@ -2405,21 +2496,22 @@ export class StageController {
     slots: Slot[],
     target: SlotsTarget | null,
   ): Promise<StageState> {
-    this.assertSlotsKey(scope, key);
+    const boardId = this.boardFor(scope, key);
     if (target) await this.assertTargetPlanBelongs(target);
-    const map = scope === "view" ? this.rawSlotsByView : this.rawSlotsByObject;
     if (!target) {
-      // Two whole literals rather than one line with `${label}` spliced in. The
+      // Literal lines rather than one line with `${label}` spliced in. The
       // method name and the scope are ours, not a request's — but log-injection's
       // scan reads source and cannot know that, and a guard whose only failures
       // are false ones stops being read. Every VALUE here still goes through
       // scrub().
       if (scope === "view") {
         console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
-      } else {
+      } else if (scope === "object") {
         console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
+      } else {
+        console.log("[stage-controller] setBoardSlots: no active service type — slots not persisted");
       }
-      map.set(key, stripResolvedFields(slots));
+      this.rawSlotsByBoard.set(boardId, stripResolvedFields(slots));
     } else {
       // scrub() is spelled out INSIDE each interpolation, not hoisted into a
       // local. log-injection.test.ts reads source and only recognises the
@@ -2427,109 +2519,106 @@ export class StageController {
       // stops being read.
       if (scope === "view") {
         console.log(
-          `[stage-controller] setViewSlots (${scrub(slots.length)} slots) for view=${scrub(key)} target=${scrub(describeSlotsTarget(target))}`,
+          `[stage-controller] setViewSlots (${scrub(slots.length)} slots) for view=${scrub(key)} board=${scrub(boardId)} target=${scrub(describeSlotsTarget(target))}`,
+        );
+      } else if (scope === "object") {
+        console.log(
+          `[stage-controller] setLayoutObjectSlots (${scrub(slots.length)} slots) for object=${scrub(key)} board=${scrub(boardId)} target=${scrub(describeSlotsTarget(target))}`,
         );
       } else {
         console.log(
-          `[stage-controller] setLayoutObjectSlots (${scrub(slots.length)} slots) for object=${scrub(key)} target=${scrub(describeSlotsTarget(target))}`,
+          `[stage-controller] setBoardSlots (${scrub(slots.length)} slots) for board=${scrub(boardId)} target=${scrub(describeSlotsTarget(target))}`,
         );
       }
-      if (target.kind === "default") {
-        await slotsStore.setDefault(key, target.serviceTypeId, slots);
-      } else {
-        // A client naming the current plan does not know its PCO sort_date, and
-        // an override with no date is one pruning can never age out — so fill it
-        // in here, where it is known, rather than trusting the request for it.
-        const sortDate =
-          target.sortDate ??
-          (target.planId === this.state.planId ? this.currentPlanSortDate : null);
-        if (sortDate === null) {
-          // Recoverable, not lost: the daily prune dates an undated override by
-          // asking Planning Center about the plan. Said out loud because the
-          // alternative is an operator finding an override that never ages out
-          // and having nothing at all to read about why.
-          console.log(
-            `[slots] override for plan ${scrub(target.planId)} saved without a date; prune will ask Planning Center for it`,
-          );
-        }
-        await slotsStore.setOverride(key, target.planId, target.serviceTypeId, slots, sortDate);
-      }
-      map.set(key, await slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId));
+      await slotsStore.saveMany([{ boardId, target: this.datedTarget(target), slots }]);
+      this.rawSlotsByBoard.set(boardId, await this.rawFor(boardId));
     }
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
-  }
-
-  /** Persist + apply a slots-kind View's slot configuration, then re-resolve and
-   *  broadcast. `target` defaults to the current plan, else the type's default. */
-  async setViewSlots(viewId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
-    return this.persistSlots("view", viewId, slots, target ?? this.defaultSlotsTarget());
-  }
-
-  /** Persist + apply an inline mic-slots object's slot configuration (a custom
-   *  layout `slots-grid` with source "inline"), keyed by the layout object's id. */
-  async setLayoutObjectSlots(objectId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
-    return this.persistSlots("object", objectId, slots, target ?? this.defaultSlotsTarget());
-  }
-
-  /** Drop one plan's override, so the key falls back to the type's default
-   *  ("Revert to default"). Rejects when there was nothing to revert, rather than
-   *  reporting a revert that changed nothing. */
-  async clearSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
-    this.assertSlotsKey(scope, key);
-    const cleared = await slotsStore.clearOverride(key, planId);
-    if (!cleared) {
-      throw new SlotsNotFoundError(
-        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to revert.`,
-      );
-    }
-    if (scope === "view") {
-      console.log(
-        `[stage-controller] clearSlotsOverride for view=${scrub(key)} target=${scrub(`plan:${planId}`)}`,
-      );
-    } else {
-      console.log(
-        `[stage-controller] clearSlotsOverride for object=${scrub(key)} target=${scrub(`plan:${planId}`)}`,
-      );
-    }
-    return this.refreshRawSlotsFor(scope, key);
-  }
-
-  /** Make a plan's override the service type's default and drop the override
-   *  ("Set as default"). */
-  async promoteSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
-    this.assertSlotsKey(scope, key);
-    const promoted = await slotsStore.promoteOverride(key, planId);
-    if (!promoted) {
-      throw new SlotsNotFoundError(
-        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to promote.`,
-      );
-    }
-    if (scope === "view") {
-      console.log(
-        `[stage-controller] promoteSlotsOverride (${scrub(promoted.slots.length)} slots) for view=${scrub(key)} target=${scrub(`default:${promoted.serviceTypeId}`)}`,
-      );
-    } else {
-      console.log(
-        `[stage-controller] promoteSlotsOverride (${scrub(promoted.slots.length)} slots) for object=${scrub(key)} target=${scrub(`default:${promoted.serviceTypeId}`)}`,
-      );
-    }
-    return this.refreshRawSlotsFor(scope, key);
-  }
-
-  /** Re-read one key's rows from the store and broadcast. */
-  private async refreshRawSlotsFor(scope: SlotsScope, key: string): Promise<StageState> {
-    const map = scope === "view" ? this.rawSlotsByView : this.rawSlotsByObject;
-    map.set(key, await slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId));
     this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
   /**
-   * Both boards for a key, so the editor can show either without a second call:
-   * the service type's default, and the current plan's override when it has one.
+   * A plan target with its PCO sort_date filled in where it is known.
+   *
+   * A client naming the current plan does not know its date, and an override
+   * with no date is one pruning can never age out — so it is filled in here,
+   * where it is known, rather than trusted from the request.
+   */
+  private datedTarget(target: SlotsTarget): SlotsTarget {
+    if (target.kind !== "plan") return target;
+    const sortDate =
+      target.sortDate ?? (target.planId === this.state.planId ? this.currentPlanSortDate : null);
+    if (sortDate === null) {
+      // Recoverable, not lost: the daily prune dates an undated override by
+      // asking Planning Center about the plan. Said out loud because the
+      // alternative is an operator finding an override that never ages out
+      // and having nothing at all to read about why.
+      console.log(
+        `[slots] override for plan ${scrub(target.planId)} saved without a date; prune will ask Planning Center for it`,
+      );
+    }
+    return { ...target, sortDate };
+  }
+
+  /** Persist + apply the slots of the board a slots-kind View shows, then
+   *  re-resolve and broadcast. `target` defaults to the current plan, else the
+   *  type's default. */
+  async setViewSlots(viewId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
+    return this.persistSlots("view", viewId, slots, target ?? this.defaultSlotsTarget());
+  }
+
+  /** The same for the board a slots widget (a custom layout `slots-grid`) shows,
+   *  named by the layout object's id. */
+  async setLayoutObjectSlots(objectId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
+    return this.persistSlots("object", objectId, slots, target ?? this.defaultSlotsTarget());
+  }
+
+  /** Drop one plan's override, so the board falls back to the type's default
+   *  ("Revert to default"). Rejects when there was nothing to revert, rather than
+   *  reporting a revert that changed nothing. */
+  async clearSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
+    const boardId = this.boardFor(scope, key);
+    const cleared = await slotsStore.clearOverride(boardId, planId);
+    if (!cleared) {
+      throw new SlotsNotFoundError(
+        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to revert.`,
+      );
+    }
+    console.log(
+      `[stage-controller] clearSlotsOverride for board=${scrub(boardId)} (${scrub(scope)} ${scrub(key)}) target=${scrub(`plan:${planId}`)}`,
+    );
+    return this.refreshRawSlotsFor(boardId);
+  }
+
+  /** Make a plan's override the service type's default and drop the override
+   *  ("Set as default"). */
+  async promoteSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
+    const boardId = this.boardFor(scope, key);
+    const promoted = await slotsStore.promoteOverride(boardId, planId);
+    if (!promoted) {
+      throw new SlotsNotFoundError(
+        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to promote.`,
+      );
+    }
+    console.log(
+      `[stage-controller] promoteSlotsOverride (${scrub(promoted.slots.length)} slots) for board=${scrub(boardId)} (${scrub(scope)} ${scrub(key)}) target=${scrub(`default:${promoted.serviceTypeId}`)}`,
+    );
+    return this.refreshRawSlotsFor(boardId);
+  }
+
+  /** Re-read one board's rows from the store and broadcast. */
+  private async refreshRawSlotsFor(boardId: string): Promise<StageState> {
+    this.rawSlotsByBoard.set(boardId, await this.rawFor(boardId));
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Both layouts for a board, so the editor can show either without a second
+   * call: the service type's default, and the current plan's override when it
+   * has one.
    *
    * One request rather than a route per target — the editor needs the pair at
    * once anyway, to know whether to badge the plan side as edited.
@@ -2539,7 +2628,7 @@ export class StageController {
     key: string,
     want?: { serviceTypeId?: string | null; planId?: string | null },
   ): Promise<SlotTargetsDTO> {
-    this.assertSlotsKey(scope, key);
+    const boardId = this.boardFor(scope, key);
     // Absent `want` means the machine's own type and plan — what every caller
     // did before the editor could be pointed somewhere else. A `want` naming a
     // type and no plan is the type's DEFAULT board, not "fall back to the
@@ -2550,10 +2639,11 @@ export class StageController {
     const planId = asked ? (want.planId ?? null) : this.state.planId;
     const isCurrent = planId !== null && planId === this.state.planId;
     const row = isCurrent ? null : this.cachedUpcoming(planId);
-    const override = serviceTypeId && planId ? await slotsStore.getOverride(key, planId) : null;
+    const override = serviceTypeId && planId ? await slotsStore.getOverride(boardId, planId) : null;
     return {
       scope,
       key,
+      boardId,
       serviceTypeId,
       // The switcher's own list is the only place a NON-current plan's name and
       // date are known without another Planning Center request, and the editor
@@ -2565,12 +2655,296 @@ export class StageController {
       planId,
       planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
       planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),
-      defaultSlots: serviceTypeId ? await slotsStore.getDefault(key, serviceTypeId) : [],
+      defaultSlots: serviceTypeId ? await slotsStore.getDefault(boardId, serviceTypeId) : [],
       // A record saved against a DIFFERENT service type is not this type's
       // override, and offering it as one would let a revert discard a board the
       // operator cannot see.
       overrideSlots: override && override.serviceTypeId === serviceTypeId ? override.slots : null,
     };
+  }
+
+  // ── Slot boards ──────────────────────────────────────────────────────
+
+  /**
+   * Make a board and remember it. `id` is given only where a board's id must be
+   * a v3 key (a widget saved by an editor from before boards); every other board
+   * gets a fresh `b-<uuid>`.
+   */
+  private async newBoard(
+    name: string,
+    forWhat: string,
+    opts: {
+      id?: string;
+      columnWidthIn?: number | null;
+      layouts?: { defaults?: Map<string, Slot[]> | null; overrides?: Map<string, SlotsOverride> | null };
+    } = {},
+  ): Promise<string> {
+    const id = opts.id ?? `b-${randomUUID()}`;
+    const meta: SlotBoardMeta = { name, columnWidthIn: opts.columnWidthIn ?? null, createdAt: new Date().toISOString() };
+    await slotsStore.createBoard(id, meta, opts.layouts);
+    this.boards.set(id, meta);
+    console.log(`[boards] created "${scrub(name)}" (${scrub(id)}) for ${scrub(forWhat)}`);
+    return id;
+  }
+
+  /** Copy a board under a new id and name; the new id. */
+  private async duplicateBoardRecord(srcId: string, name: string): Promise<string> {
+    const id = `b-${randomUUID()}`;
+    const src = this.boards.get(srcId);
+    const meta: SlotBoardMeta = { name, columnWidthIn: src?.columnWidthIn ?? null, createdAt: new Date().toISOString() };
+    if (!(await slotsStore.duplicateBoard(srcId, id, meta, () => randomUUID()))) {
+      throw new SlotsNotFoundError(`There is no board ${srcId}.`);
+    }
+    this.boards.set(id, meta);
+    console.log(
+      `[boards] duplicated "${scrub(src?.name ?? srcId)}" (${scrub(srcId)}) as "${scrub(name)}" (${scrub(id)})`,
+    );
+    return id;
+  }
+
+  /** Everywhere a board is shown, in view order. */
+  private boardShownOn(boardId: string): SlotBoardShownOn[] {
+    const out: SlotBoardShownOn[] = [];
+    for (const v of this.state.views) {
+      if (v.kind === "slots" && viewBoardId(v) === boardId) out.push({ kind: "view", id: v.id, name: v.name, viewId: v.id });
+    }
+    forEachSlotsGrid(this.state.views, (oid, config, v) => {
+      if (gridBoardId(config, oid) === boardId) out.push({ kind: "object", id: oid, name: v.name, viewId: v.id });
+    });
+    return out;
+  }
+
+  /** A board's name for a message, or its id when there is no such board. */
+  describeBoard(boardId: string): string {
+    return this.boards.get(boardId)?.name ?? boardId;
+  }
+
+  /** `GET /api/boards`: every board, by name, with where each is shown. */
+  listBoards(): SlotBoardDTO[] {
+    return [...this.boards]
+      .map(([id, b]) => ({ id, name: b.name, columnWidthIn: b.columnWidthIn, createdAt: b.createdAt, shownOn: this.boardShownOn(id) }))
+      .sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
+  }
+
+  /** A name a board may have: trimmed and not blank. */
+  private boardName(name: unknown): string {
+    const trimmed = typeof name === "string" ? name.trim() : "";
+    if (!trimmed) throw new SlotsNotFoundError("A board needs a name.", 400);
+    return trimmed;
+  }
+
+  /**
+   * `POST /api/boards`: a new board, blank, a copy of a board, or holding a saved
+   * layout. A saved layout is one slot list, so it goes under one target — the
+   * one named, else the current service type's default. Answers the new id.
+   */
+  async createBoard(
+    rawName: unknown,
+    from?: { boardId: string } | { presetId: string },
+    target?: SlotsTarget,
+  ): Promise<string> {
+    const name = this.boardName(rawName);
+    if (from && "boardId" in from) {
+      this.boardFor("board", from.boardId);
+      return this.duplicateBoardRecord(from.boardId, name);
+    }
+    if (from && "presetId" in from) {
+      const preset = (await presetsStore.load()).find((p) => p.id === from.presetId);
+      if (!preset) throw new SlotsNotFoundError(`There is no saved layout ${from.presetId}.`);
+      const into = target ?? (this.state.serviceTypeId ? { kind: "default" as const, serviceTypeId: this.state.serviceTypeId } : null);
+      if (!into) throw new SlotsNotFoundError("No service type is selected, so there is nowhere to put the saved layout.", 400);
+      const slots = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
+      const dated = this.datedTarget(into);
+      const layouts =
+        dated.kind === "default"
+          ? { defaults: new Map([[dated.serviceTypeId, slots]]) }
+          : {
+              overrides: new Map<string, SlotsOverride>([
+                [dated.planId, { serviceTypeId: dated.serviceTypeId, sortDate: dated.sortDate ?? null, slots }],
+              ]),
+            };
+      return this.newBoard(name, `the saved layout "${preset.name}"`, { layouts });
+    }
+    return this.newBoard(name, "a blank start");
+  }
+
+  /** `PATCH /api/boards/:id`: rename it and/or set its column width (null:
+   *  not aligned to chargers). */
+  async updateBoard(boardId: string, patch: { name?: unknown; columnWidthIn?: number | null }): Promise<StageState> {
+    const before = this.boards.get(this.boardFor("board", boardId)) as SlotBoardMeta;
+    const name = patch.name !== undefined ? this.boardName(patch.name) : undefined;
+    const cw = patch.columnWidthIn;
+    if (cw !== undefined && cw !== null && positiveOrNull(cw) === null) {
+      throw new SlotsNotFoundError("A column width must be a positive number of inches, or null.", 400);
+    }
+    const saved = await slotsStore.updateBoard(boardId, { ...(name !== undefined ? { name } : {}), ...(cw !== undefined ? { columnWidthIn: cw } : {}) });
+    if (!saved) throw new SlotsNotFoundError(`There is no board ${boardId}.`);
+    this.boards.set(boardId, saved);
+    if (name !== undefined && name !== before.name) {
+      console.log(`[boards] renamed "${scrub(before.name)}" to "${scrub(name)}" (${scrub(boardId)})`);
+    }
+    if (cw !== undefined && cw !== before.columnWidthIn) {
+      console.log(
+        `[boards] "${scrub(saved.name)}" (${scrub(boardId)}) column width ${scrub(cw === null ? "off" : `${cw}in`)}`,
+      );
+    }
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** `POST /api/boards/:id/duplicate`: the new board's id. */
+  async duplicateBoard(boardId: string, rawName?: unknown): Promise<string> {
+    const src = this.boards.get(this.boardFor("board", boardId)) as SlotBoardMeta;
+    const name = rawName === undefined ? `${src.name} copy` : this.boardName(rawName);
+    return this.duplicateBoardRecord(boardId, name);
+  }
+
+  /**
+   * `DELETE /api/boards/:id`: delete a board and every layout it holds, pointing
+   * each screen and widget that showed it at `replacement` (null: nothing).
+   *
+   * The pointers move first and the board goes second, so a failure between the
+   * two leaves a board nothing shows — listed, and deletable again — never a
+   * screen pointing at a board that is gone.
+   */
+  async deleteBoard(boardId: string, replacement: string | null): Promise<StageState> {
+    const meta = this.boards.get(this.boardFor("board", boardId)) as SlotBoardMeta;
+    if (replacement !== null) {
+      this.boardFor("board", replacement);
+      if (replacement === boardId) throw new SlotsNotFoundError("A board cannot be replaced by itself.", 400);
+    }
+    const shownOn = this.boardShownOn(boardId);
+    const views = this.state.views.map((v): View => {
+      let next = v;
+      if (v.boardId === boardId || (v.kind === "slots" && viewBoardId(v) === boardId)) next = { ...next, boardId: replacement };
+      if (next.layout && next.kind === "custom") {
+        const objects = structuredClone(next.layout.objects);
+        let touched = false;
+        walkLayoutObjects(objects, (o) => {
+          if (o.config.type === "slots-grid" && gridBoardId(o.config, o.id) === boardId) {
+            const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = o.config;
+            o.config = { ...rest, boardId: replacement };
+            touched = true;
+          }
+        });
+        if (touched) next = { ...next, layout: { ...next.layout, objects } };
+      }
+      return next;
+    });
+    if (shownOn.length > 0) {
+      this.state = { ...this.state, views };
+      await viewsStore.save(views);
+    }
+    await slotsStore.deleteBoard(boardId);
+    this.boards.delete(boardId);
+    const where = shownOn.map((s) => (s.kind === "view" ? `screen "${s.name}"` : `a widget on "${s.name}"`)).join(", ");
+    const now = replacement === null ? "nothing" : `"${this.boards.get(replacement)?.name ?? replacement}"`;
+    console.log(
+      `[boards] deleted "${scrub(meta.name)}" (${scrub(boardId)})` +
+        (shownOn.length ? `; showing ${scrub(now)} instead: ${scrub(where)}` : "; no screen or widget showed it"),
+    );
+    await this.loadShownBoards();
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** `PUT /api/views/:id/board`: point a slots screen at a board (null: none). */
+  async setViewBoard(viewId: string, boardId: string | null): Promise<StageState> {
+    const view = this.requireView(viewId, "views:setBoard");
+    if (view.kind !== "slots") {
+      throw new SlotsNotFoundError(`"${view.name}" is a ${view.kind} view, not a slots screen; point its slots widgets at a board in its layout.`, 400);
+    }
+    if (boardId !== null) this.boardFor("board", boardId);
+    const name = boardId === null ? "nothing" : `"${this.boards.get(boardId)?.name ?? boardId}"`;
+    const views = this.state.views.map((v) => (v.id === viewId ? { ...v, boardId } : v));
+    console.log(`[boards] screen "${scrub(view.name)}" (${scrub(viewId)}) now shows ${scrub(name)}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    await this.loadShownBoards();
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * `POST /api/boards/slots`: save several boards at once, all or nothing.
+   *
+   * Every entry is checked — the board exists, the target is one its plan can
+   * hold, no board is named twice for one target — before anything is written,
+   * and then every entry lands in ONE write of slots.json. A refusal names the
+   * board it is about, so the page can point at it.
+   */
+  async saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget }[]): Promise<StageState> {
+    const writes: SlotsWrite[] = [];
+    const seen = new Set<string>();
+    const refuse = (boardId: string, err: unknown): never => {
+      const name = this.boards.get(boardId)?.name ?? boardId;
+      const msg = errorMessage(err);
+      console.warn(`[boards] save-all refused, nothing written: board "${scrub(name)}" (${scrub(boardId)}): ${scrub(msg)}`);
+      if (err instanceof SlotsNotFoundError) throw new SlotsNotFoundError(`Board "${name}": ${msg}`, err.status);
+      throw err;
+    };
+    for (const e of entries) {
+      try {
+        this.boardFor("board", e.boardId);
+        const target = e.target ?? this.defaultSlotsTarget();
+        if (!target) throw new SlotsNotFoundError("No service type is selected, so there is nowhere to save it.", 400);
+        await this.assertTargetPlanBelongs(target);
+        const key = `${e.boardId}\u0000${describeSlotsTarget(target)}`;
+        if (seen.has(key)) throw new SlotsNotFoundError(`It is in this save twice for ${describeSlotsTarget(target)}.`, 400);
+        seen.add(key);
+        writes.push({ boardId: e.boardId, target, slots: e.slots });
+      } catch (err) {
+        refuse(e.boardId, err);
+      }
+    }
+    // Dated only once every entry has passed: datedTarget logs an undated
+    // override, and a save that is then refused wrote none.
+    await slotsStore.saveMany(writes.map((w) => ({ ...w, target: this.datedTarget(w.target) })));
+    for (const w of writes) this.rawSlotsByBoard.delete(w.boardId);
+    await this.loadShownBoards();
+    const saved = writes.map((w) => [this.describeBoard(w.boardId), describeSlotsTarget(w.target)].join(" ")).join(", ");
+    console.log(`[boards] saved ${scrub(writes.length)} board layout(s): ${scrub(saved)}`);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * `GET /api/boards/check`: this plan's check, for one target — the people on
+   * the plan whose position some board names but who landed on no slot, and the
+   * slots that accept no position. Every board is read at that target, the way
+   * a screen showing it would read it.
+   */
+  async checkBoardsFor(want?: { serviceTypeId: string; planId: string | null }): Promise<BoardCheckDTO> {
+    const serviceTypeId = want?.serviceTypeId ?? this.state.serviceTypeId;
+    const planId = want ? want.planId : this.state.planId;
+    if (!serviceTypeId) {
+      throw new SlotsNotFoundError("No service type is selected; name one with ?serviceTypeId=.", 400);
+    }
+    const boards: { id: string; name: string; slots: Slot[] }[] = [];
+    for (const [id, b] of this.boards) boards.push({ id, name: b.name, slots: await slotsStore.resolve(id, serviceTypeId, planId) });
+    const live = serviceTypeId === this.state.serviceTypeId && planId !== null && planId === this.state.planId;
+    let roster: BoardCheckDTO["roster"] = "none";
+    let reason: string | undefined;
+    let members: TeamMemberDTO[] = [];
+    if (live) {
+      roster = "live";
+      members = this.teamMembers;
+    } else if (planId) {
+      const read = await this.previewRoster(serviceTypeId, planId);
+      if (read.reason) {
+        roster = "unavailable";
+        reason = read.reason;
+      } else {
+        roster = "plan";
+        members = read.members;
+      }
+    }
+    const { unplaced, noPosition } = checkBoards(boards, members, this.personDirectory.people);
+    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition };
   }
 
   /** How long an override outlives its plan before the daily sweep drops it. */
@@ -3071,40 +3445,48 @@ export class StageController {
   }
 
   /**
-   * The slots an arrangement should capture for a view.
-   *
-   * A slots-kind View keeps its slots under its own id. A CUSTOM view does not:
-   * its slots belong to inline `slots-grid` layout objects and are keyed by object
-   * id, so looking it up by view id finds nothing. Resolved here only when the
-   * view has exactly one such grid — with several, "the view's slots" has no one
-   * meaning and the caller should be saving from the grid's own editor, which
-   * sends its slots directly.
+   * The board an arrangement captures for a view: the one a slots view shows,
+   * or, on a custom view, the one its single slots widget shows. With several
+   * widgets "the view's slots" has no one meaning, and the caller names the
+   * board instead.
    */
-  private slotsForPresetTarget(viewId: string): Slot[] {
-    const own = this.rawSlotsByView.get(viewId);
-    if (own?.length) return own;
-
+  private boardForPresetTarget(viewId: string): string | null {
     const view = this.state.views.find((v) => v.id === viewId);
-    if (view?.kind === "custom" && view.layout) {
-      const gridIds: string[] = [];
-      forEachInlineSlotsGrid([view], (oid) => gridIds.push(oid));
-      if (gridIds.length === 1) return this.rawSlotsByObject.get(gridIds[0]) ?? [];
+    if (!view) return null;
+    if (view.kind === "slots") return viewBoardId(view);
+    if (view.kind === "custom") {
+      const boards: (string | null)[] = [];
+      forEachSlotsGrid([view], (oid, config) => boards.push(gridBoardId(config, oid)));
+      if (boards.length === 1) return boards[0] ?? null;
     }
-    return [];
+    return null;
   }
 
   async savePreset(target: string, name: string): Promise<SlotPreset[]> {
     const viewId = this.viewIdForTarget(target);
     console.log(`[stage-controller] savePreset "${scrub(name)}" for view=${scrub(viewId)}`);
+    const boardId = this.boardForPresetTarget(viewId);
+    return this.savePresetOf(boardId, viewId, name);
+  }
+
+  /** Save the layout a board shows now as a named layout, recalled into that
+   *  board by default. */
+  async savePresetFromBoard(boardId: string, name: string): Promise<SlotPreset[]> {
+    this.boardFor("board", boardId);
+    console.log(`[stage-controller] savePreset "${scrub(name)}" for board=${scrub(boardId)}`);
+    return this.savePresetOf(boardId, `board ${boardId}`, name);
+  }
+
+  private async savePresetOf(boardId: string | null, what: string, name: string): Promise<SlotPreset[]> {
     const presets = await presetsStore.load();
-    const rawSlots = this.slotsForPresetTarget(viewId);
+    const rawSlots = boardId ? (this.rawSlotsByBoard.get(boardId) ?? (await this.rawFor(boardId))) : [];
     // REFUSE rather than save nothing. This used to be `?? []`, so a target with
     // no entry in rawSlotsByView — every custom view, whose slots live per layout
     // object — silently produced an empty arrangement, saved and toasted as a
     // success. An arrangement that captures nothing is never what was meant.
     if (rawSlots.length === 0) {
       throw new Error(
-        `Nothing to save: view ${viewId} has no slots. An arrangement captures a view's current slots.`,
+        `Nothing to save: ${what} has no slots. A saved layout captures a board's current slots.`,
       );
     }
     const newPreset: SlotPreset = {
@@ -3113,6 +3495,7 @@ export class StageController {
       // Deep-clone with fresh slot ids so preset slots are independent.
       slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })),
       createdAt: new Date().toISOString(),
+      ...(boardId ? { boardId } : {}),
     };
     const updated = [...presets, newPreset];
     await presetsStore.save(updated);
@@ -3218,7 +3601,9 @@ export class StageController {
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
-    const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
+    const view = this.state.views.find((v) => v.id === viewId);
+    const boardId = view ? viewBoardId(view) : null;
+    const rawSlots = explicitSlots ?? (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
       p.id === id ? { ...p, slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })) } : p,
@@ -3260,21 +3645,28 @@ export class StageController {
     // A kind with nothing to operate asked for as a console would be a console
     // that cannot carry a control: a promise the screen could not keep.
     const effectiveSurface: ViewSurface = viewCanBeControlSurface({ kind }) ? surface : "display";
+    const viewName = name?.trim() || defaultViewName(kind);
+    // A new slots screen gets a board of its own, named after it, before the view
+    // is saved: a view pointing at a board that failed to be made would show
+    // nothing and could not be saved to, where a board whose view failed to save
+    // is listed on the Mic slots page as unused.
+    const boardId = kind === "slots" ? await this.newBoard(viewName, `screen ${id}`) : undefined;
     const view: View = {
       id,
-      name: name?.trim() || defaultViewName(kind),
+      name: viewName,
       kind,
       surface: effectiveSurface,
       ndiSource: null,
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,
+      ...(boardId ? { boardId } : {}),
     };
     console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
     onAssigned?.(view);
     await viewsStore.save(views);
-    if (kind === "slots") this.rawSlotsByView.set(id, []);
+    if (boardId) this.rawSlotsByBoard.set(boardId, []);
     this.recomputeResolved();
     this.broadcast();
     return view;
@@ -3378,17 +3770,30 @@ export class StageController {
     // A console is live on every screen showing it, so it may only become a kind
     // that still has something to operate.
     if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
+    // Becoming a slots screen needs a board. One it pointed at before is kept
+    // (the pointer stays, dormant, through a kind change); a view from before
+    // boards whose own id is a board shows that one, as the migration would
+    // have pointed it; otherwise it gets a new board named after it.
+    const boardId =
+      kind === "slots" && current.boardId === undefined
+        ? this.boards.has(id)
+          ? id
+          : await this.newBoard(current.name, `screen ${id}`)
+        : current.boardId;
     const views = this.state.views.map((v) =>
       v.id === id
-        ? { ...v, kind, layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout }
+        ? {
+            ...v,
+            kind,
+            layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout,
+            ...(boardId ? { boardId } : {}),
+          }
         : v,
     );
     console.log(`[stage-controller] setViewKind id=${scrub(id)} kind=${scrub(kind)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
-    if (kind === "slots" && !this.rawSlotsByView.has(id)) {
-      this.rawSlotsByView.set(id, await this.rawFor(id));
-    }
+    await this.loadShownBoards();
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -3405,13 +3810,25 @@ export class StageController {
     );
   }
 
-  /** Set (or clear) a slots-View's physical-alignment config. */
-  async setViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null): Promise<StageState> {
-    this.requireView(id, "views:setSlotsLayout");
+  /**
+   * Set (or clear) a slots screen's half of charger alignment: its display
+   * width. A body that also carries `columnWidthIn` — the shape before boards,
+   * which the screen editor still sends — sets that on the screen's board, which
+   * every screen showing the board shares. Clearing it clears only this screen's
+   * display width; the board keeps its column width for the others.
+   */
+  async setViewSlotsLayout(id: string, slotsLayout: ViewSlotsLayout | null): Promise<StageState> {
+    const view = this.requireView(id, "views:setSlotsLayout");
+    const displayWidthIn = slotsLayout ? positiveOrNull(slotsLayout.displayWidthIn) : null;
+    const columnWidthIn = slotsLayout ? positiveOrNull(slotsLayout.columnWidthIn) : null;
+    const boardId = viewBoardId(view);
+    if (columnWidthIn !== null && boardId && this.boards.has(boardId) && this.boards.get(boardId)?.columnWidthIn !== columnWidthIn) {
+      await this.updateBoard(boardId, { columnWidthIn });
+    }
     return this.commitViewPatch(
       id,
-      { slotsLayout },
-      `[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`,
+      { slotsLayout: displayWidthIn !== null ? { displayWidthIn } : null },
+      `[stage-controller] setViewSlotsLayout id=${scrub(id)} ${displayWidthIn !== null ? `${scrub(displayWidthIn)}in` : "(off)"}`,
     );
   }
 
@@ -3486,30 +3903,93 @@ export class StageController {
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
+    const pointed = await this.pointLayoutGrids(current, layout);
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout: pointed, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
     console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
-    // Load raw slots for any newly-added inline mic-slots objects, and drop the
-    // in-memory entries for grids no longer present in any layout.
-    const inlineIds = new Set<string>();
-    forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
-    if (this.state.serviceTypeId) {
-      for (const oid of inlineIds) {
-        if (!this.rawSlotsByObject.has(oid)) this.rawSlotsByObject.set(oid, await this.rawFor(oid));
-      }
-    }
-    for (const key of [...this.rawSlotsByObject.keys()]) if (!inlineIds.has(key)) this.rawSlotsByObject.delete(key);
+    // Rows for any board a new or repointed widget shows, and none kept for a
+    // board nothing shows any more.
+    await this.loadShownBoards();
     this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
-  /** Copy a view. Answers the state and the copy this call made, so a caller need not
-   *  look for "the newest view" in a state another operator may have added to. */
-  async duplicateView(id: string, name?: string): Promise<{ state: StageState; view: View }> {
-    const view = await this.copyViewRecord(id, name);
+  /**
+   * The layout as it is saved: every slots widget pointing at a board.
+   *
+   * A widget naming a board refers to one that exists, or the save is refused —
+   * a pointer at nothing would draw an empty grid that looks deliberately so.
+   *
+   * A widget still in the shape before boards (`source`, `sourceViewId`,
+   * `slotsLayout`) comes from an editor that predates them, and is read the way
+   * the migration reads one: "inline" keeps the board it shows (or gets one of
+   * its own, under its object id), "view" shows that view's board, and a column
+   * width moves onto the board. Those fields are not stored.
+   */
+  private async pointLayoutGrids(current: View, layout: LayoutDTO): Promise<LayoutDTO> {
+    const stored = new Map<string, string | null>();
+    if (current.layout) {
+      walkLayoutObjects(current.layout.objects, (o) => {
+        if (o.config.type === "slots-grid") stored.set(o.id, gridBoardId(o.config, o.id));
+      });
+    }
+    const objects = structuredClone(layout.objects);
+    const pending: { objectId: string; config: Extract<LayoutObject["config"], { type: "slots-grid" }> }[] = [];
+    walkLayoutObjects(objects, (o) => {
+      if (o.config.type !== "slots-grid") return;
+      const c = o.config;
+      if (!hasLegacyGridFields(c)) {
+        if (typeof c.boardId === "string" && c.boardId && !this.boards.has(c.boardId)) {
+          throw new SlotsNotFoundError(`There is no board ${c.boardId} for mic-slots object ${o.id} to show.`, 400);
+        }
+        return;
+      }
+      pending.push({ objectId: o.id, config: c });
+    });
+    if (pending.length === 0) return { ...layout, objects };
+    const byObject = new Map(pending.map((p) => [p.objectId, p.config]));
+    const replace = new Map<string, LayoutObject["config"]>();
+    for (const { objectId, config: c } of pending) {
+      let boardId: string | null;
+      if (c.source === "inline") {
+        boardId = stored.get(objectId) ?? objectId;
+        if (!this.boards.has(boardId)) {
+          await this.newBoard(`${current.name} · widget`, `widget ${objectId}`, { id: boardId });
+        }
+      } else if (c.source === "view") {
+        const src = this.state.views.find((v) => v.id === c.sourceViewId);
+        boardId = src ? viewBoardId(src) : null;
+      } else {
+        boardId = typeof c.boardId === "string" && c.boardId ? c.boardId : (stored.get(objectId) ?? null);
+      }
+      const columnWidthIn = positiveOrNull(c.slotsLayout?.columnWidthIn);
+      if (columnWidthIn !== null && boardId && this.boards.has(boardId) && this.boards.get(boardId)?.columnWidthIn !== columnWidthIn) {
+        await this.updateBoard(boardId, { columnWidthIn });
+      }
+      const displayWidthIn = "slotsLayout" in c ? positiveOrNull(c.slotsLayout?.displayWidthIn) : gridDisplayWidthIn(c);
+      const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = c;
+      replace.set(objectId, { ...rest, boardId, ...(displayWidthIn !== null ? { displayWidthIn } : {}) });
+    }
+    walkLayoutObjects(objects, (o) => {
+      const next = byObject.has(o.id) ? replace.get(o.id) : undefined;
+      if (next) o.config = next;
+    });
+    return { ...layout, objects };
+  }
+
+  /**
+   * Copy a view. Answers the state and the copy this call made, so a caller need
+   * not look for "the newest view" in a state another operator may have added to.
+   *
+   * The copy shows the SAME boards as the original — a second screen over the
+   * same charger is the point of a board. `copyBoards` gives the copy boards of
+   * its own instead, each a duplicate of the one it showed.
+   */
+  async duplicateView(id: string, name?: string, opts: { copyBoards?: boolean } = {}): Promise<{ state: StageState; view: View }> {
+    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? false);
     return { state: this.state, view };
   }
 
@@ -3527,8 +4007,26 @@ export class StageController {
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
+    // A widget in the shape before boards finds its board by its OWN object id,
+    // which the clone just changed. Pointed explicitly here, at the board the
+    // original shows, so the copy shows it too.
+    if (cloned) {
+      const oldIdOf = new Map([...cloned.idMap].map(([from, to]) => [to, from]));
+      walkLayoutObjects(cloned.layout.objects, (o) => {
+        if (o.config.type !== "slots-grid" || !hasLegacyGridFields(o.config)) return;
+        const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = o.config;
+        const displayWidthIn = gridDisplayWidthIn(o.config);
+        o.config = {
+          ...rest,
+          boardId: gridBoardId(o.config, oldIdOf.get(o.id) ?? o.id),
+          ...(displayWidthIn !== null ? { displayWidthIn } : {}),
+        };
+      });
+    }
+    const srcBoard = src.kind === "slots" ? viewBoardId(src) : null;
     const copy: View = {
       ...src,
+      ...(srcBoard ? { boardId: srcBoard } : {}),
       id: newId,
       name,
       ndiSource: src.ndiSource ?? null,
@@ -3543,54 +4041,62 @@ export class StageController {
   }
 
   /**
-   * Deep-copy the slot config a view holds, with fresh slot ids, through the same
-   * copyKey for the view itself and for each inline mic-slots object: EVERY
-   * service type's default and every per-plan override, not just the active
-   * type's rows. Copying one type's board by hand is what this did before, and a
-   * duplicate of a view configured for three service types came back configured
-   * for one.
+   * Give a copy boards of its own: each board it shows duplicated (every service
+   * type's default and every plan's override, with fresh slot ids), and the copy
+   * pointed at the duplicates. A board shown twice on the copy is duplicated
+   * once, so the copy's widgets still share it with each other.
    */
-  private async copyViewSlotConfig(
-    src: View,
-    copy: View,
-    cloned: ReturnType<typeof cloneLayoutWithMap> | null,
-  ): Promise<void> {
-    if (src.kind === "slots") {
-      await slotsStore.copyKey(src.id, copy.id, () => randomUUID());
-    }
-    // Each inline mic-slots object's slots (all service types) to the cloned
-    // object ids, so the duplicated layout keeps its lineups.
-    if (cloned) {
-      const inlineOldIds: string[] = [];
-      forEachInlineSlotsGrid([src], (oid) => inlineOldIds.push(oid));
-      for (const oldId of inlineOldIds) {
-        const mapped = cloned.idMap.get(oldId);
-        if (!mapped) continue;
-        await slotsStore.copyKey(oldId, mapped, () => randomUUID());
+  private async giveCopyItsOwnBoards(copy: View): Promise<View> {
+    const fresh = new Map<string, string>();
+    const dup = async (boardId: string | null): Promise<string | null> => {
+      if (!boardId || !this.boards.has(boardId)) return boardId;
+      let id = fresh.get(boardId);
+      if (!id) {
+        id = await this.duplicateBoardRecord(boardId, `${this.boards.get(boardId)?.name ?? boardId} copy`);
+        fresh.set(boardId, id);
       }
+      return id;
+    };
+    let next: View = copy;
+    if (copy.kind === "slots") {
+      const b = await dup(viewBoardId(copy));
+      if (b) next = { ...next, boardId: b };
     }
+    if (next.layout) {
+      const objects = structuredClone(next.layout.objects);
+      const grids: LayoutObject[] = [];
+      walkLayoutObjects(objects, (o) => {
+        if (o.config.type === "slots-grid") grids.push(o);
+      });
+      for (const o of grids) {
+        if (o.config.type !== "slots-grid") continue;
+        o.config = { ...o.config, boardId: await dup(gridBoardId(o.config, o.id)) };
+      }
+      next = { ...next, layout: { ...next.layout, objects } };
+    }
+    return next;
   }
 
   /** duplicateView, returning the copy — see createViewRecord for why, and for
    *  `onAssigned`. */
-  private async copyViewRecord(id: string, name?: string, onAssigned?: (view: View) => void): Promise<View> {
+  private async copyViewRecord(
+    id: string,
+    name?: string,
+    onAssigned?: (view: View) => void,
+    copyBoards = false,
+  ): Promise<View> {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
-    const { copy, cloned } = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
-    console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
+    const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
+    const copy = copyBoards ? await this.giveCopyItsOwnBoards(cloned.copy) : cloned.copy;
+    console.log(
+      `[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"${scrub(copyBoards ? " with its own boards" : "")}`,
+    );
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
     onAssigned?.(copy);
     await viewsStore.save(views);
-
-    await this.copyViewSlotConfig(src, copy, cloned);
-    if (src.kind === "slots") this.rawSlotsByView.set(newId, await this.rawFor(newId));
-    if (this.state.serviceTypeId) {
-      // The copy's own inline grids are the ids the config was just copied under.
-      const inlineIds: string[] = [];
-      forEachInlineSlotsGrid([copy], (oid) => inlineIds.push(oid));
-      for (const oid of inlineIds) this.rawSlotsByObject.set(oid, await this.rawFor(oid));
-    }
+    await this.loadShownBoards();
     this.recomputeResolved();
     this.broadcast();
     return copy;
@@ -3617,32 +4123,71 @@ export class StageController {
    * asked for.
    */
   async copyViewSlots(targetViewId: string, fromViewId: string, target?: SlotsTarget): Promise<StageState> {
-    this.assertSlotsKey("view", targetViewId);
-    this.assertSlotsKey("view", fromViewId);
+    this.boardFor("view", targetViewId);
+    const src = this.boardFor("view", fromViewId);
+    return this.copyBetweenBoards(src, {}, target, "view", targetViewId);
+  }
+
+  /**
+   * Copy a layout into one target of a board — POST /api/boards/:id/copy-from.
+   *
+   * The source is a board (this one when none is named) and one of its layouts:
+   * a named plan's override, a named service type's default, or — named neither
+   * — the same target as the destination. On a plan target with no override on
+   * the source, that is the source's default for the plan's type, copied INTO
+   * the destination's override: the point is that the destination ends up
+   * showing what the source shows, without rewriting its standing layout.
+   */
+  async copyIntoBoard(
+    boardId: string,
+    from: { fromBoardId?: string; fromServiceTypeId?: string; fromPlanId?: string },
+    target?: SlotsTarget,
+  ): Promise<StageState> {
+    this.boardFor("board", boardId);
+    const src = from.fromBoardId ? this.boardFor("board", from.fromBoardId) : boardId;
+    return this.copyBetweenBoards(src, from, target, "board", boardId);
+  }
+
+  /** The body behind both: read the source layout, write it with fresh ids
+   *  through the same save as any other, to the board `scope`/`key` names. */
+  private async copyBetweenBoards(
+    src: string,
+    from: { fromServiceTypeId?: string; fromPlanId?: string },
+    target: SlotsTarget | undefined,
+    scope: SlotsScope,
+    key: string,
+  ): Promise<StageState> {
     const effective = target ?? this.defaultSlotsTarget();
+    const fresh = (rows: Slot[]) => rows.map((s) => ({ ...s, id: randomUUID() }));
     // No service type means nothing is persisted anywhere, so there is only the
     // in-memory board to copy — the same thing this did before targets existed.
     if (!effective) {
-      const src = this.rawSlotsByView.get(fromViewId) ?? [];
-      return this.setViewSlots(targetViewId, src.map((s) => ({ ...s, id: randomUUID() })));
+      return this.persistSlots(scope, key, fresh(this.rawSlotsByBoard.get(src) ?? []), null);
     }
-
-    const fresh = (rows: Slot[]) => rows.map((s) => ({ ...s, id: randomUUID() }));
-    if (effective.kind === "default") {
-      const rows = await slotsStore.getDefault(fromViewId, effective.serviceTypeId);
-      return this.persistSlots("view", targetViewId, fresh(rows), effective);
+    let rows: Slot[];
+    if (from.fromPlanId) {
+      const override = await slotsStore.getOverride(src, from.fromPlanId);
+      if (override) rows = override.slots;
+      else if (from.fromServiceTypeId) rows = await slotsStore.getDefault(src, from.fromServiceTypeId);
+      else throw new SlotsNotFoundError(`Board ${src} has no layout saved for plan ${from.fromPlanId}.`);
+    } else if (from.fromServiceTypeId) {
+      rows = await slotsStore.getDefault(src, from.fromServiceTypeId);
+    } else if (effective.kind === "plan") {
+      const override = await slotsStore.getOverride(src, effective.planId);
+      rows =
+        override && override.serviceTypeId === effective.serviceTypeId
+          ? override.slots
+          : await slotsStore.getDefault(src, effective.serviceTypeId);
+    } else {
+      rows = await slotsStore.getDefault(src, effective.serviceTypeId);
     }
-
-    // The plan side. The source's own board for this plan when it has one, and
-    // otherwise the source's DEFAULT copied INTO the destination's override —
-    // which is what makes "copy slots from another view" show what the other
-    // view shows, without touching the destination's default.
-    const override = await slotsStore.getOverride(fromViewId, effective.planId);
-    const rows =
-      override && override.serviceTypeId === effective.serviceTypeId
-        ? override.slots
-        : await slotsStore.getDefault(fromViewId, effective.serviceTypeId);
-    return this.persistSlots("view", targetViewId, fresh(rows), effective);
+    if (scope === "board") {
+      const what = from.fromPlanId ? `plan:${from.fromPlanId}` : from.fromServiceTypeId ? `default:${from.fromServiceTypeId}` : "the same target";
+      console.log(
+        `[boards] copied into "${scrub(this.describeBoard(key))}" (${scrub(key)}) ${scrub(describeSlotsTarget(effective))} from "${scrub(this.describeBoard(src))}" (${scrub(src)}) ${scrub(what)}: ${scrub(rows.length)} slots`,
+      );
+    }
+    return this.persistSlots(scope, key, fresh(rows), effective);
   }
 
   /**
@@ -3691,16 +4236,11 @@ export class StageController {
     console.log(`[stage-controller] deleteView id=${scrub(id)}`);
     const removed = this.state.views.find((v) => v.id === id);
     const views = this.state.views.filter((v) => v.id !== id);
-    // Drop any inline mic-slots stored for this view's layout objects.
+    // The boards this view and its widgets showed are NOT deleted. A board is
+    // the operator's work and may be shown elsewhere; one nothing shows any
+    // more is listed on the Mic slots page, where it can be deleted on purpose.
     if (removed) {
-      const inlineIds: string[] = [];
-      forEachInlineSlotsGrid([removed], (oid) => inlineIds.push(oid));
-      for (const oid of inlineIds) {
-        await slotsStore.removeDisplay(oid);
-        this.rawSlotsByObject.delete(oid);
-      }
-      // And any notes/checklist content those objects held. Same reason the
-      // inline slots above are cleaned up: content is keyed by object id, and
+      // Notes/checklist content its objects held: keyed by object id, and
       // without this notes.json accumulates the text of every object ever
       // deleted — carried into every backup, forever.
       const objectIds: string[] = [];
@@ -3733,8 +4273,7 @@ export class StageController {
       await settingsStore.patch({ outputs });
       for (const o of stopped) this.logRoleFlip(screenName(o), false, undefined);
     });
-    await slotsStore.removeDisplay(id);
-    this.rawSlotsByView.delete(id);
+    await this.loadShownBoards();
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -4582,28 +5121,12 @@ export class StageController {
   async reloadViews(): Promise<StageState> {
     const views = await viewsStore.load();
     this.state = { ...this.state, views };
-    // Slot rows for a slots-KIND view. recomputeResolved reads rawSlotsByView,
-    // so without this an imported slots view resolves to nothing though its rows
-    // are on disk. duplicateView does this; the first version of reloadViews did
-    // not, and export is offered for every view kind.
-    if (this.state.serviceTypeId) {
-      for (const v of views) {
-        if (v.kind === "slots" && !this.rawSlotsByView.has(v.id)) {
-          this.rawSlotsByView.set(v.id, await this.rawFor(v.id));
-        }
-      }
-    }
-    // Same inline-slots sync saveViewLayout does: an imported layout may contain
-    // slots-grid objects whose rows are on disk but not yet in memory.
-    const inlineIds = new Set<string>();
-    forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
-    if (this.state.serviceTypeId) {
-      for (const oid of inlineIds) {
-        if (!this.rawSlotsByObject.has(oid)) {
-          this.rawSlotsByObject.set(oid, await this.rawFor(oid));
-        }
-      }
-    }
+    // An import adds boards as well as views, and the rows of every board an
+    // imported screen or widget shows are on disk but not yet in memory.
+    // recomputeResolved reads rawSlotsByBoard, so without this an imported
+    // screen resolves to nothing.
+    this.boards = await slotsStore.listBoards();
+    await this.loadShownBoards();
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -5040,49 +5563,68 @@ export class StageController {
   }
 
   /**
-   * Load raw slots for every slots-kind View and inline slots-grid object.
+   * Load raw slots for every board a slots screen or slots widget shows.
    *
    * Both the service type AND the plan are arguments rather than read off
    * `this.state`: the callers that switch either one call this while the state is
    * mid-change, and reading the half-updated state is how a reload would land on
    * the previous week's board.
    *
-   * The plan matters because a board can be saved against ONE plan (see
-   * slots-store), so this must re-run when the plan changes even though the
-   * service type did not. The primary View additionally adopts the legacy
-   * "default" bucket if present.
+   * The plan matters because a board can have a layout saved against ONE plan
+   * (see slots-store), so this must re-run when the plan changes even though the
+   * service type did not. The primary View's board additionally adopts the
+   * legacy "default" bucket if present.
    */
   private async loadAllViewRawSlots(serviceTypeId: string | null, planId: string | null): Promise<void> {
-    this.rawSlotsByView.clear();
-    this.rawSlotsByObject.clear();
-    // Inline mic-slots objects (custom layouts) — keyed by object id.
-    if (serviceTypeId) {
-      const inlineIds: string[] = [];
-      forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.push(oid));
-      for (const oid of inlineIds) {
-        this.rawSlotsByObject.set(oid, await slotsStore.resolve(oid, serviceTypeId, planId));
-      }
+    this.rawSlotsByBoard.clear();
+    if (!serviceTypeId) {
+      for (const id of this.shownBoardIds()) this.rawSlotsByBoard.set(id, []);
+      return;
     }
-    const primaryViewId = this.primaryViewId();
-    for (const view of this.state.views) {
-      if (view.kind !== "slots") continue;
-      if (!serviceTypeId) {
-        this.rawSlotsByView.set(view.id, []);
-        continue;
-      }
+    const primary = this.state.views.find((v) => v.id === this.primaryViewId());
+    const primaryBoard = primary && primary.kind === "slots" ? viewBoardId(primary) : null;
+    for (const id of this.shownBoardIds()) {
       const slots =
-        view.id === primaryViewId
-          ? await slotsStore.adoptDefaultInto(view.id, serviceTypeId, planId)
-          : await slotsStore.resolve(view.id, serviceTypeId, planId);
-      this.rawSlotsByView.set(view.id, slots);
+        id === primaryBoard
+          ? await slotsStore.adoptDefaultInto(id, serviceTypeId, planId)
+          : await slotsStore.resolve(id, serviceTypeId, planId);
+      this.rawSlotsByBoard.set(id, slots);
     }
   }
 
-  /** One key's rows for what is in effect NOW — the current plan's override if it
-   *  has one, else the active service type's default. The single read used by
-   *  every path that needs a key's rows without reloading all of them. */
-  private rawFor(key: string): Promise<Slot[]> {
-    return slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId);
+  /** Every board a slots screen or a slots widget shows. */
+  private shownBoardIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const v of this.state.views) {
+      if (v.kind !== "slots") continue;
+      const b = viewBoardId(v);
+      if (b) ids.add(b);
+    }
+    forEachSlotsGrid(this.state.views, (oid, config) => {
+      const b = gridBoardId(config, oid);
+      if (b) ids.add(b);
+    });
+    return ids;
+  }
+
+  /**
+   * Load the rows of every shown board not yet in memory, and drop those of a
+   * board nothing shows any more. For every write that can change which boards
+   * are shown: a layout save, a kind change, a new or deleted view, a repoint.
+   */
+  private async loadShownBoards(): Promise<void> {
+    const shown = this.shownBoardIds();
+    for (const id of shown) {
+      if (!this.rawSlotsByBoard.has(id)) this.rawSlotsByBoard.set(id, await this.rawFor(id));
+    }
+    for (const id of [...this.rawSlotsByBoard.keys()]) if (!shown.has(id)) this.rawSlotsByBoard.delete(id);
+  }
+
+  /** One board's rows for what is in effect NOW — the current plan's override if
+   *  it has one, else the active service type's default. The single read used by
+   *  every path that needs a board's rows without reloading all of them. */
+  private rawFor(boardId: string): Promise<Slot[]> {
+    return slotsStore.resolve(boardId, this.state.serviceTypeId, this.state.planId);
   }
 
   /** @deprecated Async shim kept for the many `await this.reResolveAll()` call
@@ -5099,43 +5641,52 @@ export class StageController {
     return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people, this.prepTags.map);
   }
 
-  /** Resolve every slots-View, then derive the per-output descriptors and the
-   *  legacy compat shim (displays/slotsByDisplay/slots) from outputs + views. */
+  /** A board's column width: its own, or, on a boot still running on the shapes
+   *  before boards, the one the screen or widget still carries. */
+  private columnWidthOf(boardId: string | null, legacy: number | null | undefined): number | null {
+    const board = boardId ? this.boards.get(boardId) : undefined;
+    if (board) return board.columnWidthIn;
+    return positiveOrNull(legacy);
+  }
+
+  /** Resolve every slots screen and slots widget from the board it shows, then
+   *  derive the per-output descriptors and the legacy compat shim
+   *  (displays/slotsByDisplay/slots) from outputs + views. */
   private recomputeResolved(): void {
     const slotsByView: Record<string, Slot[]> = {};
+    const slotsLayoutByView: Record<string, SlotsLayout | null> = {};
     for (const view of this.state.views) {
       if (view.kind !== "slots") continue;
-      const raw = this.rawSlotsByView.get(view.id) ?? [];
+      const boardId = viewBoardId(view);
+      const raw = (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
       slotsByView[view.id] = this.resolve(raw, this.teamMembers);
+      slotsLayoutByView[view.id] = effectiveSlotsLayout(
+        positiveOrNull(view.slotsLayout?.displayWidthIn),
+        this.columnWidthOf(boardId, view.slotsLayout?.columnWidthIn),
+      );
     }
 
-    // Inline mic-slots objects on custom layouts — resolved by object id. We
-    // resolve every object that has raw slots, not just those already saved into a
-    // persisted view, so a freshly-added inline grid shows its slots immediately
-    // after "Save slots" (before the layout itself is saved). Orphaned ids are
-    // pruned from rawSlotsByObject when the layout is next saved (setViewLayout).
+    // Every slots widget, keyed by its OBJECT, from the board it points at. A
+    // widget is a free-dragged box on a custom layout, so nothing server-side
+    // knows the shape its photos will be drawn at: it asks for the whole image
+    // and lets `object-fit: cover` crop it in the one place that does. A slots
+    // screen keeps the column crop above — a display's box genuinely IS that
+    // shape, even when it shows the same board. See AvatarFit.
     const slotsByLayoutObject: Record<string, Slot[]> = {};
-    const resolveObjectSlots = (oid: string) => {
-      const raw = this.rawSlotsByObject.get(oid) ?? [];
-      // An inline grid is whatever size the operator dragged it to, so nothing
-      // here knows the shape its photos will be drawn at. Send the whole image
-      // and let `object-fit: cover` crop it in the one place that does. The view
-      // path above keeps the column crop: a display's box genuinely IS that
-      // shape. See AvatarFit.
+    const slotsLayoutByLayoutObject: Record<string, SlotsLayout | null> = {};
+    forEachSlotsGrid(this.state.views, (oid, config) => {
+      const boardId = gridBoardId(config, oid);
+      const raw = (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
       slotsByLayoutObject[oid] = this.resolve(raw, this.teamMembers, "whole");
-    };
-    forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
-    for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
-
-    // A grid EMBEDDING a slots view is the same problem wearing a different
-    // source. Its slots come from that view, but its box is a free-dragged
-    // rectangle on a custom layout, so it needs the whole image exactly as an
-    // inline grid does. Keyed by the OBJECT so the source view's own display
-    // keeps the column crop it is correctly modelled on; the renderer reads this
-    // first and falls back to slotsByView for anything not resolved here.
-    forEachViewSourcedSlotsGrid(this.state.views, (oid, sourceViewId) => {
-      const raw = this.rawSlotsByView.get(sourceViewId) ?? [];
-      slotsByLayoutObject[oid] = this.resolve(raw, this.teamMembers, "whole");
+      // A widget from before boards that embedded a view was drawn with that
+      // view's alignment; on a boot still on those shapes it still is.
+      const embedded =
+        config.source !== "inline" && typeof config.sourceViewId === "string"
+          ? this.state.views.find((v) => v.id === config.sourceViewId)
+          : undefined;
+      slotsLayoutByLayoutObject[oid] = embedded
+        ? (slotsLayoutByView[embedded.id] ?? null)
+        : effectiveSlotsLayout(gridDisplayWidthIn(config), this.columnWidthOf(boardId, config.slotsLayout?.columnWidthIn));
     });
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
@@ -5160,6 +5711,8 @@ export class StageController {
       ...this.state,
       slotsByView,
       slotsByLayoutObject,
+      slotsLayoutByView,
+      slotsLayoutByLayoutObject,
       resolvedByOutput,
       chargerBays: this.computeChargerBays(),
     };

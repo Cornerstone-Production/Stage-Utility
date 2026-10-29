@@ -227,6 +227,7 @@ a path or a credential. If you see one, report it.
 | `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist, and a closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[automation]` | Rules added, changed, removed, saved with issues, failing to fire, or run by hand from a Run button (who ran it, and what came of it); on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
+| `[boards]` | Slot boards created, renamed, given a column width, duplicated, copied into, or deleted (with the screens and widgets that now show something else), a screen pointed at another board, a save across boards, and one refused with nothing written, naming the board: [Slots](../reference/data-model.md#slots) |
 | `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
 | `[baptism]` | Session-store eviction at the cap, sessions stored more than once under one id, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/servicecue-and-baptisms.md#logging) |
 | `[baptism-lane]` | The Session chart's server-side span data dropping a span with an unreadable boundary timestamp: [The Session chart](../features/servicecue-and-baptisms.md#the-session-chart) |
@@ -299,7 +300,7 @@ a path or a credential. If you see one, report it.
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
-| `[slots-store]` | Slot-set migration, and copying or removing a display's slots: [Mic slots](../slots.md) |
+| `[slots-store]` | `slots.json` migrations: the move onto named boards with its counts, each pair of identical boards merged, each unused board kept, and a move that could not be saved (both files left as they were): [Slots](../reference/data-model.md#slots) |
 | `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
 | `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |
 | `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |

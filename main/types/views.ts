@@ -230,12 +230,21 @@ export interface View {
   /** Free-form layout for kind === "custom"; null/absent for the built-in kinds. */
   layout?: LayoutDTO | null;
   /**
-   * Physical-alignment config for a slots-View (so on-screen columns line up with
-   * the chargers below the monitor). Absent/null → columns share width equally
-   * (default). When set, columns are sized in inches against `displayWidthIn`
-   * (the monitor's active width), so widths render at true physical inches.
+   * The slot board a slots-kind View shows (an id in slots.json's `boards`).
+   * Several views and slots widgets can show the same board. Kept, dormant, on a
+   * view whose kind changes, so switching back shows the same board. Null:
+   * deliberately none (its board was deleted with nothing to replace it).
+   * Absent only on a view saved before boards, which shows the board its own id
+   * names until the boot migration points it.
    */
-  slotsLayout?: SlotsLayout | null;
+  boardId?: string | null;
+  /**
+   * This screen's half of charger alignment: the monitor's active width.
+   * Absent/null → columns share width equally (default). When set and the board
+   * has a column width, columns are sized in inches against `displayWidthIn`, so
+   * they line up with the chargers below the monitor.
+   */
+  slotsLayout?: ViewSlotsLayout | null;
   /**
    * Hide the operator app's chrome — BOTH bands — while this View is open as a
    * console at /consoles/<id>. Absent/false = the normal shell.
@@ -321,12 +330,24 @@ export interface View {
   layoutRev?: number;
 }
 
-/** Physical layout config for a slots-View. All measurements in inches. */
+/**
+ * Charger alignment as a screen draws it, in inches: the screen's own active
+ * width and its board's column width. The server resolves one per slots screen
+ * and slots widget into `StageState.slotsLayoutByView` / `slotsLayoutByLayoutObject`.
+ */
 export interface SlotsLayout {
   /** The monitor's active-area width (e.g. ~32.25 for a 37″ 16:9 panel). */
   displayWidthIn: number;
   /** Default width of one charger column (e.g. 3.49 for a Shure SBC220). */
   columnWidthIn: number;
+}
+
+/** What a slots View stores of its alignment: its display width. */
+export interface ViewSlotsLayout {
+  displayWidthIn: number;
+  /** Read only by the boards migration, which moves it onto the board. A view
+   *  saved before boards existed carries it; nothing writes it any more. */
+  columnWidthIn?: number;
 }
 
 // ── Visual layout schema (kind === "custom") ─────────────────────────────────
@@ -580,12 +601,23 @@ export type LayoutObjectConfig =
       /** The presentation's name, small in the corner. */
       showTitle?: boolean;
     }
-  // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
-  // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
-  // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
-  // with `slotsLayout` holding its physical-inch alignment. Missing `source` ==
-  // "view" (back-compat with existing objects).
-  | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
+  // Mic-slots grid. Shows the slot board `boardId` (null: none), resolved into
+  // `StageState.slotsByLayoutObject[objectId]`. `displayWidthIn` is this widget's
+  // half of charger alignment; the column width is the board's.
+  //
+  // `source`, `sourceViewId` and `slotsLayout` are the shape before boards: an
+  // inline grid stored its own slots under its object id, a "view" grid showed
+  // another view's. The boards migration reads them and removes them, and a
+  // layout save that still sends them (an editor from before boards) is read the
+  // same way. Nothing else reads them.
+  | {
+      type: "slots-grid";
+      boardId?: string | null;
+      displayWidthIn?: number | null;
+      source?: "view" | "inline";
+      sourceViewId?: string | null;
+      slotsLayout?: SlotsLayout | null;
+    }
   // `hideChannels` drops lines from the named ProdCom channels (by channel name)
   // so a strip can show only the channels you care about.
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
@@ -1527,6 +1559,6 @@ export function isLayoutShape(v: unknown): v is LayoutDTO {
 
 /** A view's `slotsLayout` as PATCH /api/views/:id and a restore take it: an
  *  object, or null for the default. An array is neither. */
-export function isSlotsLayoutValue(v: unknown): v is SlotsLayout | null {
+export function isSlotsLayoutValue(v: unknown): v is ViewSlotsLayout | null {
   return v === null || (typeof v === "object" && !Array.isArray(v));
 }
