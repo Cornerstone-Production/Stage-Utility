@@ -201,7 +201,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 |---|---|---|
 | GET | `/api/presets` | List |
 | POST | `/api/presets` | Snapshot the current slots under a name: `{name, boardId?}` saves what that board shows and records it as the layout's `boardId`; otherwise `{name, viewId?}` saves the board the view shows (`displayId` is read when `viewId` is absent; with neither, the primary display). `400` for a blank name |
-| POST | `/api/presets/import` | Add one from data: `{name, slots}` |
+| POST | `/api/presets/import` | Add one from data: `{name, slots, boardId?}`. `boardId` records the board the layout came from, which is where recalling it defaults; an unknown board is `404`, a blank one `400` |
 | POST | `/api/presets/reorder` | `{ids: string[]}` |
 | POST | `/api/presets/:id/apply` | Write it onto the board a view shows: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
 | PATCH | `/api/presets/:id` | `{name?}` renames; `{slots}` replaces its slots, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |

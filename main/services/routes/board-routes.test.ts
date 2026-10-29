@@ -387,6 +387,17 @@ describe("the older routes, as aliases onto the board a screen shows", () => {
     assert.equal(saved?.slots.length, 1);
   });
 
+  it("POST /api/presets/import with boardId records the board; an unknown board is refused", async () => {
+    const ok = await call(presetRoutes, "/api/presets/import", "POST", { name: "From the editor", slots: [slot("e")], boardId: "b-left" });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.equal((await presetsStore.load()).find((p) => p.name === "From the editor")?.boardId, "b-left");
+    const bad = await call(presetRoutes, "/api/presets/import", "POST", { name: "Nowhere", slots: [slot("e")], boardId: "b-gone" });
+    assert.equal(bad.status, 404, JSON.stringify(bad.json));
+    assert.ok(!(await presetsStore.load()).some((p) => p.name === "Nowhere"), "a refused import stores nothing");
+    const blank = await call(presetRoutes, "/api/presets/import", "POST", { name: "Blank id", slots: [slot("e")], boardId: "" });
+    assert.equal(blank.status, 400);
+  });
+
   it("PATCH /api/views/:id with { slotsLayout } splits the two widths between the screen and its board", async () => {
     const r = await call(viewRoutes, "/api/views/wall-1", "PATCH", { slotsLayout: { displayWidthIn: 30, columnWidthIn: 3.8 } });
     assert.equal(r.status, 200, JSON.stringify(r.json));

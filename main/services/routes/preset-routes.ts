@@ -59,8 +59,18 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const presets = await stageController.importPreset((body.name as string).trim(), body.slots as never[]);
-      json(res, presets);
+      // `boardId` (optional) records which board the layout was saved from.
+      if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
+        error(res, "body.boardId must be a board id");
+        return;
+      }
+      try {
+        const presets = await stageController.importPreset((body.name as string).trim(), body.slots as never[], body.boardId as string | undefined);
+        json(res, presets);
+      } catch (err) {
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 

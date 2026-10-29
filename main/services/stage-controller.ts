@@ -3575,13 +3575,18 @@ export class StageController {
   }
 
   /** Add a preset from imported data (e.g. an exported .json), with fresh ids. */
-  async importPreset(name: string, slots: Slot[]): Promise<SlotPreset[]> {
+  /** Add a saved layout from data. `boardId` records the board it came from, so
+   *  recalling it defaults there; an unknown board is refused rather than stored
+   *  as a pointer at nothing. */
+  async importPreset(name: string, slots: Slot[], boardId?: string): Promise<SlotPreset[]> {
+    if (boardId !== undefined) this.boardFor("board", boardId);
     const presets = await presetsStore.load();
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name: name.trim() || "Imported",
       slots: stripResolvedFields(slots).map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
+      ...(boardId !== undefined ? { boardId } : {}),
     };
     console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${scrub(newPreset.slots.length)} slots)`);
     const updated = [...presets, newPreset];
