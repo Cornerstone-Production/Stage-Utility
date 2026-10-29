@@ -408,4 +408,17 @@ describe("pointing a screen or widget at a board", () => {
     assert.equal(ctl.boards.get("b-left")?.columnWidthIn, 3.6, "the widget's column width did not reach its board");
     assert.equal(ctl.boards.get("g-new")?.name, "Stage Layout · widget");
   });
+
+  it("a pre-boards widget embedding a view that is not a slots screen shows nothing, as it did", async () => {
+    // "pad" is custom; a board pointer it kept from an earlier life as a slots
+    // screen is dormant, and was never what an embed of it drew.
+    ctl.state = { ...ctl.state, views: ctl.state.views.map((v) => (v.id === "pad" ? { ...v, boardId: "b-right" } : v)) };
+    const layout = {
+      version: 1, canvas: { width: 1920, height: 1080 },
+      objects: [{ id: "g-embed", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", source: "view", sourceViewId: "pad" } }],
+    };
+    const r = await call(viewRoutes, "/api/views/pad", "PATCH", { layout });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(ctl.state.views.find((v) => v.id === "pad")!.layout!.objects[0]!.config, { type: "slots-grid", boardId: null });
+  });
 });

@@ -237,6 +237,30 @@ describe("a v4 install that something from before boards wrote to", () => {
   });
 });
 
+describe("a widget that embedded a view that is not a slots screen", () => {
+  // Only a slots view's rows were ever drawn through an embed. The key of a
+  // deleted view (or of a view since turned into a layout) can still hold a
+  // lineup nobody has looked at for months.
+  const stale = (): SlotsFile => ({
+    version: 3,
+    boards: new Map(),
+    defaults: new Map([["view-gone", new Map([[WEEKEND, lineup("x", ["Choir"])]])], ["view-9", new Map([[WEEKEND, lineup("y", ["Band"])]])]]),
+    overrides: new Map(),
+  });
+  const views = (): View[] => [
+    custom("view-9", "Was a screen", []),
+    custom("pad", "Pad", [grid("g-dead", { source: "view", sourceViewId: "view-gone" }), grid("g-custom", { source: "view", sourceViewId: "view-9" })]),
+  ];
+
+  test("points at nothing, as it drew nothing, and the stale rows are kept on an unused board", () => {
+    const r = migrateBoards(views(), stale(), NOW);
+    assert.equal(gridOf(r.views, "pad", "g-dead").boardId, null, "a widget embedding a deleted view starts drawing its stale rows");
+    assert.equal(gridOf(r.views, "pad", "g-custom").boardId, null, "a widget embedding a custom view starts drawing its stale rows");
+    assert.deepEqual(r.file.boards.get("view-gone")?.name, "Unused board 1");
+    assert.ok(r.file.defaults.has("view-gone"), "the stale rows were dropped");
+  });
+});
+
 describe("the writes a merge needs", () => {
   test("stage the merged board, kept and named, before the views stop pointing at it", () => {
     const r = migrateBoards(henryViews(), henryFile(), NOW);

@@ -248,12 +248,12 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
         const cw = positiveOrNull(c.slotsLayout?.columnWidthIn);
         if (cw !== null) liftedWidth.set(o.id, cw);
       } else {
+        // Only a slots view's rows were ever drawn through an embed. A deleted
+        // or other-kind source drew nothing, and its key may still hold a stale
+        // lineup that pointing at it would start drawing.
         const srcId = typeof c.sourceViewId === "string" ? c.sourceViewId : "";
         const src = srcId ? pointedById.get(srcId) : undefined;
-        boardId =
-          src && src.kind === "slots" ? viewBoardId(src)
-          : srcId && (file.defaults.has(srcId) || file.overrides.has(srcId) || file.boards.has(srcId)) ? srcId
-          : null;
+        boardId = src && src.kind === "slots" ? viewBoardId(src) : null;
         const srcLayout = srcId ? viewsById.get(srcId)?.slotsLayout : undefined;
         displayWidthIn = positiveOrNull(srcLayout?.displayWidthIn);
       }

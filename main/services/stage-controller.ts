@@ -3969,8 +3969,9 @@ export class StageController {
           await this.newBoard(`${current.name} · widget`, `widget ${objectId}`, { id: boardId });
         }
       } else if (c.source === "view") {
+        // Only a slots screen's rows were ever drawn through an embed.
         const src = this.state.views.find((v) => v.id === c.sourceViewId);
-        boardId = src ? viewBoardId(src) : null;
+        boardId = src?.kind === "slots" ? viewBoardId(src) : null;
       } else {
         boardId = typeof c.boardId === "string" && c.boardId ? c.boardId : (stored.get(objectId) ?? null);
       }

@@ -309,7 +309,8 @@ so no slot data moves:
 
 - each board is named after its view, or `<view name> · widget` for a grid;
 - each slots view and grid is pointed at it, and a grid that showed another
-  slots view's slots now shares that view's board;
+  slots view's slots now shares that view's board; a grid that embedded a
+  deleted view, or a view of another kind, shows none, as it did before;
 - the column width moves from the view or grid onto its board;
 - boards made this way that are identical in every service type's default,
   every override and their column width (slot ids aside) become one: a
