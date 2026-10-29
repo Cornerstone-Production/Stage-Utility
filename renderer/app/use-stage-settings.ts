@@ -20,12 +20,11 @@
 //   - useEscapeToClose, which called window:closeSettings - meaningless once
 //     Settings is routes inside the app rather than its own window
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { screenName, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 import type { AppIconInput } from "@main/services/app-icon";
-import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { arrayMove } from "@dnd-kit/sortable";
+import { MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke as ipc, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
@@ -33,9 +32,6 @@ import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { changeViewRole } from "../settings/view-role-change";
-import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
-import { registerTargetGuard } from "../settings/sections/editing-target";
-import { useSlotsPreview } from "../settings/sections/slots-preview-target";
 import type { CreateScreenOutcome, RemoveViewOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
@@ -199,35 +195,10 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   });
 
-  // Local slot editor state
-  const [localSlots, setLocalSlots] = useState<Slot[]>([]);
-  const [slotsDirty, setSlotsDirty] = useState(false);
-  const [isSavingSlots, setIsSavingSlots] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Which of the view's two boards the editor is on — the service type's default
-  // or the current plan's own. Owns the read AND the save target, so the two can
-  // never disagree about which board an edit lands on.
-  const slotsTarget = useSlotsTarget("view", selectedViewId);
-
-  // Mirror the selected board into the editor (unless dirty).
-  //
-  // The RAW rows for the selected side, not `stageState.slotsByView` — that is
-  // the board currently in effect, so editing the default while a plan override
-  // was live would have shown, and then saved back, the override's rows.
-  useResyncOn([slotsTarget.slotsForSide, selectedViewId, slotsDirty, slotsTarget.side], () => {
-    if (slotsDirty) return;
-    const rows = slotsTarget.slotsForSide ?? [];
-    setLocalSlots([...rows].sort((a, b) => a.order - b.order));
-  });
-
-  // The preview iframe's rows. Resolved server-side (no save) so the preview
-  // shows the board being EDITED — unsaved edits, and whichever plan the switcher
-  // is on — exactly as the kiosk would draw it. Null while the editor is on the
-  // live plan with nothing unsaved, which leaves the iframe showing the kiosk.
-  // See slots-preview-target.tsx for the rules and the debounce.
-  const slotsPreview = useSlotsPreview(localSlots, slotsDirty);
-  // DnD sensors — mouse and touch deliberately separate.
+  // DnD sensors for the Screens page's card reorder -- mouse and touch
+  // deliberately separate.
   //
   // A single PointerSensor treats them identically: it claims the gesture on
   // touch-down and waits to see whether you move far enough to be dragging,
@@ -242,25 +213,6 @@ export function useStageSettings(pinnedViewId?: string) {
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
   );
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setLocalSlots((prev) => {
-      // Reorder by stacked GROUP (lead + `stackWithPrevious` followers) keyed by
-      // the lead slot's id, so a stacked column moves as one and never splits.
-      const groups: Slot[][] = [];
-      for (const s of prev) {
-        if (s.stackWithPrevious && groups.length > 0) groups[groups.length - 1].push(s);
-        else groups.push([s]);
-      }
-      const oldIndex = groups.findIndex((g) => g[0].id === active.id);
-      const newIndex = groups.findIndex((g) => g[0].id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return prev;
-      return arrayMove(groups, oldIndex, newIndex).flat().map((s, i) => ({ ...s, order: i }));
-    });
-    setSlotsDirty(true);
-  }
 
   async function handleServiceTypeChange(id: string) {
     if (await writeState("stage:setServiceType", { id }, { fail: "Failed to set service type" })) {
@@ -404,119 +356,6 @@ export function useStageSettings(pinnedViewId?: string) {
     });
   }
 
-  function updateSlot(idx: number, updated: Slot) {
-    setLocalSlots((prev) => {
-      const next = [...prev];
-      next[idx] = updated;
-      return next;
-    });
-    setSlotsDirty(true);
-  }
-
-  function addSlot() {
-    // Next channel = highest existing numeric channel + 1, so deleting/reordering
-    // slots doesn't produce duplicate or skipped channel numbers.
-    const maxChannel = localSlots.reduce((max, s) => {
-      const n = Number.parseInt(s.channel, 10);
-      return Number.isFinite(n) ? Math.max(max, n) : max;
-    }, 0);
-    const newSlot: Slot = {
-      id: `slot-${Date.now()}`,
-      channel: String(maxChannel + 1).padStart(2, "0"),
-      order: localSlots.length,
-      link: { kind: "pco", matchBy: "position", positions: [] },
-      deviceBinding: null,
-      displayName: null,
-      photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
-    };
-    setLocalSlots((prev) => [...prev, newSlot]);
-    setSlotsDirty(true);
-  }
-
-  function addSpacer() {
-    const newSlot: Slot = {
-      id: `slot-${Date.now()}`,
-      channel: "",
-      order: localSlots.length,
-      link: { kind: "spacer" },
-      widthIn: 2,
-      deviceBinding: null,
-      displayName: null,
-      photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
-    };
-    setLocalSlots((prev) => [...prev, newSlot]);
-    setSlotsDirty(true);
-  }
-
-  function removeSlot(idx: number) {
-    setLocalSlots((prev) => {
-      const next = prev.map((s) => ({ ...s }));
-      // If the next slot was stacked onto the one being deleted, break the stack
-      // instead of letting it silently re-attach to the slot above the deleted one.
-      if (next[idx + 1]?.stackWithPrevious) {
-        next[idx + 1] = { ...next[idx + 1], stackWithPrevious: false };
-      }
-      return next.filter((_, i) => i !== idx).map((s, i) => ({ ...s, order: i }));
-    });
-    setSlotsDirty(true);
-  }
-
-  async function saveSlots() {
-    setIsSavingSlots(true);
-    try {
-      const slots = localSlots.map((s, i) => ({ ...s, order: i }));
-      const next = await ipc<StageState>("views:setSlots", {
-        id: selectedViewId,
-        slots,
-        target: slotsTarget.wireTarget(),
-      });
-      queryClient.setQueryData(["stage:getState"], next);
-      await slotsTarget.invalidate();
-      setSlotsDirty(false);
-      // Names the board it landed on. "Slots saved." was true of either, which is
-      // the one thing this editor must not be ambiguous about.
-      slotsTarget.announceSaved();
-    } catch (err) {
-      toast.error(`Failed to save slots: ${errorMessage(err)}`);
-    } finally {
-      setIsSavingSlots(false);
-    }
-  }
-
-  /**
-   * Move the editor to the other board, asking first when there are edits in the
-   * buffer — the same question leaving the page asks. Switching silently would
-   * discard them, because the mirror re-seeds from the new side.
-   */
-  async function setSlotsTargetSide(next: "default" | "plan") {
-    if (next === slotsTarget.side) return;
-    if (slotsDirty) {
-      if (!(await confirmDiscardSlotEdits())) return;
-      setSlotsDirty(false);
-    }
-    slotsTarget.setSide(next);
-  }
-
-  // The plan switcher asks the same question from its own header. Registered
-  // while dirty only, so a switch with an empty buffer is silent.
-  useEffect(() => {
-    if (!slotsDirty) return;
-    registerTargetGuard(`view:${selectedViewId}`, async () => {
-      if (!(await confirmDiscardSlotEdits())) return false;
-      setSlotsDirty(false);
-      return true;
-    });
-    return () => registerTargetGuard(`view:${selectedViewId}`, null);
-  }, [slotsDirty, selectedViewId]);
-
-  // Drop unsaved slot edits: clearing dirty lets the mirror effect re-seed
-  // localSlots from the saved server state, and the preview clears its draft.
-  function discardSlots() {
-    setSlotsDirty(false);
-  }
-
   // ── Views (content) ──────────────────────────────────────────────────
   async function handleAddView(
     name: string,
@@ -577,9 +416,6 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("views:setKind", { id, kind }, { fail: "Failed to change view type" });
   }
 
-  async function handleSetViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null) {
-    await writeState("views:setSlotsLayout", { id, slotsLayout }, { fail: "Failed to update alignment" });
-  }
 
   const revOf = (s: StageState | undefined, id: string) =>
     s?.views?.find((v) => v.id === id)?.layoutRev ?? 0;
@@ -642,112 +478,6 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeTo<LayoutTemplate[]>(["layoutTemplates:list"], "layoutTemplates:delete", { id }, {
       fail: "Failed to delete layout",
     });
-  }
-
-  async function handleCopySlots(targetViewId: string, fromViewId: string) {
-    try {
-      const next = await ipc<StageState>("views:copySlots", {
-        id: targetViewId,
-        fromViewId,
-        // The side the editor is on, so the copy reads and writes THAT board.
-        target: slotsTarget.wireTarget(),
-      });
-      queryClient.setQueryData(["stage:getState"], next);
-      // Clearing dirty and letting the mirror re-seed, rather than seeding from
-      // `next.slotsByView` — that is the board in EFFECT, which on the Default
-      // side with a live override is the override's rows, shown as saved. The
-      // invalidate is awaited, so the refetched targets are what seeds.
-      setSlotsDirty(false);
-      await slotsTarget.invalidate();
-      toast.success("Slots copied.");
-    } catch (err) {
-      toast.error(`Failed to copy slots: ${errorMessage(err)}`);
-    }
-  }
-
-  // ── Presets (saved slot arrangements) ────────────────────────────────
-  async function handleSavePreset(name: string) {
-    try {
-      // Persist any pending editor edits first so the preset captures what's on screen.
-      if (slotsDirty) await saveSlots();
-      const presets = await ipc<SlotPreset[]>("presets:save", { name, viewId: selectedViewId });
-      queryClient.setQueryData(["presets:list"], presets);
-      toast.success(`Saved arrangement "${name}".`);
-    } catch (err) {
-      toast.error(`Failed to save arrangement: ${errorMessage(err)}`);
-    }
-  }
-
-  async function handleApplyPreset(id: string) {
-    try {
-      const next = await ipc<StageState & { appliedViewId?: string }>("presets:apply", {
-        id,
-        viewId: selectedViewId,
-        target: slotsTarget.wireTarget(),
-      });
-      queryClient.setQueryData(["stage:getState"], next);
-      // Read back the view the SERVER says it wrote, not the one we asked for.
-      // Those differed when an output shared an id with a view, and reading the
-      // requested id showed the unchanged slots — a silent no-op under a success
-      // toast. If they still differ, that is a bug worth surfacing, not hiding.
-      const appliedTo = next.appliedViewId ?? selectedViewId;
-      if (appliedTo !== selectedViewId) {
-        toast.error(`Arrangement went to "${appliedTo}", not the view you are editing. Nothing was changed here.`);
-        return;
-      }
-      // As in handleCopySlots: the mirror re-seeds from the refetched targets for
-      // the side being edited. `next.slotsByView` is the board in effect, so on
-      // the Default side with a live override it showed the override's rows and
-      // marked them saved.
-      setSlotsDirty(false);
-      await slotsTarget.invalidate();
-      toast.success("Arrangement applied.");
-    } catch (err) {
-      toast.error(`Failed to apply arrangement: ${errorMessage(err)}`);
-    }
-  }
-
-  async function handleDeletePreset(id: string) {
-    await writeTo<SlotPreset[]>(["presets:list"], "presets:delete", { id }, {
-      fail: "Failed to delete arrangement",
-    });
-  }
-
-  async function handleImportPreset(name: string, slots: Slot[]) {
-    await writeTo<SlotPreset[]>(["presets:list"], "presets:import", { name, slots }, {
-      fail: "Failed to import arrangement",
-      ok: `Imported arrangement "${name}".`,
-    });
-  }
-
-  async function handleReorderPresets(ids: string[]) {
-    await optimistic<SlotPreset[]>(
-      ["presets:list"],
-      (cur) => reorderById(cur, ids),
-      () => ipc<SlotPreset[]>("presets:reorder", { ids }),
-      "Failed to reorder arrangements",
-    );
-  }
-
-  async function handleRenamePreset(id: string, name: string) {
-    await writeTo<SlotPreset[]>(["presets:list"], "presets:rename", { id, name }, {
-      fail: "Failed to rename arrangement",
-    });
-  }
-
-  async function handleOverwritePreset(id: string) {
-    try {
-      // Persist any pending editor edits first so the preset captures what's on screen.
-      if (slotsDirty) await saveSlots();
-      // The rows ON SCREEN, not the view's in-effect board: the editor may be on
-      // the service type's default while a plan override is what the server would
-      // read back, and an arrangement must capture what the operator is looking at.
-      const presets = await ipc<SlotPreset[]>("presets:overwrite", { id, slots: localSlots });
-      queryClient.setQueryData(["presets:list"], presets);
-      toast.success("Arrangement overwritten with current slots.");
-    } catch (err) {
-      toast.error(`Failed to overwrite arrangement: ${errorMessage(err)}`);
-    }
   }
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
@@ -950,16 +680,6 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetAllowedServiceTypes,
     handleSetPlanSwitcherMode,
     handleSetBranding,
-    updateSlot,
-    addSlot,
-    addSpacer,
-    removeSlot,
-    saveSlots,
-    discardSlots,
-    setSlotsTargetSide,
-    revertSlotsOverride: slotsTarget.revert,
-    promoteSlotsOverride: slotsTarget.promote,
-    handleSetViewSlotsLayout,
     handleAddView,
     handleRenameView,
     handleDuplicateView,
@@ -969,14 +689,6 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSaveLayoutTemplate,
     handleUpdateLayoutTemplate,
     handleDeleteLayoutTemplate,
-    handleCopySlots,
-    handleSavePreset,
-    handleApplyPreset,
-    handleDeletePreset,
-    handleImportPreset,
-    handleReorderPresets,
-    handleRenamePreset,
-    handleOverwritePreset,
     handleCreateScreen,
     handleClaimDevice,
     handleRenameOutput,
@@ -993,7 +705,6 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRemoveOutput,
     handleReorderOutputs,
     handleRefreshDisplay,
-    handleDragEnd,
     sensors,
   };
 
@@ -1008,16 +719,7 @@ export function useStageSettings(pinnedViewId?: string) {
     updateStatus,
     selectedViewId,
     setSelectedViewId,
-    localSlots,
-    slotsDirty,
-    isSavingSlots,
     isRefreshing,
-    slotsPreview,
-    slotsTargetSide: slotsTarget.side,
-    slotsTargetTypeName: slotsTarget.typeName,
-    slotsTargetLabel: slotsTarget.label,
-    slotsTargetHasPlan: slotsTarget.hasPlan,
-    slotsTargetHasOverride: slotsTarget.hasOverride,
     handleDismissOnboarding,
     handlers,
   };

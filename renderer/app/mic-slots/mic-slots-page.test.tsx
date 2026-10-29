@@ -63,6 +63,8 @@ function board(spec: string): Slot[] {
 }
 
 let layouts: Record<string, Slot[]> = {};
+/** A plan's own layout per board, returned when the target names a plan. */
+let overrides: Record<string, Slot[]> = {};
 let boards: SlotBoardDTO[] = [];
 let presets: SlotPreset[] = [];
 let planId: string | null = null;
@@ -106,10 +108,10 @@ const STATE = () =>
       serviceTypeId: "st-1",
       serviceTypeName: "Weekend",
       planId: new URL(url, "http://x").searchParams.get("planId"),
-      planDates: null,
-      planSortDate: null,
+      planDates: "September 13, 2026",
+      planSortDate: new URL(url, "http://x").searchParams.get("planId") ? "2026-09-13T14:00:00Z" : null,
       defaultSlots: layouts[targets[1]!] ?? [],
-      overrideSlots: null,
+      overrideSlots: new URL(url, "http://x").searchParams.get("planId") ? (overrides[targets[1]!] ?? null) : null,
     };
   } else if (path === "/api/plans/upcoming") out = { plans: [], cacheAgeMs: 0 };
   else if (path === "/api/presets" && method === "GET") out = presets;
@@ -164,6 +166,7 @@ beforeEach(() => {
   registerTargetGuard("mic-slots", null);
   boards = BOARDS();
   layouts = { "b-left": board("a | b+c | ~s | d"), "b-right": board("x | y") };
+  overrides = {};
   presets = [];
   planId = null;
   requests = [];
@@ -514,5 +517,136 @@ describe("saved layouts", () => {
     await mount();
     await click(screen.getByRole("button", { name: "Saved layouts" }));
     assert.ok(screen.getByRole("button", { name: "Recall Easter" }).textContent!.includes("Right wall"));
+  });
+});
+
+describe("a saved layout's name", () => {
+  const preset = () => ({ id: "p1", name: "Opening", slots: board("q"), createdAt: "2026-04-02T00:00:00Z", boardId: "b-right" }) as SlotPreset;
+
+  async function rename(typed: string) {
+    presets = [preset()];
+    await mount();
+    await click(screen.getByRole("button", { name: "Saved layouts" }));
+    await openMenu(screen.getByRole("button", { name: "More for Opening" }));
+    await choose(screen.getByRole("menuitem", { name: "Rename" }));
+    const field = screen.getByLabelText("Rename Opening") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.blur(field);
+    });
+    await settle();
+  }
+  const patches = () => requests.filter((r) => r.method === "PATCH" && r.url.endsWith("/api/presets/p1"));
+
+  test("saves a changed name trimmed on blur", async () => {
+    await rename("  Welcome  ");
+    assert.deepEqual(patches().map((r) => JSON.parse(r.body!)), [{ name: "Welcome" }]);
+  });
+
+  test("an emptied name is put back, not saved as nothing", async () => {
+    await rename("   ");
+    assert.equal(patches().length, 0);
+    assert.ok(screen.getByText("Opening"));
+  });
+});
+
+describe("which side of the plan the page edits", () => {
+  const typeButton = () => screen.getByRole("button", { name: /Weekend default/ });
+  const planButton = () => screen.getByRole("button", { name: /only/ }) as HTMLButtonElement;
+
+  test("opens on the plan, showing the plan's own layout", async () => {
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+    await mount();
+    assert.equal(planButton().getAttribute("aria-pressed"), "true");
+    assert.equal(shape("b-left"), "o1 | o2");
+  });
+
+  test("the Default side shows the DEFAULT even while a plan has its own", async () => {
+    // The layout in effect this week is the exception. Editing the default from it
+    // would save this week's exception onto the service type's standing layout.
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+    await mount();
+    await click(typeButton());
+    assert.equal(shape("b-left"), "a | b+c | ~s | d");
+  });
+
+  test("a plan with no layout of its own edits a copy of the default, not an empty board", async () => {
+    planId = "p1";
+    await mount();
+    assert.equal(shape("b-left"), "a | b+c | ~s | d");
+  });
+
+  test("the plan side is off with no plan, and the page opens on the default", async () => {
+    await mount();
+    assert.equal(planButton().disabled, true);
+    assert.equal(typeButton().getAttribute("aria-pressed"), "true");
+  });
+
+  test("EDITED is there only when a board has a layout for this plan", async () => {
+    planId = "p1";
+    await mount();
+    assert.ok(!document.querySelector("[data-mic-edited]"), "no board is an exception");
+    cleanup();
+    overrides = { "b-right": board("o1") };
+    await mount();
+    assert.ok(document.querySelector("[data-mic-edited]"), "one board is");
+  });
+
+  test("a save on the plan side carries the plan, its type and its date", async () => {
+    planId = "p1";
+    await mount();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const sent = JSON.parse(posts("/api/boards/slots")[0]!.body!) as { boards: { target: unknown }[] };
+    assert.deepEqual(sent.boards[0]!.target, { kind: "plan", planId: "p1", serviceTypeId: "st-1", sortDate: "2026-09-13T14:00:00Z" }, "without the date the 30-day prune can never age the override out");
+  });
+
+  test("a save on the Default side is the type's default, never a plan's", async () => {
+    planId = "p1";
+    await mount();
+    await click(typeButton());
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const sent = JSON.parse(posts("/api/boards/slots")[0]!.body!) as { boards: { target: unknown }[] };
+    assert.deepEqual(sent.boards[0]!.target, { kind: "default", serviceTypeId: "st-1" });
+  });
+
+  test("Revert and Set as default are offered only when there is a plan layout to act on", async () => {
+    planId = "p1";
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Plan board actions" }));
+    assert.equal(screen.getByRole("menuitem", { name: /^Revert/ }).getAttribute("aria-disabled"), "true");
+    assert.equal(screen.getByRole("menuitem", { name: /^Set .* as/ }).getAttribute("aria-disabled"), "true");
+  });
+});
+
+describe("unsaved work and the plan switcher", () => {
+  test("stepping to another plan asks first, and keeps the work when refused", async () => {
+    const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
+    const { requestEditingTarget } = await import("../../settings/sections/editing-target.js");
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null))));
+    await settle();
+    await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
+    assert.ok(unsaved());
+    let moved: boolean | null = null;
+    await act(async () => {
+      void requestEditingTarget({ serviceTypeId: "st-1", planId: null }).then((ok) => (moved = ok));
+    });
+    await settle();
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
+    assert.equal(moved, false, "the switcher stays where it was");
+    assert.ok(unsaved(), "and the work is still there");
+    await act(async () => {
+      void requestEditingTarget({ serviceTypeId: "st-1", planId: null }).then((ok) => (moved = ok));
+    });
+    await settle();
+    await click(screen.getByRole("button", { name: "Discard" }));
+    await settle();
+    assert.equal(moved, true);
+    assert.ok(!unsaved(), "discarding drops the edits");
   });
 });

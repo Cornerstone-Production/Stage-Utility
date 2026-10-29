@@ -12,6 +12,7 @@ import { invoke as ipc } from "../../lib/api";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { useStageState } from "../../main/use-stage-state";
 import { useUpcomingPlans } from "../../settings/sections/plan-switcher";
+import { SlotsPreviewNote } from "../../settings/sections/slots-preview-target";
 import { namedType } from "../../settings/sections/slots-target-pill";
 import { plural } from "@main/services/plural";
 import { groupColumns, isSpacerColumn } from "../../components/slots-columns";
@@ -303,6 +304,7 @@ export function BoardSection({
             />
           )}
         </div>
+        {!empty && <SlotsPreviewNote resolution={preview.resolution} planLabel={mic.label} serviceTypeName={typeName} />}
         {banks.length > 0 && (
           <div className="relative h-3.5 w-full max-w-[1056px]" aria-hidden>
             {banks.map((b, i) => (

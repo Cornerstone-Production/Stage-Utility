@@ -95,13 +95,14 @@ const STATE = {
   let body: unknown = {};
   if (url.includes("/api/plans/upcoming")) {
     body = { plans: unavailable ? [] : PLANS, cacheAgeMs: 0, ...(unavailable ? { unavailable } : {}) };
-  } else if (url.includes("/slot-targets")) {
+  } else if (url.includes("/api/boards/b1/targets")) {
     slotTargetUrls.push(url);
     const q = new URL(url, "http://localhost:8788").searchParams;
     const row = datesKnown ? PLANS.find((p) => p.planId === q.get("planId")) : undefined;
     body = {
-      scope: "view",
-      key: "v1",
+      scope: "board",
+      key: "b1",
+      boardId: "b1",
       serviceTypeId: q.get("serviceTypeId"),
       serviceTypeName: typeNamesKnown ? (q.get("serviceTypeId") === SUN ? "Sunday" : "Youth") : null,
       planId: q.get("planId"),
@@ -139,7 +140,7 @@ const settle = async () => {
 
 /** Prints what the editor's hook resolved to, beside the switcher itself. */
 function Probe(): React.ReactElement {
-  const t = useSlotsTarget("view", "v1");
+  const t = useSlotsTarget("b1");
   return React.createElement(
     "div",
     null,
@@ -166,7 +167,7 @@ function Probe(): React.ReactElement {
       {
         "data-testid": "real-save",
         onClick: () => {
-          void ipc("views:setSlots", { id: "v1", slots: [], target: t.wireTarget() }).catch(() => {});
+          void ipc("boards:saveAll", { boards: [{ boardId: "b1", slots: [], target: t.wireTarget() }] }).catch(() => {});
         },
       },
       "real save",
@@ -314,7 +315,7 @@ describe("the switcher writes nothing", () => {
    *  /api/plan-switcher-mode. None of them is on this list, and neither is
    *  anything else — a new endpoint of any kind, by any method, fails here and
    *  has to be justified. */
-  const READS = ["/api/plans/upcoming", "/api/state", "/api/views/v1/slot-targets"];
+  const READS = ["/api/boards/b1/targets", "/api/plans/upcoming", "/api/state"];
 
   /** Distinct request paths, sorted, so the assertion is order-independent. */
   const paths = () =>
@@ -400,11 +401,11 @@ describe("the board a save lands on", () => {
     requests = [];
     await press("real save");
 
-    const save = requests.find((r) => r.url.includes("/api/views/v1/slots"));
+    const save = requests.find((r) => r.url.includes("/api/boards/slots"));
     assert.equal(!!save, true, "the save request was made");
     assert.equal(save?.method, "POST");
     assert.equal(
-      JSON.stringify(JSON.parse(save?.body ?? "{}").target ?? null),
+      JSON.stringify((JSON.parse(save?.body ?? "{}").boards?.[0]?.target ?? null)),
       JSON.stringify({
         kind: "plan",
         planId: "s2",
@@ -431,9 +432,9 @@ describe("the board a save lands on", () => {
 
     requests = [];
     await press("real save");
-    const save = requests.find((r) => r.url.includes("/api/views/v1/slots"));
+    const save = requests.find((r) => r.url.includes("/api/boards/slots"));
     assert.equal(
-      JSON.stringify(JSON.parse(save?.body ?? "{}").target ?? null),
+      JSON.stringify((JSON.parse(save?.body ?? "{}").boards?.[0]?.target ?? null)),
       JSON.stringify({ kind: "default", serviceTypeId: YOUTH }),
     );
   });

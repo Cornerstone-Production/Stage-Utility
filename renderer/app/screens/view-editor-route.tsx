@@ -82,18 +82,7 @@ export function ViewEditorRoute() {
           // Arrived here from a screen's "Edit layout": go straight in.
           startEditing
           stageState={s.stageState}
-          wirelessChannels={s.wirelessChannels}
           layoutTemplates={s.layoutTemplates}
-          localSlots={s.localSlots}
-          slotsDirty={s.slotsDirty}
-          isSavingSlots={s.isSavingSlots}
-          slotsPreview={s.slotsPreview}
-          slotsTargetTypeName={s.slotsTargetTypeName}
-          slotPresets={s.slotPresets}
-          slotsTargetSide={s.slotsTargetSide}
-          slotsTargetLabel={s.slotsTargetLabel}
-          slotsTargetHasPlan={s.slotsTargetHasPlan}
-          slotsTargetHasOverride={s.slotsTargetHasOverride}
           canDelete={views.length > 1}
           handlers={s.handlers}
         />

@@ -20,7 +20,7 @@ import { confirm, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
 import { useEditingTarget, registerTargetGuard } from "../../settings/sections/editing-target";
-import { confirmDiscardSlotEdits, namedType, planLabel, savedMessage, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
+import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
 import { errorMessage } from "@main/services/errors";
 import { gridBoardId, forEachSlotsGrid, viewBoardId } from "@main/services/slot-boards";
 import { plural } from "@main/services/plural";
@@ -40,8 +40,6 @@ import { duplicateOf, newSlot, newSpacer } from "./slot-factory";
 
 export const BOARDS_KEY = ["boards:list"] as const;
 const TARGETS_PREFIX = ["boards:targets"] as const;
-const targetsKey = (id: string, serviceTypeId: string | null, planId: string | null) =>
-  ["boards:targets", id, serviceTypeId, planId] as const;
 export const checkKey = (serviceTypeId: string | null, planId: string | null) => ["boards:check", serviceTypeId, planId] as const;
 
 const NO_SLOTS: Slot[] = [];
@@ -100,27 +98,22 @@ export function useMicSlots() {
     void qc.invalidateQueries({ queryKey: BOARDS_KEY });
   }, [pointers, qc]);
 
-  // ── which side of the plan ───────────────────────────────────────────
-  const hasPlan = !!planId;
-  // Opens on the current plan when there is one, because that is the layout the
-  // screens are showing and so the one an edit almost always means. The chosen
-  // side survives a target change (see useSlotsTarget): only a plan side with no
-  // plan has to be corrected.
-  const [ownSide, setOwnSide] = useState<SlotsTargetSide | null>(null);
-  const side: SlotsTargetSide = ownSide ?? (hasPlan ? "plan" : "default");
-  const effectiveSide: SlotsTargetSide = side === "plan" && !hasPlan ? "default" : side;
+  // ── which plan, and which side of it ─────────────────────────────────
+  // One target for the whole page, read off the first board: the plan's date and
+  // the service type's name are the same whichever board they are asked of.
+  const pageTarget = useSlotsTarget(boards[0]?.id ?? "");
+  const { hasPlan, side: effectiveSide, setSide: setOwnSide, label, typeName, wireTarget } = pageTarget;
 
   // ── every board's two layouts at the target being edited ─────────────
   const targetQs = useQueries({
     queries: boards.map((b) => ({
-      queryKey: targetsKey(b.id, serviceTypeId, planId),
+      queryKey: boardTargetsKey(b.id, serviceTypeId, planId),
       queryFn: () => ipc<SlotTargetsDTO>("boards:targets", { id: b.id, serviceTypeId, planId }),
       enabled: !!serviceTypeId,
     })),
   });
   const targetsById = new Map<string, SlotTargetsDTO | undefined>(boards.map((b, i) => [b.id, targetQs[i]?.data]));
   const dataVersion = targetQs.map((q) => q.dataUpdatedAt).join(",");
-  const firstTargets = targetQs.map((q) => q.data).find((d) => !!d);
   const targetsFailed = targetQs.find((q) => q.isError)?.error ?? null;
 
   // ── unsaved work ─────────────────────────────────────────────────────
@@ -164,26 +157,6 @@ export function useMicSlots() {
   const at = picked ? locate(boardsMap, picked) : null;
   const selection: Selection | null = picked && at ? { boardId: at.boardId, slotId: picked } : null;
   const selectedSlot = selection ? findSlot(boardsMap, selection.slotId) : null;
-
-  // ── labelling ────────────────────────────────────────────────────────
-  const label = planLabel(
-    firstTargets?.planSortDate ?? null,
-    firstTargets?.planDates ?? (editing.onLive ? (state?.planDates ?? null) : null),
-    state?.timezone ?? null,
-  );
-  const typeName =
-    firstTargets?.serviceTypeName ??
-    (serviceTypeId === (state?.serviceTypeId ?? null) ? (state?.serviceTypeName ?? null) : null);
-
-  function wireTarget(): WireTarget | undefined {
-    if (!serviceTypeId) return undefined;
-    if (effectiveSide === "plan" && planId) {
-      // The plan's date travels with the save: an override with none is one the
-      // 30-day prune can never age out.
-      return { kind: "plan", planId, serviceTypeId, sortDate: firstTargets?.planSortDate ?? null };
-    }
-    return { kind: "default", serviceTypeId };
-  }
 
   // ── refreshing ───────────────────────────────────────────────────────
   async function refresh(): Promise<void> {
@@ -241,11 +214,7 @@ export function useMicSlots() {
       takeState(next);
       setEdits({});
       await refresh();
-      // Amber whenever the editor is not on the plan the machine follows: the save
-      // was real, and changed nothing on any screen.
-      const message = `${savedMessage(effectiveSide, label, typeName)} · ${plural(ids.length, "board")}`;
-      if (editing.onLive) toast.success(message);
-      else toast.info(message);
+      pageTarget.announceSaved(plural(ids.length, "board"));
       return true;
     } catch (err) {
       const message = errorMessage(err);

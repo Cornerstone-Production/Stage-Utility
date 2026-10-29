@@ -468,7 +468,6 @@ export type IpcChannel =
   | "layoutGroups:delete"
   | "layoutGroups:list"
   | "layoutGroups:save"
-  | "layoutObjects:setSlots"
   | "layoutTemplates:delete"
   | "layoutTemplates:list"
   | "layoutTemplates:save"
@@ -514,14 +513,12 @@ export type IpcChannel =
   | "people:getCount"
   | "plans:exportPreview"
   | "plans:upcoming"
-  | "presets:apply"
   | "presets:delete"
   | "presets:import"
   | "presets:list"
   | "presets:overwrite"
   | "presets:rename"
   | "presets:reorder"
-  | "presets:save"
   | "prodcom:clearTranscript"
   | "prodcom:getChannels"
   | "prodcom:getTranscript"
@@ -571,9 +568,6 @@ export type IpcChannel =
   | "settings:setReconnectSchedule"
   | "settings:setTaperWindow"
   | "settings:setTimezone"
-  | "slots:clearOverride"
-  | "slots:promoteOverride"
-  | "slots:targets"
   | "spl:deleteHistory"
   | "spl:getHistory"
   | "spl:getHistoryCurrent"
@@ -629,7 +623,6 @@ export type IpcChannel =
   | "video:state"
   | "video:updateFeed"
   | "views:add"
-  | "views:copySlots"
   | "views:duplicate"
   | "views:import"
   | "views:remove"
@@ -642,7 +635,6 @@ export type IpcChannel =
   | "views:setKind"
   | "views:setLayout"
   | "views:setServiceCueLayout"
-  | "views:setSlots"
   | "views:setShowInSidebar"
   | "views:setSlotsLayout"
   | "views:setRole"
@@ -1184,20 +1176,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "presets:list":
       return apiFetch<T>("/api/presets");
 
-    case "presets:save":
-      return post<T>("/api/presets", p);
-
-    case "presets:apply": {
-      const id = p.id as string;
-      return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, {
-        viewId: p.viewId,
-        displayId: p.displayId,
-        // Recalling an arrangement lands on the board the editor is showing, not
-        // always the service type's default.
-        target: p.target,
-      });
-    }
-
     case "presets:delete": {
       const id = p.id as string;
       return del<T>(`/api/presets/${encodeURIComponent(id)}`);
@@ -1316,58 +1294,13 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       });
     }
 
-    case "views:setSlots": {
-      const id = p.id as string;
-      // `target` omitted = whichever board a plain save goes to (the current plan
-      // if one is selected, else the service type's default). Sent only when the
-      // editor has an explicit one, so every other caller keeps working.
-      const body: Record<string, unknown> = { slots: p.slots };
-      if (p.target) body.target = p.target;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, body);
-    }
-
-    // ── Slot targets (the type's default vs one plan's board) ──────────────
-    // One path shape for both scopes: a slots View's id and an inline slots-grid
-    // OBJECT's id name boards in the same file under the same rules.
-    case "slots:targets": {
-      const base = p.scope === "view" ? "views" : "layout-objects";
-      // Which board pair to read. Sent whenever a service type is known, so a
-      // switcher pointed at another week gets that week's rows rather than the
-      // machine's; the server falls back to its own plan when it is absent.
-      const q = new URLSearchParams();
-      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
-      if (p.planId) q.set("planId", String(p.planId));
-      const tail = q.size > 0 ? `?${q}` : "";
-      return apiFetch<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slot-targets${tail}`);
-    }
-
-    case "slots:clearOverride": {
-      const base = p.scope === "view" ? "views" : "layout-objects";
-      return del<T>(
-        `/api/${base}/${encodeURIComponent(p.key as string)}/slots/override/${encodeURIComponent(p.planId as string)}`,
-      );
-    }
-
-    case "slots:promoteOverride": {
-      const base = p.scope === "view" ? "views" : "layout-objects";
-      return post<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slots/promote`, {
-        planId: p.planId,
-      });
-    }
-
+    // ── The Mic slots preview ──────────────────────────────────────────────
     case "views:resolveSlots":
       // Resolve slots against a plan's roster and this rig's device state WITHOUT
       // saving — powers the slots editor's preview. `target` names the board being
       // previewed; omitted, the server answers for the plan the screens follow.
       // Returns { slots, roster, reason? }.
       return post<T>("/api/views/resolve-slots", { slots: p.slots, target: p.target });
-
-    case "layoutObjects:setSlots": {
-      const id = p.id as string;
-      const body: Record<string, unknown> = { slots: p.slots };
-      if (p.target) body.target = p.target;
-      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, body);
-    }
 
     case "views:duplicate": {
       const id = p.id as string;
@@ -1401,16 +1334,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
-
-    case "views:copySlots": {
-      const id = p.id as string;
-      // `target` names ONE board on both sides of the copy: the source's rows for
-      // that board go to the destination's same board. Omitted = wherever a plain
-      // save would go.
-      const body: Record<string, unknown> = { fromViewId: p.fromViewId };
-      if (p.target) body.target = p.target;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, body);
-    }
 
     case "views:remove": {
       const id = p.id as string;
