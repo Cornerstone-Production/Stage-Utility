@@ -4754,12 +4754,15 @@ export class StageController {
       const before = JSON.stringify(this.teamMembers);
       const prepBefore = this.prepTags.map;
       await this.fetchTeamMembers(serviceTypeId, planId, { fresh: true });
-      if (JSON.stringify(this.teamMembers) === before && this.prepTags.map === prepBefore) return;
+      const rosterChanged = JSON.stringify(this.teamMembers) !== before;
+      const prepChanged = this.prepTags.map !== prepBefore;
+      if (!rosterChanged && !prepChanged) return;
       // broadcast() already drops an identical state, so the saving here is
       // recomputeResolved(), which re-resolves every view, every inline slots grid
       // and every view-sourced grid. That runs every minute for hours inside a
       // window, and almost every one of those minutes the roster has not changed.
-      console.log("[stage-controller] roster changed mid-window — re-resolving");
+      const what = rosterChanged && prepChanged ? "roster and prep tags" : rosterChanged ? "roster" : "prep tags";
+      console.log(`[stage-controller] ${what} changed mid-window — re-resolving`);
       this.recomputeResolved();
       this.broadcast();
     } finally {
@@ -4985,10 +4988,12 @@ export class StageController {
   ): Promise<void> {
     const key = `${serviceTypeId}:${planId}`;
     if (opts.fresh) pcoService.clearTeamMembersCache(this.pcoAppId!, serviceTypeId, planId);
-    // Rides along with the roster: every caller re-resolves straight after, and
-    // the service caches the tags on its LONG tier, so this is usually no request.
-    // It reports its own failure and never throws.
-    await this.prepTags.refresh();
+    // Rides along with the roster, read CONCURRENTLY: a cold cache or a 429
+    // backoff on the tags must not hold the roster up. Every caller re-resolves
+    // straight after, and the service caches the tags on its LONG tier, so this is
+    // usually no request. It reports its own failure and never throws, so the
+    // roster cannot be failed by it; both are awaited before this returns.
+    const tagRead = this.prepTags.refresh();
     try {
       const fetched = await pcoService.listTeamMembers(
         this.pcoAppId!,
@@ -5029,6 +5034,8 @@ export class StageController {
       console.error("[stage-controller] fetchTeamMembers error:", scrubError(err));
       this.teamMembers = [];
       this.teamMembersKey = null;
+    } finally {
+      await tagRead;
     }
   }
 
