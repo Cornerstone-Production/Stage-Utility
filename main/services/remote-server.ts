@@ -229,6 +229,10 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * alternative is a test that restates the mapping and then agrees with itself.
  */
 export function handlerErrorStatus(err: unknown): number {
+  // decodeURIComponent on a path segment is the one thing that throws a
+  // URIError, and it means the request's own % escape is malformed. Routes
+  // decode ids in some twenty places; answered here once rather than in each.
+  if (err instanceof URIError) return 400;
   const declared = (err as { status?: number } | null)?.status;
   return declared === 413 || declared === 409 || declared === 400 || declared === 503 ? declared : 500;
 }
