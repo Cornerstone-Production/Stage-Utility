@@ -160,6 +160,38 @@ describe("PrepTagBook", () => {
     assert.equal(out.filter((l) => l.includes("more than one capsule")).length, 1);
   });
 
+  it("forgets the map on reset, and reads the same answer as new afterwards", async () => {
+    const r = bookRig([[tagged("Capsule: KSM9", "1")]]);
+    await lines(async () => void (await r.book.refresh()));
+    assert.equal(r.book.map.size, 1);
+    r.book.reset();
+    assert.equal(r.book.map.size, 0, "a map read under old credentials must not outlive them");
+    const res = await lines(async () => {
+      assert.deepEqual(await r.book.refresh(), { changed: true, failed: false });
+    });
+    assert.deepEqual(res, ["[pco-tags] read 1 tagged people from 1 tags"]);
+  });
+
+  it("drops a read that was in flight across a reset, success or failure", async () => {
+    for (const outcome of ["ok", "fail"] as const) {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const book = new PrepTagBook(() => async () => {
+        await held;
+        if (outcome === "fail") throw new Error("old credentials refused");
+        return [tagged("Capsule: KSM9", "1")];
+      });
+      const out = await lines(async () => {
+        const pending = book.refresh();
+        book.reset(); // credentials changed while the read was out
+        release();
+        assert.deepEqual(await pending, { changed: false, failed: false }, outcome);
+      });
+      assert.equal(book.map.size, 0, `${outcome}: an old-credential answer must not land`);
+      assert.deepEqual(out, [], `${outcome}: nor be logged`);
+    }
+  });
+
   it("asks nothing without credentials", async () => {
     const book = new PrepTagBook(() => null);
     assert.deepEqual(await book.refresh(), { changed: false, failed: false });
@@ -170,6 +202,29 @@ describe("pcoService.listPersonPrepTags", () => {
   type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
   const svc = pcoService as unknown as Requester;
   const realRequest = svc.request;
+
+  it("reads the second page of a tag's people", async () => {
+    pcoService.clearCache();
+    svc.request = async (url: string) => {
+      if (url.endsWith("/tag_groups?per_page=100")) return { data: [{ id: "10", attributes: { tags_for: "person" } }] };
+      if (url.includes("/tag_groups/10/tags?")) return { data: [{ id: "100", attributes: { name: "Capsule: KSM9" } }] };
+      if (url.includes("/tags/100/people") && url.includes("offset=100")) return { data: [{ id: "3" }] };
+      if (url.includes("/tags/100/people")) {
+        return {
+          data: [{ id: "1" }, { id: "2" }],
+          links: { next: "https://api.planningcenteronline.com/services/v2/tag_groups/10/tags/100/people?per_page=100&offset=100" },
+        };
+      }
+      throw new Error(`unexpected ${url}`);
+    };
+    try {
+      const out = await pcoService.listPersonPrepTags("app", "secret");
+      assert.deepEqual(out, [{ tagName: "Capsule: KSM9", personIds: ["1", "2", "3"] }]);
+    } finally {
+      svc.request = realRequest;
+      pcoService.clearCache();
+    }
+  });
 
   it("reads tag groups, then only person groups' prep tags, then those tags' people", async () => {
     pcoService.clearCache();
