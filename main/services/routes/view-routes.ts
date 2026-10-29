@@ -360,9 +360,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      // `copyBoards: true` gives the copy boards of its own; by default it shows
+      // By default the copy gets boards of its own; `copyBoards: false` shows
       // the same boards as the original.
-      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name, { copyBoards: body.copyBoards === true });
+      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name, { copyBoards: body.copyBoards !== false });
       // The copy this call made, beside the state, as POST /api/outputs answers.
       json(res, { ...state, viewId: view.id }, 201);
       return;

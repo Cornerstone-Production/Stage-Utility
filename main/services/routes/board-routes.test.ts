@@ -302,6 +302,20 @@ describe("deleting a screen", () => {
   });
 });
 
+describe("POST /api/views/:id/duplicate", () => {
+  // What the Duplicate button sends: a name and nothing else.
+  it("gives the copy its own board unless told to share", async () => {
+    await slotsStore.setDefault("b-left", TYPE, [slot("keep")]);
+    const r = await call(viewRoutes, "/api/views/wall-1/duplicate", "POST", { name: "Left Display copy" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const copy = ctl.state.views.find((v) => v.id === (r.json as { viewId: string }).viewId)!;
+    assert.notEqual(copy.boardId, "b-left", "a plain duplicate shares the original's live board");
+    assert.equal(ctl.boards.get(copy.boardId!)?.name, "Left copy");
+    const shared = await call(viewRoutes, "/api/views/wall-1/duplicate", "POST", { name: "Shared", copyBoards: false });
+    assert.equal(ctl.state.views.find((v) => v.id === (shared.json as { viewId: string }).viewId)!.boardId, "b-left");
+  });
+});
+
 describe("one plan's layout on a board", () => {
   it("reads both targets, reverts and promotes", async () => {
     ctl.state = { ...ctl.state, planId: PLAN };

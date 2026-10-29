@@ -1,8 +1,9 @@
-// Duplicating a view and its slot boards. A copy shows the SAME boards as its
-// original — a second screen over the same charger is what a board is for — and
-// `copyBoards` gives it boards of its own instead, each a duplicate of the one
-// it showed (every service type, fresh slot ids), held in memory straight away
-// so the copy draws them without a restart.
+// Duplicating a view and its slot boards. By default a copy gets boards of its
+// own, each a duplicate of the one it showed (every service type, fresh slot
+// ids), held in memory straight away so the copy draws them without a restart:
+// that is what Duplicate did before boards, and a copy silently sharing the
+// original's live wall is a surprise. `copyBoards: false` points the copy at the
+// SAME boards instead — a second screen over the same charger.
 //
 // Driven against the real controller and the real slots store in a temp data
 // directory. Every id and name is invented.
@@ -59,7 +60,7 @@ beforeEach(() => {
 });
 
 describe("duplicating a view", () => {
-  it("points the copy at the same boards, and makes none", async () => {
+  it("with copyBoards: false, points the copy at the same boards, and makes none", async () => {
     const mics = await board("Mic board", ["Pastor"]);
     const drums = await board("Drums", ["Drums"]);
     ctl.state = {
@@ -72,8 +73,8 @@ describe("duplicating a view", () => {
     };
     const before = (await slotsStore.listBoards()).size;
 
-    await stageController.duplicateView("mics", "Mic board 2");
-    await stageController.duplicateView("pad", "Pad 2");
+    await stageController.duplicateView("mics", "Mic board 2", { copyBoards: false });
+    await stageController.duplicateView("pad", "Pad 2", { copyBoards: false });
 
     const mics2 = ctl.state.views.find((v) => v.name === "Mic board 2")!;
     const pad2 = ctl.state.views.find((v) => v.name === "Pad 2")!;
@@ -83,7 +84,7 @@ describe("duplicating a view", () => {
     assert.equal((await slotsStore.listBoards()).size, before, "a plain duplicate made boards");
   });
 
-  it("with copyBoards, gives the copy duplicates of its boards, held in memory under their new ids", async () => {
+  it("by default gives the copy duplicates of its boards, held in memory under their new ids", async () => {
     const mics = await board("Wall", ["Pastor"]);
     const drums = await board("Kit", ["Drums"]);
     ctl.state = {
@@ -95,8 +96,8 @@ describe("duplicating a view", () => {
       ] as unknown as View[],
     };
 
-    await stageController.duplicateView("wall", "Wall 2", { copyBoards: true });
-    await stageController.duplicateView("kit", "Kit 2", { copyBoards: true });
+    await stageController.duplicateView("wall", "Wall 2");
+    await stageController.duplicateView("kit", "Kit 2");
 
     const wall2 = ctl.state.views.find((v) => v.name === "Wall 2")!;
     const kit2 = ctl.state.views.find((v) => v.name === "Kit 2")!;
@@ -129,7 +130,7 @@ describe("duplicating a view", () => {
       ] as unknown as View[],
     };
 
-    await stageController.duplicateView("old", "Old 2");
+    await stageController.duplicateView("old", "Old 2", { copyBoards: false });
 
     const old2 = ctl.state.views.find((v) => v.name === "Old 2")!;
     assert.equal(gridConfig(old2).boardId, "old-grid", "the copied widget lost its slots");

@@ -6,8 +6,8 @@ Slots are edited on a Mic Slots view's own page, opened from Screens.
 
 Slots live on named **boards**, and a Mic Slots view, or a mic-slots object in a
 custom layout, shows one. Several can show the same board: editing the slots of
-any one of them edits every screen showing that board. A copy of a view shows
-the same boards as the original. See [Slots](reference/data-model.md#slots) and
+any one of them edits every screen showing that board. A copy of a view gets
+its own copy of each board the original shows. See [Slots](reference/data-model.md#slots) and
 the [board routes](reference/api.md#slot-boards).
 
 ## The slot editor

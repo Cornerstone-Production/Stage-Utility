@@ -1022,8 +1022,9 @@ export class StageController {
       if (copy) {
         reused.push(`reused the copy left by an interrupted upgrade: "${copy.name}"`);
       } else {
-        // The copy shows the same boards as the view it copies, as any
-        // duplicate does: it is the same content on another screen.
+        // The copy shows the same boards as the view it copies, unlike a
+        // Duplicate: it is the same content split onto a screen of the other
+        // role, so an edit to either must show on both.
         const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
         copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" };
         nextViews = [...nextViews, copy];
@@ -3993,12 +3994,13 @@ export class StageController {
    * Copy a view. Answers the state and the copy this call made, so a caller need
    * not look for "the newest view" in a state another operator may have added to.
    *
-   * The copy shows the SAME boards as the original — a second screen over the
-   * same charger is the point of a board. `copyBoards` gives the copy boards of
-   * its own instead, each a duplicate of the one it showed.
+   * The copy gets boards of its own, each a duplicate of the one it showed, as
+   * a duplicate did before boards: sharing would silently tie the copy to the
+   * original's live wall. `copyBoards: false` points it at the SAME boards — a
+   * second screen over the same charger.
    */
   async duplicateView(id: string, name?: string, opts: { copyBoards?: boolean } = {}): Promise<{ state: StageState; view: View }> {
-    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? false);
+    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? true);
     return { state: this.state, view };
   }
 
