@@ -228,7 +228,9 @@ export function DeleteBoardDialog({
 }) {
   const [replacement, setReplacement] = useState<string>(NOBODY);
   const [busy, setBusy] = useState(false);
-  const contents = useBoardContents(board?.id ?? "", !!board);
+  // Off once the delete is under way: the board is going, and reading its layouts
+  // again is a 404 per plan.
+  const contents = useBoardContents(board?.id ?? "", !!board && !busy);
   if (!board) return null;
   const shown = board.shownOn;
   const names = shown.map((s) => (s.kind === "object" ? `${s.name} (widget)` : s.name));
