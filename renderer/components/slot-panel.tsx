@@ -253,14 +253,14 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             <span
               className="font-semibold text-fg leading-tight line-clamp-2 block"
               // cqmin, not cqi. Sized to the card's WIDTH alone, a short wide slot
-              // got large text and a two-line reservation, and between them the name
-              // card ate the photo -- faces were behind it. cqmin takes the smaller
-              // of width and height, so a slot that is short gets smaller text, which
-              // is what "make it fit" means when the constraint is vertical.
+              // got large text and the name card ate the photo -- faces were behind
+              // it. cqmin takes the smaller of width and height, so a slot that is
+              // short gets smaller text, which is what "make it fit" means when the
+              // constraint is vertical.
               //
-              // The reservation shrinks with it: two lines keeps one- and two-line
-              // names the same card height so photo bottoms line up across a row, but
-              // on a short card min() gives that up rather than spend the photo on it.
+              // No height is reserved for a second line: a one-line name is one line
+              // tall, and a long one wraps to two (line-clamp-2). The band's 45cqb
+              // ceiling, not a reservation, is what keeps the photo.
               style={{ fontSize: "clamp(0.75rem, 9.3cqmin, 3.4rem)" }}
             >
               {displayName ?? "—"}

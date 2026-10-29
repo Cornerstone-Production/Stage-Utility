@@ -6,13 +6,15 @@
 // text, the two-line reservation doubled it, and between them the name and
 // position covered the photo completely. The visible strip was hair and forehead.
 //
-// Three changes, all asserted here:
+// Two changes, both asserted here:
 //   1. cqmin, not cqi — the SMALLER of width and height governs, so a short card
 //      gets smaller text. That is what "make it fit" means when the constraint is
 //      vertical, and it is a no-op on a tall card where width is already smaller.
-//   2. (superseded by concept A) the two-line reservation is gone; see below.
-//   3. a hard ceiling on the band, so the photo keeps the majority whatever the
+//   2. a hard ceiling on the band, so the photo keeps the majority whatever the
 //      text does.
+//
+// The name reserves no second line of height; that is asserted on the rendered
+// card in slot-panel-markup.test.tsx, where it can read the style React wrote.
 //
 // VERIFIED IN A REAL BROWSER, because container queries do not resolve in jsdom
 // and a DOM test here would assert nothing. Driving the running app at
@@ -44,17 +46,6 @@ describe("slot card sizing", () => {
       /fontSize:\s*"clamp\(1rem,\s*14cqi/,
       "the width-only sizing is what this fixes",
     );
-  });
-
-  it("does not reserve a second name line the photo has to pay for", () => {
-    // Concept A drops the two-line reservation (a min-height in em on the name).
-    // It kept photo bottoms aligned across a row, but the approved card sizes its
-    // band to what it holds -- a one-line name is one line, and a card with no
-    // IEM is shorter than one with it -- so the reservation only moved the
-    // position line away from a short name. A long name still wraps to two lines
-    // (line-clamp-2), and the 45cqb ceiling below is what protects the photo.
-    assert.doesNotMatch(SRC, /minHeight:\s*"[^"]*\dem/, "a fixed two-line reservation is back");
-    assert.match(SRC, /line-clamp-2/, "a long name still wraps to two lines, not one clipped one");
   });
 
   it("caps the name card so the photo always keeps most of the slot", () => {
