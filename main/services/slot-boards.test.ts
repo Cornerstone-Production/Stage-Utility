@@ -299,6 +299,42 @@ describe("a v4 pointer at a board that does not exist", () => {
   });
 });
 
+describe("what makes two boards different", () => {
+  // Merging deletes the loser's rows, so anything the signature leaves out is
+  // something a merge throws away.
+  const twoBoards = (a: { defaults?: Slot[]; override?: Slot[] }, b: { defaults?: Slot[]; override?: Slot[] }) => {
+    const ov = (slots: Slot[]): Map<string, SlotsOverride> => new Map([["plan-9", { serviceTypeId: WEEKEND, sortDate: "2026-11-01", slots }]]);
+    const defaults = new Map<string, Map<string, Slot[]>>();
+    const overrides = new Map<string, Map<string, SlotsOverride>>();
+    for (const [id, x] of [["a", a], ["b", b]] as const) {
+      if (x.defaults) defaults.set(id, new Map([[WEEKEND, x.defaults]]));
+      if (x.override) overrides.set(id, ov(x.override));
+    }
+    return migrateBoards(
+      [{ id: "a", name: "A", kind: "slots", createdAt: "" }, { id: "b", name: "B", kind: "slots", createdAt: "" }] as unknown as View[],
+      { version: 3, boards: new Map(), defaults, overrides },
+      NOW,
+    );
+  };
+
+  test("one plan's rows", () => {
+    const r = twoBoards(
+      { defaults: lineup("a", left), override: lineup("ao", ["Pastor"]) },
+      { defaults: lineup("b", left), override: lineup("bo", ["Host"]) },
+    );
+    assert.deepEqual([...r.file.boards.keys()].sort(), ["a", "b"], "two boards differing only in one plan's rows were merged");
+  });
+
+  test("a static slot's own name, which the resolver keeps as stored", () => {
+    // A pco slot's displayName is filled in on every read, so it is not layout;
+    // a static slot's is what it shows.
+    const stat = (id: string, displayName: string): Slot =>
+      ({ id, channel: "01", order: 0, link: { kind: "static", label: "Guest", color: "#2E6691" }, displayName, deviceBinding: null }) as unknown as Slot;
+    const r = twoBoards({ defaults: [stat("a1", "Pastor Sam")] }, { defaults: [stat("b1", "Pastor Jo")] });
+    assert.deepEqual([...r.file.boards.keys()].sort(), ["a", "b"], "two boards differing only in a static slot's name were merged");
+  });
+});
+
 describe("the writes a merge needs", () => {
   test("stage the merged board, kept and named, before the views stop pointing at it", () => {
     const r = migrateBoards(henryViews(), henryFile(), NOW);
