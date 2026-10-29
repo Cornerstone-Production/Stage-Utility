@@ -4762,7 +4762,7 @@ export class StageController {
       // and every view-sourced grid. That runs every minute for hours inside a
       // window, and almost every one of those minutes the roster has not changed.
       const what = rosterChanged && prepChanged ? "roster and prep tags" : rosterChanged ? "roster" : "prep tags";
-      console.log(`[stage-controller] ${what} changed mid-window — re-resolving`);
+      console.log(`[stage-controller] ${scrub(what)} changed mid-window — re-resolving`);
       this.recomputeResolved();
       this.broadcast();
     } finally {
