@@ -82,6 +82,35 @@ describe("a restored slots.json", () => {
     const r = await check(JSON.parse('{"version":4,"boards":{"__proto__":{"name":"x","columnWidthIn":null}},"defaults":{},"overrides":{}}'));
     assert.equal(r.ok, false);
   });
+
+  it("is refused with an interrupted migration's merge naming a key that reaches the prototype", async () => {
+    const ok = { ...v4({ "b-1": { name: "Left", columnWidthIn: null } }), pendingMerges: { "b-2": "b-1" } };
+    assert.equal((await check(ok)).ok, true);
+    const r = await check(JSON.parse('{"version":4,"boards":{},"defaults":{},"overrides":{},"pendingMerges":{"__proto__":"b-1"}}'));
+    assert.equal(r.ok, false);
+    assert.match(String((r as { reason?: string }).reason), /pending board merges/);
+  });
+});
+
+describe("a restored views.json", () => {
+  const check = async (raw: unknown) => {
+    const run = restoreCheckFor("views.json");
+    assert.ok(run, "views.json has no restore check");
+    return run(raw);
+  };
+  const screen = (boardId: unknown) => [{ id: "v1", name: "Main", kind: "slots", createdAt: "", boardId }];
+
+  it("is accepted with a screen pointing at a board, or at none", async () => {
+    assert.equal((await check(screen("b-1"))).ok, true);
+    assert.equal((await check(screen(null))).ok, true);
+  });
+
+  it("is refused with a board id that reaches the prototype, or is not text", async () => {
+    const r = await check(screen("__proto__"));
+    assert.equal(r.ok, false, "a board id that reaches the prototype was restored");
+    assert.match(String((r as { reason?: string }).reason), /slot board id is not allowed/);
+    assert.equal((await check(screen(5))).ok, false, "a board id that is a number was restored");
+  });
 });
 
 describe("boards", () => {
