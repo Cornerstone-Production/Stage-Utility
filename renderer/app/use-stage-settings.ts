@@ -88,13 +88,12 @@ export function selectViewId(pinned: string | undefined, own: string): string {
  * This hook is per-component -- there is no shared context -- so every caller
  * gets its OWN selectedViewId, and the resync below defaults it to the first
  * view. The layout editor route resolved its view from the URL but never said
- * so here, and the slot editor reads and WRITES through selectedViewId: opening
- * the second slots view showed the first view's slots under the second's name,
- * and Save wrote them onto the first. screens-route called setSelectedViewId on
- * its own instance before navigating, which reached nothing.
+ * so here, and what acts through selectedViewId acted on the first view while the
+ * page showed the second. screens-route called setSelectedViewId on its own
+ * instance before navigating, which reached nothing.
  *
  * Pinning it is the fix rather than an effect, because an effect leaves one
- * render where the slot state mirrors the wrong view.
+ * render where the selection is the wrong view.
  */
 export function useStageSettings(pinnedViewId?: string) {
   const queryClient = useQueryClient();

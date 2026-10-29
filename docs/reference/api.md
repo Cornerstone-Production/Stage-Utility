@@ -81,7 +81,7 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
 | POST | `/api/allowed-service-types` | Set the allowlist: `{ids: string[]}` (`400` when `ids` is not an array). Answers the state |
-| POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
+| POST | `/api/plan-switcher-mode` | How the Mic slots page's plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save the slots of the board a display shows (`{slots, displayId?}`; `400` when `slots` is not an array, `404` for a `displayId` that names no display or a display showing no board, and the primary display when it is omitted). An alias onto the [board](#slot-boards) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 

@@ -20,8 +20,8 @@ import { useStageSettings } from "../use-stage-settings";
 export function ViewEditorRoute() {
   const params = useParams({ strict: false }) as { viewId?: string };
   // PINNED to the view in the URL. Without it this hook instance defaults to
-  // the first view, and the slot editor below both reads and saves through that
-  // selection -- so editing the second slots view saved its slots onto the first.
+  // the first view, and the handlers that act on the selected view would act on
+  // the wrong one.
   const s = useStageSettings(params.viewId);
   const router = useRouter();
 

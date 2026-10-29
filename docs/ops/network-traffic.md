@@ -78,7 +78,7 @@ that holds a Messages or Message composer widget.
   which changes when the photo does; all are cached for a year, except a
   full-size photo standing in for a smaller copy Planning Center has not sent. A slots DISPLAY
   has its photos cropped to the column shape they are drawn at, which is a tall
-  sliver — that is the saving. An inline mic-slots object on a custom layout is
+  sliver — that is the saving. A mic-slots object on a custom layout is
   whatever size it was dragged to, so nothing server-side knows its shape: it
   receives the whole image and the browser crops it.
 - **Photos come at the size they are drawn.** Each slot asks for the device
