@@ -13,7 +13,7 @@
 // path is tested through the rendered card.
 
 import { useDraggable, useDndContext, useDroppable } from "@dnd-kit/core";
-import type { KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { SlotsColumns, groupColumns, isSpacerColumn, type SlotsColumnsEditing } from "../../components/slots-columns";
 import { cn } from "../../lib/cn";
@@ -32,6 +32,16 @@ export interface DragData {
 export interface DropData {
   drop: Drop;
 }
+
+/**
+ * The card a key press moved, which must hold focus afterwards.
+ *
+ * A card moved into another column is a new element (its parent changed), so the
+ * browser drops focus to the page and the next key press goes nowhere. Whoever
+ * moves a card by keyboard names it here; the card that mounts under that id takes
+ * focus back, once.
+ */
+let refocus: string | null = null;
 
 const KEY_DIRECTION: Record<string, Nudge> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
 
@@ -95,7 +105,7 @@ function StackZone({ slot }: { slot: Slot }) {
       ref={setNodeRef}
       data-mic-stack={slot.id}
       className={cn(
-        "pointer-events-none absolute inset-x-1.5 bottom-1.5 flex h-[45%] items-end justify-center rounded-b-xl pb-2 transition-opacity",
+        "pointer-events-none absolute inset-x-1.5 bottom-1.5 z-20 flex h-[45%] items-end justify-center rounded-b-xl pb-2 transition-opacity",
         shown ? "opacity-100" : "opacity-0",
         isOver ? "border-t-2 border-accent bg-accent/30" : "border-t border-dashed border-accent/45 bg-accent/10",
       )}
@@ -130,6 +140,14 @@ function Card({
   const data: DragData = { drag: { kind: "slot", id: slot.id }, slotIds: [slot.id], spacer: false, label: slotTitle(slot) };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `card:${slot.id}`, data });
   const { active } = useDragging();
+  const node = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (refocus === slot.id) {
+      refocus = null;
+      node.current?.focus();
+    }
+  }, [slot.id]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     // While dnd-kit's keyboard drag is running it owns the arrow keys.
@@ -142,6 +160,7 @@ function Card({
       const dir = KEY_DIRECTION[e.key];
       if (dir) {
         e.preventDefault();
+        refocus = slot.id;
         // Shift+Down stacks onto the column to the left; Shift+Up takes a card
         // out of its stack. Plain arrows move.
         if (e.shiftKey && dir === "down") actions.stack(slot.id);
@@ -155,7 +174,10 @@ function Card({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(el) => {
+        node.current = el;
+        setNodeRef(el);
+      }}
       {...attributes}
       {...listeners}
       onKeyDown={onKeyDown}

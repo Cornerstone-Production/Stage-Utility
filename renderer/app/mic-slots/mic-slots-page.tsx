@@ -212,7 +212,18 @@ export function MicSlotsPage() {
               }
             />
           ) : (
-            <DndContext sensors={sensors} collisionDetection={collide} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={collide}
+              // Scrolls the page when a card is carried to its top or bottom edge, as it
+              // must to reach a board below the fold, but over a thinner band than the
+              // default fifth: a zone a card is about to be dropped on, near an edge,
+              // should not scroll out from under it.
+              autoScroll={{ threshold: { x: 0.1, y: 0.1 }, acceleration: 6 }}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onDragCancel={() => setDragging(null)}
+            >
               {mic.boards.map((b) => (
                 <BoardSection
                   key={b.id}

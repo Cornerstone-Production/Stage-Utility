@@ -422,6 +422,19 @@ describe("the keyboard", () => {
     assert.equal(shape("b-left"), "a | b | c");
   });
 
+  test("a card moved by keyboard keeps focus, so the next key press still reaches it", async () => {
+    // Stacking puts the card in another column, which is a new element; without the
+    // refocus the browser drops focus to the page and a second Shift+Up goes nowhere.
+    layouts["b-left"] = board("a | b | c");
+    await mount();
+    card("b").focus();
+    await key(card("b"), "ArrowDown", true);
+    assert.equal(shape("b-left"), "a+b | c");
+    assert.ok(document.activeElement === card("b"), "focus is on the card that moved");
+    await key(document.activeElement!, "ArrowUp", true);
+    assert.equal(shape("b-left"), "a | b | c");
+  });
+
   test("the arrow keys move a column, and Delete removes a card", async () => {
     layouts["b-left"] = board("a | b | c");
     await mount();

@@ -27,7 +27,10 @@ export function TopBar({
   const noType = !mic.serviceTypeId;
   const typeLabel = mic.typeName ? `${mic.typeName} default` : "Default";
   return (
-    <div className="sticky top-0 z-20 -mx-2 flex flex-wrap items-center gap-2.5 border-b border-line bg-bg px-2 py-2 max-sm:-mx-3 max-sm:px-3">
+    // The shell pads its scroller by 1rem from sm up, and a sticky bar holds at the
+    // padding edge rather than the scroller's: the bar cancels that padding, so
+    // nothing scrolls visibly above it.
+    <div className="sticky top-0 z-20 -mx-2 flex flex-wrap items-center gap-2.5 border-b border-line bg-bg px-2 py-2 max-sm:-mx-3 max-sm:px-3 sm:-top-4 sm:-mt-4 sm:pt-6">
       <PlanSwitcher disabled={noType} />
       <span className="h-[22px] w-px bg-line" />
       <ButtonGroup role="group" aria-label="Which layouts to edit">
