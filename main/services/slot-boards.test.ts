@@ -261,6 +261,44 @@ describe("a widget that embedded a view that is not a slots screen", () => {
   });
 });
 
+describe("a v4 pointer at a board that does not exist", () => {
+  const meta = { name: "Kept", columnWidthIn: null, createdAt: NOW };
+
+  test("is cleared and named, never given a new empty board", () => {
+    const r = migrateBoards(
+      [
+        { id: "a", name: "A", kind: "slots", createdAt: "", boardId: "b-gone" },
+        { id: "z", name: "Z", kind: "slots", createdAt: "", boardId: "b-1" },
+        custom("pad", "Pad", [grid("g-1", { boardId: "b-gone" })]),
+        // Dormant: a slots view keeping the layout it had as a custom view.
+        { ...custom("old", "Old", [grid("g-2", { boardId: "b-gone" })]), kind: "slots", boardId: "b-1" },
+      ] as unknown as View[],
+      { version: 4, boards: new Map([["b-1", meta]]), defaults: new Map(), overrides: new Map() },
+      NOW,
+    );
+    assert.equal(r.views.find((v) => v.id === "a")!.boardId, null);
+    assert.equal(gridOf(r.views, "pad", "g-1").boardId, null);
+    assert.equal(gridOf(r.views, "old", "g-2").boardId, null);
+    assert.deepEqual([...r.file.boards.keys()], ["b-1"], "a phantom board was made for a dangling pointer");
+    assert.equal(r.changed, true);
+    assert.deepEqual(r.log, [
+      '"A" (a) pointed at board b-gone, which does not exist; it now shows none',
+      'a slots widget (g-1) on "Pad" pointed at board b-gone, which does not exist; it now shows none',
+      'a slots widget (g-2) on "Old" pointed at board b-gone, which does not exist; it now shows none',
+    ]);
+  });
+
+  test("but a pointer at rows that have no board yet gets one", () => {
+    const r = migrateBoards(
+      [{ id: "a", name: "A", kind: "slots", createdAt: "", boardId: "a" }] as unknown as View[],
+      { version: 4, boards: new Map(), defaults: new Map([["a", new Map([[WEEKEND, lineup("x", left)]])]]), overrides: new Map() },
+      NOW,
+    );
+    assert.equal(r.views[0]!.boardId, "a");
+    assert.equal(r.file.boards.get("a")?.name, "A");
+  });
+});
+
 describe("the writes a merge needs", () => {
   test("stage the merged board, kept and named, before the views stop pointing at it", () => {
     const r = migrateBoards(henryViews(), henryFile(), NOW);

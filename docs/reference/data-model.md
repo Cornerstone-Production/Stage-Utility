@@ -318,6 +318,10 @@ so no slot data moves:
 - a key with no view or widget to name it, and nothing showing it, is kept as
   "Unused board N"; a dormant view's board keeps the view's name.
 
+A pointer at a board that does not exist (a deleted board, a restored backup) is
+set to none on start, with a `[slots-store]` line, rather than given a new empty
+board.
+
 The files are written in an order where a crash after any write loses nothing:
 `slots.json` first with every board and its column width, keeping the boards a
 merge will remove (listed under `pendingMerges`); then `views.json` with the

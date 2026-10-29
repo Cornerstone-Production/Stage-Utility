@@ -166,6 +166,35 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
   return objects.map((o) => ({ ...o, config: { ...o.config }, ...(o.children ? { children: cloneObjects(o.children) } : {}) }));
 }
 
+/**
+ * A v4 file's pointers at boards that do not exist, set to none. A deleted
+ * board, a restored backup from another moment, a hand edit: each leaves a
+ * pointer the migration would otherwise give a new empty board named by its raw
+ * id, drawing a blank grid that looks deliberate. A pointer at rows with no
+ * board (a key from before boards) is not dangling; it gets its board below.
+ */
+function clearDangling(views: readonly View[], file: SlotsFile, log: string[]): View[] {
+  const exists = (id: string): boolean => file.boards.has(id) || file.defaults.has(id) || file.overrides.has(id);
+  return views.map((v): View => {
+    let next = v;
+    if (typeof v.boardId === "string" && v.boardId && !exists(v.boardId)) {
+      log.push(`"${v.name}" (${v.id}) pointed at board ${v.boardId}, which does not exist; it now shows none`);
+      next = { ...next, boardId: null };
+    }
+    if (!next.layout) return next;
+    const objects = cloneObjects(next.layout.objects);
+    let touched = false;
+    walk(objects, (o) => {
+      if (o.config.type !== "slots-grid" || hasLegacyGridFields(o.config)) return;
+      const b = o.config.boardId;
+      if (typeof b !== "string" || !b || exists(b)) return;
+      log.push(`a slots widget (${o.id}) on "${v.name}" pointed at board ${b}, which does not exist; it now shows none`);
+      o.config = { ...o.config, boardId: null };
+      touched = true;
+    });
+    return touched ? { ...next, layout: { ...next.layout, objects } } : next;
+  });
+}
 
 /**
  * Move slots.json and the views onto named boards. Idempotent: run over its own
@@ -187,6 +216,8 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
  * 5. A key with no view or widget name, and nothing pointing at it, is kept,
  *    named "Unused board N". A dormant view's board keeps the view's name.
  *
+ * On a v4 file a pointer at a board that does not exist is set to none first.
+ *
  * The answer is written in up to three steps so that every state a crash can
  * leave on disk loses nothing (see the controller's migrateSlotBoards): `staged`
  * (or `file`), then the views, then `file`.
@@ -194,6 +225,7 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
 export function migrateBoards(views: readonly View[], input: SlotsFile, now: string): BoardMigration {
   const log: string[] = [];
   const inputViews = views;
+  if (input.version === 4) views = clearDangling(views, input, log);
   const file: SlotsFile = {
     version: 4,
     boards: new Map([...input.boards].map(([id, b]) => [id, { ...b }])),
