@@ -843,7 +843,7 @@ chooses which; with one, it is not shown.
 | **Embedded view** | **View** (any other view; a view cannot contain itself and nesting stops after three levels), **Show the view's header** (off), **Follow the live item** (on) |
 | **Embedded screen** | **Screen**, **Show the screen's name** (on), **Show a status dot** (on, offered while the name shows) |
 | **Plan file** | **Match** (a filename substring, `stage plot` by default), a picker of the files on the current plan, **PDF page** (1 to 99), **Trim white**, **Background** (keep, black or transparent) and **Crop %** for each edge (0 to 95) |
-| **Mic slots** | **Source**: Define here (a board of its own, edited below the canvas) or Embed a view (shows a slots view's board). A widget showing a slots view's board reads as embedding that view; switching it to Define here gives it its own copy of that board when the layout is saved |
+| **Mic slots** | **Board** (which [board](../slots.md) it shows, or *New board…*; boards are edited on the Mic slots page, which an **Edit in Mic slots** link opens on this one), **Display width** (this widget's active width in inches, for a board [aligned to chargers](../slots.md#aligning-to-chargers); blank leaves it unaligned) |
 | **Wireless summary** | **Online count** (on), **Lowest battery** (on), **Time remaining** (off), **Show label** (off) and its **Label** (`Mics`) |
 | **Mic channel** | **Channel** (Auto uses the first), **RF signal** (on), **Battery %** (on), **Time remaining** (off), **Frequency** (on), **Audio level** (off), **Show channel name** (on) |
 | **Charger battery** | **Battery %** and **Charging** (on to start), **Cycles**, **Health**, **Temp** (off), and the **Bays** to list, each with an optional name |

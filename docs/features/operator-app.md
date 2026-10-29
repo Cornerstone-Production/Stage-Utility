@@ -28,7 +28,7 @@ done. Dismiss it and it stays dismissed.
 |---|---|
 | — | **Home** |
 | Content | **ServiceCue**, **Patch** |
-| Screens | **Screens**, **Video feeds** |
+| Screens | **Screens**, **Mic slots**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
@@ -187,6 +187,11 @@ a pill for what it is (*wall* or *control surface*) and, for a console, whether 
 is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
 *Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
 **Show in the sidebar**.
+
+A Mic Slots screen has no layout to place. Its card's **Edit** opens **Mic slots**
+in the sidebar, where every board is edited together and the screen's own board is
+selected (see [Mic slots](../slots.md#the-mic-slots-page)); the screen's **View
+settings…** carries its **Display width**.
 
 Under the cards: **New view** (pick what the view shows: Mic Slots, Dashboard,
 Stage, Transcription, ServiceCue, SPL Rundown, Calendar or a Custom Layout, and for

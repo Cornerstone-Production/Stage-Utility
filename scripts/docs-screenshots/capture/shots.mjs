@@ -132,9 +132,9 @@ export const SHOTS = [
   {
     name: "slots-editor",
     phase: "week",
-    shows: "The mic board editor: slots linked to Planning Center positions and bound to wireless channels.",
+    shows: "The Mic slots page: a board's preview, the inspector for the selected slot, and the plan switcher.",
     async run({ session, page, world }) {
-      await session.goto(page, `/screens/${world.micBoardId}/edit`);
+      await session.goto(page, `/mic-slots?board=${world.micBoardId}`);
       await session.shoot(page, "slots-editor");
     },
   },

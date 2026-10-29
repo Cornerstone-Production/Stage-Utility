@@ -34,7 +34,7 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 | `screens-overview.png` | Screens: a card per screen with a live preview and its message groups, the found-devices banner and the sidebar's count of screens not set up. |
 | `servicecue-picker.png` | The ServiceCue landing page: a service type and a column preset to open its rundown. |
 | `servicecue-rundown.png` | The ServiceCue page in the app for the Weekend plan with the Audio preset, the live item highlighted. |
-| `slots-editor.png` | The mic board editor: slots linked to Planning Center positions and bound to wireless channels. |
+| `slots-editor.png` | The Mic slots page: a board's preview, the inspector for the selected slot, and the plan switcher. |
 | `video-feeds.png` | Video feeds: pulled cameras and pushed encoders, with the editor for one feed. |
 | `wall-lobby.png` | A lobby screen built in the layout editor: clock and countdown. |
 | `wall-servicecue.png` | A ServiceCue rundown on a screen, with the live item highlighted and the Audio and Band note columns. |

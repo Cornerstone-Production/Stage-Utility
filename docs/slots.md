@@ -2,56 +2,159 @@
 
 A slot is one cell on the mic board. It links to a person, optionally binds a
 wireless mic and an IEM pack, and shows a name, photo and live telemetry.
-Slots are edited on a Mic Slots view's own page, opened from Screens.
 
-Slots live on named **boards**, and a Mic Slots view, or a mic-slots object in a
-custom layout, shows one. Several can show the same board: editing the slots of
-any one of them edits every screen showing that board. A copy of a view gets
-its own copy of each board the original shows. See [Slots](reference/data-model.md#slots) and
-the [board routes](reference/api.md#slot-boards).
+Slots live on named **boards**. A Mic Slots view, or a mic-slots object in a custom
+layout, shows one board, and several can show the same one: edit it once and every
+screen showing it changes. Boards are created, renamed, duplicated and deleted on
+the **Mic slots** page, with no limit on how many. A copy of a view shows the same
+boards as the original, unless the copy is made with its own. See
+[Slots](reference/data-model.md#slots) and the [board routes](reference/api.md#slot-boards).
 
-## The slot editor
+## The Mic slots page
 
-The editor is a list of slots in board order, with **Add slot** and **Add spacer**
-under it and **Save slots** at the top. **Unsaved changes** shows beside Save until
-it is pressed, and nothing reaches a screen before that. Drag a row by its grip to
-reorder; a stacked column moves as one.
+**Mic slots**, in the Screens group of the sidebar, edits every board at once.
+A Mic Slots screen's **Edit** on the Screens page opens it on that screen's board
+(`/mic-slots?board=<id>`), scrolled to and selected.
 
-![The mic board editor with slots linked to Planning Center positions and wireless channels](images/slots-editor.png)
+![The Mic slots page: boards with screen-shaped previews, the inspector for the selected slot, and the plan switcher](images/slots-editor.png)
 
-Each slot row has:
+**Nothing reaches a screen until Save all.** **Unsaved changes** shows beside it
+while any board has work in it. Leaving the page, or moving the plan switcher, with
+unsaved work asks first.
+
+### The top bar
 
 | Control | What it does |
 |---|---|
-| **Channel** | A short reference number for the slot, such as `01`, drawn as a badge on the cell's photo. Blank draws no badge |
-| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a color, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot color**, takes no part in Planning Center matching, and can still carry a mic, IEM and battery. An empty slot is a blank cell, and has no further options |
-| **Stack** | Puts the slot in the same on-screen column as the slot above it, as rows, for a dual-bay charger two people share. Off for the first slot |
-| Remove | Deletes the slot |
+| **Plan switcher** | `‹ name ▾ ›` and **Now**: which plan's layouts every board on the page shows and saves to. See [Switching plans](#switching-plans-in-the-editor) |
+| **Default** and **<plan> only** | Which side of the plan is being edited, for every board at once. **EDITED** marks a plan that has a layout of its own on some board. See [Defaults and this week](#defaults-and-this-week) |
+| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default**, and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan, and says which boards it could not do |
+| **Saved layouts** | [Saved layouts](#saved-layouts) |
+| **Save all** | Writes every board with changes in one request |
 
-**Options**, collapsed under each slot with a one-line summary of what is set
-(`mic · IEM · charger`):
+Save all is all or nothing. The server checks every board before it writes any, and
+a refusal names the board that failed (`Board "Left wall": …`): the page keeps every
+edit and marks that board.
 
-| Option | What it does |
+### A board
+
+Each board is a section with its name, **Shown on** (each screen or widget that
+shows it), its slot count, **+ Slot**, **+ Spacer** and a **⋯** menu. Under that is a
+screen-shaped preview drawn by the same components a screen uses, filled with the
+people the plan being edited puts on each slot, and a line saying so ("Previewing
+Sun, Sep 20 · 6 of 8 positions filled"; "positions only, no plan" on a default). The
+line is absent on the live plan.
+
+The **⋯** menu:
+
+| Item | What it does |
 |---|---|
-| **Device channel** | The wireless channel this slot's mic is bound to, from the [Wireless](integrations/wireless.md) integration: the cell shows its RF bars and battery. **Offline (manual label)** is for a mic or pack with no network: the cell shows its label in the same row, without bars. **None** clears it |
-| **Mic label** | Text shown in place of the frequency. See [Labels](#labels) |
-| **IEM pack** | A second device, on any slot, whose battery shows on its own row under the mic's. Same choices as Device channel |
-| **IEM label** | Text of the IEM row. See [Labels](#labels) |
-| **Battery from** | Where the mic row's battery reads from: **Mic battery (transmitter)**, a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
-| **Hide RF** | Hides the RF bars and shows only the battery level, for charge-only or IEM slots |
+| **Rename**, **Duplicate board** | Duplicating copies every service type's layouts and plan layouts, with new slot ids |
+| **Shown on** | A checklist of every Mic Slots screen and every mic-slots widget. Checking one points it at this board. To move a screen off a board, check it on another |
+| **Copy this board from…** | Copies a layout over this board's layout for the plan being edited: from **another board**, from a **service type** (its default) or from a **plan** (its own layout, else its type's default). Written at once, after asking if the board has unsaved edits |
+| **Revert this board to the default** | Deletes this board's layout for the plan being edited. Offered on the plan side when it has one |
+| **Charger layout…** | [Aligning to chargers](#aligning-to-chargers) |
+| **Delete board…** | Names what goes with it (the service types it has a layout for, and the upcoming plans with a layout of their own) and every screen showing it, and asks what those screens show instead: another board, or nothing. **Save it as a saved layout first** to keep a copy |
 
-A view of this kind also has **Align to physical chargers**, off by default. On, a
-column's width is set in inches against the monitor's active width (**Display
-width**, 32.25 in to start) so the cells line up with the chargers below them.
-**Charger width** (3.49 in to start) is the width of one column, and a **spacer**
-(**Add spacer**, with its own **Width**) is a blank gap for the space between charger
-banks and the side margins. A stacked column counts once, by its first slot. The
-panel says how many inches are used of the display's and turns red when the row is
-wider. Without it every column, a spacer's included, takes an equal share of the
-width. The charger width belongs to the board, so it is shared by every screen
-showing it; the display width is this screen's own.
+A board with no layout for the service type being edited shows **No layout for
+this board yet**, and offers **Copy the <type> layout** (from another type that has
+one), **Recall a saved layout** and **Start blank**. The screens showing it draw an
+empty board for that type's plans until it has one.
 
-**Copy slots from**, above the editor, fills this board from another Mic Slots view.
+**+ New board**, under the boards, asks for a name and a starting point: **Blank**, a
+**Copy of** a board, or **A saved layout** (placed under the service type and plan
+being edited), and optionally which screens and widgets show it.
+
+### Drag, drop and stack
+
+Every card and every gap on the page is a drop target, including on another board.
+
+| Drag | Drop | Result |
+|---|---|---|
+| A card | in a **gap** between columns | The card becomes a column of its own there. A card dragged out of a stack leaves it |
+| A card | on the **lower half of another card** | It stacks directly below that card, in that card's column |
+| The **bar over a column** | in a gap | The whole stack moves |
+| The bar over a column | on a card | The two stacks join, the dragged one below that card |
+| A **spacer** | in a gap | It moves like a column. A spacer never stacks, and nothing stacks onto one |
+
+A drop that changes nothing is not an unsaved change.
+
+From the keyboard, with a card focused (click it, or Tab to it):
+
+| Key | What it does |
+|---|---|
+| **←** **→** | Moves the card's column one place. A card inside a stack leaves it, to that side |
+| **↑** **↓** | Reorders a card inside its stack |
+| **Shift+↓** | Stacks the card onto the column to its left, skipping spacers |
+| **Shift+↑** | Takes the card out of its stack, into a column just after it |
+| **Delete** | Removes the card |
+| **Space** | Picks the card up; the arrow keys then carry it between zones, including onto another board, and **Space** drops it |
+
+The inspector's **Stacked** switch does the same as Shift+↑ and Shift+↓.
+
+### The inspector
+
+Select a card, or a spacer, to edit it. A spacer has only a **Width**.
+
+**Who**
+
+| Control | What it does |
+|---|---|
+| **Position / Person / Label / Empty** | How the slot is filled: by position and person from Planning Center ([below](#linking-a-slot-to-a-person)), a typed **Label** with a color, or nothing. A label slot takes no part in Planning Center matching and can still carry a mic, IEM and charge bar. An empty slot is a blank cell with no further options |
+| **This plan** | Who the plan being edited puts on the slot, or a note that a default resolves no one |
+
+**Hardware**
+
+| Control | What it does |
+|---|---|
+| **Mic** | The wireless channel this slot's mic is bound to, from the [Wireless](integrations/wireless.md) integration, with its live battery: the cell shows its RF bars and battery. **Offline (manual label)** is for a mic or pack with no network: the cell shows its label in the same row, without bars. **None** clears it |
+| **Shows as** | Text shown in place of the frequency, with **Use receiver name** to fill it from the receiver. See [Labels](#labels) |
+| **In-ear pack** | A second device, on any slot, whose battery shows on its own row under the mic's. Same choices as Mic, with an **In-ear label** under the mic label |
+| **Battery from** | **Mic** (the transmitter), a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
+| **RF bars** | Off hides the RF bars and shows only the battery level, for charge-only or IEM slots |
+
+**Placement**
+
+| Control | What it does |
+|---|---|
+| **Channel number** | A short number for the slot, such as `01`, drawn as a badge on the cell's photo. Blank draws no badge |
+| **Stacked** | Puts the slot in the same on-screen column as the one to its left, as rows, for a dual-bay charger two people share |
+| **Column width** | When the board is aligned to chargers: this column's width in inches, **Auto** being the board's charger width |
+
+The header's **Duplicate** copies who fills the slot, with the next channel number
+and none of its hardware (two cards on one receiver is never what a duplicate is
+for); **Remove** deletes it.
+
+### This plan's check
+
+Under the boards, **This plan's check** reads the saved layouts against the plan
+being edited:
+
+- **On the plan, on no slot**: people whose position some board names but who landed
+  on no slot, with **Add to <board>** for each board naming it. The button adds a
+  slot for that position to the board's unsaved edits.
+- **Slots that accept no position**: a position slot with nothing in it, with
+  **Show it**.
+
+It is read from what is saved, so Save all first to check your edits. A default has no
+week, so it has no people to check. If Planning Center cannot be read the check says
+so and skips the people.
+
+### Aligning to chargers
+
+A board's **Charger layout…** has **Align to chargers**, off by default, and the
+**charger column width** (3.49 in to start). On, a column's width is set in inches
+against the screen's active width, so the cells line up with the chargers below
+them. A **spacer** is a blank gap for the space between charger banks and the side
+margins, and a stacked column counts once. The preview draws a bracket under each
+run of columns between spacers, and the line under it says how many inches are used
+of the display's, in red when the row is wider. Without alignment every column, a
+spacer's included, takes an equal share of the width.
+
+The column width belongs to the board, so every screen showing it shares it. The
+**display width** (32.25 in for a 37 inch 16:9 panel) is each screen's own: set it in
+the screen's settings on the Screens page (a Mic Slots screen) or in the widget's
+**Display width** in the layout editor. A screen with no display width is not aligned.
 
 ## Linking a slot to a person
 
@@ -136,82 +239,73 @@ A slot listing `Vocals→4, Acoustic` and another listing just `Acoustic` are
 different sets, so both show the guitarist — which is what you want when someone
 has two devices and needs to see both.
 
-The editor flags any slot sharing its set with another, since adding one position
+The inspector flags any slot sharing its set with another, since adding one position
 changes the grouping.
 
 ## Defaults and this week
 
-Every service type has a **default** board — the lineup it comes back to every
-week. A change made while a Planning Center plan is selected is saved against
-**that plan only**, and the next plan of that type shows the default again.
+Every board has a **default** layout per service type: the lineup that type comes
+back to every week. A change made while a Planning Center plan is selected is saved
+against **that plan only**, and the next plan of that type shows the default again.
 
-The editor's pill picks which of the two you are editing:
+The top bar picks which of the two you are editing, for every board:
 
 | Side | What it is |
 |---|---|
-| **Default** | the service type's standing board |
-| the plan's date | that plan's board. Carries an **edited** badge once it has one |
+| **<Type> default** | the service type's standing layouts |
+| **<plan date> only** | that plan's layouts. **EDITED** appears once any board has one |
 
-Two actions appear once a plan has a board of its own:
+A plan whose board has no layout of its own opens as an editable copy of the
+default. Revert and Set as default, in the plan actions and on each board's menu,
+appear once a plan has a layout of its own:
 
-- **Revert to default** deletes that plan's board, so the screens go back to the
-  service type's default.
-- **Set as default** makes that plan's board the service type's default, and the
+- **Revert** deletes that plan's layout, so the screens go back to the service
+  type's default.
+- **Set as default** makes that plan's layout the service type's default, and the
   plan stops being an exception.
 
 Both discard something, so both ask first. Saving the default while a plan's own
-board is in effect changes nothing on any screen — the plan's board still wins
+layout is in effect changes nothing on any screen: the plan's layout still wins
 until it is reverted or the plan advances.
 
-Everything that writes slots lands on the side you are editing: a save, recalling
-an arrangement, and copying slots from another view. A copy reads the source's
-board for that same side and writes it to yours, and never deletes the board on
-the other side. Copying onto the plan side from a view that has no board for the
-plan copies that view's default into your plan's board, so your screen matches it
-without your default changing.
+Everything that writes slots lands on the side you are editing: Save all, copying a
+layout over a board, and a saved layout made into a board. A copy reads the
+source's layout for that same side and never deletes the layout on the other side.
+Copying onto the plan side from a source that has none for the plan copies the
+source's default into your plan's layout, so your screen matches it without your
+default changing.
 
-A plan's board is deleted automatically once the plan is more than 30 days past.
-Defaults are never pruned. When Planning Center cannot be reached to date a
-plan, nothing of that service type is pruned.
+A plan's layout is deleted automatically once the plan is more than 30 days past.
+Defaults are never pruned. When Planning Center cannot be reached to date a plan,
+nothing of that service type is pruned.
 
-Exporting a view carries the defaults for every service type. Per-plan boards do
-not travel — a plan id means nothing on the far end.
+Exporting a view carries the boards it shows, with the defaults for every service
+type. Per-plan layouts do not travel, because a plan id means nothing on the far end.
 
-To move one service type's whole setup — every board it has, on every view — use
-the plan export instead: **Plan → Export plan…**. See
+To move one service type's whole setup, every board it has, use the plan export
+instead: **Plan → Export plan…**. See
 [Moving a view between installs](moving-a-view.md#moving-a-plan).
 
 ### Switching plans in the editor
 
-The slot editors carry a plan switcher — `‹ name ▾ ›` and a **Now** button — in
-the slots view's header, in an inline grid's header, and in the layout editor's
-toolbar while a mic-slots object is selected. It changes **which board you are
-editing** and nothing else: what the screens follow is still set on the Plan page.
+The page carries a plan switcher, `‹ name ▾ ›` and a **Now** button, in its top bar,
+and the layout editor carries one in its toolbar. It changes **which plan's layouts
+you are editing** and nothing else: what the screens follow is still set on the Plan
+page.
 
-A badge says which you are looking at. **live** means the editor is on the plan
-the screens are following; **editing** means it is on some other week or some
-other service type, and a save there changes nothing on any screen until that
-plan comes round. The save toast is the ordinary one while live and a quieter
-one while not.
+A badge says which you are looking at. **live** means the editor is on the plan the
+screens are following; **editing** means it is on some other week or some other
+service type, and a save there changes nothing on any screen until that plan comes
+round. The save toast is the ordinary one while live and a quieter one while not.
 
 **Now** returns to the plan the screens are following, and the editor follows it
-forward from then on — including when auto mode advances it mid-session.
+forward from then on, including when auto mode advances it mid-session.
 
-The preview beside the editor follows the switcher too: step to next Sunday and
-the preview draws next Sunday's board with next Sunday's people in it, and a line
-under it names the board — "Previewing Sun, Sep 20 · 6 of 8 positions filled".
-On a **Default** target it reads "positions only, no plan": a default board is
-every week, so it has no roster and the rows show the positions they are linked
-to rather than guessing at a week's names. If Planning Center cannot be read the
-line says so and the rows again show positions only, with the reason on hover.
-The line is absent while the editor is on the live plan, where the preview is
-simply the kiosk.
-
-Only the slot rows follow the switcher. Everything else the preview draws — the
-view's top bar, the series and plan title — still comes from the plan the screens
-are following, so a preview of another week is headed with the live plan's title.
-An inline mic-slots object inside a custom layout previews on the layout editor's
-own canvas, which does not follow the switcher.
+The previews follow the switcher: step to next Sunday and every board draws next
+Sunday's people. On a **default** it reads "positions only, no plan": a default is
+every week, so it has no roster and the rows show the positions they are linked to
+rather than guessing at a week's names. If Planning Center cannot be read the line
+says so and the rows again show positions only, with the reason on hover.
 
 Two modes, set on the Plan page:
 
@@ -221,33 +315,40 @@ Two modes, set on the Plan page:
 | **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Youth Night" | every active type's plans in date order |
 
 In **Upcoming plans** the middle's dropdown lists the next ten plans and a
-**Defaults…** group with each active type's default board. The arrows do not
-wrap: at either end of the list the arrow is simply disabled.
+**Defaults…** group with each active type's default. The arrows do not wrap: at
+either end of the list the arrow is simply disabled.
 
-A board that is not on the list — a type's default while in **Upcoming plans**,
-or a plan old enough to have dropped out of the window — sits immediately before
-its own service type's first listed plan, so **›** from it lands on that type's
-earliest listed plan rather than on the top of the week.
+A target that is not on the list, a type's default while in **Upcoming plans** or a
+plan old enough to have dropped out of the window, sits immediately before its own
+service type's first listed plan, so **›** from it lands on that type's earliest
+listed plan rather than on the top of the week.
 
 The list covers the last seven days and the next sixty, refreshed from Planning
 Center at most every five minutes. When Planning Center cannot be reached the
 switcher shows the plan the screens are following, disables the arrows and says
-"Planning Center unreachable" — the board on screen is still editable.
+"Planning Center unreachable"; the boards on screen are still editable.
 
-Switching with unsaved slot edits asks first, the same question leaving the page
-asks. A new tab, or a reload, always opens on the plan the screens are
-following: where the switcher was pointed is never remembered.
+Switching with unsaved edits asks first, the same question leaving the page asks. A
+new tab, or a reload, always opens on the plan the screens are following: where the
+switcher was pointed is never remembered.
 
-### Saved arrangements
+### Saved layouts
 
-Under the editor, **Saved arrangements** keeps named copies of a board. Type a name
-and **Save** to capture the current slots; each saved row can be renamed in place,
-dragged into order, **Recalled** onto the board being edited, overwritten with the
-current slots (after a confirm), **Exported** as a `.slots.json` file or deleted.
-**Import…** reads such a file. Arrangements are global and can be recalled onto any
-service type. Position names are per-service-type, so a slot listing several
-positions travels better than one naming a single position that another type does
-not define.
+**Saved layouts**, in the top bar, keeps named copies of **one board** each. Pick a
+board, name it, **Save**: it captures the board as the editor shows it now, unsaved
+edits included. Each row shows its name, the board it came from, its slot count and
+the date, with **Recall into** that board (or another, from the arrow beside it) and
+a **⋯** menu: **Overwrite** with the board named in the Save picker, **Rename**,
+**Export file** (a `.slots.json`) and **Delete**. Rows are dragged into order.
+**Import a file** reads such a file, and **Export the current board** writes one.
+
+**Recall fills the editor only.** It replaces that board's slots in the editor,
+asks first if the board has unsaved edits, and nothing reaches a screen until Save
+all. Saved layouts are global and can be recalled into any board and service type.
+Position names are per-service-type, so a slot listing several positions travels
+better than one naming a single position that another type does not define. A
+layout saved before boards existed, or imported from a file, has no source board and
+recalls into the board the page is working in.
 
 ## What the card shows
 
@@ -255,18 +356,18 @@ A filled slot is a photo with a name band under it. Everything on it scales with
 slot, from the editor's preview to a 4K column, and the phone view draws the same
 things over the bottom of the photo.
 
-- **On the photo.** Top left, the slot's **Channel**. Top right, a small ears badge
-  when the person brings their own in-ears. Bottom left, the capsule plate: their
-  microphone capsule. The last two come from [prep tags](integrations/planning-center.md#prep-tags)
+- **On the photo.** Top left, the slot's **Channel number**. Top right, a small ears
+  badge when the person brings their own in-ears. Bottom left, the capsule plate:
+  their microphone capsule. The last two come from [prep tags](integrations/planning-center.md#prep-tags)
   in Planning Center and appear only for a slot filled by a tagged person. The badges
   are neutral white on dark glass; the app's accent colour is never used on stage.
 - **The band.** The name, the position line, a hairline, then flat rows: the **mic
   row** (RF bars, the label or frequency, and the battery percentage) and, when an
   IEM is bound, the **IEM row** (headphones, its label, its percentage). Percentages
-  are green from 60, amber from 25 and red under 25. **Hide RF** drops the bars and
-  the frequency and keeps the percentage. A device with no network shows its label
-  in the same rows, with no bars and no percentage. A charger bay's level, or an
-  IEM pack's, shows as a battery row even with no live mic bound, without bars.
+  are green from 60, amber from 25 and red under 25. **RF bars** off drops the bars
+  and the frequency and keeps the percentage. A device with no network shows its
+  label in the same rows, with no bars and no percentage. A charger bay's level, or
+  an IEM pack's, shows as a battery row even with no live mic bound, without bars.
 - **Low battery.** When the mic's battery is under 25% the card's edge goes red.
 - An empty slot is a quiet blank cell; a spacer draws nothing.
 
@@ -279,5 +380,5 @@ labels are the whole row.
 
 The label's presence is the switch — blank shows the frequency, filled takes over.
 
-The editor offers a **Use receiver name** button to fill the label from the
+The inspector offers a **Use receiver name** button to fill the label from the
 receiver's own channel name in one click.

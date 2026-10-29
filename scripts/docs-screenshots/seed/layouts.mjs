@@ -48,7 +48,7 @@ function stageWall(micBoardViewId, rundownViewId) {
     obj({ type: "text", text: "Main Room · Stage" }, [0.02, 0.03, 0.3, 0.08], { style: title }),
     obj({ type: "timer", source: "service", hideWhenIdle: false, caption: "Time left" }, [0.34, 0.015, 0.3, 0.115], { style: { ...CARD, ...big, textAlign: "center", fontSize: 0.07 } }),
     obj({ type: "clock", showSeconds: false, format: "12h", showMeridiem: true }, [0.78, 0.015, 0.2, 0.115], { style: { ...CARD, ...big, textAlign: "center" } }),
-    obj({ type: "slots-grid", source: "view", sourceViewId: micBoardViewId }, [0.02, 0.15, 0.62, 0.62], {}),
+    obj({ type: "slots-grid", boardId: micBoardViewId }, [0.02, 0.15, 0.62, 0.62], {}),
     obj({ type: "messages" }, [0.66, 0.15, 0.32, 0.3], { id: "wall-messages", style: { ...CARD, fontSize: 0.026 } }),
     obj(
       { type: "view-embed", viewId: rundownViewId, showHeader: false, autoScroll: true },
@@ -119,13 +119,15 @@ async function seedServiceCue(api) {
 export async function seedLayouts(api, { wirelessIds }) {
   // The first display ships with the app: make it the mic board.
   const { views, outputs } = await api.get("/api/state");
-  const micBoardId = views.find((v) => v.kind === "slots").id;
+  const micView = views.find((v) => v.kind === "slots");
+  // The board a slots screen shows; the screen's own id until it is pointed elsewhere.
+  const micBoardId = micView.boardId ?? micView.id;
   const firstOutputId = outputs[0].id;
-  await api.patch(`/api/views/${micBoardId}`, { name: "Mic Board" });
+  await api.patch(`/api/views/${micView.id}`, { name: "Mic Board" });
+  await api.patch(`/api/boards/${micBoardId}`, { name: "Mic Board" });
   await api.patch(`/api/outputs/${firstOutputId}`, { name: "Stage Monitors" });
-  await api.post(`/api/views/${micBoardId}/slots`, {
-    slots: micBoard(wirelessIds),
-    target: { kind: "default", serviceTypeId: SERVICE_TYPES[0].id },
+  await api.post("/api/boards/slots", {
+    boards: [{ boardId: micBoardId, slots: micBoard(wirelessIds), target: { kind: "default", serviceTypeId: SERVICE_TYPES[0].id } }],
   });
 
   const rundownId = await createView(api, { name: "Audio Rundown", kind: "script" });
