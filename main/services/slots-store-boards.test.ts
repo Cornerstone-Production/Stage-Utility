@@ -15,6 +15,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { slotsStore, normaliseSlotsFile, serialiseSlotsFile } = await import("./slots-store.js");
 const { restoreCheckFor } = await import("./stores.js");
+const { stripResolvedFields } = await import("./slot-resolver.js");
 
 after(() => {
   fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
@@ -154,7 +155,7 @@ describe("saving several boards", () => {
       { boardId: b, target: { kind: "plan", planId: "p1", serviceTypeId: "st", sortDate: "2026-11-01" }, slots: [slot("b1")] },
     ]);
     assert.equal((await slotsStore.getDefault(a, "st"))[0]?.id, "a1");
-    assert.deepEqual(await slotsStore.getOverride(b, "p1"), { serviceTypeId: "st", sortDate: "2026-11-01", slots: [slot("b1")] });
+    assert.deepEqual(await slotsStore.getOverride(b, "p1"), { serviceTypeId: "st", sortDate: "2026-11-01", slots: stripResolvedFields([slot("b1")]) });
   });
 
   it("writes nothing when one entry cannot be stored", async () => {
