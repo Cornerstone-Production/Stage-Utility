@@ -24,7 +24,7 @@ import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
-import { migrateBoards } from "./slot-boards.js";
+import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { isLayoutShape } from "../types/views.js";
 import type { Slot } from "../types/stage.js";
@@ -174,21 +174,51 @@ export interface ImportOptions {
   onClash?: "keep" | "replace";
 }
 
+/** Whether any view in a bundle is still in the shape from before boards: a
+ *  slots view with no board pointer, or a slots widget with the old fields. */
+function hasPreBoardViews(views: readonly View[]): boolean {
+  return views.some((v) => {
+    if (v.kind === "slots" && v.boardId === undefined) return true;
+    let legacy = false;
+    if (v.layout) {
+      walkLayoutObjects(v.layout.objects, (o) => {
+        if (o.config.type === "slots-grid" && hasLegacyGridFields(o.config)) legacy = true;
+      });
+    }
+    return legacy;
+  });
+}
+
 /**
- * A bundle with slot boards. One that already has them is returned as it is; one
- * from before boards has its views and slot keys migrated by the same function a
- * boot uses, with a line for each merge or unused board it decides on.
+ * A bundle with slot boards. One whose views already point at boards is
+ * returned as it is; one with views from before boards has its views and slot
+ * keys migrated by the same function a boot uses, with a line for each merge or
+ * unused board it decides on.
+ *
+ * Decided by the VIEWS, not by `sideData.boards` being there: a file can carry
+ * an empty `boards` beside views that point at nothing, and taking that as
+ * "already migrated" imported every screen blank while reporting success.
  */
 function boardsBundle(bundle: ViewBundle): ViewBundle {
-  if (bundle.sideData?.boards) return bundle;
+  if (!hasPreBoardViews(bundle.views)) return bundle;
   const defaults = new Map<string, Map<string, Slot[]>>();
   for (const [key, byType] of Object.entries(bundle.sideData?.slots ?? {})) {
     defaults.set(key, new Map(Object.entries(byType ?? {})));
   }
+  // Boards the file does carry are kept as they are, so the migration only adds.
+  const carried = Object.entries(bundle.sideData?.boards ?? {});
+  const now = new Date().toISOString();
   const result = migrateBoards(
     bundle.views,
-    { version: 3, boards: new Map(), defaults, overrides: new Map() },
-    new Date().toISOString(),
+    carried.length > 0
+      ? {
+          version: 4,
+          boards: new Map(carried.map(([id, b]) => [id, { name: b.name, columnWidthIn: b.columnWidthIn ?? null, createdAt: now }])),
+          defaults,
+          overrides: new Map(),
+        }
+      : { version: 3, boards: new Map(), defaults, overrides: new Map() },
+    now,
   );
   for (const line of result.log) console.log(`[view-import] ${scrub(line)}`);
   return {
@@ -333,7 +363,9 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     await slotsStore.createBoard(newId, { name, columnWidthIn: meta?.columnWidthIn ?? null, createdAt }, { defaults });
     for (const [type, rows] of defaults) landedBoards.set(`${newId}\u0000${type}`, rows.length);
   }
-  const slotBoards = landedBoards.size;
+  // Every board this import made, rows or none: a screen the file carried with
+  // an empty board is still a board the operator now has.
+  const slotBoards = boardIdMap.size;
   let slotRows = 0;
   for (const n of landedBoards.values()) slotRows += n;
 

@@ -357,6 +357,36 @@ describe("landing a plan under a different service type", () => {
   });
 });
 
+describe("a bundle's slot boards", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+
+  test("views from before boards are migrated even when the file carries an empty boards record", async () => {
+    // Decided by the views: an empty `boards` beside a slots view with no
+    // pointer used to be read as "already migrated", and the screen came in
+    // blank while the import reported success.
+    const report = await applyViewBundle(
+      bundle({ views: [slotsView("view-1", "Mic Board")], sideData: { slots: { "view-1": { "st-src": [slotRow("r1"), slotRow("r2")] } }, boards: {}, notes: {}, serviceCueLayouts: [] } }),
+    );
+    const board = await boardOf(report.views[0]!.id);
+    assert.ok(board, "the imported screen points at no board");
+    assert.equal((await slotsStore.allDefaults())[board]?.["st-src"]?.length, 2, "the imported screen's rows did not land on its board");
+  });
+
+  test("the report counts every board made, rows or none", async () => {
+    const report = await applyViewBundle(
+      bundle({
+        views: [slotsView("view-1", "Mic Board"), slotsView("view-2", "Empty Board")],
+        sideData: { slots: { "view-1": { "st-src": [slotRow("r1")] } }, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.ok(await boardOf(report.views[1]!.id), "the empty screen got no board");
+    assert.equal(report.slotBoards, 2, "a board with no rows was not counted");
+    assert.equal(report.slotRows, 1);
+  });
+});
+
 describe("the rebind list walks every root", () => {
   beforeEach(async () => { await viewsStore.save([] as never); });
 

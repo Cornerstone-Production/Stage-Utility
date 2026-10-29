@@ -108,8 +108,8 @@ export interface ImportReport {
    *  importer landed the boards under a different service type than the file
    *  named — the id they came from, so the report can say so. */
   plan?: { serviceTypeId: string; serviceTypeName: string; retypedFrom?: string };
-  /** How many (key, service type) slot boards landed, and how many rows across
-   *  them. Boards never clash — see the note in view-import.ts. */
+  /** How many slot boards the import made (each a new board, so none clash —
+   *  see the note in view-import.ts), and how many rows landed across them. */
   slotBoards: number;
   slotRows: number;
   /**
