@@ -403,6 +403,15 @@ describe("pointing a screen or widget at a board", () => {
   });
 
   it("a layout save from an editor before boards is pointed: an inline widget keeps the board it shows", async () => {
+    // g-1 on a board of its own, which no screen shows.
+    await slotsStore.createBoard("b-pad", { name: "Stage Layout · widget", columnWidthIn: null, createdAt: NOW });
+    ctl.boards = await slotsStore.listBoards();
+    ctl.state = {
+      ...ctl.state,
+      views: ctl.state.views.map((v) =>
+        v.id === "pad" ? { ...v, layout: { ...v.layout!, objects: v.layout!.objects.map((o) => ({ ...o, config: { type: "slots-grid", boardId: "b-pad" } })) } } : v,
+      ) as View[],
+    };
     const layout = {
       version: 1, canvas: { width: 1920, height: 1080 },
       objects: [
@@ -415,12 +424,35 @@ describe("pointing a screen or widget at a board", () => {
     assert.equal(r.status, 200, JSON.stringify(r.json));
     const configs = ctl.state.views.find((v) => v.id === "pad")!.layout!.objects.map((o) => o.config);
     assert.deepEqual(configs, [
-      { type: "slots-grid", boardId: "b-left", displayWidthIn: 21 },
+      { type: "slots-grid", boardId: "b-pad", displayWidthIn: 21 },
       { type: "slots-grid", boardId: "g-new" },
       { type: "slots-grid", boardId: "b-right" },
     ]);
-    assert.equal(ctl.boards.get("b-left")?.columnWidthIn, 3.6, "the widget's column width did not reach its board");
+    assert.equal(ctl.boards.get("b-pad")?.columnWidthIn, 3.6, "the widget's column width did not reach its board");
     assert.equal(ctl.boards.get("g-new")?.name, "Stage Layout · widget");
+  });
+
+  it("Define here over a screen's board gives the widget its own copy, leaving the screen's board alone", async () => {
+    // The editor before boards sends source "inline" and keeps the boardId it
+    // had; g-1 shows b-left, which is also Left Display's live wall.
+    await slotsStore.setDefault("b-left", TYPE, [slot("wall")]);
+    await ctl.loadAllViewRawSlots(TYPE, null);
+    const layout = {
+      version: 1, canvas: { width: 1920, height: 1080 },
+      objects: [{ id: "g-1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", source: "inline", boardId: "b-left", displayWidthIn: 20 } }],
+    };
+    const r = await call(viewRoutes, "/api/views/pad", "PATCH", { layout });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const config = ctl.state.views.find((v) => v.id === "pad")!.layout!.objects[0]!.config as { boardId: string; displayWidthIn: number };
+    assert.notEqual(config.boardId, "b-left", "Define here left the widget editing the screen's board");
+    assert.equal(config.displayWidthIn, 20);
+    assert.equal(ctl.boards.get(config.boardId)?.name, "Stage Layout · widget");
+    assert.equal(ctl.boards.get(config.boardId)?.columnWidthIn, 3.49, "the copy lost the board's column width");
+    assert.deepEqual(ids(await slotsStore.getDefault(config.boardId, TYPE)).length, 1, "the copy did not carry the rows");
+    // An edit through the widget lands on its copy, not on the wall.
+    await call(viewRoutes, "/api/layout-objects/g-1/slots", "POST", { slots: [slot("pad-only")] });
+    assert.deepEqual(ids(ctl.state.slotsByView["wall-1"]), ["wall"], "editing the widget rewrote the screen's wall");
+    assert.deepEqual(ids(ctl.state.slotsByLayoutObject["g-1"]), ["pad-only"]);
   });
 
   it("two saves of one layout opened at the same revision: one lands, the other is refused", async () => {

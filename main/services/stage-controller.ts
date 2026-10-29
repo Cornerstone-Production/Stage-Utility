@@ -2722,6 +2722,11 @@ export class StageController {
     return out;
   }
 
+  /** Whether some slots screen shows this board. */
+  private boardShownByScreen(boardId: string): boolean {
+    return this.state.views.some((v) => v.kind === "slots" && viewBoardId(v) === boardId);
+  }
+
   /** A board's name for a message, or its id when there is no such board. */
   describeBoard(boardId: string): string {
     return this.boards.get(boardId)?.name ?? boardId;
@@ -3973,9 +3978,20 @@ export class StageController {
     for (const { objectId, config: c } of pending) {
       let boardId: string | null;
       if (c.source === "inline") {
-        boardId = stored.get(objectId) ?? objectId;
-        if (!this.boards.has(boardId)) {
-          await this.newBoard(`${current.name} · widget`, `widget ${objectId}`, { id: boardId });
+        // "Define here" is a board of the widget's own. One it showed that a
+        // slots screen also shows is that screen's live wall: the widget gets
+        // its own copy of it, as a pre-boards inline widget had its own rows.
+        const was = stored.get(objectId) ?? null;
+        if (was !== null && this.boards.has(was) && this.boardShownByScreen(was)) {
+          boardId = await this.duplicateBoardRecord(was, `${current.name} · widget`);
+          console.log(
+            `[boards] a widget (${scrub(objectId)}) on "${scrub(current.name)}" was set to Define here over screen board "${scrub(this.describeBoard(was))}"; it now has its own copy (${scrub(boardId)})`,
+          );
+        } else {
+          boardId = was ?? objectId;
+          if (!this.boards.has(boardId)) {
+            await this.newBoard(`${current.name} · widget`, `widget ${objectId}`, { id: boardId });
+          }
         }
       } else if (c.source === "view") {
         // Only a slots screen's rows were ever drawn through an embed.

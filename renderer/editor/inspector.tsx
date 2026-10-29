@@ -89,6 +89,7 @@ import {
 } from "./inspector-rows";
 import { TimerInspector } from "./timer-inspector";
 import { LyricsInspector } from "./lyrics-inspector";
+import { slotsGridSource } from "./slots-grid-source";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
@@ -1256,22 +1257,32 @@ export function Inspector({
         </>
       )}
       {c.type === "slots-grid" && (() => {
-        // A widget pointing at a board edits that board below the canvas, so it
-        // reads as "Define here" until a view is picked to embed instead.
-        const isInline = (c.source ?? (typeof c.boardId === "string" ? "inline" : "view")) === "inline";
+        // A widget on a slots screen's board reads as embedding that screen, not
+        // as "Define here": see slots-grid-source.ts.
+        const src = slotsGridSource(c, slotsViews);
         return (
           <>
             <RowSelect
               label="Source"
-              value={isInline ? "inline" : "view"}
+              value={src.mode}
               options={[{ value: "inline", label: "Define here" }, { value: "view", label: "Embed a view" }]}
-              onChange={(v) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}
+              onChange={(v) =>
+                onConfig(
+                  v === "inline"
+                    ? { ...c, source: "inline" }
+                    : { ...c, source: "view", sourceViewId: c.sourceViewId ?? src.embeds?.id ?? null },
+                )
+              }
             />
-            {isInline ? (
-              <p className="text-caption2 text-fg-muted leading-snug">Edit this grid's slots below the canvas.</p>
+            {src.mode === "inline" ? (
+              <p className="text-caption2 text-fg-muted leading-snug">
+                {src.awaitingCopy
+                  ? "Save the layout to give this grid its own copy of the screen's slots, then edit them below the canvas."
+                  : "Edit this grid's slots below the canvas."}
+              </p>
             ) : (
               <Row label="View">
-                <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
+                <Select value={src.embeds?.id ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
                   <SelectTrigger aria-label="View"><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
                   <SelectContent>
                     {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
