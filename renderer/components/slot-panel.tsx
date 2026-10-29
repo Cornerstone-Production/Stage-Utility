@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
-import { CapsulePlate, LOW_BATTERY, PX_UNIT, PhotoBadges, StatusRows } from "./status-strip";
-import { slotStripMode } from "./slot-strip-mode";
+import { CapsulePlate, LOW_BATTERY, PX_UNIT, PhotoBadges, StatusRows } from "./status-rows";
+import { slotRowsMode } from "./slot-rows-mode";
 import { BrandLogo } from "./brand-logo";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { usePhotoSize } from "@renderer/lib/use-photo-size";
@@ -66,11 +66,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   // note) shows the same blank/logo view as a configured empty slot.
   const isUnfilled = isEmpty || (slot.link.kind === "pco" && !slot.displayName);
 
-  const stripMode = slotStripMode(slot.device, slot.hideRf);
+  const rowsMode = slotRowsMode(slot.device, slot.hideRf);
   const capsule = slot.prep?.capsule ?? null;
   // Only the mic's own charge (or the charger bay it reads) drives the edge, as in
   // the mockup; an IEM pack that is low shows red in its own row.
-  const lowBattery = stripMode === "strip" && slot.device.charge !== null && slot.device.charge < LOW_BATTERY;
+  const lowBattery = rowsMode === "live" && slot.device.charge !== null && slot.device.charge < LOW_BATTERY;
 
   if (isUnfilled) {
     return (
@@ -278,8 +278,8 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           {/* Flat rows, never a nested pill. A live device shows the telemetry rows
               (a manual label standing in for the frequency inside them); a
               manually-assigned (offline) device shows its labels in the same rows
-              without bars. See slot-strip-mode.ts. */}
-          {stripMode !== "none" && <StatusRows device={slot.device} mode={stripMode} hideRf={slot.hideRf} />}
+              without bars. See slot-rows-mode.ts. */}
+          {rowsMode !== "none" && <StatusRows device={slot.device} mode={rowsMode} hideRf={slot.hideRf} />}
         </div>
       </div>
     </div>

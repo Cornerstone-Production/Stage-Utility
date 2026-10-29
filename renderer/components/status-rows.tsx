@@ -61,9 +61,9 @@ const iconStyle: CSSProperties = { width: px(18), height: px(18) };
 
 interface StatusRowsProps {
   device: SlotDevice;
-  /** "strip": live telemetry rows. "offline": the manual labels only, no bars, no
-   *  percent. slot-strip-mode.ts decides which, or neither. */
-  mode: "strip" | "offline";
+  /** "live": telemetry rows. "offline": the manual labels only, no bars, no
+   *  percent. slot-rows-mode.ts decides which, or neither. */
+  mode: "live" | "offline";
   /** Drop the RF bars and the frequency; keep the charge. */
   hideRf?: boolean;
 }
