@@ -114,7 +114,7 @@ describe("a boot whose slots write fails", () => {
   });
 
   it("says so on a tagged line", () => {
-    assert.ok(lines.some((l) => /^\[slots-store\] could not save the slot boards migration;.*disk full/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => /^\[slots-store\] could not save the slot boards migration \(writing slots.json\);.*disk full/.test(l)), lines.join("\n"));
   });
 
   it("still draws every screen and widget, from the old shapes", () => {

@@ -17,7 +17,12 @@
 //   { version: 4,
 //     boards:    Record<boardId, { name, columnWidthIn, createdAt }>,
 //     defaults:  Record<boardId, Record<serviceTypeId, Slot[]>>,
-//     overrides: Record<boardId, Record<planId, { serviceTypeId, sortDate, slots }>> }
+//     overrides: Record<boardId, Record<planId, { serviceTypeId, sortDate, slots }>>,
+//     pendingMerges?: Record<boardId, boardId> }
+//
+// `pendingMerges` exists only between the writes of an interrupted boot
+// migration: each key is a board the migration merged into the value, kept
+// until views.json has stopped pointing at it (see migrateSlotBoards).
 //
 // IN MEMORY all three are Maps, not records. The keys are request derived — a
 // board id, a service type id, a plan id — and `obj[key] = value` with a key from
@@ -29,7 +34,7 @@
 //
 // v3 is the same file without `boards`, keyed by the screen that owned it: a
 // view id, or an inline slots-grid's object id. Turning it into v4 needs the
-// views (for names and pointers), so it is not done here: board-migration.ts
+// views (for names and pointers), so it is not done here: slot-boards.ts
 // does it at boot, and until then a v3 file loads and saves as v3. A board's id
 // is the v3 key, so the migration moves no slot data.
 //
@@ -100,6 +105,9 @@ export interface SlotsFile {
   defaults: Map<string, Map<string, Slot[]>>;
   /** boardId -> planId -> override */
   overrides: Map<string, Map<string, SlotsOverride>>;
+  /** Board -> the board a boot migration merged it into, while views.json may
+   *  still point at it. Absent once the migration has finished. */
+  pendingMerges?: Map<string, string>;
 }
 
 /** The envelope as it is written to disk. `boards` is absent on a v3 file. */
@@ -108,6 +116,7 @@ export interface SerialisedSlotsFile {
   boards?: Record<string, SlotBoardMeta>;
   defaults: SlotsDefaults;
   overrides: SlotsOverrides;
+  pendingMerges?: Record<string, string>;
 }
 
 /** One entry of a save across several boards — see `slotsStore.saveMany`. */
@@ -165,6 +174,10 @@ function checkRestoredSlots(raw: unknown): unknown {
       refuse(`slot board ${id}'s column width must be a positive number or null`);
     }
   }
+  for (const [loser, survivor] of file.pendingMerges ?? []) {
+    refuseKey(loser, "the pending board merges");
+    refuseKey(survivor, "the pending board merges");
+  }
   for (const [key, byType] of file.defaults) {
     refuseKey(key, "the slots");
     for (const [typeId, slots] of byType) {
@@ -206,7 +219,13 @@ export function serialiseSlotsFile(file: SlotsFile): SerialisedSlotsFile {
     [...file.overrides].map(([key, byPlan]) => [key, Object.fromEntries(byPlan)]),
   );
   if (file.version === 3) return { version: 3, defaults, overrides };
-  return { version: 4, boards: Object.fromEntries(file.boards), defaults, overrides };
+  return {
+    version: 4,
+    boards: Object.fromEntries(file.boards),
+    defaults,
+    overrides,
+    ...(file.pendingMerges?.size ? { pendingMerges: Object.fromEntries(file.pendingMerges) } : {}),
+  };
 }
 
 /** A board's metadata as read off disk, made loadable. The restore check is
@@ -227,6 +246,16 @@ function toBoardMap(raw: unknown): Map<string, SlotBoardMeta> {
   const out = new Map<string, SlotBoardMeta>();
   if (!isRecord(raw)) return out;
   for (const [id, b] of Object.entries(raw)) out.set(id, toBoardMeta(id, b));
+  return out;
+}
+
+/** An interrupted migration's merges, as far as they read as board -> board.
+ *  Anything else is dropped: the migration then keeps the board it named,
+ *  which loses nothing. */
+function toPendingMerges(raw: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!isRecord(raw)) return out;
+  for (const [loser, survivor] of Object.entries(raw)) if (typeof survivor === "string" && survivor) out.set(loser, survivor);
   return out;
 }
 
@@ -302,11 +331,13 @@ export function normaliseSlotsFile(raw: unknown): { file: SlotsFile; migrated: s
   // v4: the envelope with boards. A missing stamp beside all three halves is v4
   // for the same reason the pair of halves is v3 below.
   if (raw.version === 4 || (isRecord(raw.boards) && isRecord(raw.defaults) && isRecord(raw.overrides))) {
+    const pendingMerges = toPendingMerges(raw.pendingMerges);
     const file: SlotsFile = {
       version: 4,
       boards: toBoardMap(raw.boards),
       defaults: toNestedMap<Slot[]>(raw.defaults),
       overrides: toNestedMap<SlotsOverride>(raw.overrides),
+      ...(pendingMerges.size ? { pendingMerges } : {}),
     };
     const linksChanged = migrateLinks(allSlotSets(file));
     if (raw.version !== 4) return { file, migrated: "v4 envelope with no version stamp → restamped" };
@@ -451,10 +482,11 @@ export const slotsStore = {
       boards: new Map([...file.boards].map(([id, b]) => [id, { ...b }])),
       defaults: new Map([...file.defaults].map(([id, byType]) => [id, new Map(byType)])),
       overrides: new Map([...file.overrides].map(([id, byPlan]) => [id, new Map(byPlan)])),
+      ...(file.pendingMerges ? { pendingMerges: new Map(file.pendingMerges) } : {}),
     };
   },
 
-  /** Replace the whole file — the boot migration's one write. */
+  /** Replace the whole file — the boot migration's writes. */
   async replaceFile(file: SlotsFile): Promise<void> {
     await store.save(serialiseSlotsFile(file));
   },

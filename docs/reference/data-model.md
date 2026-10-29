@@ -309,17 +309,22 @@ so no slot data moves:
 
 - each board is named after its view, or `<view name> · widget` for a grid;
 - each slots view and grid is pointed at it, and a grid that showed another
-  view's slots now shares that view's board;
+  slots view's slots now shares that view's board;
 - the column width moves from the view or grid onto its board;
 - boards made this way that are identical in every service type's default,
-  every override and their column width (slot ids aside) become one, the lowest
-  id surviving;
-- a key nothing shows is kept as "Unused board N".
+  every override and their column width (slot ids aside) become one: a
+  screen's board survives over a widget's, then the lowest id;
+- a key with no view or widget to name it, and nothing showing it, is kept as
+  "Unused board N"; a dormant view's board keeps the view's name.
 
-`views.json` and `slots.json` are written only once both are worked out. A
-failure leaves both files as they were, is logged on a `[slots-store]` line, and
-the server runs on the older shapes, which it reads the same way. The step runs
-on every start and does nothing once done.
+The files are written in an order where a crash after any write loses nothing:
+`slots.json` first with every board and its column width, keeping the boards a
+merge will remove (listed under `pendingMerges`); then `views.json` with the
+pointers; then `slots.json` without the merged boards. The next start finishes
+whatever a crash left, and a merge recorded in `pendingMerges` is finished only
+if the two boards are still identical. A failed write is logged on a
+`[slots-store]` line and the server runs on what it read. The step runs on every
+start and does nothing once done.
 
 Details in [slots](../slots.md).
 

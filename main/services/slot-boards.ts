@@ -95,7 +95,16 @@ export function effectiveSlotsLayout(displayWidthIn: number | null, columnWidthI
 
 export interface BoardMigration {
   views: View[];
+  /** slots.json once the migration is done: no merged board left, nothing pending. */
   file: SlotsFile;
+  /**
+   * slots.json as it is written BEFORE views.json, when a merge removes boards:
+   * every board, the merged ones still there and named in `pendingMerges`, so a
+   * views.json still pointing at one loses nothing. Null when nothing merges.
+   */
+  staged: SlotsFile | null;
+  viewsChanged: boolean;
+  fileChanged: boolean;
   /** True when either file differs from what was read. */
   changed: boolean;
   /** One line per decision worth an operator's attention, untagged. */
@@ -157,6 +166,7 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
   return objects.map((o) => ({ ...o, config: { ...o.config }, ...(o.children ? { children: cloneObjects(o.children) } : {}) }));
 }
 
+
 /**
  * Move slots.json and the views onto named boards. Idempotent: run over its own
  * output it changes nothing, so it runs on every boot and finishes whatever an
@@ -170,13 +180,20 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
  *    display width, which is the one it was drawn with.
  * 4. Boards made in THIS run collapse when identical in every layout and in
  *    column width, slot ids aside. A screen's board survives over a widget's,
- *    then the lowest id; every pointer moves
- *    to it, and the other's entries go. A board made before is never merged:
- *    two identical boards an operator kept are two boards.
- * 5. A key nothing points at is kept, named "Unused board N".
+ *    then the lowest id; every pointer moves to it, and the other's entries go.
+ *    A board made before is never merged: two identical boards an operator
+ *    kept are two boards. The one exception is a merge an interrupted run
+ *    recorded in `pendingMerges`, finished if both boards are still identical.
+ * 5. A key with no view or widget name, and nothing pointing at it, is kept,
+ *    named "Unused board N". A dormant view's board keeps the view's name.
+ *
+ * The answer is written in up to three steps so that every state a crash can
+ * leave on disk loses nothing (see the controller's migrateSlotBoards): `staged`
+ * (or `file`), then the views, then `file`.
  */
 export function migrateBoards(views: readonly View[], input: SlotsFile, now: string): BoardMigration {
   const log: string[] = [];
+  const inputViews = views;
   const file: SlotsFile = {
     version: 4,
     boards: new Map([...input.boards].map(([id, b]) => [id, { ...b }])),
@@ -186,7 +203,6 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
   const viewsById = new Map(views.map((v) => [v.id, v]));
   const liftedWidth = new Map<string, number>();
   const pointers: Pointer[] = [];
-  let viewsChanged = false;
 
   // Views first: a "view" grid points at the board its source view ends up on.
   const pointedViews = views.map((v): View => {
@@ -201,7 +217,6 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
       const dw = positiveOrNull(legacy.displayWidthIn);
       next = { ...next, slotsLayout: dw !== null ? { displayWidthIn: dw } : null };
     }
-    if (next !== v) viewsChanged = true;
     pointers.push({ kind: "view", id: v.id, view: next, boardId, ownKey: false });
     return next;
   });
@@ -249,7 +264,6 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
       pointers.push({ kind: "object", id: o.id, view: v, boardId, ownKey });
     });
     if (!touched) return v;
-    viewsChanged = true;
     return { ...v, layout: { ...v.layout, objects } };
   });
 
@@ -295,29 +309,40 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
   const viewIds = new Set(views.map((v) => v.id));
   const survivorOrder = (a: string, b: string): number =>
     Number(!viewIds.has(a)) - Number(!viewIds.has(b)) || (a < b ? -1 : a > b ? 1 : 0);
+  const signature = (id: string): string | null => boardSignature(file, id, file.boards.get(id)?.columnWidthIn ?? null);
+  const mergedInto = new Map<string, string>();
+  const mergeLine = (loser: string, survivor: string): string =>
+    `merged board "${file.boards.get(loser)?.name ?? loser}" (${loser}) into "${file.boards.get(survivor)?.name ?? survivor}" (${survivor}) (identical layouts)`;
+  // What an interrupted run decided, finished only while still true: both
+  // boards there and identical. Anything else keeps the board, which loses nothing.
+  const pending = input.pendingMerges ?? new Map<string, string>();
+  for (const [loser, survivor] of pending) {
+    const sig = file.boards.has(loser) && file.boards.has(survivor) ? signature(loser) : null;
+    if (loser !== survivor && !pending.has(survivor) && sig !== null && sig === signature(survivor)) {
+      mergedInto.set(loser, survivor);
+      log.push(mergeLine(loser, survivor));
+    } else {
+      log.push(`kept board "${file.boards.get(loser)?.name ?? loser}" (${loser}): an interrupted migration was merging it into ${survivor}, and the two are no longer identical`);
+    }
+  }
   const bySignature = new Map<string, string[]>();
   for (const id of [...created].sort(survivorOrder)) {
-    const sig = boardSignature(file, id, file.boards.get(id)?.columnWidthIn ?? null);
+    const sig = signature(id);
     if (sig === null) continue;
     const group = bySignature.get(sig) ?? [];
     group.push(id);
     bySignature.set(sig, group);
   }
-  const mergedInto = new Map<string, string>();
-  let merged = 0;
   for (const group of bySignature.values()) {
     if (group.length < 2) continue;
     const [survivor, ...losers] = group as [string, ...string[]];
     for (const loser of losers) {
       mergedInto.set(loser, survivor);
-      log.push(`merged board "${file.boards.get(loser)?.name ?? loser}" (${loser}) into "${file.boards.get(survivor)?.name ?? survivor}" (${survivor}) (identical layouts)`);
-      file.boards.delete(loser);
-      file.defaults.delete(loser);
-      file.overrides.delete(loser);
+      log.push(mergeLine(loser, survivor));
       created.delete(loser);
-      merged++;
     }
   }
+  const merged = mergedInto.size;
   const repoint = (id: string | null): string | null => (id !== null ? (mergedInto.get(id) ?? id) : null);
   for (const p of pointers) p.boardId = repoint(p.boardId);
   const finalViews =
@@ -354,18 +379,40 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
     log.push(`kept unused board "${file.boards.get(id)?.name}" (${id}): no screen or widget shows it`);
   }
 
+  // The merged boards go only from the final file. `staged` keeps them for the
+  // write before views.json, which may still point at them.
+  const staged: SlotsFile | null =
+    merged === 0
+      ? null
+      : {
+          version: 4,
+          boards: new Map(file.boards),
+          defaults: new Map(file.defaults),
+          overrides: new Map(file.overrides),
+          pendingMerges: new Map(mergedInto),
+        };
+  for (const loser of mergedInto.keys()) {
+    file.boards.delete(loser);
+    file.defaults.delete(loser);
+    file.overrides.delete(loser);
+  }
+
   if (input.version === 3) {
     log.unshift(
       `migrated slots.json v3 → v4: ${file.boards.size} board(s) from ${candidates.size} key(s), ${merged} merged, ${unusedN} unused`,
     );
+  } else if (pending.size > 0) {
+    log.unshift(`finished an interrupted slot boards migration: ${merged} merged, ${created.size} board(s) added`);
   } else if (created.size > 0) {
     log.unshift(`added ${created.size} board(s) for slots nothing had a board for`);
   }
 
-  const boardsChanged =
+  const fileChanged =
     input.version !== 4 ||
     created.size > 0 ||
     merged > 0 ||
+    pending.size > 0 ||
     [...file.boards].some(([id, b]) => input.boards.get(id)?.columnWidthIn !== b.columnWidthIn);
-  return { views: finalViews, file, changed: viewsChanged || boardsChanged, log };
+  const viewsChanged = finalViews.some((v, i) => v !== inputViews[i]);
+  return { views: finalViews, file, staged, viewsChanged, fileChanged, changed: viewsChanged || fileChanged, log };
 }

@@ -236,3 +236,34 @@ describe("a v4 install that something from before boards wrote to", () => {
     assert.equal(r.changed, false);
   });
 });
+
+describe("the writes a merge needs", () => {
+  test("stage the merged board, kept and named, before the views stop pointing at it", () => {
+    const r = migrateBoards(henryViews(), henryFile(), NOW);
+    assert.ok(r.staged, "a merge with no staged file");
+    assert.deepEqual([...r.staged.pendingMerges!], [["g-left-copy", "display-1"]]);
+    assert.ok(r.staged.boards.has("g-left-copy") && r.staged.defaults.has("g-left-copy") && r.staged.overrides.has("g-left-copy"));
+    assert.equal(r.file.pendingMerges, undefined);
+    assert.equal(r.file.boards.has("g-left-copy"), false);
+  });
+
+  test("a recorded merge is finished on the next run", () => {
+    const first = migrateBoards(henryViews(), henryFile(), NOW);
+    // Died after the views were written: slots.json is the staged one.
+    const next = migrateBoards(first.views, first.staged!, NOW);
+    assert.equal(next.viewsChanged, false);
+    assert.equal(next.fileChanged, true);
+    assert.deepEqual([...next.file.boards.keys()].sort(), [...first.file.boards.keys()].sort());
+    assert.equal(next.file.pendingMerges, undefined);
+  });
+
+  test("a recorded merge whose boards are no longer identical keeps both", () => {
+    const first = migrateBoards(henryViews(), henryFile(), NOW);
+    const staged = first.staged!;
+    staged.defaults.set("g-left-copy", new Map([[WEEKEND, lineup("new", ["Edited"])]]));
+    const next = migrateBoards(first.views, staged, NOW);
+    assert.ok(next.file.boards.has("g-left-copy"), "a board edited since the merge was recorded was deleted");
+    assert.deepEqual(next.file.defaults.get("g-left-copy")?.get(WEEKEND)?.map((x) => x.id), ["new-0"]);
+    assert.equal(next.file.pendingMerges, undefined);
+  });
+});

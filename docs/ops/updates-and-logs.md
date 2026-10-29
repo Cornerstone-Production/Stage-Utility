@@ -300,7 +300,7 @@ a path or a credential. If you see one, report it.
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
-| `[slots-store]` | `slots.json` migrations: the move onto named boards with its counts, each pair of identical boards merged, each unused board kept, and a move that could not be saved (both files left as they were): [Slots](../reference/data-model.md#slots) |
+| `[slots-store]` | `slots.json` migrations: the move onto named boards with its counts, each pair of identical boards merged, each unused board kept, a merge an interrupted start recorded and the next one finished or kept, and a write that could not be saved (which file, and that the next start finishes it): [Slots](../reference/data-model.md#slots) |
 | `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
 | `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |
 | `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |

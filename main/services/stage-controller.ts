@@ -752,17 +752,25 @@ export class StageController {
   }
 
   /**
-   * Move slots.json and the views onto named boards (slot-boards.ts), and save
-   * both — views first, then slots — only once the whole migration has been
-   * worked out. Idempotent, so it runs every boot and costs nothing once done.
+   * Move slots.json and the views onto named boards (slot-boards.ts) and save
+   * both. Idempotent, so it runs every boot and costs nothing once done.
    *
-   * Views first because that order survives a crash between the two writes: the
-   * views then point at board ids that are still the v3 keys, and the next boot
-   * migrates the v3 slots onto them exactly as before. The other order could
-   * leave a view pointing (by its v3 shape) at a key a merge had removed.
+   * Written in an order where a crash after any write leaves files that lose
+   * nothing, and that the next boot finishes from:
    *
-   * A failure leaves both files as they were, says so, and boots on the old
-   * shapes, which the pointer helpers read the way the migration would point them.
+   *   1. slots.json with every board, its name and its lifted column width,
+   *      and nothing removed. Boards a merge will remove are kept, named in
+   *      `pendingMerges`. The views still carry their widths and resolve by
+   *      their old shapes, and a board's id is its v3 key, so they still find
+   *      their rows.
+   *   2. views.json: the pointers, the column widths gone (now on the boards).
+   *   3. slots.json without the merged boards, nothing pending. Only when step 1
+   *      kept some.
+   *
+   * When the views do not change, the final slots.json is the only write.
+   *
+   * A failed write stops there and the boot runs on what was read; the files on
+   * disk are whichever step last landed, and the next boot finishes the rest.
    */
   private async migrateSlotBoards(views: View[]): Promise<View[]> {
     const unreadable = viewsStore.refusingSaves() ?? slotsStore.refusingSaves();
@@ -784,29 +792,27 @@ export class StageController {
       return views;
     }
     if (!result.changed) return views;
+    let step = "slots.json";
     try {
-      await viewsStore.save(result.views);
-      try {
+      if (result.viewsChanged) {
+        await slotsStore.replaceFile(result.staged ?? result.file);
+        step = "views.json";
+        await viewsStore.save(result.views);
+        if (result.staged) {
+          step = "slots.json, removing the merged boards";
+          await slotsStore.replaceFile(result.file);
+        }
+      } else {
         await slotsStore.replaceFile(result.file);
-      } catch (err) {
-        // Put the views back, so neither file is half-migrated. If that fails
-        // too, the views point at board ids that are still the v3 keys, which
-        // the next boot migrates onto as usual (see above) — and the line below
-        // says which of the two happened.
-        const putBack = await viewsStore.save(views).then(() => null, (e: unknown) => e);
-        if (!putBack) throw err;
-        throw new Error(
-          `${errorMessage(err)}; views.json could not be put back either (${errorMessage(putBack)}), ` +
-            "so it already points at the boards and the next boot finishes the migration",
-          { cause: err },
-        );
       }
     } catch (err) {
+      const viewsSaved = step.startsWith("slots.json,");
       console.error(
-        "[slots-store] could not save the slot boards migration; slots.json and views.json are unchanged and this boot runs on the old shapes:",
+        `[slots-store] could not save the slot boards migration (writing ${scrub(step)}); nothing is lost, the next boot finishes it, ` +
+          `and this boot runs on ${viewsSaved ? "the migrated views" : "the views as they were"}:`,
         scrubError(err),
       );
-      return views;
+      return viewsSaved ? result.views : views;
     }
     for (const line of result.log) console.log(`[slots-store] ${scrub(line)}`);
     return result.views;
