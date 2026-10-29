@@ -20,7 +20,9 @@ A Mic Slots screen's **Edit** on the Screens page opens it on that screen's boar
 ![The Mic slots page: boards with screen-shaped previews, the inspector for the selected slot, and the plan switcher](images/slots-editor.png)
 
 **Nothing reaches a screen until Save all.** **Unsaved changes** shows beside it
-while any board has work in it. Leaving the page, or moving the plan switcher, with
+while any board has work in it, with **Discard** (after asking) to throw it away. A
+board deleted from another browser while you have edits to it is dropped from the
+page, and a message names whose edits went; Save all then saves the other boards. Leaving the page, or moving the plan switcher, with
 unsaved work asks first.
 
 ### The top bar
@@ -29,7 +31,7 @@ unsaved work asks first.
 |---|---|
 | **Plan switcher** | `‹ name ▾ ›` and **Now**: which plan's layouts every board on the page shows and saves to. See [Switching plans](#switching-plans-in-the-editor) |
 | **Default** and **<plan> only** | Which side of the plan is being edited, for every board at once. **EDITED** marks a plan that has a layout of its own on some board. See [Defaults and this week](#defaults-and-this-week) |
-| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default**, and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan, and says which boards it could not do |
+| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default**, and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan and says which boards it could not do. Copying names the boards and the target it replaces, and leaves alone, naming them, any board whose source has no layout |
 | **Saved layouts** | [Saved layouts](#saved-layouts) |
 | **Save all** | Writes every board with changes in one request |
 
@@ -52,8 +54,9 @@ The **⋯** menu:
 |---|---|
 | **Rename**, **Duplicate board** | Duplicating copies every service type's layouts and plan layouts, with new slot ids |
 | **Shown on** | A checklist of every Mic Slots screen and every mic-slots widget. Checking one points it at this board. To move a screen off a board, check it on another |
-| **Copy this board from…** | Copies a layout over this board's layout for the plan being edited: from **another board**, from a **service type** (its default) or from a **plan** (its own layout, else its type's default). Written at once, after asking if the board has unsaved edits |
-| **Revert this board to the default** | Deletes this board's layout for the plan being edited. Offered on the plan side when it has one |
+| **Copy this board from…** | Copies a layout over this board's layout for the plan being edited: from **another board**, from a **service type** (its default) or from a **plan** (its own layout, else its type's default). Written at once, after asking when it would replace a saved layout or unsaved edits. A source with no layout copies nothing and the board is left as it was |
+| **Revert this board to the default** | Deletes this board's layout for the plan being edited. Offered on the plan side when it has one. Unsaved edits to it go with it, once the revert has landed |
+| **Set this board as the default** | Makes this board's layout for the plan the service type's default. Unsaved edits are saved first, and the confirm says so |
 | **Charger layout…** | [Aligning to chargers](#aligning-to-chargers) |
 | **Delete board…** | Names what goes with it (the service types it has a layout for, and the upcoming plans with a layout of their own) and every screen showing it, and asks what those screens show instead: another board, or nothing. **Save it as a saved layout first** to keep a copy |
 
@@ -169,9 +172,11 @@ of the display's, in red when the row is wider. Without alignment every column, 
 spacer's included, takes an equal share of the width.
 
 The column width belongs to the board, so every screen showing it shares it. The
-**display width** (32.25 in for a 37 inch 16:9 panel) is each screen's own: set it in
-the screen's settings on the Screens page (a Mic Slots screen) or in the widget's
-**Display width** in the layout editor. A screen with no display width is not aligned.
+**display width** (32.25 in for a 37 inch 16:9 panel) is each screen's and widget's
+own. The Charger layout dialog lists every screen and widget showing the board with its
+display width, prefilled, and writes only the ones you change or that had none; they are
+also set in the screen's settings on the Screens page and in the widget's **Display
+width** in the layout editor. A screen with no display width is not aligned.
 
 ## Linking a slot to a person
 
