@@ -2930,8 +2930,10 @@ export class StageController {
   /**
    * `GET /api/boards/check`: this plan's check, for one target — the people on
    * the plan whose position some board names but who landed on no slot, and the
-   * slots that accept no position. Every board is read at that target, the way
-   * a screen showing it would read it.
+   * slots that accept no position. Every board some screen or widget shows is
+   * read at that target, the way a screen showing it would read it. A board
+   * nothing shows is not: an unused board's old lineup is no evidence about
+   * who has a mic this week.
    */
   async checkBoardsFor(want?: { serviceTypeId: string; planId: string | null }): Promise<BoardCheckDTO> {
     const serviceTypeId = want?.serviceTypeId ?? this.state.serviceTypeId;
@@ -2940,7 +2942,10 @@ export class StageController {
       throw new SlotsNotFoundError("No service type is selected; name one with ?serviceTypeId=.", 400);
     }
     const boards: { id: string; name: string; slots: Slot[] }[] = [];
-    for (const [id, b] of this.boards) boards.push({ id, name: b.name, slots: await slotsStore.resolve(id, serviceTypeId, planId) });
+    const shown = this.shownBoardIds();
+    for (const [id, b] of this.boards) {
+      if (shown.has(id)) boards.push({ id, name: b.name, slots: await slotsStore.resolve(id, serviceTypeId, planId) });
+    }
     const live = serviceTypeId === this.state.serviceTypeId && planId !== null && planId === this.state.planId;
     let roster: BoardCheckDTO["roster"] = "none";
     let reason: string | undefined;

@@ -343,6 +343,17 @@ describe("GET /api/boards/check", () => {
       noPosition: [{ boardId: "b-right", boardName: "Right", slotId: "bare", channel: "01", index: 2 }],
     });
   });
+
+  it("reads only the boards a screen or widget shows", async () => {
+    // An unused board's old lineup says nothing about this week.
+    await slotsStore.createBoard("b-unused", { name: "Unused board 1", columnWidthIn: null, createdAt: NOW }, {
+      defaults: new Map([[TYPE, [{ ...slot("stale"), link: { kind: "pco", matchBy: "position", positions: [] } } as unknown as Slot]]]),
+    });
+    ctl.boards = await slotsStore.listBoards();
+    const r = await call(boardRoutes, `/api/boards/check?serviceTypeId=${TYPE}`);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual((r.json as { noPosition: { boardId: string }[] }).noPosition.map((n) => n.boardId), [], "a board nothing shows was checked");
+  });
 });
 
 describe("the older routes, as aliases onto the board a screen shows", () => {
