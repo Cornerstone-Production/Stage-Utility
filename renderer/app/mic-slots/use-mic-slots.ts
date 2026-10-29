@@ -455,6 +455,8 @@ export function useMicSlots() {
     if (!next) return false;
     takeState(next);
     dropEdits(boardId);
+    // Out of the list first, so nothing still mounted asks for its layouts again.
+    qc.setQueryData<SlotBoardDTO[]>(BOARDS_KEY, (old) => old?.filter((b) => b.id !== boardId));
     // The board is gone: asking for its layouts again is a 404 in the console.
     qc.removeQueries({ queryKey: ["boards:targets", boardId] });
     qc.removeQueries({ queryKey: ["boards:contents", boardId] });
