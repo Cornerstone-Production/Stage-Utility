@@ -230,6 +230,51 @@ describe("DELETE /api/boards/:id", () => {
     assert.deepEqual(await slotsStore.getDefault("b-left", TYPE), []);
   });
 
+  it("points a widget inside a container, and keeps a pre-boards widget's display width", async () => {
+    // A widget nested in a container is reached only by walking children; one
+    // still in the pre-boards shape (a boot whose migration could not be saved)
+    // carries its display width inside slotsLayout.
+    ctl.state = {
+      ...ctl.state,
+      views: [
+        ...ctl.state.views,
+        {
+          id: "pad-2", name: "Nested", kind: "custom", createdAt: "", layoutRev: 0,
+          layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [
+            { id: "box", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "container" }, children: [
+              { id: "g-nested", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", boardId: "b-right" } },
+            ] },
+            { id: "b-right", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline", sourceViewId: null, slotsLayout: { displayWidthIn: 18, columnWidthIn: 3 } } },
+          ] },
+        },
+      ] as unknown as View[],
+    };
+    const r = await call(boardRoutes, "/api/boards/b-right", "DELETE", { replacement: "b-left" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const objects = ctl.state.views.find((v) => v.id === "pad-2")!.layout!.objects;
+    assert.deepEqual(objects[0]!.children![0]!.config, { type: "slots-grid", boardId: "b-left" }, "the nested widget still points at the deleted board");
+    assert.deepEqual(objects[1]!.config, { type: "slots-grid", boardId: "b-left", displayWidthIn: 18 }, "the widget lost its display width");
+  });
+
+  it("points a widget on a dormant layout too, so switching the view back to custom finds no board that is gone", async () => {
+    ctl.state = {
+      ...ctl.state,
+      views: [
+        ...ctl.state.views,
+        {
+          id: "wall-4", name: "Was a layout", kind: "slots", createdAt: "", boardId: "b-right",
+          layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [
+            { id: "g-dormant", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", boardId: "b-left" } },
+          ] },
+        },
+      ] as unknown as View[],
+    };
+    const r = await call(boardRoutes, "/api/boards/b-left", "DELETE", { replacement: "b-right" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const dormant = ctl.state.views.find((v) => v.id === "wall-4")!.layout!.objects[0]!.config as { boardId: string | null };
+    assert.equal(dormant.boardId, "b-right", "a dormant layout still points at the deleted board");
+  });
+
   it("with null leaves its screens showing nothing", async () => {
     const r = await call(boardRoutes, "/api/boards/b-left", "DELETE", { replacement: null });
     assert.equal(r.status, 200);

@@ -9,6 +9,7 @@ import {
   gridDisplayWidthIn,
   hasLegacyGridFields,
   migrateBoards,
+  pointedGrid,
   positiveOrNull,
   viewBoardId,
 } from "./slot-boards.js";
@@ -2815,16 +2816,18 @@ export class StageController {
       if (replacement === boardId) throw new SlotsNotFoundError("A board cannot be replaced by itself.", 400);
     }
     const shownOn = this.boardShownOn(boardId);
+    // Every layout, a dormant one too (a view switched to another kind keeps
+    // its layout): switched back to custom, it must not point at a board that
+    // is gone.
     const views = this.state.views.map((v): View => {
       let next = v;
       if (v.boardId === boardId || (v.kind === "slots" && viewBoardId(v) === boardId)) next = { ...next, boardId: replacement };
-      if (next.layout && next.kind === "custom") {
+      if (next.layout) {
         const objects = structuredClone(next.layout.objects);
         let touched = false;
         walkLayoutObjects(objects, (o) => {
           if (o.config.type === "slots-grid" && gridBoardId(o.config, o.id) === boardId) {
-            const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = o.config;
-            o.config = { ...rest, boardId: replacement };
+            o.config = pointedGrid(o.config, replacement);
             touched = true;
           }
         });
@@ -2832,7 +2835,7 @@ export class StageController {
       }
       return next;
     });
-    if (shownOn.length > 0) {
+    if (views.some((v, i) => v !== this.state.views[i])) {
       this.state = { ...this.state, views };
       await viewsStore.save(views);
     }
@@ -3970,8 +3973,7 @@ export class StageController {
         await this.updateBoard(boardId, { columnWidthIn });
       }
       const displayWidthIn = "slotsLayout" in c ? positiveOrNull(c.slotsLayout?.displayWidthIn) : gridDisplayWidthIn(c);
-      const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = c;
-      replace.set(objectId, { ...rest, boardId, ...(displayWidthIn !== null ? { displayWidthIn } : {}) });
+      replace.set(objectId, pointedGrid(c, boardId, displayWidthIn));
     }
     walkLayoutObjects(objects, (o) => {
       const next = byObject.has(o.id) ? replace.get(o.id) : undefined;
@@ -4014,13 +4016,7 @@ export class StageController {
       const oldIdOf = new Map([...cloned.idMap].map(([from, to]) => [to, from]));
       walkLayoutObjects(cloned.layout.objects, (o) => {
         if (o.config.type !== "slots-grid" || !hasLegacyGridFields(o.config)) return;
-        const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = o.config;
-        const displayWidthIn = gridDisplayWidthIn(o.config);
-        o.config = {
-          ...rest,
-          boardId: gridBoardId(o.config, oldIdOf.get(o.id) ?? o.id),
-          ...(displayWidthIn !== null ? { displayWidthIn } : {}),
-        };
+        o.config = pointedGrid(o.config, gridBoardId(o.config, oldIdOf.get(o.id) ?? o.id));
       });
     }
     const srcBoard = src.kind === "slots" ? viewBoardId(src) : null;

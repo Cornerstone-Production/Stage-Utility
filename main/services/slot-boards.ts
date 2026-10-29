@@ -72,6 +72,16 @@ export function gridDisplayWidthIn(config: GridConfig): number | null {
   return positiveOrNull(config.slotsLayout?.displayWidthIn);
 }
 
+/**
+ * A grid's config as it is stored: the board it shows and its own display
+ * width, with every field from before boards gone. The one place those fields
+ * are taken off, so no caller can drop a display width another keeps.
+ */
+export function pointedGrid(c: GridConfig, boardId: string | null, displayWidthIn: number | null = gridDisplayWidthIn(c)): GridConfig {
+  const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = c;
+  return { ...rest, boardId, ...(displayWidthIn !== null ? { displayWidthIn } : {}) };
+}
+
 export function positiveOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
 }
@@ -233,8 +243,7 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
         displayWidthIn = positiveOrNull(srcLayout?.displayWidthIn);
       }
       if (legacy || c.boardId === undefined) {
-        const { source: _s, sourceViewId: _v, slotsLayout: _l, displayWidthIn: _d, ...rest } = c;
-        o.config = { ...rest, boardId, ...(displayWidthIn !== null ? { displayWidthIn } : {}) };
+        o.config = pointedGrid(c, boardId, displayWidthIn);
         touched = true;
       }
       pointers.push({ kind: "object", id: o.id, view: v, boardId, ownKey });
