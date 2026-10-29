@@ -4,7 +4,7 @@
 import { setAvatarGeometry } from "./avatar-geometry.js";
 import { clamp } from "./clamp.js";
 import { isPcoPersonId, normalizePcoPersonId } from "./pco-person-id.js";
-import type { PersonCardDTO, Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
+import type { PersonCardDTO, PrepTags, Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
 const EMPTY_DEVICE: SlotDevice = {
@@ -349,6 +349,7 @@ export function fitAvatarToColumn(
 }
 
 const NO_PEOPLE: ReadonlyMap<string, PersonCardDTO> = new Map();
+const NO_PREP: ReadonlyMap<string, PrepTags> = new Map();
 
 /** The normalised IDs of by-person slots whose person is not on this roster: the
  *  ones the person directory has to read from Planning Center. */
@@ -373,6 +374,9 @@ export function resolveSlots(
   /** People read from Planning Center by ID (person-directory.ts), for by-person
    *  slots whose person is not on this roster. */
   people: ReadonlyMap<string, PersonCardDTO> = NO_PEOPLE,
+  /** Prep tags by Planning Center person id (pco-prep-tags.ts). Read only for a
+   *  slot filled by a person; a spacer, empty or static slot never gets one. */
+  prep: ReadonlyMap<string, PrepTags> = NO_PREP,
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
@@ -385,7 +389,10 @@ export function resolveSlots(
   // is the array order the caller passes.
   const claimed = new Map<string, Set<string>>();
 
-  return slots.map((slot, slotIndex): Slot => {
+  return slots.map((stored, slotIndex): Slot => {
+    // `prep` is derived here and never trusted from the input: a resolved slot
+    // sent back by an editor must not carry last week's capsule onto this one.
+    const { prep: _stale, ...slot } = stored;
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
@@ -453,8 +460,10 @@ export function resolveSlots(
       iemLabel: slot.iemLabel ?? null,
     };
 
+    const memberPrep = member?.personId ? prep.get(member.personId) : undefined;
     return {
       ...slot,
+      ...(memberPrep ? { prep: { ...memberPrep } } : {}),
       displayName: member?.name ?? null,
       photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, avatarFit),
       shownPositions,

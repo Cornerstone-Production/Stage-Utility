@@ -70,6 +70,7 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js"
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
+import { PrepTagBook } from "./pco-prep-tags.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
 import { iconToSettings, type AppIconInput } from "./app-icon.js";
@@ -458,6 +459,13 @@ export class StageController {
       this.broadcast();
     },
   );
+  /** Planning Center prep tags (capsule, own in-ears) by person id. Best-effort:
+   *  a failed read keeps the last good map and is logged, never blanks a slot. */
+  private readonly prepTags = new PrepTagBook(() => {
+    const appId = this.pcoAppId;
+    const secret = this.pcoSecret;
+    return appId && secret ? () => pcoService.listPersonPrepTags(appId, secret) : null;
+  });
   /** `serviceTypeId:planId` the roster above belongs to, so a failed refresh can
    *  tell "the same plan, momentarily unreachable" from "a different plan". */
   private teamMembersKey: string | null = null;
@@ -958,6 +966,7 @@ export class StageController {
     this.pcoSecret = secret;
     // Every person read under the old credentials may not hold under the new ones.
     this.personDirectory.reset();
+    this.prepTags.reset();
     if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
     void this.refreshServiceWindows(); // creds (re)applied — (re)compute reconnect windows
@@ -4743,8 +4752,9 @@ export class StageController {
     this.rosterRefreshing = true;
     try {
       const before = JSON.stringify(this.teamMembers);
+      const prepBefore = this.prepTags.map;
       await this.fetchTeamMembers(serviceTypeId, planId, { fresh: true });
-      if (JSON.stringify(this.teamMembers) === before) return;
+      if (JSON.stringify(this.teamMembers) === before && this.prepTags.map === prepBefore) return;
       // broadcast() already drops an identical state, so the saving here is
       // recomputeResolved(), which re-resolves every view, every inline slots grid
       // and every view-sourced grid. That runs every minute for hours inside a
@@ -4975,6 +4985,10 @@ export class StageController {
   ): Promise<void> {
     const key = `${serviceTypeId}:${planId}`;
     if (opts.fresh) pcoService.clearTeamMembersCache(this.pcoAppId!, serviceTypeId, planId);
+    // Rides along with the roster: every caller re-resolves straight after, and
+    // the service caches the tags on its LONG tier, so this is usually no request.
+    // It reports its own failure and never throws.
+    await this.prepTags.refresh();
     try {
       const fetched = await pcoService.listTeamMembers(
         this.pcoAppId!,
@@ -5075,7 +5089,7 @@ export class StageController {
    *  leave a by-person slot empty for want of the lookup. */
   private resolve(raw: Slot[], members: TeamMemberDTO[], avatarFit: AvatarFit = "column"): Slot[] {
     this.personDirectory.want(unrosteredPersonIds(raw, members));
-    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people);
+    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people, this.prepTags.map);
   }
 
   /** Resolve every slots-View, then derive the per-output descriptors and the

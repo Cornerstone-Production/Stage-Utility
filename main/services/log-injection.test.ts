@@ -131,6 +131,9 @@ const REQUEST_FACING = [
   // Every line names a file it serves (an allowlisted name) and what the release
   // host or the disk said back, which is text from outside.
   "output-helper-download.ts",
+  // Names a tag value and a tag-group error typed into Planning Center and read
+  // back over HTTP, and a person id off a response body; scrubbed at the logger.
+  "pco-prep-tags.ts",
   "pco-service.ts",
   "person-directory.ts",
   // GET /photos?u= hands the caller's string to every one of its log lines: the
@@ -506,6 +509,8 @@ function requestFacingFiles(): string[] {
     // Every line names a file it serves (an allowlisted name) and what the release
     // host or the disk said back, which is text from outside.
     path.join(HERE, "output-helper-download.ts"),
+    // Names a tag value, an error and a person id read from Planning Center.
+    path.join(HERE, "pco-prep-tags.ts"),
     path.join(HERE, "pco-service.ts"),
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.
