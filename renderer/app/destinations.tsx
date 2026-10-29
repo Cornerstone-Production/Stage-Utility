@@ -18,6 +18,7 @@ import {
   DropletIcon,
   ListChecksIcon,
   MessageSquareIcon,
+  MicIcon,
   MonitorIcon,
   PaletteIcon,
   PlugIcon,
@@ -38,6 +39,7 @@ import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
+import { MicSlotsPage } from "./mic-slots/mic-slots-page";
 import { ServiceCueSection } from "../settings/sections/servicecue-section";
 import {
   SERVICECUE_LANDING_PATH,
@@ -80,6 +82,15 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
     Component: ScreensRoute,
+  },
+  {
+    // Every mic slot board, edited together: the screens and widgets that show
+    // them are listed on each board, and a slots screen's Edit comes here.
+    path: "/mic-slots",
+    label: "Mic slots",
+    description: "The boards your screens show, who fills each slot and what mic it carries.",
+    icon: <MicIcon className="size-4" />,
+    Component: MicSlotsPage,
   },
   {
     path: "/video-feeds",
@@ -206,7 +217,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // "output" in its description is XLR, not a display.
   { label: "Content", paths: ["/servicecue/manage", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens", "/video-feeds"] },
+  { label: "Screens", paths: ["/screens", "/mic-slots", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.

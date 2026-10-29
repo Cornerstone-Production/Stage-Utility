@@ -320,6 +320,11 @@ function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }
 
+/** A DELETE that carries a body: deleting a board says what its screens show next. */
+function delWithBody<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "DELETE", body: JSON.stringify(body) });
+}
+
 // ── Channel → HTTP mapping ────────────────────────────────────────────────────
 
 /**
@@ -402,6 +407,17 @@ export type IpcChannel =
   | "baptism:startBaptisms"
   | "baptism:undo"
   | "barItems:set"
+  | "boards:check"
+  | "boards:clearOverride"
+  | "boards:copyFrom"
+  | "boards:create"
+  | "boards:delete"
+  | "boards:duplicate"
+  | "boards:list"
+  | "boards:promote"
+  | "boards:saveAll"
+  | "boards:targets"
+  | "boards:update"
   | "calendar:getGrid"
   | "calendar:sources"
   | "captions:setChannelColor"
@@ -620,6 +636,7 @@ export type IpcChannel =
   | "views:rename"
   | "views:reorder"
   | "views:resolveSlots"
+  | "views:setBoard"
   | "views:setCalendarFilters"
   | "views:setHideChrome"
   | "views:setKind"
@@ -1104,6 +1121,64 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       const state = await apiFetch<{ remoteUrl: string | null }>("/api/state");
       return state.remoteUrl as unknown as T;
     }
+
+    // ── Slot boards (the Mic slots page) ───────────────────────────────
+    // A board is named by its own id here, never by a screen's: `slots:*` above
+    // are the per-screen aliases the older editors used.
+    case "boards:list":
+      return apiFetch<T>("/api/boards");
+
+    case "boards:create":
+      return post<T>("/api/boards", { name: p.name, from: p.from, target: p.target });
+
+    case "boards:update":
+      return patch<T>(`/api/boards/${encodeURIComponent(p.id as string)}`, {
+        ...("name" in p ? { name: p.name } : {}),
+        ...("columnWidthIn" in p ? { columnWidthIn: p.columnWidthIn } : {}),
+      });
+
+    case "boards:duplicate":
+      return post<T>(`/api/boards/${encodeURIComponent(p.id as string)}/duplicate`, { name: p.name });
+
+    case "boards:delete":
+      return delWithBody<T>(`/api/boards/${encodeURIComponent(p.id as string)}`, { replacement: p.replacement ?? null });
+
+    case "boards:targets": {
+      const q = new URLSearchParams();
+      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+      if (p.planId) q.set("planId", String(p.planId));
+      const tail = q.size > 0 ? `?${q}` : "";
+      return apiFetch<T>(`/api/boards/${encodeURIComponent(p.id as string)}/targets${tail}`);
+    }
+
+    // Save all: every dirty board in one request, all or nothing.
+    case "boards:saveAll":
+      return post<T>("/api/boards/slots", { boards: p.boards });
+
+    case "boards:clearOverride":
+      return del<T>(`/api/boards/${encodeURIComponent(p.id as string)}/override/${encodeURIComponent(p.planId as string)}`);
+
+    case "boards:promote":
+      return post<T>(`/api/boards/${encodeURIComponent(p.id as string)}/promote`, { planId: p.planId });
+
+    case "boards:copyFrom":
+      return post<T>(`/api/boards/${encodeURIComponent(p.id as string)}/copy-from`, {
+        fromBoardId: p.fromBoardId,
+        fromServiceTypeId: p.fromServiceTypeId,
+        fromPlanId: p.fromPlanId,
+        target: p.target,
+      });
+
+    case "boards:check": {
+      const q = new URLSearchParams();
+      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+      if (p.planId) q.set("planId", String(p.planId));
+      const tail = q.size > 0 ? `?${q}` : "";
+      return apiFetch<T>(`/api/boards/check${tail}`);
+    }
+
+    case "views:setBoard":
+      return put<T>(`/api/views/${encodeURIComponent(p.id as string)}/board`, { boardId: p.boardId ?? null });
 
     // ── Presets ────────────────────────────────────────────────────────
     case "presets:list":
