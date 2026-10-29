@@ -1,247 +1,227 @@
+import type { CSSProperties, ReactNode } from "react";
 import { clamp } from "@main/services/clamp";
 import { cn } from "../lib/cn";
-import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, MicIcon, HeadphonesIcon } from "lucide-react";
+import { EarIcon, HeadphonesIcon, MicIcon } from "lucide-react";
 
-interface StatusStripProps {
-  device: SlotDevice;
-  /** Hide the RF bars (and frequency); show only the charge bar + level. */
-  hideRf?: boolean;
-  className?: string;
-}
+/**
+ * The slot card's readout rows and photo badges.
+ *
+ * Every size is a multiple of --px, one pixel of the approved mockup (a card about
+ * 258 wide), written in cqmin. The card is a size container, so cqmin is the
+ * smaller of its width and height: the same proportions in the editor preview, on
+ * a 1080p column and on a 4K one, and a short wide card shrinks its text rather
+ * than letting it cover the photo.
+ *
+ * --px has to be set on an element INSIDE the card, never on the card itself (a
+ * container's own cq units resolve against the container above it), and not inside
+ * `.slot-photo`, which is a container of its own and would measure the photo box
+ * instead. That is why the badge layer is a sibling of the photo, not a child.
+ */
+export const PX_UNIT = { ["--px" as string]: "0.388cqmin" } as CSSProperties;
+const px = (n: number) => `calc(var(--px) * ${n})`;
+/** Text never drops under this, however small the preview. */
+const text = (n: number) => `max(0.6rem, ${px(n)})`;
 
-// All sizing inside the strip is driven off one container-relative unit (`--rf`)
-// set on the wrapper. Because the slot card establishes [container-type:inline-size],
-// the cqi in that clamp resolves against the slot width — so the RF bar grows on a
-// 4K column and shrinks in the editor preview, staying proportional everywhere.
-const RF_UNIT = "clamp(0.58rem, 6cqi, 1.6rem)";
+/** A mic or IEM battery under this puts a red edge on the whole card. */
+export const LOW_BATTERY = 25;
 
-function BatteryIcon({ level }: { level: number }) {
-  const style = { width: "calc(var(--rf) * 1.2)", height: "calc(var(--rf) * 1.2)" };
-  if (level >= 60) return <BatteryFullIcon className="text-green-10 shrink-0" style={style} />;
-  if (level >= 25) return <BatteryMediumIcon className="text-yellow-10 shrink-0" style={style} />;
-  return <BatteryLowIcon className="text-red-10 shrink-0" style={style} />;
-}
-
-// Charge level uses the same thresholds as the battery readout / slot status
-// (green ≥60, yellow 25–59, red <25) and the same green as the active RF bars,
-// so it reads as one family.
-function chargeColor(pct: number): string {
-  if (pct >= 60) return "bg-green-9";
-  if (pct >= 25) return "bg-yellow-9";
-  return "bg-red-9";
-}
-
-function readoutColor(level: number | null): string {
-  if (level === null) return "text-fg-faint";
-  if (level >= 60) return "text-green-10";
-  if (level >= 25) return "text-yellow-10";
+// One set of thresholds everywhere: green >=60, amber 25-59, red <25.
+function levelColor(pct: number): string {
+  if (pct >= 60) return "text-green-10";
+  if (pct >= 25) return "text-yellow-10";
   return "text-red-10";
 }
 
-// A thin charge-level bar sized to sit directly under the 5-bar RF cluster. The
-// track is always rendered (so every pill keeps the same height); the fill only
-// shows when a battery level is known.
-function ChargeBar({ level }: { level: number | null }) {
-  return (
-    <span
-      // Fixed width matching the 5-bar RF cluster, so the bar aligns under the
-      // bars and still renders at a sensible size when shown on its own (no RF).
-      className="block overflow-hidden rounded-full bg-white/10"
-      style={{ width: "calc(var(--rf) * 2.9)", height: "calc(var(--rf) * 0.26)" }}
-    >
-      {level !== null && (
-        <span
-          className={cn("block h-full rounded-full transition-all", chargeColor(level))}
-          style={{ width: `${clamp(level, 0, 100)}%` }}
-        />
-      )}
-    </span>
-  );
-}
-
 function RfBars({ bars }: { bars: number }) {
-  // 5 vertical bars with rounded caps; active bars use soft green with a subtle glow.
-  // Heights/width/gap are multiples of --rf so the whole cluster scales as one.
   return (
-    <span className="flex items-end" style={{ gap: "calc(var(--rf) * 0.2)" }}>
-      {Array.from({ length: 5 }).map((_, i) => {
-        const active = i < bars;
-        return (
-          <span
-            key={i}
-            className={cn(
-              "rounded-sm transition-colors shrink-0",
-              active ? "bg-green-9" : "bg-white/10",
-            )}
-            style={{
-              width: "calc(var(--rf) * 0.42)",
-              height: `calc(var(--rf) * ${(0.6 + i * 0.26).toFixed(2)})`,
-              boxShadow: active ? "0 0 6px 1px rgba(74,222,128,0.30)" : undefined,
-            }}
-          />
-        );
-      })}
+    <span className="flex items-end" style={{ gap: px(3) }}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <span
+          key={i}
+          className={cn("block shrink-0", i < bars ? "bg-green-9" : "bg-white/10")}
+          style={{ width: px(6), minWidth: 2, height: px(8 + i * 3.5), borderRadius: px(2) }}
+        />
+      ))}
     </span>
   );
 }
 
-// Hairline vertical divider between strip segments
-function Divider() {
-  return <span className="w-px self-stretch bg-white/10 shrink-0" style={{ margin: "0 calc(var(--rf) * 0.2)" }} />;
+/** The fixed-width lead of a row: the bars for a live mic, an icon otherwise. */
+function Lead({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex shrink-0 items-center justify-center" style={{ width: px(42) }}>
+      {children}
+    </span>
+  );
 }
 
-export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
-  const micBound = device.status !== "none";
-  const showRf = micBound && !hideRf;
-  const showFreq = micBound && !hideRf;
-  const charge = device.charge;
-  const iemCharge = device.iemCharge;
-  const hasIem = iemCharge !== null;
+const rowStyle: CSSProperties = { gap: px(10), fontSize: text(17) };
+const MONO = "font-mono tabular-nums font-bold leading-none";
+const iconStyle: CSSProperties = { width: px(18), height: px(18) };
 
-  // Nothing to show (no RF, no charge, no IEM) — render nothing rather than an
-  // empty pill. slot-panel gates on the same condition, so this is a safety net.
-  // (Offline/manual device labels render as a SEPARATE label in slot-panel, not
-  // in this telemetry pill.)
-  if (!showRf && charge === null && iemCharge === null) return null;
+interface StatusRowsProps {
+  device: SlotDevice;
+  /** "strip": live telemetry rows. "offline": the manual labels only, no bars, no
+   *  percent. slot-strip-mode.ts decides which, or neither. */
+  mode: "strip" | "offline";
+  /** Drop the RF bars and the frequency; keep the charge. */
+  hideRf?: boolean;
+}
 
-  const statusColor =
-    device.status === "ok"
-      ? "text-green-10"
-      : device.status === "warn"
-        ? "text-yellow-10"
-        : "text-red-10";
+/**
+ * Flat rows under the name: the mic row (RF bars, label or frequency, battery %)
+ * and, when an IEM is bound, the IEM row (headphones, label, battery %). No nested
+ * pill. An offline device is the same rows with its label and nothing else.
+ */
+export function StatusRows({ device, mode, hideRf }: StatusRowsProps) {
+  const offline = mode === "offline";
+  const showRf = !offline && device.status !== "none" && !hideRf;
+  const charge = offline ? null : device.charge;
+  const iemCharge = offline ? null : device.iemCharge;
 
-  // Readout follows the charge SOURCE (mic battery or charger bay), so the number
-  // matches the bar.
-  const chargeReadoutColor =
-    charge === null
-      ? "text-fg-faint"
-      : charge >= 60
-        ? "text-green-10"
-        : charge >= 25
-          ? "text-yellow-10"
-          : "text-red-10";
+  // The middle of the mic row. Live: the manual label if there is one (it takes the
+  // frequency's place), else the frequency. RF hidden: nothing, as the frequency is
+  // RF information. Offline: the label, which is why the row exists.
+  let micText: ReactNode = null;
+  if (offline) {
+    if (device.label !== null) micText = <span className="font-semibold text-fg">{device.label || "Offline"}</span>;
+  } else if (showRf) {
+    const statusColor =
+      device.status === "ok" ? "text-green-10" : device.status === "warn" ? "text-yellow-10" : "text-red-10";
+    if (device.label) micText = <span className={cn("font-bold", statusColor)}>{device.label}</span>;
+    else if (device.freq !== null) micText = <span className={cn(MONO, statusColor)}>{device.freq}</span>;
+    else micText = <span className="font-bold text-fg-faint">—</span>;
+  }
 
-  const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
-
-  // Charge-only pill (no RF bars, no frequency — e.g. an instrumentalist on a
-  // charger bay): center the bar + readout instead of left-aligning them.
-  const chargeOnly = !showRf && !showFreq;
+  const showMicRow = offline ? micText !== null : showRf || charge !== null;
+  const iemLabel = offline
+    ? device.iemLabel !== null
+      ? device.iemLabel || "Offline"
+      : null
+    : (device.iemLabel ?? (iemCharge !== null ? "IEM" : null));
+  const showIemRow = iemLabel !== null;
+  if (!showMicRow && !showIemRow) return null;
 
   return (
     <div
-      className={cn(
-        // Solid pill inset from the card edge. It lives inside the opaque info
-        // band now, so no heavy backdrop blur is needed (cheaper to render).
-        "relative mx-2 mb-2 flex items-center overflow-hidden su-card",
-        chargeOnly && "justify-center",
-        className,
-      )}
-      style={{
-        ["--rf" as string]: RF_UNIT,
-        padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.6)",
-      }}
+      className="flex flex-col"
+      data-slot-rows=""
+      style={{ ...PX_UNIT, gap: px(8), paddingTop: px(12), borderTop: "1px solid rgba(255,255,255,0.08)" }}
     >
-      {/* ── RF + charge segment — the 5-bar RF cluster (when shown) with the thin
-          charge bar(s) beneath it: the primary (mic / charger), then an optional
-          second bar for a bound IEM/PSM pack. With RF hidden or no mic bound, the
-          charge bar(s) stand on their own. ── */}
-      <div className="flex flex-col items-center justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
-        {showRf && <RfBars bars={device.rf === null ? 0 : clamp(Math.round(device.rf), 0, 5)} />}
-        {(showRf || charge !== null) && <ChargeBar level={charge} />}
-        {hasIem && <ChargeBar level={iemCharge} />}
-      </div>
-
-      {/* ── Label / frequency segment — only with the RF bars (it's RF info).
-          A manual label takes the frequency's place; the label's presence IS the
-          toggle, so leaving it blank keeps the frequency showing. An IEM label
-          sits on a second line, present only when set. ── */}
-      {showFreq && (
-        <>
-          <Divider />
-          <div className="flex flex-col justify-center flex-1 min-w-0" style={{ gap: "calc(var(--rf) * 0.12)" }}>
-            {device.label ? (
-              <span className={cn("font-bold truncate leading-none", statusColor)} style={valueTextStyle}>
-                {device.label}
-              </span>
-            ) : device.freq !== null ? (
-              <span className={cn("font-mono font-bold tabular-nums truncate leading-none", statusColor)} style={valueTextStyle}>
-                {device.freq}
-              </span>
+      {showMicRow && (
+        <div className="flex items-center" data-slot-row="mic" style={rowStyle}>
+          <Lead>
+            {showRf ? (
+              <RfBars bars={device.rf === null ? 0 : clamp(Math.round(device.rf), 0, 5)} />
             ) : (
-              <span className="font-bold text-fg-faint leading-none" style={valueTextStyle}>—</span>
+              <MicIcon className="text-fg-muted" style={iconStyle} aria-hidden />
             )}
-            {device.iemLabel && (
-              <span
-                className="text-fg-muted truncate leading-none"
-                style={{ fontSize: "calc(var(--rf) * 0.78)" }}
-              >
-                {device.iemLabel}
-              </span>
-            )}
-          </div>
-        </>
+          </Lead>
+          <span className="min-w-0 flex-1 truncate leading-none">{micText}</span>
+          {charge !== null && <span className={cn(MONO, levelColor(charge))}>{charge}%</span>}
+        </div>
       )}
-
-      {/* ── Battery readout(s). With an IEM bound, two labeled rows (mic = handheld,
-          headphones = IEM pack); otherwise the single mic/charger battery. ── */}
-      {hasIem ? (
-        (charge !== null || iemCharge !== null) && (
-          <>
-            <Divider />
-            <div className="flex flex-col justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
-              {charge !== null && (
-                <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
-                  <MicIcon className={cn("shrink-0", readoutColor(charge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                  <span className={cn("font-mono font-bold tabular-nums leading-none", readoutColor(charge))} style={valueTextStyle}>{charge}%</span>
-                </div>
-              )}
-              <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
-                <HeadphonesIcon className={cn("shrink-0", readoutColor(iemCharge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                <span className={cn("font-mono font-bold tabular-nums leading-none", readoutColor(iemCharge))} style={valueTextStyle}>{iemCharge}%</span>
-              </div>
-            </div>
-          </>
-        )
-      ) : (
-        charge !== null && (
-          <>
-            <Divider />
-            <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
-              <BatteryIcon level={charge} />
-              <span className={cn("font-mono font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
-                {charge}%
-              </span>
-            </div>
-          </>
-        )
+      {showIemRow && (
+        <div className="flex items-center" data-slot-row="iem" style={rowStyle}>
+          <Lead>
+            <HeadphonesIcon className="text-fg-muted" style={iconStyle} aria-hidden />
+          </Lead>
+          <span className={cn("min-w-0 flex-1 truncate font-mono font-semibold leading-none", offline ? "text-fg" : "text-fg-muted")}>
+            {iemLabel}
+          </span>
+          {iemCharge !== null && <span className={cn(MONO, levelColor(iemCharge))}>{iemCharge}%</span>}
+        </div>
       )}
     </div>
   );
 }
 
-// A pill for an OFFLINE (manually-assigned) device — the mic and/or IEM label(s),
-// no icons, no bars. Styled to match the StatusStrip pill so it sits in the same
-// spot and reads as "this slot's device info", just without live telemetry. Each
-// label is centered; with both mic + IEM set they stack as two centered rows.
-export function OfflinePill({ micLabel, iemLabel, className }: { micLabel: string | null; iemLabel: string | null; className?: string }) {
-  if (micLabel === null && iemLabel === null) return null;
-  const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
-  const labels = [micLabel, iemLabel].filter((l): l is string => l !== null);
+/** The capsule plate: a microphone and the capsule model, in mono. */
+export function CapsulePlate({ capsule, style }: { capsule: string; style?: CSSProperties }) {
   return (
-    <div
-      className={cn("relative mx-2 mb-2 flex flex-col items-center justify-center overflow-hidden su-card", className)}
-      style={{ ["--rf" as string]: RF_UNIT, padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.7)", gap: "calc(var(--rf) * 0.2)" }}
+    <span
+      data-slot-badge="capsule"
+      className="inline-flex max-w-full items-center"
+      style={{
+        ...PX_UNIT,
+        height: px(36),
+        gap: px(7),
+        padding: `0 ${px(12)} 0 ${px(10)}`,
+        borderRadius: px(10),
+        background: "rgba(0,0,0,0.62)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        ...style,
+      }}
     >
-      {labels.map((label, i) => (
+      <MicIcon className="shrink-0" style={{ width: px(16), height: px(16), color: "rgba(255,255,255,0.75)" }} aria-hidden />
+      <span className="truncate font-mono font-bold leading-none text-white" style={{ fontSize: text(18) }}>
+        {capsule}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The badges on the photo: channel top-left, own-in-ears top-right and, unless the
+ * card draws it in its scrim, the capsule plate bottom-left. Neutral white on dark
+ * glass, deliberately: nothing on stage carries the brand accent.
+ */
+export function PhotoBadges({
+  channel,
+  ownIems,
+  capsule,
+  plate,
+}: {
+  channel: string;
+  ownIems: boolean;
+  capsule: string | null;
+  /** Draw the plate here. False when the card puts it in its scrim instead. */
+  plate: boolean;
+}) {
+  const ch = channel.trim();
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[1]" style={PX_UNIT} data-slot-badges="">
+      {ch !== "" && (
         <span
-          key={i}
-          className="max-w-full truncate text-center font-semibold leading-none text-fg"
-          style={valueTextStyle}
+          data-slot-badge="channel"
+          className="absolute inline-flex items-center justify-center font-mono font-semibold"
+          style={{
+            top: px(12),
+            left: px(12),
+            height: px(30),
+            minWidth: px(30),
+            maxWidth: "45%",
+            padding: `0 ${px(9)}`,
+            borderRadius: px(9),
+            background: "rgba(0,0,0,0.55)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            fontSize: text(15),
+            color: "rgba(255,255,255,0.80)",
+          }}
         >
-          {label || "Offline"}
+          <span className="truncate">{ch}</span>
         </span>
-      ))}
+      )}
+      {ownIems && (
+        <span
+          data-slot-badge="ears"
+          role="img"
+          aria-label="Brings own in-ears"
+          className="absolute flex items-center justify-center"
+          style={{
+            top: px(12),
+            right: px(12),
+            width: px(34),
+            height: px(34),
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.18)",
+            boxShadow: "0 0 0 2px rgba(0,0,0,0.45)",
+          }}
+        >
+          <EarIcon style={{ width: px(19), height: px(19), color: "#ffffff" }} strokeWidth={2.2} aria-hidden />
+        </span>
+      )}
+      {plate && capsule && <CapsulePlate capsule={capsule} style={{ position: "absolute", left: px(12), bottom: px(12), maxWidth: `calc(100% - ${px(24)})` }} />}
     </div>
   );
 }

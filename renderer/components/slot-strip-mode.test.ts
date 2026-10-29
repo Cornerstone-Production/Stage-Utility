@@ -1,4 +1,4 @@
-// Which of the two pills a slot shows. Pulled out of slot-panel so the rule is
+// Which rows a slot shows. Pulled out of slot-panel so the rule is
 // testable without a DOM. The regression this guards: a label on a LIVE device
 // used to suppress the whole strip, taking RF bars and battery with it.
 
@@ -31,12 +31,12 @@ describe("slotStripMode", () => {
     assert.equal(slotStripMode(device({ label: "VOX 3", iemLabel: "IEM 2" })), "strip");
   });
 
-  test("an offline device with a label shows the offline pill", () => {
-    assert.equal(slotStripMode(device({ status: "error", rf: null, battery: null, charge: null, label: "VOX 3" })), "pill");
+  test("an offline device with a label shows the offline row", () => {
+    assert.equal(slotStripMode(device({ status: "error", rf: null, battery: null, charge: null, label: "VOX 3" })), "offline");
   });
 
-  test("an offline device with only an IEM label shows the pill", () => {
-    assert.equal(slotStripMode(device({ status: "error", rf: null, battery: null, charge: null, iemLabel: "IEM 2" })), "pill");
+  test("an offline device with only an IEM label shows the offline row", () => {
+    assert.equal(slotStripMode(device({ status: "error", rf: null, battery: null, charge: null, iemLabel: "IEM 2" })), "offline");
   });
 
   test("a warn-state device is still live", () => {

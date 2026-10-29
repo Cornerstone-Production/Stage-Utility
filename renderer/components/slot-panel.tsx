@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
-import { StatusStrip, OfflinePill } from "./status-strip";
+import { CapsulePlate, LOW_BATTERY, PX_UNIT, PhotoBadges, StatusRows } from "./status-strip";
 import { slotStripMode } from "./slot-strip-mode";
 import { BrandLogo } from "./brand-logo";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -66,6 +66,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   // note) shows the same blank/logo view as a configured empty slot.
   const isUnfilled = isEmpty || (slot.link.kind === "pco" && !slot.displayName);
 
+  const stripMode = slotStripMode(slot.device, slot.hideRf);
+  const capsule = slot.prep?.capsule ?? null;
+  // Only the mic's own charge (or the charger bay it reads) drives the edge, as in
+  // the mockup; an IEM pack that is low shows red in its own row.
+  const lowBattery = stripMode === "strip" && slot.device.charge !== null && slot.device.charge < LOW_BATTERY;
+
   if (isUnfilled) {
     return (
       // Outer wrapper provides the gap spacing — p-1.5 all sides, last child no right padding handled by gap
@@ -119,8 +125,19 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           height never comes from its content: the columns path is flex-1 inside a
           definite-height column, and the phone grid wraps it in aspect-[3/4]. */}
       <div
-        className="relative flex flex-col flex-1 overflow-hidden su-card [container-type:size]"
-        style={{ borderRadius: "7cqi" }}
+        className={cn("relative flex flex-col flex-1 overflow-hidden su-card [container-type:size]", lowBattery && "su-card-live")}
+        // su-card's 14px radius as a floor that grows with the slot, so the corner
+        // keeps its proportion from the editor preview to a 4K column. A LOW
+        // battery swaps the card's edge to danger the way su-card-live does for a
+        // service running over. The ground is strictly R=G=B: the kiosk is always
+        // dark and a blue-biased dark bands on the Pi panels.
+        style={{
+          borderRadius: "clamp(0.875rem, 5cqi, 2rem)",
+          background: "#121212",
+          ...(lowBattery
+            ? { ["--su-live-9" as string]: "var(--su-danger-9)" }
+            : { borderColor: "rgba(255,255,255,0.09)" }),
+        }}
       >
         {/* ── Photo (top) — fills all the space above the info card and stops at
             its top edge (object-cover crops the photo, never overlapping the
@@ -129,7 +146,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             QUERY reads it -- that rule is gone (see styles.css). It stays because
             the avatar bubble below sizes itself in cqi, which has to resolve
             against this box rather than the whole card. */}
-        <div ref={photoBoxRef} className="slot-photo relative flex-1 min-h-0 overflow-hidden">
+        {/* The photo region is NOT a container; its photo child and its badge layer
+            are siblings, so the badges' cq units resolve against the whole card
+            (see PX_UNIT) and not against the photo box. */}
+        <div className="relative flex-1 min-h-0">
+        <div ref={photoBoxRef} className="slot-photo absolute inset-0 overflow-hidden">
           {photoSrc ? (
             <img
               src={photoSrc}
@@ -182,6 +203,13 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             </div>
           )}
         </div>
+        <PhotoBadges
+          channel={slot.channel}
+          ownIems={slot.prep?.ownIems ?? false}
+          capsule={slot.prep?.capsule ?? null}
+          plate={!overlay}
+        />
+        </div>
 
         {/* ── Info card (bottom). Stacked mode: a SOLID opaque panel the photo
             butts up to (image never shows behind it), macOS-26/Tahoe styling.
@@ -191,16 +219,24 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         <div
           className={
             overlay
-              ? "absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end gap-0.5 px-3 pt-10 pb-2"
-              : "relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2 overflow-hidden"
+              ? "absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end"
+              : "relative z-10 flex flex-col justify-start overflow-hidden"
           }
           style={
             overlay
-              ? { background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.88) 100%)" }
+              ? {
+                  ...PX_UNIT,
+                  gap: "calc(var(--px) * 8)",
+                  padding: "calc(var(--px) * 40) calc(var(--px) * 12) calc(var(--px) * 10)",
+                  background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.88) 100%)",
+                }
               : {
-                  background: "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
-                  borderTop: "1px solid rgba(255,255,255,0.12)",
-                  boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
+                  ...PX_UNIT,
+                  gap: "calc(var(--px) * 12)",
+                  padding: "calc(var(--px) * 14) calc(var(--px) * 16) calc(var(--px) * 16)",
+                  // Pure R=G=B, a step above the card's #121212.
+                  background: "#161616",
+                  borderTop: "1px solid rgba(255,255,255,0.10)",
                   // A CEILING, not a size. However small the text goes, the band
                   // never takes more than this share of the card, so there is always
                   // a face to look at -- the complaint that started this.
@@ -208,7 +244,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                 }
           }
         >
-          <div className="min-h-0">
+          {overlay && capsule && (
+            <div className="min-w-0">
+              <CapsulePlate capsule={capsule} />
+            </div>
+          )}
+          <div className="min-h-0" style={{ display: "flex", flexDirection: "column", gap: "calc(var(--px) * 2)" }}>
             <span
               className="font-semibold text-fg leading-tight line-clamp-2 block"
               // cqmin, not cqi. Sized to the card's WIDTH alone, a short wide slot
@@ -220,37 +261,25 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               // The reservation shrinks with it: two lines keeps one- and two-line
               // names the same card height so photo bottoms line up across a row, but
               // on a short card min() gives that up rather than spend the photo on it.
-              style={{
-                fontSize: "clamp(0.75rem, 14cqmin, 3.4rem)",
-                minHeight: overlay ? undefined : "min(2.5em, 16cqb)",
-              }}
+              style={{ fontSize: "clamp(0.75rem, 9.3cqmin, 3.4rem)" }}
             >
               {displayName ?? "—"}
             </span>
             {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && slot.link.positions.length > 0 && (
               <span
-                className="text-fg-muted block leading-tight truncate mt-0.5"
-                style={{ fontSize: "clamp(0.6rem, 8.5cqmin, 1.75rem)" }}
+                className="text-fg-muted block leading-tight truncate"
+                style={{ fontSize: "clamp(0.6rem, 5.8cqmin, 1.75rem)" }}
               >
                 {(slot.shownPositions ?? slot.link.positions.map((p) => p.name ?? "Any")).join(" / ")}
               </span>
             )}
           </div>
 
-          {/* One of two pills, never both. A live device shows the telemetry strip
-              — with any manual label standing in for the frequency inside it — and
-              a manually-assigned (offline) device shows the label-only pill in the
-              same spot. See slot-strip-mode.ts. */}
-          {(() => {
-            const mode = slotStripMode(slot.device, slot.hideRf);
-            if (mode === "pill") {
-              return <OfflinePill micLabel={slot.device.label} iemLabel={slot.device.iemLabel} />;
-            }
-            if (mode === "strip") {
-              return <StatusStrip device={slot.device} hideRf={slot.hideRf} />;
-            }
-            return null;
-          })()}
+          {/* Flat rows, never a nested pill. A live device shows the telemetry rows
+              (a manual label standing in for the frequency inside them); a
+              manually-assigned (offline) device shows its labels in the same rows
+              without bars. See slot-strip-mode.ts. */}
+          {stripMode !== "none" && <StatusRows device={slot.device} mode={stripMode} hideRf={slot.hideRf} />}
         </div>
       </div>
     </div>
