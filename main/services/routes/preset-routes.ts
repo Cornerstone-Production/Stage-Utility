@@ -132,8 +132,18 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
       if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
       // `slots` (explicit) overwrites with those directly (inline mic-slots objects);
       // otherwise overwrite from the given view/display's current slots.
+      if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
+        error(res, "body.boardId must be a board id");
+        return;
+      }
       if (Array.isArray(body.slots)) {
-        presets = await stageController.overwritePreset(id, "", body.slots as Slot[]);
+        try {
+          presets = await stageController.overwritePreset(id, "", body.slots as Slot[], body.boardId as string | undefined);
+        } catch (err) {
+          if (!(err instanceof SlotsNotFoundError)) throw err;
+          error(res, err.message, err.status);
+          return;
+        }
       } else if (typeof body.overwriteFromDisplayId === "string") {
         presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
       }

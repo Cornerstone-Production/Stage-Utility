@@ -214,6 +214,36 @@ describe("creating, changing and copying boards", () => {
   });
 });
 
+describe("copying from a source with no layout", () => {
+  it("leaves the target as it was instead of writing an empty list over it", async () => {
+    await slotsStore.setDefault("b-left", TYPE, [slot("keep1"), slot("keep2")]);
+    // b-right has nothing for this type.
+    const r = await call(boardRoutes, "/api/boards/b-left/copy-from", "POST", { fromBoardId: "b-right", target: { kind: "default", serviceTypeId: TYPE } });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(ids(await slotsStore.getDefault("b-left", TYPE)), ["keep1", "keep2"], "a copy of nothing blanked the target");
+    const byType = await call(boardRoutes, "/api/boards/b-left/copy-from", "POST", { fromServiceTypeId: "st-other", target: { kind: "default", serviceTypeId: TYPE } });
+    assert.equal(byType.status, 200);
+    assert.deepEqual(ids(await slotsStore.getDefault("b-left", TYPE)), ["keep1", "keep2"], "same for a service type with no layout");
+  });
+});
+
+describe("overwriting a saved layout", () => {
+  it("records the board the slots came from, and refuses none or an unknown board", async () => {
+    await call(presetRoutes, "/api/presets/import", "POST", { name: "Opening", slots: [slot("q")], boardId: "b-right" });
+    const id = (await presetsStore.load()).find((p) => p.name === "Opening")!.id;
+    const ok = await call(presetRoutes, `/api/presets/${id}`, "PATCH", { slots: [slot("w1"), slot("w2")], boardId: "b-left" });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const saved = (await presetsStore.load()).find((p) => p.id === id)!;
+    assert.equal(saved.boardId, "b-left", "it still pointed at the old source");
+    assert.equal(saved.slots.length, 2);
+    const empty = await call(presetRoutes, `/api/presets/${id}`, "PATCH", { slots: [], boardId: "b-left" });
+    assert.equal(empty.status, 400, "overwriting with nothing would empty a layout the operator meant to keep");
+    assert.equal((await presetsStore.load()).find((p) => p.id === id)!.slots.length, 2);
+    const unknown = await call(presetRoutes, `/api/presets/${id}`, "PATCH", { slots: [slot("w")], boardId: "b-gone" });
+    assert.equal(unknown.status, 404);
+  });
+});
+
 describe("DELETE /api/boards/:id", () => {
   it("points every screen and widget on it at the replacement, then deletes it", async () => {
     await slotsStore.setDefault("b-left", TYPE, [slot("gone")]);
