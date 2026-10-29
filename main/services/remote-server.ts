@@ -95,6 +95,7 @@ import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
+import { boardRoutes } from "./routes/board-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
@@ -135,6 +136,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   systemRoutes,
   brandingRoutes,
   presetRoutes,
+  boardRoutes,
   calendarRoutes,
   videoRoutes,
   messagesRoutes,

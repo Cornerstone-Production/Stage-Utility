@@ -82,7 +82,7 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
 | POST | `/api/allowed-service-types` | Set the allowlist: `{ids: string[]}` (`400` when `ids` is not an array). Answers the state |
 | POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
-| POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`; `400` when `slots` is not an array, `404` for a `displayId` that names no display, and the primary display when it is omitted) |
+| POST | `/api/slots` | Save the slots of the board a display shows (`{slots, displayId?}`; `400` when `slots` is not an array, `404` for a `displayId` that names no display or a display showing no board, and the primary display when it is omitted). An alias onto the [board](#slot-boards) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
 **Views, displays & layouts**
@@ -90,20 +90,21 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201`, answering the state. A missing or unrecognised `kind` makes a slots view. `surface: "console"` is honoured for a custom view or a calendar; any other kind is created as a display |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout` (an object, or `null` for the default; anything else is `400`), `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, each an array of `{id, name}` strings, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
-| POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout` (an object, or `null` for the default; anything else is `400`: the view keeps `displayWidthIn`, and a `columnWidthIn` beside it is set on the view's board, which every screen showing that board shares), `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, each an array of `{id, name}` strings, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
+| POST | `/api/views/:id/slots` | Save the slots of the board a slots view shows (`{slots, target?}`). An alias onto the [board](#slot-boards); `404` for a view that is not a slots view or shows no board |
+| PUT | `/api/views/:id/board` | Point a slots view at a board (`{boardId}`, or `{boardId: null}` for none). `404` for an unknown board, `400` for a view of another kind — a custom layout's slots-grid objects take their `boardId` in the layout |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
-| POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
+| POST | `/api/layout-objects/:objectId/slots` | Save the slots of the board a slots-grid object shows (`{slots, target?}`). An alias onto the [board](#slot-boards) |
 | GET | `/api/views/:id/slot-targets` | The service type's default board and a plan's own, plus the plan it belongs to. `?serviceTypeId=&planId=` names which pair to read (a `serviceTypeId` with no `planId` is that type's default); absent, it is the active type and plan. Also `/api/layout-objects/:id/slot-targets` |
-| DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
-| POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
+| DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default on the view's board. `404` when the plan had no layout of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
+| POST | `/api/views/:id/slots/promote` | Make a plan's layout the service type's default on the view's board (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/surface` | Change what a view is for, and with it every screen showing it, in one call: a screen is a control surface exactly when its view is a console, so the view's surface is the one thing written. Body `{surface: "display"\|"console", screens?}`; a `surface` that is neither, or a `screens` that is not an array of screen ids, is `400`. `screens` is the ids of the screens the caller showed the operator before they agreed (`[]` when it asked nothing): when they are not, as a set, the screens showing the view now, nothing is written and the answer is `409 {error, code: "screens-changed", screens: [{id, name}]}` with the list as it is now, to ask again with. Without `screens`, every screen showing the view changes, whatever is there: the call for a script. A view already as asked changes nothing and is not an error. Only a custom view or a calendar may become a console (the only kinds with something to operate), and Home and an unknown view are refused: `400` with the reason, nothing written. Answers the state. A failure puts the view back, with the same `500` shape as `POST /api/outputs`. `PATCH /api/views/:id` with `surface` is the narrower call and refuses a view that screens are showing, in either direction, naming them |
-| POST | `/api/views/:id/duplicate` | Duplicate a view, optionally under `{name}`. `201`, answering the state plus `viewId`, the id of the copy this call made |
+| POST | `/api/views/:id/duplicate` | Duplicate a view, optionally under `{name}`. `201`, answering the state plus `viewId`, the id of the copy this call made. The copy shows the same slot boards as the original; `{copyBoards: true}` gives it duplicates of them instead |
 | GET | `/api/views/:id/export` | Download the view and anything it embeds as one file, `stage-utility-view-<name>-<date>.json` (`404` for an unknown view) |
 | POST | `/api/views/import` | Merge an exported view or plan in; returns what landed and what needs rebinding. Body is the bundle, or `{bundle, serviceTypeId?, onClash?}` to land a plan export under a chosen service type (`onClash` is `keep`, the default, or `replace`) |
 | GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` (defaults: `slots=type`, `patch=1`, `presets=0`) | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, a bad flag, or Planning Center not being configured, is `400` |
 | GET | `/api/plans/export/preview?serviceTypeId=…[&slots=type\|all]` | What that file would contain at that scope, for the export dialog's counts. `400` as above |
-| POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
+| POST | `/api/views/:id/copy-slots` | Copy the slots another view's board shows onto one target of this view's board (`{fromViewId, target?}`). An alias for `POST /api/boards/:id/copy-from` |
 | POST | `/api/views/reorder` | Reorder views: `{ids: string[]}` (`400` when `ids` is not an array) |
 | DELETE | `/api/views/:id` | Delete a view. Screens showing it are left with no view; each one that was a control surface is read-only from then on, and the server logs a `[screens]` line for it. `?ifUnshown=1` deletes the view only if no screen shows it, checked in the same turn that reserves the view for deletion (from then on no screen can be pointed at it, by routing or by a new screen, until the delete is done): when one does, nothing is written and the answer is `409 {error, code: "view-shown", screens: [{id, name}]}`. The Screens page sends it when a screen is removed together with its view |
 | GET | `/api/outputs` | List physical displays |
@@ -125,9 +126,10 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | DELETE | `/api/layout-groups/:id` | Delete a group. Answers the list |
 
 **`target` on a slot write.** Optional, and picks which of a service type's two
-boards the write lands on. Read by `POST /api/views/:id/slots`, `POST
-/api/layout-objects/:objectId/slots`, `POST /api/views/:id/copy-slots` and `POST
-/api/presets/:id/apply`. `POST /api/slots` does not read it.
+layouts on a board the write lands on. Read by `POST /api/views/:id/slots`, `POST
+/api/layout-objects/:objectId/slots`, `POST /api/views/:id/copy-slots`, `POST
+/api/presets/:id/apply`, each entry of `POST /api/boards/slots`, `POST
+/api/boards/:id/copy-from` and `POST /api/boards`. `POST /api/slots` does not read it.
 
 | `target` | Lands on |
 |---|---|
@@ -137,8 +139,34 @@ boards the write lands on. Read by `POST /api/views/:id/slots`, `POST
 
 A `target` that is present but malformed is a `400`, not a fall back to the
 default, and a `{"kind":"plan"}` target naming a service type the plan does not
-belong to is a `400` as well. An unknown view, layout object or plan is a `404`.
+belong to is a `400` as well. An unknown board, view, layout object or plan is a `404`.
 See [Mic slots](../slots.md#defaults-and-this-week).
+
+### Slot boards
+
+A board is a named set of slot layouts that slots views and slots-grid objects
+point at; several can show one board. The per-view and per-object slot routes
+above are aliases onto the board their view or object shows. See
+[Slots](data-model.md#slots).
+
+| Method | Path | Does |
+|---|---|---|
+| GET | `/api/boards` | Every board, by name: `[{id, name, columnWidthIn, createdAt, shownOn}]`. `shownOn` is `[{kind: "view" \| "object", id, name, viewId}]` — each slots view, and each slots-grid object with the view holding it |
+| POST | `/api/boards` | Create one: `{name, from?, target?}`. `from` is `{boardId}` (a copy of every layout on that board, fresh slot ids) or `{presetId}` (a saved layout, placed under `target`, else the current service type's default). `201 {id, boards}`. A blank name is `400`; an unknown board or preset `404` |
+| PATCH | `/api/boards/:id` | `{name?, columnWidthIn?}` — rename, and set the charger column width in inches (`null`: not aligned). Answers the list. A blank name or a width that is not a positive number is `400` |
+| POST | `/api/boards/:id/duplicate` | A copy of every layout, fresh slot ids, named `{name}` or `<name> copy`. `201 {id, boards}` |
+| DELETE | `/api/boards/:id` | Body `{replacement}`, a board id or `null`, required. Every slots view and slots-grid object showing the board is pointed at `replacement` (or at nothing), then the board and all its layouts are deleted. `400` without `replacement`, or when it is the board itself; `404` for an unknown one |
+| GET | `/api/boards/:id/targets?serviceTypeId=&planId=` | The board's default and one plan's override, as the per-view `slot-targets` answers |
+| POST | `/api/boards/slots` | Save several boards at once: `{boards: [{boardId, slots, target?}]}`. Every entry is checked first and all land in one write; any refusal writes nothing, and its message starts with the board's name (`Board "Left": …`). One board named twice for one target is `400` |
+| DELETE | `/api/boards/:id/override/:planId` | Revert that plan to the board's default. `404` when it had none |
+| POST | `/api/boards/:id/promote` | Make a plan's layout the default (`{planId}`). `404` when it had none |
+| POST | `/api/boards/:id/copy-from` | Copy a layout into one target of this board: `{fromBoardId?, fromServiceTypeId?, fromPlanId?, target?}`. The source is `fromBoardId` (this board when absent) at `fromPlanId`'s override, else `fromServiceTypeId`'s default, else the same target as the destination — on a plan target with no override there, the source's default. Fresh slot ids |
+| GET | `/api/boards/check?serviceTypeId=&planId=` | This plan's check, every board read at that target: `{serviceTypeId, planId, roster, reason?, unplaced, noPosition}`. `unplaced` is the people on the plan whose position some board's slot names but who are on no slot, each with the boards naming it; `noPosition` is every position slot that accepts no position. `roster` is as for `resolve-slots`; a type's default (no `planId`) has no people. Without `serviceTypeId`, the current type and plan |
+
+A slots-grid object in a layout saved through `PATCH /api/views/:id` points at a
+board with `config.boardId`; one naming a board that does not exist is `400`. A
+grid in the shape from before boards (`source`, `sourceViewId`, `slotsLayout`) is
+read as it was meant and stored with a `boardId`.
 
 `GET /api/displays` returns each output joined with its routed view's kind, for
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
@@ -172,10 +200,10 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/presets` | List |
-| POST | `/api/presets` | Snapshot the current slots under a name: `{name, viewId?}` (`displayId` is read when `viewId` is absent; with neither, the primary display). `400` for a blank name |
+| POST | `/api/presets` | Snapshot the current slots under a name: `{name, boardId?}` saves what that board shows and records it as the layout's `boardId`; otherwise `{name, viewId?}` saves the board the view shows (`displayId` is read when `viewId` is absent; with neither, the primary display). `400` for a blank name |
 | POST | `/api/presets/import` | Add one from data: `{name, slots}` |
 | POST | `/api/presets/reorder` | `{ids: string[]}` |
-| POST | `/api/presets/:id/apply` | Write it onto a view: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
+| POST | `/api/presets/:id/apply` | Write it onto the board a view shows: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
 | PATCH | `/api/presets/:id` | `{name?}` renames; `{slots}` replaces its slots, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
 | DELETE | `/api/presets/:id` | Delete |
 
