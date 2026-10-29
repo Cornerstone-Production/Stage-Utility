@@ -185,7 +185,7 @@ control surface carries a **panel** pill.
 A view that no screen shows has its own card under **Views not on a screen**, with
 a pill for what it is (*wall* or *control surface*) and, for a console, whether it
 is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
-*Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
+*Make it a control surface*, *Duplicate view* (which, for a view that shows Mic Slots boards, asks whether the copy gets boards of its own or shares them), *Delete view…* and, for a console,
 **Show in the sidebar**.
 
 A Mic Slots screen has no layout to place. Its card's **Edit** opens **Mic slots**

@@ -32,6 +32,7 @@ import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { changeViewRole } from "../settings/view-role-change";
+import { askDuplicateView } from "../settings/sections/screen-confirms";
 import type { CreateScreenOutcome, RemoveViewOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
@@ -381,9 +382,15 @@ export function useStageSettings(pinnedViewId?: string) {
 
   /** Resolves the copy's id, or null when it could not be made (already toasted). */
   async function handleDuplicateView(id: string): Promise<string | null> {
+    // A view that shows mic slot boards asks whether its copy gets boards of its
+    // own or shares them. The answer always goes with the request, so what the
+    // server does by default does not decide it.
+    const view = stageState?.views?.find((v) => v.id === id);
+    const how = view ? await askDuplicateView(view) : { copyBoards: false };
+    if (!how) return null;
     try {
       // The answer is the state and the id of the copy this call made.
-      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id });
+      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id, copyBoards: how.copyBoards });
       queryClient.setQueryData(["stage:getState"], next);
       if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");

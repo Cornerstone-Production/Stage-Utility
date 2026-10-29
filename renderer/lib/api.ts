@@ -1304,7 +1304,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "views:duplicate": {
       const id = p.id as string;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/duplicate`, { name: p.name });
+      return post<T>(`/api/views/${encodeURIComponent(id)}/duplicate`, { name: p.name, copyBoards: p.copyBoards });
     }
 
     case "update:notices":
