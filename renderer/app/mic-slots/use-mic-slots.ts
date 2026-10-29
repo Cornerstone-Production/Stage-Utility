@@ -366,6 +366,9 @@ export function useMicSlots() {
     if (!next) return false;
     takeState(next);
     dropEdits(boardId);
+    // The board is gone: asking for its layouts again is a 404 in the console.
+    qc.removeQueries({ queryKey: ["boards:targets", boardId] });
+    qc.removeQueries({ queryKey: ["boards:contents", boardId] });
     await refresh();
     return true;
   }
