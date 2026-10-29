@@ -149,7 +149,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         {/* The photo region is NOT a container; its photo child and its badge layer
             are siblings, so the badges' cq units resolve against the whole card
             (see PX_UNIT) and not against the photo box. */}
-        <div className="relative flex-1 min-h-0">
+        {/* overflow-hidden: the photo is the first thing given up when the info band
+            needs the height, and the badges must go with it rather than spill over
+            the band. */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
         <div ref={photoBoxRef} className="slot-photo absolute inset-0 overflow-hidden">
           {photoSrc ? (
             <img
@@ -220,7 +223,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           className={
             overlay
               ? "absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end"
-              : "relative z-10 flex flex-col justify-start overflow-hidden"
+              : "relative z-10 flex flex-col justify-start overflow-hidden shrink-0"
           }
           style={
             overlay
@@ -237,10 +240,13 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                   // Pure R=G=B, a step above the card's #121212.
                   background: "#161616",
                   borderTop: "1px solid rgba(255,255,255,0.10)",
-                  // A CEILING, not a size. However small the text goes, the band
-                  // never takes more than this share of the card, so there is always
-                  // a face to look at -- the complaint that started this.
-                  maxHeight: "45cqb",
+                  // No height of its own: the band is as tall as its content (shrink-0,
+                  // so the photo gives way, never the text) and never taller than the
+                  // card. It used to be capped at 45cqb to protect the photo, and with
+                  // a mic row AND an IEM row in a half-height card the cap clipped
+                  // the name away. Priority is name > rows > position > photo; the
+                  // position line is dropped by a container query in styles.css.
+                  maxHeight: "100cqb",
                 }
           }
         >
@@ -249,9 +255,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               <CapsulePlate capsule={capsule} />
             </div>
           )}
-          <div className="min-h-0" style={{ display: "flex", flexDirection: "column", gap: "calc(var(--px) * 2)" }}>
+          <div className="shrink-0" style={{ display: "flex", flexDirection: "column", gap: "calc(var(--px) * 2)" }}>
             <span
-              className="font-semibold text-fg leading-tight line-clamp-2 block"
+              data-slot-name=""
+              className="font-semibold text-fg leading-tight line-clamp-2 pb-[0.08em]"
               // cqmin, not cqi. Sized to the card's WIDTH alone, a short wide slot
               // got large text and the name card ate the photo -- faces were behind
               // it. cqmin takes the smaller of width and height, so a slot that is
@@ -259,14 +266,15 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               // constraint is vertical.
               //
               // No height is reserved for a second line: a one-line name is one line
-              // tall, and a long one wraps to two (line-clamp-2). The band's 45cqb
-              // ceiling, not a reservation, is what keeps the photo.
+              // tall, and a long one wraps to two (line-clamp-2), or one on a card
+              // too short for two (styles.css).
               style={{ fontSize: "clamp(0.75rem, 9.3cqmin, 3.4rem)" }}
             >
               {displayName ?? "—"}
             </span>
             {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && slot.link.positions.length > 0 && (
               <span
+                data-slot-position=""
                 className="text-fg-muted block leading-tight truncate"
                 style={{ fontSize: "clamp(0.6rem, 5.8cqmin, 1.75rem)" }}
               >
