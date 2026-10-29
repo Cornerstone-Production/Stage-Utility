@@ -18,7 +18,7 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
   });
   if (mic.boards.length === 0 || !serviceTypeId) return null;
   const check = q.data;
-  const problems = (check?.unplaced.length ?? 0) + (check?.noPosition.length ?? 0);
+  const problems = (check?.unplaced.length ?? 0) + (check?.noPosition.length ?? 0) + (check?.noCapsule.length ?? 0);
 
   return (
     <section aria-label="This plan's check" className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-4 shadow-[var(--su-shadow-1)]">
@@ -75,9 +75,16 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
               ))}
             </div>
           )}
-          {/* TODO(prep tags): a third item, "Filled slots with a mic but no Capsule
-              tag", with a "Show them" link, goes here once Slot.prep exists on
-              this branch. */}
+          {check.noCapsule.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-footnote text-fg" data-check-no-capsule={check.noCapsule.length}>
+              <span>
+                {plural(check.noCapsule.length, "person", "people")} on slots with a mic {check.noCapsule.length === 1 ? "has" : "have"} no Capsule tag yet
+              </span>
+              <Button variant="filled" size="small" onClick={() => mic.showSlots(check.noCapsule.map((n) => n.slotId))}>
+                Show them
+              </Button>
+            </div>
+          )}
           {problems === 0 && check.roster !== "unavailable" && (
             <p className="text-footnote text-fg-muted">
               {check.roster === "none" ? "Every slot accepts a position." : `Everyone on the plan is on a slot, and every slot accepts a position.`}

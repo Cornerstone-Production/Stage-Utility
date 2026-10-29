@@ -234,8 +234,16 @@ export function useMicSlots() {
   }
 
   // ── layout edits ─────────────────────────────────────────────────────
+  /** Slots the check asked to show (its "Show them"); cleared by the next selection. */
+  const [highlighted, setHighlighted] = useState<ReadonlySet<string>>(new Set());
   function select(slotId: string | null): void {
     setPicked(slotId);
+    setHighlighted((prev) => (prev.size === 0 ? prev : new Set()));
+  }
+  /** Mark these slots and select the first, so the inspector and the preview agree. */
+  function showSlots(slotIds: readonly string[]): void {
+    setPicked(slotIds[0] ?? null);
+    setHighlighted(new Set(slotIds));
   }
 
   function updateSlot(slotId: string, fn: (s: Slot) => Slot): void {
@@ -570,6 +578,8 @@ export function useMicSlots() {
     selection,
     selectedSlot,
     select,
+    highlighted,
+    showSlots,
     mutate,
     updateSlot,
     addSlot,

@@ -67,6 +67,9 @@ let layouts: Record<string, Slot[]> = {};
 let overrides: Record<string, Slot[]> = {};
 let boards: SlotBoardDTO[] = [];
 let presets: SlotPreset[] = [];
+/** What the resolver adds to a slot, by id: a person and their prep. */
+let resolvedExtras: Record<string, Partial<Slot>> = {};
+let checkNoCapsule: { boardId: string; boardName: string; slotId: string; name: string }[] = [];
 let planId: string | null = null;
 let requests: { url: string; method: string; body: string | null }[] = [];
 let failSave: string | null = null;
@@ -117,8 +120,8 @@ const STATE = () =>
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
   else if (path === "/api/integrations/wireless/statuses") out = [];
-  else if (path === "/api/views/resolve-slots") out = { slots: JSON.parse(body ?? "{}").slots, roster: "none" };
-  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [] };
+  else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
+  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule };
   else if (path === "/api/boards/slots" && method === "POST") {
     if (failSave) {
       status = 400;
@@ -168,6 +171,8 @@ beforeEach(() => {
   layouts = { "b-left": board("a | b+c | ~s | d"), "b-right": board("x | y") };
   overrides = {};
   presets = [];
+  resolvedExtras = {};
+  checkNoCapsule = [];
   planId = null;
   requests = [];
   failSave = null;
@@ -661,5 +666,51 @@ describe("unsaved work and the plan switcher", () => {
     await settle();
     assert.equal(moved, true);
     assert.ok(!unsaved(), "discarding drops the edits");
+  });
+});
+
+describe("prep from Planning Center", () => {
+  const prep = () => (document.querySelector("[data-prep-capsule]")?.textContent ?? "") + " | " + (document.querySelector("[data-prep-ears]")?.textContent ?? "");
+
+  test("the inspector shows the selected slot's capsule and that they bring their own in-ears", async () => {
+    resolvedExtras = { a: { displayName: "Ana Rivera", prep: { capsule: "KSM9", ownIems: true } } };
+    await mount();
+    await click(card("a"));
+    // The resolver answers after the preview's 250 ms debounce.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    assert.equal(prep(), "KSM9 | Brings their own");
+  });
+
+  test("no tag reads 'no tag', a bound IEM pack is house buds, and neither is no pack", async () => {
+    layouts["b-left"] = [{ ...board("a")[0]!, iemBinding: { providerId: "wireless", channelId: "i1" } } as Slot, ...board("b | c").map((s, i) => ({ ...s, order: i + 1 }))];
+    await mount();
+    await click(card("a"));
+    await settle();
+    assert.equal(prep(), "no tag | House buds");
+    await click(card("b"));
+    await settle();
+    assert.equal(prep(), "no tag | No pack on this slot");
+  });
+
+  test("the check names the people on mics with no capsule, and Show them marks and selects their slots", async () => {
+    checkNoCapsule = [
+      { boardId: "b-left", boardName: "Left wall", slotId: "b", name: "Ben" },
+      { boardId: "b-left", boardName: "Left wall", slotId: "d", name: "Dee" },
+    ];
+    await mount();
+    const row = document.querySelector("[data-check-no-capsule]")!;
+    assert.ok((row.textContent ?? "").includes("2 people on slots with a mic have no Capsule tag yet"));
+    await click(within(row as HTMLElement).getByRole("button", { name: "Show them" }));
+    assert.equal(card("b").getAttribute("data-selected"), "true", "the first is selected");
+    assert.equal(card("d").getAttribute("data-highlighted"), "true", "the rest are marked");
+    await click(card("a"));
+    assert.equal(card("d").getAttribute("data-highlighted"), null, "the next selection clears the marks");
+  });
+
+  test("no such people, no row", async () => {
+    await mount();
+    assert.ok(!document.querySelector("[data-check-no-capsule]"));
   });
 });

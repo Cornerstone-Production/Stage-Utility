@@ -298,6 +298,7 @@ export function BoardSection({
               slots={preview.slots}
               layout={layout}
               selectedId={selectedHere}
+              highlighted={mic.highlighted}
               actions={actions}
               emptySlotLogo={state?.emptySlotLogo ?? null}
               defaultAvatar={state?.defaultAvatar ?? null}

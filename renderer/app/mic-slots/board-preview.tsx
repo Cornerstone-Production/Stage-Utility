@@ -129,11 +129,14 @@ export interface BoardPreviewActions {
 function Card({
   slot,
   selected,
+  highlighted,
   actions,
   children,
 }: {
   slot: Slot;
   selected: boolean;
+  /** Named by the plan check: needs a look. */
+  highlighted: boolean;
   actions: BoardPreviewActions;
   children: ReactNode;
 }) {
@@ -187,9 +190,11 @@ function Card({
       aria-pressed={selected}
       data-mic-slot={slot.id}
       data-selected={selected ? "true" : undefined}
+      data-highlighted={highlighted ? "true" : undefined}
       className={cn("relative flex min-h-0 flex-1 cursor-grab flex-col outline-none", isDragging && "opacity-35")}
     >
       {children}
+      {highlighted && !selected && <span className="pointer-events-none absolute inset-1.5 z-10 rounded-xl ring-2 ring-warn-9" />}
       {selected && <span className="pointer-events-none absolute inset-1.5 z-10 rounded-xl ring-2 ring-accent" />}
       <StackZone slot={slot} />
     </div>
@@ -303,6 +308,7 @@ export function BoardPreview({
   slots,
   layout,
   selectedId,
+  highlighted,
   actions,
   emptySlotLogo,
   defaultAvatar,
@@ -312,6 +318,7 @@ export function BoardPreview({
   slots: Slot[];
   layout: SlotsLayout | null;
   selectedId: string | null;
+  highlighted: ReadonlySet<string>;
   actions: BoardPreviewActions;
   emptySlotLogo: string | null;
   defaultAvatar: string | null;
@@ -325,7 +332,7 @@ export function BoardPreview({
       </>
     ),
     card: (slot, panel) => (
-      <Card slot={slot} selected={selectedId === slot.id} actions={actions}>
+      <Card slot={slot} selected={selectedId === slot.id} highlighted={highlighted.has(slot.id)} actions={actions}>
         {panel}
       </Card>
     ),

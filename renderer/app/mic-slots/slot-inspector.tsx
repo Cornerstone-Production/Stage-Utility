@@ -96,6 +96,13 @@ function PersonIdField({ value, onChange }: { value: string; onChange: (personId
   );
 }
 
+/** What the in-ears row says: their own, the house's, or nothing to say. */
+export function earsLine(slot: Slot, resolved: Slot | undefined): string {
+  if (resolved?.prep?.ownIems) return "Brings their own";
+  if (slot.iemBinding || slot.iemLabel != null) return "House buds";
+  return "No pack on this slot";
+}
+
 export interface SlotInspectorProps {
   slot: Slot;
   /** The slot as the resolver filled it for the plan being edited. */
@@ -241,7 +248,7 @@ export function SlotInspector(props: SlotInspectorProps) {
 
       {mode !== "empty" && (
         <Card title="Hardware">
-          <Row label="Mic">
+          <Row label="Mic" hint="Offline shows a typed label in the mic row, with no RF bars">
             <Select value={micValue} onValueChange={setMic}>
               <SelectTrigger className="w-44" aria-label="Mic"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -271,7 +278,7 @@ export function SlotInspector(props: SlotInspectorProps) {
               </div>
             </Row>
           )}
-          <Row label="In-ear pack">
+          <Row label="In-ear pack" hint="Adds an in-ear row with its battery">
             <Select value={iemValue} onValueChange={setIem}>
               <SelectTrigger className="w-44" aria-label="In-ear pack"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -294,7 +301,7 @@ export function SlotInspector(props: SlotInspectorProps) {
               />
             </Row>
           )}
-          <Row label="Battery from">
+          <Row label="Battery from" hint={charge === "off" ? "Battery hidden; the mic row shows RF only" : charge === "charger" ? "Reads from the chosen charger bay" : "Reads from the bound transmitter"}>
             <div className="flex flex-col items-stretch gap-1.5">
               <Select
                 value={charge}
@@ -330,10 +337,21 @@ export function SlotInspector(props: SlotInspectorProps) {
         </Card>
       )}
 
-      {/* TODO(prep tags): "Prep · from Planning Center" goes here — the capsule and
-          in-ears read from Slot.prep, read-only, with one line on the tag names
-          (Capsule: <x>, IEM: <x>, IEMs: Own). Built after the prep-tags branch
-          lands; Slot.prep does not exist on this branch yet. */}
+      <Card title="Prep · from Planning Center">
+        <Row label="Capsule">
+          <span className="font-mono text-footnote font-bold text-fg" data-prep-capsule>
+            {resolved?.prep?.capsule ?? "no tag"}
+          </span>
+        </Row>
+        <Row label="In-ears">
+          <span className="text-footnote text-fg" data-prep-ears>
+            {earsLine(slot, resolved)}
+          </span>
+        </Row>
+        <p className="px-4 py-2.5 text-caption2 text-fg-subtle">
+          Tags named Capsule: or IEMs: on their Planning Center profile are picked up automatically.
+        </p>
+      </Card>
 
       <Card title="Placement">
         <Row label="Channel number">

@@ -114,6 +114,18 @@ Select a card, or a spacer, to edit it. A spacer has only a **Width**.
 | **Battery from** | **Mic** (the transmitter), a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
 | **RF bars** | Off hides the RF bars and shows only the battery level, for charge-only or IEM slots |
 
+**Prep · from Planning Center** is read-only, for the plan being edited:
+
+| Row | What it says |
+|---|---|
+| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag* |
+| **In-ears** | *Brings their own* when their `IEMs:` tag says `Own`; *House buds* when the slot has an in-ear pack and they do not bring their own; otherwise *No pack on this slot* |
+
+Tags named `Capsule:` or `IEMs:` on a person's Planning Center profile are picked up
+automatically, with no setting. The same two facts are drawn on the card, as the
+capsule plate and the ears badge ([What the card shows](#what-the-card-shows)). A
+slot nobody fills, or whose person has no such tag, shows *no tag*.
+
 **Placement**
 
 | Control | What it does |
@@ -136,6 +148,10 @@ being edited:
   slot for that position to the board's unsaved edits.
 - **Slots that accept no position**: a position slot with nothing in it, with
   **Show it**.
+- **N people on slots with a mic have no Capsule tag yet**: filled slots with a bound
+  receiver or an offline mic label whose person has no `Capsule:` tag, with **Show
+  them**, which selects the first and rings every one until the next selection. It is
+  silent until some tag has been read, and for a default, which has no people.
 
 It is read from what is saved, so Save all first to check your edits. A default has no
 week, so it has no people to check. If Planning Center cannot be read the check says
