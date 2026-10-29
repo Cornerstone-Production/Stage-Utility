@@ -3909,11 +3909,19 @@ export class StageController {
    */
   async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
     const current = this.requireView(id, "views:setLayout");
-    const rev = current.layoutRev ?? 0;
+    let rev = current.layoutRev ?? 0;
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
     const pointed = await this.pointLayoutGrids(current, layout);
+    // Checked again after the await: another save of this view, made at the
+    // same revision, may have landed while the widgets were being pointed, and
+    // both passing the check above is how one erases the other.
+    const now = this.requireView(id, "views:setLayout").layoutRev ?? 0;
+    if (now !== rev) {
+      if (expectedRev !== undefined) throw new LayoutConflictError(id, expectedRev, now);
+      rev = now;
+    }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout: pointed, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
     console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);

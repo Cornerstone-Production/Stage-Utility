@@ -423,6 +423,21 @@ describe("pointing a screen or widget at a board", () => {
     assert.equal(ctl.boards.get("g-new")?.name, "Stage Layout · widget");
   });
 
+  it("two saves of one layout opened at the same revision: one lands, the other is refused", async () => {
+    // Pointing the widgets awaits; both saves passing the revision check before
+    // either has written is how one erases the other.
+    const layout = (boardId: string) => ({
+      version: 1, canvas: { width: 1920, height: 1080 },
+      objects: [{ id: "g-1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", boardId } }],
+    });
+    const results = await Promise.allSettled([
+      stageController.setViewLayout("pad", layout("b-left") as never, 0),
+      stageController.setViewLayout("pad", layout("b-right") as never, 0),
+    ]);
+    assert.deepEqual(results.map((r) => r.status), ["fulfilled", "rejected"], "both saves made at revision 0 landed");
+    assert.equal(ctl.state.views.find((v) => v.id === "pad")!.layoutRev, 1);
+  });
+
   it("a pre-boards widget embedding a view that is not a slots screen shows nothing, as it did", async () => {
     // "pad" is custom; a board pointer it kept from an earlier life as a slots
     // screen is dormant, and was never what an embed of it drew.
