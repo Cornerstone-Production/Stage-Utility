@@ -87,9 +87,9 @@ import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, setsOwnType, sizesTypeFromItsBox,
 } from "./inspector-rows";
+import { SlotsGridBoard } from "./slots-grid-board";
 import { TimerInspector } from "./timer-inspector";
 import { LyricsInspector } from "./lyrics-inspector";
-import { slotsGridSource } from "./slots-grid-source";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
@@ -816,7 +816,7 @@ export function ReaperLiveLabel() {
 }
 
 export function Inspector({
-  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
@@ -827,7 +827,6 @@ export function Inspector({
   nested: boolean;
   /** True when this object — or an ancestor container — is locked. */
   locked: boolean;
-  slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h" | "anchor" | "keepAspect" | "minPx" | "maxPx">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
   /** Replace the style with the type's default. Not a patch: a merge cannot clear
@@ -1256,43 +1255,7 @@ export function Inspector({
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
-      {c.type === "slots-grid" && (() => {
-        // A widget on a slots screen's board reads as embedding that screen, not
-        // as "Define here": see slots-grid-source.ts.
-        const src = slotsGridSource(c, slotsViews);
-        return (
-          <>
-            <RowSelect
-              label="Source"
-              value={src.mode}
-              options={[{ value: "inline", label: "Define here" }, { value: "view", label: "Embed a view" }]}
-              onChange={(v) =>
-                onConfig(
-                  v === "inline"
-                    ? { ...c, source: "inline" }
-                    : { ...c, source: "view", sourceViewId: c.sourceViewId ?? src.embeds?.id ?? null },
-                )
-              }
-            />
-            {src.mode === "inline" ? (
-              <p className="text-caption2 text-fg-muted leading-snug">
-                {src.awaitingCopy
-                  ? "Save the layout to give this grid its own copy of the screen's slots, then edit them below the canvas."
-                  : "Edit this grid's slots below the canvas."}
-              </p>
-            ) : (
-              <Row label="View">
-                <Select value={src.embeds?.id ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
-                  <SelectTrigger aria-label="View"><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
-                  <SelectContent>
-                    {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Row>
-            )}
-          </>
-        );
-      })()}
+      {c.type === "slots-grid" && <SlotsGridBoard objectId={o.id} config={c} onConfig={onConfig} />}
       {c.type === "charger-battery" && (
         <>
           <RowSwitch label="Battery %" checked={c.show.battery ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />

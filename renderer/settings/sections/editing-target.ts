@@ -1,4 +1,4 @@
-// Which board the slot editors are pointed at — and NOTHING the machine follows.
+// Which plan the Mic slots page is pointed at — and NOTHING the machine follows.
 //
 // The plan switcher moves the EDITOR. What the screens show is still decided on
 // the Plan page and nowhere else; nothing in this file writes a plan, a service
@@ -6,10 +6,10 @@
 //
 // ── Why a module store rather than component state ────────────────────────────
 //
-// Two separate components have to agree on the target: the switcher in the
-// layout editor's toolbar, and the inline grid far below the canvas that re-seeds
-// from it. Component state cannot be shared across that gap, so the target lives
-// here and both read it.
+// Several separate components have to agree on the target: the switcher in the top
+// bar, every board's preview and the inspector's position list. Component state
+// cannot be shared across that gap, so the target lives here and all of them read
+// it.
 //
 // ── Why it is written to no storage, ever ────────────────────────────────────
 //

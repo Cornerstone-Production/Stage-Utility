@@ -397,6 +397,15 @@ export interface BoardCheckNoPosition {
   index: number;
 }
 
+/** One filled slot with a mic whose person has no Capsule tag in Planning Center. */
+export interface BoardCheckNoCapsule {
+  boardId: string;
+  boardName: string;
+  slotId: string;
+  /** Who fills it. */
+  name: string;
+}
+
 /** What `GET /api/boards/check` answers: this plan's check, for one target. */
 export interface BoardCheckDTO {
   serviceTypeId: string;
@@ -408,6 +417,9 @@ export interface BoardCheckDTO {
   reason?: string;
   unplaced: BoardCheckUnplaced[];
   noPosition: BoardCheckNoPosition[];
+  /** Filled slots with a mic whose person has no Capsule tag. Empty while no tag has
+   *  been read at all, and for a plan with no roster: nothing is known to be missing. */
+  noCapsule: BoardCheckNoCapsule[];
 }
 
 /**

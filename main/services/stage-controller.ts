@@ -13,7 +13,7 @@ import {
   positiveOrNull,
   viewBoardId,
 } from "./slot-boards.js";
-import { checkBoards } from "./board-check.js";
+import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { asMigratedConsole, findLeftoverCopy, planScreenRoles } from "./screen-role-migration.js";
@@ -2969,7 +2969,13 @@ export class StageController {
       }
     }
     const { unplaced, noPosition } = checkBoards(boards, members, this.personDirectory.people);
-    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition };
+    // Nothing is known to be missing until a tag has been read, or with nobody on
+    // the plan to be missing one.
+    const noCapsule =
+      members.length > 0 && this.prepTags.map.size > 0
+        ? noCapsuleSlots(boards.map((b) => ({ id: b.id, name: b.name, slots: this.resolve(b.slots, members) })))
+        : [];
+    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition, noCapsule };
   }
 
   /** How long an override outlives its plan before the daily sweep drops it. */
@@ -3574,14 +3580,18 @@ export class StageController {
     return updated;
   }
 
-  /** Add a preset from imported data (e.g. an exported .json), with fresh ids. */
-  async importPreset(name: string, slots: Slot[]): Promise<SlotPreset[]> {
+  /** Add a saved layout from data. `boardId` records the board it came from, so
+   *  recalling it defaults there; an unknown board is refused rather than stored
+   *  as a pointer at nothing. */
+  async importPreset(name: string, slots: Slot[], boardId?: string): Promise<SlotPreset[]> {
+    if (boardId !== undefined) this.boardFor("board", boardId);
     const presets = await presetsStore.load();
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name: name.trim() || "Imported",
       slots: stripResolvedFields(slots).map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
+      ...(boardId !== undefined ? { boardId } : {}),
     };
     console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${scrub(newPreset.slots.length)} slots)`);
     const updated = [...presets, newPreset];
@@ -3622,7 +3632,15 @@ export class StageController {
    *  this preset). Reuses the savePreset snapshot logic. */
   // `explicitSlots` overwrites with the given slots directly (used by inline
   // mic-slots objects, which aren't view-keyed); otherwise read the target view's.
-  async overwritePreset(id: string, target: string, explicitSlots?: Slot[]): Promise<SlotPreset[]> {
+  //
+  // `boardId` records the board the layout now comes from, so recalling it defaults
+  // there; an unknown board is refused, and so is overwriting with no slots (that
+  // would empty a saved layout the operator meant to keep).
+  async overwritePreset(id: string, target: string, explicitSlots?: Slot[], newBoardId?: string): Promise<SlotPreset[]> {
+    if (newBoardId !== undefined) this.boardFor("board", newBoardId);
+    if (explicitSlots !== undefined && explicitSlots.length === 0) {
+      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
+    }
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
@@ -3631,7 +3649,9 @@ export class StageController {
     const rawSlots = explicitSlots ?? (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
-      p.id === id ? { ...p, slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })) } : p,
+      p.id === id
+        ? { ...p, slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })), ...(newBoardId !== undefined ? { boardId: newBoardId } : {}) }
+        : p,
     );
     await presetsStore.save(updated);
     return updated;
@@ -4219,6 +4239,15 @@ export class StageController {
           : await slotsStore.getDefault(src, effective.serviceTypeId);
     } else {
       rows = await slotsStore.getDefault(src, effective.serviceTypeId);
+    }
+    // A source with no layout has nothing to copy. Writing its empty list would
+    // blank a live wall and report a copy, so the target is left as it was.
+    if (rows.length === 0) {
+      const what = from.fromPlanId ? `plan:${from.fromPlanId}` : from.fromServiceTypeId ? `default:${from.fromServiceTypeId}` : "the same target";
+      console.warn(
+        `[boards] copy into "${scrub(this.describeBoard(key))}" (${scrub(key)}) ${scrub(describeSlotsTarget(effective))} skipped: "${scrub(this.describeBoard(src))}" (${scrub(src)}) ${scrub(what)} has no layout, so the target was left as it was`,
+      );
+      return this.state;
     }
     if (scope === "board") {
       const what = from.fromPlanId ? `plan:${from.fromPlanId}` : from.fromServiceTypeId ? `default:${from.fromServiceTypeId}` : "the same target";

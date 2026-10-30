@@ -272,7 +272,6 @@ describe("the full Inspector, for a Video object", () => {
             parentH: 1080,
             nested: false,
             locked: false,
-            slotsViews: [],
             onGeom: noop,
             onStyle: noop,
             onResetLook: noop,

@@ -81,7 +81,7 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
 | POST | `/api/allowed-service-types` | Set the allowlist: `{ids: string[]}` (`400` when `ids` is not an array). Answers the state |
-| POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
+| POST | `/api/plan-switcher-mode` | How the Mic slots page's plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save the slots of the board a display shows (`{slots, displayId?}`; `400` when `slots` is not an array, `404` for a `displayId` that names no display or a display showing no board, and the primary display when it is omitted). An alias onto the [board](#slot-boards) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
@@ -160,8 +160,8 @@ above are aliases onto the board their view or object shows. See
 | POST | `/api/boards/slots` | Save several boards at once: `{boards: [{boardId, slots, target?}]}`. Every entry is checked first and all land in one write; any refusal writes nothing, and its message starts with the board's name (`Board "Left": …`). One board named twice for one target is `400` |
 | DELETE | `/api/boards/:id/override/:planId` | Revert that plan to the board's default. `404` when it had none |
 | POST | `/api/boards/:id/promote` | Make a plan's layout the default (`{planId}`). `404` when it had none |
-| POST | `/api/boards/:id/copy-from` | Copy a layout into one target of this board: `{fromBoardId?, fromServiceTypeId?, fromPlanId?, target?}`. The source is `fromBoardId` (this board when absent) at `fromPlanId`'s override, else `fromServiceTypeId`'s default, else the same target as the destination — on a plan target with no override there, the source's default. Fresh slot ids |
-| GET | `/api/boards/check?serviceTypeId=&planId=` | This plan's check, every board a screen or widget shows read at that target (a board nothing shows is left out): `{serviceTypeId, planId, roster, reason?, unplaced, noPosition}`. `unplaced` is the people on the plan whose position some board's slot names but who are on no slot, each with the boards naming it; `noPosition` is every position slot that accepts no position. `roster` is as for `resolve-slots`; a type's default (no `planId`) has no people. Without `serviceTypeId`, the current type and plan |
+| POST | `/api/boards/:id/copy-from` | Copy a layout into one target of this board: `{fromBoardId?, fromServiceTypeId?, fromPlanId?, target?}`. The source is `fromBoardId` (this board when absent) at `fromPlanId`'s override, else `fromServiceTypeId`'s default, else the same target as the destination — on a plan target with no override there, the source's default. Fresh slot ids. A source with no layout copies nothing: the target is left as it was and the server logs a `[boards]` line saying so |
+| GET | `/api/boards/check?serviceTypeId=&planId=` | This plan's check, every board a screen or widget shows read at that target (a board nothing shows is left out): `{serviceTypeId, planId, roster, reason?, unplaced, noPosition, noCapsule}`. `unplaced` is the people on the plan whose position some board's slot names but who are on no slot, each with the boards naming it; `noPosition` is every position slot that accepts no position. `noCapsule` is every filled slot with a mic (a bound receiver or an offline mic label) whose person carries no `Capsule:` [prep tag](../integrations/planning-center.md#prep-tags), `{boardId, boardName, slotId, name}` each; it is empty while no prep tag has been read at all and for a plan with no roster, since nothing is then known to be missing. `roster` is as for `resolve-slots`; a type's default (no `planId`) has no people. Without `serviceTypeId`, the current type and plan |
 
 A slots-grid object in a layout saved through `PATCH /api/views/:id` points at a
 board with `config.boardId`; one naming a board that does not exist is `400`. A
@@ -201,10 +201,10 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 |---|---|---|
 | GET | `/api/presets` | List |
 | POST | `/api/presets` | Snapshot the current slots under a name: `{name, boardId?}` saves what that board shows and records it as the layout's `boardId`; otherwise `{name, viewId?}` saves the board the view shows (`displayId` is read when `viewId` is absent; with neither, the primary display). `400` for a blank name |
-| POST | `/api/presets/import` | Add one from data: `{name, slots}` |
+| POST | `/api/presets/import` | Add one from data: `{name, slots, boardId?}`. `boardId` records the board the layout came from, which is where recalling it defaults; an unknown board is `404`, a blank one `400` |
 | POST | `/api/presets/reorder` | `{ids: string[]}` |
 | POST | `/api/presets/:id/apply` | Write it onto the board a view shows: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
-| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots}` replaces its slots, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
+| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots, boardId?}` replaces its slots (never with none: `400`) and records the board they came from, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
 | DELETE | `/api/presets/:id` | Delete |
 
 **Integrations & wireless**

@@ -1,6 +1,5 @@
 // Shared contracts for the settings view and its section components.
 
-import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
 import type { CreateScreenInput, ViewSurface } from "@main/types/views";
@@ -68,22 +67,6 @@ export interface SectionHandlers {
     /** The tab and home-screen icon, set as a whole; `null` removes it. */
     icon?: AppIconInput | null;
   }) => Promise<boolean>;
-  // Slot editor (operates on the currently-selected View)
-  updateSlot: (idx: number, updated: Slot) => void;
-  addSlot: () => void;
-  addSpacer: () => void;
-  removeSlot: (idx: number) => void;
-  saveSlots: () => Promise<void>;
-  /** Drop unsaved slot edits and revert the editor + preview to saved state. */
-  discardSlots: () => void;
-  /** Move the editor between the service type's default board and the current
-   *  plan's own, asking about unsaved edits first. */
-  setSlotsTargetSide: (side: "default" | "plan") => Promise<void>;
-  /** Delete the current plan's board, so the screen goes back to the default. */
-  revertSlotsOverride: () => Promise<boolean>;
-  /** Make the current plan's board the service type's default. */
-  promoteSlotsOverride: () => Promise<boolean>;
-  handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
@@ -106,15 +89,6 @@ export interface SectionHandlers {
   handleSaveLayoutTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;
-  handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
-  // Presets (saved slot arrangements — global, recall into any view)
-  handleSavePreset: (name: string) => Promise<void>;
-  handleApplyPreset: (id: string) => Promise<void>;
-  handleDeletePreset: (id: string) => Promise<void>;
-  handleImportPreset: (name: string, slots: Slot[]) => Promise<void>;
-  handleReorderPresets: (ids: string[]) => Promise<void>;
-  handleRenamePreset: (id: string, name: string) => Promise<void>;
-  handleOverwritePreset: (id: string) => Promise<void>;
   // Outputs (physical screens + routing)
   /** Make a screen from the Screen settings panel's answers. */
   handleCreateScreen: (input: CreateScreenInput) => Promise<CreateScreenOutcome>;
@@ -140,7 +114,7 @@ export interface SectionHandlers {
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   /** Remotely reload kiosk pages. Pass an output id, or null for all displays. */
   handleRefreshDisplay: (id: string | null) => Promise<void>;
-  handleDragEnd: (event: DragEndEvent) => void;
+  /** Mouse and touch drag sensors for a reorderable list. */
   sensors: ReturnType<typeof useSensors>;
 }
 
@@ -150,26 +124,7 @@ export interface SectionProps {
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
   layoutTemplates: LayoutTemplate[];
-  localSlots: Slot[];
-  slotsDirty: boolean;
-  isSavingSlots: boolean;
-  /**
-   * The preview iframe's rows, resolved server-side (no save) for the board the
-   * editor is pointed at, plus whose roster filled them. Null while the editor is
-   * on the live plan with nothing unsaved — then the iframe shows the kiosk.
-   */
-  slotsPreview: SlotsPreviewDTO | null;
-  /** Which of the selected view's two boards the slot editor is on. */
-  slotsTargetSide: "default" | "plan";
-  /** The service type being EDITED, named — for the default board's caption. */
-  slotsTargetTypeName: string | null;
-  /** The current plan's short date, e.g. "Wed Sep 13". */
-  slotsTargetLabel: string;
-  slotsTargetHasPlan: boolean;
-  /** True when the current plan has a board of its own (the "edited" badge). */
-  slotsTargetHasOverride: boolean;
   isRefreshing: boolean;
-  slotPresets: SlotPreset[];
   updateStatus: UpdateStatus | null;
   handlers: SectionHandlers;
 }

@@ -231,7 +231,6 @@ async function mountInspector(type: LayoutObjectType, configOver?: Partial<Layou
           parentH: 1080,
           nested: false,
           locked: false,
-          slotsViews: [],
           onGeom: noop,
           onStyle: noop,
           onResetLook: noop,
@@ -289,9 +288,10 @@ describe("the whole Inspector, for every object type", () => {
     assert.deepEqual(unnamed(container), []);
   });
 
-  test("slots-grid, embedding a view", async () => {
-    const { container } = await mountInspector("slots-grid", { source: "view" });
-    assert.ok(within(container).getByRole("combobox", { name: "View" }));
+  test("slots-grid, showing a board", async () => {
+    const { container } = await mountInspector("slots-grid", { boardId: "b-1", displayWidthIn: 30 } as Partial<LayoutObjectConfig>);
+    assert.ok(within(container).getByRole("combobox", { name: "Board" }));
+    assert.ok(within(container).getByRole("link", { name: "Edit in Mic slots" }));
     assert.deepEqual(unnamed(container), []);
   });
 

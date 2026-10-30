@@ -169,7 +169,7 @@ in date order and stop at the ends; the menu lists them with their dates and
 times, the one on screen selected and the followed one marked when that is known
 (always on the plan being followed; otherwise only for the service type the app is
 on). It is the same
-list, and the same stepping, as the plan switcher in the slots editor, so it
+list, and the same stepping, as the plan switcher on the Mic slots page, so it
 covers the next two months and the last week.
 
 It moves **this page only**. The Plan page, and so every display, stays on the

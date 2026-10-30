@@ -40,6 +40,7 @@ import { Button } from "../../components/ui";
 import { usePageActions } from "../page-actions";
 import { useStageSettings } from "../use-stage-settings";
 import { UnclaimedScreens } from "./unclaimed-screens";
+import { viewBoardId } from "@main/services/slot-boards";
 
 export function ScreensRoute() {
   const s = useStageSettings();
@@ -109,6 +110,14 @@ export function ScreensRoute() {
     defaultName: device ? device.name || device.hostname || "New screen" : "",
   });
   function editLayout(viewId: string) {
+    // A slots screen has no layout to place: its slots are edited with every other
+    // board on the Mic slots page, which opens on the board this screen shows.
+    const view = state.views?.find((v) => v.id === viewId);
+    if (view?.kind === "slots") {
+      const board = viewBoardId(view);
+      router.navigate({ to: "/mic-slots", search: board ? { board } : undefined } as never);
+      return;
+    }
     // Select it too, so the editor's slot state resolves against the right
     // view the moment it mounts.
     s.setSelectedViewId(viewId);

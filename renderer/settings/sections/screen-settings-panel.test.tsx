@@ -948,6 +948,30 @@ describe("view settings", () => {
     assert.deepEqual(calls, []);
   });
 
+  test("a slots screen's display width is set here, and Edit slots goes to the Mic slots page", async () => {
+    const slots: View = { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW, slotsLayout: { displayWidthIn: 32.25 } };
+    const { calls } = mount({ target: { kind: "view", viewId: "mics" }, views: [slots], outputs: [MINE] });
+    const width = screen.getByLabelText("Display active width (inches)") as HTMLInputElement;
+    assert.equal(width.value, "32.25");
+    fetchCalls.length = 0;
+    await act(async () => {
+      fireEvent.change(width, { target: { value: "40" } });
+      fireEvent.blur(width);
+      await settle();
+    });
+    const write = fetchCalls.find((c) => c.method === "PATCH" && c.url.endsWith("/api/views/mics"));
+    assert.ok(write, "the display width reaches the server as a view write");
+    assert.deepEqual(JSON.parse(write!.body), { slotsLayout: { displayWidthIn: 40 } });
+    await click(screen.getByRole("button", { name: "Edit slots" }));
+    assert.deepEqual(calls.at(-1), ["editLayout", "mics"]);
+  });
+
+  test("a view that is not a slots screen has no display width", () => {
+    onView(CTL_A);
+    assert.equal(screen.queryByLabelText("Display active width (inches)") !== null, false);
+    assert.equal(screen.queryByRole("button", { name: "Edit slots" }) !== null, false);
+  });
+
   test("a calendar CAN be a control surface: its month chevrons are something to operate", async () => {
     const calendar: View = { id: "cal", name: "Month calendar", kind: "calendar", surface: "display", createdAt: NOW };
     const { calls } = mount({ target: { kind: "view", viewId: "cal" }, views: [calendar], outputs: [MINE] });

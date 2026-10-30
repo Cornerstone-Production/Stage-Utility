@@ -128,6 +128,7 @@ describe("every registered route resolves a title", () => {
     // also merges cleanly when two branches each add a different route.
     // 24 since /servicecue split into the tablet's page and /servicecue/manage,
     // plus /video-feeds, the Screens-adjacent page for camera and program feeds,
+    // plus /mic-slots, where every slot board is edited,
     // plus the two routes that redirect the old /scriptview prefix.
     assert.deepEqual(
       [...REGISTERED].sort(),
@@ -139,6 +140,7 @@ describe("every registered route resolves a title", () => {
         "/displays",
         "/history",
         "/history/manage",
+        "/mic-slots",
         "/patch",
         "/patch/edit",
         "/plan",
@@ -176,6 +178,7 @@ describe("every registered route resolves a title", () => {
         "/consoles/$viewId",
         "/history",
         "/history/manage",
+        "/mic-slots",
         "/patch",
         "/patch/edit",
         "/plan",

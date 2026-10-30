@@ -153,6 +153,13 @@ function liveBody(plan, live) {
   };
 }
 
+/** Person tags by index into PEOPLE: who carries which capsule, and who brings their own in-ears. */
+const PREP_TAGS = [
+  { id: "100", name: "Capsule: KSM9", people: [0, 1] },
+  { id: "101", name: "Capsule: B58a", people: [2] },
+  { id: "102", name: "IEMs: Own", people: [1] },
+];
+
 const ok = (body) => ({ status: 200, body });
 const missing = () => ({ status: 404, body: { errors: [{ title: "Not Found", status: "404" }] } });
 
@@ -173,6 +180,19 @@ export function handlePco(pathname, query, state) {
   if (parts[0] === "people" && parts.length === 2) {
     const person = PEOPLE.find((p) => p.id === parts[1]);
     return person ? ok({ data: { type: "Person", id: person.id, attributes: { full_name: person.name } } }) : missing();
+  }
+  // Prep tags: one person tag group, a capsule or two and an own-in-ears tag, on
+  // invented people, so the Mic slots page has capsule plates and ears badges to show.
+  if (parts[0] === "tag_groups") {
+    if (parts.length === 1) return ok({ data: [{ type: "TagGroup", id: "10", attributes: { name: "Gear", tags_for: "person" } }] });
+    if (parts.length === 3 && parts[2] === "tags") {
+      return ok({ data: PREP_TAGS.map((t) => ({ type: "Tag", id: t.id, attributes: { name: t.name } })) });
+    }
+    if (parts.length === 5 && parts[2] === "tags" && parts[4] === "people") {
+      const tag = PREP_TAGS.find((t) => t.id === parts[3]);
+      return tag ? ok({ data: tag.people.map((i) => ({ type: "Person", id: PEOPLE[i].id, attributes: { full_name: PEOPLE[i].name } })) }) : missing();
+    }
+    return missing();
   }
   if (parts[0] !== "service_types") return missing();
 

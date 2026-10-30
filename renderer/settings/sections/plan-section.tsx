@@ -223,14 +223,14 @@ export function PlanSection({
                 />
               )}
               {active.map(row)}
-              {/* The slot editors' plan switcher walks these types. Beside the
+              {/* The Mic slots page's plan switcher walks these types. Beside the
                   allowlist because it is the same decision continued: which
                   types, and then in what order the editor steps through them.
                   It moves the EDITOR only; nothing here changes what the screens
                   follow. */}
               <Field orientation="vertical">
                 <FieldContent>
-                  <FieldLabel>Plan switcher in the slot editors</FieldLabel>
+                  <FieldLabel>Plan switcher on Mic slots</FieldLabel>
                   <FieldDescription>
                     {stageState.planSwitcherMode === "within-type"
                       ? "Within a type: the middle is a dropdown of the allowed types; the arrows walk that type's plans, Default first and then each upcoming date."
