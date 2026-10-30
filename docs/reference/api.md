@@ -114,6 +114,9 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`; `400` without a string `actionId`) — what a console control does. Always `200 {ok, detail}`: an unknown action or one that fails is `ok: false` with the reason, and is logged on `[action]`. Needs a cue bearer token unless the request is a same-origin browser request |
 | POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`, `content` an object; `400` otherwise). The write is awaited, so a failed save is a failed request |
+| GET | `/api/home/snoozes` | The problems snoozed on [Home's Needs attention](../features/operator-app.md#home), the snapshot `home:snoozes` also carries: `{rev, snoozes: [{key, severity, at, expiresAt}]}`, sorted by key. `severity` is the item's when it was snoozed (`"critical"` or `"warn"`); `expiresAt` is null until the next service starts, and set 12 hours out only when Planning Center is not configured |
+| POST | `/api/home/snoozes` | Snooze one: `{key, severity}`. `key` is the item's `source:subject`, up to 140 characters of letters, digits and `_ . : -`. `201` with the snooze; snoozing a key again replaces it. A body that breaks a rule is `400` with which. Snoozes are shared by every browser, are not part of a configuration backup, and clear when a service starts |
+| DELETE | `/api/home/snoozes/:key` | Unsnooze one (percent-encode the colon or not). `{ok: true}`; `404` when that key is not snoozed |
 | GET | `/api/messages` | The [stage messages](../features/stage-messages.md) state, the snapshot `messages:state` also carries: `{rev, serverNow, groups, quickMessages, quickReplies, messages, alerts}`. `serverNow` is the server's clock in milliseconds when the snapshot was built; `messages` is today's, oldest first; `alerts` is every message whose alert is still running, newest first |
 | POST | `/api/messages` | Send a message: `{to, text, alert?, from?}`. `to` is group ids from `/api/messaging`, or exactly `["everyone"]`; `text` is 1–280 characters once trimmed; `alert` (default `false`) holds the screens for 30 seconds; `from` (default `"Operator"`) is 1–60 characters. `201` with the message; the server stamps `id`, `at` and `alertUntil`, and a body cannot choose them. A body that breaks a rule is `400` with the reason |
 | POST | `/api/messages/:id/clear-alert` | End a running alert early (`{from?}` names who did). `200` with the state, also for an alert that is already over; `404` for an id nobody issued, `400` for one that is not a message id |
@@ -171,10 +174,13 @@ read as it was meant and stored with a `boardId`.
 `GET /api/displays` returns each output joined with its routed view's kind, for
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
 screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
-`{connected: [outputId], rev}` — the screens with a browser attached, which each
+`{connected: [outputId], rev, lastSeen: [[outputId, epochMs]]}` — the screens with a browser attached, and when each output last reported in, which each
 display page reports by heartbeat to `POST /api/displays/presence` (`{outputId, …}`, or `{outputId, leaving: true}` when the page closes; answers `{ok}`, false without an `outputId`). The same set
 rides the `displays:presence` SSE channel; `rev` is what lets a client tell a
-stale read from a fresh one.
+stale read from a fresh one. `lastSeen` is an array of pairs, one per output that has
+reported since the server started (an output that never has no entry), and survives an output leaving. It is exact for an output that is not connected, which is
+what it is for; for a connected one it is as of the last change, because a heartbeat
+alone broadcasts nothing.
 
 The heartbeat body may also carry `video`: an array of up to 32 reports, one
 per Video widget instance on that screen currently showing a relay or
@@ -726,7 +732,7 @@ something to change:
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
 `wireless:channels` · `calendar:grid` · `displays:presence` · `video:state` ·
-`video:probe` · `messages:state`
+`video:probe` · `messages:state` · `home:snoozes`
 
 **Pushed only when something happens:**
 

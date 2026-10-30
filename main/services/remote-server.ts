@@ -100,8 +100,11 @@ import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { messagesRoutes } from "./routes/messages-routes.js";
+import { homeRoutes } from "./routes/home-routes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
+import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
+import { homeSnoozes } from "./home-snoozes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
 
@@ -140,6 +143,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   calendarRoutes,
   videoRoutes,
   messagesRoutes,
+  homeRoutes,
   hostNameRoutes,
 ] as const;
 
@@ -526,6 +530,11 @@ export function writeHelloBurst(res: EventSink): void {
   // scan can only see a quoted name, and renaming MESSAGES_CHANNEL must stop
   // compiling here rather than leave this burst writing to a dead channel.
   sseWrite(res, "messages:state" satisfies typeof MESSAGES_CHANNEL, messagesService.state());
+  // The snoozes on Home's Needs attention. They change when an operator presses
+  // Snooze or a service starts, so a Home opened after the last change would
+  // show a handled problem as new until the next one.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "home:snoozes" satisfies typeof HOME_SNOOZES_CHANNEL, homeSnoozes.state());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

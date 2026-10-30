@@ -71,6 +71,7 @@ import { SYSTEM_DATA_DIRS, wrongDataDirWarning } from "./main/services/port-hold
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
+import { homeSnoozes } from "./main/services/home-snoozes.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { configSnapshot } from "./main/services/config-snapshot.js";
@@ -141,6 +142,8 @@ await baptismTimerService.init();
 for (const { what, error } of await messagesService.start()) {
   console.error(`[messages] ${what} at start-up failed:`, scrubError(error));
 }
+// Home's snoozed problems: load them, and watch pco:live for a service starting.
+await homeSnoozes.start();
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 

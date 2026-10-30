@@ -64,6 +64,9 @@ export const HYDRATED_CHANNELS = [
   // that connects while an alert is running must show it, and a thread that
   // changes only when somebody sends would otherwise leave it blank until then.
   "messages:state",
+  // Snoozes are a decision about this week, made once and standing until a
+  // service starts: a Home opened Thursday must show Tuesday's snooze as one.
+  "home:snoozes",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);
