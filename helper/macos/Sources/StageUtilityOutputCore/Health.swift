@@ -4,14 +4,20 @@ import Foundation
 public enum HealthPost {
   public static let interval: TimeInterval = 10
 
-  /// `{ at, dropped, fps, latencyMs, repeated }`, `at` in epoch milliseconds like
+  /// `{ at, dropped, enabled, fps, latencyMs, repeated }`, `at` in epoch milliseconds like
   /// every other timestamp the server stores. fps, the repeated percent and the
   /// latency are rounded to 2 places. `latencyMs` (a card output's render to air) is
   /// left out when nothing measured it, and when it is outside what the server takes
   /// (0 to 10,000 ms, `parseHealthReport` in output-health.ts), which would cost the
   /// whole post a 400.
-  public static func body(_ sample: HealthSample, at: Date) -> Data {
+  ///
+  /// `enabled: true` says the Mac holds this output on, and `changed` is the id of a
+  /// change somebody just made to its switch in the helper's window, sent with every
+  /// post until the server has taken it (`OutputSwitch`).
+  public static func body(_ sample: HealthSample, at: Date, changeId: String? = nil) -> Data {
     struct Wire: Encodable {
+      var enabled = true
+      var changed: String?
       var fps: Double
       var repeated: Double
       var dropped: Int
@@ -23,10 +29,24 @@ public enum HealthPost {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let wire = Wire(
+      changed: changeId,
       fps: twoPlaces(sample.fps), repeated: twoPlaces(sample.repeated), dropped: sample.dropped,
       at: Int64((at.timeIntervalSince1970 * 1000).rounded()),
       latencyMs: sample.latencyMs.flatMap { $0.isFinite && (0...maxLatencyMs).contains($0) ? twoPlaces($0) : nil })
     return try! encoder.encode(wire)
+  }
+
+  /// What an output that is switched off posts: `{ enabled: false }` and nothing
+  /// else, since it draws nothing and has no figures (the server refuses figures
+  /// sent with it). It posts so that the server can tell it to come back.
+  public static func offBody(changeId: String? = nil) -> Data {
+    struct Wire: Encodable {
+      var enabled = false
+      var changed: String?
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return try! encoder.encode(Wire(changed: changeId))
   }
 
   /// The most the server's health route takes for `latencyMs`.
