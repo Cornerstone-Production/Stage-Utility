@@ -43,7 +43,7 @@ type Mutable = {
   loadAllViewRawSlots: (serviceTypeId: string | null, planId: string | null) => Promise<void>;
   applyPlan: (plan: { id: string; title: string; seriesTitle: string | null; sortDate: string | null; dates: string | null }) => Promise<void>;
   fetchTeamMembers: (serviceTypeId: string, planId: string) => Promise<void>;
-  rawSlotsByView: Map<string, Slot[]>;
+  rawSlotsByBoard: Map<string, Slot[]>;
   upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null;
 };
 const ctl = stageController as unknown as Mutable;
@@ -146,7 +146,7 @@ describe("saving a board", () => {
     await stageController.setViewSlots(VIEW, [slot("standing", "02")], { kind: "default", serviceTypeId: TYPE });
 
     assert.equal(
-      ctl.rawSlotsByView.get(VIEW)?.[0]?.id,
+      ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id,
       "week",
       "editing the type's default is not a live change — the plan's own board still wins",
     );
@@ -211,7 +211,7 @@ describe("changing plan within a service type", () => {
     await ctl.applyPlan({ id: PLAN_B, title: "Sep 20", seriesTitle: null, sortDate: "2026-09-20T14:00:00Z", dates: "September 20, 2026" });
 
     assert.equal(
-      ctl.rawSlotsByView.get(VIEW)?.[0]?.id,
+      ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id,
       "next-week",
       "the override is keyed by PLAN, so advancing the plan has to re-read the rows even though the service type did not change",
     );
@@ -221,12 +221,12 @@ describe("changing plan within a service type", () => {
     await slotsStore.setDefault(VIEW, TYPE, [slot("standing", "01")]);
     await slotsStore.setOverride(VIEW, PLAN_A, TYPE, [slot("this-week", "02")], "2026-09-13T14:00:00Z");
     await ctl.loadAllViewRawSlots(TYPE, PLAN_A);
-    assert.equal(ctl.rawSlotsByView.get(VIEW)?.[0]?.id, "this-week");
+    assert.equal(ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id, "this-week");
 
     await ctl.applyPlan({ id: PLAN_B, title: "Sep 20", seriesTitle: null, sortDate: "2026-09-20T14:00:00Z", dates: "September 20, 2026" });
 
     assert.equal(
-      ctl.rawSlotsByView.get(VIEW)?.[0]?.id,
+      ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id,
       "standing",
       "a swap made for one week must not become every following week's board",
     );
@@ -237,12 +237,12 @@ describe("revert to default and set as default", () => {
   it("revert drops the override and puts the default back on screen", async () => {
     await slotsStore.setDefault(VIEW, TYPE, [slot("standing", "01")]);
     await stageController.setViewSlots(VIEW, [slot("week", "02")]);
-    assert.equal(ctl.rawSlotsByView.get(VIEW)?.[0]?.id, "week");
+    assert.equal(ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id, "week");
 
     await stageController.clearSlotsOverride("view", VIEW, PLAN_A);
 
     assert.equal(await slotsStore.getOverride(VIEW, PLAN_A), null);
-    assert.equal(ctl.rawSlotsByView.get(VIEW)?.[0]?.id, "standing");
+    assert.equal(ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id, "standing");
   });
 
   it("revert refuses when there is nothing to revert", async () => {
@@ -261,7 +261,7 @@ describe("revert to default and set as default", () => {
 
     assert.equal((await slotsStore.getDefault(VIEW, TYPE))[0]?.id, "week");
     assert.equal(await slotsStore.getOverride(VIEW, PLAN_A), null);
-    assert.equal(ctl.rawSlotsByView.get(VIEW)?.[0]?.id, "week", "and the screens do not flicker back");
+    assert.equal(ctl.rawSlotsByBoard.get(VIEW)?.[0]?.id, "week", "and the screens do not flicker back");
   });
 
   it("promote refuses when there is nothing to promote", async () => {
@@ -469,7 +469,7 @@ describe("copying slots from another view", () => {
     );
     assert.equal((await slotsStore.getDefault(VIEW, TYPE))[0]?.channel, "02");
     assert.equal(
-      ctl.rawSlotsByView.get(VIEW)?.[0]?.channel,
+      ctl.rawSlotsByBoard.get(VIEW)?.[0]?.channel,
       "01",
       "and the screens follow it, because the override is what is in effect",
     );
@@ -485,7 +485,7 @@ describe("copying slots from another view", () => {
   it("names the target on the log line, like every other slot write", async () => {
     await stageController.copyViewSlots(VIEW, SRC, { kind: "default", serviceTypeId: TYPE });
     assert.ok(
-      logs.some((l) => /setViewSlots \(1 slots\) for view=v-slots target=default:st-main/.test(l)),
+      logs.some((l) => /setViewSlots \(1 slots\) for view=v-slots board=v-slots target=default:st-main/.test(l)),
       "a copy is a write, and an operator reading /log has to see which board it changed",
     );
   });
@@ -513,10 +513,10 @@ describe("a request naming something that is not there", () => {
     );
   });
 
-  it("refuses an inline object id that is on no layout", async () => {
+  it("refuses an object id that is on no layout", async () => {
     await assert.rejects(
       () => stageController.setLayoutObjectSlots("obj-nowhere", [slot("s1", "07")]),
-      (err: Error) => err.name === "SlotsNotFoundError" && /no inline mic-slots object/.test(err.message),
+      (err: Error) => err.name === "SlotsNotFoundError" && /no mic-slots object/.test(err.message),
     );
   });
 });

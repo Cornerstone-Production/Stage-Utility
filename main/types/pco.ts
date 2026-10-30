@@ -328,9 +328,9 @@ export interface Slot {
    *  slot (in order), forming a multi-row column. Used to mirror dual-bay
    *  chargers where two people share one charger footprint. */
   stackWithPrevious?: boolean;
-  /** Width in inches for this column, used only when the View has a `slotsLayout`
-   *  (physical alignment). Required for a "spacer" slot; an optional per-column
-   *  override on a column's lead slot (defaults to slotsLayout.columnWidthIn). */
+  /** Width in inches for this column, used only when the board is aligned to
+   *  chargers. Required for a "spacer" slot; an optional per-column override on a
+   *  column's lead slot (defaults to the board's columnWidthIn). */
   widthIn?: number;
 }
 
@@ -339,15 +339,83 @@ export interface SlotPreset {
   name: string;
   slots: Slot[];
   createdAt: string;
+  /** The board the layout was saved from, and where it is recalled by default.
+   *  Absent on a layout saved before boards existed, or imported from a file. */
+  boardId?: string;
 }
 
 /**
- * What a slot board is keyed by: a slots-kind VIEW's id, or the id of an inline
- * `slots-grid` layout OBJECT on a custom layout. The two are stored in the same
- * file and behave identically, so every operation on a board takes the scope
- * beside the key rather than existing twice.
+ * A named slot board: what one or more screens and slots widgets show. Its
+ * layouts (a default per service type, and per-plan overrides) live beside it in
+ * slots.json under the same id.
  */
-export type SlotsScope = "view" | "object";
+export interface SlotBoardMeta {
+  name: string;
+  /** Width of one charger column in inches, or null when the board is not
+   *  aligned to chargers. Each screen keeps its own active display width. */
+  columnWidthIn: number | null;
+  /** ISO timestamp. Empty on a board whose creation time was never recorded. */
+  createdAt: string;
+}
+
+/** Where a board is shown: a slots screen, or a slots widget on a custom layout. */
+export interface SlotBoardShownOn {
+  kind: "view" | "object";
+  /** The view id, or the layout object id. */
+  id: string;
+  /** The view's name; for a widget, the name of the view whose layout holds it. */
+  name: string;
+  /** The view that holds it — the view itself for kind "view". */
+  viewId: string;
+}
+
+/** One entry of `GET /api/boards`. */
+export interface SlotBoardDTO {
+  id: string;
+  name: string;
+  columnWidthIn: number | null;
+  createdAt: string;
+  shownOn: SlotBoardShownOn[];
+}
+
+/** One person `GET /api/boards/check` found on the plan and on no slot. */
+export interface BoardCheckUnplaced {
+  personId: string | null;
+  name: string;
+  position: string | null;
+  /** Every board with a slot naming this person's position. */
+  boards: { id: string; name: string }[];
+}
+
+/** One slot `GET /api/boards/check` found that accepts no position. */
+export interface BoardCheckNoPosition {
+  boardId: string;
+  boardName: string;
+  slotId: string;
+  channel: string;
+  /** 1-based place in the board's order. */
+  index: number;
+}
+
+/** What `GET /api/boards/check` answers: this plan's check, for one target. */
+export interface BoardCheckDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  /** Whose roster the people half was read against. "none" for a type's default,
+   *  which has no week and so no people. */
+  roster: SlotsPreviewRoster;
+  /** One sentence, only when `roster` is "unavailable". */
+  reason?: string;
+  unplaced: BoardCheckUnplaced[];
+  noPosition: BoardCheckNoPosition[];
+}
+
+/**
+ * What a slot write names. `"board"` names the board directly. `"view"` and
+ * `"object"` are the older aliases: a slots screen's id or a slots widget's
+ * layout object id, each meaning the board that screen or widget shows.
+ */
+export type SlotsScope = "view" | "object" | "board";
 
 /**
  * The two boards one key can have right now — the service type's default, and
@@ -359,6 +427,8 @@ export type SlotsScope = "view" | "object";
 export interface SlotTargetsDTO {
   scope: SlotsScope;
   key: string;
+  /** The board `scope`/`key` resolved to — `key` itself for scope "board". */
+  boardId: string;
   serviceTypeId: string | null;
   serviceTypeName: string | null;
   planId: string | null;

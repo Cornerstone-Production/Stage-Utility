@@ -24,12 +24,13 @@ const { buildViewBundle } = await import("./view-export.js");
 
 const TYPES = { listServiceTypes: async () => [{ id: "st-1", name: "Sunday AM" }, { id: "st-2", name: "Youth" }] };
 
-const slotsView = (id: string) => ({ id, name: id, kind: "slots", createdAt: 0, layout: null });
+const slotsView = (id: string) => ({ id, name: id, kind: "slots", createdAt: 0, layout: null, boardId: id });
 const custom = (id: string, objects: unknown[]) => ({
   id, name: id, kind: "custom", createdAt: 0,
   layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
 });
-const grid = (id: string) => ({ id, x: 0, y: 0, w: 1, h: 1, z: 0, style: {}, config: { type: "slots-grid" } });
+// A widget whose board kept its object id, as the boards migration names one.
+const grid = (id: string) => ({ id, x: 0, y: 0, w: 1, h: 1, z: 0, style: {}, config: { type: "slots-grid", boardId: id } });
 const row = (id: string) => ({ id, label: id, link: { kind: "static" as const } });
 
 beforeEach(async () => {
@@ -38,8 +39,12 @@ beforeEach(async () => {
     custom("view-grid", [grid("obj-grid")]),
     custom("view-unrelated", []),
   ] as never);
-  // A board on a slots VIEW and a board on an inline slots-grid OBJECT: the two
-  // ways a service type's rows are keyed, and only one of them names a view.
+  // A board a slots VIEW shows and one a slots widget shows: only one of them is
+  // found from a view id alone, the other by walking the layout.
+  for (const [id, name] of [["view-slots", "Left wall"], ["obj-grid", "Pad widget"]] as const) {
+    await slotsStore.deleteBoard(id);
+    await slotsStore.createBoard(id, { name, columnWidthIn: id === "view-slots" ? 3.49 : null, createdAt: "" });
+  }
   await slotsStore.setDefault("view-slots", "st-1", [row("a"), row("b")] as never);
   await slotsStore.setDefault("obj-grid", "st-1", [row("c")] as never);
   await slotsStore.setDefault("obj-grid", "st-2", [row("d"), row("e")] as never);
@@ -65,10 +70,10 @@ const opts = (over: Record<string, unknown> = {}) =>
   ({ serviceTypeId: "st-1", slots: "type" as const, patch: true, presets: true, ...over });
 
 describe("which views a plan export starts from", () => {
-  test("a slots view and an inline slots-grid's OWNER are both roots", async () => {
+  test("a slots view and the owner of a slots widget showing a board are both roots", async () => {
     const b = await buildPlanBundle(opts(), TYPES);
-    // view-grid is here because obj-grid's board is keyed by the OBJECT id, and
-    // an object id names no view — the layout has to be walked to find it.
+    // view-grid is here because a widget on its layout shows obj-grid's board,
+    // which names no view — the layout has to be walked to find it.
     assert.deepEqual(b.roots?.slice().sort(), ["view-grid", "view-slots"]);
   });
 
@@ -152,7 +157,7 @@ describe("refusing rather than shipping an empty file", () => {
 
   test("a type with no board anywhere is an error naming the type", async () => {
     // A file that downloads and does nothing at the far end is the worst outcome.
-    await slotsStore.removeDisplay("obj-grid");
+    await slotsStore.deleteBoard("obj-grid");
     await assert.rejects(
       () => buildPlanBundle(opts({ serviceTypeId: "st-2" }), TYPES),
       /nothing to export for Youth/,
@@ -189,16 +194,22 @@ describe("the preview and the file agree", () => {
   });
 });
 
-// buildViewBundle was refactored to share its body with the plan export. A view
-// export must still be byte for byte what it was, or every install that reads
-// one is reading a different file than it was written for.
-describe("a plain view export is unchanged", () => {
+// buildViewBundle shares its body with the plan export. A view export carries
+// none of the plan's sections, or every install that reads one is reading a
+// different file than it was written for. Its `boards` section is its own: the
+// views point at boards, and the boards travel with them.
+describe("a plain view export is a view export", () => {
   test("no plan, no roots, and every service type's board", async () => {
     const b = await buildViewBundle("view-grid");
     assert.equal("plan" in b, false, "a view export must not carry a plan section");
     assert.equal("roots" in b, false, "a view export has one root and says so by ordering");
     assert.deepEqual(Object.keys(b.sideData.slots["obj-grid"]!).sort(), ["st-1", "st-2"]);
-    assert.deepEqual(Object.keys(b.sideData), ["slots", "notes", "serviceCueLayouts"]);
+    assert.deepEqual(Object.keys(b.sideData), ["slots", "boards", "notes", "serviceCueLayouts"]);
+  });
+
+  test("carries the boards its views show, with their names and column widths", async () => {
+    assert.deepEqual((await buildViewBundle("view-grid")).sideData.boards, { "obj-grid": { name: "Pad widget", columnWidthIn: null } });
+    assert.deepEqual((await buildViewBundle("view-slots")).sideData.boards, { "view-slots": { name: "Left wall", columnWidthIn: 3.49 } });
   });
 
   test("the key order of the envelope is untouched", async () => {

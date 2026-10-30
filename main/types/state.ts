@@ -40,9 +40,14 @@ export interface StageState {
   /** Content of notes/checklist objects, keyed by layout object id. The layout
    *  holds the design; this holds what the operator typed into it. */
   notesByObject: Record<string, { text?: string; items?: { id: string; text: string; done: boolean }[] }>;
-  /** Resolved slots for inline mic-slots objects, keyed by the layout object's id
-   *  (a custom-layout `slots-grid` with `source: "inline"`). */
+  /** Resolved slots for every slots widget, keyed by the layout object's id: the
+   *  board the widget points at. */
   slotsByLayoutObject: Record<string, Slot[]>;
+  /** Charger alignment per slots View: its display width with its board's column
+   *  width. Null (or absent) when either half is unset — columns share width. */
+  slotsLayoutByView: Record<string, SlotsLayout | null>;
+  /** The same per slots widget, keyed by layout object id. */
+  slotsLayoutByLayoutObject: Record<string, SlotsLayout | null>;
   /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
   resolvedByOutput: Record<string, ResolvedOutput>;
 

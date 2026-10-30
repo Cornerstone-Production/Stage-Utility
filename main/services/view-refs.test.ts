@@ -30,11 +30,24 @@ describe("what a view points at", () => {
     assert.deepEqual(collectRefs([a, b], "view-1").embeddedViewIds, ["view-2"]);
   });
 
-  test("a slots-grid sourcing another view counts as embedding it", () => {
-    const a = view("view-1", [
-      obj("o1", { type: "slots-grid", source: "view", sourceViewId: "view-9" }),
+  test("a slots widget embeds no view: the board it shows is what travels", () => {
+    // A board can be shared by several screens; the widget points at the board,
+    // and exporting the screen it once copied from would drag a view along that
+    // the layout does not draw.
+    const a = view("view-1", [obj("o1", { type: "slots-grid", boardId: "b-left" })]);
+    const r = collectRefs([a, view("view-9", [])], "view-1");
+    assert.deepEqual(r.embeddedViewIds, []);
+    assert.deepEqual(r.boardIds, ["b-left"]);
+  });
+
+  test("a slots screen's board is collected, and one board shown twice is listed once", () => {
+    const wall = { id: "wall", name: "wall", kind: "slots", createdAt: 0, boardId: "b-left" } as unknown as View;
+    const pad = view("pad", [
+      obj("o1", { type: "view-embed", viewId: "wall" }),
+      obj("o2", { type: "slots-grid", boardId: "b-left" }),
+      obj("o3", { type: "slots-grid", boardId: "b-right" }),
     ]);
-    assert.deepEqual(collectRefs([a, view("view-9", [])], "view-1").embeddedViewIds, ["view-9"]);
+    assert.deepEqual(collectRefs([pad, wall], "pad").boardIds.sort(), ["b-left", "b-right"]);
   });
 
   test("nested container children are walked", () => {

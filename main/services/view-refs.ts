@@ -7,6 +7,7 @@
 
 import type { View, LayoutObject } from "../types/views.js";
 import type { ViewRefs, UnresolvableRef } from "../types/view-bundle.js";
+import { gridBoardId, viewBoardId } from "./slot-boards.js";
 
 /**
  * Walk an object tree, parent before children. Containers nest arbitrarily deep.
@@ -48,6 +49,7 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
   const imageFiles: string[] = [];
   const osc: string[] = [];
   const ross: string[] = [];
+  const boards: string[] = [];
   const unresolvable: UnresolvableRef[] = [];
 
   // Breadth-first over the embed graph. `seen` starts with the roots, so a cycle
@@ -57,6 +59,10 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
 
   while (queue.length) {
     const v = byId.get(queue.shift() as string);
+    if (v?.kind === "slots") {
+      const b = viewBoardId(v);
+      if (b) boards.push(b);
+    }
     if (!v?.layout) continue;
     const viewId = v.id;
 
@@ -65,6 +71,15 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       const c = o.config as unknown as Record<string, unknown>;
       const type = str(c.type);
 
+      // The board a slots widget shows travels as a board, not as a view: a
+      // widget points at a board, which several screens may share. A layout
+      // kept dormant on a view of another kind counts too, like its other
+      // objects: switched back, it should find its board.
+      if (type === "slots-grid" && o.config.type === "slots-grid") {
+        const b = gridBoardId(o.config, o.id);
+        if (b) boards.push(b);
+      }
+
       // `screen-embed` is deliberately absent from THIS expression: it
       // references an OUTPUT, not a view, and an output is per-install — its
       // routed view does not travel with an export at all (see
@@ -72,10 +87,7 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       // non-view id into a list of view ids. It is not refless, though — it
       // goes on the rebind work list below, because a bundle carries views
       // and never outputs.
-      const embed =
-        type === "view-embed" ? str(c.viewId)
-        : type === "slots-grid" && c.source === "view" ? str(c.sourceViewId)
-        : "";
+      const embed = type === "view-embed" ? str(c.viewId) : "";
       if (embed && !seen.has(embed)) {
         seen.add(embed);
         embedded.push(embed);
@@ -144,6 +156,7 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
     imageFiles: uniq(imageFiles),
     oscTargetIds: uniq(osc),
     rosstalkTargetIds: uniq(ross),
+    boardIds: uniq(boards),
     unresolvable,
   };
 }

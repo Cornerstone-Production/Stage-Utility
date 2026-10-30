@@ -43,6 +43,18 @@ describe("what a thrown route error puts on the wire", () => {
     assert.equal(handlerErrorCode(err, status), undefined, "its errno must not reach the wire");
   });
 
+  test("a malformed % escape in a path (decodeURIComponent's URIError) is the caller's 400, not a 500", () => {
+    let err: unknown;
+    try {
+      decodeURIComponent("b-%E0%A4%A");
+    } catch (e) {
+      err = e;
+    }
+    const status = handlerErrorStatus(err);
+    assert.equal(status, 400);
+    assert.equal(handlerErrorCode(err, status), undefined);
+  });
+
   test("an ordinary failure becomes a 500 with NO code — a Node errno must never reach the wire", () => {
     const err = Object.assign(new Error("ENOSPC: no space left on device"), { errno: -28, code: "ENOSPC" });
     const status = handlerErrorStatus(err);

@@ -705,10 +705,14 @@ export function SlotEditor({
   slotsTargetHasOverride,
   handlers,
 }: SlotEditorProps) {
-  const layout = view.slotsLayout ?? null;
+  const stageState = useStageState().state;
+  // Both halves of alignment as the screen draws them: this screen's display
+  // width and its board's column width, joined by the server. Saving sends both
+  // back; the server splits them between the screen and the board.
+  const layout = stageState?.slotsLayoutByView?.[view.id] ?? null;
   // Read here rather than plumbed as a fifth slotsTarget* prop: the inline
   // editor's copy of this pill reads the same thing from the same hook.
-  const serviceTypeId = useStageState().state?.serviceTypeId ?? null;
+  const serviceTypeId = stageState?.serviceTypeId ?? null;
 
   // Group slots into stacked columns (a lead slot + its `stackWithPrevious`
   // followers). Each group is dragged as a single sortable unit.

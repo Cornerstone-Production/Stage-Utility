@@ -1276,29 +1276,34 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "video":
       return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} listen={ctx.home && ctx.interactive} />;
     case "slots-grid": {
-      // Resolved BY OBJECT wherever the server could do it -- inline grids, and
-      // grids embedding a view. Both are free-dragged boxes on a custom layout,
-      // so both get photos cropped for an unknown shape (see AvatarFit); keying
-      // on the object is what lets them differ from the source view's own
-      // display, which keeps the column crop it is correctly modelled on.
+      // Resolved BY OBJECT, from the board the widget points at. A widget is a
+      // free-dragged box on a custom layout, so its photos are cropped for an
+      // unknown shape (see AvatarFit); keying on the object is what lets it
+      // differ from a slots screen showing the same board, which keeps the
+      // column crop it is correctly modelled on.
       //
-      // slotsByView is the fallback, and it still matters: a state broadcast from
-      // a server that has not resolved this object yet, or an object whose id is
-      // not in the layout the server holds, would otherwise draw an empty grid.
-      const inline = c.source === "inline";
+      // The fallback is for an object the server has not resolved — a widget the
+      // layout editor added and has not saved yet. Only the shape from before
+      // boards can name a view's rows here (a board's rows are not in the state
+      // by board), so a new widget pointed at a board shows its placeholder
+      // until the layout is saved.
       const byObject = ctx.state.slotsByLayoutObject?.[o.id];
-      const slots = inline
-        ? (byObject ?? [])
-        : (byObject ?? (c.sourceViewId ? (ctx.state.slotsByView?.[c.sourceViewId] ?? []) : []));
+      const embeds = c.source !== "inline" && c.sourceViewId ? c.sourceViewId : null;
+      const slots = byObject ?? (embeds ? (ctx.state.slotsByView?.[embeds] ?? []) : []);
       if (slots.length === 0) {
         return <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Mic slots</span>;
       }
       // Render via the same component the standalone slots view uses, honoring the
-      // physical-inch alignment (the object's own when inline, else the source
-      // View's), over the kiosk backdrop so it looks identical.
-      const slotsLayout = inline
-        ? (c.slotsLayout ?? null)
-        : (c.sourceViewId ? (ctx.state.views?.find((v) => v.id === c.sourceViewId)?.slotsLayout ?? null) : null);
+      // physical-inch alignment the server resolved for this widget (its display
+      // width with its board's column width), over the kiosk backdrop so it looks
+      // identical.
+      const resolvedLayout = ctx.state.slotsLayoutByLayoutObject?.[o.id];
+      const slotsLayout =
+        resolvedLayout !== undefined
+          ? resolvedLayout
+          : embeds
+            ? (ctx.state.slotsLayoutByView?.[embeds] ?? null)
+            : (c.slotsLayout ?? null);
       return (
         <SlotsColumns
           slots={slots}
