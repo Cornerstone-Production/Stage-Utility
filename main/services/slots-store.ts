@@ -33,6 +33,7 @@
 // never had a version stamp of its own. Two independent lineages, same digit.
 
 import type { Slot, SlotLink } from "../types/stage.js";
+import { stripResolvedFields } from "./slot-resolver.js";
 import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { assertSafeKey, isSafeKey } from "./safe-key.js";
@@ -341,7 +342,7 @@ export const slotsStore = {
         byType = new Map();
         file.defaults.set(key, byType);
       }
-      byType.set(serviceTypeId, slots);
+      byType.set(serviceTypeId, stripResolvedFields(slots));
       return file;
     });
   },
@@ -377,7 +378,7 @@ export const slotsStore = {
         byPlan = new Map();
         file.overrides.set(key, byPlan);
       }
-      byPlan.set(planId, { serviceTypeId, sortDate, slots });
+      byPlan.set(planId, { serviceTypeId, sortDate, slots: stripResolvedFields(slots) });
       return file;
     });
   },

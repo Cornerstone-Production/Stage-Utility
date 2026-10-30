@@ -217,6 +217,35 @@ Conditional requests (`ETag` / `If-Modified-Since`) are deliberately **not** use
 A 304 counts against the same quota, so they would spend the scarce thing to save
 the plentiful one.
 
+## Prep tags
+
+Tag a person in Planning Center and their [slot](../slots.md) shows what they bring
+to the mic. Stage reads the person tags named:
+
+| Tag name | Shows |
+|---|---|
+| `Capsule: <model>` (e.g. `Capsule: KSM9`) | the capsule, on a plate over the photo |
+| `IEMs: Own` | an in-ears badge: this person wears their own in-ears |
+
+The names are matched case-insensitively and ignore spaces around the colon;
+`IEM:` and `IEMs:` are the same. The tag can sit in **any person tag group**, and a
+group that is not a person group is never read. Only a slot filled by a person
+shows them; a spacer, an empty slot or a static label never does.
+
+Two cases are settled rather than guessed. A person with more than one capsule tag
+shows the first alphabetically. An `IEMs:` value other than `Own` is ignored. Each
+is logged once on the `[pco-tags]` tag.
+
+The read is tag-first, because Planning Center ignores `include=person.tags` on team
+members and `where[]` filters on people. It costs one request for the tag groups,
+one per person group for its tags, and one per matching tag for the people holding
+it (each paginated), whatever the plan's size. The tags belong to the account, not
+to a plan, so the result is cached for 15 minutes and read again by the next
+refresh after that, whichever plan is selected. The read runs beside the roster's,
+never ahead of it. If a read fails the last good tags stay and no slot goes
+blank; a failed read with no earlier result means no prep is shown. The token
+needs the same read access it already has for people.
+
 ## Item times
 
 PCO publishes no scheduled time on a plan item — an Item carries a title, a type,

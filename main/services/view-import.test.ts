@@ -577,6 +577,17 @@ describe("presets", () => {
     assert.equal((await presetsStore.load())[0]!.name, "From the file");
   });
 
+  test("resolved names and readings in a bundled arrangement are not stored", async () => {
+    await presetsStore.save([] as never);
+    const resolved = { ...slotRow("s"), displayName: "Jordan Lee", photoUrl: "/api/photo/100000007", shownPositions: ["Vocals"], prep: { capsule: "KSM9", ownIems: true } };
+    await applyViewBundle(planBundle({}, { slots: {}, presets: [{ id: "p9", name: "Old build", slots: [resolved], createdAt: "" }] }));
+    const stored = (await presetsStore.load())[0]!.slots[0] as unknown as Record<string, unknown>;
+    assert.equal(stored.displayName, null);
+    assert.equal(stored.photoUrl, null);
+    assert.equal("prep" in stored, false);
+    assert.equal("shownPositions" in stored, false);
+  });
+
   test("Keep leaves the local one of the same id alone", async () => {
     await presetsStore.save([p("p1", "Mine")] as never);
     const report = await applyViewBundle(withPresets());

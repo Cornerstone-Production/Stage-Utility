@@ -285,6 +285,13 @@ export interface SlotDevice {
   iemLabel: string | null;
 }
 
+/** What Planning Center says a person brings to a mic slot, from their person tags
+ *  ("Capsule: KSM9", "IEMs: Own"). See pco-prep-tags.ts. */
+export interface PrepTags {
+  capsule: string | null;
+  ownIems: boolean;
+}
+
 export interface Slot {
   id: string;
   channel: string;
@@ -308,6 +315,9 @@ export interface Slot {
    *  to the device's name. */
   iemLabel?: string | null;
   displayName?: string | null;
+  /** Set by the resolver, only for a slot filled by a person who carries a prep
+   *  tag in Planning Center. Never stored. */
+  prep?: PrepTags;
   /** Which of a position range's names the resolved person is actually scheduled
    *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
    *  this person is really doing. Absent on non-position slots. */

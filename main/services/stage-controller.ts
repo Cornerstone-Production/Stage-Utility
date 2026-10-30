@@ -70,7 +70,8 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js"
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
-import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
+import { PrepTagBook } from "./pco-prep-tags.js";
+import { resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
 import { iconToSettings, type AppIconInput } from "./app-icon.js";
 import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
@@ -458,6 +459,13 @@ export class StageController {
       this.broadcast();
     },
   );
+  /** Planning Center prep tags (capsule, own in-ears) by person id. Best-effort:
+   *  a failed read keeps the last good map and is logged, never blanks a slot. */
+  private readonly prepTags = new PrepTagBook(() => {
+    const appId = this.pcoAppId;
+    const secret = this.pcoSecret;
+    return appId && secret ? () => pcoService.listPersonPrepTags(appId, secret) : null;
+  });
   /** `serviceTypeId:planId` the roster above belongs to, so a failed refresh can
    *  tell "the same plan, momentarily unreachable" from "a different plan". */
   private teamMembersKey: string | null = null;
@@ -958,6 +966,7 @@ export class StageController {
     this.pcoSecret = secret;
     // Every person read under the old credentials may not hold under the new ones.
     this.personDirectory.reset();
+    this.prepTags.reset();
     if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
     void this.refreshServiceWindows(); // creds (re)applied — (re)compute reconnect windows
@@ -2410,7 +2419,7 @@ export class StageController {
       } else {
         console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
       }
-      map.set(key, slots);
+      map.set(key, stripResolvedFields(slots));
     } else {
       // scrub() is spelled out INSIDE each interpolation, not hoisted into a
       // local. log-injection.test.ts reads source and only recognises the
@@ -3102,7 +3111,7 @@ export class StageController {
       id: randomUUID(),
       name,
       // Deep-clone with fresh slot ids so preset slots are independent.
-      slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })),
+      slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })),
       createdAt: new Date().toISOString(),
     };
     const updated = [...presets, newPreset];
@@ -3163,7 +3172,7 @@ export class StageController {
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name: name.trim() || "Imported",
-      slots: slots.map((s, i) => ({ ...s, id: randomUUID(), order: i })),
+      slots: stripResolvedFields(slots).map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
     };
     console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${scrub(newPreset.slots.length)} slots)`);
@@ -3212,7 +3221,7 @@ export class StageController {
     const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
-      p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
+      p.id === id ? { ...p, slots: stripResolvedFields(rawSlots).map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
     await presetsStore.save(updated);
     return updated;
@@ -4743,13 +4752,17 @@ export class StageController {
     this.rosterRefreshing = true;
     try {
       const before = JSON.stringify(this.teamMembers);
+      const prepBefore = this.prepTags.map;
       await this.fetchTeamMembers(serviceTypeId, planId, { fresh: true });
-      if (JSON.stringify(this.teamMembers) === before) return;
+      const rosterChanged = JSON.stringify(this.teamMembers) !== before;
+      const prepChanged = this.prepTags.map !== prepBefore;
+      if (!rosterChanged && !prepChanged) return;
       // broadcast() already drops an identical state, so the saving here is
       // recomputeResolved(), which re-resolves every view, every inline slots grid
       // and every view-sourced grid. That runs every minute for hours inside a
       // window, and almost every one of those minutes the roster has not changed.
-      console.log("[stage-controller] roster changed mid-window — re-resolving");
+      const what = rosterChanged && prepChanged ? "roster and prep tags" : rosterChanged ? "roster" : "prep tags";
+      console.log(`[stage-controller] ${scrub(what)} changed mid-window — re-resolving`);
       this.recomputeResolved();
       this.broadcast();
     } finally {
@@ -4975,6 +4988,12 @@ export class StageController {
   ): Promise<void> {
     const key = `${serviceTypeId}:${planId}`;
     if (opts.fresh) pcoService.clearTeamMembersCache(this.pcoAppId!, serviceTypeId, planId);
+    // Rides along with the roster, read CONCURRENTLY: a cold cache or a 429
+    // backoff on the tags must not hold the roster up. Every caller re-resolves
+    // straight after, and the service caches the tags on its LONG tier, so this is
+    // usually no request. It reports its own failure and never throws, so the
+    // roster cannot be failed by it; both are awaited before this returns.
+    const tagRead = this.prepTags.refresh();
     try {
       const fetched = await pcoService.listTeamMembers(
         this.pcoAppId!,
@@ -5015,6 +5034,8 @@ export class StageController {
       console.error("[stage-controller] fetchTeamMembers error:", scrubError(err));
       this.teamMembers = [];
       this.teamMembersKey = null;
+    } finally {
+      await tagRead;
     }
   }
 
@@ -5075,7 +5096,7 @@ export class StageController {
    *  leave a by-person slot empty for want of the lookup. */
   private resolve(raw: Slot[], members: TeamMemberDTO[], avatarFit: AvatarFit = "column"): Slot[] {
     this.personDirectory.want(unrosteredPersonIds(raw, members));
-    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people);
+    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people, this.prepTags.map);
   }
 
   /** Resolve every slots-View, then derive the per-output descriptors and the

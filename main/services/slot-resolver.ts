@@ -4,7 +4,7 @@
 import { setAvatarGeometry } from "./avatar-geometry.js";
 import { clamp } from "./clamp.js";
 import { isPcoPersonId, normalizePcoPersonId } from "./pco-person-id.js";
-import type { PersonCardDTO, Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
+import type { PersonCardDTO, PrepTags, Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
 const EMPTY_DEVICE: SlotDevice = {
@@ -18,6 +18,30 @@ const EMPTY_DEVICE: SlotDevice = {
   label: null,
   iemLabel: null,
 };
+
+/**
+ * A slot as it is STORED: the resolver's output taken back off it.
+ *
+ * resolveSlots fills in displayName, photoUrl, shownPositions, prep and device
+ * from Planning Center and the device list. The editors work on the resolved
+ * slots they were sent (seeding a new board from a view's current rows, copying
+ * an arrangement), so a save can carry last Sunday's names and this minute's
+ * battery readings. Written to slots.json they are never read back as anything
+ * but noise, and a stale `prep` once even looked like a live capsule. Every
+ * write of slots to disk goes through here so what is stored is only what an
+ * operator authored. Null/empty values are what the editors write for a new slot,
+ * so a stripped slot is one the editors already know how to read.
+ *
+ * Entries that are not objects pass through unchanged: this is not the place to
+ * validate a board.
+ */
+export function stripResolvedFields(slots: Slot[]): Slot[] {
+  return slots.map((slot) => {
+    if (typeof slot !== "object" || slot === null) return slot;
+    const { prep: _prep, shownPositions: _shown, ...authored } = slot;
+    return { ...authored, displayName: null, photoUrl: null, device: { ...EMPTY_DEVICE } };
+  });
+}
 
 
 /**
@@ -349,6 +373,7 @@ export function fitAvatarToColumn(
 }
 
 const NO_PEOPLE: ReadonlyMap<string, PersonCardDTO> = new Map();
+const NO_PREP: ReadonlyMap<string, PrepTags> = new Map();
 
 /** The normalised IDs of by-person slots whose person is not on this roster: the
  *  ones the person directory has to read from Planning Center. */
@@ -373,6 +398,9 @@ export function resolveSlots(
   /** People read from Planning Center by ID (person-directory.ts), for by-person
    *  slots whose person is not on this roster. */
   people: ReadonlyMap<string, PersonCardDTO> = NO_PEOPLE,
+  /** Prep tags by Planning Center person id (pco-prep-tags.ts). Read only for a
+   *  slot filled by a person; a spacer, empty or static slot never gets one. */
+  prep: ReadonlyMap<string, PrepTags> = NO_PREP,
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
@@ -385,7 +413,10 @@ export function resolveSlots(
   // is the array order the caller passes.
   const claimed = new Map<string, Set<string>>();
 
-  return slots.map((slot, slotIndex): Slot => {
+  return slots.map((stored, slotIndex): Slot => {
+    // `prep` is derived here and never trusted from the input: a resolved slot
+    // sent back by an editor must not carry last week's capsule onto this one.
+    const { prep: _stale, ...slot } = stored;
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
@@ -453,8 +484,10 @@ export function resolveSlots(
       iemLabel: slot.iemLabel ?? null,
     };
 
+    const memberPrep = member?.personId ? prep.get(member.personId) : undefined;
     return {
       ...slot,
+      ...(memberPrep ? { prep: { ...memberPrep } } : {}),
       displayName: member?.name ?? null,
       photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, avatarFit),
       shownPositions,
