@@ -319,6 +319,11 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
     overflow: "hidden",
     // Border draws inside the box so it never changes the object's footprint.
     boxSizing: "border-box",
+    // Layer order is the order the boxes are drawn in, which only holds if no
+    // box lets a z-index inside it compete with its siblings. A mic slot's name
+    // band is z-10, and without this it drew over every object in front of the
+    // grid, however far back the grid was sent.
+    isolation: "isolate",
   };
   if (s.background) css.background = s.background;
   // The object's own text colour, published for the readout idiom to pick up.
