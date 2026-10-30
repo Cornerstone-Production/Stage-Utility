@@ -6,13 +6,17 @@
 // text, the two-line reservation doubled it, and between them the name and
 // position covered the photo completely. The visible strip was hair and forehead.
 //
-// Three changes, all asserted here:
+// Two changes, both asserted here:
 //   1. cqmin, not cqi — the SMALLER of width and height governs, so a short card
 //      gets smaller text. That is what "make it fit" means when the constraint is
 //      vertical, and it is a no-op on a tall card where width is already smaller.
-//   2. the two-line reservation shrinks with it, via min() against cqb.
-//   3. a hard ceiling on the band, so the photo keeps the majority whatever the
-//      text does.
+//   2. (superseded) a 45cqb ceiling on the band so the photo kept the majority. It
+//      clipped the name away on a half-height card with a mic row AND an IEM row,
+//      so the band is now as tall as its content and the PHOTO gives way; see
+//      slot-card-priority.test.tsx for the priority order it enforces.
+//
+// The name reserves no second line of height; that is asserted on the rendered
+// card in slot-panel-markup.test.tsx, where it can read the style React wrote.
 //
 // VERIFIED IN A REAL BROWSER, because container queries do not resolve in jsdom
 // and a DOM test here would assert nothing. Driving the running app at
@@ -46,22 +50,9 @@ describe("slot card sizing", () => {
     );
   });
 
-  it("shrinks the two-line reservation on a short card", () => {
-    // Reserving two lines keeps photo bottoms aligned across a row, which is worth
-    // having — but not at the cost of the photo itself.
-    assert.match(
-      SRC,
-      /minHeight:\s*overlay\s*\?\s*undefined\s*:\s*"min\(2\.5em,\s*\d+cqb\)"/,
-      "the reservation must give way on a short card",
-    );
-  });
-
-  it("caps the name card so the photo always keeps most of the slot", () => {
-    assert.match(
-      SRC,
-      /maxHeight:\s*"\d+cqb"/,
-      "without a ceiling, enough text still buries the photo",
-    );
+  it("does not cap the band below the card: the photo gives way, never the name", () => {
+    assert.doesNotMatch(SRC, /maxHeight:\s*"4\d*cqb"/, "a ceiling under the card is what clipped the name");
+    assert.match(SRC, /maxHeight:\s*"100cqb"/, "the band may fill the card and no more");
   });
 
   it("needs a size container for any of that to resolve", () => {

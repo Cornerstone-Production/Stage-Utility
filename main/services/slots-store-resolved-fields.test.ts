@@ -29,7 +29,7 @@ type Mutable = {
   state: Record<string, unknown>;
   broadcast: () => void;
   loadAllViewRawSlots: (serviceTypeId: string | null, planId: string | null) => Promise<void>;
-  rawSlotsByView: Map<string, Slot[]>;
+  rawSlotsByBoard: Map<string, Slot[]>;
 };
 const ctl = stageController as unknown as Mutable;
 
@@ -108,7 +108,7 @@ describe("slots.json holds only what an operator authored", () => {
   it("a save with no service type, which is held in memory only, is stripped too", async () => {
     ctl.state = { ...ctl.state, serviceTypeId: null, planId: null };
     await stageController.setViewSlots(VIEW, [resolvedSlot("a")]);
-    const held = ctl.rawSlotsByView.get(VIEW)![0] as unknown as Record<string, unknown>;
+    const held = ctl.rawSlotsByBoard.get(VIEW)![0] as unknown as Record<string, unknown>;
     assert.equal(held.displayName, null);
     assert.equal("prep" in held, false);
   });
@@ -119,7 +119,7 @@ describe("slots.json holds only what an operator authored", () => {
 
     // A slots.json written by an older build still holds resolved fields, and is
     // what a save-as-arrangement snapshots until the board is next saved.
-    ctl.rawSlotsByView.set(VIEW, [resolvedSlot("b")]);
+    ctl.rawSlotsByBoard.set(VIEW, [resolvedSlot("b")]);
     const saved = await stageController.savePreset(VIEW, "Saved");
     assertClean(await bytes("presets.json"), "savePreset");
 

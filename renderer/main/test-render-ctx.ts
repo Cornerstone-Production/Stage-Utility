@@ -33,6 +33,8 @@ export const DEFAULT_STAGE_STATE: StageState = {
   savedColors: [],
   notesByObject: {},
   slotsByLayoutObject: {},
+  slotsLayoutByView: {},
+  slotsLayoutByLayoutObject: {},
   resolvedByOutput: {},
   pcoConfigured: false,
   lastRefreshedAt: null,

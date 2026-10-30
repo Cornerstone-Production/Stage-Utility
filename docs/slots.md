@@ -4,6 +4,12 @@ A slot is one cell on the mic board. It links to a person, optionally binds a
 wireless mic and an IEM pack, and shows a name, photo and live telemetry.
 Slots are edited on a Mic Slots view's own page, opened from Screens.
 
+Slots live on named **boards**, and a Mic Slots view, or a mic-slots object in a
+custom layout, shows one. Several can show the same board: editing the slots of
+any one of them edits every screen showing that board. A copy of a view gets
+its own copy of each board the original shows. See [Slots](reference/data-model.md#slots) and
+the [board routes](reference/api.md#slot-boards).
+
 ## The slot editor
 
 The editor is a list of slots in board order, with **Add slot** and **Add spacer**
@@ -17,8 +23,8 @@ Each slot row has:
 
 | Control | What it does |
 |---|---|
-| **Channel** | A short reference number for the slot, such as `01`. It is for the operator and is not drawn on the cell |
-| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a color, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot color**, takes no part in Planning Center matching, and can still carry a mic, IEM and charge bar. An empty slot is a blank cell, and has no further options |
+| **Channel** | A short reference number for the slot, such as `01`, drawn as a badge on the cell's photo. Blank draws no badge |
+| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a color, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot color**, takes no part in Planning Center matching, and can still carry a mic, IEM and battery. An empty slot is a blank cell, and has no further options |
 | **Stack** | Puts the slot in the same on-screen column as the slot above it, as rows, for a dual-bay charger two people share. Off for the first slot |
 | Remove | Deletes the slot |
 
@@ -27,11 +33,11 @@ Each slot row has:
 
 | Option | What it does |
 |---|---|
-| **Device channel** | The wireless channel this slot's mic is bound to, from the [Wireless](integrations/wireless.md) integration: the cell shows its RF bars and battery. **Offline (manual label)** is for a mic or pack with no network: the cell shows a name pill instead of bars. **None** clears it |
+| **Device channel** | The wireless channel this slot's mic is bound to, from the [Wireless](integrations/wireless.md) integration: the cell shows its RF bars and battery. **Offline (manual label)** is for a mic or pack with no network: the cell shows its label in the same row, without bars. **None** clears it |
 | **Mic label** | Text shown in place of the frequency. See [Labels](#labels) |
-| **IEM pack** | A second device, on any slot, whose battery shows as a second bar. Same choices as Device channel |
-| **IEM label** | Text under the mic label. See [Labels](#labels) |
-| **Charge bar** | Where the battery bar reads from: **Mic battery (transmitter)**, a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
+| **IEM pack** | A second device, on any slot, whose battery shows on its own row under the mic's. Same choices as Device channel |
+| **IEM label** | Text of the IEM row. See [Labels](#labels) |
+| **Battery from** | Where the mic row's battery reads from: **Mic battery (transmitter)**, a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
 | **Hide RF** | Hides the RF bars and shows only the battery level, for charge-only or IEM slots |
 
 A view of this kind also has **Align to physical chargers**, off by default. On, a
@@ -42,7 +48,8 @@ width**, 32.25 in to start) so the cells line up with the chargers below them.
 banks and the side margins. A stacked column counts once, by its first slot. The
 panel says how many inches are used of the display's and turns red when the row is
 wider. Without it every column, a spacer's included, takes an equal share of the
-width.
+width. The charger width belongs to the board, so it is shared by every screen
+showing it; the display width is this screen's own.
 
 **Copy slots from**, above the editor, fills this board from another Mic Slots view.
 
@@ -242,12 +249,33 @@ service type. Position names are per-service-type, so a slot listing several
 positions travels better than one naming a single position that another type does
 not define.
 
+## What the card shows
+
+A filled slot is a photo with a name band under it. Everything on it scales with the
+slot, from the editor's preview to a 4K column, and the phone view draws the same
+things over the bottom of the photo.
+
+- **On the photo.** Top left, the slot's **Channel**. Top right, a small ears badge
+  when the person brings their own in-ears. Bottom left, the capsule plate: their
+  microphone capsule. The last two come from [prep tags](integrations/planning-center.md#prep-tags)
+  in Planning Center and appear only for a slot filled by a tagged person. The badges
+  are neutral white on dark glass; the app's accent colour is never used on stage.
+- **The band.** The name, the position line, a hairline, then flat rows: the **mic
+  row** (RF bars, the label or frequency, and the battery percentage) and, when an
+  IEM is bound, the **IEM row** (headphones, its label, its percentage). Percentages
+  are green from 60, amber from 25 and red under 25. **Hide RF** drops the bars and
+  the frequency and keeps the percentage. A device with no network shows its label
+  in the same rows, with no bars and no percentage. A charger bay's level, or an
+  IEM pack's, shows as a battery row even with no live mic bound, without bars.
+- **Low battery.** When the mic's battery is under 25% the card's edge goes red.
+- An empty slot is a quiet blank cell; a spacer draws nothing.
+
 ## Labels
 
 `deviceLabel` and `iemLabel` are per-slot text. On a live device the mic label
-replaces the frequency in the status strip and the IEM label renders beneath it;
+replaces the frequency in the mic row and the IEM label is the text of the IEM row;
 RF bars and battery are unaffected. On an offline, manually assigned device the
-labels are the whole pill.
+labels are the whole row.
 
 The label's presence is the switch — blank shows the frequency, filled takes over.
 

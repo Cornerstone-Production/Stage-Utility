@@ -18,8 +18,8 @@ import { isSafeKey } from "./safe-key.js";
  * A restored views.json, read through the legacy-field adoption a load applies
  * and held to what PATCH /api/views/:id checks of each field, through the same
  * predicates: a kind the app has (isDisplayKind), a layout of the layout shape,
- * `slotsLayout` an object or null, the ServiceCue layout and NDI source text or
- * null, the two flags booleans, the calendar lists `{ id, name }` lists, the
+ * `slotsLayout` an object or null, the slot board, the ServiceCue layout and
+ * NDI source text or null, the two flags booleans, the calendar lists `{ id, name }` lists, the
  * surface display or console. No id twice.
  */
 const restoreCheck = checked((raw) => {
@@ -32,6 +32,8 @@ const restoreCheck = checked((raw) => {
     if (!isDisplayKind(v.kind)) refuse(`${what} has a kind this app does not have`);
     if (v.layout !== undefined && v.layout !== null && !isLayoutShape(v.layout)) refuse(`${what}'s layout is not a layout`);
     if (v.slotsLayout !== undefined && !isSlotsLayoutValue(v.slotsLayout)) refuse(`${what}'s slots layout must be an object or null`);
+    textOrNull(v.boardId, `${what}'s slot board`);
+    if (typeof v.boardId === "string" && !isSafeKey(v.boardId)) refuse(`${what}'s slot board id is not allowed`);
     textOrNull(v.serviceCueLayoutId, `${what}'s ServiceCue layout`);
     textOrNull(v.ndiSource, `${what}'s NDI source`);
     optional(v.hideChrome, "boolean", `${what}'s hideChrome`);

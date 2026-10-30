@@ -34,6 +34,8 @@ export interface ViewRefs {
   imageFiles: string[];
   oscTargetIds: string[];
   rosstalkTargetIds: string[];
+  /** Slot boards the slots views and slots widgets show. */
+  boardIds: string[];
   /** Device-level bindings, for the rebind work list. */
   unresolvable: UnresolvableRef[];
 }
@@ -63,8 +65,13 @@ export interface ViewBundle {
   roots?: string[];
   views: View[];
   sideData: {
-    /** slots.json key -> serviceTypeId -> rows. Key is a view id or object id. */
+    /** board id -> serviceTypeId -> rows: the DEFAULTS of every board the
+     *  bundle's views show. In a file from before boards, the key is a view id
+     *  or a slots widget's object id instead, and `boards` is absent. */
     slots: Record<string, Record<string, Slot[]>>;
+    /** The boards the views point at, by the id `slots` is keyed by. Absent in a
+     *  file from before boards, which import migrates as a boot would. */
+    boards?: Record<string, { name: string; columnWidthIn: number | null }>;
     /** layout object id -> notes content. Left loose because NotesContent lives
      *  in a service module, and this type is imported by the renderer. */
     notes: Record<string, unknown>;
@@ -101,8 +108,8 @@ export interface ImportReport {
    *  importer landed the boards under a different service type than the file
    *  named — the id they came from, so the report can say so. */
   plan?: { serviceTypeId: string; serviceTypeName: string; retypedFrom?: string };
-  /** How many (key, service type) slot boards landed, and how many rows across
-   *  them. Boards never clash — see the note in view-import.ts. */
+  /** How many slot boards the import made (each a new board, so none clash —
+   *  see the note in view-import.ts), and how many rows landed across them. */
   slotBoards: number;
   slotRows: number;
   /**

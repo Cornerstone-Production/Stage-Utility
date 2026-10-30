@@ -2033,3 +2033,26 @@ button.score-capsule:focus-visible {
     inset: calc(-1 * var(--handle-pad, 0px));
   }
 }
+
+/* ── Slot card: what gives way when the card is short ───────────────────────
+   The info band is as tall as its content and the photo takes whatever is left,
+   down to nothing. Priority is name > mic row > IEM row > position line > photo.
+   Text scales with the card (cqmin) down to a floor, so the band only outgrows a
+   card when the floors bind: measured, a card under about 9rem (144px) tall. There
+   the badges leave the photo (too short to hold them, and clipped halves are worse
+   than none); under 8rem the position line goes too, and a name that was allowed two lines
+   is held to one, ellipsis at the end, never a clipped glyph. The card is the
+   nearest size container, so the query reads the card's own height. */
+@container (max-height: 9rem) {
+  [data-slot-badges] {
+    display: none;
+  }
+}
+@container (max-height: 8rem) {
+  [data-slot-position] {
+    display: none;
+  }
+  [data-slot-name] {
+    -webkit-line-clamp: 1;
+  }
+}

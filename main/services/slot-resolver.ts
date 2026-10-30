@@ -97,7 +97,7 @@ function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>): numb
 
 // Resolve the charge-bar level for a slot from its configured source. Defaults
 // to the bound mic's battery (current behavior); "charger" reads a chosen SBC
-// bay (independent of any bound mic); "off" hides the charge bar.
+// bay (independent of any bound mic); "off" hides the battery.
 function resolveCharge(
   slot: Slot,
   device: SlotDevice,
@@ -141,7 +141,7 @@ function positionKey(name: string | null | undefined): string {
 }
 
 /** Does `memberPosition` satisfy a slot configured for `configured`? */
-function positionMatches(configured: string | null | undefined, memberPosition: string | null | undefined): boolean {
+export function positionMatches(configured: string | null | undefined, memberPosition: string | null | undefined): boolean {
   const key = positionKey(configured);
   if (!key) return false;
   // An explicitly-named variant is exact; a base name covers its sub-variants.
@@ -164,7 +164,7 @@ function positionSignature(positions: SlotPositionMatch[]): string {
 /** Claim key for a team member. Person-level where PCO gives us a person id, so
  *  someone scheduled in two positions still only fills one of a set of identical
  *  slots; falls back to the team-member row id when it doesn't. */
-function claimKey(m: TeamMemberDTO): string {
+export function claimKey(m: TeamMemberDTO): string {
   return m.personId ?? m.id;
 }
 
@@ -388,6 +388,51 @@ export function unrosteredPersonIds(slots: Slot[], members: TeamMemberDTO[]): st
   return [...out];
 }
 
+/**
+ * Who each slot is filled by, in board order: the one matching rule, shared by
+ * the resolver below and the boards check, so the check's "landed on no slot"
+ * and the screen cannot disagree.
+ *
+ * Claimed people are keyed by positions-signature. Slots with the same
+ * signature compete for distinct people; slots with different signatures are
+ * independent, so a player with two devices still appears in both of their
+ * slots. Board order is the array order the caller passes.
+ */
+export function matchMembers(
+  slots: Slot[],
+  members: TeamMemberDTO[],
+  people: ReadonlyMap<string, PersonCardDTO> = NO_PEOPLE,
+): (TeamMemberDTO | null)[] {
+  const claimed = new Map<string, Set<string>>();
+  return slots.map((slot): TeamMemberDTO | null => {
+    const { link } = slot;
+    if (link.kind === "pco" && link.matchBy === "person") {
+      // Normalised, so the AC-prefixed ID from a Planning Center page URL matches.
+      // The roster first, since it is this plan's; otherwise the person as read
+      // from Planning Center by ID, so they show whether scheduled or not.
+      const want = normalizePcoPersonId(link.personId);
+      const member = want ? (members.find((m) => m.personId === want) ?? null) : null;
+      if (member || !want) return member;
+      const card = people.get(want);
+      return card
+        ? { id: `person:${want}`, personId: want, name: card.name, photoUrl: card.photoUrl, teamPositionName: null, teamName: null, status: "C", notes: null }
+        : null;
+    }
+    if (link.kind === "pco" && link.matchBy === "position") {
+      const sig = positionSignature(link.positions);
+      let taken = claimed.get(sig);
+      if (!taken) {
+        taken = new Set<string>();
+        claimed.set(sig, taken);
+      }
+      const member = matchByPositions(link.positions, members, taken);
+      if (member) taken.add(claimKey(member));
+      return member;
+    }
+    return null;
+  });
+}
+
 export function resolveSlots(
   slots: Slot[],
   members: TeamMemberDTO[],
@@ -407,11 +452,7 @@ export function resolveSlots(
   // Per-slot, because a stacked slot is drawn shorter and needs a shorter crop.
   const depths = stackDepths(slots);
 
-  // Claimed people, keyed by positions-signature. Slots with the same signature
-  // compete for distinct people; slots with different signatures are independent,
-  // so a player with two devices still appears in both of their slots. Board order
-  // is the array order the caller passes.
-  const claimed = new Map<string, Set<string>>();
+  const matched = matchMembers(slots, members, people);
 
   return slots.map((stored, slotIndex): Slot => {
     // `prep` is derived here and never trusted from the input: a resolved slot
@@ -442,33 +483,13 @@ export function resolveSlots(
 
     // PCO-linked slots.
     const { link } = slot;
-    let member: TeamMemberDTO | null = null;
+    const member = matched[slotIndex] ?? null;
     // The positions to print on the cell — what this person actually holds, not the
     // whole range the slot was configured to accept.
-    let shownPositions: string[] | undefined;
-    if (link.kind === "pco" && link.matchBy === "person") {
-      // Normalised, so the AC-prefixed ID from a Planning Center page URL matches.
-      // The roster first, since it is this plan's; otherwise the person as read
-      // from Planning Center by ID, so they show whether scheduled or not.
-      const want = normalizePcoPersonId(link.personId);
-      member = want ? (members.find((m) => m.personId === want) ?? null) : null;
-      if (!member && want) {
-        const card = people.get(want);
-        if (card) member = { id: `person:${want}`, personId: want, name: card.name, photoUrl: card.photoUrl, teamPositionName: null, teamName: null, status: "C", notes: null };
-      }
-    } else if (link.kind === "pco" && link.matchBy === "position") {
-      const sig = positionSignature(link.positions);
-      let taken = claimed.get(sig);
-      if (!taken) {
-        taken = new Set<string>();
-        claimed.set(sig, taken);
-      }
-      member = matchByPositions(link.positions, members, taken);
-      if (member) {
-        taken.add(claimKey(member));
-        shownPositions = heldPositions(link.positions, member, members);
-      }
-    }
+    const shownPositions =
+      member && link.kind === "pco" && link.matchBy === "position"
+        ? heldPositions(link.positions, member, members)
+        : undefined;
 
     let device = EMPTY_DEVICE;
     if (slot.deviceBinding) {

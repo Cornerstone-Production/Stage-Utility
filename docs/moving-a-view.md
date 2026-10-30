@@ -22,7 +22,7 @@ is taken arrives as `<name> (imported)`; the one you already had is untouched.
 ## Moving a plan
 
 A **plan export** is one service type's whole setup rather than one layout: every
-slot board that type has, the views and layouts holding them, and — by choice —
+slot board with a layout for that type, the views and layouts showing them, and — by choice —
 the patch sheet variant it is assigned to and your saved slot presets. It is per
 service type, never per date: a per-plan board is one week's exception keyed by a
 Planning Center plan id, and that id means nothing on another machine.
@@ -32,7 +32,7 @@ Pick the type and tick what travels:
 
 | | |
 |---|---|
-| Views and layouts | Always. Every view with a board for this type, plus anything they embed |
+| Views and layouts | Always. Every view showing a board with a layout for this type, plus anything they embed |
 | Mic slots | *This type only*, or *every type on those views* — the second is for a destination that runs other types on the same layouts |
 | Patch sheet variant | The variant this type is assigned to, per sheet. Off when no sheet assigns one |
 | Slot presets | Off by default. They are global, not this type's |
@@ -53,8 +53,8 @@ service type on it, and the review adds two decisions:
 - **Keep mine where they clash** / **Replace mine.** Keep is the default.
 
 **Only the patch assignment and the presets can clash.** Imported views always
-arrive as new views with new ids, so their slot rows are always new boards — they
-never land on top of anything you have.
+arrive as new views with new ids, and the boards they show arrive as new boards
+with new ids — they never land on top of anything you have.
 
 ### What the patch section does and does not carry
 
@@ -80,7 +80,7 @@ one of yours is never silent.
 | | |
 |---|---|
 | The layout, and any view it embeds | An embed whose target is missing renders an error, so dependencies come automatically |
-| Slot rows | Every service type, not just the active one |
+| Slot boards | Every board the view and its widgets show, with its name and column width, and its layout for every service type, not just the active one. A board shown twice is carried once and shared on arrival, as it was. Each arrives as a new board (`<name> (imported)` when the name is taken) |
 | Notes and checklists | Keyed to their objects, so they follow them |
 | Images | Stored by content hash, so a logo you already have is shared, not duplicated |
 | OSC and RossTalk targets | Definition only. A target you already have with the same id is kept as yours |

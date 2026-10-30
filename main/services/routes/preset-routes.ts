@@ -25,7 +25,18 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (non-empty string) required");
         return;
       }
-      // Optional displayId — defaults to primary display if omitted.
+      // `boardId` saves the layout a board shows now, recalled into that board
+      // by default. Otherwise the view's (or legacy display's) board — the
+      // primary display's when neither is given.
+      if (typeof body.boardId === "string" && body.boardId) {
+        try {
+          json(res, await stageController.savePresetFromBoard(body.boardId, (body.name as string).trim()));
+        } catch (err) {
+          if (!(err instanceof SlotsNotFoundError)) throw err;
+          error(res, err.message, err.status);
+        }
+        return;
+      }
       const displayIdForPreset =
         typeof body.viewId === "string" && body.viewId
           ? body.viewId

@@ -24,7 +24,7 @@ import { appVersion } from "./config-snapshot.js";
 import type { ViewBundle } from "../types/view-bundle.js";
 import type { View } from "../types/views.js";
 import type { ViewRefs } from "../types/view-bundle.js";
-import type { Slot } from "../types/stage.js";
+import type { Slot, SlotBoardMeta } from "../types/stage.js";
 
 /**
  * Everything a bundle carries that is derived from a set of ROOT views.
@@ -93,10 +93,7 @@ export async function collectBundleParts(
 }
 
 /**
- * The slot boards on these views' keys.
- *
- * Slot rows are keyed by view id (a slots view) or by layout object id (an
- * inline slots-grid). Both are collected.
+ * The layouts of the boards these views show.
  *
  * `onlyServiceTypeId` null keeps EVERY service type, which is what a view export
  * does: the destination may run different ones, and dropping them loses real
@@ -111,7 +108,8 @@ export function pickSlots(
   onlyServiceTypeId: string | null,
 ): ViewBundle["sideData"]["slots"] {
   const slots: ViewBundle["sideData"]["slots"] = {};
-  for (const key of [...parts.views.map((v) => v.id), ...parts.refs.objectIds]) {
+  for (const key of parts.refs.boardIds) {
+    if (!Object.hasOwn(allDefaults, key)) continue;
     const byType = allDefaults[key];
     if (!byType) continue;
     if (onlyServiceTypeId === null) {
@@ -123,6 +121,23 @@ export function pickSlots(
     }
   }
   return slots;
+}
+
+/**
+ * The name and column width of every board these views show. A board shown with
+ * no layout at all still travels: the views point at it, and an empty board is
+ * what they should find on the far end rather than a pointer to nothing.
+ */
+export function pickBoards(
+  boards: ReadonlyMap<string, SlotBoardMeta>,
+  parts: ViewBundleParts,
+): NonNullable<ViewBundle["sideData"]["boards"]> {
+  const out: NonNullable<ViewBundle["sideData"]["boards"]> = {};
+  for (const id of parts.refs.boardIds) {
+    const b = boards.get(id);
+    if (b) out[id] = { name: b.name, columnWidthIn: b.columnWidthIn };
+  }
+  return out;
 }
 
 /** kind / version / stamps / who exported it — identical for both bundle kinds. */
@@ -145,11 +160,12 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
 
   const parts = await collectBundleParts(all, [rootId]);
   const slots = pickSlots(await slotsStore.allDefaults(), parts, null);
+  const boards = pickBoards(await slotsStore.listBoards(), parts);
 
   return {
     ...(await bundleEnvelope()),
     views: parts.views,
-    sideData: { slots, notes: parts.notes, serviceCueLayouts: parts.serviceCueLayouts },
+    sideData: { slots, boards, notes: parts.notes, serviceCueLayouts: parts.serviceCueLayouts },
     targets: parts.targets,
     images: parts.images,
     ...(parts.missingImages.length ? { missingImages: parts.missingImages } : {}),

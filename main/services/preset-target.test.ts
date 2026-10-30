@@ -91,11 +91,12 @@ describe("preset target resolution", () => {
     ctl().state.serviceTypeId = "TYPE_OTHER";
     const { viewId } = await stageController.applyPreset("display-2", presets.at(-1)!.id);
     const raw = JSON.parse(await fs.readFile(path.join(TMP, "slots.json"), "utf8"));
-    // The v3 file's DEFAULTS half. No plan is selected in this seeded state, so
+    // The file's DEFAULTS half, under the board the view shows (its own id, on a
+    // view saved before boards). No plan is selected in this seeded state, so
     // that is where a recall lands — and asserting the half as well as the count
     // is what would catch a recall going into a per-plan override, where the
     // next plan of that type would silently drop it.
-    assert.equal(raw.version, 3);
+    assert.equal(raw.version, 4, "a fresh data directory starts at v4");
     assert.equal(raw.defaults?.[viewId]?.["TYPE_OTHER"]?.length, 3);
     assert.deepEqual(raw.overrides, {}, "with no plan selected there is no exception to write");
   });

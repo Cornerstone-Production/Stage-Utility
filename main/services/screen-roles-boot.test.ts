@@ -189,13 +189,15 @@ describe("the first boot after the upgrade", () => {
   const fitOf = (view: { layout?: unknown }) => (view.layout as { canvas: { fit?: string } } | null | undefined)?.canvas.fit;
   const named = (name: string) => state().views.find((v) => v.name === name)!;
 
-  it("a control-surface copy takes its source's inline mic-slots board, under the copy's new object ids", async () => {
+  it("a control-surface copy shows its source's mic-slots board, under the copy's new object ids", async () => {
     const copy = named("Atrium loop (control surface)");
-    const grid = (copy.layout as { objects: { id: string; config: { type: string } }[] }).objects.find((o) => o.config.type === "slots-grid")!;
+    const grid = (copy.layout as { objects: { id: string; config: { type: string; boardId?: string } }[] }).objects.find((o) => o.config.type === "slots-grid")!;
     assert.notEqual(grid.id, GRID_ID, "the copy shares the grid's object id with its source");
+    // The same content on another screen, so the same board: the boards
+    // migration keeps the inline grid's key as the board's id.
+    assert.equal(grid.config.boardId, GRID_ID, "the copy does not show its source's board");
     const labels = (rows: { link?: unknown }[]) => rows.map((r) => (r.link as { label: string }).label);
-    assert.deepEqual(labels(await slotsStore.getDefault(grid.id, "st-1")), ["Drums"], "the copy's board was not copied under its new id");
-    assert.deepEqual(labels(await slotsStore.getDefault(GRID_ID, "st-1")), ["Drums"], "the source's own board is gone");
+    assert.deepEqual(labels(await slotsStore.getDefault(GRID_ID, "st-1")), ["Drums"], "the source's board is gone");
   });
 
   it("a panel keeps its shape: a view made a console, or copied into one, gets the fit it had as a wall view unless its layout chose one", () => {

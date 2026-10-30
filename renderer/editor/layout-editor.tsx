@@ -95,6 +95,7 @@ import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
+import { adoptSavedGridPointers, slotsGridSource } from "./slots-grid-source";
 import { Palette } from "./palette";
 import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
@@ -1317,6 +1318,16 @@ export function LayoutEditor({
   const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
+  // Once this editor's save is back in the view (its revision past the one the
+  // save started from), a slots widget sent as "Define here" or "Embed a view"
+  // takes the board the server pointed it at (see slots-grid-source.ts). Keyed
+  // on the revision so the layout from BEFORE the save is never adopted.
+  const [adoptAfterRev, setAdoptAfterRev] = useState<number | null>(null);
+  if (adoptAfterRev !== null && !dirty && view.layout && (view.layoutRev ?? 0) > adoptAfterRev) {
+    setAdoptAfterRev(null);
+    const adopted = adoptSavedGridPointers(objects, view.layout.objects);
+    if (adopted !== objects) setObjects(adopted);
+  }
   /**
    * Unsaved work held by something INSIDE the editor that the layout comparison
    * cannot see — today the inline mic-slots editor, whose slots live on the
@@ -1635,10 +1646,12 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
-  // The selected object iff it's an inline mic-slots grid (config narrowed so the
-  // inline slot editor below the canvas gets its id + alignment).
+  // The selected object iff it's a mic-slots grid with slots to edit here (config
+  // narrowed so the slot editor below the canvas gets its id + alignment): only
+  // one whose board is its own. A widget on a slots screen's board would edit
+  // that screen's live wall from here (see slots-grid-source.ts).
   const inlineGrid =
-    selected && selected.config.type === "slots-grid" && (selected.config.source ?? "view") === "inline"
+    selected && selected.config.type === "slots-grid" && slotsGridSource(selected.config, slotsViews).editsBelow
       ? { id: selected.id, config: selected.config }
       : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
@@ -2000,6 +2013,7 @@ export function LayoutEditor({
       // left on screen to say so — and saveThen closes the editor on a resolved
       // save, so the throw has to reach it.
       const panelsOk = await panels.saveAll();
+      setAdoptAfterRev(view.layoutRev ?? 0);
       await onSave({ version: 1, canvas, objects });
       setDirty(false);
       setHistory([]);

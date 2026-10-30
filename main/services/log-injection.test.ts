@@ -158,6 +158,8 @@ const REQUEST_FACING = [
   "routes/app-icon-routes.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
+  // Its save-all refusal names the board, whose id and name arrive in the body.
+  "routes/board-routes.ts",
   "routes/branding-routes.ts",
   "routes/calendar-routes.ts",
   // Its two lines carry a tag and a message posted by a BROWSER — the most

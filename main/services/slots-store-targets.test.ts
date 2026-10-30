@@ -98,9 +98,9 @@ describe("slots.json v3: normalising what is on disk", () => {
     assert.deepEqual(overrides, {});
   });
 
-  it("an empty file is not reported as a migration", () => {
+  it("an empty file is not reported as a migration, and starts as v4", () => {
     const { file, migrated } = normaliseSlotsFile({});
-    assert.deepEqual(serialiseSlotsFile(file), { version: 3, defaults: {}, overrides: {} });
+    assert.deepEqual(serialiseSlotsFile(file), { version: 4, boards: {}, defaults: {}, overrides: {} });
     assert.equal(migrated, null, "a first run must not write and log a migration of nothing");
   });
 
@@ -255,9 +255,20 @@ describe("prototype-reaching keys", () => {
     await assert.rejects(() => slotsStore.setOverride("__proto__", "p7", "st9", []), /not an allowed identifier/);
     await assert.rejects(() => slotsStore.setOverride("v1", "__proto__", "st9", []), /not an allowed identifier/);
     await assert.rejects(() => slotsStore.setOverride("v1", "p7", "__proto__", []), /not an allowed identifier/);
-    await assert.rejects(() => slotsStore.copyKey("v1", "__proto__", () => "x"), /not an allowed identifier/);
-    await assert.rejects(() => slotsStore.copyKey("__proto__", "v1", () => "x"), /not an allowed identifier/);
-    await assert.rejects(() => slotsStore.removeDisplay("__proto__"), /not an allowed identifier/);
+    const meta = { name: "B", columnWidthIn: null, createdAt: "" };
+    await assert.rejects(() => slotsStore.createBoard("__proto__", meta), /not an allowed identifier/);
+    await assert.rejects(() => slotsStore.updateBoard("__proto__", { name: "x" }), /not an allowed identifier/);
+    await assert.rejects(() => slotsStore.duplicateBoard("v1", "__proto__", meta, () => "x"), /not an allowed identifier/);
+    await assert.rejects(() => slotsStore.duplicateBoard("__proto__", "v1", meta, () => "x"), /not an allowed identifier/);
+    await assert.rejects(() => slotsStore.deleteBoard("__proto__"), /not an allowed identifier/);
+    await assert.rejects(
+      () => slotsStore.saveMany([{ boardId: "__proto__", target: { kind: "default", serviceTypeId: "st9" }, slots: [] }]),
+      /not an allowed identifier/,
+    );
+    await assert.rejects(
+      () => slotsStore.saveMany([{ boardId: "v1", target: { kind: "plan", planId: "__proto__", serviceTypeId: "st9" }, slots: [] }]),
+      /not an allowed identifier/,
+    );
   });
 
   // The two that got away. `clearOverride("v1", "__proto__")` resolved TRUE with
@@ -329,16 +340,21 @@ describe("a v3 envelope with no version stamp", () => {
   });
 });
 
-describe("copying a key", () => {
+describe("duplicating a board", () => {
   it("carries every service type's default AND every override, with fresh ids", async () => {
     const src = freshKey();
     const dst = freshKey();
+    await slotsStore.createBoard(src, { name: "Left", columnWidthIn: 3.49, createdAt: "" });
     await slotsStore.setDefault(src, "st9", [slot("a", "01")]);
     await slotsStore.setDefault(src, "st-youth", [slot("b", "02")]);
     await slotsStore.setOverride(src, `${src}-p7`, "st9", [slot("c", "03")], "2026-09-10");
 
     let n = 0;
-    await slotsStore.copyKey(src, dst, () => `${dst}-fresh-${++n}`);
+    assert.equal(
+      await slotsStore.duplicateBoard(src, dst, { name: "Left copy", columnWidthIn: 3.49, createdAt: "" }, () => `${dst}-fresh-${++n}`),
+      true,
+    );
+    assert.equal((await slotsStore.listBoards()).get(dst)?.name, "Left copy");
 
     assert.equal((await slotsStore.getDefault(dst, "st9"))[0].id, `${dst}-fresh-1`);
     assert.equal((await slotsStore.getDefault(dst, "st-youth"))[0].id, `${dst}-fresh-2`);

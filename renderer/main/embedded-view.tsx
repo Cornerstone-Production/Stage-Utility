@@ -120,7 +120,7 @@ export function EmbeddedView({
       return (
         <SlotsColumns
           slots={slots}
-          slotsLayout={view.slotsLayout ?? null}
+          slotsLayout={ctx.state.slotsLayoutByView?.[view.id] ?? null}
           emptySlotLogo={ctx.state.emptySlotLogo}
           defaultAvatar={ctx.state.defaultAvatar}
           className="h-full w-full kiosk-surface"
