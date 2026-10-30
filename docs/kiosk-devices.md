@@ -750,7 +750,8 @@ Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
 architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
 Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
 Mac's displays and DeckLink ports has a switch and a status line. Launching it again
-brings the window back. Where `/Library/LaunchAgents/com.stageutility.output.plist`
+brings the window back, and so does Control-Option-Command-O from any app, which is
+the way back when an output covers the menu bar icon. Where `/Library/LaunchAgents/com.stageutility.output.plist`
 exists, it starts at every login from that LaunchAgent, and the window says "Starts at
 login (installed)"; the installer writes the file, see
 [Installing the Mac output helper](#installing-the-mac-output-helper).

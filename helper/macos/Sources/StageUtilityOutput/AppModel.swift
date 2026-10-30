@@ -12,6 +12,8 @@ struct OutputRow: Identifiable, Equatable {
   var enabled: Bool
   var status: String
   var switchable = true
+  /// The display with the menu bar: on, it covers the helper's icon.
+  var coversMenuBar = false
 }
 
 /// Everything the helper decides, in one place: which outputs exist, which are on,
@@ -639,6 +641,21 @@ final class AppModel: ObservableObject {
 
   // MARK: Window state
 
+  /// The shortcut that opens the window, once it is registered: what the window says
+  /// about it. Nil while it is not (taken by another app, or not tried yet).
+  @Published private(set) var hotKeyLabel: String?
+
+  /// The shortcut's registration: it works, or why it does not.
+  func hotKeyRegistered(_ problem: String?) {
+    if let problem {
+      hotKeyLabel = nil
+      setNote("hotkey", problem)
+    } else {
+      hotKeyLabel = HelperHotKey.label
+      clearNote("hotkey")
+    }
+  }
+
   private func setNote(_ cause: String, _ text: String) {
     noteTable[cause] = text
     publishNotes()
@@ -663,7 +680,9 @@ final class AppModel: ObservableObject {
           unreachable: rt.unreachable, boundScreenName: rt.boundScreenName, showingBound: rt.showingBound,
           fps: rt.fps, healthPaused: healthBoard.isPaused(key), portProblem: (rt.sink as? CardOutput)?.problem,
           latencyMs: rt.latencyMs, testPattern: options.testPattern != nil))
-      return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
+      return OutputRow(
+        id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status,
+        coversMenuBar: d.isMain)
     } + deckLink.inputs.map {
       OutputRow(
         id: $0.id.outputKey, title: $0.descriptor.name, enabled: false, status: StatusText.inputPortLine, switchable: false)

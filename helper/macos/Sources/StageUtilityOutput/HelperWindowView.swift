@@ -40,6 +40,8 @@ private struct PillSwitch: ToggleStyle {
 
 struct HelperWindowView: View {
   @ObservedObject var model: AppModel
+  /// The output the person has asked to turn on and has not yet confirmed.
+  @State private var asking: OutputRow?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -70,6 +72,20 @@ struct HelperWindowView: View {
     .frame(width: 440)
     .background(Palette.window)
     .environment(\.colorScheme, .dark)
+    .alert(
+      "Turn on \(asking?.title ?? "this display")?",
+      isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
+      presenting: asking
+    ) { row in
+      Button("Turn on") { model.setEnabled(row.id, true) }
+      Button("Cancel", role: .cancel) {}
+    } message: { _ in
+      Text(
+        model.hotKeyLabel.map {
+          "This display has the menu bar, so it will cover this app's icon. Press \($0) to bring this window back."
+        }
+          ?? "This display has the menu bar, so it will cover this app's icon, and the shortcut that would bring this window back is not available. Restart the helper to get this window back: it opens by itself when an output covers the menu bar.")
+    }
   }
 
   private var dotColor: Color {
@@ -105,7 +121,16 @@ struct HelperWindowView: View {
         if row.switchable {
           Toggle(
             "Use \(row.title)",
-            isOn: Binding(get: { row.enabled }, set: { model.setEnabled(row.id, $0) })
+            isOn: Binding(
+              get: { row.enabled },
+              set: { on in
+                // The display with the menu bar takes the icon with it: say how to
+                // get the window back before it goes.
+                switch HelperWindowPolicy.toggleAction(turningOn: on, coversMenuBar: row.coversMenuBar) {
+                case .confirm: asking = row
+                case .apply: model.setEnabled(row.id, on)
+                }
+              })
           )
           .toggleStyle(PillSwitch())
           .labelsHidden()
@@ -134,6 +159,9 @@ struct HelperWindowView: View {
         }
         Spacer(minLength: 8)
         Text("v\(model.version)").quiet()
+      }
+      if let key = model.hotKeyLabel {
+        Text("\(key) opens this window from anywhere").quiet()
       }
       // An agent app has no menu to quit from. Not in the mockup, kept small and quiet.
       HStack {
