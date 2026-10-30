@@ -102,6 +102,8 @@ item** on (how a new Timer starts), which is a stat card like the cards beside i
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
+**Recent services**, **Screens**, the service **Timer** and **Current item** also expand on Home; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
+
 **Recent services** shows the active service type's average attendance, peak,
 length and start time, and — when its tile is tall enough — an attendance trend
 like the Trends card on **History**. Right-click it — or tap and hold it — for **SPL trend line** — the service level
@@ -498,6 +500,8 @@ widgets and the Timer pick which instance they follow. See
 | **Wireless summary** | How many packs are online, and their batteries | Every wireless connection |
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
 | **Charger battery** | Battery levels in the charger bays | Shure SBC chargers |
+
+**Wireless summary** can be expanded on Home to list every channel with its battery, time left, RF bars and whether it is muted or offline; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
 
 **Wireless summary** leads with the online count and qualifies it underneath with
 the lowest battery in the fleet, and — if you turn it on — the **shortest runtime

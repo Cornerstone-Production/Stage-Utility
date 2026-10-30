@@ -521,10 +521,13 @@ export function RecentServicesCard({
   showSpl = false,
   splMetric = null,
   hoverSuppressed = false,
+  inPanel = false,
 }: {
   state: StageState;
   showSpl?: boolean;
   splMetric?: string | null;
+  /** Drawn in Home's expand panel, whose own header carries Open History. */
+  inPanel?: boolean;
   /** Home's own right-click menu is open over this card. Same problem History
    *  solved for its copy of this chart: without it, the tooltip draws through
    *  the menu and keeps tracking the pointer underneath it. */
@@ -545,7 +548,11 @@ export function RecentServicesCard({
   );
 
   const empty = !(overview.attPoints.length > 0 || list?.length);
-  if (empty && !failed.has("timeline") && !failed.has("attendance")) return null;
+  if (empty && !failed.has("timeline") && !failed.has("attendance")) {
+    // The tile draws nothing until something has been recorded. An opened panel
+    // is blank for the same reason, which reads as broken, so it says so.
+    return inPanel ? <p className="px-5 py-6 text-callout text-fg-subtle">No services recorded yet.</p> : null;
+  }
   const unread = [
     failed.has("timeline") && "service timings",
     failed.has("attendance") && "attendance history",
@@ -568,9 +575,11 @@ export function RecentServicesCard({
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
         </h2>
-        <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
-          Open History
-        </AppLink>
+        {!inPanel && (
+          <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
+            Open History
+          </AppLink>
+        )}
       </header>
       {unread.length > 0 && <ErrorNote className="mx-3 my-2 shrink-0">Couldn't load {theList(unread)}.</ErrorNote>}
       {!empty && (
@@ -988,7 +997,7 @@ export function ScreensCard({
 }) {
   const total = outputs.length;
   if (!onlineKnown) {
-    return <Stat label="Screens" value={`—/${total}`} to="/screens" />;
+    return <Stat label="Screens" value={`—/${total}`} />;
   }
   const online = splitByPresence(outputs, onlineOutputIds).online.length;
   return (
@@ -996,7 +1005,6 @@ export function ScreensCard({
       label="Screens"
       value={`${online}/${total}`}
       sub={online === total ? "all connected" : "one or more offline"}
-      to="/screens"
       tone={online === total ? undefined : "danger"}
     />
   );

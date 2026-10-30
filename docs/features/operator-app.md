@@ -114,6 +114,26 @@ live value. Pick one and the tile shows that metric, captioned
 once a metric is picked, "loudest" is judged on that metric. A picked metric the
 meter stops reporting reads `—` and names it, never another metric's number.
 
+### Expanding a tile
+
+Some tiles open over Home instead of sending you to another page. Press the
+corner control on a tile — or, on a tile with no controls of its own, the tile
+itself — and it fills the window. The panel's header carries the tile's name,
+an **Open** link to the page the tile belongs to (**Open Screens**, for one), and **Close**; Escape closes it
+too. Nothing navigates, so Home is exactly where you left it.
+
+| Tile | Collapsed | Expanded | Open link goes to |
+|---|---|---|---|
+| **Wireless summary** | online count, lowest battery | every channel: name, battery, time left, RF bars, muted, offline | Mic slots |
+| **Screens** | connected of total | every screen: name, the view it shows, online or offline | Screens |
+| **Timer** (service) and **Current item** | the live item and its countdown | the whole rundown, the live item marked, planned against actual so far | Plan |
+| **Recent services** | the figures | the attendance trend with its readout | History |
+
+A tile with no expanded body does what it always did. Only the tiles with no
+controls of their own — Wireless summary, Screens and Recent services — expand on
+a press of the tile; on the others only the corner control does, so a button on a
+tile is never swallowed. While you are editing Home nothing expands.
+
 ### Sizes
 
 Five shapes on a three-column grid:

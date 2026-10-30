@@ -561,7 +561,7 @@ function fmtSignedDuration(sec: number): string {
 }
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
-function rfBarsGlyph(bars: number): string {
+export function rfBarsGlyph(bars: number): string {
   const n = clamp(Math.round(bars), 0, 5);
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
