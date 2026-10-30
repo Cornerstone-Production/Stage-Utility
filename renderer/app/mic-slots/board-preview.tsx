@@ -115,7 +115,7 @@ function StackZone({ slot }: { slot: Slot }) {
       style={isOver ? { background: "color-mix(in srgb, var(--color-accent) 30%, #111111)" } : undefined}
     >
       {isOver && (
-        <span data-mic-stack-label className="text-caption2 font-semibold uppercase tracking-wider text-white">
+        <span data-mic-stack-label className="px-1 text-center text-caption2 font-semibold uppercase leading-tight tracking-wider text-white">
           Stack below
         </span>
       )}

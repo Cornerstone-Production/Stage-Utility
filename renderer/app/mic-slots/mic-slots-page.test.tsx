@@ -447,8 +447,15 @@ describe("dragging with the pointer", () => {
     });
     await settle();
     assert.equal(labels(), 1);
-    assert.ok(stackZone("a").querySelector("[data-mic-stack-label]"));
+    const label = stackZone("a").querySelector("[data-mic-stack-label]");
+    assert.ok(label);
     assert.match((stackZone("a") as HTMLElement).style.background, /color-mix/);
+    // A column is narrow enough that both wrap to two lines; uncentred, each
+    // wrapped line sits against the left edge.
+    assert.ok(label.classList.contains("text-center"), "the stack label's wrapped lines must be centred");
+    const chip = document.querySelector("[data-mic-drag-label]");
+    assert.ok(chip, "the dragged slot's name chip must be showing");
+    assert.ok(chip.classList.contains("text-center"), "the dragged name's wrapped lines must be centred");
     await act(async () => {
       fireEvent.mouseUp(document, { clientX: z.x, clientY: z.y });
     });

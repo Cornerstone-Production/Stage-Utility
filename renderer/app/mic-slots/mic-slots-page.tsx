@@ -222,7 +222,7 @@ export function MicSlotsPage() {
               ))}
               <DragOverlay dropAnimation={null}>
                 {dragging && (
-                  <div className="rounded-lg border border-line-strong bg-popover px-3 py-2 text-footnote font-medium text-fg shadow-lg">{dragging.label}</div>
+                  <div data-mic-drag-label className="rounded-lg border border-line-strong bg-popover px-3 py-2 text-center text-footnote font-medium text-fg shadow-lg">{dragging.label}</div>
                 )}
               </DragOverlay>
             </DndContext>
