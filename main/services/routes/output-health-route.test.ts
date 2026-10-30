@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { beforeEach, describe, it } from "node:test";
+import { after, beforeEach, describe, it } from "node:test";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-output-health-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -15,7 +15,8 @@ process.env.HOME = path.join(TMP, "home");
 
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
-const { updateDevices } = await import("../kiosk-devices-store.js");
+const { kioskDevicesStore, updateDevices } = await import("../kiosk-devices-store.js");
+const { restoreCheckFor } = await import("../stores.js");
 const { healthList, resetKioskPresence } = await import("../kiosk-presence.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 
@@ -191,5 +192,174 @@ describe("what Screens is told", () => {
     const released = await callRoute(kioskDeviceRoutes, "/api/devices/release", { method: "POST", body: { deviceId: ID } });
     assert.equal(released.status, 200);
     assert.deepEqual(healthList(), [], "a released output still showed its old health");
+  });
+});
+
+describe("switching an output on and off", () => {
+  const setEnabled = (deviceId: string, enabled: unknown) =>
+    callRoute(kioskDeviceRoutes, "/api/devices/enabled", { method: "POST", body: { deviceId, enabled } });
+  const stored = async () => (await kioskDevicesStore.loadStrict()).find((d) => d.id === ID);
+
+  it("a post is answered with what Screens wants, on until it is switched off", async () => {
+    const r = await post(ID, REPORT, { token: SECRET });
+    assert.deepEqual(r.json, { ok: true, enabled: true });
+  });
+
+  it("Screens switches it off, and the helper's next post is told so", async () => {
+    const r = await setEnabled(ID, false);
+    assert.equal(r.status, 200);
+    assert.equal((await stored())?.enabled, false);
+    const answer = await post(ID, { ...REPORT, enabled: true }, { token: SECRET });
+    assert.deepEqual(answer.json, { ok: true, enabled: false });
+  });
+
+  it("and back on: the stored flag goes away rather than saying true", async () => {
+    await setEnabled(ID, false);
+    await setEnabled(ID, true);
+    assert.equal("enabled" in ((await stored()) ?? {}), false);
+    assert.deepEqual((await post(ID, REPORT, { token: SECRET })).json, { ok: true, enabled: true });
+  });
+
+  it("an output that is off posts no figures and is not struggling, and keeps being heard", async () => {
+    await setEnabled(ID, false);
+    for (let i = 0; i < 4; i++) await post(ID, { enabled: false }, { token: SECRET });
+    assert.deepEqual(healthList().map((h) => [h.deviceId, h.enabled, h.struggling]), [[ID, false, false]]);
+  });
+
+  it("an echo of the Mac's value never overrides Screens", async () => {
+    await setEnabled(ID, false);
+    // The Mac has not caught up: it still says on, with no `changed`.
+    const r = await post(ID, { ...REPORT, enabled: true }, { token: SECRET });
+    assert.deepEqual(r.json, { ok: true, enabled: false });
+    assert.equal((await stored())?.enabled, false, "a stale echo switched the output back on");
+  });
+
+  it("a change made on the Mac itself is taken, once, and Screens then shows it", async () => {
+    const r = await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+    assert.deepEqual(r.json, { ok: true, enabled: false });
+    assert.equal((await stored())?.enabled, false);
+    // And the Mac switching it back on is taken the same way.
+    const back = await post(ID, { ...REPORT, enabled: true, changed: "c2" }, { token: SECRET });
+    assert.deepEqual(back.json, { ok: true, enabled: true });
+    assert.equal("enabled" in ((await stored()) ?? {}), false);
+  });
+
+  it("the same change sent again, after a lost reply or replayed, is taken once and cannot undo Screens", async () => {
+    await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+    assert.equal((await stored())?.enabled, false);
+    // The operator switches it back on in Screens, then the Mac's retry arrives.
+    await setEnabled(ID, true);
+    const retry = await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+    assert.deepEqual(retry.json, { ok: true, enabled: true });
+    assert.equal("enabled" in ((await stored()) ?? {}), false, "a retried change undid what Screens set");
+    // A new change is still taken.
+    const fresh = await post(ID, { enabled: false, changed: "c2" }, { token: SECRET });
+    assert.deepEqual(fresh.json, { ok: true, enabled: false });
+  });
+
+  it("only the device's own secret may say it changed, and a refused post changes nothing", async () => {
+    const r = await post(ID, { enabled: false, changed: "c1" }, { token: "not-the-secret" });
+    assert.equal(r.status, 401);
+    assert.equal("enabled" in ((await stored()) ?? {}), false, "an unauthenticated post switched an output off");
+    assert.equal(r.body.includes("enabled"), false, "the flag was in a refusal");
+  });
+
+  it("the switch answers 400 to a body that is not an object", async () => {
+    for (const body of [null, [], "x"]) {
+      const r = await callRoute(kioskDeviceRoutes, "/api/devices/enabled", { method: "POST", body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+  });
+
+  it("the switch refuses what it cannot do", async () => {
+    assert.equal((await setEnabled(ID, "no")).status, 400);
+    assert.equal((await setEnabled("", true)).status, 400);
+    assert.equal((await setEnabled("someone-else.sdi-9", false)).status, 404);
+    await updateDevices((cur) => [...cur, { id: "pi-1", token: "t", outputId: "display-3", macs: [] }]);
+    const pi = await setEnabled("pi-1", false);
+    assert.equal(pi.status, 400, "a Pi kiosk was given a switch that does nothing");
+    assert.equal("enabled" in (((await kioskDevicesStore.loadStrict()).find((d) => d.id === "pi-1")) ?? {}), false);
+  });
+
+  it("the switch does not list the secret", async () => {
+    await setEnabled(ID, false);
+    const list = await callRoute(kioskDeviceRoutes, "/api/devices");
+    assert.equal(list.body.includes(SECRET), false);
+    assert.equal((list.json as { bound: { id: string; enabled?: boolean }[] }).bound.find((d) => d.id === ID)?.enabled, false);
+  });
+
+  it("a restored binding keeps a false switch and drops any other value", async () => {
+    const run = restoreCheckFor("kiosk-devices.json");
+    assert.ok(run, "kiosk-devices.json has no restore check");
+    const r = (await run([
+      { id: "a.1", outputId: "o1", enabled: false },
+      { id: "b.1", outputId: "o2", enabled: true },
+      { id: "c.1", outputId: "o3", enabled: "no" },
+    ])) as { ok: boolean; value: { id: string; enabled?: boolean }[] };
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.value.map((d) => [d.id, d.enabled]), [["a.1", false], ["b.1", undefined], ["c.1", undefined]]);
+  });
+});
+
+describe("the log says what the switch did", () => {
+  const lines: string[] = [];
+  const realLog = console.log;
+  const realWarn = console.warn;
+  beforeEach(() => {
+    lines.length = 0;
+    console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+    console.warn = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  });
+  after(() => { console.log = realLog; console.warn = realWarn; });
+  const switchLines = () => lines.filter((l) => l.includes("[output-helper]") && l.includes(ID));
+  const setEnabled = (enabled: boolean) =>
+    callRoute(kioskDeviceRoutes, "/api/devices/enabled", { method: "POST", body: { deviceId: ID, enabled } });
+
+  it("says a switch from Screens, once, and nothing when it changes nothing", async () => {
+    await setEnabled(false);
+    await setEnabled(false);
+    assert.deepEqual(switchLines().map((l) => l.replace(/^.*\[output-helper\] /, "")), [`${ID} (decklink "SDI 1") switched off from Screens`]);
+  });
+
+  it("says a switch made on the Mac", async () => {
+    await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+    assert.deepEqual(switchLines().map((l) => l.replace(/^.*\[output-helper\] /, "")), [`${ID} was switched off on its Mac`]);
+  });
+
+  it("says once, after two posts, that the Mac has not answered, and again after it has", async () => {
+    await setEnabled(false);
+    lines.length = 0;
+    await post(ID, { ...REPORT, enabled: true }, { token: SECRET });
+    assert.equal(switchLines().length, 0, "warned after one post");
+    await post(ID, { ...REPORT, enabled: true }, { token: SECRET });
+    assert.match(switchLines().join("\n"), /is set off in Screens and it still says on after 2 health posts/);
+    await post(ID, { ...REPORT, enabled: true }, { token: SECRET });
+    assert.equal(switchLines().length, 1, "warned on every post, not once");
+    // The Mac answers; the next disagreement counts again from one.
+    await post(ID, { enabled: false }, { token: SECRET });
+    await setEnabled(true);
+    lines.length = 0;
+    await post(ID, { enabled: false }, { token: SECRET });
+    assert.equal(switchLines().length, 0);
+    await post(ID, { enabled: false }, { token: SECRET });
+    assert.match(switchLines().join("\n"), /is set on in Screens and it still says off/);
+  });
+
+  it("says an old helper does not report it, only for an output that is off", async () => {
+    await post(ID, REPORT, { token: SECRET });
+    await post(ID, REPORT, { token: SECRET });
+    assert.equal(switchLines().length, 0, "an old helper on an output that is on was warned about");
+    await setEnabled(false);
+    lines.length = 0;
+    await post(ID, REPORT, { token: SECRET });
+    await post(ID, REPORT, { token: SECRET });
+    assert.match(switchLines().join("\n"), /its helper does not report it/);
+  });
+
+  it("a struggling output that is switched off does not log a recovery", async () => {
+    for (const dropped of [0, 5, 10, 15]) await post(ID, { ...REPORT, dropped }, { token: SECRET });
+    lines.length = 0;
+    await post(ID, { enabled: false }, { token: SECRET });
+    assert.equal(lines.some((l) => l.includes("has recovered")), false, "a switch off was logged as a recovery");
   });
 });

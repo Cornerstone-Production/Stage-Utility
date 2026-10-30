@@ -27,6 +27,9 @@ const MAX_FPS = 1_000;
 const MAX_LATENCY_MS = 10_000;
 const MAX_DROPPED = 1_000_000_000_000;
 
+/** The most a change id may be: a UUID is 36. */
+const MAX_CHANGE_ID = 64;
+
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /**
@@ -36,9 +39,31 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
  * report that is wrong by a factor is worse than one that is refused, because
  * nothing says it is wrong.
  */
-export function parseHealthReport(body: unknown): { report: OutputHealthReport } | { error: string } {
+export function parseHealthReport(body: unknown): { report: OutputHealthReport; changed?: string } | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "the body must be a JSON object" };
   const o = body as Record<string, unknown>;
+  // A JSON boolean and nothing else: 0 and 1 are not an answer. Absent from a
+  // helper older than the switch, and then the server changes nothing.
+  if (o.enabled !== undefined && typeof o.enabled !== "boolean") return { error: "enabled must be true or false" };
+  // The id of a change somebody just made to the switch on the Mac itself: only
+  // that is news the server should take. It is an id, not a flag, so a post sent
+  // again after a lost reply, or replayed, is the same change and is taken once
+  // rather than undoing what Screens has said since. Every post without one only
+  // echoes what the Mac holds, and never overrides Screens.
+  if (o.changed !== undefined && (typeof o.changed !== "string" || o.changed === "" || o.changed.length > MAX_CHANGE_ID)) {
+    return { error: `changed, when sent, must be text of 1 to ${MAX_CHANGE_ID} characters` };
+  }
+  if (o.changed !== undefined && o.enabled === undefined) return { error: "changed needs enabled" };
+  const changed = typeof o.changed === "string" ? { changed: o.changed } : {};
+  // An output that is off is drawing nothing, so it has no figures to give. It
+  // still posts, to be told when to come back, and says so with enabled: false.
+  if (o.enabled === false) {
+    const quiet = { fps: 0, repeated: 0, dropped: 0, at: 0, enabled: false };
+    for (const k of ["fps", "repeated", "dropped", "at", "latencyMs"] as const) {
+      if (o[k] !== undefined && o[k] !== null) return { error: `${k} is not sent while enabled is false` };
+    }
+    return { report: quiet, ...changed };
+  }
   if (!finite(o.fps) || o.fps < 0 || o.fps > MAX_FPS) return { error: `fps must be a number from 0 to ${MAX_FPS}` };
   if (!finite(o.repeated) || o.repeated < 0 || o.repeated > 100) return { error: "repeated must be a percent from 0 to 100" };
   if (!finite(o.dropped) || !Number.isInteger(o.dropped) || o.dropped < 0 || o.dropped > MAX_DROPPED) {
@@ -46,6 +71,7 @@ export function parseHealthReport(body: unknown): { report: OutputHealthReport }
   }
   if (!finite(o.at) || o.at < 0) return { error: "at must be a time in ms since the epoch" };
   const report: OutputHealthReport = { fps: o.fps, repeated: o.repeated, dropped: o.dropped, at: o.at };
+  if (o.enabled === true) report.enabled = true;
   // Optional, and null reads as absent: the helper sends null until it has measured one.
   if (o.latencyMs !== undefined && o.latencyMs !== null) {
     if (!finite(o.latencyMs) || o.latencyMs < 0 || o.latencyMs > MAX_LATENCY_MS) {
@@ -53,7 +79,7 @@ export function parseHealthReport(body: unknown): { report: OutputHealthReport }
     }
     report.latencyMs = o.latencyMs;
   }
-  return { report };
+  return { report, ...changed };
 }
 
 /** What is remembered between two reports to judge the second. */
@@ -79,6 +105,9 @@ export const FRESH_TREND: HealthTrend = { dropped: null, run: 0, struggling: fal
  * so one slow page does not flicker a warning on and off.
  */
 export function judge(trend: HealthTrend, report: OutputHealthReport, kind: DeviceOutputKind | undefined): HealthTrend {
+  // An output that is off is not late or dropping anything. It starts again from
+  // a fresh baseline when it comes back, because the dropped count restarts too.
+  if (report.enabled === false) return FRESH_TREND;
   // Only a DeckLink port has a card that can fall behind. A display output's
   // figures come from the display link, which does not tick while the display is
   // asleep or the screen is locked, so a healthy one reports 0 fps and a rule on
@@ -103,8 +132,8 @@ export function judge(trend: HealthTrend, report: OutputHealthReport, kind: Devi
 /** The figures a person sees, to the precision they see them at. Two reports that
  *  round to the same thing are the same news: a healthy 59.94 that reads 59.93
  *  next time must not wake every open Screens page. */
-export function displaySignature(h: { fps: number; repeated: number; dropped: number; struggling: boolean; latencyMs?: number }): string {
+export function displaySignature(h: { fps: number; repeated: number; dropped: number; struggling: boolean; latencyMs?: number; enabled?: boolean }): string {
   // Latency is shown in whole milliseconds, null when absent.
   const latency = h.latencyMs === undefined ? null : Math.round(h.latencyMs);
-  return JSON.stringify([Math.round(h.fps * 10) / 10, Math.round(h.repeated * 10) / 10, h.dropped, h.struggling, latency]);
+  return JSON.stringify([Math.round(h.fps * 10) / 10, Math.round(h.repeated * 10) / 10, h.dropped, h.struggling, latency, h.enabled ?? null]);
 }
