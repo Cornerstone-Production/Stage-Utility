@@ -100,6 +100,11 @@ The inspector's **Stacked** switch does the same as Shift+↑ and Shift+↓.
 
 Select a card, or a spacer, to edit it. A spacer has only a **Width**.
 
+The inspector opens beside the boards when something is selected and folds away when nothing is, so
+the previews take the full width. Click the selected card again to fold it away. The **Inspector**
+button at the top right opens it with nothing selected, to read the drag and keyboard help, and
+closes it, clearing the selection.
+
 **Who**
 
 | Control | What it does |
