@@ -422,6 +422,40 @@ describe("dragging with the pointer", () => {
     assert.equal(shape("b-left"), "~s | a | b+c | d");
   });
 
+  test("only the zone under the pointer is labelled, and it is opaque over the name", async () => {
+    // Every zone covers its card's name band while a drag is on. A label in each
+    // one printed "Stack below" over every name on the board at once.
+    await mount();
+    install();
+    placeRects();
+    const s = centre(card("d"));
+    await act(async () => {
+      fireEvent.mouseDown(card("d"), { button: 0, clientX: s.x, clientY: s.y });
+      fireEvent.mouseMove(document, { clientX: s.x + 8, clientY: s.y + 8 });
+    });
+    await settle();
+    const labels = () => [...document.querySelectorAll("[data-mic-stack]")].filter((z) => /stack below/i.test(z.textContent ?? "")).length;
+    const g = centre(gap("b-left", 1));
+    await act(async () => {
+      fireEvent.mouseMove(document, { clientX: g.x, clientY: g.y });
+    });
+    await settle();
+    assert.equal(labels(), 0, "a zone the pointer is not over must not print over a card's name");
+    const z = centre(stackZone("a"));
+    await act(async () => {
+      fireEvent.mouseMove(document, { clientX: z.x, clientY: z.y });
+    });
+    await settle();
+    assert.equal(labels(), 1);
+    assert.ok(stackZone("a").querySelector("[data-mic-stack-label]"));
+    assert.match((stackZone("a") as HTMLElement).style.background, /color-mix/);
+    await act(async () => {
+      fireEvent.mouseUp(document, { clientX: z.x, clientY: z.y });
+    });
+    uninstall();
+    await settle();
+  });
+
   test("a drop that lands on nothing changes nothing", async () => {
     await mount();
     install();
