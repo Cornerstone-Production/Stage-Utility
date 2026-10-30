@@ -100,19 +100,25 @@ function StackZone({ slot }: { slot: Slot }) {
     disabled: refused,
   });
   const shown = !!active && !refused;
+  // The zone lies over the card's name band. Only the zone under the pointer
+  // says anything, and it is opaque so it covers the band rather than printing
+  // over the name; every other zone is an edge and a faint tint, no text.
   return (
     <div
       ref={setNodeRef}
       data-mic-stack={slot.id}
       className={cn(
-        "pointer-events-none absolute inset-x-1.5 bottom-1.5 z-20 flex h-[45%] items-end justify-center rounded-b-xl pb-2 transition-opacity",
+        "pointer-events-none absolute inset-x-1.5 bottom-1.5 z-20 flex h-[45%] items-center justify-center rounded-b-xl transition-opacity",
         shown ? "opacity-100" : "opacity-0",
-        isOver ? "border-t-2 border-accent bg-accent/30" : "border-t border-dashed border-accent/45 bg-accent/10",
+        isOver ? "border-t-2 border-accent" : "border-t border-dashed border-accent/45 bg-accent/10",
       )}
+      style={isOver ? { background: "color-mix(in srgb, var(--color-accent) 30%, #111111)" } : undefined}
     >
-      <span className={cn("text-caption2 font-semibold uppercase tracking-wider", isOver ? "text-white" : "text-white/55")}>
-        Stack below
-      </span>
+      {isOver && (
+        <span data-mic-stack-label className="text-caption2 font-semibold uppercase tracking-wider text-white">
+          Stack below
+        </span>
+      )}
     </div>
   );
 }
