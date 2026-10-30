@@ -717,6 +717,21 @@ modes the port reported that the server accepts, otherwise all of them),
 **Rotation**, the output's health and **Release**. Releasing returns the output
 to *Not set up yet*.
 
+**The output's switch** turns the port on or off from Screens. It is on the screen's
+card and in the Device section as **Output on `<port>`**, one value shown twice. It belongs
+to the output, the port on the Mac, not to the screen it shows: off stops that port
+drawing, the screen keeps its view, URL and binding, and binding another screen to the
+port leaves it off. Releasing the output forgets the switch: set up again, it is on. The helper hears it in the answer to its next health post (within
+ten seconds), so nothing on the Mac listens for it. Until the Mac says it holds the new
+value, the card reads *Turning off…* (or *Turning on…*); once it does, *Off on this
+Mac*. An output that is off draws nothing and sends no figures, but keeps posting
+every ten seconds so that it can be told to come back. Only an output that is set up
+can be switched from Screens: one in *Not set up yet* has no secret to answer with,
+and is switched in the helper's own window. A switch changed in the helper's window is
+sent with an id for that change, taken once however many times it is sent again, and is the one report that overrides Screens; any other
+report only says what the Mac holds. A Mac helper that predates the switch ignores it,
+and Screens shows the output as off with the Mac not confirming.
+
 **Format and rotation** are settings of the screen, not of the Mac: a DeckLink
 port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
 rotation for a monitor on its side (`rotation`, 0 unless changed). They are
