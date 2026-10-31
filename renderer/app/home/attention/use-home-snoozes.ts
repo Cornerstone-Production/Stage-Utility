@@ -1,7 +1,7 @@
 // Home's snoozes, shared by every browser: one read to hydrate, then
 // `home:snoozes` pushes ordered by the server's rev.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { invoke } from "../../../lib/api";
 import { useStatusChannel } from "../../../main/use-status-channel";
@@ -21,8 +21,16 @@ export function useHomeSnoozes(enabled = true): HomeSnoozesHandle {
   const read = useCallback(() => invoke<HomeSnoozesState>("home:getSnoozes"), []);
   const channel = useStatusChannel<HomeSnoozesState>(read, HOME_SNOOZES_CHANNEL, enabled);
   const [fresh, setFresh] = useState<HomeSnoozesState | null>(null);
+  const latest = useRef(channel.value);
+  useEffect(() => {
+    latest.current = channel.value;
+  }, [channel.value]);
   const refresh = useCallback(async () => {
-    setFresh(await read());
+    const before = latest.current;
+    const next = await read();
+    // A frame that landed while the read was out is at least as new as it: the
+    // read starts after the server has committed this browser's change.
+    if (latest.current === before) setFresh(next);
   }, [read]);
   // `fresh` only bridges the gap until the channel next speaks. It is dropped the
   // moment a new frame arrives, never compared to it by rev: the server's rev
