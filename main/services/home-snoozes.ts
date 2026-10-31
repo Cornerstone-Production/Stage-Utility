@@ -67,6 +67,10 @@ export class HomeSnoozes {
   private rev = 0;
   private loaded = false;
   private wasLive: boolean | null = null;
+  /** Memory holds a clear the file does not: a drop() whose save failed. The next
+   *  successful save writes the whole list, so it is retried on every commit,
+   *  drop and lapse, and its outcome is logged on [home]. */
+  private dirty = false;
   private expiry: ReturnType<typeof setTimeout> | null = null;
   private writes = new WriteQueue();
 
@@ -128,8 +132,29 @@ export class HomeSnoozes {
         console.error("[home] could not save snoozes, NOT recorded:", scrubError(err));
         throw err;
       }
+      this.noteSaved();
       this.snoozes = next;
       this.publish();
+    });
+  }
+
+  /** A save went through: if it was owed from an earlier failure, say it is paid. */
+  private noteSaved(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
+    console.log("[home] saved snoozes: the earlier failed save is now on disk");
+  }
+
+  /** Retry an owed save with nothing else to do. */
+  private async flush(): Promise<void> {
+    if (!this.dirty) return;
+    await this.writes.enqueue(async () => {
+      try {
+        await store.save({ snoozes: [...this.snoozes.values()] });
+        this.noteSaved();
+      } catch (err) {
+        console.error("[home] retry of the snooze save failed; will retry:", scrubError(err));
+      }
     });
   }
 
@@ -139,7 +164,7 @@ export class HomeSnoozes {
     broadcast(HOME_SNOOZES_CHANNEL, this.state());
   }
 
-  /** One timer, aimed at the earliest expiry. Only 12-hour snoozes have one. */
+  /** One timer, aimed at the earliest expiry. Every snooze has one: 12 hours, or the 7-day backstop. */
   private armExpiry(): void {
     if (this.expiry) clearTimeout(this.expiry);
     this.expiry = null;
@@ -154,6 +179,7 @@ export class HomeSnoozes {
     const now = Date.now();
     const gone = [...this.snoozes.values()].filter((s) => s.expiresAt !== null && s.expiresAt <= now);
     if (gone.length === 0) {
+      await this.flush();
       this.armExpiry();
       return;
     }
@@ -173,8 +199,8 @@ export class HomeSnoozes {
   /**
    * Remove keys from a listener or timer, which has no caller to hand a failure
    * to. The memory is updated either way (the service has started; the snoozes
-   * are over) and the failed write is named on /log; the next change saves the
-   * whole file again.
+   * are over) and the failed write is named on /log and marked owed (`dirty`):
+   * the next commit, drop or lapse saves the whole file again and says so.
    */
   private async drop(which: (s: HomeSnooze) => boolean, why: (n: number) => string): Promise<void> {
     // Built INSIDE the queue, from what is held by the time this turn comes: a
@@ -187,8 +213,10 @@ export class HomeSnoozes {
         count = this.snoozes.size - next.size;
         try {
           await store.save({ snoozes: [...next.values()] });
+          this.noteSaved();
         } catch (err) {
-          console.error("[home] could not save snoozes after clearing them:", scrubError(err));
+          console.error("[home] could not save snoozes after clearing them; will retry:", scrubError(err));
+          this.dirty = true;
         }
         this.snoozes = next;
       });

@@ -180,4 +180,35 @@ describe("home snoozes", () => {
     assert.deepEqual(keys(homeSnoozes.state()), [], "the service has started: the snoozes are over");
     assert.ok(errs.some((e) => e.includes("[home] could not save snoozes after clearing them")), errs.join("\n"));
   });
+
+  it("a clear whose save failed is owed: the next commit writes it and says so", async () => {
+    live("none");
+    await homeSnoozes.snooze("owed:a", "warn", true);
+    await fs.rm(FILE, { force: true });
+    await fs.mkdir(FILE);
+    const errors = mock.method(console, "error", () => {});
+    live("item");
+    await settle();
+    errors.mock.restore();
+    await fs.rmdir(FILE);
+    assert.deepEqual(keys(homeSnoozes.state()), []);
+    await homeSnoozes.snooze("owed:b", "warn", true);
+    assert.deepEqual(await onDisk(), ["owed:b"], "the file no longer holds the cleared snooze");
+    assert.ok(logged.includes("[home] saved snoozes: the earlier failed save is now on disk"), logged.join("\n"));
+    await homeSnoozes.unsnooze("owed:b");
+  });
+
+  it("a lapse with nothing to drop still retries an owed save", async () => {
+    live("none");
+    await homeSnoozes.snooze("owed2:a", "warn", true);
+    await fs.rm(FILE, { force: true });
+    await fs.mkdir(FILE);
+    const errors = mock.method(console, "error", () => {});
+    live("item");
+    await settle();
+    await fs.rmdir(FILE);
+    await (homeSnoozes as unknown as { lapse: () => Promise<void> }).lapse();
+    errors.mock.restore();
+    assert.deepEqual(await onDisk(), [], "the owed clear reached the disk");
+  });
 });

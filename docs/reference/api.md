@@ -177,8 +177,10 @@ screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
 `{connected: [outputId], rev, lastSeen: [[outputId, epochMs]]}` — the screens with a browser attached, and when each output last reported in, which each
 display page reports by heartbeat to `POST /api/displays/presence` (`{outputId, …}`, or `{outputId, leaving: true}` when the page closes; answers `{ok}`, false without an `outputId`). The same set
 rides the `displays:presence` SSE channel; `rev` is what lets a client tell a
-stale read from a fresh one. `lastSeen` is an array of pairs, one per output that has
-reported since the server started (an output that never has no entry), and survives an output leaving. It is exact for an output that is not connected, which is
+stale read from a fresh one. `lastSeen` is an array of pairs, one per screen that exists and has reported in (a
+screen that never has no entry), and survives a screen leaving. An output is forgotten
+after 30 days of silence, ids over 128 characters are ignored, and ids that are not
+screens are never published. It is exact for an output that is not connected, which is
 what it is for; for a connected one it is as of the last change, because a heartbeat
 alone broadcasts nothing.
 
