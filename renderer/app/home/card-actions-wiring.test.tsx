@@ -101,3 +101,28 @@ describe("the service Timer", () => {
     assert.ok(screen.queryByRole("button") === null);
   });
 });
+
+describe("Screens keeps its link where it does not expand", () => {
+  const screens = { type: "home-screens" };
+  async function mountScreens(home: boolean) {
+    const { RouterContextProvider } = await import("@tanstack/react-router");
+    const { routerAt } = await import("../../test-fixtures/router.js");
+    render(
+      React.createElement(RouterContextProvider, {
+        router: routerAt("/", "/", "/screens"),
+        children: React.createElement(ObjectContent, { o: obj(screens), ctx: makeRenderCtx({ home, interactive: true }) }),
+      }),
+    );
+    await settle();
+  }
+
+  test("on a console it links to /screens", async () => {
+    await mountScreens(false);
+    assert.equal(screen.getByRole("link").getAttribute("href"), "/screens");
+  });
+
+  test("on Home it does not: the tile expands and the panel carries Open Screens", async () => {
+    await mountScreens(true);
+    assert.ok(screen.queryByRole("link") === null);
+  });
+});

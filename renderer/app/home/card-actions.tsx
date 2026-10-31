@@ -24,6 +24,7 @@ import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/button";
+import { useLiveStep } from "../../main/live-controls";
 import type { Recorder } from "../recording-status";
 
 /** How long "Stop recording?" waits for its second press. */
@@ -53,26 +54,32 @@ export function useTransientNote(ms = ACTION_NOTE_MS): [string | null, (message:
  * Two presses within `ms`. The first arms, the second confirms; an armed press
  * that is not followed up disarms itself.
  */
-export function useStopConfirm(onConfirm: () => void, ms = STOP_CONFIRM_MS) {
-  const [armed, setArmed] = useState(false);
+export function useStopConfirm(onConfirm: () => void, scope: unknown, ms = STOP_CONFIRM_MS) {
+  // The ask belongs to the state it was made about (`scope`): a recorder that
+  // restarts inside the window is a different question, and one press must not
+  // answer it.
+  const [asked, setAsked] = useState<{ scope: unknown } | null>(null);
+  // Any change of scope disarms, adjusted during render so there is no frame in
+  // which the old ask is still showing. false, true, false, true inside the
+  // window must not land back on an armed button.
+  const [seen, setSeen] = useState(scope);
+  if (!Object.is(seen, scope)) {
+    setSeen(scope);
+    if (asked) setAsked(null);
+  }
+  const armed = asked !== null && Object.is(asked.scope, scope) && Object.is(seen, scope);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const armedRef = useRef(false);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const press = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
-    if (armedRef.current) {
-      armedRef.current = false;
-      setArmed(false);
+    if (armed) {
+      setAsked(null);
       onConfirm();
       return;
     }
-    armedRef.current = true;
-    setArmed(true);
-    timer.current = setTimeout(() => {
-      armedRef.current = false;
-      setArmed(false);
-    }, ms);
-  }, [onConfirm, ms]);
+    setAsked({ scope });
+    timer.current = setTimeout(() => setAsked(null), ms);
+  }, [armed, onConfirm, scope, ms]);
   return { armed, press };
 }
 
@@ -122,7 +129,18 @@ type Verb = "start" | "stop";
 
 /** What the recorders must report for `verb` to have happened. */
 function arrived(list: readonly Recorder[], names: readonly string[], verb: Verb): boolean {
-  return names.every((n) => list.find((r) => r.name === n)?.recording === (verb === "start"));
+  return names.every((n) => {
+    const r = list.find((x) => x.name === n);
+    // A recorder that is gone or disconnected is not recording, so a Stop is
+    // done. A Start is not: it keeps waiting, and gives up naming it.
+    if (verb === "stop" && (!r || !r.connected)) return true;
+    return r?.recording === (verb === "start");
+  });
+}
+
+/** The recorders still not where a press wanted them. */
+function missing(list: readonly Recorder[], names: readonly string[], verb: Verb): string[] {
+  return names.filter((n) => !arrived(list, [n], verb));
 }
 
 export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
@@ -130,6 +148,12 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
   const recording = targets.some((r) => r.recording);
   const [pending, setPending] = useState<{ verb: Verb; names: string[] } | null>(null);
   const [note, showNote] = useTransientNote();
+  // What the give-up timer and a late failure judge against: the CURRENT status,
+  // not the render that scheduled them.
+  const latest = useRef(chosen);
+  useEffect(() => {
+    latest.current = chosen;
+  });
 
   // The status channel is the only thing that finishes a press.
   const waiting = pending !== null && !arrived(chosen, pending.names, pending.verb);
@@ -141,7 +165,15 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
   useEffect(() => {
     if (!waiting || !pending) return;
     const t = setTimeout(() => {
-      showNote(`${pending.names.map((n) => RECORDER_ACTION[n]?.label ?? n).join(" and ")} did not confirm`);
+      const label = (n: string) => RECORDER_ACTION[n]?.label ?? n;
+      const now = latest.current;
+      const gone = missing(now, pending.names, pending.verb);
+      const off = gone.filter((n) => !now.find((r) => r.name === n)?.connected);
+      showNote(
+        off.length > 0
+          ? `${off.map(label).join(" and ")} disconnected`
+          : `${gone.map(label).join(" and ")} did not confirm`,
+      );
       setPending(null);
     }, CONFIRM_GIVE_UP_MS);
     return () => clearTimeout(t);
@@ -171,13 +203,15 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
       );
       if (failures.length > 0) {
         setPending(null);
-        showNote(failures.join(" "));
+        // A refusal that arrives after the status already shows what was asked
+        // for is not news: the recorder is where the operator wanted it.
+        if (!arrived(latest.current, these.map((r) => r.name), verb)) showNote(failures.join(" "));
       }
     },
     [targets, showNote],
   );
 
-  const stop = useStopConfirm(() => void run("stop"));
+  const stop = useStopConfirm(() => void run("stop"), recording);
 
   if (targets.length === 0) return null;
   if (note) return <Note>{note}</Note>;
@@ -215,20 +249,8 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
  * and moves on its own when `pco:live` does.
  */
 export function StepAction({ showPrev }: { showPrev: boolean }) {
-  const [busy, setBusy] = useState<"previous" | "next" | null>(null);
   const [note, showNote] = useTransientNote();
-
-  async function go(dir: "previous" | "next") {
-    if (busy) return;
-    setBusy(dir);
-    try {
-      await invoke(dir === "next" ? "pco:liveNext" : "pco:livePrevious");
-    } catch (e) {
-      showNote(`PCO ${dir} failed: ${errorMessage(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  }
+  const { busy, go } = useLiveStep(showNote);
 
   if (note) return <Note>{note}</Note>;
   return (

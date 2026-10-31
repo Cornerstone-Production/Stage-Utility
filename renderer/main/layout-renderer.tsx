@@ -1022,6 +1022,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
           actionable={live}
+          linked={ctx.interactive && !ctx.home}
         />
       </div>
     );

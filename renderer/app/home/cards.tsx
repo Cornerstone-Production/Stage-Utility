@@ -994,7 +994,11 @@ export function ScreensCard({
   outputs,
   onlineOutputIds,
   onlineKnown,
+  linked = false,
 }: {
+  /** Link the tile to the Screens page. Off on Home, where the tile expands and
+   *  its panel carries Open Screens; on for the same card placed on a console. */
+  linked?: boolean;
   outputs: readonly Output[];
   onlineOutputIds: readonly string[];
   /** Whether presence has answered yet — see useDisplayPresenceStatus. Unknown
@@ -1004,7 +1008,7 @@ export function ScreensCard({
 }) {
   const total = outputs.length;
   if (!onlineKnown) {
-    return <Stat label="Screens" value={`—/${total}`} />;
+    return <Stat label="Screens" value={`—/${total}`} to={linked ? "/screens" : undefined} />;
   }
   const online = splitByPresence(outputs, onlineOutputIds).online.length;
   return (
@@ -1012,6 +1016,7 @@ export function ScreensCard({
       label="Screens"
       value={`${online}/${total}`}
       sub={online === total ? "all connected" : "one or more offline"}
+      to={linked ? "/screens" : undefined}
       tone={online === total ? undefined : "danger"}
     />
   );
@@ -1034,7 +1039,10 @@ export function HomeCard({
   secondsToStart,
   hoverSuppressed = false,
   actionable = false,
+  linked = false,
 }: {
+  /** Whether Screens links to its page: an interactive surface that is not Home. */
+  linked?: boolean;
   /** Whether a tile's own action (Start / Stop) is drawn. See RecordingCard. */
   actionable?: boolean;
   /**
@@ -1110,6 +1118,7 @@ export function HomeCard({
           outputs={state.outputs ?? []}
           onlineOutputIds={onlineOutputIds}
           onlineKnown={onlineKnown}
+          linked={linked}
         />
       );
     case "home-next-service":

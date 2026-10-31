@@ -85,6 +85,19 @@ describe("Stop takes two presses", () => {
     assert.ok(screen.getByRole("button", { name: "Stop recording?" }));
   });
 
+  test("a recorder that restarts inside the window is not stopped by one press", async () => {
+    const { rerender } = render(tile([reaper({ recording: true })]));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    assert.ok(screen.getByRole("button", { name: "Stop recording?" }));
+    // Stopped by somebody else, then started again, all inside 3 seconds.
+    rerender(tile([reaper({ recording: false })]));
+    rerender(tile([reaper({ recording: true })]));
+    await settle();
+    assert.ok(screen.getByRole("button", { name: "Stop" }), "the ask was about a recording that ended");
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    assert.equal(invokes().length, 0, "one press only asks again");
+  });
+
   test("OBS stops through its own action", async () => {
     render(tile([{ name: "OBS", connected: true, recording: true, timecode: null }]));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -128,6 +141,75 @@ describe("Start", () => {
     await act(async () => { await Promise.resolve(); });
     act(() => mock.timers.tick(CONFIRM_GIVE_UP_MS));
     assert.match(screen.getByRole("alert").textContent ?? "", /Reaper did not confirm/);
+  });
+
+  test("with two recorders chosen, it spins until BOTH report recording", async () => {
+    const obs = (recording: boolean) => ({ name: "OBS", connected: true, recording, timecode: null });
+    const { rerender } = render(tile([reaper(), obs(false)]));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await settle();
+    assert.equal(invokes().length, 2, "each recorder is told");
+    rerender(tile([reaper({ recording: true }), obs(false)]));
+    await settle();
+    assert.ok(screen.getByRole("button", { name: "Starting" }), "one of two is not done");
+    rerender(tile([reaper({ recording: true }), obs(true)]));
+    await settle();
+    assert.ok(screen.getByRole("button", { name: "Stop" }));
+  });
+
+  test("a refusal clears the spinner and says why, when the status never moves", async () => {
+    answer = () => ok({ ok: false, detail: "REAPER is not connected" });
+    render(tile([reaper()]));
+    mock.timers.enable({ apis: ["setTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    assert.match(screen.getByRole("alert").textContent ?? "", /not connected/);
+    assert.ok(screen.queryByRole("button", { name: "Starting" }) === null, "the spinner must clear");
+    // And it stays cleared once the note has gone, not hiding behind it.
+    act(() => mock.timers.tick(ACTION_NOTE_MS));
+    assert.ok(screen.queryByRole("alert") === null);
+    assert.ok(screen.queryByRole("button", { name: "Starting" }) === null, "no spinner under the note");
+    assert.ok(screen.getByRole("button", { name: "Start" }));
+  });
+
+  test("a refusal that lands after the recorder is already recording shows no failure", async () => {
+    let release: (v: unknown) => void = () => {};
+    answer = () => new Promise((r) => { release = r; });
+    const { rerender } = render(tile([reaper()]));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await settle();
+    rerender(tile([reaper({ recording: true })]));
+    await settle();
+    release(ok({ ok: false, detail: "already recording" }));
+    await settle();
+    assert.ok(screen.queryByRole("alert") === null, "a note over a working recorder is a lie");
+  });
+
+  test("a recorder that disconnects or vanishes mid-Stop finishes the press at once", async () => {
+    const obs = (recording: boolean) => ({ name: "OBS", connected: true, recording, timecode: null });
+    for (const gone of [reaper({ recording: true, connected: false }), null]) {
+      const { rerender, unmount } = render(tile([reaper({ recording: true }), obs(true)]));
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+      fireEvent.click(screen.getByRole("button", { name: "Stop recording?" }));
+      await settle();
+      assert.ok(screen.getByRole("button", { name: "Stopping" }));
+      // OBS stops; REAPER is gone and would never report recording: false.
+      rerender(tile([...(gone ? [gone] : []), obs(false)]));
+      await settle();
+      assert.ok(screen.queryByRole("button", { name: "Stopping" }) === null, "a gone recorder is not recording");
+      unmount();
+    }
+  });
+
+  test("a recorder that disconnects mid-Start is named at the give-up", async () => {
+    const obs = (recording: boolean) => ({ name: "OBS", connected: true, recording, timecode: null });
+    const { rerender } = render(tile([reaper(), obs(false)]));
+    mock.timers.enable({ apis: ["setTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await act(async () => { await Promise.resolve(); });
+    rerender(tile([reaper({ connected: false }), obs(true)]));
+    act(() => mock.timers.tick(CONFIRM_GIVE_UP_MS));
+    assert.match(screen.getByRole("alert").textContent ?? "", /Reaper disconnected/);
   });
 
   test("a recorder that is not connected offers nothing", () => {

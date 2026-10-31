@@ -49,7 +49,7 @@ const dev = (over: Partial<DeviceStatus>): DeviceStatus =>
     cycles: null, health: null, tempC: null, updatedAt: "", ...over,
   }) as DeviceStatus;
 
-function mount(config: unknown, opts: { interactive?: boolean; editing?: boolean; onInner?: () => void; currentItemId?: string } = {}) {
+function mount(config: unknown, opts: { interactive?: boolean; editing?: boolean; onInner?: () => void; currentItemId?: string; parentSees?: string[] } = {}) {
   const router = routerAt("/", "/", "/mic-slots", "/screens", "/plan", "/history/manage");
   const ctx = makeRenderCtx({
     home: true,
@@ -62,6 +62,13 @@ function mount(config: unknown, opts: { interactive?: boolean; editing?: boolean
     React.createElement(RouterContextProvider, {
       router,
       children: React.createElement(
+        "div",
+        {
+          onContextMenu: () => opts.parentSees?.push("contextmenu"),
+          onPointerDown: () => opts.parentSees?.push("pointerdown"),
+          onPointerUp: () => opts.parentSees?.push("pointerup"),
+        },
+        React.createElement(
         ExpandableTile,
         {
           o: obj(config),
@@ -70,7 +77,7 @@ function mount(config: unknown, opts: { interactive?: boolean; editing?: boolean
           children: React.createElement("div", { "data-testid": "body" }, "tile body",
             React.createElement("button", { type: "button", onClick: opts.onInner }, "inner")),
         },
-      ),
+      )),
     }),
   );
   return router;
@@ -89,6 +96,26 @@ test("the corner control opens the panel and Close shuts it", async () => {
   // The Close press bubbles through the React tree to the card's own press
   // handler. If that reads it as a press on the card, the panel reopens.
   assert.ok(panel() === null, "Close must leave it closed");
+});
+
+test("pointer and context-menu events inside the panel never reach the card's own handlers", async () => {
+  // Home's cell listens for a long press and a right-click on the card to open
+  // its menu. A portal's events still bubble through the React tree, so without
+  // the guard a right-click in the panel opens that menu behind it.
+  const seen: string[] = [];
+  mount({ type: "wireless-summary" }, { parentSees: seen });
+  // The control proves the parent listens at all.
+  fireEvent.contextMenu(screen.getByTestId("body"));
+  fireEvent.pointerDown(screen.getByTestId("body"));
+  assert.deepEqual(seen, ["contextmenu", "pointerdown"], "events on the card itself do reach it");
+  seen.length = 0;
+  fireEvent.click(screen.getByRole("button", { name: "Expand Wireless" }));
+  await settle();
+  const row = (panel() as HTMLElement).querySelector("[data-row]") as HTMLElement;
+  fireEvent.contextMenu(row);
+  fireEvent.pointerDown(row);
+  fireEvent.pointerUp(row);
+  assert.deepEqual(seen, [], "nothing from the panel reaches the card");
 });
 
 test("pressing the body of a card with no controls of its own opens it", async () => {
