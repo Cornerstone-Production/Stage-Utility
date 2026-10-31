@@ -176,7 +176,7 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
   return {
     loadRules: () => automationStore.loadRules(),
     saveRules: (rules) => automationStore.saveRules(rules),
-    refusal: () => automationStore.rulesUnreadable() ?? viewsStore.refusingSaves(),
+    refusal: () => automationStore.refusingSaves() ?? viewsStore.refusingSaves(),
     actionLabel: (id) => AUTOMATION_ACTIONS[id]?.label,
   };
 }
@@ -198,16 +198,18 @@ export async function runActionButtonMigration(
   const left = (failure: string | null): ActionButtonMigrationRun => ({ views, settled: false, rulesWritten: 0, line: null, failure });
   if (alreadyDone) return { ...left(null), settled: true };
   const d = deps ?? (await defaultDeps());
-  // The rules file unreadable reads as no rules at all, and writing over that is
-  // how an operator's cues are lost. Nothing is changed until a start reads it.
-  const refusal = d.refusal();
-  if (refusal) return left(refusedSentence(refusal));
   let existing: Rule[];
   try {
     existing = await d.loadRules();
   } catch (err) {
     return left(refusedSentence(err));
   }
+  // After the load, not before: a store that has not been read yet cannot say it
+  // is unreadable, and an unreadable rules file reads as no rules at all. Writing
+  // over that is how an operator's cues are lost, so nothing is changed until a
+  // start reads it.
+  const refusal = d.refusal();
+  if (refusal) return left(refusedSentence(refusal));
   const plan = planActionButtonMigration(views, existing, d.actionLabel);
   if (plan.count === 0) return { ...left(null), settled: true };
   if (plan.rules.length > 0) {

@@ -75,6 +75,10 @@ export const automationStore = {
   rulesUnreadable() {
     return rules.unreadable();
   },
+  /** Why saves to the rules are refused, or null: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return rules.refusingSaves();
+  },
   async loadRules(): Promise<Rule[]> {
     return rules.load();
   },
