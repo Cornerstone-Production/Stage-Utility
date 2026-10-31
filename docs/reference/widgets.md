@@ -653,7 +653,9 @@ does not change when the label or the pick does. Pointing the Button at the comm
 is an edit like any other, so the layout still needs saving. The command itself
 is written at once and is not part of that edit: **Discard**, **Undo** and a Home
 sheet's **Cancel** put the Button back to the command it named, but not the command's
-action, so a re-pick that is then discarded leaves the Button pressing the new thing. If the server refuses
+action, so a re-pick that is then discarded leaves the Button pressing the new thing. A Button duplicated with its command shares it until
+one of the two is picked again: that pick leaves the shared command as it is for the
+other and gives this Button a new one. If the server refuses
 the rule, the Button is left as it was and the reason is shown under the choice.
 
 **List it with the other commands** releases the command from its Button. Nothing

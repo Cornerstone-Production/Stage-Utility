@@ -70,6 +70,23 @@ export interface PressTarget {
 
 type Wrote = { ok: true; cue: string; rule: Rule } | { ok: false; error: string };
 
+/** One Button that names a command, as `GET /api/cues/usage` lists it. */
+interface UsageUse {
+  viewId: string;
+  objectId: string;
+}
+
+/**
+ * Every Button OTHER than `owner` that names this command. A Button duplicated with
+ * its command still pressing the original's has the same cue, so the rule is not the
+ * one Button's alone any more, whoever it says it belongs to.
+ */
+async function otherUsers(cue: string, owner: PressOwner): Promise<UsageUse[]> {
+  const usage = await invoke<Record<string, UsageUse[]>>("cues:usage");
+  const key = cue.trim().toLowerCase();
+  return (Object.hasOwn(usage, key) ? usage[key]! : []).filter((u) => !sameOwner(u, owner));
+}
+
 /**
  * Make, or rewrite, the command that belongs to this Button.
  *
@@ -78,7 +95,11 @@ type Wrote = { ok: true; cue: string; rule: Rule } | { ok: false; error: string 
  * in a row would mint `btn_x` and `btn_x_2`. A rule that already belongs to this
  * Button has its action and name rewritten and is switched on; its trigger, and so
  * the command's name, is left alone.
-
+ *
+ * COPY ON WRITE: when another Button also presses that rule (a duplicate made before
+ * this pick), rewriting it would change what the copy does under its feet. The rule is
+ * then left as it is, handed to the first of those Buttons as its own, and this
+ * Button gets a new command.
  */
 export async function writeOwnedRule(opts: {
   owner: PressOwner;
@@ -91,7 +112,17 @@ export async function writeOwnedRule(opts: {
   try {
     const ruleName = chosenLabel(opts.label) ?? (opts.target.name.trim() || opts.target.action.id);
     const { rules } = await invoke<{ rules: Rule[] }>("automation:rules");
-    const existing = ownedRuleFor(rules, opts.owner, opts.cue);
+    let existing = ownedRuleFor(rules, opts.owner, opts.cue);
+    if (existing) {
+      const sharers = await otherUsers(calledCueName(existing.trigger), opts.owner);
+      if (sharers.length > 0) {
+        await invoke("automation:updateRule", {
+          id: existing.id,
+          patch: { ownedBy: { viewId: sharers[0]!.viewId, objectId: sharers[0]!.objectId } },
+        });
+        existing = null;
+      }
+    }
     if (existing) {
       // `says` is what a Button with no label of its own draws (the manifest names a command
       // by it), so it follows the pick; the command's own name, beside it, never changes.

@@ -543,6 +543,34 @@ describe("writes that overlap", () => {
   });
 });
 
+describe("a Button that copies of it also press", () => {
+  test("a re-pick leaves the shared command to the copy and gives this Button a new one", async () => {
+    const shared = owned("btn_shutter", PRESS_17_2_0);
+    const s = serve({
+      rules: [shared],
+      usage: {
+        btn_shutter: [
+          { viewId: "booth", viewName: "Booth console", objectId: "o1", label: "", home: false },
+          { viewId: "foh", viewName: "FOH iPad", objectId: "copy", label: "", home: false },
+        ],
+      },
+    });
+    const { container, configs } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true });
+    await gridReady(container);
+    await eventually(() => assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true"));
+    fireEvent.click(keyAt(container, 0, 0)!);
+    await eventually(() => assert.equal(configs.length, 1));
+    const sharedNow = s.rules.find((r) => r.id === "own-1")!;
+    assert.deepEqual(sharedNow.action, PRESS_17_2_0, "what the copy presses is not rewritten under it");
+    assert.deepEqual(sharedNow.ownedBy, { viewId: "foh", objectId: "copy" }, "it now belongs to the copy");
+    assert.equal(s.posts.length, 1);
+    assert.deepEqual(s.posts[0]!.ownedBy, OWNER);
+    const made = (s.posts[0]!.trigger as { params: { name: string } }).params.name;
+    assert.notEqual(made, "btn_shutter");
+    assert.equal((configs[0] as { cue: string }).cue, made);
+  });
+});
+
 describe("the page list", () => {
   test("with no page that has anything on it, the pane says so instead of reading for ever", async () => {
     serve({ noPages: true });
