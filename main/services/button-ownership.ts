@@ -24,6 +24,7 @@ import { homeVisibilityParams } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import { HOME_VIEW_ID } from "./home-view.js";
 import { viewsStore } from "./views-store.js";
+import { walkLayoutObjects } from "./view-refs.js";
 
 /** One Button that names a cue. */
 export interface CueButtonUse {
@@ -36,16 +37,17 @@ export interface CueButtonUse {
   home: boolean;
 }
 
-/** Every object under `objects`, nested ones included, with the cue it names, trimmed and
+/** Every Button under `objects`, nested ones included, with the cue it names, trimmed and
  *  lower-cased the way the engine compares a cue name. */
-function* cueButtonsIn(objects: readonly LayoutObject[] | undefined): Generator<{ object: LayoutObject; cue: string }> {
-  for (const o of objects ?? []) {
-    const cfg = o.config as { type?: string; cue?: unknown };
+function cueButtonsIn(objects: readonly LayoutObject[] | undefined): { object: LayoutObject; cue: string }[] {
+  const out: { object: LayoutObject; cue: string }[] = [];
+  walkLayoutObjects(objects ?? [], (object) => {
+    const cfg = object.config as { type?: string; cue?: unknown };
     if (cfg?.type === "cue-button" && typeof cfg.cue === "string" && cfg.cue.trim()) {
-      yield { object: o, cue: cfg.cue.trim().toLowerCase() };
+      out.push({ object, cue: cfg.cue.trim().toLowerCase() });
     }
-    if (o.children?.length) yield* cueButtonsIn(o.children);
-  }
+  });
+  return out;
 }
 
 /**
@@ -105,7 +107,7 @@ export function ownerHolds(rule: Rule, views: readonly View[]): boolean {
   for (const { object, cue } of cueButtonsIn(view?.layout?.objects)) {
     if (object.id === owner.objectId && names.has(cue)) return true;
   }
-  return views.some((v) => [...cueButtonsIn(v.layout?.objects)].some(({ cue }) => names.has(cue)));
+  return views.some((v) => cueButtonsIn(v.layout?.objects).some(({ cue }) => names.has(cue)));
 }
 
 /**
