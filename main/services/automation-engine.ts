@@ -71,11 +71,12 @@ function withOwner(rule: Rule, ownedBy: unknown): Rule {
   return ownedBy === null ? rest : { ...rest, ownedBy: ownedBy as OwnedBy };
 }
 
-/** What an update's log line adds about the Button, or nothing for a rule that has none. */
+/** What an update's log line adds about the Button, or nothing for a rule that has none.
+ *  Built from stored ids, so the caller scrubs the whole of it. */
 function ownerNote(before: OwnedBy | undefined, after: OwnedBy | undefined): string {
-  if (after) return ` — belongs to button ${scrub(after.objectId)} on view ${scrub(after.viewId)}`;
+  if (after) return ` — belongs to button ${after.objectId} on view ${after.viewId}`;
   if (before) {
-    return ` — no longer belongs to button ${scrub(before.objectId)} on view ${scrub(before.viewId)}; listed with the other cues`;
+    return ` — no longer belongs to button ${before.objectId} on view ${before.viewId}; listed with the other cues`;
   }
   return "";
 }
@@ -474,7 +475,7 @@ class AutomationEngine {
     if (!("ownedBy" in merged)) delete r.ownedBy;
     Object.assign(r, merged);
     await automationStore.saveRules(this.rules);
-    console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})${ownerNote(ownerBefore, r.ownedBy)}`);
+    console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})${scrub(ownerNote(ownerBefore, r.ownedBy))}`);
     // A cue's name is a URL somebody else holds. When it changes or goes, "a console
     // button reads Unbound" needs a line to be traced back to.
     const cueAfter = calledCueName(r.trigger);

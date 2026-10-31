@@ -33,9 +33,6 @@ import {
 } from "./companion-state-source.js";
 import { collapse, slugForCue } from "./cue-slug.js";
 
-// Both live in cue-slug.ts so a module that only names cues need not load this parser.
-export { collapse, slugForCue };
-
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
   page: number;

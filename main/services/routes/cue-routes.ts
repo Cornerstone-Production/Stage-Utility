@@ -44,10 +44,10 @@ import {
   cueSlugs,
   isSuggestedPair,
   singleButtons,
-  slugForCue,
   splitToggleLabel,
   togglePairSlug,
 } from "../companion-export.js";
+import { slugForCue } from "../cue-slug.js";
 import { learnableOffer } from "../companion-state-learn.js";
 import { stateBindingParams, stateBindingProblem } from "../cue-pairs.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
