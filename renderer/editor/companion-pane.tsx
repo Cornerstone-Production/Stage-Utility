@@ -27,7 +27,8 @@ import { errorMessage } from "@main/services/errors";
 import { ErrorNote } from "../components/ui";
 import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
-import { companionButtonsQuery, fingerprintFor, type CompanionButton } from "../settings/sections/companion-cues";
+import { companionButtonsQuery } from "../lib/companion-buttons";
+import { fingerprintFor, type CompanionButton } from "../settings/sections/companion-cues";
 import { COMPANION_PRESS, type PressTarget } from "./owned-press";
 
 type PageReply = ({ ok: true } & CompanionPageView) | { ok: false; reason: string };

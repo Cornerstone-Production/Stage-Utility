@@ -442,7 +442,6 @@ export type IpcChannel =
   | "cues:states"
   | "cues:usage"
   | "cues:tokens"
-  | "cues:usage"
   | "devices:claim"
   | "devices:list"
   | "devices:release"
@@ -1594,11 +1593,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "companion:page": return apiFetch(`/api/companion/pages/${encodeURIComponent(String(p.page))}`);
     case "companion:refreshButtons": return post("/api/companion/buttons/refresh");
     case "companion:pairs": return apiFetch("/api/companion/pairs");
-    // One page as a picker draws it: its extent and every key's look, icons included.
-    case "companion:page": return apiFetch(`/api/companion/pages/${encodeURIComponent(String((params as { page: number }).page))}`);
     case "cues:tokens": return apiFetch("/api/cues/tokens");
-    // Where each cue is used: the Buttons that name it, on every screen and Home.
-    case "cues:usage": return apiFetch("/api/cues/usage");
     // Read on demand and cached for five seconds server-side, so the rules list
     // polling this while it is open costs one round of Companion reads.
     case "cues:states": return apiFetch("/api/cues/states");

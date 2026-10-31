@@ -31,7 +31,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";
-import { togglePairSlug, type CompanionPageSummary } from "@main/services/companion-export";
+import { togglePairSlug } from "@main/services/companion-export";
 import type { InferredStateSource } from "@main/services/companion-state-source";
 import {
   type ButtonFingerprint,
@@ -62,7 +62,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
-import { companionButtonsQuery } from "../../lib/companion-buttons";
+import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
 import { plural } from "@main/services/plural";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
@@ -86,21 +86,6 @@ export interface CompanionButton {
    */
   stateSource?: InferredStateSource | null;
 }
-
-export interface ButtonsReply {
-  ok: boolean;
-  reason?: string;
-  buttons: CompanionButton[];
-  /** Every page, empty ones included (`labelled` is 0). Absent from an older server's answer. */
-  pages?: CompanionPageSummary[];
-}
-
-/** Companion's buttons and page list, under one key so the rule editor's picker and the
- *  Button inspector's share one read. */
-export const companionButtonsQuery = {
-  queryKey: ["companion:buttons"],
-  queryFn: () => invoke<ButtonsReply>("companion:buttons"),
-};
 
 /**
  * The press action's params for a picked button, with the identity the reconcile

@@ -1,7 +1,8 @@
 // companion-buttons.ts — the one read of `GET /api/companion/buttons`.
 //
-// The button picker and Browse buttons both read it, so they share a query key and a
-// cache: opening one after the other costs no second read of Companion's export.
+// The rule editor's picker, the Button inspector's Companion pane and Browse buttons all
+// read it, so they share a query key and a cache: opening one after another costs no second
+// read of Companion's export.
 
 import type { CompanionPageSummary } from "@main/services/companion-export";
 
@@ -9,7 +10,7 @@ import type { CompanionButton } from "../settings/sections/companion-cues";
 import { invoke } from "./api";
 
 /** What the route answers: every pressable button and the page list, or why Companion could not be read. */
-export interface CompanionButtonsReply {
+export interface ButtonsReply {
   ok: boolean;
   reason?: string;
   buttons: CompanionButton[];
@@ -17,7 +18,8 @@ export interface CompanionButtonsReply {
   pages?: CompanionPageSummary[];
 }
 
+/** Companion's buttons and page list, under one key. */
 export const companionButtonsQuery = {
   queryKey: ["companion:buttons"],
-  queryFn: () => invoke<CompanionButtonsReply>("companion:buttons"),
+  queryFn: () => invoke<ButtonsReply>("companion:buttons"),
 } as const;
