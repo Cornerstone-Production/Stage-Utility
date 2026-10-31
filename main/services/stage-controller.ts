@@ -959,7 +959,7 @@ export class StageController {
     // Every Run an action Button becomes a cue Button with a rule of its own.
     // After the screens, so it sees the final views (a copy a role made carries
     // its Buttons too), and in this same pass for the reason Home is seeded here.
-    const actions = await runActionButtonMigration(roles.views, done.actionButtonsMigrated === true);
+    const actions = await runActionButtonMigration(roles.views, { alreadyDone: done.actionButtonsMigrated === true });
     if (actions.failure) console.error(scrub(actions.failure));
     const result = { ...surfaced, views: actions.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims

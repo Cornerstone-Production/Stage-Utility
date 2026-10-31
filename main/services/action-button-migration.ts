@@ -15,6 +15,9 @@
 // The migration changes behaviour on purpose: those Buttons now obey Simulate and
 // Disarm.
 //
+// A view that arrives later (an import) is converted the same way, by the same
+// function, so no Button ever keeps ignoring Simulate and Disarm.
+//
 // `planActionButtonMigration` is PURE: it plans. `runActionButtonMigration` writes
 // the rules and hands the views back for the caller to save (stage-controller.ts,
 // in the pass that already owns the views file). A pass that died between its two
@@ -122,11 +125,11 @@ export function planActionButtonMigration(
 }
 
 /** The one line a run logs, or null when there was nothing to migrate. */
-export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView">): string | null {
+export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView">, onImport = false): string | null {
   if (m.count === 0) return null;
   const where = m.perView.map((p) => `${scrub(p.viewName)} ${p.count}`).join(", ");
   const what = m.count === 1 ? "1 Run an action button to its own cue" : `${m.count} Run an action buttons to their own cues`;
-  return `[automation] migrated ${what} (${where})`;
+  return `[automation] ${onImport ? "converted" : "migrated"} ${what}${onImport ? " on import" : ""} (${where})`;
 }
 
 /** What the pass reads and writes, so a test can swap any of it. */
@@ -175,12 +178,17 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
  */
 export async function runActionButtonMigration(
   views: View[],
-  alreadyDone: boolean,
-  deps?: ActionButtonMigrationDeps,
+  opts: {
+    /** The start-up pass already ran: nothing to do, and the caller may record it. */
+    alreadyDone?: boolean;
+    /** Views arriving through an import rather than the start-up pass: worded as such on the log. */
+    onImport?: boolean;
+    deps?: ActionButtonMigrationDeps;
+  } = {},
 ): Promise<ActionButtonMigrationRun> {
   const left = (failure: string | null): ActionButtonMigrationRun => ({ views, settled: false, rulesWritten: 0, line: null, failure });
-  if (alreadyDone) return { ...left(null), settled: true };
-  const d = deps ?? (await defaultDeps());
+  if (opts.alreadyDone) return { ...left(null), settled: true };
+  const d = opts.deps ?? (await defaultDeps());
   let existing: Rule[];
   try {
     existing = await d.loadRules();
@@ -205,7 +213,7 @@ export async function runActionButtonMigration(
       );
     }
   }
-  return { views: plan.views, settled: true, rulesWritten: plan.rules.length, line: migrationLine(plan), failure: null };
+  return { views: plan.views, settled: true, rulesWritten: plan.rules.length, line: migrationLine(plan, opts.onImport), failure: null };
 }
 
 function refusedSentence(why: unknown): string {
