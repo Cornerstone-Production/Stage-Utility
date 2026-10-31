@@ -643,7 +643,9 @@ starts, before it has been given the feed.
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
 Pass `?cid=<your id>` and then `POST /api/events/subscribe` with the same `cid`
-and the channels you render; until you do, you are sent all of them. A `cid` over
+and the channels you render; until you do, you are sent all of them. Each report
+replaces the last, and reports sent at once can be handled in any order, so send
+one at a time and wait for the answer before the next. A `cid` over
 128 characters is ignored, so that stream is sent everything. A stream
 marked `?client=companion` (or with an `X-Companion-Module` header) is counted
 toward the Companion integration's connected-client total.

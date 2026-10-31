@@ -20,6 +20,7 @@
 // until it had them.
 
 import { HYDRATED_SET } from "./sse-channels";
+import { createSubscribeReporter } from "./subscribe-reporter";
 
 // The renderer tsconfig uses the DOM lib (self: Window), so type the shared-worker
 // global locally instead of redeclaring `self` (which would conflict).
@@ -99,17 +100,25 @@ function replayTo(port: MessagePort, channels: Iterable<string>): void {
   }
 }
 
+// One report in flight at a time — see subscribe-reporter.ts for why a parallel
+// burst lets a stale report land last and drop channels added after it.
+const reporter = createSubscribeReporter(
+  union,
+  (channels) =>
+    fetch("/api/events/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cid, channels }),
+    }),
+  // Filtering is an optimization — a failed report just means the old filter (or
+  // send-all) stays until the next report.
+  (err) => console.warn("[sse-worker] subscribe report failed", err),
+);
+
 function report(): void {
   ensureEs();
-  const channels = union();
-  for (const c of channels) attach(c);
-  fetch("/api/events/subscribe", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cid, channels }),
-  }).catch(() => {
-    /* filtering is an optimization — a failed report just means send-all */
-  });
+  for (const c of union()) attach(c);
+  reporter.report();
 }
 
 /**

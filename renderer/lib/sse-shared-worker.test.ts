@@ -19,6 +19,9 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 
+import { ChannelReports } from "../../main/services/channel-reports.js";
+import { heldFetch } from "../test-held-fetch.js";
+
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
@@ -102,4 +105,68 @@ test("a live push carries no replay flag; a late subscriber's replay does", asyn
   // snapshot newer than a read it joined from an older one ("Shared reads" in
   // api.ts). It is the push's arrival, not the replay's.
   assert.deepEqual(tab2.posted[0], { channel: "pco:live", data: { mode: "item" }, replay: true, at: 1_700_000_000_000 });
+});
+
+// The subscribe report. The server overwrites a client's filter with whichever
+// report it handles LAST, and parallel POSTs are handled in no fixed order, so a
+// stale report landing last used to drop a channel added after it. The held-fetch
+// stub lets this test choose the order: it releases the newest request first and
+// feeds each released body into a real ChannelReports, as the server route does.
+test("a late-landing stale subscribe report cannot undo a newer one", async () => {
+  const held = heldFetch();
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: unknown }).fetch = held.fetch;
+  try {
+    const onconnect = (globalThis as unknown as { self: { onconnect: (e: { ports: unknown[] }) => void } }).self
+      .onconnect;
+    const tab = fakePort();
+    onconnect({ ports: [tab.port] });
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["a"] } });
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["a", "b"] } });
+
+    const reports = new ChannelReports();
+    let cid = "";
+    while (held.outstanding.length > 0) {
+      assert.ok(held.maxConcurrent <= 1, `${held.maxConcurrent} subscribe reports were in flight at once`);
+      const req = held.outstanding[held.outstanding.length - 1]!; // newest first
+      const body = JSON.parse(req.body) as { cid: string; channels: string[] };
+      cid = body.cid;
+      reports.report(body.cid, body.channels);
+      req.respond();
+      await held.settle();
+    }
+    assert.ok(held.sent.length >= 1, "no report was sent");
+    assert.ok(held.maxConcurrent <= 1, `${held.maxConcurrent} subscribe reports were in flight at once`);
+    assert.ok(reports.get(cid)?.has("b"), `the filter lost b: ${JSON.stringify([...(reports.get(cid) ?? [])])}`);
+  } finally {
+    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+  }
+});
+
+test("a failed subscribe report still lets the trailing one go", async () => {
+  const held = heldFetch();
+  const realFetch = globalThis.fetch;
+  const realWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...a: unknown[]) => void warnings.push(a);
+  (globalThis as unknown as { fetch: unknown }).fetch = held.fetch;
+  try {
+    const onconnect = (globalThis as unknown as { self: { onconnect: (e: { ports: unknown[] }) => void } }).self
+      .onconnect;
+    const tab = fakePort();
+    onconnect({ ports: [tab.port] });
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["c"] } });
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["c", "d"] } });
+    assert.equal(held.outstanding.length, 1);
+    held.outstanding[0]!.fail(new Error("network down"));
+    await held.settle();
+    assert.equal(held.outstanding.length, 1, "the trailing report did not go after a failure");
+    assert.ok((JSON.parse(held.outstanding[0]!.body) as { channels: string[] }).channels.includes("d"));
+    assert.equal(warnings.length, 1, "a failed report must be said, not swallowed");
+    held.outstanding[0]!.respond();
+    await held.settle();
+  } finally {
+    console.warn = realWarn;
+    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+  }
 });
