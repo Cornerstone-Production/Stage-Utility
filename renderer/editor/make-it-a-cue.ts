@@ -15,9 +15,8 @@
 // A failure is RETURNED, never thrown and never logged away: the caller leaves the
 // widget as it was and tells the operator what the server said.
 
-import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
-import { homeVisibilityParams } from "@main/services/cue-pairs";
-import { chosenLabel, cueNameFor, cueSlug } from "@main/services/cue-naming";
+import { CALL_TRIGGER_ID } from "@main/services/cue-aliases";
+import { buttonCueRule, chosenLabel, cueNameFor, cueSlug, namesTakenForNewCue, ruleParams } from "@main/services/cue-naming";
 import type { CueManifest } from "@main/services/cue-manifest";
 import type { Rule } from "@main/types/automation";
 import { errorMessage } from "@main/services/errors";
@@ -27,70 +26,14 @@ import { invoke } from "../lib/api";
 // The naming is shared with the server, which names a migrated Button's cue the same way.
 export { chosenLabel, cueNameFor, cueSlug };
 
-/** Seconds a cue made this way waits before it may fire again. Short: a Button
- *  is pressed by hand, and two accidental taps should not run it twice. */
-const MADE_CUE_COOLDOWN_SEC = 2;
-
 /**
- * Every cue name something already answers to: each cue rule's name and former
- * names, and every id and call name in the manifest (which is where the cues the
- * app ships appear, and where a pair's base name lives).
- *
- * The manifest alone would miss a cue hidden from Home Assistant on an older
- * server, and the rules alone would miss the built-ins, so both are read.
+ * Every cue name something already answers to. The server names a migrated
+ * Button's cue from the same function, so the two cannot disagree.
  */
-export function takenCueNames(rules: readonly Rule[], manifest: CueManifest | null): Set<string> {
-  const taken = new Set<string>();
-  for (const r of rules) {
-    if (r.trigger.id !== CALL_TRIGGER_ID) continue;
-    const name = String(r.trigger.params.name ?? "").trim().toLowerCase();
-    if (name) taken.add(name);
-    for (const alias of parseAliases(r.trigger.params)) taken.add(alias);
-  }
-  for (const s of manifest?.switches ?? []) {
-    taken.add(s.id);
-    taken.add(s.on);
-    taken.add(s.off);
-  }
-  for (const b of manifest?.buttons ?? []) {
-    taken.add(b.id);
-    taken.add(b.cue);
-  }
-  return taken;
-}
+export const takenCueNames = namesTakenForNewCue;
 
-/** Rule params hold strings and numbers only; every registry param type is one of
- *  the two, so anything else on a button's `params` is not a value to carry. */
-function ruleParams(params: Record<string, unknown> | undefined): Record<string, string | number> {
-  const out: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(params ?? {})) {
-    if (typeof v === "string" || typeof v === "number") out[k] = v;
-  }
-  return out;
-}
-
-/** The manual cue: Called by name, enabled, a short cooldown, allowed during a
- *  service (no `service.is-not-live` condition), and kept out of Home Assistant
- *  until the operator chooses otherwise. */
-function manualCueRule(opts: {
-  name: string;
-  cueName: string;
-  actionId: string;
-  params: Record<string, unknown> | undefined;
-}): Omit<Rule, "id"> {
-  return {
-    name: opts.name,
-    enabled: true,
-    trigger: {
-      id: CALL_TRIGGER_ID,
-      params: { name: opts.cueName, says: opts.name, ...homeVisibilityParams(true) },
-    },
-    conditions: [],
-    action: { id: opts.actionId, params: ruleParams(opts.params) },
-    cooldownSec: MADE_CUE_COOLDOWN_SEC,
-    oncePerService: false,
-  };
-}
+/** Seconds a cue made this way waits before it may fire again. */
+const MADE_CUE_COOLDOWN_SEC = 2;
 
 type MakeCueResult =
   | {
@@ -140,7 +83,14 @@ export async function makeCueFromAction(opts: {
     const taken = takenCueNames(rules, manifest);
     // The label first, the action's name when the label has no letters in it.
     const cueName = cueNameFor(cueSlug(ruleName) ? ruleName : opts.actionLabel, taken);
-    const rule = manualCueRule({ name: ruleName, cueName, actionId: opts.actionId, params: opts.params });
+    const rule = buttonCueRule({
+      name: ruleName,
+      cueName,
+      action: { id: opts.actionId, params: ruleParams(opts.params) },
+      says: ruleName,
+      // Short, because two accidental taps should not run it twice.
+      cooldownSec: MADE_CUE_COOLDOWN_SEC,
+    });
     await invoke<Rule>("automation:addRule", rule);
     return { ok: true, cue: cueName, reused: false };
   } catch (e) {

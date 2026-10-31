@@ -20,7 +20,6 @@ import type { OwnedBy, Rule } from "../types/automation.js";
 import type { View } from "../types/stage.js";
 import type { LayoutObject } from "../types/views.js";
 import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
-import { homeVisibilityParams } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import { HOME_VIEW_ID } from "./home-view.js";
 import { viewsStore } from "./views-store.js";
@@ -152,30 +151,6 @@ export function ownedByProblem(rule: { trigger?: { id?: string } | null; ownedBy
     return "A rule that belongs to a button has to stay Called by name, or the button would read Not set";
   }
   return null;
-}
-
-/** What an owned rule is made with. Every guard in `callByName` applies to it. */
-export function ownedCueRule(opts: {
-  /** What an operator reads in the rules list. */
-  name: string;
-  cueName: string;
-  action: Rule["action"];
-  ownedBy: OwnedBy;
-}): Omit<Rule, "id"> {
-  return {
-    name: opts.name,
-    enabled: true,
-    // Hidden from Home Assistant: the Button is its only caller until the
-    // operator lists it with the other cues.
-    trigger: { id: CALL_TRIGGER_ID, params: { name: opts.cueName, ...homeVisibilityParams(true) } },
-    // Allowed during a service: a Button is pressed by hand, mid-service.
-    conditions: [],
-    action: opts.action,
-    // 0 is accepted and built-in cues use it: the engine enforces only `> 0`.
-    cooldownSec: 0,
-    oncePerService: false,
-    ownedBy: opts.ownedBy,
-  };
 }
 
 /**

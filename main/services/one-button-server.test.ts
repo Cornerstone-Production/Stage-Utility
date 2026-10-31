@@ -30,6 +30,7 @@ const { cueRoutes } = await import("./routes/cue-routes.js");
 const { automationRoutes } = await import("./routes/automation-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
 const { companionDeps } = await import("./companion-api.js");
+const { buttonCueRule } = await import("./cue-naming.js");
 const { planActionButtonMigration } = await import("./action-button-migration.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
@@ -299,6 +300,31 @@ describe("planning the migration", () => {
       { viewName: "Console", count: 1 },
       { viewName: "Console", count: 1 },
     ]);
+  });
+});
+
+describe("the rule a Button's action becomes", () => {
+  const action = { id: "obs.record", params: { mode: "toggle" } };
+
+  test("a manual cue (make it a cue) says its name, has its cooldown, belongs to nobody and is hidden from Home Assistant", () => {
+    const rule = buttonCueRule({ name: "Rec", cueName: "rec", action, says: "Rec", cooldownSec: 2 });
+    assert.deepEqual(rule, {
+      name: "Rec",
+      enabled: true,
+      trigger: { id: "call.by-name", params: { name: "rec", says: "Rec", homeAssistant: "hidden" } },
+      conditions: [],
+      action,
+      cooldownSec: 2,
+      oncePerService: false,
+    });
+    assert.equal("ownedBy" in rule, false);
+  });
+
+  test("a migrated Button's rule belongs to it, says nothing of its own and is never cooled down", () => {
+    const rule = buttonCueRule({ name: "Rec", cueName: "btn_rec", action, ownedBy: { viewId: "v", objectId: "o" } });
+    assert.deepEqual(rule.ownedBy, { viewId: "v", objectId: "o" });
+    assert.equal(rule.cooldownSec, 0);
+    assert.deepEqual(rule.trigger.params, { name: "btn_rec", homeAssistant: "hidden" });
   });
 });
 

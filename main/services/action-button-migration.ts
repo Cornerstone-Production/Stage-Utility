@@ -26,9 +26,8 @@ import { randomUUID } from "node:crypto";
 import type { Rule } from "../types/automation.js";
 import type { View } from "../types/stage.js";
 import type { LayoutObject } from "../types/views.js";
-import { ownedCueRule } from "./button-ownership.js";
-import { calledCueName, takenCueNames } from "./cue-aliases.js";
-import { chosenLabel, cueNameFor, cueSlug } from "./cue-naming.js";
+import { calledCueName } from "./cue-aliases.js";
+import { buttonCueRule, chosenLabel, cueNameFor, cueSlug, namesTakenForNewCue, ruleParams } from "./cue-naming.js";
 import { migrateViews } from "./never-chosen-defaults.js";
 import { automationStore } from "./automation-store.js";
 import { errorMessage } from "./errors.js";
@@ -48,15 +47,6 @@ export interface ActionButtonMigration {
   perView: { viewName: string; count: number }[];
 }
 
-/** Rule params hold strings and numbers only, and so does every registry param. */
-function ruleParams(params: Record<string, unknown> | undefined): Record<string, string | number> {
-  const out: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(params ?? {})) {
-    if (typeof v === "string" || typeof v === "number") out[k] = v;
-  }
-  return out;
-}
-
 /**
  * Plan the migration of every Run an action Button in `views`.
  *
@@ -68,14 +58,7 @@ export function planActionButtonMigration(
   existingRules: readonly Rule[],
   actionLabel: (actionId: string) => string | undefined,
 ): ActionButtonMigration {
-  // Everything a cue name may not be, and a pair's base as well as its two halves:
-  // the manifest lists a pair under its base, so `btn_x` would collide with the
-  // pair `btn_x_on` / `btn_x_off`.
-  const taken = takenCueNames(existingRules);
-  for (const name of [...taken]) {
-    const base = /^(.+)_(on|off)$/.exec(name)?.[1];
-    if (base) taken.add(base);
-  }
+  const taken = namesTakenForNewCue(existingRules);
   // The same Button, found again by a pass that died before it finished.
   const ownedAlready = new Map<string, string>();
   for (const r of existingRules) {
@@ -107,7 +90,7 @@ export function planActionButtonMigration(
         cueName = cueNameFor(cueSlug(ruleName) ? ruleName : registryName, taken, "btn_");
         taken.add(cueName);
         rules.push({
-          ...ownedCueRule({
+          ...buttonCueRule({
             name: ruleName,
             cueName,
             action: { id: cfg.actionId, params: ruleParams(cfg.params) },
