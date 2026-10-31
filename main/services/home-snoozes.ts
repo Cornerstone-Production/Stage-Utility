@@ -13,7 +13,8 @@
 //
 // A snooze lasts until the next service STARTS: pco:live reporting an item
 // running after something that was not. Where Planning Center is not configured
-// no service is ever announced, so a snooze there lapses after 12 hours.
+// no service is ever announced, so a snooze there lapses after 12 hours; with it,
+// a 7-day backstop covers a pco:live that never reaches an item.
 //
 // The first pco:live this process sees only sets a baseline. A restart in the
 // middle of a service must not read as the service starting, or a restart would
@@ -31,6 +32,8 @@ import { WriteQueue } from "./write-queue.js";
 import {
   HOME_SNOOZES_CHANNEL,
   SNOOZE_KEY,
+  SNOOZE_BACKSTOP_MS,
+  SNOOZE_MAX,
   SNOOZE_NO_PCO_MS,
   type AttentionSeverity,
   type HomeSnooze,
@@ -94,10 +97,13 @@ export class HomeSnoozes {
   async snooze(key: unknown, severity: unknown, pcoConfigured: boolean): Promise<HomeSnooze> {
     if (typeof key !== "string" || !SNOOZE_KEY.test(key)) throw new SnoozeRefused("key must look like source:subject");
     if (!isSeverity(severity)) throw new SnoozeRefused('severity must be "critical" or "warn"');
+    if (!this.snoozes.has(key) && this.snoozes.size >= SNOOZE_MAX) {
+      throw new SnoozeRefused(`${SNOOZE_MAX} snoozes are already held; unsnooze some first`);
+    }
     const now = Date.now();
-    const entry: HomeSnooze = { key, severity, at: now, expiresAt: pcoConfigured ? null : now + SNOOZE_NO_PCO_MS };
+    const entry: HomeSnooze = { key, severity, at: now, expiresAt: now + (pcoConfigured ? SNOOZE_BACKSTOP_MS : SNOOZE_NO_PCO_MS) };
     await this.commit(() => new Map(this.snoozes).set(key, entry));
-    console.log(`[home] snoozed ${scrub(key)} (${scrub(severity)}) until ${scrub(pcoConfigured ? "next service" : "12 hours from now")}`);
+    console.log(`[home] snoozed ${scrub(key)} (${scrub(severity)}) until ${scrub(pcoConfigured ? "next service (7 days at most)" : "12 hours from now")}`);
     return entry;
   }
 
@@ -151,7 +157,7 @@ export class HomeSnoozes {
       this.armExpiry();
       return;
     }
-    await this.drop(gone.map((s) => s.key), `cleared ${plural(gone.length, "snooze")}: lapsed after 12 hours`);
+    await this.drop((s) => s.expiresAt !== null && s.expiresAt <= now, (n) => `cleared ${plural(n, "snooze")}: lapsed`);
   }
 
   private observeLive(payload: unknown): void {
@@ -161,7 +167,7 @@ export class HomeSnoozes {
     const before = this.wasLive;
     this.wasLive = live;
     if (before !== false || !live || this.snoozes.size === 0) return;
-    void this.drop([...this.snoozes.keys()], `cleared ${plural(this.snoozes.size, "snooze")}: service started`);
+    void this.drop(() => true, (n) => `cleared ${plural(n, "snooze")}: service started`);
   }
 
   /**
@@ -170,17 +176,25 @@ export class HomeSnoozes {
    * are over) and the failed write is named on /log; the next change saves the
    * whole file again.
    */
-  private async drop(keys: string[], why: string): Promise<void> {
-    const next = new Map(this.snoozes);
-    for (const k of keys) next.delete(k);
-    try {
-      await this.writes.enqueue(() => store.save({ snoozes: [...next.values()] }));
-    } catch (err) {
-      console.error("[home] could not save snoozes after clearing them:", scrubError(err));
-    }
-    this.snoozes = next;
+  private async drop(which: (s: HomeSnooze) => boolean, why: (n: number) => string): Promise<void> {
+    // Built INSIDE the queue, from what is held by the time this turn comes: a
+    // snooze committed while this waited must not be dropped with its 201 sent.
+    let count = 0;
+    await this.writes
+      .enqueue(async () => {
+        const next = new Map(this.snoozes);
+        for (const [k, v] of this.snoozes) if (which(v)) next.delete(k);
+        count = this.snoozes.size - next.size;
+        try {
+          await store.save({ snoozes: [...next.values()] });
+        } catch (err) {
+          console.error("[home] could not save snoozes after clearing them:", scrubError(err));
+        }
+        this.snoozes = next;
+      });
+    if (count === 0) return;
     this.publish();
-    console.log(`[home] ${scrub(why)}`);
+    console.log(`[home] ${scrub(why(count))}`);
   }
 }
 

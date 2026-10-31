@@ -26,7 +26,7 @@ import { EventPollHub, serializePollResponse, type PollFrame } from "./event-pol
 import { ChannelReports, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, usableCid } from "./channel-reports.js";
 
 import { APP_ROOT } from "./app-root.js";
-import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import { displayHeartbeat, displayLeaving, presenceSnapshot, setKnownOutputIds } from "./display-presence.js";
 import type { VideoPlaybackReport } from "../types/video.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { serverPort } from "./server-port.js";
@@ -302,6 +302,9 @@ export function handlePresenceHeartbeat(
   const reports = parseVideoReports(body.video);
   if (reports && reports.length > 0) deps.recordVideo(outputId, reports);
 }
+
+// Presence publishes last-seen times only for screens that exist.
+setKnownOutputIds(() => new Set((stageController.getState().outputs ?? []).map((o) => o.id)));
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();

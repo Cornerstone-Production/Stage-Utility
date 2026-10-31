@@ -142,7 +142,8 @@ until it knows whether a service is live.
 
 **Snooze** hides one problem until the next service starts, for everyone: the
 booth and the iPad agree on what is handled. Outside Planning Center it lasts
-12 hours. A problem that clears and comes back stays snoozed, but one that gets
+12 hours, and with it a snooze still lapses after 7 days if no service starts
+in that time. At most 500 can be held at once. A problem that clears and comes back stays snoozed, but one that gets
 worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
 lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
 configuration backup and restoring one does not bring any back.

@@ -17,7 +17,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 const { HomeSnoozes, homeSnoozes, SnoozeRefused } = await import("./home-snoozes.js");
 const { addBroadcastListener, broadcast } = await import("./broadcaster.js");
 const { runtimeFiles, configFiles } = await import("./config-snapshot.js");
-const { SNOOZE_NO_PCO_MS } = await import("../types/home-snoozes.js");
+const { SNOOZE_NO_PCO_MS, SNOOZE_BACKSTOP_MS, SNOOZE_MAX } = await import("../types/home-snoozes.js");
 type HomeSnoozesState = import("../types/home-snoozes.js").HomeSnoozesState;
 
 const FILE = path.join(TMP, "home-snoozes.json");
@@ -49,11 +49,11 @@ describe("home snoozes", () => {
   it("saves to disk before it answers, stamps a rev, and says so on the log", async () => {
     const rev = homeSnoozes.state().rev;
     const s = await homeSnoozes.snooze("wireless-battery:ch3", "critical", true);
-    assert.equal(s.expiresAt, null, "with Planning Center, a snooze lasts until the next service");
+    assert.ok(s.expiresAt !== null && s.expiresAt - Date.now() > SNOOZE_BACKSTOP_MS - 5000 && s.expiresAt - Date.now() <= SNOOZE_BACKSTOP_MS, "with Planning Center, a 7-day backstop");
     assert.deepEqual(await onDisk(), ["wireless-battery:ch3"]);
     assert.equal(homeSnoozes.state().rev, rev + 1);
     assert.equal(frames.at(-1)?.rev, rev + 1, "the channel carries the new rev");
-    assert.ok(logged.includes("[home] snoozed wireless-battery:ch3 (critical) until next service"), logged.join("\n"));
+    assert.ok(logged.includes("[home] snoozed wireless-battery:ch3 (critical) until next service (7 days at most)"), logged.join("\n"));
   });
 
   it("outside Planning Center a snooze lapses after 12 hours", async () => {
@@ -127,5 +127,57 @@ describe("home snoozes", () => {
     errors.mock.restore();
     assert.deepEqual(homeSnoozes.state(), before, "memory did not move ahead of the disk");
     await fs.rmdir(FILE);
+  });
+
+  it("refuses a new key past 500, and still takes a key it already holds", async () => {
+    const held = keys(homeSnoozes.state());
+    for (let i = 0; i < SNOOZE_MAX - held.length; i++) await homeSnoozes.snooze(`cap:${i}`, "warn", true);
+    assert.equal(homeSnoozes.state().snoozes.length, SNOOZE_MAX);
+    await assert.rejects(homeSnoozes.snooze("cap:over", "warn", true), SnoozeRefused);
+    await homeSnoozes.snooze("cap:0", "critical", true);
+    assert.equal(homeSnoozes.state().snoozes.length, SNOOZE_MAX);
+    for (const k of keys(homeSnoozes.state())) await homeSnoozes.unsnooze(k);
+  });
+
+  it("a snooze committed while a drop waits is not lost with it", async () => {
+    await homeSnoozes.snooze("race:a", "warn", true);
+    const pending = homeSnoozes.snooze("race:b", "warn", true); // queued first
+    const drop = (homeSnoozes as unknown as { drop: (w: (s: { key: string }) => boolean, y: (n: number) => string) => Promise<void> })
+      .drop((s) => s.key === "race:a", (n) => `race ${n}`);
+    await Promise.all([pending, drop]);
+    assert.deepEqual(keys(homeSnoozes.state()), ["race:b"], "memory");
+    assert.deepEqual(await onDisk(), ["race:b"], "disk");
+    await homeSnoozes.unsnooze("race:b");
+  });
+
+  it("the 12 hour lapse itself clears a no-Planning-Center snooze and leaves a Planning Center one", async () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+    try {
+      await homeSnoozes.snooze("lapse:nopco", "warn", false);
+      await homeSnoozes.snooze("lapse:pco", "warn", true);
+      mock.timers.tick(SNOOZE_NO_PCO_MS + 1000);
+      mock.timers.reset();
+      await settle();
+      assert.deepEqual(keys(homeSnoozes.state()), ["lapse:pco"]);
+      assert.ok(logged.includes("[home] cleared 1 snooze: lapsed"), logged.join("\n"));
+    } finally {
+      mock.timers.reset();
+    }
+    await homeSnoozes.unsnooze("lapse:pco");
+  });
+
+  it("a failed save while clearing logs it and keeps the clear in memory", async () => {
+    live("none");
+    await homeSnoozes.snooze("fail:a", "warn", true);
+    await fs.rm(FILE, { force: true });
+    await fs.mkdir(FILE);
+    const errs: string[] = [];
+    const errors = mock.method(console, "error", (...a: unknown[]) => void errs.push(a.map(String).join(" ")));
+    live("item");
+    await settle();
+    errors.mock.restore();
+    await fs.rmdir(FILE);
+    assert.deepEqual(keys(homeSnoozes.state()), [], "the service has started: the snoozes are over");
+    assert.ok(errs.some((e) => e.includes("[home] could not save snoozes after clearing them")), errs.join("\n"));
   });
 });

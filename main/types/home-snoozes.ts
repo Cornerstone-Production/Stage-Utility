@@ -10,9 +10,9 @@ export interface HomeSnooze {
   severity: AttentionSeverity;
   /** When it was snoozed, epoch ms. */
   at: number;
-  /** Epoch ms after which it lapses on its own. Null: until the next service
-   *  starts. Set only when Planning Center is not configured, where "the next
-   *  service" is never announced. */
+  /** Epoch ms after which it lapses on its own, whether or not a service has
+   *  started: 7 days with Planning Center (a backstop, in case pco:live never
+   *  reaches an item), 12 hours without it, where no service is ever announced. */
   expiresAt: number | null;
 }
 
@@ -31,3 +31,9 @@ export const SNOOZE_KEY = /^[A-Za-z0-9_.-]{1,40}:[A-Za-z0-9_.:-]{1,100}$/;
 
 /** How long a snooze lasts where no service is ever announced. */
 export const SNOOZE_NO_PCO_MS = 12 * 60 * 60 * 1000;
+
+/** The longest a snooze can outlast a service that never starts, with Planning Center. */
+export const SNOOZE_BACKSTOP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The most snoozes held at once. */
+export const SNOOZE_MAX = 500;

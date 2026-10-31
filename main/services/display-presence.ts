@@ -25,6 +25,20 @@ const lastSeen = new Map<string, number>();
 // send: past DEPARTED_MAX the oldest is dropped.
 const departed = new Map<string, number>();
 const DEPARTED_MAX = 256;
+// Heartbeats carry any id a LAN client cares to send. An id longer than this is
+// not an output id (they are short slugs) and is ignored.
+const MAX_ID_LENGTH = 128;
+// An output not heard from in this long is forgotten rather than kept for ever.
+const FORGET_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+// The ids of outputs that exist, so what is PUBLISHED (and serialised into every
+// broadcast and hello burst) is bounded by the real screens, not by whatever
+// ids have been posted. Null until the server registers one, which publishes
+// everything (tests).
+let knownOutputs: (() => ReadonlySet<string>) | null = null;
+export function setKnownOutputIds(fn: (() => ReadonlySet<string>) | null): void {
+  knownOutputs = fn;
+}
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let lastSig = "";
 
@@ -68,7 +82,9 @@ export interface PresenceSnapshot {
 function lastSeenPairs(): [string, number][] {
   const all = new Map(departed);
   for (const [id, t] of lastSeen) all.set(id, t);
-  return [...all].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const known = knownOutputs?.();
+  return [...all]
+    .filter(([id]) => !known || known.has(id)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 // Broadcast only when the connected set actually changes (change-driven, per the
@@ -82,21 +98,28 @@ function maybeBroadcast(): void {
   broadcast("displays:presence", { connected: conn, rev, lastSeen: lastSeenPairs() } satisfies PresenceSnapshot);
 }
 
+/** One pass of the sweep: forget what has been silent for 30 days, then
+ *  broadcast if the connected set moved. Exported for the test. */
+export function sweepPresence(): void {
+  const cutoff = Date.now() - FORGET_AFTER_MS;
+  for (const m of [lastSeen, departed]) for (const [id, t] of m) if (t < cutoff) m.delete(id);
+  maybeBroadcast();
+  if (lastSeen.size === 0) {
+    if (sweepTimer) clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+}
+
 function ensureSweep(): void {
   if (sweepTimer) return;
-  sweepTimer = setInterval(() => {
-    maybeBroadcast();
-    if (lastSeen.size === 0) {
-      if (sweepTimer) clearInterval(sweepTimer);
-      sweepTimer = null;
-    }
-  }, SWEEP_MS);
+  sweepTimer = setInterval(sweepPresence, SWEEP_MS);
   // Don't hold the event loop open for the sweep alone.
   sweepTimer.unref?.();
 }
 
 /** Record a heartbeat from a display output. */
 export function displayHeartbeat(outputId: string): void {
+  if (outputId.length > MAX_ID_LENGTH) return;
   lastSeen.set(outputId, Date.now());
   departed.delete(outputId);
   ensureSweep();
@@ -105,6 +128,7 @@ export function displayHeartbeat(outputId: string): void {
 
 /** A display is closing — drop it immediately so the dot goes offline at once. */
 export function displayLeaving(outputId: string): void {
+  if (outputId.length > MAX_ID_LENGTH) return;
   const at = lastSeen.get(outputId);
   if (at === undefined) return;
   lastSeen.delete(outputId);
