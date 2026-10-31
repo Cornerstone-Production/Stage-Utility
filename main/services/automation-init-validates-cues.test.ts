@@ -95,9 +95,9 @@ describe("init() runs the write path's own validation over the loaded rules", ()
       warnings.filter((w) => w.includes("would be refused")).sort(),
       [
         '[cues] rule "Rule __proto___off" would be refused if you saved it: ' +
-          '"__proto___off" is not a usable cue name — use lower_snake_case',
+          '"__proto___off" is not a usable command name — use lower_snake_case',
         '[cues] rule "Rule __proto___on" would be refused if you saved it: ' +
-          '"__proto___on" is not a usable cue name — use lower_snake_case',
+          '"__proto___on" is not a usable command name — use lower_snake_case',
         '[cues] rule "Rule bad_binding_on" would be refused if you saved it: ' +
           '"not a variable name!" is not a Companion variable — a custom variable ' +
           "(letters, digits, _, - and . only) or <connection label>:<variable name>",

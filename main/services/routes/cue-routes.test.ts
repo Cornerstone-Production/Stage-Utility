@@ -2111,7 +2111,7 @@ describe("reconciling a cue's Companion button", () => {
     try {
       companionApi.invalidate();
       const r = await integrationManager.test("companion");
-      assert.match(r.message ?? "", /1 cue status\(es\) could not be saved\./);
+      assert.match(r.message ?? "", /1 command status\(es\) could not be saved\./);
     } finally {
       automationEngine.updateRule = realUpdate;
       restore();

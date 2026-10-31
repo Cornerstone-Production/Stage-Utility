@@ -706,7 +706,7 @@ describe("a Run an action Button in an imported view", () => {
     assert.deepEqual(rules[0]!.action, { id: "obs.record", params: { mode: "toggle" } });
     assert.deepEqual(
       lines.filter((l) => l.startsWith("[automation]")),
-      ["[automation] converted 1 Run an action button to its own cue on import (Booth 1)"],
+      ["[automation] converted 1 Run an action button to its own command on import (Booth 1)"],
     );
   });
 
