@@ -1,9 +1,9 @@
 // unconverted-button.tsx — what a stored Run an action Button draws.
 //
 // The type is gone: nothing in the app makes one or presses one, and the server turns every one
-// it finds into a Button with a command of its own at start-up and on import. A layout can still
-// hold one for a moment (the rules could not be saved, so the pass said so on the log and left
-// it), and an older tab can save one back. It is drawn as an inert tile saying what is wrong,
+// it finds into a Button with a command of its own at start-up, on import and when a layout is
+// saved. A layout can still hold one when that could not be done (the rules could not be saved,
+// so the pass said why on the log and left it). It is drawn as an inert tile saying what is wrong,
 // never as a control: a Button that looked like one and pressed nothing would say nothing.
 
 import type { CSSProperties } from "react";

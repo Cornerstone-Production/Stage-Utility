@@ -21,7 +21,7 @@ import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
-import { runActionButtonMigration } from "./action-button-migration.js";
+import { liveRulesDeps, runActionButtonMigration } from "./action-button-migration.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -3971,7 +3971,14 @@ export class StageController {
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
-    const pointed = await this.pointLayoutGrids(current, layout);
+    const pointedGrids = await this.pointLayoutGrids(current, layout);
+    // A Run an action Button saved back by an older tab becomes a Button with a command of its own
+    // here too, not only at start-up and on import: nothing presses the old type, and the next
+    // start may be weeks away. A failure is logged and the layout saves as sent.
+    const converted = await runActionButtonMigration([{ ...current, layout: pointedGrids }], { onSave: true, deps: await liveRulesDeps() });
+    if (converted.failure) console.error(scrub(converted.failure));
+    else if (converted.line) console.log(converted.line);
+    const pointed = converted.views[0]!.layout!;
     // Checked again after the await: another save of this view, made at the
     // same revision, may have landed while the widgets were being pointed, and
     // both passing the check above is how one erases the other.

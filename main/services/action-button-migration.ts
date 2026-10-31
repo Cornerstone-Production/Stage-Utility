@@ -141,11 +141,12 @@ export function planActionButtonMigration(
 }
 
 /** The one line a run logs, or null when there was nothing to migrate. */
-export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView">, onImport = false): string | null {
+export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView">, via: boolean | "save" = false): string | null {
   if (m.count === 0) return null;
   const where = m.perView.map((p) => `${scrub(p.viewName)} ${p.count}`).join(", ");
   const what = m.count === 1 ? "1 Run an action button to its own cue" : `${m.count} Run an action buttons to their own cues`;
-  return `[automation] ${onImport ? "converted" : "migrated"} ${what}${onImport ? " on import" : ""} (${where})`;
+  const arrived = via === "save" ? " on save" : via ? " on import" : "";
+  return `[automation] ${via ? "converted" : "migrated"} ${what}${arrived} (${where})`;
 }
 
 /** What the pass reads and writes, so a test can swap any of it. */
@@ -184,11 +185,29 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
 }
 
 /**
+ * The same deps over the RUNNING engine, for a pass made while the server is up. Rules written
+ * straight to the store would not be in the engine until the next start, and a Button bound to
+ * a cue the engine does not know refuses every press. New rules go through `addRule`, which
+ * gives each its id; the cue names the Buttons keep are the plan's own.
+ */
+export async function liveRulesDeps(): Promise<ActionButtonMigrationDeps> {
+  const { automationEngine } = await import("./automation-engine.js");
+  return {
+    ...(await defaultDeps()),
+    loadRules: async () => automationEngine.listRules(),
+    saveRules: async (all) => {
+      const known = new Set(automationEngine.listRules().map((r) => r.id));
+      for (const { id, ...rule } of all) if (!known.has(id)) await automationEngine.addRule(rule);
+    },
+  };
+}
+
+/**
  * The whole pass over the views the controller holds: plan, write the new rules,
  * return the views. Writes the RULES and not the views, so the two writes are told
  * apart.
  *
- * Runs at every start and on import; with nothing to convert it writes and says
+ * Runs at every start, on import and on a layout save; with nothing to convert it writes and says
  * nothing. A failure is returned as `failure`, never swallowed into "done": the
  * next start tries again over the same Buttons, which until then draw "Needs
  * converting" and do nothing (the app has no renderer that presses one).
@@ -198,6 +217,8 @@ export async function runActionButtonMigration(
   opts: {
     /** Views arriving through an import rather than the start-up pass: worded as such on the log. */
     onImport?: boolean;
+    /** A layout saved by the editor (an older tab can send the type back): worded as such. */
+    onSave?: boolean;
     deps?: ActionButtonMigrationDeps;
   } = {},
 ): Promise<ActionButtonMigrationRun> {
@@ -227,7 +248,7 @@ export async function runActionButtonMigration(
       );
     }
   }
-  return { views: plan.views, rulesWritten: plan.rules.length, cuesWritten: plan.rules.map((r) => String(r.trigger.params.name)), line: migrationLine(plan, opts.onImport), failure: null };
+  return { views: plan.views, rulesWritten: plan.rules.length, cuesWritten: plan.rules.map((r) => String(r.trigger.params.name)), line: migrationLine(plan, opts.onSave ? "save" : opts.onImport), failure: null };
 }
 
 function refusedSentence(why: unknown): string {

@@ -699,12 +699,15 @@ nothing chosen reads **Choose what it presses**, and tapping it opens that sheet
 A Button's own command made there belongs to Home.
 
 A Button saved by an earlier version as **Run an action** is converted when the
-server starts, and when a view carrying one is imported: it becomes a Button with
+server starts, when a view carrying one is imported, and when a layout carrying one
+is saved (an older browser tab can send the old type back): it becomes a Button with
 the same label, look and position, bound to a command of its own that runs the same
 action with the same parameters, named `btn_<label>` as above. From then on the
 Button obeys Simulate mode and Disarm, as every command does. The conversion runs at
-every start and on import, and logs one `[automation]` line, only when it converted
-something, saying how many Buttons it converted and on which views.
+every start, on import and on save, and logs one `[automation]` line, only when it
+converted something, saying how many Buttons it converted and on which views. Until a
+Button is converted (the rules could not be saved: the log says why) it draws **Needs
+converting** and does nothing.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and
