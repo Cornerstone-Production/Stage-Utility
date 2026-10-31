@@ -449,12 +449,12 @@ class AutomationEngine {
     // merged rule is what must be valid, so it is cleared before the check.
     const { ownedBy, ...rest } = patch;
     const releasing = ownedBy === null && r.ownedBy !== undefined;
-    const merged: Rule = { ...r, ...rest, ...(ownedBy ? { ownedBy } : {}) };
+    const merged: Rule = { ...r, ...rest, ...(ownedBy != null ? { ownedBy } : {}) };
     if (ownedBy === null) delete merged.ownedBy;
     this.assertCueValid(merged, id);
     const cueBefore = calledCueName(r.trigger);
     const ownerBefore = r.ownedBy;
-    Object.assign(r, rest, ownedBy ? { ownedBy } : {});
+    Object.assign(r, rest, ownedBy != null ? { ownedBy } : {});
     if (ownedBy === null) delete r.ownedBy;
     await automationStore.saveRules(this.rules);
     console.log(

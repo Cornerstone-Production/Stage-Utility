@@ -411,6 +411,21 @@ describe("a rule that belongs to a Button", () => {
     assert.match((r.json as { error: string }).error, /viewId and an objectId/);
   });
 
+  test("a PATCH whose ownedBy is a falsy non-null value is refused, not reported as saved", async () => {
+    const list = (await api(automationRoutes, "/api/automation/rules")).json as { rules: Rule[] };
+    const owned = list.rules.find((r) => r.ownedBy?.objectId === "b-shutter")!;
+    for (const bad of ["", false, 0]) {
+      const r = await api(automationRoutes, `/api/automation/rules/${owned.id}`, "PATCH", { ownedBy: bad });
+      assert.equal(r.status, 400, `ownedBy ${JSON.stringify(bad)} was accepted`);
+      assert.match((r.json as { error: string }).error, /viewId and an objectId/);
+      assert.deepEqual(
+        automationEngine.listRules().find((x) => x.id === owned.id)!.ownedBy,
+        { viewId: "v-booth", objectId: "b-shutter" },
+        `ownedBy ${JSON.stringify(bad)} changed the rule`,
+      );
+    }
+  });
+
   test("a new owned rule is accepted and returned with ownedBy, and null clears it", async () => {
     const made = await api(automationRoutes, "/api/automation/rules", "POST", {
       name: "Made for a Button",
