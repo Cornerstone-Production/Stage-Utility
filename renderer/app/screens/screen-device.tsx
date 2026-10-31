@@ -12,12 +12,12 @@
 import { useState } from "react";
 
 import { invoke } from "../../lib/api";
-import { Tooltip, toast } from "../../components/ui";
+import { Switch, Tooltip, toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { DeviceOutput } from "@main/types/kiosk";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
-import { outputModeLine } from "./output-helpers";
+import { outputModeLine, outputSwitchState } from "./output-helpers";
 import { readUpdate, TONE_CLASS } from "./machine-update";
 import { cn } from "../../lib/cn";
 
@@ -36,6 +36,20 @@ export async function releaseDevice(deviceId: string, screenName: string): Promi
     // Said out loud because nothing else on the card changes visibly except
     // this strip disappearing, and a strip disappearing reads like a bug.
     toast.success(`${screenName} released — the screen goes back to waiting`);
+  } catch (err) {
+    toast.error(errorMessage(err));
+  }
+}
+
+/** Switch one output of a Mac helper on or off, and say so if it fails. The Mac
+ *  hears it in the answer to its next health post. One function for the card and
+ *  Screen settings, so both fail the same way. */
+export async function setOutputEnabled(deviceId: string, enabled: boolean): Promise<void> {
+  try {
+    await invoke("devices:setEnabled", { deviceId, enabled });
+    // The same refetch a release does: this page reads the stored value back.
+    const failed = await refreshDevices();
+    if (failed) toast.error(`Switched, but the list did not reload: ${failed.message}`);
   } catch (err) {
     toast.error(errorMessage(err));
   }
@@ -60,6 +74,8 @@ export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; 
   const update = readUpdate(device, data);
 
   const size = describeScreen(device.screen);
+  const output = device.output;
+  const sw = output ? outputSwitchState(device, data.health.find((h) => h.deviceId === device.id)) : null;
 
   const deviceId = device.id;
   async function release() {
@@ -94,6 +110,16 @@ export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; 
         )}
         <div className="truncate font-mono text-caption2 text-fg-faint">{device.id}</div>
       </div>
+      {output && sw && (
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={cn("text-caption1", sw.pending ? "text-warn-11" : "text-fg-muted")}>{sw.label}</span>
+          <Switch
+            checked={sw.on}
+            aria-label={`Output on ${output.port}`}
+            onCheckedChange={(v: boolean) => void setOutputEnabled(device.id, v)}
+          />
+        </div>
+      )}
       <Tooltip label="Unbind the machine. The screen keeps its view and its URL.">
         <button
           type="button"

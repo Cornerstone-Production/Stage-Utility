@@ -444,6 +444,7 @@ export type IpcChannel =
   | "devices:claim"
   | "devices:list"
   | "devices:release"
+  | "devices:setEnabled"
   | "devices:requestUpdate"
   | "devices:scan"
   | "displays:getPresence"
@@ -1095,6 +1096,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/devices/claim", p);
     case "devices:release":
       return post<T>("/api/devices/release", p);
+    case "devices:setEnabled":
+      return post<T>("/api/devices/enabled", p);
     // Update now, or Try again, for one Mac helper or Windows kiosk.
     case "devices:requestUpdate":
       return post<T>("/api/machine-updates/request", p);

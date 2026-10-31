@@ -685,6 +685,19 @@ describe("the device of a Mac output helper", () => {
     assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it is on screen");
   });
 
+  test("an output the Mac holds off shows dashes, not the zeros it sends, and says so", async () => {
+    await open(SDI, { health: [{ ...HEALTH, fps: 0, repeated: 0, dropped: 0, enabled: false }] });
+    const stats = within(screen.getByRole("group", { name: "Output health" }));
+    assert.equal(stats.getAllByText("—").length, 3, "an off output's zeros were shown as a measurement");
+    assert.ok(screen.getByText("Off. Nothing is being drawn on this port."));
+  });
+
+  test("has a switch named for the port, on when Screens has it on", async () => {
+    await open(SDI, { health: [HEALTH] });
+    const sw = screen.getByRole("switch", { name: "Output on SDI 1" });
+    assert.equal(sw.getAttribute("aria-checked"), "true");
+  });
+
   test("shows a DeckLink output's latency, to the millisecond, with what it measures", async () => {
     await open(SDI, { health: [{ ...HEALTH, latencyMs: 20.4 }] });
     assert.ok(screen.getByText("Latency 20 ms (render to air)"));

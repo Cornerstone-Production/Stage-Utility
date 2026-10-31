@@ -193,7 +193,8 @@ export function recordHealth(
   const trend = judge(before?.trend ?? FRESH_TREND, report, kind);
   const latest: OutputHealth = { ...report, deviceId, receivedAt: now, struggling: trend.struggling };
   health.set(deviceId, { latest, trend });
-  if (trend.struggling !== (before?.trend.struggling ?? false)) {
+  // An output switched off is not a recovery: its figures are gone, not good.
+  if (report.enabled !== false && trend.struggling !== (before?.trend.struggling ?? false)) {
     // The word is chosen first so there is one template to scrub, not two.
     const verdict = trend.struggling ? "is struggling" : "has recovered";
     console.log(
@@ -203,6 +204,48 @@ export function recordHealth(
   ensureSweep();
   announce(now);
   return latest;
+}
+
+/** Health posts in a row that did not say what Screens asked for, by device id.
+ *  RUNTIME: it only exists to say so once in the log. */
+const unansweredSwitch = new Map<string, number>();
+
+/** The last change a Mac reported making to its own switch, by device id. RUNTIME:
+ *  it only has to outlast a retry. */
+const lastChange = new Map<string, string>();
+
+/** Is this change one the server has not taken yet? Remembers it, so the same id
+ *  sent again (a retry after a lost reply, or a replay) answers false. */
+export function takeChange(deviceId: string, changeId: string): boolean {
+  if (lastChange.get(deviceId) === changeId) return false;
+  lastChange.set(deviceId, changeId);
+  return true;
+}
+
+/** How many posts may pass before a switch is called unanswered: two, at the
+ *  helper's ten seconds. */
+export const SWITCH_POSTS_BEFORE_WARNING = 2;
+
+/**
+ * Compare what a helper says it holds with what Screens asked for.
+ *
+ * Says in the log, once, when a change has still not arrived after two posts, so
+ * a switch that did nothing leaves a line to read. A helper older than the switch
+ * never says, and gets the same one line; a post that agrees clears it.
+ */
+export function noteSwitchAnswer(deviceId: string, wanted: boolean, reported: boolean | undefined): void {
+  if (reported === wanted) {
+    unansweredSwitch.delete(deviceId);
+    return;
+  }
+  const n = (unansweredSwitch.get(deviceId) ?? 0) + 1;
+  unansweredSwitch.set(deviceId, n);
+  if (n === SWITCH_POSTS_BEFORE_WARNING) {
+    // The words are chosen first so there is one template to scrub.
+    const want = wanted ? "on" : "off";
+    const heard = reported === undefined ? "its helper does not report it (older than the switch)" : `it still says ${reported ? "on" : "off"}`;
+    console.warn(`[output-helper] ${scrub(deviceId)} is set ${scrub(want)} in Screens and ${scrub(heard)} after ${scrub(SWITCH_POSTS_BEFORE_WARNING)} health posts`);
+  }
 }
 
 /** Plain code-unit order, not locale order: the same list on every box. */
@@ -222,6 +265,8 @@ export function healthList(now = Date.now()): OutputHealth[] {
 
 /** Drop what was reported for a device: it was released, or taken over. */
 export function forgetHealth(deviceId: string): void {
+  unansweredSwitch.delete(deviceId);
+  lastChange.delete(deviceId);
   if (health.delete(deviceId)) announce();
 }
 
@@ -376,6 +421,8 @@ export function resetKioskPresence(): void {
   secrets.clear();
   mismatched.clear();
   health.clear();
+  unansweredSwitch.clear();
+  lastChange.clear();
   seen.clear();
   toldReleased.clear();
   scans.clear();
