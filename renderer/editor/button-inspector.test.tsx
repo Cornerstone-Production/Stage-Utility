@@ -408,7 +408,7 @@ describe("what it saved as", () => {
   test("an owned command names itself, and List it with the other commands clears only the owner", async () => {
     const s = serve({ rules: [owned("btn_shutter", PRESS_17_2_0)] });
     const { container, configs } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true });
-    await eventually(() => assert.ok(container.textContent?.includes("Saved as this button’s own command")));
+    await eventually(() => assert.ok(container.textContent?.includes("Saved as this Button’s own command")));
     assert.ok(container.textContent?.includes("btn_shutter"));
     assert.ok(container.textContent?.includes("Simulate, Disarm and the activity log apply."));
 
@@ -418,7 +418,7 @@ describe("what it saved as", () => {
     assert.deepEqual(configs, [], "the Button keeps pressing the same command");
     // And the panel now reads as a plain command.
     await eventually(() => assert.equal(seg(container, "A command").getAttribute("aria-pressed"), "true"));
-    assert.equal(container.textContent?.includes("Saved as this button"), false);
+    assert.equal(container.textContent?.includes("Saved as this Button"), false);
   });
 
   test("a refused List it says why and leaves the switch where it was", async () => {

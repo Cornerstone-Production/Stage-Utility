@@ -24,13 +24,13 @@ import { COMPANION_PRESS, type PressTarget } from "./owned-press";
  *  write. An object so a test can set it to 0 rather than wait. */
 export const timing = { fieldWriteMs: 500 };
 
-/** The action list as the rule editor groups it, then the action's own fields. */
 /** A typed field's write that is waiting out the debounce: its timer, and what sending it now does. */
 export interface PendingWrite {
   timer: ReturnType<typeof setTimeout>;
   send: () => void;
 }
 
+/** The action list as the rule editor groups it, then the action's own fields. */
 export function ActionPane({
   saved,
   pendingRef,

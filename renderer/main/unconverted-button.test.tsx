@@ -34,6 +34,8 @@ describe("a Run an action Button that was not converted", () => {
     assert.match(container.textContent ?? "", /Needs converting/);
     assert.equal(container.querySelector("button"), null, "nothing here may look or act like a control");
     fireEvent.click(container.querySelector("[data-unconverted-button]")!);
+    assert.match(container.textContent ?? "", /Needs converting/, "a tap changes nothing");
+    assert.equal(container.querySelector("button"), null);
   });
 
   test("any other dropped type still draws nothing", () => {

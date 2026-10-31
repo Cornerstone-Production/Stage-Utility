@@ -647,7 +647,7 @@ name made unique against every command name and former name; one ending `_on` or
 and never appear in the list. It is enabled, hidden from Home Assistant, allowed
 during a service, with no conditions and no cooldown, and it belongs to that
 Button. Its spoken name is the label, or the picked name when the label is blank,
-and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this button's own command* with the name.
+and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this Button's own command* with the name.
 Picking again on the same Button rewrites that command's action in place: its name
 does not change when the label or the pick does. Pointing the Button at the command
 is an edit like any other, so the layout still needs saving. The command itself

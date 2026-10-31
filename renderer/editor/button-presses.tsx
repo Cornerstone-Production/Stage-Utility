@@ -292,7 +292,7 @@ function HowItIsSaved({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line p-2.5 text-caption1 text-fg-muted">
       <span>
-        <span className="font-medium text-fg">Saved as this button&rsquo;s own command </span>
+        <span className="font-medium text-fg">Saved as this Button&rsquo;s own command </span>
         <span className="font-mono text-fg">{calledCueName(own.trigger)}</span>
         <span>. Simulate, Disarm and the activity log apply.</span>
       </span>

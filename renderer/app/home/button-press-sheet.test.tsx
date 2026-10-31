@@ -91,7 +91,7 @@ describe("the Presses sheet", () => {
     assert.deepEqual(server.posts[0]!.ownedBy, { viewId: "home", objectId: "home-cue-button-5-4" });
     assert.equal(saved.length, 0, "nothing is stored until Save");
 
-    await eventually(() => assert.ok(screen.queryByText(/Saved as this button/)));
+    await eventually(() => assert.ok(screen.queryByText(/Saved as this Button/)));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await eventually(() => assert.equal(saved.length, 1));
     assert.deepEqual(saved[0]!.config, { type: "cue-button", cue: "btn_refresh", showDevice: true, label: "Refresh" });
