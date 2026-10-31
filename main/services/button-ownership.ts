@@ -91,18 +91,19 @@ function namesOf(rule: Rule): Set<string> {
  * and names this rule's cue (or a former name of it)?
  *
  * A Button re-pointed at another cue is NOT its owner any more: the rule is then
- * treated exactly as one whose Button is gone.
+ * treated exactly as one whose Button is gone — unless another Button still names
+ * it. Duplicating a view copies its Buttons with their cue, so deleting the
+ * original leaves the copy pressing the rule, and that rule's Button is not gone.
  */
 export function ownerHolds(rule: Rule, views: readonly View[]): boolean {
   const owner = rule.ownedBy;
   if (!owner) return true;
-  const view = views.find((v) => v.id === owner.viewId);
-  if (!view) return false;
   const names = namesOf(rule);
-  for (const { object, cue } of cueButtonsIn(view.layout?.objects)) {
-    if (object.id === owner.objectId) return names.has(cue.toLowerCase());
+  const view = views.find((v) => v.id === owner.viewId);
+  for (const { object, cue } of cueButtonsIn(view?.layout?.objects)) {
+    if (object.id === owner.objectId && names.has(cue.toLowerCase())) return true;
   }
-  return false;
+  return views.some((v) => [...cueButtonsIn(v.layout?.objects)].some(({ cue }) => names.has(cue.toLowerCase())));
 }
 
 /**

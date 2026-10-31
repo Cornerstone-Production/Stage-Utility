@@ -601,6 +601,31 @@ describe("a view saved without the Button that owns a rule", () => {
     );
   });
 
+  test("deleting a view whose duplicate still has the Button is not a Button gone", async (t) => {
+    await automationEngine.addRule({
+      name: "Duplicated",
+      enabled: true,
+      trigger: { id: "call.by-name", params: { name: "btn_duplicated", homeAssistant: "hidden" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+      ownedBy: { viewId: "v-dup", objectId: "d-1" },
+    });
+    const dup = (id: string, name: string) =>
+      ({
+        id,
+        name,
+        layout: { objects: [{ id: "d-1", x: 0, y: 0, w: 10, h: 10, config: { type: "cue-button", cue: "btn_duplicated" } }] },
+      }) as unknown as View;
+    await viewsStore.save([...(await viewsStore.load()), dup("v-dup", "Original"), dup("v-dup-copy", "Original copy")]);
+    const lines = captureConsole(t, "log");
+    await viewsStore.save((await viewsStore.load()).filter((v) => v.id !== "v-dup"));
+    assert.deepEqual(lines.filter((l) => l.includes("btn_duplicated")), []);
+    const list = (await api(automationRoutes, "/api/automation/rules")).json as { rules: (Rule & { ownerMissing?: true })[] };
+    assert.equal(list.rules.find((r) => r.trigger.params.name === "btn_duplicated")?.ownerMissing, undefined);
+  });
+
   test("a rule written before its Button was saved is not reported by an unrelated save", async (t) => {
     // The inspector writes the rule when the pick is made and the layout later.
     await automationEngine.addRule({
