@@ -402,7 +402,9 @@ switch or Run — opens the editor in a dialog over the list, so the list and th
 tabs stay where they are. **Test** and **Delete** are in its footer beside
 **Cancel** and **Save**; Escape, the overlay and Cancel all discard the draft, and
 a save the server refuses leaves the dialog open with the change still in it.
-Deleting asks first, naming the cues that go. The editor's header repeats **Used on**.
+Deleting asks first, naming the cues that go. The editor's header repeats **Used on**. Where a command is used is read again
+whenever any view is added, removed, renamed or saved, from this page or anywhere
+else, after a short pause, so the chips follow a Button as it is added or deleted.
 
 Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
 rule's name and id, so a bulk delete leaves a record of exactly which rules went.

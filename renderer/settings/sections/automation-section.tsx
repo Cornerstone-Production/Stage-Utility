@@ -42,7 +42,8 @@ import {
   type Registry,
   type RuleEditorTarget,
 } from "./rule-editor-dialog";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStageState } from "../../main/use-stage-state";
 import { useSearchParam } from "../../lib/use-search-param";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { usePvpState } from "../../main/use-pvp-state";
@@ -251,6 +252,9 @@ interface CompanionPairsReply {
   pairs?: { on?: OfferedButton; off?: OfferedButton }[];
   buttons?: OfferedButton[];
 }
+
+/** The pause before a change to the views re-reads where commands are used. */
+export const VIEWS_REREAD_MS = 400;
 
 /** How long a first press on a confirm rule's Run waits for the second. */
 const RUN_CONFIRM_MS = 5000;
@@ -712,6 +716,21 @@ export function AutomationSection({
 
   // Where each command is used: the Buttons that name it. Undefined until read.
   const { usage, error: usageError } = useCueUsage();
+  // Where a command is used goes stale when anybody edits a layout: this page, the layout
+  // editor, another client. The stage state carries every view's revision and name, so a change
+  // to any of them re-reads the usage, after a pause so a burst of saves is one read. The first
+  // state is the baseline, not a change.
+  const { state: stage } = useStageState();
+  const viewsSignature = stage?.views?.map((v) => `${v.id}:${v.layoutRev ?? 0}:${v.name}`).join("|") ?? null;
+  const lastViews = useRef<string | null>(null);
+  useEffect(() => {
+    if (viewsSignature === null) return;
+    const before = lastViews.current;
+    lastViews.current = viewsSignature;
+    if (before === null || before === viewsSignature) return;
+    const t = setTimeout(() => void qc.invalidateQueries({ queryKey: CUE_USAGE_KEY }), VIEWS_REREAD_MS);
+    return () => clearTimeout(t);
+  }, [viewsSignature, qc]);
   // A failed read says so on the page and on /log, so a command that reads as
   // unused over an unreadable usage is never the only evidence there was.
   useEffect(() => {
