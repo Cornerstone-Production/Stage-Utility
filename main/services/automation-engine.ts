@@ -60,6 +60,26 @@ import { ownedByProblem, watchOwnedRules } from "./button-ownership.js";
  */
 type RulePatch = Partial<Omit<Rule, "id" | "ownedBy">> & { ownedBy?: OwnedBy | null };
 
+/**
+ * `rule` with its owner set the way a request means it: undefined leaves it alone,
+ * `null` clears it (List it with the other cues), anything else sets it, whatever it
+ * is, so the validator and not a truthiness test decides whether it is acceptable.
+ */
+function withOwner(rule: Rule, ownedBy: unknown): Rule {
+  if (ownedBy === undefined) return rule;
+  const { ownedBy: _before, ...rest } = rule;
+  return ownedBy === null ? rest : { ...rest, ownedBy: ownedBy as OwnedBy };
+}
+
+/** What an update's log line adds about the Button, or nothing for a rule that has none. */
+function ownerNote(before: OwnedBy | undefined, after: OwnedBy | undefined): string {
+  if (after) return ` — belongs to button ${scrub(after.objectId)} on view ${scrub(after.viewId)}`;
+  if (before) {
+    return ` — no longer belongs to button ${scrub(before.objectId)} on view ${scrub(before.viewId)}; listed with the other cues`;
+  }
+  return "";
+}
+
 /** Why a call was refused. Each maps to one sentence the caller can speak. */
 export type CueBlockReason =
   | "disabled"
@@ -427,8 +447,7 @@ class AutomationEngine {
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
     this.assertRulesRead();
     // A client that clears an owner by sending null on a create means "none".
-    const next: Rule = { ...rule, id: randomUUID() };
-    if ((next as { ownedBy?: unknown }).ownedBy === null) delete next.ownedBy;
+    const next = withOwner({ ...rule, id: randomUUID() }, (rule as { ownedBy?: unknown }).ownedBy);
     this.assertCueValid(next, null);
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
@@ -445,26 +464,17 @@ class AutomationEngine {
     this.assertRulesRead();
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
-    // `ownedBy: null` is the ask to clear it (List it with the other cues); the
-    // merged rule is what must be valid, so it is cleared before the check.
+    // The merged rule is what must be valid, and what is then applied: `ownedBy`
+    // is merged once, by withOwner, for the check and for the write alike.
     const { ownedBy, ...rest } = patch;
-    const releasing = ownedBy === null && r.ownedBy !== undefined;
-    const merged: Rule = { ...r, ...rest, ...(ownedBy != null ? { ownedBy } : {}) };
-    if (ownedBy === null) delete merged.ownedBy;
+    const merged = withOwner({ ...r, ...rest }, ownedBy);
     this.assertCueValid(merged, id);
     const cueBefore = calledCueName(r.trigger);
     const ownerBefore = r.ownedBy;
-    Object.assign(r, rest, ownedBy != null ? { ownedBy } : {});
-    if (ownedBy === null) delete r.ownedBy;
+    if (!("ownedBy" in merged)) delete r.ownedBy;
+    Object.assign(r, merged);
     await automationStore.saveRules(this.rules);
-    console.log(
-      `[automation] rule updated "${scrub(r.name)}" (${scrub(id)})` +
-        (releasing && ownerBefore
-          ? ` — no longer belongs to button ${scrub(ownerBefore.objectId)} on view ${scrub(ownerBefore.viewId)}; listed with the other cues`
-          : r.ownedBy
-            ? ` — belongs to button ${scrub(r.ownedBy.objectId)} on view ${scrub(r.ownedBy.viewId)}`
-            : ""),
-    );
+    console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})${ownerNote(ownerBefore, r.ownedBy)}`);
     // A cue's name is a URL somebody else holds. When it changes or goes, "a console
     // button reads Unbound" needs a line to be traced back to.
     const cueAfter = calledCueName(r.trigger);
