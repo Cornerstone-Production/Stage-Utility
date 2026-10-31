@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { AppLink } from "../app-link";
+import { ActionTile, RecordingAction } from "./card-actions";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
@@ -644,7 +645,11 @@ export function RecordingCard({
   recorder = "any",
   now,
   showElapsed = true,
+  actionable = false,
 }: {
+  /** Draw Start / Stop on the tile. Only where a press can land: Home, for an
+   *  operator. A wall draws the same card and must not grow a button. */
+  actionable?: boolean;
   recorder?: string;
   /** The SERVER's clock, from the one tick the page already runs — the same
    *  argument StreamingCard makes below. OBS's record timecode is interpolated
@@ -668,7 +673,7 @@ export function RecordingCard({
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
   // way the SPL card's value is: on Home the caption and the sub-line carry the
   // grey, and the value is the thing you read.
-  return (
+  const stat = (
     <Stat
       label={recorder === "any" ? "Recording" : recorder}
       value={ind.value}
@@ -676,6 +681,8 @@ export function RecordingCard({
       tone={ind.state === "live" ? "live" : undefined}
     />
   );
+  if (!actionable || !chosen.some((r) => r.connected)) return stat;
+  return <ActionTile action={<RecordingAction chosen={chosen} />}>{stat}</ActionTile>;
 }
 
 /**
@@ -1026,7 +1033,10 @@ export function HomeCard({
   onlineKnown,
   secondsToStart,
   hoverSuppressed = false,
+  actionable = false,
 }: {
+  /** Whether a tile's own action (Start / Stop) is drawn. See RecordingCard. */
+  actionable?: boolean;
   /**
    * The card's WHOLE config, not just its type.
    *
@@ -1059,11 +1069,11 @@ export function HomeCard({
   const c = config;
   switch (c.type) {
     case "home-recording":
-      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} actionable={actionable} />;
     case "home-recording-obs":
-      return <RecordingCard recorder="OBS" now={now} />;
+      return <RecordingCard recorder="OBS" now={now} actionable={actionable} />;
     case "home-recording-reaper":
-      return <RecordingCard recorder="REAPER" now={now} />;
+      return <RecordingCard recorder="REAPER" now={now} actionable={actionable} />;
     case "home-streaming":
       return (
         <StreamingCard

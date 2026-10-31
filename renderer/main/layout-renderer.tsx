@@ -1,6 +1,8 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
+import { ActionTile, StepAction } from "../app/home/card-actions";
+import { sizeOf } from "../app/home/home-cards";
 import { readConfig, timerSource } from "./timer-config";
 import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
@@ -1019,6 +1021,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
+          actionable={live}
         />
       </div>
     );
@@ -1372,7 +1375,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // A stored `home-live-status` is that Stat on a wall too: it drew Home's card
       // wherever it was placed, and keeps its look off Home.
       if ((ctx.home || o.config?.type === "home-live-status") && timerSource(c) === "service" && (c.nextItem ?? false)) {
-        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        const stat = <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        // Prev / Next on the tile, for an operator on Home with a service live.
+        // Never on a wall: the same Timer is drawn there and has no press.
+        return ctx.home && ctx.interactive && ctx.pcoLive?.mode === "item" ? (
+          <ActionTile action={<StepAction showPrev={sizeOf(o) !== "s"} />}>{stat}</ActionTile>
+        ) : (
+          stat
+        );
       }
       // The baptism readout never sized itself to Home's uniform tile, and still
       // does not: its value fills the box as it did.

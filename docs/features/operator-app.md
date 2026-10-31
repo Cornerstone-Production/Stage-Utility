@@ -134,6 +134,33 @@ controls of their own — Wireless summary, Screens and Recent services — expa
 a press of the tile; on the others only the corner control does, so a button on a
 tile is never swallowed. While you are editing Home nothing expands.
 
+### Actions on a tile
+
+A tile may carry **one** action, drawn on the tile itself.
+
+| Tile | Action | Does |
+|---|---|---|
+| **Timer** (service), while a service is live | **Next** — and **Prev** beside it from Medium up | moves Planning Center Live on or back, one press each |
+| **Recording** | **Start** when stopped, **Stop** while recording | starts or stops REAPER and OBS, whichever are connected |
+| **Streaming**, **Wireless summary**, **Screens** | none | |
+
+Streaming has none on purpose: starting a broadcast from a tile is too easy to do
+by accident and too public to get wrong.
+
+**Stop takes two presses.** The first turns the button into **Stop recording?**
+for three seconds; a second press inside that stops, and one after it lapses is
+a first press again. **Start** shows a spinner until the recorder itself reports
+that it is recording, and says so on the tile if it has not within ten seconds.
+A failed action names the problem on the tile for five seconds.
+
+The action is dropped from a tile too narrow to hold it beside its reading, such
+as a Small tile on a narrow tablet; make the tile Medium to get it back. On a
+touch screen every control on a tile is at least 44 px square.
+
+A fresh Home includes the **Message composer** across the page, so a stage
+message can be sent without leaving it. A Home you have edited is left as you
+made it; **Add widget** offers the composer at any time.
+
 ### Sizes
 
 Five shapes on a three-column grid:

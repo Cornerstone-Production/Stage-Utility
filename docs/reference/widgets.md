@@ -240,6 +240,8 @@ recording**, which colors just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
 
+On Home, the **Recording** tile carries **Start** and **Stop**, and a live service **Timer** carries **Prev** and **Next**; see [Actions on a tile](../features/operator-app.md#actions-on-a-tile). A wall draws neither.
+
 The Home **Streaming** tile is one object in two presentations. On Home it is a
 card in a row of cards; put one on a screen and it wears the composition above,
 beside OBS status and REAPER status. So all of its settings are offered on Home,
