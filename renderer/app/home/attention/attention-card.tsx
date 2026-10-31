@@ -15,6 +15,7 @@ import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/cn";
 import { invoke } from "../../../lib/api";
 import { errorMessage } from "@main/services/errors";
+import type { HomeSnooze } from "@main/types/home-snoozes";
 import { homeMode } from "../home-mode";
 import { collectAttention } from "./collect";
 import { healthyLine } from "./healthy";
@@ -81,10 +82,13 @@ function FixButton({ fix, onFailed }: { fix: AttentionFix; onFailed: (why: strin
 
 function Row({
   item,
+  interactive,
   onSnooze,
   onFailed,
 }: {
   item: AttentionItem;
+  /** False off Home: a wall or console draws the problem and nothing to press. */
+  interactive: boolean;
   onSnooze: () => void;
   onFailed: (why: string) => void;
 }) {
@@ -95,10 +99,14 @@ function Row({
         <span className="block truncate text-body font-medium text-fg">{item.title}</span>
         <span className="block truncate text-caption1 text-fg-subtle">{item.detail}</span>
       </span>
-      <Button variant="filled" onClick={onSnooze} aria-label={`Snooze ${item.title}`}>
-        Snooze
-      </Button>
-      <FixButton fix={item.fix} onFailed={onFailed} />
+      {interactive && (
+        <>
+          <Button variant="filled" onClick={onSnooze} aria-label={`Snooze ${item.title}`}>
+            Snooze
+          </Button>
+          <FixButton fix={item.fix} onFailed={onFailed} />
+        </>
+      )}
     </li>
   );
 }
@@ -115,15 +123,45 @@ function SnoozedRow({ item, onUnsnooze }: { item: AttentionItem; onUnsnooze: () 
   );
 }
 
+function HealthyDots({ healthy, bare, className }: { healthy: readonly string[]; bare?: boolean; className?: string }) {
+  if (healthy.length === 0) return null;
+  const dots = healthy.map((h) => (
+    <span key={h} className="inline-flex items-center gap-1.5">
+      <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-live-9" />
+      {h}
+    </span>
+  ));
+  if (bare) return <>{dots}</>;
+  return <p className={cn("flex flex-wrap gap-x-4 gap-y-1 text-footnote text-fg-muted", className)}>{dots}</p>;
+}
+
+function SnoozedToggle({ count, open, onToggle }: { count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="ml-auto text-caption1 text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+    >
+      {open ? "Hide snoozed" : `Show ${count} snoozed`}
+    </button>
+  );
+}
+
 /** The widget, over an input already assembled. Split from the hooks so a test can draw any state. */
 export function AttentionView({
   input,
   snoozes,
+  interactive,
   onSnooze,
   onUnsnooze,
 }: {
   input: AttentionInput;
-  snoozes: readonly import("@main/types/home-snoozes").HomeSnooze[];
+  snoozes: readonly HomeSnooze[];
+  /** Home's own page, where controls fire. On a wall or console the card is
+   *  wrapped in pointer-events-none, so a button there would only be a lie:
+   *  rows draw without Snooze, a fix, a "+N more" toggle or Show snoozed. */
+  interactive: boolean;
   onSnooze: (item: AttentionItem) => Promise<unknown>;
   onUnsnooze: (key: string) => Promise<unknown>;
 }) {
@@ -136,7 +174,7 @@ export function AttentionView({
   const { shown, snoozed } = partitionSnoozed(items, snoozes);
   const healthy = healthyLine(input, items);
 
-  const visible = expanded ? shown : shown.slice(0, limit);
+  const visible = expanded && interactive ? shown : shown.slice(0, limit);
   const hidden = shown.length - visible.length;
   const worst = shown.some((i) => i.severity === "critical") ? "critical" : "warn";
 
@@ -171,12 +209,16 @@ export function AttentionView({
               <Row
                 key={item.key}
                 item={item}
+                interactive={interactive}
                 onSnooze={() => void run(onSnooze(item), "snooze that")}
                 onFailed={(why) => setFailure(`${item.fix.label} failed: ${why}`)}
               />
             ))}
           </ul>
-          {hidden > 0 && (
+          {hidden > 0 && !interactive && (
+            <p className="border-t border-line px-4 py-1.5 text-caption1 text-fg-subtle">+{hidden} more</p>
+          )}
+          {hidden > 0 && interactive && (
             <button
               type="button"
               onClick={() => setExpanded(true)}
@@ -185,7 +227,7 @@ export function AttentionView({
               +{hidden} more
             </button>
           )}
-          {expanded && shown.length > limit && (
+          {interactive && expanded && shown.length > limit && (
             <button
               type="button"
               onClick={() => setExpanded(false)}
@@ -203,43 +245,36 @@ export function AttentionView({
         </p>
       )}
 
-      {/* Pinned to the foot of the tile: where the list is longer than the tile,
-          it scrolls beneath this, and the healthy line (and the Show snoozed
-          switch) are never the part that is clipped. The opaque ground is the
-          tile's own, so the rows do not show through the tint above it. */}
-      <div className="sticky bottom-0 bg-surface">
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-footnote text-fg-muted",
-          shown.length > 0 && "border-t border-line bg-fill/50",
-        )}
-      >
-        {healthy.length === 0 && shown.length === 0 && snoozed.length === 0 && <span>Checking…</span>}
-        {healthy.map((h) => (
-          <span key={h} className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-live-9" />
-            {h}
-          </span>
-        ))}
-        {healthy.length > 0 && (
-          <span className="ml-auto text-fg-subtle">
-            {shown.length > 0 ? "all else healthy" : "nothing needs attention"}
-          </span>
-        )}
-        {snoozed.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowSnoozed((v) => !v)}
-            aria-expanded={showSnoozed}
-            className="ml-auto text-caption1 text-fg-muted underline-offset-2 hover:text-fg hover:underline"
-          >
-            {showSnoozed ? "Hide snoozed" : `Show ${snoozed.length} snoozed`}
-          </button>
-        )}
-      </div>
-      </div>
+      {shown.length === 0 ? (
+        // All clear: a tile in its own right, captioned and headlined the way the
+        // cards beside it are, with what is healthy beneath as the line of dots.
+        <div className="flex min-h-full flex-col justify-center px-4 py-3">
+          <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Needs attention</h2>
+          <p className="mt-0.5 flex items-center gap-2 text-title2 font-medium text-fg">
+            {healthy.length > 0 && <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full bg-live-9" />}
+            {healthy.length > 0 ? "All clear" : "Checking…"}
+          </p>
+          <HealthyDots healthy={healthy} className="mt-1.5" />
+          {interactive && snoozed.length > 0 && (
+            <SnoozedToggle count={snoozed.length} open={showSnoozed} onToggle={() => setShowSnoozed((v) => !v)} />
+          )}
+        </div>
+      ) : (
+        // Pinned to the foot of the tile: where the list is longer than the tile,
+        // it scrolls beneath this, so the healthy line is never the part clipped.
+        // The opaque ground is the tile's own, so rows do not show through the tint.
+        <div className="sticky bottom-0 bg-surface">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line bg-fill/50 px-4 py-2 text-footnote text-fg-muted">
+            <HealthyDots healthy={healthy} bare />
+            {healthy.length > 0 && <span className="ml-auto text-fg-subtle">all else healthy</span>}
+            {interactive && snoozed.length > 0 && (
+              <SnoozedToggle count={snoozed.length} open={showSnoozed} onToggle={() => setShowSnoozed((v) => !v)} />
+            )}
+          </div>
+        </div>
+      )}
 
-      {showSnoozed && snoozed.length > 0 && (
+      {interactive && showSnoozed && snoozed.length > 0 && (
         <ul className="border-t border-line">
           {snoozed.map((item) => (
             <SnoozedRow
@@ -259,7 +294,9 @@ function AttentionBody({
   now,
   state,
   pcoLive,
+  interactive,
 }: {
+  interactive: boolean;
   mood: "live" | "idle";
   now: number;
   state: StageState;
@@ -271,6 +308,7 @@ function AttentionBody({
     <AttentionView
       input={input}
       snoozes={snoozes.value?.snoozes ?? []}
+      interactive={interactive}
       onSnooze={(item) => snoozeItem(item.key, item.severity).then(snoozes.refresh)}
       onUnsnooze={(key) => unsnoozeItem(key).then(snoozes.refresh)}
     />
@@ -287,7 +325,10 @@ export function AttentionCard({
   pcoLive,
   pcoLiveKnown,
   secondsToStart,
+  interactive,
 }: {
+  /** True on Home itself; see AttentionView. */
+  interactive: boolean;
   state: StageState;
   now: number;
   pcoLive: PcoLiveDTO | null;
@@ -296,5 +337,5 @@ export function AttentionCard({
 }) {
   const mood = homeMode(pcoLiveKnown, pcoLive, secondsToStart);
   if (mood === "unknown") return null;
-  return <AttentionBody mood={mood} now={now} state={state} pcoLive={pcoLive} />;
+  return <AttentionBody mood={mood} now={now} state={state} pcoLive={pcoLive} interactive={interactive} />;
 }

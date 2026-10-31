@@ -29,7 +29,7 @@ const stateOf = (outputs: unknown[]) =>
 function view(
   over: Parameters<typeof attentionInput>[0],
   snoozes: import("@main/types/home-snoozes").HomeSnooze[] = [],
-  on: { snooze?: (key: string, sev: string) => Promise<unknown>; unsnooze?: (key: string) => Promise<unknown> } = {},
+  on: { interactive?: boolean; snooze?: (key: string, sev: string) => Promise<unknown>; unsnooze?: (key: string) => Promise<unknown> } = {},
 ) {
   return render(
     React.createElement(
@@ -38,6 +38,7 @@ function view(
       React.createElement(AttentionView, {
         input: attentionInput(over),
         snoozes,
+        interactive: on.interactive ?? true,
         onSnooze: (i: { key: string; severity: string }) => (on.snooze ?? (async () => {}))(i.key, i.severity),
         onUnsnooze: on.unsnooze ?? (async () => {}),
       }),
@@ -48,14 +49,47 @@ function view(
 const text = (c: HTMLElement) => c.textContent ?? "";
 const mark = (c: HTMLElement) => c.querySelector("[data-attention]")?.getAttribute("data-attention");
 
-test("nothing wrong: the healthy line alone, no header, no list", async () => {
+test("nothing wrong: a captioned tile that says All clear, with the healthy entries beneath and no list", async () => {
   const { container } = view({ state: stateOf([OUTPUTS[0]]), onlineOutputIds: ["o0"] });
   await settle();
   assert.equal(mark(container), "clear");
-  assert.ok(!/Needs attention/.test(text(container)));
+  assert.equal(container.querySelector("h2")?.textContent, "Needs attention", "captioned like the cards beside it");
+  assert.ok(/All clear/.test(text(container)), text(container));
   assert.ok(/1 of 1 screens/.test(text(container)), text(container));
-  assert.ok(/nothing needs attention/.test(text(container)));
   assert.equal(container.querySelectorAll("li").length, 0);
+});
+
+test("nothing heard yet is Checking, not All clear", async () => {
+  const { container } = view({ state: stateOf([OUTPUTS[0]]), onlineKnown: false, wirelessKnown: false, integrationsKnown: false });
+  await settle();
+  assert.ok(/Checking/.test(text(container)) && !/All clear/.test(text(container)));
+});
+
+test("off Home (a wall or console) the rows draw with no button of any kind", async () => {
+  const { container } = view(
+    {
+      mood: "live", minutesLeft: 52, state: stateOf(OUTPUTS), onlineOutputIds: [],
+      assigned: new Map([["rx::3", "Lead"]]), wireless: [mic("rx::3", { battery: 5, batteryMinutes: 3 })],
+      integrations: [integration("reaper")], integrationLabels: { reaper: "REAPER" },
+      reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
+    },
+    [{ key: "readiness:plan", severity: "warn", at: 0, expiresAt: null }],
+    { interactive: false },
+  );
+  await settle();
+  assert.ok(container.querySelectorAll("li").length >= 3, "the problems are still drawn");
+  assert.ok(/\+\d+ more/.test(text(container)), "the count of what is hidden is still said");
+  assert.equal(container.querySelectorAll("button, a").length, 0, `controls on a wall: ${text(container)}`);
+});
+
+test("the all-clear tile off Home has no Show snoozed button either", async () => {
+  const { container } = view(
+    { state: stateOf([OUTPUTS[0]]), onlineOutputIds: ["o0"], mood: "live", minutesLeft: 52, assigned: new Map([["rx::3", "L"]]), wireless: [mic("rx::3", { battery: 5, batteryMinutes: 3 })] },
+    [{ key: "wireless-battery:rx::3", severity: "critical", at: 0, expiresAt: null }],
+    { interactive: false },
+  );
+  await settle();
+  assert.equal(container.querySelectorAll("button").length, 0);
 });
 
 test("a problem: its title, reason, Snooze and fix; critical marks the tile critical", async () => {

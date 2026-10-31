@@ -31,4 +31,24 @@ describe("healthyLine", () => {
     const input = attentionInput({ onlineKnown: false, wirelessKnown: false, integrationsKnown: false, state: { outputs } as unknown as StageState });
     assert.deepEqual(healthyLine(input, []), []);
   });
+
+  it("a count of none is not called healthy: no '0 of 2 screens', no '0 of 1 mics'", () => {
+    const input = attentionInput({
+      state: { outputs: outputs.slice(0, 2), pcoConfigured: true } as unknown as StageState,
+      onlineOutputIds: [],
+      assigned: new Map([["rx::1", "Lead"]]),
+      wireless: [mic("rx::1", { online: false })],
+    });
+    assert.deepEqual(healthyLine(input, []), []);
+  });
+
+  it("streaming platforms say what they are doing, once their status has answered", () => {
+    const base = {
+      integrations: [integration("resi"), integration("youtube")],
+      integrationLabels: { resi: "Resi", youtube: "YouTube" },
+    };
+    const st = (live: boolean) => ({ connected: true, live, startedAt: null, detail: null });
+    assert.deepEqual(healthyLine(attentionInput({ ...base, resi: st(true), youtube: st(false) }), []), ["Resi streaming", "YouTube idle"]);
+    assert.deepEqual(healthyLine(attentionInput({ ...base, resi: null, resiKnown: false, youtube: st(false) }), []), ["YouTube idle"]);
+  });
 });

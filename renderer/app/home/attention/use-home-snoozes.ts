@@ -11,11 +11,9 @@ export interface HomeSnoozesHandle {
   value: HomeSnoozesState | null;
   known: boolean;
   /** Read the list again, now. The browser that pressed Snooze calls this when
-   *  the server has answered, so it shows its own change without waiting for the
-   *  push: the shared worker reports a tab's channels one POST at a time and the
-   *  server can apply them out of order, which can leave a late subscriber (this
-   *  widget mounts once Home knows its mood) without the channel. Every other
-   *  browser still relies on the push. */
+   *  the server has answered, so it shows its own change at once instead of
+   *  waiting for the push to come back round. Every other browser relies on the
+   *  push. */
   refresh: () => Promise<void>;
 }
 

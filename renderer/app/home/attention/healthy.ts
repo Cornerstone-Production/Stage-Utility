@@ -33,7 +33,16 @@ export function healthyLine(input: AttentionInput, items: readonly AttentionItem
   if (input.integrationsKnown) {
     for (const i of integrationHealth(input.integrations).setUp) {
       if (i.connection !== "connected" || bad.has(`integration-down:${i.id}`)) continue;
-      out.push(input.integrationLabels[i.id] ?? i.id);
+      const label = input.integrationLabels[i.id] ?? i.id;
+      // A streaming platform says what it is doing, as the mockup does: "Resi
+      // streaming" or "Resi idle". Until its status answers it says nothing.
+      const stream = i.id === "resi" ? [input.resi, input.resiKnown] : i.id === "youtube" ? [input.youtube, input.youtubeKnown] : null;
+      if (stream) {
+        const [status, known] = stream as [{ live: boolean } | null, boolean];
+        if (known && status) out.push(`${label} ${status.live ? "streaming" : "idle"}`);
+        continue;
+      }
+      out.push(label);
     }
   }
   return out;

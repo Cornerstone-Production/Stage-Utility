@@ -1021,6 +1021,7 @@ export function HomeCard({
   secondsToStart,
   pcoLive = null,
   pcoLiveKnown = false,
+  interactive = false,
   hoverSuppressed = false,
 }: {
   /**
@@ -1050,6 +1051,9 @@ export function HomeCard({
    *  than the countdown (Needs attention reads the mood and the service's length). */
   pcoLive?: PcoLiveDTO | null;
   pcoLiveKnown?: boolean;
+  /** Home's own page, where controls fire (`ctx.home && ctx.interactive`). On a
+   *  wall or console a card that carries buttons draws none. */
+  interactive?: boolean;
   /** This card's own right-click menu is open, so its chart (if it has one)
    *  must stop tracking the pointer underneath it. Only `home-recent-services`
    *  reads it today; every other case ignores it, the same way most of them
@@ -1105,7 +1109,7 @@ export function HomeCard({
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
     case "home-attention":
-      return <AttentionCard state={state} now={now} pcoLive={pcoLive} pcoLiveKnown={pcoLiveKnown} secondsToStart={secondsToStart} />;
+      return <AttentionCard state={state} now={now} pcoLive={pcoLive} pcoLiveKnown={pcoLiveKnown} secondsToStart={secondsToStart} interactive={interactive} />;
     case "home-readiness":
       return <ReadinessCard checks={readinessChecks(state, onlineOutputIds, onlineKnown)} />;
     case "home-recent-services":

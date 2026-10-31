@@ -47,4 +47,9 @@ describe("wireless-battery source", () => {
   it("unknown contributes nothing", () => {
     assert.deepEqual(run({ wirelessKnown: false, minutesLeft: 60 }, mic("rx::1", { battery: 1, batteryMinutes: 1 })), []);
   });
+
+  it("an overrunning service (0 minutes left) falls back to 20%: a nearly empty pack still fires, a full one does not", () => {
+    assert.equal(run({ mood: "live", minutesLeft: 0 }, mic("rx::1", { batteryMinutes: 3, battery: 10 })).length, 1);
+    assert.deepEqual(run({ mood: "live", minutesLeft: 0 }, mic("rx::1", { batteryMinutes: 3, battery: 90 })), []);
+  });
 });

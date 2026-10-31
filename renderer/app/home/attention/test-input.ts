@@ -40,6 +40,10 @@ export function attentionInput(over: Partial<AttentionInput> = {}): AttentionInp
     reaperKnown: true,
     obs: null,
     obsKnown: true,
+    resi: null,
+    resiKnown: true,
+    youtube: null,
+    youtubeKnown: true,
     ...over,
   };
 }

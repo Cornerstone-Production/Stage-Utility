@@ -33,4 +33,11 @@ describe("recorder-idle source", () => {
     assert.deepEqual(recorderIdle.items(attentionInput({ ...base, reaper: null, reaperKnown: false, obs: null, obsKnown: false })), []);
     assert.deepEqual(recorderIdle.items(attentionInput({ ...base, integrationsKnown: false, reaper: reaper(), obs: obs() })), []);
   });
+
+  it("each recorder's own known flag counts: OBS unanswered does not silence REAPER, nor the reverse", () => {
+    const r = recorderIdle.items(attentionInput({ ...base, reaper: reaper(), reaperKnown: true, obs: obs(), obsKnown: false }));
+    assert.deepEqual(r.map((i) => i.key), ["recorder-idle:reaper"]);
+    const o = recorderIdle.items(attentionInput({ ...base, reaper: reaper(), reaperKnown: false, obs: obs(), obsKnown: true }));
+    assert.deepEqual(o.map((i) => i.key), ["recorder-idle:obs"]);
+  });
 });

@@ -119,9 +119,12 @@ meter stops reporting reads `—` and names it, never another metric's number.
 **Needs attention** lists what is wrong right now, one row per problem: a dot,
 what it is, the reason, **Snooze**, and the fix as a button. Everything healthy
 folds into one line beneath it ("5 of 6 screens · 7 of 8 mics · ProPresenter ·
-Planning Center"), so a green Home is a single line and a red one is loud. It is
-on a new Home by default, in place of Readiness, and **Add widget** offers both;
-a Home somebody has edited is left as it is.
+Planning Center · Resi streaming"; a streaming platform says "streaming" or
+"idle"). With nothing wrong the tile is captioned **Needs attention**, says
+**All clear** with a green dot, and puts that line beneath it. It is on a new
+Home by default, in place of Readiness, and **Add widget** offers both; a Home
+somebody has edited is left as it is. Placed on a wall or console, it draws the
+same rows with no buttons.
 
 A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
 takes the colour of the worst problem showing. At the medium size the list is

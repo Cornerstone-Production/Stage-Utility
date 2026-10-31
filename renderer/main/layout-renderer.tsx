@@ -1020,6 +1020,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           secondsToStart={homeSecondsToStart(ctx)}
           pcoLive={ctx.pcoLive}
           pcoLiveKnown={ctx.pcoLiveKnown}
+          interactive={!!live}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
         />
       </div>

@@ -12,6 +12,7 @@ import { useObsStatus } from "../../../main/use-obs-state";
 import { projectedServiceEndMs } from "../../../main/pco-timer";
 import { usePlanItemsStatus } from "../../../main/use-plan-items";
 import { useReaperStatus } from "../../../main/use-reaper-state";
+import { useResiStatus, useYouTubeStatus } from "../../../main/use-stream-state";
 import { useWirelessTelemetryStatus } from "../../../main/use-wireless-telemetry";
 import { integrationHealth } from "../../context-bar";
 import { trackDownSince } from "./down-since";
@@ -42,6 +43,11 @@ export function useAttentionInput(args: {
   const integrations = useIntegrations();
   const reaper = useReaperStatus();
   const obs = useObsStatus();
+  // Only while the platform is switched on: each one holds a poll open against a
+  // cloud API (one with a daily quota), which a Home with no streaming must not.
+  const enabled = (id: string) => integrations.states.some((i) => i.id === id && i.enabled);
+  const resi = useResiStatus(enabled("resi"));
+  const youtube = useYouTubeStatus(enabled("youtube"));
   // The rundown is read only while live: it is what turns "26 minutes of
   // battery" into "enough for the 52 left", and idle has no service to be left in.
   const planItems = usePlanItemsStatus(mood === "live");
@@ -80,5 +86,9 @@ export function useAttentionInput(args: {
     reaperKnown: reaper.known,
     obs: obs.value,
     obsKnown: obs.known,
+    resi: resi.value,
+    resiKnown: resi.known,
+    youtube: youtube.value,
+    youtubeKnown: youtube.known,
   };
 }

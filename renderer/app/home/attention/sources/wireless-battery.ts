@@ -24,7 +24,10 @@ export const wirelessBattery: AttentionSource = {
       const slot = input.assigned.get(ch.channelId);
       if (slot === undefined || ch.deviceType === "charger" || ch.charging === true || !ch.online) continue;
 
-      const byRuntime = ch.batteryMinutes !== null && input.minutesLeft !== null;
+      // Zero minutes left is a service that is overrunning, not one that is about
+      // to end: comparing a runtime against 0 would never fire, so a pack nearly
+      // empty in the longest service of the year would pass. It falls to the 20% rule.
+      const byRuntime = ch.batteryMinutes !== null && input.minutesLeft !== null && input.minutesLeft > 0;
       const low = byRuntime
         ? ch.batteryMinutes! < input.minutesLeft!
         : ch.battery !== null && ch.battery <= LOW_BATTERY_PERCENT;

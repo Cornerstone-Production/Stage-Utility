@@ -7,7 +7,7 @@
 import type { DeviceStatus } from "@main/types/devices";
 import type { AttentionSeverity } from "@main/types/home-snoozes";
 import type { IntegrationState } from "@main/types/integrations";
-import type { ObsStatusDTO, ReaperStatusDTO } from "@main/types/live";
+import type { ObsStatusDTO, ReaperStatusDTO, StreamStatusDTO } from "@main/types/live";
 
 export type { AttentionSeverity };
 
@@ -65,6 +65,11 @@ export interface AttentionInput {
   reaperKnown: boolean;
   obs: ObsStatusDTO | null;
   obsKnown: boolean;
+  /** Streaming platforms, read only while their integration is enabled. */
+  resi: StreamStatusDTO | null;
+  resiKnown: boolean;
+  youtube: StreamStatusDTO | null;
+  youtubeKnown: boolean;
 }
 
 /** One source: its id is the first half of every key it makes. */
