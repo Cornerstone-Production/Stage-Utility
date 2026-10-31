@@ -5,7 +5,7 @@
 // `Projectors on` becomes. The renderer imports it through `@main/services`, like
 // the rest of the cue grammar.
 
-import { slugForCue } from "./companion-export.js";
+import { slugForCue } from "./cue-slug.js";
 import { isPairHalfName } from "./cue-pairs.js";
 
 /** The label every action button was created with, before a blank one meant "use
