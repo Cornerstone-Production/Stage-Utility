@@ -406,8 +406,7 @@ export function parseButtons(raw: unknown): CompanionButton[] {
         actionIds: actionIdsOf(control),
         stateSource: inferStateSource(entries, connections),
         learnConnections: learnableConnections(entries, connections),
-        bg: layerColor(control, "box"),
-        fg: layerColor(control, "text"),
+        ...colorsOf(control),
       });
     }
   }
@@ -427,7 +426,12 @@ function isPressable(control: Record<string, unknown>): boolean {
 
 /** A control's own look, which is what a page draws for it. */
 function lookOf(control: Record<string, unknown>) {
-  return { label: labelOf(control), bg: layerColor(control, "box"), fg: layerColor(control, "text"), icon: iconOf(control) };
+  return { label: labelOf(control), ...colorsOf(control), icon: iconOf(control) };
+}
+
+/** A button's own background and text colour: the part of its look a rule's button list needs too. */
+function colorsOf(control: Record<string, unknown>): { bg: string | null; fg: string | null } {
+  return { bg: layerColor(control, "box"), fg: layerColor(control, "text") };
 }
 
 const MIN_COLS = 8;
