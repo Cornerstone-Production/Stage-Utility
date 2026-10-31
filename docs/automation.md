@@ -598,23 +598,31 @@ names, spoken name and room, edits included.
 
 **Renaming a command repoints its Buttons.** While the name field differs from
 the saved one, the dialog lists, above its footer, each screen and Button that
-names the command (the same places the **Used on** chips show). **Save** writes
-the rule, then points each of those Buttons at the new name through the views API,
-with the layout's revision: a screen someone has open in the layout editor is
-refused rather than overwritten, after one retry from a fresh read. A Button inside
-a container is reached, and a Button that now names another command is left alone.
-A screen that refuses is named in the dialog with the reason, and the dialog stays
-open over it; **the command stays renamed** and the other screens still follow. A
-name the server refuses repoints nothing. Each save that touches screens leaves one
-line on `/log`:
+names the command or any of its former names (the same places the **Used on**
+chips show). **Save** writes the rule, with the old name added to its former
+names so a URL, a Home Assistant call or a Companion button still using it keeps
+working. It then reads where the command is used **again**, because the list on
+screen is as old as the page, and points each Button found at the new name
+through the views API, with the layout's revision: a screen someone has open in
+the layout editor is refused rather than overwritten, after one retry from a
+fresh read. A Button inside a container is reached, and a Button that now names
+another command is left alone. A screen that refuses is named in the dialog with
+the reason, and the dialog stays open over it; **the command stays renamed** and
+the other screens still follow. If where it is used cannot be read, nothing is
+repointed, the dialog says so, and the old name keeps working as a former name. A
+name the server refuses repoints nothing. A save that touches screens leaves a
+short line on `/log` (the count and the screens, and how many refused), and one
+more line for each screen that refused, with its reason:
 
 ```
-[automation] renamed take_screens to take_the_screens; repointed Booth (1), FOH (2); refused Home (This view was changed by someone else …)
+[automation] renamed take_screens to take_the_screens; repointed 3 buttons on Booth, FOH; 1 refused
+[automation] could not point the buttons on Home at take_the_screens: This view was changed by someone else …
 ```
 
 **Make it automatic** shows the same list as a warning (*reads Not set*) and
 repoints nothing: the command is gone, so a Button that named it has nothing to
-press until somebody picks another. A pair is not renamed from here.
+press until somebody picks another. A pair is not renamed from here: each half's
+cue name is shown and cannot be edited.
 
 ### Built-in cues
 

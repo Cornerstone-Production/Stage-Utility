@@ -19,7 +19,7 @@
 // only ever mounted by this dialog, so the two files split along that line.
 
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID, calledCueName, encodeAliases, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, calledCueName, encodeAliases, nextAliases, parseAliases } from "@main/services/cue-aliases";
 import {
   choiceList,
   fieldsNeedAttention,
@@ -67,10 +67,10 @@ import { HandIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
-import { repointCueButtons, repointLogLine, type RepointResult } from "../../lib/console-cue-buttons";
+import { repointCueButtons, repointLogLines, type RepointResult } from "../../lib/console-cue-buttons";
 import { UsedOn } from "./automation-chips";
 import { CueRenameNotice, RepointRefusals } from "./cue-rename-notice";
-import { usesOf, type CueUse } from "./cue-usage";
+import { usesOf, type CueUse, type CueUsageReply } from "./cue-usage";
 import {
   Button,
   confirm,
@@ -1166,7 +1166,19 @@ export function RuleEditorBody({
   const triggerFieldRows = trigger?.params
     .filter((p) => p.key !== "aliases" && !p.key.startsWith("state"))
     .filter((p) => !(pairFieldsElsewhere && PAIR_PARAM_KEYS.includes(p.key)))
-    .map((p) => (
+    .map((p) =>
+      // A half's name is what makes it half of a pair (`<base>_on`, `<base>_off`) and what a
+      // Button stores the base of, so it is shown and not edited: a pair is not renamed from here.
+      pairFieldsElsewhere && p.key === "name" ? (
+        <Row key={p.key} label={p.label} hint="A pair is not renamed from here: its two names make it a pair.">
+          <Input
+            value={String(draft.trigger.params[p.key] ?? "")}
+            readOnly
+            aria-label={p.label}
+            className="h-7 text-footnote"
+          />
+        </Row>
+      ) : (
       <ParamField
         key={p.key}
         spec={p}
@@ -1176,7 +1188,8 @@ export function RuleEditorBody({
         issue={triggerIssues[p.key]}
         attempted={attempted}
       />
-    ));
+      ),
+    );
   const formerNamesRow = isCue && (
     <FormerNamesField
       params={draft.trigger.params}
@@ -1666,15 +1679,24 @@ export function RuleEditorDialog({
   // stores the pair's base, which a half's name does not change on its own.
   const cueFrom = isPair ? "" : calledCueName(savedOn.trigger);
   const cueTo = isPair ? "" : calledCueName(onDraft.trigger);
+  // The names a Button may hold for it: its own and its former names, the same set the
+  // Used on chips use, so the dialog and the row never disagree about where it is used.
+  const fromNames = isPair ? [] : [cueFrom, ...parseAliases(savedOn.trigger.params)];
   const places = isPair
     ? usesOf(usage, [target.pair.base, target.pair.onName, target.pair.offName])
-    : usesOf(usage, [cueFrom]);
+    : usesOf(usage, fromNames);
   /** The name is being changed: Save will point each of `places` at the new one. */
   const renaming = cueFrom !== "" && cueTo !== "" && cueFrom !== cueTo;
   /** The command is being turned into an automatic rule: its Buttons will read Not set. */
   const leaving = cueFrom !== "" && onDraft.trigger.id !== CALL_TRIGGER_ID;
   // What a rename's repoints did, kept while the dialog stays open over a screen that refused.
-  const [repointed, setRepointed] = useState<{ to: string; results: RepointResult[] } | null>(null);
+  const [repointed, setRepointed] = useState<{
+    from: string;
+    to: string;
+    results: RepointResult[];
+    /** Set when where the command is used could not be read, so nothing was repointed. */
+    readError?: string;
+  } | null>(null);
 
   const lookup = useMemo(() => specLookupFor(registry), [registry]);
   // Recomputed on every keystroke, which is what "fields re-check live after
@@ -1779,7 +1801,13 @@ export function RuleEditorDialog({
    * pair with no room and no hidden flag is saved without either.
    */
   function onHalfPatch(): Rule {
-    if (!isPair) return onDraft;
+    if (!isPair) {
+      if (!renaming) return onDraft;
+      // A rename keeps the old name as a former name, so a URL, a Home Assistant call or a
+      // Companion button still using it keeps working while its Buttons are pointed at the new one.
+      const aliases = encodeAliases(nextAliases(parseAliases(onDraft.trigger.params), cueFrom, cueTo));
+      return { ...onDraft, trigger: { ...onDraft.trigger, params: { ...onDraft.trigger.params, aliases } } };
+    }
     return {
       ...onDraft,
       trigger: {
@@ -1854,12 +1882,28 @@ export function RuleEditorDialog({
       // views API, one screen at a time. A screen that refuses is named in the
       // dialog, which stays open over it, and the command stays renamed.
       let refusedScreens = 0;
-      if (renaming && places.length > 0) {
-        const results = await repointCueButtons(places, cueFrom, cueTo);
-        const line = repointLogLine(cueFrom, cueTo, results);
-        if (line) logToServer("automation", line);
-        setRepointed({ to: cueTo, results });
-        refusedScreens = results.filter((r) => !r.ok).length;
+      if (renaming) {
+        // Where it is used is read FRESH, now: the list the dialog drew is as old as the page, and
+        // a Button added since would be left naming a command that has been renamed. If the read
+        // fails nothing is repointed and the dialog says so, and the old name still works as a
+        // former name.
+        let fresh: ReturnType<typeof usesOf> | null = null;
+        try {
+          fresh = usesOf(new Map(Object.entries(await invoke<CueUsageReply>("cues:usage"))), fromNames);
+        } catch (e) {
+          logToServer(
+            "automation",
+            `renamed ${cueFrom} to ${cueTo}, but could not read where it is used, so no button was repointed: ${errorMessage(e)}`,
+          );
+          setRepointed({ from: cueFrom, to: cueTo, results: [], readError: errorMessage(e) });
+          refusedScreens = 1;
+        }
+        if (fresh && fresh.length > 0) {
+          const results = await repointCueButtons(fresh, fromNames, cueTo);
+          for (const line of repointLogLines(cueFrom, cueTo, results)) logToServer("automation", line);
+          setRepointed({ from: cueFrom, to: cueTo, results });
+          refusedScreens = results.filter((r) => !r.ok).length;
+        }
       }
       if (offDraft && seed.off) {
         writing = "Turn off";
@@ -1880,7 +1924,12 @@ export function RuleEditorDialog({
       if (anyIssues) setForcedOff(true);
       // Open over a refusal as well as over an issue, and with the saved name as the one now held.
       if (anyIssues || refusedScreens > 0) {
-        if (!isPair) setSavedOn(onHalfPatch());
+        if (!isPair) {
+          // The draft takes what was written (the old name, now a former name) so the open dialog shows it.
+          const written = onHalfPatch();
+          setSavedOn(written);
+          setOnDraft(written);
+        }
       } else {
         onClose();
       }
@@ -2110,9 +2159,9 @@ export function RuleEditorDialog({
             still there after Save. Nothing is drawn when no Button names the command. */}
         {(renaming || leaving || repointed) && (
           <div className="flex flex-col gap-2 pb-2">
-            {renaming && <CueRenameNotice kind="rename" places={places} homeAssistant={homeEntity(savedOn) !== null} />}
+            {renaming && <CueRenameNotice kind="rename" from={cueFrom} places={places} homeAssistant={homeEntity(savedOn) !== null} />}
             {leaving && <CueRenameNotice kind="automatic" places={places} homeAssistant={homeEntity(savedOn) !== null} />}
-            {repointed && <RepointRefusals to={repointed.to} results={repointed.results} />}
+            {repointed && <RepointRefusals from={repointed.from} to={repointed.to} results={repointed.results} readError={repointed.readError} />}
           </div>
         )}
 

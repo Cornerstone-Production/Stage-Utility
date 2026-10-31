@@ -459,6 +459,8 @@ describe("one rule", () => {
 
     const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
     assert.deepEqual(body.trigger?.params, {
+      // A rename keeps the old name as a former name.
+      aliases: "take_screens",
       name: "the_screens",
       says: "the screens",
       stateCandidates: "kasa:power_state",
@@ -525,6 +527,14 @@ describe("a pair", () => {
     // section, and not repeated in the half below it.
     assert.equal(document.querySelectorAll('[aria-label="Room"]').length, 1);
     assert.equal(field("Room")?.value, "Auditorium");
+  });
+
+  test("a half's cue name is shown and cannot be edited: a pair is not renamed from here", async () => {
+    await mount();
+    await openPair("the projectors");
+    assert.equal(field("Cue name")?.readOnly, true, "the ON half's name is editable");
+    await press(tab("Turn off"), "the Turn off tab");
+    assert.equal(field("Cue name")?.readOnly, true, "the OFF half's name is editable");
   });
 
   test("the segmented control swaps the cue name between the halves", async () => {
@@ -734,11 +744,11 @@ describe("a pair", () => {
     await mount();
     await openPair("the projectors");
     await press(tab("Turn off"), "the Turn off tab");
-    await typeIn(field("Cue name"), "beamers_off", "Cue name");
+    await typeIn(field("Spoken as"), "switch the beamers off", "Spoken as");
     await press(button("Save"), "Save");
 
     assert.equal(editors(), 1, "a refused save closed the editor");
-    assert.equal(field("Cue name")?.value, "beamers_off", "the refused draft was thrown away");
+    assert.equal(field("Spoken as")?.value, "switch the beamers off", "the refused draft was thrown away");
     await press(tab("Turn on"), "the Turn on tab");
     assert.equal(field("Cue name")?.value, "projectors_on", "the other half's draft was thrown away");
     assert.deepEqual(

@@ -22,10 +22,13 @@ function placeName(use: CueUse): string {
  */
 export function CueRenameNotice({
   kind,
+  from,
   places,
   homeAssistant,
 }: {
   kind: "rename" | "automatic";
+  /** The name being left. A rename keeps it as a former name. */
+  from?: string;
   places: readonly CueUse[];
   /** Home Assistant has an entity for the command now. */
   homeAssistant: boolean;
@@ -43,6 +46,11 @@ export function CueRenameNotice({
             {kind === "rename" ? "follows the new name" : <>reads <b className="font-semibold">Not set</b></>}
           </li>
         ))}
+        {kind === "rename" && from && (
+          <li>
+            <span className="font-mono">{from}</span> stays as a former name, so anything still calling it keeps working
+          </li>
+        )}
         {homeAssistant && (
           <li>
             {kind === "rename"
@@ -59,8 +67,31 @@ export function CueRenameNotice({
  * After Save: the screens that did not follow the new name, each with the reason.
  * The command IS renamed. Nothing when every screen followed.
  */
-export function RepointRefusals({ to, results }: { to: string; results: readonly RepointResult[] }) {
+export function RepointRefusals({
+  from,
+  to,
+  results,
+  readError,
+}: {
+  from: string;
+  to: string;
+  results: readonly RepointResult[];
+  /** Where the command is used could not be read, so no screen was tried. */
+  readError?: string;
+}) {
   const refused = results.filter((r) => !r.ok);
+  if (readError !== undefined) {
+    return (
+      <div role="alert" data-repoint-unread="" className={`${BOX} border-danger-9/40`}>
+        <b className="font-semibold">No Button was pointed at the new name:</b>
+        <span>Where the command is used could not be read: {readError}</span>
+        <span className="text-caption1 text-fg-muted">
+          The command is renamed to <span className="font-mono">{to}</span>, and <span className="font-mono">{from}</span> still
+          works as a former name. Point its Buttons at the new name in the layout editor.
+        </span>
+      </div>
+    );
+  }
   if (refused.length === 0) return null;
   return (
     <div role="alert" data-repoint-refused={refused.length} className={`${BOX} border-danger-9/40`}>
@@ -75,7 +106,8 @@ export function RepointRefusals({ to, results }: { to: string; results: readonly
         ))}
       </ul>
       <span className="text-caption1 text-fg-muted">
-        The command is renamed to <span className="font-mono">{to}</span>. Point those Buttons at it in the layout editor.
+        The command is renamed to <span className="font-mono">{to}</span>, and <span className="font-mono">{from}</span> still works
+        as a former name. Point those Buttons at it in the layout editor.
       </span>
     </div>
   );

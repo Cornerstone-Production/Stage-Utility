@@ -151,25 +151,46 @@ export const consoleButtonDeps = {
   },
 };
 
-async function addToOne(viewId: string, cue: string, label: string, shownAs: string): Promise<ConsoleResult> {
-  // One retry, from a fresh read, on a stale revision. See the header.
+/** What a plan decides for one view: the layout to write and how many Buttons it changed, or why not. */
+type LayoutPlan = { layout: LayoutDTO; count: number; overEdge?: boolean } | { refuse: string };
+
+/**
+ * Read one view fresh, let `plan` change its layout, and write it with the revision
+ * it was read at. The one place the rules live: a 409 is retried ONCE from a fresh
+ * read (anything past one is somebody editing in a loop), `?? 0` is the revision of
+ * a console that has never saved a layout (omitting it would be an unconditional
+ * overwrite), and every outcome is RETURNED, never thrown.
+ *
+ * A plan that changes nothing (`count` 0) writes nothing and is not a failure.
+ */
+async function writeConsoleLayout(
+  viewId: string,
+  plan: (view: View) => LayoutPlan,
+): Promise<ConsoleResult & { count: number }> {
   for (let attempt = 0; ; attempt++) {
     const view = (await consoleButtonDeps.readViews()).find((v) => v.id === viewId);
-    if (!view) return { viewId, name: viewId, ok: false, error: "it no longer exists" };
-    if (!viewIsConsole(view) || view.kind !== "custom" || !view.layout) {
-      return { viewId, name: view.name, ok: false, error: "it is no longer a console with a layout" };
-    }
-    const placed = withCueButton(view.layout, cue, label, shownAs);
+    if (!view) return { viewId, name: viewId, ok: false, count: 0, error: "it no longer exists" };
+    const decided = plan(view);
+    if ("refuse" in decided) return { viewId, name: view.name, ok: false, count: 0, error: decided.refuse };
+    if (decided.count === 0) return { viewId, name: view.name, ok: true, count: 0 };
     try {
-      // `?? 0`, as the server reads it: a console that has never saved a layout is at
-      // revision 0, and omitting the revision would be an unconditional overwrite.
-      await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev ?? 0);
-      return { viewId, name: view.name, ok: true, ...(placed.overEdge ? { overEdge: true } : {}) };
+      await consoleButtonDeps.writeLayout(viewId, decided.layout, view.layoutRev ?? 0);
+      return { viewId, name: view.name, ok: true, count: decided.count, ...(decided.overEdge ? { overEdge: true } : {}) };
     } catch (err) {
       if ((err as { status?: number }).status === 409 && attempt === 0) continue;
-      return { viewId, name: view.name, ok: false, error: errorMessage(err) };
+      return { viewId, name: view.name, ok: false, count: 0, error: errorMessage(err) };
     }
   }
+}
+
+function addToOne(viewId: string, cue: string, label: string, shownAs: string): Promise<ConsoleResult> {
+  return writeConsoleLayout(viewId, (view) => {
+    if (!viewIsConsole(view) || view.kind !== "custom" || !view.layout) {
+      return { refuse: "it is no longer a console with a layout" };
+    }
+    const placed = withCueButton(view.layout, cue, label, shownAs);
+    return { layout: placed.layout, count: 1, overEdge: placed.overEdge };
+  });
 }
 
 /**
@@ -211,62 +232,43 @@ export async function addCueButtonToConsoles(
 // the operator has since pointed elsewhere is left alone and not counted.
 
 /** One view's outcome. `count` is the Buttons that were repointed in it. */
-export interface RepointResult {
-  viewId: string;
-  /** The view's name as it was when read, or the id when it was not found. */
-  name: string;
-  ok: boolean;
-  count: number;
-  /** Why it was not written. Absent when `ok`. */
-  error?: string;
-}
+export type RepointResult = ConsoleResult & { count: number };
 
-const sameCue = (a: unknown, b: string): boolean => typeof a === "string" && a.trim().toLowerCase() === b;
+const norm = (a: unknown): string => (typeof a === "string" ? a.trim().toLowerCase() : "");
 
 /**
- * `layout` with every cue Button in `objectIds` that names `from` pointed at `to`,
- * and how many that was. Immutable: a layout that changes nothing comes back as
- * the very same object.
+ * `layout` with every cue Button in `objectIds` that names any of `from` pointed at
+ * `to`, and how many that was. Immutable: a layout that changes nothing comes back
+ * as the very same object, and so does every object that is not on the way to a change.
  */
 export function withCueRepointed(
   layout: LayoutDTO,
   objectIds: ReadonlySet<string>,
-  from: string,
+  from: readonly string[],
   to: string,
 ): { layout: LayoutDTO; count: number } {
+  const names = new Set(from.map(norm));
   let count = 0;
   const walk = (objects: readonly LayoutObject[]): LayoutObject[] =>
     objects.map((o) => {
+      const before = count;
       const children = o.children?.length ? walk(o.children) : o.children;
       const hit =
         objectIds.has(o.id) &&
         (o.config as { type?: string }).type === "cue-button" &&
-        sameCue((o.config as { cue?: unknown }).cue, from);
+        names.has(norm((o.config as { cue?: unknown }).cue));
       if (hit) count++;
-      const sameChildren = children === o.children || (children?.every((c, i) => c === o.children?.[i]) ?? true);
-      if (!hit && sameChildren) return o;
+      if (!hit && count === before) return o;
       return { ...o, ...(children ? { children } : {}), ...(hit ? { config: { ...o.config, cue: to } } : {}) };
     });
   const objects = walk(layout.objects);
   return count === 0 ? { layout, count } : { layout: { ...layout, objects }, count };
 }
 
-async function repointOne(viewId: string, objectIds: ReadonlySet<string>, from: string, to: string): Promise<RepointResult> {
-  for (let attempt = 0; ; attempt++) {
-    const view = (await consoleButtonDeps.readViews()).find((v) => v.id === viewId);
-    if (!view) return { viewId, name: viewId, ok: false, count: 0, error: "it no longer exists" };
-    if (!view.layout) return { viewId, name: view.name, ok: false, count: 0, error: "it has no layout" };
-    const placed = withCueRepointed(view.layout, objectIds, from, to);
-    // Nothing here names the old command any more (or the Button went): not a failure, nothing to write.
-    if (placed.count === 0) return { viewId, name: view.name, ok: true, count: 0 };
-    try {
-      await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev ?? 0);
-      return { viewId, name: view.name, ok: true, count: placed.count };
-    } catch (err) {
-      if ((err as { status?: number }).status === 409 && attempt === 0) continue;
-      return { viewId, name: view.name, ok: false, count: 0, error: errorMessage(err) };
-    }
-  }
+function repointOne(viewId: string, objectIds: ReadonlySet<string>, from: readonly string[], to: string): Promise<RepointResult> {
+  return writeConsoleLayout(viewId, (view) =>
+    view.layout ? withCueRepointed(view.layout, objectIds, from, to) : { refuse: "it has no layout" },
+  );
 }
 
 /**
@@ -278,7 +280,8 @@ async function repointOne(viewId: string, objectIds: ReadonlySet<string>, from: 
  */
 export async function repointCueButtons(
   uses: readonly { viewId: string; objectId: string }[],
-  from: string,
+  /** Every name the Buttons may hold: the command's own and its former names. */
+  from: readonly string[],
   to: string,
 ): Promise<RepointResult[]> {
   const byView = new Map<string, Set<string>>();
@@ -287,11 +290,10 @@ export async function repointCueButtons(
     if (ids) ids.add(u.objectId);
     else byView.set(u.viewId, new Set([u.objectId]));
   }
-  const fromName = from.trim().toLowerCase();
   const results: RepointResult[] = [];
   for (const [viewId, ids] of byView) {
     try {
-      results.push(await repointOne(viewId, ids, fromName, to));
+      results.push(await repointOne(viewId, ids, from, to));
     } catch (err) {
       results.push({ viewId, name: viewId, ok: false, count: 0, error: errorMessage(err) });
     }
@@ -299,18 +301,33 @@ export async function repointCueButtons(
   return results;
 }
 
+/** The most screens a log line names, and the most refusals logged one by one. Past either, a count. */
+const LOG_NAMES = 4;
+const LOG_REFUSALS = 6;
+/** A reason is cut here, so a line carrying one still fits the log route's 300 characters beside the screen's name. */
+const LOG_REASON = 140;
+const cut = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+
 /**
- * The one `[automation]` line a rename's repoints leave on /log, or null when no
- * view was involved. It says what was repointed and what was refused, with the
- * reason, because "the console button reads Not set" is what somebody debugging
- * a Sunday-morning screen goes looking for, and the log is where they look.
+ * What a rename's repoints leave on /log: a short line saying what was repointed
+ * (a count and the screens, then how many refused), and one line for each screen
+ * that refused, with the reason. The refusals are lines of their own because the
+ * log route cuts a line at 300 characters, and a reason is exactly the part that
+ * sits at the end of a long one. Empty when no view was involved.
  */
-export function repointLogLine(from: string, to: string, results: readonly RepointResult[]): string | null {
-  if (results.length === 0) return null;
-  const done = results.filter((r) => r.ok && r.count > 0).map((r) => `${r.name} (${r.count})`);
-  const refused = results.filter((r) => !r.ok).map((r) => `${r.name} (${r.error ?? "refused"})`);
-  const parts = [`renamed ${from} to ${to}`];
-  parts.push(done.length > 0 ? `repointed ${done.join(", ")}` : "repointed none");
-  if (refused.length > 0) parts.push(`refused ${refused.join(", ")}`);
-  return parts.join("; ");
+export function repointLogLines(from: string, to: string, results: readonly RepointResult[]): string[] {
+  if (results.length === 0) return [];
+  const done = results.filter((r) => r.ok && r.count > 0);
+  const refused = results.filter((r) => !r.ok);
+  const buttons = done.reduce((n, r) => n + r.count, 0);
+  const names = done.slice(0, LOG_NAMES).map((r) => cut(r.name, 40));
+  if (done.length > LOG_NAMES) names.push(`${done.length - LOG_NAMES} more`);
+  const head =
+    `renamed ${from} to ${to}; repointed ${buttons} button${buttons === 1 ? "" : "s"}` +
+    (names.length > 0 ? ` on ${names.join(", ")}` : "") +
+    (refused.length > 0 ? `; ${refused.length} refused` : "");
+  const lines = [head];
+  for (const r of refused.slice(0, LOG_REFUSALS)) lines.push(`could not point the buttons on ${cut(r.name, 60)} at ${to}: ${cut(r.error ?? "refused", LOG_REASON)}`);
+  if (refused.length > LOG_REFUSALS) lines.push(`${refused.length - LOG_REFUSALS} more screens refused ${to}; see the dialog`);
+  return lines;
 }

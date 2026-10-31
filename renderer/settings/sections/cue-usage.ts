@@ -8,6 +8,7 @@
 // Keyed by what the Button stores, trimmed and lower-case: for an ON/OFF pair that
 // is the pair's base.
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { invoke } from "../../lib/api";
@@ -42,7 +43,9 @@ export function useCueUsage(): { usage: ReadonlyMap<string, readonly CueUse[]> |
     queryKey: CUE_USAGE_KEY,
     queryFn: () => invoke<CueUsageReply>("cues:usage"),
   });
-  return { usage: data ? new Map(Object.entries(data)) : undefined, error };
+  // Memoised on the answer: a new Map each render would re-run everything keyed on it.
+  const usage = useMemo(() => (data ? new Map(Object.entries(data)) : undefined), [data]);
+  return { usage, error };
 }
 
 /** The Buttons that name any of `names` (a cue's name and its former names), each once. */

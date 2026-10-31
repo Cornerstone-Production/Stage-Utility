@@ -175,7 +175,7 @@ const automationLines = (): string[] =>
   bridge.writes
     .filter((w) => w.url === "/api/log/client")
     .map((w) => JSON.parse(w.body ?? "{}") as { tag: string; message: string })
-    .filter((l) => l.tag === "automation" && l.message.startsWith("renamed"))
+    .filter((l) => l.tag === "automation")
     .map((l) => `[${l.tag}] ${l.message}`);
 /** The same line, as the server's own log received it. */
 const serverLogged = (): boolean => warned.some((l) => l.startsWith("[automation] renamed take_screens"));
@@ -261,10 +261,7 @@ describe("renaming a command", () => {
     await eventually(() => assert.equal(editorOpen(), false));
     await eventually(() => assert.equal(automationLines().length, 1, `lines: ${JSON.stringify(warned)}`));
     const line = automationLines()[0]!;
-    assert.match(line, /renamed take_screens to take_the_screens/);
-    assert.match(line, /repointed .*FOH \(2\)/);
-    assert.match(line, /Booth \(1\)/);
-    assert.match(line, /Home \(1\)/);
+    assert.match(line, /renamed take_screens to take_the_screens; repointed 4 buttons on Booth, FOH, Home/);
     assert.doesNotMatch(line, /refused/);
     assert.ok(serverLogged(), "the line never reached the server's log");
   });
@@ -289,10 +286,65 @@ describe("renaming a command", () => {
     assert.deepEqual(cuesIn("home"), { h1: "take_the_screens" }, "a screen after the refused one was not written");
     assert.equal(cuesIn("foh").f1, "take_the_screens");
 
-    await eventually(() => assert.equal(automationLines().length, 1));
-    assert.match(automationLines()[0]!, /refused Booth \(This view was changed by someone else\)/);
+    await eventually(() => assert.equal(automationLines().length, 2));
+    assert.match(automationLines()[0]!, /repointed 3 buttons on FOH, Home; 1 refused/);
+    assert.match(automationLines()[1]!, /could not point the buttons on Booth at take_the_screens: This view was changed by someone else/);
     // And the dialog no longer calls it a rename: the name it now holds is the new one.
     assert.equal(notice("rename"), null, "the dialog still offers to rename what is renamed");
+  });
+
+  test("the places are read fresh at Save: a Button added after the page loaded follows too", async () => {
+    await mount();
+    await openRow("Take screens");
+    await rename("take_the_screens");
+    // Another client, or the layout editor, puts a Button on Booth after this page read the usage.
+    const booth = ctl.state.views.find((v) => v.id === "booth")!;
+    booth.layout!.objects.push(cueButton("late", "take_screens", "Late") as never);
+    await viewsStore.save(ctl.state.views);
+    await press(button("Save"), "Save");
+    await eventually(() => assert.equal(editorOpen(), false));
+    assert.deepEqual(cuesIn("booth"), { b1: "take_the_screens", late: "take_the_screens" }, "a Button added after the page loaded was left on the old name");
+  });
+
+  test("a rename keeps the old name as a former name, and a Button on a former name follows too", async () => {
+    await automationEngine.updateRule(rules()[0]!.id, { trigger: { id: "call.by-name", params: { name: "take_screens", homeAssistant: "hidden", aliases: "older_name" } } });
+    ctl.state.views.find((v) => v.id === "booth")!.layout!.objects.push(cueButton("former", "older_name", "Former") as never);
+    await viewsStore.save(ctl.state.views);
+    await mount();
+    await openRow("Take screens");
+    await rename("take_the_screens");
+    const text = notice("rename")?.textContent ?? "";
+    assert.match(text, /take_screens stays as a former name/);
+    assert.match(text, /Booth · Former follows the new name/, "the dialog does not list a Button on a former name");
+    await press(button("Save"), "Save");
+    await eventually(() => assert.equal(editorOpen(), false));
+    const p = rules()[0]!.trigger.params;
+    assert.equal(p.name, "take_the_screens");
+    assert.deepEqual(String(p.aliases).split(","), ["older_name", "take_screens"], "the old name was not kept, or the earlier former name was lost");
+    assert.equal(cuesIn("booth").former, "take_the_screens", "a Button on a former name was left behind");
+  });
+
+  test("where it is used cannot be read: nothing is repointed, the dialog says so, the old name still works, and /log has it", async () => {
+    await mount();
+    await openRow("Take screens");
+    await rename("take_the_screens");
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      if (String(input).startsWith("/api/cues/usage")) return { ok: false, status: 503, statusText: "503", json: async () => ({ error: "views.json could not be read" }), text: async () => "" };
+      return real(input as never, init);
+    }) as typeof fetch;
+    try {
+      await press(button("Save"), "Save");
+      await eventually(() => assert.ok(document.querySelector("[data-repoint-unread]"), "the unread usage is not said"));
+    } finally {
+      globalThis.fetch = real;
+    }
+    assert.equal(editorOpen(), true, "the dialog closed over Buttons that were not repointed");
+    assert.match(document.querySelector("[data-repoint-unread]")?.textContent ?? "", /could not be read: views\.json could not be read/);
+    assert.equal(rules()[0]!.trigger.params.name, "take_the_screens");
+    assert.equal(String(rules()[0]!.trigger.params.aliases), "take_screens");
+    assert.equal(bridge.writes.filter((w) => w.url.startsWith("/api/views")).length, 0);
+    assert.ok(automationLines().some((l) => /could not read where it is used, so no button was repointed/.test(l)), JSON.stringify(automationLines()));
   });
 
   test("a command no Button names is renamed with no list, no views write and no line", async () => {
