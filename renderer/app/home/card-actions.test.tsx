@@ -62,9 +62,9 @@ describe("Stop takes two presses", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     assert.equal(invokes().length, 0, "the first press must only ask");
-    assert.ok(screen.getByRole("button", { name: "Stop recording?" }));
+    assert.ok(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     act(() => mock.timers.tick(STOP_CONFIRM_MS - 100));
-    fireEvent.click(screen.getByRole("button", { name: "Stop recording?" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     mock.timers.reset();
     await settle();
     assert.equal(invokes().length, 1);
@@ -82,13 +82,13 @@ describe("Stop takes two presses", () => {
     mock.timers.reset();
     await settle();
     assert.equal(invokes().length, 0);
-    assert.ok(screen.getByRole("button", { name: "Stop recording?" }));
+    assert.ok(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
   });
 
   test("a recorder that restarts inside the window is not stopped by one press", async () => {
     const { rerender } = render(tile([reaper({ recording: true })]));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    assert.ok(screen.getByRole("button", { name: "Stop recording?" }));
+    assert.ok(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     // Stopped by somebody else, then started again, all inside 3 seconds.
     rerender(tile([reaper({ recording: false })]));
     rerender(tile([reaper({ recording: true })]));
@@ -101,7 +101,7 @@ describe("Stop takes two presses", () => {
   test("OBS stops through its own action", async () => {
     render(tile([{ name: "OBS", connected: true, recording: true, timecode: null }]));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stop recording?" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     await settle();
     assert.deepEqual(invokes()[0]?.body, { actionId: "obs.record", params: { command: "stop" } });
   });
@@ -190,7 +190,7 @@ describe("Start", () => {
     for (const gone of [reaper({ recording: true, connected: false }), null]) {
       const { rerender, unmount } = render(tile([reaper({ recording: true }), obs(true)]));
       fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-      fireEvent.click(screen.getByRole("button", { name: "Stop recording?" }));
+      fireEvent.click(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
       await settle();
       assert.ok(screen.getByRole("button", { name: "Stopping" }));
       // OBS stops; REAPER is gone and would never report recording: false.
@@ -264,5 +264,44 @@ describe("Prev and Next", () => {
     fireEvent.click(screen.getByRole("button", { name: /Next/ }));
     await settle();
     assert.match(screen.getByRole("alert").textContent ?? "", /PCO next failed/);
+  });
+});
+
+describe("keyboard and screen-reader behaviour", () => {
+  test("the armed Stop announces that it needs a second press", () => {
+    render(tile([reaper({ recording: true })]));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    assert.ok(screen.getByRole("button", { name: /press again to confirm/ }));
+  });
+
+  test("Start keeps keyboard focus through the spinner and a failure note", async () => {
+    answer = () => ok({ ok: false, detail: "REAPER is not connected" });
+    render(tile([reaper()]));
+    const start = screen.getByRole("button", { name: "Start" });
+    start.focus();
+    fireEvent.click(start);
+    // Mid-press: a spinner, on the SAME element, aria-disabled and not disabled.
+    const busy = screen.getByRole("button", { name: "Starting" });
+    assert.ok(busy === start, "the spinner is the same element, not a replacement");
+    assert.equal(busy.getAttribute("aria-disabled"), "true");
+    assert.equal((busy as HTMLButtonElement).disabled, false, "a disabled button drops focus");
+    assert.ok(document.activeElement === start);
+    await settle();
+    // The failure note shows beside the button and focus is still on it.
+    assert.ok(screen.getByRole("alert"));
+    assert.ok(document.activeElement === screen.getByRole("button", { name: "Start" }), "focus survives the note");
+  });
+
+  test("Next keeps keyboard focus while busy and after a failure", async () => {
+    answer = () => { throw new TypeError("fetch failed"); };
+    render(React.createElement(StepAction, { showPrev: true }));
+    const next = screen.getByRole("button", { name: /Next/ });
+    next.focus();
+    fireEvent.click(next);
+    assert.equal((next as HTMLButtonElement).disabled, false);
+    assert.equal(next.getAttribute("aria-disabled"), "true");
+    await settle();
+    assert.ok(screen.getByRole("alert"));
+    assert.ok(document.activeElement === screen.getByRole("button", { name: /Next/ }));
   });
 });

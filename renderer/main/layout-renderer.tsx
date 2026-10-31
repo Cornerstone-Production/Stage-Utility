@@ -1380,7 +1380,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         // Prev / Next on the tile, for an operator on Home with a service live.
         // Never on a wall: the same Timer is drawn there and has no press.
         return ctx.home && ctx.interactive && ctx.pcoLive?.mode === "item" ? (
-          <ActionTile action={<StepAction showPrev={sizeOf(o) !== "s"} />}>{stat}</ActionTile>
+          <ActionTile reserveCorner action={<StepAction showPrev={sizeOf(o) !== "s"} />}>{stat}</ActionTile>
         ) : (
           stat
         );

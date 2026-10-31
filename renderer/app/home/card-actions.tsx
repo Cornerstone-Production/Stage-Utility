@@ -91,13 +91,28 @@ export function useStopConfirm(onConfirm: () => void, scope: unknown, ms = STOP_
  * hit is worse than none. Container-query driven, so it follows the tile's own
  * width and not the window's.
  */
-export function ActionTile({ action, children }: { action: ReactNode; children: ReactNode }) {
+export function ActionTile({
+  action,
+  reserveCorner = false,
+  children,
+}: {
+  action: ReactNode;
+  /** The tile also expands, and its expand control sits in the bottom-right
+   *  corner. The column keeps clear of that corner (44px control, 4px inset)
+   *  rather than centring into it: on a Small tile the two otherwise overlap and
+   *  a press meant for Next lands on Expand. */
+  reserveCorner?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="@container/tile flex h-full w-full">
       <div className="relative min-w-0 flex-1">{children}</div>
       <div
         data-tile-action=""
-        className="hidden shrink-0 flex-col items-end justify-center gap-2 pr-3 @min-[13rem]/tile:flex"
+        className={cn(
+          "hidden shrink-0 flex-col items-end justify-center gap-2 pr-3 @min-[13rem]/tile:flex",
+          reserveCorner && "pb-12",
+        )}
       >
         {action}
       </div>
@@ -107,6 +122,11 @@ export function ActionTile({ action, children }: { action: ReactNode; children: 
 
 /** Every control on a tile is at least 44px square under a coarse pointer. */
 const TOUCH = "coarse:h-11 coarse:min-w-11 coarse:px-4";
+
+/** A button that is busy says so with aria-disabled, not `disabled`: a disabled
+ *  button drops keyboard focus to <body>, and the operator's next key press
+ *  would start from the top of the page. */
+const BUSY = "aria-disabled:pointer-events-none aria-disabled:opacity-40";
 
 function Note({ children }: { children: ReactNode }) {
   return (
@@ -214,29 +234,37 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
   const stop = useStopConfirm(() => void run("stop"), recording);
 
   if (targets.length === 0) return null;
-  if (note) return <Note>{note}</Note>;
-  if (pending && waiting) {
-    return (
-      <Button variant="filled" disabled className={TOUCH} aria-label={pending.verb === "start" ? "Starting" : "Stopping"}>
-        <Loader2Icon className="size-4 animate-spin" />
-      </Button>
-    );
-  }
-  if (recording) {
-    return (
-      <Button
-        variant="filled"
-        onClick={stop.press}
-        className={cn(TOUCH, stop.armed && "bg-danger-9 text-white hover:bg-danger-9")}
-      >
-        {stop.armed ? "Stop recording?" : "Stop"}
-      </Button>
-    );
-  }
+  const spinning = pending !== null && waiting;
+  // ONE button, always, with the failure note beside it rather than in its place:
+  // swapping the element for a note would drop keyboard focus to <body>.
   return (
-    <Button variant="accent" onClick={() => void run("start")} className={TOUCH}>
-      Start
-    </Button>
+    <div className="flex flex-col items-end gap-1">
+      {spinning ? (
+        <Button
+          variant="filled"
+          aria-disabled="true"
+          onClick={() => {}}
+          className={cn(TOUCH, BUSY)}
+          aria-label={pending.verb === "start" ? "Starting" : "Stopping"}
+        >
+          <Loader2Icon className="size-4 animate-spin" />
+        </Button>
+      ) : recording ? (
+        <Button
+          variant="filled"
+          onClick={stop.press}
+          aria-label={stop.armed ? "Stop recording, press again to confirm" : undefined}
+          className={cn(TOUCH, stop.armed && "bg-danger-9 text-white hover:bg-danger-9")}
+        >
+          {stop.armed ? "Stop recording?" : "Stop"}
+        </Button>
+      ) : (
+        <Button variant="accent" onClick={() => void run("start")} className={TOUCH}>
+          Start
+        </Button>
+      )}
+      {note && <Note>{note}</Note>}
+    </div>
   );
 }
 
@@ -252,19 +280,21 @@ export function StepAction({ showPrev }: { showPrev: boolean }) {
   const [note, showNote] = useTransientNote();
   const { busy, go } = useLiveStep(showNote);
 
-  if (note) return <Note>{note}</Note>;
   return (
+    <div className="flex flex-col items-end gap-1">
     <div className="flex items-center gap-2">
       {showPrev && (
-        <Button variant="filled" onClick={() => void go("previous")} disabled={busy !== null} className={TOUCH}>
+        <Button variant="filled" onClick={() => void go("previous")} aria-disabled={busy !== null} className={cn(TOUCH, BUSY)}>
           {busy === "previous" ? <Loader2Icon className="size-4 animate-spin" /> : <ChevronLeftIcon className="size-4" />}
           Prev
         </Button>
       )}
-      <Button variant="accent" onClick={() => void go("next")} disabled={busy !== null} className={TOUCH}>
+      <Button variant="accent" onClick={() => void go("next")} aria-disabled={busy !== null} className={cn(TOUCH, BUSY)}>
         Next
         {busy === "next" ? <Loader2Icon className="size-4 animate-spin" /> : <ChevronRightIcon className="size-4" />}
       </Button>
+    </div>
+    {note && <Note>{note}</Note>}
     </div>
   );
 }

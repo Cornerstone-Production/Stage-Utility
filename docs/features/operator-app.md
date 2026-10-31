@@ -140,7 +140,7 @@ A tile may carry **one** action, drawn on the tile itself.
 
 | Tile | Action | Does |
 |---|---|---|
-| **Timer** (service), while a service is live | **Next** — and **Prev** beside it from Medium up | moves Planning Center Live on or back, one press each |
+| **Timer** (service source, showing the next item), while an item is live | **Next** — and **Prev** beside it from Medium up | moves Planning Center Live on or back, one press each |
 | **Recording** | **Start** when stopped, **Stop** while recording | starts or stops REAPER and OBS, whichever are connected |
 | **Streaming**, **Wireless summary**, **Screens** | none | |
 
