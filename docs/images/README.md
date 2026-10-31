@@ -16,7 +16,7 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 
 | Image | Shows |
 |---|---|
-| `automation-rules.png` | Automation: the rules list with simulate mode, the Home Assistant group and everything else. |
+| `automation-rules.png` | Automation: the Commands tab, with Simulate and Disarm above the tabs and Used on chips on each command. |
 | `baptisms-sessions.png` | Baptisms: the saved sessions from past services, and their trends. |
 | `history-overview.png` | History: the Trends chart across three service types, the month calendar and the recorded services list. |
 | `history-service.png` | A recorded service: its rundown with each item's actual time against the plan. |
