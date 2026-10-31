@@ -302,7 +302,9 @@ export async function repointCueButtons(
 }
 
 /** The most screens a log line names, and the most refusals logged one by one. Past either, a count. */
-const LOG_NAMES = 4;
+const LOG_NAMES = 3;
+/** A command name is cut here in a line, so two of them and the screens still fit 300 characters. */
+const LOG_COMMAND = 60;
 const LOG_REFUSALS = 6;
 /** A reason is cut here, so a line carrying one still fits the log route's 300 characters beside the screen's name. */
 const LOG_REASON = 140;
@@ -317,17 +319,18 @@ const cut = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 
  */
 export function repointLogLines(from: string, to: string, results: readonly RepointResult[]): string[] {
   if (results.length === 0) return [];
+  const [was, now] = [cut(from, LOG_COMMAND), cut(to, LOG_COMMAND)];
   const done = results.filter((r) => r.ok && r.count > 0);
   const refused = results.filter((r) => !r.ok);
   const buttons = done.reduce((n, r) => n + r.count, 0);
-  const names = done.slice(0, LOG_NAMES).map((r) => cut(r.name, 40));
+  const names = done.slice(0, LOG_NAMES).map((r) => cut(r.name, 30));
   if (done.length > LOG_NAMES) names.push(`${done.length - LOG_NAMES} more`);
   const head =
-    `renamed ${from} to ${to}; repointed ${buttons} button${buttons === 1 ? "" : "s"}` +
+    `renamed ${was} to ${now}; repointed ${buttons} button${buttons === 1 ? "" : "s"}` +
     (names.length > 0 ? ` on ${names.join(", ")}` : "") +
     (refused.length > 0 ? `; ${refused.length} refused` : "");
   const lines = [head];
-  for (const r of refused.slice(0, LOG_REFUSALS)) lines.push(`could not point the buttons on ${cut(r.name, 60)} at ${to}: ${cut(r.error ?? "refused", LOG_REASON)}`);
-  if (refused.length > LOG_REFUSALS) lines.push(`${refused.length - LOG_REFUSALS} more screens refused ${to}; see the dialog`);
+  for (const r of refused.slice(0, LOG_REFUSALS)) lines.push(`could not point the buttons on ${cut(r.name, 60)} at ${now}: ${cut(r.error ?? "refused", LOG_REASON)}`);
+  if (refused.length > LOG_REFUSALS) lines.push(`${refused.length - LOG_REFUSALS} more screens refused ${now}; see the dialog`);
   return lines;
 }

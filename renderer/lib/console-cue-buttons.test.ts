@@ -386,6 +386,15 @@ describe("repointLogLines", () => {
     assert.ok(lines.some((l) => l.startsWith("3 more screens refused")), "refusals past the cap are not counted");
   });
 
+  test("two long command names cannot push the head line past 300 characters", () => {
+    const long = "c".repeat(200);
+    const screens = Array.from({ length: 5 }, (_, i) => `A screen with a rather long name number ${i}`);
+    const lines = repointLogLines(long, long + "x", [...screens.map((n) => ok(n, 1)), no("Lobby", "refused")]);
+    for (const l of lines) assert.ok(l.length <= 300, `${l.length} characters`);
+    assert.ok(lines[0]!.includes("…"), "the names were not cut");
+    assert.ok(lines[1]!.length < 300 && !lines[1]!.includes("c".repeat(70)), "the refusal line carries the whole name");
+  });
+
   test("nothing involved, nothing said", () => {
     assert.deepEqual(repointLogLines("a", "b", []), []);
   });
