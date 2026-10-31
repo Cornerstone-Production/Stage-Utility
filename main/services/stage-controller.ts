@@ -3977,7 +3977,7 @@ export class StageController {
     // start may be weeks away. A failure is logged and the layout saves as sent.
     const converted = await runActionButtonMigration([{ ...current, layout: pointedGrids }], { onSave: true, deps: await liveRulesDeps() });
     if (converted.failure) console.error(scrub(converted.failure));
-    else if (converted.line) console.log(converted.line);
+    else if (converted.line) console.log(scrub(converted.line));
     const pointed = converted.views[0]!.layout!;
     // Checked again after the await: another save of this view, made at the
     // same revision, may have landed while the widgets were being pointed, and
