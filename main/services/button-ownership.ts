@@ -36,12 +36,13 @@ export interface CueButtonUse {
   home: boolean;
 }
 
-/** Every object under `objects`, nested ones included, with the cue it names. */
+/** Every object under `objects`, nested ones included, with the cue it names, trimmed and
+ *  lower-cased the way the engine compares a cue name. */
 function* cueButtonsIn(objects: readonly LayoutObject[] | undefined): Generator<{ object: LayoutObject; cue: string }> {
   for (const o of objects ?? []) {
     const cfg = o.config as { type?: string; cue?: unknown };
     if (cfg?.type === "cue-button" && typeof cfg.cue === "string" && cfg.cue.trim()) {
-      yield { object: o, cue: cfg.cue.trim() };
+      yield { object: o, cue: cfg.cue.trim().toLowerCase() };
     }
     if (o.children?.length) yield* cueButtonsIn(o.children);
   }
@@ -50,7 +51,8 @@ function* cueButtonsIn(objects: readonly LayoutObject[] | undefined): Generator<
 /**
  * Every Button that names a cue, grouped by the cue it names, each list in a
  * fixed order (view id, then object id) so the answer is the same on every read.
- * The key is what the Button stores, which for a pair is the pair's base.
+ * The key is the cue as the engine reads it (trimmed, lower-case), which for a
+ * pair is the pair's base.
  */
 export function cueUsage(views: readonly View[]): Record<string, CueButtonUse[]> {
   // A Map, not an object built from stored text: a cue named `__proto__` in a
@@ -101,9 +103,9 @@ export function ownerHolds(rule: Rule, views: readonly View[]): boolean {
   const names = namesOf(rule);
   const view = views.find((v) => v.id === owner.viewId);
   for (const { object, cue } of cueButtonsIn(view?.layout?.objects)) {
-    if (object.id === owner.objectId && names.has(cue.toLowerCase())) return true;
+    if (object.id === owner.objectId && names.has(cue)) return true;
   }
-  return views.some((v) => [...cueButtonsIn(v.layout?.objects)].some(({ cue }) => names.has(cue.toLowerCase())));
+  return views.some((v) => [...cueButtonsIn(v.layout?.objects)].some(({ cue }) => names.has(cue)));
 }
 
 /**

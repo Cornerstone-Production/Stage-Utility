@@ -524,6 +524,25 @@ describe("GET /api/cues/usage", () => {
     assert.equal("btn_unused" in usage, false);
     assert.equal(Object.keys(usage).length, 6);
   });
+
+  test("a hand-written Button's cue is keyed the way the engine reads it: trimmed and lower-cased", async () => {
+    const before = await viewsStore.load();
+    const hand = (id: string, cue: string) => ({ id, ...place, config: { type: "cue-button", cue, label: id } });
+    await viewsStore.save(
+      before.map((v) =>
+        v.id === "home"
+          ? { ...v, layout: { ...v.layout!, objects: [...v.layout!.objects, hand("h-up", "Lights"), hand("h-low", " lights ")] as never } }
+          : v,
+      ),
+    );
+    try {
+      const usage = (await callRoute(cueRoutes, "/api/cues/usage")).json as Record<string, { objectId: string }[]>;
+      assert.equal("Lights" in usage, false, "the cue is keyed as stored, not as the engine reads it");
+      assert.deepEqual(usage.lights?.map((u) => u.objectId), ["h-low", "h-up"]);
+    } finally {
+      await viewsStore.save(before);
+    }
+  });
 });
 
 // ── When the Button goes ──────────────────────────────────────────────────────
