@@ -5,6 +5,7 @@
 export interface HeldRequest {
   url: string;
   body: string;
+  signal: AbortSignal | undefined;
   respond: () => void;
   fail: (err: Error) => void;
 }
@@ -18,11 +19,12 @@ export function heldFetch() {
     maxConcurrent: 0,
     /** Let promise continuations (the reporter's .finally) run. */
     settle: () => new Promise<void>((r) => setImmediate(r)),
-    fetch: (url: string, init?: { body?: string }) =>
+    fetch: (url: string, init?: { body?: string; signal?: AbortSignal }) =>
       new Promise((resolve, reject) => {
         const req: HeldRequest = {
           url: String(url),
           body: init?.body ?? "",
+          signal: init?.signal,
           respond: () => {
             outstanding.splice(outstanding.indexOf(req), 1);
             resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });

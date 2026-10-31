@@ -170,3 +170,26 @@ test("a failed subscribe report still lets the trailing one go", async () => {
     (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
   }
 });
+
+// One report in flight at a time: a request that never settles would hold every
+// later report back, so the worker's own fetch must carry a timeout. (api.ts's
+// `post` has its own.) The 15 s abort itself is the platform's; what this pins is
+// that the worker hands one over.
+test("the worker's subscribe report can time out", async () => {
+  const held = heldFetch();
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: unknown }).fetch = held.fetch;
+  try {
+    const onconnect = (globalThis as unknown as { self: { onconnect: (e: { ports: unknown[] }) => void } }).self
+      .onconnect;
+    const tab = fakePort();
+    onconnect({ ports: [tab.port] });
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["e"] } });
+    assert.equal(held.outstanding.length, 1);
+    assert.ok(held.outstanding[0]!.signal instanceof AbortSignal, "a report with no timeout can hold back every later one");
+    held.outstanding[0]!.respond();
+    await held.settle();
+  } finally {
+    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+  }
+});

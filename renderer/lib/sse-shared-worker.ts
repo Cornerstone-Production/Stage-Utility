@@ -20,7 +20,7 @@
 // until it had them.
 
 import { HYDRATED_SET } from "./sse-channels";
-import { createSubscribeReporter } from "./subscribe-reporter";
+import { SUBSCRIBE_REPORT_TIMEOUT_MS, createSubscribeReporter } from "./subscribe-reporter";
 
 // The renderer tsconfig uses the DOM lib (self: Window), so type the shared-worker
 // global locally instead of redeclaring `self` (which would conflict).
@@ -109,6 +109,8 @@ const reporter = createSubscribeReporter(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cid, channels }),
+      // Without it, a request that hangs holds back every later report.
+      signal: AbortSignal.timeout(SUBSCRIBE_REPORT_TIMEOUT_MS),
     }),
   // Filtering is an optimization — a failed report just means the old filter (or
   // send-all) stays until the next report.

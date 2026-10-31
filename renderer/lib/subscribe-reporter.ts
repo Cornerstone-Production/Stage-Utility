@@ -11,6 +11,14 @@
 // A failed report still releases the trailing one, so a transient error cannot
 // freeze the filter.
 
+/**
+ * How long a report may take before it is abandoned. One in flight at a time
+ * means a request that never settles would hold every later report back, so a
+ * sender with no timeout of its own must pass this one. api.ts's `post` already
+ * has its own, the same 15 s.
+ */
+export const SUBSCRIBE_REPORT_TIMEOUT_MS = 15_000;
+
 export interface SubscribeReporter {
   /** Ask for the current channel set to be reported. Cheap to call repeatedly. */
   report: () => void;
