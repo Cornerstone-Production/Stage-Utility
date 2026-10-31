@@ -442,6 +442,11 @@ function lookOf(control: Record<string, unknown>) {
 
 const MIN_COLS = 8;
 const MIN_ROWS = 4;
+/** The most columns and rows a page is drawn with. A real surface is a few dozen keys; the
+ *  keys of a document that names more are not drawn, so a pasted export cannot ask for a
+ *  grid a million cells wide. */
+const MAX_COLS = 64;
+const MAX_ROWS = 64;
 
 /**
  * Every page in an export as the picker draws it: the extent the page USES
@@ -458,8 +463,9 @@ const MIN_ROWS = 4;
 export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; views: CompanionPageView[] } {
   const pages = pagesOf(rec(raw));
   const controlAt = new Map<string, Record<string, unknown>>();
+  const inGrid = ([row, col]: [number, number, unknown]) => Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < MAX_ROWS && col < MAX_COLS;
   for (const [n, page] of pages) {
-    for (const [row, col, control] of controlsOf(page)) controlAt.set(`${n}/${row}/${col}`, control);
+    for (const [row, col, control] of controlsOf(page).filter(inGrid)) controlAt.set(`${n}/${row}/${col}`, control);
   }
 
   const summaries: CompanionPageSummary[] = [];
@@ -470,7 +476,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
     let labelled = 0;
     let maxRow = -1;
     let maxCol = -1;
-    for (const [row, col, control] of controlsOf(page)) {
+    for (const [row, col, control] of controlsOf(page).filter(inGrid)) {
       maxRow = Math.max(maxRow, row);
       maxCol = Math.max(maxCol, col);
       const type = str(control.type);

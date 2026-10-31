@@ -123,6 +123,15 @@ describe("a page's extent", () => {
     assert.deepEqual([v.cols, v.rows, v.keys.length], [8, 4, 0]);
   });
 
+  test("a key beyond 64 columns or 64 rows is ignored, so a hostile export cannot ask for a huge grid", () => {
+    const v = parsePages(doc({ "0": { "0": btn, "63": btn, "64": btn, "99999": btn, "-1": btn }, "63": { "0": btn }, "64": { "0": btn }, "-1": { "0": btn }, "99999": { "5": btn } })).views[0]!;
+    assert.deepEqual([v.cols, v.rows], [64, 64]);
+    assert.deepEqual(
+      v.keys.map((k) => `${k.row}/${k.col}`).sort(),
+      ["0/0", "0/63", "63/0"],
+    );
+  });
+
   test("the fixture's wide page", () => {
     const v = viewOf(3);
     assert.deepEqual([v.cols, v.rows], [13, 8]);
