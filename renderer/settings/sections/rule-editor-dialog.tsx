@@ -629,7 +629,7 @@ function FormerNamesField({
   return (
     <Row
       label="Former names"
-      hint="Names this cue still answers to, kept when its Companion button was relabelled. Remove one and that URL stops resolving — re-paste the Home Assistant config first."
+      hint="Names this command still answers to, kept when its Companion button was relabelled. Remove one and that URL stops resolving — re-paste the Home Assistant config first."
     >
       <span className="flex flex-wrap gap-1" data-cue-former-list={names.join(",")}>
         {names.map((name) => (
@@ -754,7 +754,7 @@ function HomeVisibilityField({
           </span>
         </span>
         <span className="text-caption2 text-fg-subtle">
-          Turn off to keep this cue voice-only. It disappears from Home Assistant within a few
+          Turn off to keep this command voice-only. It disappears from Home Assistant within a few
           seconds; automations there that refer to it stop working.
         </span>
       </span>
@@ -1348,7 +1348,7 @@ export function RuleEditorBody({
           <div className="min-w-0 flex-1">
             <div className="text-footnote font-semibold text-fg">Runs only when called</div>
             <div className="text-caption1 text-fg-muted">
-              Its Run button, a console cue button, Home Assistant or voice. No When, no If.
+              Its Run button, a console button, Home Assistant or voice. No When, no If.
             </div>
           </div>
           {onMakeAutomatic && (
@@ -1363,7 +1363,7 @@ export function RuleEditorBody({
         {cooldownRow}
 
         <Separator />
-        <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Cue</span>
+        <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Command</span>
         {triggerFieldRows}
         {formerNamesRow}
         {onceRow}
@@ -1426,7 +1426,7 @@ export function RuleEditorBody({
         <p role="status" data-picking-trigger="" className="rounded-lg bg-amber-3 px-3 py-2 text-caption1 text-amber-11">
           Pick a trigger to finish making this automatic.
           {leavingCue
-            ? ` Saving removes the cue ${leavingCue}: anything that calls it, a console cue button and Home Assistant included, stops finding it.`
+            ? ` Saving removes the command ${leavingCue}: anything that calls it, a console button and Home Assistant included, stops finding it.`
             : ""}
           {onMakeManual ? " Make it manual puts it back." : ""}
         </p>
@@ -1986,7 +1986,7 @@ export function RuleEditorDialog({
       isPair
         ? {
             title: `Delete ${target.pair.name}?`,
-            message: `Deletes both cues, ${target.pair.onName} and ${target.pair.offName}. Anything calling either URL stops working.`,
+            message: `Deletes both commands, ${target.pair.onName} and ${target.pair.offName}. Anything calling either URL stops working.`,
             confirmLabel: "Delete both",
             destructive: true,
           }
@@ -1997,7 +1997,7 @@ export function RuleEditorDialog({
             // a Home Assistant config that never mentioned this rule.
             message:
               onDraft.trigger.id === CALL_TRIGGER_ID
-                ? `The cue ${String(onDraft.trigger.params.name ?? "")} goes with it. Anything calling that URL stops working.`
+                ? `The command ${String(onDraft.trigger.params.name ?? "")} goes with it. Anything calling that URL stops working.`
                 : "The rule and everything set on it goes with it.",
             confirmLabel: "Delete",
             destructive: true,
@@ -2050,7 +2050,7 @@ export function RuleEditorDialog({
             </p>
           )}
           {!isPair && onDraft.trigger.id === CALL_TRIGGER_ID && (
-            <p className="text-caption1 text-fg-subtle" data-manual-kind="">Manual cue</p>
+            <p className="text-caption1 text-fg-subtle" data-manual-kind="">Manual command</p>
           )}
           {/* The screens whose Buttons name this command: what a rename follows
               and what Make it automatic would leave reading Not set. */}

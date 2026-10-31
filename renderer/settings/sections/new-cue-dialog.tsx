@@ -76,7 +76,7 @@ import {
   type StepId,
 } from "./new-cue-flow";
 
-const KIND_NAMES: Record<CueKind, string> = { manual: "Manual cue", auto: "Automatic rule" };
+const KIND_NAMES: Record<CueKind, string> = { manual: "Manual command", auto: "Automatic rule" };
 
 /** What the dialog says after Create when a console was refused. */
 interface Outcome {
@@ -440,7 +440,7 @@ export function NewCueDialog({
                 ["Kind", KIND_NAMES.manual, "kind"],
                 ["Does", labelOf(registry.actions, draft.action.id) || "—", "act"],
                 ["Name", displayName(draft, registry) || "—", "name"],
-                ["Cue name", cueName, "name"],
+                ["Command name", cueName, "name"],
                 ["Fires from", ["Run button", draft.homeAssistant ? "Home Assistant" : null].filter(Boolean).join(", "), "name"],
                 ["During a service", draft.allowedDuringService ? "Allowed" : "Refused", "name"],
                 ["On consoles", consoleNames.join(", ") || "None", "console"],
@@ -465,7 +465,7 @@ export function NewCueDialog({
                   <span className="min-w-0 break-words text-fg">{v}</span>
                   {/* Cue name is derived, so there is nothing to change on its own
                       row: Change goes to the Name it comes from. */}
-                  {k === "Cue name" ? (
+                  {k === "Command name" ? (
                     <span />
                   ) : (
                     <button
@@ -633,7 +633,7 @@ function logConsoleButtons(cue: string, results: ConsoleResult[]): void {
 function headingFor(id: StepId, kind: CueKind | null): { title: string; blurb: string } {
   switch (id) {
     case "kind":
-      return { title: "What kind of cue?", blurb: "You can change this later from the cue’s editor." };
+      return { title: "What kind of command?", blurb: "You can change this later from the command’s editor." };
     case "trig":
       return { title: "When does it fire?", blurb: "One trigger. It fires on the change, never on a state that just persists." };
     case "if":
@@ -648,7 +648,7 @@ function headingFor(id: StepId, kind: CueKind | null): { title: string; blurb: s
       return {
         title: "Put it on a console (optional)",
         blurb:
-          "Adds a button that fires this cue to each console you tick. Skip it and you can still add one later in the layout editor.",
+          "Adds a button that fires this command to each console you tick. Skip it and you can still add one later in the layout editor.",
       };
     case "review":
       return { title: "Review", blurb: "Nothing has been saved yet." };
@@ -680,12 +680,12 @@ function KindStep({ kind, onChoose }: { kind: CueKind | null; onChoose: (k: CueK
     </button>
   );
   return (
-    <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1" role="group" aria-label="Kind of cue">
+    <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1" role="group" aria-label="Kind of command">
       {card(
         "manual",
         <HandIcon className="size-[18px]" />,
-        "Manual cue",
-        "Fires only when someone fires it: its Run button, a cue button on a console, Home Assistant or voice. Nothing happening in the building sets it off.",
+        "Manual command",
+        "Fires only when someone fires it: its Run button, a button on a console, Home Assistant or voice. Nothing happening in the building sets it off.",
         "Projectors on. Foyer TVs off. Reset the stage.",
       )}
       {card(
@@ -754,7 +754,7 @@ function ConsoleStep({
       </div>
       {chosen.length > 0 && (
         <>
-          <SettingRow label="Button label" help="Blank uses the cue’s name." htmlFor="new-cue-button-label">
+          <SettingRow label="Button label" help="Blank uses the command’s name." htmlFor="new-cue-button-label">
             <Input
               id="new-cue-button-label"
               value={label}

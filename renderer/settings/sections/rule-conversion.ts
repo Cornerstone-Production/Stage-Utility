@@ -133,13 +133,13 @@ export function impactQuestion(impact: HomeImpact): { title: string; message: st
       ? " Home Assistant removes its entity within a few seconds, and automations there that refer to it stop working."
       : "";
     return {
-      title: "This cue will stop existing",
-      message: `${impact.cue} goes away.${home} Anything calling /api/cues/${impact.cue} stops finding it, and a cue button on a console bound to it reads Unbound.`,
+      title: "This command will stop existing",
+      message: `${impact.cue} goes away.${home} Anything calling /api/cues/${impact.cue} stops finding it, and a button on a console bound to it reads Unbound.`,
       confirmLabel: "Save anyway",
     };
   }
   return {
-    title: "Home Assistant will get a new cue",
+    title: "Home Assistant will get a new command",
     message: `${impact.cue} becomes a button in Home Assistant and Apple Home. The Home Assistant integration picks it up by itself; a pasted YAML fragment needs to be generated and pasted again.`,
     confirmLabel: "Save",
   };

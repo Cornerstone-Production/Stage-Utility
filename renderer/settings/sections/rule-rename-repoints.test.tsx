@@ -156,7 +156,7 @@ const labelled = (text: string): HTMLInputElement | null => {
 const notice = (kind: string): Element | null => document.querySelector(`[data-cue-notice="${kind}"]`);
 const openRow = (name: string) => press(document.querySelector(`[data-rule-name="${name}"]`)?.closest("button"), name);
 async function rename(to: string) {
-  const field = labelled("Cue name");
+  const field = labelled("Command name");
   assert.ok(field, "no cue name field");
   await act(async () => {
     fireEvent.change(field!, { target: { value: to } });

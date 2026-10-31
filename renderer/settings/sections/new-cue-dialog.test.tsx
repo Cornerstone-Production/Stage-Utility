@@ -330,8 +330,8 @@ describe("a manual cue", () => {
     await typeInto(labelledInput("Name"), "Projectors on", "Name");
     await press(button("Next"), "Next");
     await press(button("Skip"), "Skip");
-    const row = document.querySelector('[data-review-row="Cue name"]');
-    assert.ok(row, "no Cue name row");
+    const row = document.querySelector('[data-review-row="Command name"]');
+    assert.ok(row, "no Command name row");
     assert.ok((row.textContent ?? "").includes("projectors_on_cue"), `it read ${JSON.stringify(row.textContent)}`);
     assert.equal(row.querySelector("input") === null, true, "the cue name was editable");
     await press(document.querySelector('[aria-label="Change Does"]'), "Change Does");
@@ -513,7 +513,7 @@ describe("On a console", () => {
   test("while Create is still writing buttons, the Review does not rename the cue to dodge the one it just made", async () => {
     await toConsoleStep("Stage reset", ["booth"]);
     await press(button("Next"), "Next to Review");
-    const cueRow = () => document.querySelector('[data-review-row="Cue name"]')?.textContent ?? "";
+    const cueRow = () => document.querySelector('[data-review-row="Command name"]')?.textContent ?? "";
     assert.ok(cueRow().includes("stage_reset") && !cueRow().includes("stage_reset_2"));
     let release: () => void = () => {};
     bridge.holdWritesTo = { prefix: "/api/views/", until: new Promise<void>((resolve) => (release = resolve)) };
@@ -710,7 +710,7 @@ describe("the stepper", () => {
     await pickOption("log.message");
     await typeInto(labelledInput("Message"), "x", "Message");
     await press(button("Next"), "Next");
-    assert.ok((stepButton("kind")?.textContent ?? "").includes("Manual cue"), "Kind's choice is not shown");
+    assert.ok((stepButton("kind")?.textContent ?? "").includes("Manual command"), "Kind's choice is not shown");
     assert.ok((stepButton("act")?.textContent ?? "").includes("Write a log message"), "the action is not shown");
     await press(stepButton("kind"), "back to Kind");
     assert.equal(stepBody(), "kind");
@@ -770,7 +770,7 @@ describe("the deep link", () => {
     assert.equal(stepBody(), "act", "the link did not choose Manual and move on");
     assert.equal(heading(), "What does it do?");
     assert.equal(
-      (document.querySelector('[data-step="kind"]')?.textContent ?? "").includes("Manual cue"),
+      (document.querySelector('[data-step="kind"]')?.textContent ?? "").includes("Manual command"),
       true,
       "the stepper does not show the kind the link chose",
     );

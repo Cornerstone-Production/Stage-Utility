@@ -39,7 +39,7 @@ const REGISTRY = {
       label: "Called by name (voice or HTTP)",
       channel: "cue:call",
       params: [
-        { key: "name", label: "Cue name", type: "string" },
+        { key: "name", label: "Command name", type: "string" },
         { key: "says", label: "Spoken as", type: "string", optional: true },
       ],
     },

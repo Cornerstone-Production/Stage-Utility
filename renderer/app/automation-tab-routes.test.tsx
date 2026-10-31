@@ -51,7 +51,7 @@ after(async () => {
 
 const REGISTRY = {
   triggers: [
-    { id: "call.by-name", label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Cue name", type: "string" }] },
+    { id: "call.by-name", label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Command name", type: "string" }] },
   ],
   conditions: [],
   actions: [{ id: "log.message", label: "Write a log message", params: [] }],
