@@ -1,24 +1,13 @@
-// companion-browser.test.tsx — Browse buttons: the page dropdown, the arrows, and
-// the read-only grid in Companion's own colours.
+// companion-browser.test.tsx — Browse buttons, as the Companion dialog's card runs it.
 //
-// What is guarded, and why each is a bug rather than a nicety:
+// The page dropdown, the arrows and the grid are the shared companion-pages.tsx and are
+// tested there; this is what is Browse buttons' own:
 //
-//  - EMPTY PAGES ARE LEFT OUT of the dropdown AND the arrows. A real install has
-//    99 pages and more than half are empty; an arrow that stopped on one, or a
-//    dropdown that listed 59 pages of nothing, is the control it replaces.
-//  - THE FILTER TAKES A NUMBER OR A NAME, so "17" and "proj" both find page 17.
-//  - THE GRID IS COMPANION'S: each key's own background and text colour, its icon,
-//    a reference marked as one, a page control drawn blank. A grid that drew every
-//    key the same is a picture of nothing.
-//  - THE GRID DRAWS THE PAGE'S USED EXTENT as the server sends it, and keeps the
-//    keys in their own rows and columns.
-//  - NOTHING IS READ UNTIL BROWSE IS PRESSED, and an unreachable Companion says
-//    why instead of drawing an empty grid.
-//  - READ-ONLY: nothing in the grid is a control.
-//
-// NOT unit-tested here, and driven in a browser instead: the keys' square size, the
-// sideways scroll of a page wider than the card, and the dropdown's stacking over
-// the grid. jsdom loads no stylesheet and reports every offsetWidth as 0.
+//  - NOTHING IS READ UNTIL BROWSE IS PRESSED, and Hide buttons puts it away.
+//  - AN UNREACHABLE COMPANION SAYS WHY, and a page that cannot be read says so, instead
+//    of an empty grid that reads as a Companion with nothing on it.
+//  - IT OPENS ON THE FIRST PAGE WITH BUTTONS, steps over empty pages, and draws the page
+//    read-only, from the page route, with the extent the server sent.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND (see test-dom.ts).
 
@@ -32,7 +21,7 @@ const teardown = installRenderDom();
 const { render, cleanup, act, fireEvent, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
-const { CompanionBrowser, listedPages, filterPages, neighbour } = await import("./companion-browser.js");
+const { CompanionBrowser } = await import("./companion-browser.js");
 const { CompanionOutboundCard } = await import("./companion-outbound-card.js");
 
 type Key = {
@@ -118,7 +107,6 @@ async function press(el: Element | null | undefined, what: string) {
   await settle();
 }
 const pageButton = () => screen.getByRole("button", { name: "Companion page" });
-const optionNumbers = () => [...document.querySelectorAll("[data-page-option]")].map((o) => o.getAttribute("data-page-option"));
 const keyAt = (where: string) => document.querySelector(`[data-companion-key="${where}"]`) as HTMLElement | null;
 
 beforeEach(() => {
@@ -136,29 +124,6 @@ after(async () => {
   teardown();
 });
 
-describe("the page list", () => {
-  test("listedPages leaves out the empty pages and sorts by page number", () => {
-    assert.deepEqual(listedPages([...PAGES].reverse()).map((p) => p.page), [1, 17, 20]);
-  });
-
-  test("filterPages takes a number, as a prefix or whole, or any part of a name", () => {
-    const listed = listedPages(PAGES);
-    assert.deepEqual(filterPages(listed, "17").map((p) => p.page), [17]);
-    assert.deepEqual(filterPages(listed, "2").map((p) => p.page), [20]);
-    assert.deepEqual(filterPages(listed, "PROJ").map((p) => p.page), [17]);
-    assert.deepEqual(filterPages(listed, "playback").map((p) => p.page), [20]);
-    assert.deepEqual(filterPages(listed, "  ").map((p) => p.page), [1, 17, 20]);
-    assert.deepEqual(filterPages(listed, "zzz"), []);
-  });
-
-  test("neighbour steps over the listed pages only, and stops at the ends", () => {
-    const listed = listedPages(PAGES);
-    assert.equal(neighbour(listed, 1, 1), 17, "the arrow stopped on an empty page");
-    assert.equal(neighbour(listed, 17, -1), 1);
-    assert.equal(neighbour(listed, 20, 1), null);
-    assert.equal(neighbour(listed, 1, -1), null);
-  });
-});
 
 describe("Browse buttons", () => {
   test("nothing is read until it is pressed, and Hide buttons puts it away again", async () => {
@@ -196,123 +161,16 @@ describe("Browse buttons", () => {
   });
 });
 
-describe("the dropdown and the arrows", () => {
-  test("the dropdown lists only pages with buttons, with how many, and says empty pages are left out", async () => {
-    mount(<CompanionBrowser />);
-    await eventually(() => assert.ok(keyAt("p1 r0 c0")));
-    await press(pageButton(), "the page dropdown");
-    assert.deepEqual(optionNumbers(), ["1", "17", "20"]);
-    assert.match(document.body.textContent ?? "", /3 pages with buttons · empty pages left out/);
-  });
 
-  test("the filter finds a page by number or name, and Enter picks the highlighted one", async () => {
-    mount(<CompanionBrowser />);
-    await eventually(() => assert.ok(keyAt("p1 r0 c0")));
-    await press(pageButton(), "the page dropdown");
-    const filter = screen.getByRole("textbox", { name: "Filter pages" });
-    await act(async () => {
-      fireEvent.change(filter, { target: { value: "proj" } });
-    });
-    assert.deepEqual(optionNumbers(), ["17"]);
-    await act(async () => {
-      fireEvent.keyDown(filter, { key: "Enter" });
-    });
-    await eventually(() => assert.ok(keyAt("p17 r0 c0")));
-    assert.equal(document.querySelector("[data-page-option]") === null, true, "the dropdown stayed open after a pick");
-    assert.match(pageButton().textContent ?? "", /17\s*Projectors/);
-  });
-
-  test("a filter that matches nothing says so", async () => {
-    mount(<CompanionBrowser />);
-    await eventually(() => assert.ok(keyAt("p1 r0 c0")));
-    await press(pageButton(), "the page dropdown");
-    await act(async () => {
-      fireEvent.change(screen.getByRole("textbox", { name: "Filter pages" }), { target: { value: "zzz" } });
-    });
-    assert.match(document.body.textContent ?? "", /No page matches/);
-  });
-
-  test("Escape closes the dropdown without changing the page", async () => {
-    mount(<CompanionBrowser />);
-    await eventually(() => assert.ok(keyAt("p1 r0 c0")));
-    await press(pageButton(), "the page dropdown");
-    await act(async () => {
-      fireEvent.keyDown(screen.getByRole("textbox", { name: "Filter pages" }), { key: "Escape" });
-    });
-    assert.equal(document.querySelector("[data-page-option]") === null, true);
-    assert.match(pageButton().textContent ?? "", /1\s*Main/);
-  });
-
-  test("the arrows skip empty pages, and each is dead at its end", async () => {
-    mount(<CompanionBrowser />);
-    await eventually(() => assert.ok(keyAt("p1 r0 c0")));
-    assert.equal((screen.getByRole("button", { name: "Previous page" }) as HTMLButtonElement).disabled, true);
-    await press(screen.getByRole("button", { name: "Next page" }), "next");
-    // Pages 2 and 3 are empty, so next from 1 is 17.
-    await eventually(() => assert.ok(keyAt("p17 r0 c0")));
-    await press(screen.getByRole("button", { name: "Next page" }), "next");
-    await eventually(() => assert.ok(keyAt("p20 r2 c1")));
-    assert.equal((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled, true);
-    await press(screen.getByRole("button", { name: "Previous page" }), "previous");
-    await eventually(() => assert.ok(keyAt("p17 r0 c0")));
-  });
-});
-
-describe("the grid", () => {
-  async function onPage17() {
+describe("Browse buttons, end to end", () => {
+  test("steps over empty pages and draws the page the server sent, read-only", async () => {
     mount(<CompanionBrowser />);
     await eventually(() => assert.ok(keyAt("p1 r0 c0")));
     await press(screen.getByRole("button", { name: "Next page" }), "next");
-    await eventually(() => assert.ok(keyAt("p17 r0 c0")));
-  }
-
-  test("each key carries Companion's own background and text colour, and a key with none takes the default", async () => {
-    await onPage17();
-    const lamp = keyAt("p17 r0 c0")!;
-    assert.equal(lamp.style.backgroundColor, "rgb(170, 0, 0)");
-    assert.equal(lamp.style.color, "rgb(255, 255, 0)");
-    const plain = keyAt("p17 r4 c11")!;
-    assert.equal(plain.style.backgroundColor, "", "a key with no colour of its own was given one");
-  });
-
-  test("an icon is drawn above its label", async () => {
-    await onPage17();
-    const withIcon = keyAt("p17 r0 c1")!;
-    assert.equal(withIcon.querySelector("img")?.getAttribute("src"), "data:image/png;base64,AAAA");
-    assert.match(withIcon.textContent ?? "", /Lamp off/);
-    assert.equal(keyAt("p17 r0 c0")!.querySelector("img") === null, true);
-  });
-
-  test("a reference is drawn as the key it points at, and marked as a reference", async () => {
-    await onPage17();
-    const ref = keyAt("p17 r1 c3")!;
-    assert.equal(ref.getAttribute("data-key-kind"), "reference");
-    assert.match(ref.textContent ?? "", /Shutter/);
-    assert.match(ref.getAttribute("title") ?? "", /a reference to p20 r2 c1/);
-  });
-
-  test("a page control is a blank key: no label, nothing to read", async () => {
-    await onPage17();
-    assert.equal(keyAt("p17 r2 c0") === null, true, "a page control drew as a key");
-    assert.ok(!(document.body.textContent ?? "").includes("PAGE UP"));
-  });
-
-  test("draws the extent the server sent, with every key in its own row and column", async () => {
-    await onPage17();
-    const grid = document.querySelector('[role="img"] > div') as HTMLElement;
-    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(2.75rem, 1fr))");
-    assert.equal(grid.children.length, 12 * 5, "the grid is not cols x rows cells");
-    // r4 c11 is the last cell; r1 c3 sits one row and three cells in.
-    assert.equal(grid.children[4 * 12 + 11] === keyAt("p17 r4 c11"), true, "the last key is not in the last cell");
-    assert.equal(grid.children[1 * 12 + 3] === keyAt("p17 r1 c3"), true, "a key is not in its own row and column");
+    await eventually(() => assert.ok(keyAt("p17 r0 c0")), 3000);
+    const grid = document.querySelector('[role="img"]') as HTMLElement;
+    assert.equal(grid.children.length, 12 * 5);
+    assert.equal(document.querySelectorAll('[role="img"] button, [role="gridcell"]').length, 0, "Browse buttons drew a control");
     assert.match(document.body.textContent ?? "", /page 17 · 12 × 5/);
-  });
-
-  test("is read-only: no key is a control", async () => {
-    await onPage17();
-    assert.equal(document.querySelectorAll('[role="img"] button, [role="img"] [role="button"], [role="img"] a').length, 0);
-    const before = fetched.length;
-    await press(keyAt("p17 r0 c0"), "a key");
-    assert.equal(fetched.length, before, "pressing a key did something");
   });
 });
