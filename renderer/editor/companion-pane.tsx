@@ -379,7 +379,7 @@ function PageGrid({
     for (let c = 0; c < view.cols; c++) {
       const k = byPlace.get(`${r},${c}`);
       if (!k) {
-        cells.push(<span key={`${r},${c}`} aria-hidden className="aspect-square rounded-[3px] bg-gray-a3" />);
+        cells.push(<span key={`${r},${c}`} aria-hidden className="aspect-square rounded-[3px] bg-white/[0.08]" />);
         continue;
       }
       // A reference is picked as what it points at: that is where the press goes.
@@ -396,7 +396,7 @@ function PageGrid({
             aria-hidden
             title={k.kind === "page-control" ? "A page control cannot be picked" : undefined}
             style={style}
-            className="aspect-square rounded-[3px] bg-gray-a3 opacity-50"
+            className="aspect-square rounded-[3px] bg-white/[0.08] opacity-50"
           />,
         );
         continue;
@@ -416,7 +416,7 @@ function PageGrid({
           onClick={() => onPick(at)}
           style={style}
           className={cn(
-            "relative flex aspect-square min-w-0 flex-col items-center justify-center gap-px overflow-hidden rounded-[3px] bg-gray-a5 p-0.5 text-center",
+            "relative flex aspect-square min-w-0 flex-col items-center justify-center gap-px overflow-hidden rounded-[3px] bg-white/[0.14] p-0.5 text-center ring-1 ring-inset ring-white/15",
             "text-[9px] font-semibold leading-[1.1] text-white [overflow-wrap:anywhere] hover:brightness-125",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             picked && "outline outline-2 -outline-offset-2 outline-white ring-2 ring-accent",
@@ -437,7 +437,7 @@ function PageGrid({
     <div className="max-w-full overflow-x-auto rounded-md border border-line-strong bg-black p-1" data-page-grid={view.page}>
       <div
         role="grid"
-        aria-label={`Companion page ${view.page}`}
+        aria-label={`Buttons on page ${view.page}`}
         className="grid gap-[3px]"
         // Keys keep a minimum size, so a wide page scrolls inside the panel rather than shrinking to dots.
         style={{ gridTemplateColumns: `repeat(${view.cols}, minmax(2.25rem, 1fr))` }}

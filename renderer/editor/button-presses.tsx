@@ -318,7 +318,7 @@ function ActionOption({ label, selected, onPick }: { label: string; selected: bo
       aria-selected={selected}
       onClick={onPick}
       className={cn(
-        "flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5 text-left text-footnote text-fg last:border-b-0",
+        "flex w-full items-center justify-between gap-2 border-b border-line px-2.5 py-1.5 text-left text-footnote text-fg last:border-b-0",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
         selected ? "bg-accent/12" : "hover:bg-fill",
       )}
