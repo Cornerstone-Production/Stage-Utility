@@ -74,7 +74,8 @@ unsaved fields asks first.
 **Test** reads Companion's configuration and reports its build, how many buttons
 it found and how many of Companion's own connections are healthy — see
 [When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
-It never presses anything. Its answer appears in the card.
+It never presses anything. Its answer appears in the card. It reads the **saved**
+host and port, so while the fields hold edits **Test** is off and says to save first.
 
 **Browse buttons** opens Companion's pages in the card, read-only, so you can see
 what Stage Utility can press and what it will call each button without opening a
