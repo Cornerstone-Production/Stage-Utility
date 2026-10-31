@@ -14,7 +14,7 @@ import { before, describe, it, mock } from "node:test";
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-home-snoozes-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { HomeSnoozes, homeSnoozes, SnoozeRefused } = await import("./home-snoozes.js");
+const { HomeSnoozes, homeSnoozes, SnoozeRefused, SAVE_RETRY_MS } = await import("./home-snoozes.js");
 const { addBroadcastListener, broadcast } = await import("./broadcaster.js");
 const { runtimeFiles, configFiles } = await import("./config-snapshot.js");
 const { SNOOZE_NO_PCO_MS, SNOOZE_BACKSTOP_MS, SNOOZE_MAX } = await import("../types/home-snoozes.js");
@@ -210,5 +210,34 @@ describe("home snoozes", () => {
     await (homeSnoozes as unknown as { lapse: () => Promise<void> }).lapse();
     errors.mock.restore();
     assert.deepEqual(await onDisk(), [], "the owed clear reached the disk");
+  });
+
+  it("an owed save retries on its own timer when nothing else would save", async () => {
+    // Earlier failed saves armed a real retry timer; start from none.
+    const inner = homeSnoozes as unknown as { retry: ReturnType<typeof setTimeout> | null };
+    if (inner.retry) clearTimeout(inner.retry);
+    inner.retry = null;
+    live("none");
+    await homeSnoozes.snooze("owed3:a", "warn", true);
+    await fs.rm(FILE, { force: true });
+    await fs.mkdir(FILE);
+    const errors = mock.method(console, "error", () => {});
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      live("item");
+      await new Promise<void>((r) => setImmediate(r));
+      for (let i = 0; i < 20 && keys(homeSnoozes.state()).length > 0; i++) await new Promise<void>((r) => setImmediate(r));
+      await fs.rmdir(FILE);
+      mock.timers.tick(SAVE_RETRY_MS + 10);
+    } finally {
+      mock.timers.reset();
+      errors.mock.restore();
+    }
+    for (let i = 0; i < 50; i++) {
+      try { if ((await onDisk()).length === 0) break; } catch { /* not written yet */ }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(await onDisk(), [], "the timer wrote the owed clear");
+    assert.ok(logged.includes("[home] saved snoozes: the earlier failed save is now on disk"), logged.join("\n"));
   });
 });

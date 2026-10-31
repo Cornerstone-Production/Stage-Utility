@@ -56,6 +56,8 @@ const store = new DataStore<SnoozeFile>("home-snoozes.json", { snoozes: [] }, "r
 
 // setTimeout takes a signed 32-bit number of milliseconds.
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/** How long an owed save waits before it is tried again. */
+export const SAVE_RETRY_MS = 30_000;
 
 function isSeverity(v: unknown): v is AttentionSeverity {
   return v === "critical" || v === "warn";
@@ -71,6 +73,7 @@ export class HomeSnoozes {
    *  successful save writes the whole list, so it is retried on every commit,
    *  drop and lapse, and its outcome is logged on [home]. */
   private dirty = false;
+  private retry: ReturnType<typeof setTimeout> | null = null;
   private expiry: ReturnType<typeof setTimeout> | null = null;
   private writes = new WriteQueue();
 
@@ -154,8 +157,20 @@ export class HomeSnoozes {
         this.noteSaved();
       } catch (err) {
         console.error("[home] retry of the snooze save failed; will retry:", scrubError(err));
+        this.retryLater();
       }
     });
+  }
+
+  /** A clear at service start often leaves nothing else to save, so an owed save
+   *  gets its own timer rather than waiting for a change that may not come. */
+  private retryLater(): void {
+    if (this.retry) return;
+    this.retry = setTimeout(() => {
+      this.retry = null;
+      void this.flush();
+    }, SAVE_RETRY_MS);
+    this.retry.unref?.();
   }
 
   private publish(): void {
@@ -217,6 +232,7 @@ export class HomeSnoozes {
         } catch (err) {
           console.error("[home] could not save snoozes after clearing them; will retry:", scrubError(err));
           this.dirty = true;
+          this.retryLater();
         }
         this.snoozes = next;
       });
