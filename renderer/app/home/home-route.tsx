@@ -47,6 +47,7 @@ import {
 } from "./home-placement";
 import { HomeGrid } from "./home-grid";
 import { AddWidgetSheet, CardChrome } from "./home-editor";
+import { editorNote } from "./attention/editor-note";
 
 /** The pointer distance, in CSS px, a card drag must travel before it counts
  *  as a drag rather than a press on the chrome underneath it — see
@@ -476,6 +477,7 @@ export function HomeRoute() {
               ? (o, cancelPress) => (
                   <CardChrome
                     card={o}
+                    note={editorNote(o, home?.layout?.objects ?? [])}
                     dragging={dragId === o.id}
                     onSize={(size) => save((objs) => resizeCard(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}

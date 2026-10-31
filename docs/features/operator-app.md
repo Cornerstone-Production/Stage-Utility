@@ -114,6 +114,39 @@ live value. Pick one and the tile shows that metric, captioned
 once a metric is picked, "loudest" is judged on that metric. A picked metric the
 meter stops reporting reads `—` and names it, never another metric's number.
 
+### Needs attention
+
+**Needs attention** lists what is wrong right now, one row per problem: a dot,
+what it is, the reason, **Snooze**, and the fix as a button. Everything healthy
+folds into one line beneath it ("5 of 6 screens · 7 of 8 mics · ProPresenter ·
+Planning Center"), so a green Home is a single line and a red one is loud. It is
+on a new Home by default, in place of Readiness, and **Add widget** offers both;
+a Home somebody has edited is left as it is.
+
+A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
+takes the colour of the worst problem showing. At the medium size the list is
+three rows and **+N more**, which opens the rest inside the tile.
+
+| Problem | When it appears | Severity | The fix |
+|---|---|---|---|
+| Readiness | Each readiness check that fails, in the order to fix them (Planning Center, a plan, a view of your own, every screen has a view). "Screens online" is not repeated here: the next row says it per screen | Warn | The page and control the check names |
+| Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
+| Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
+| Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
+| Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which starts it in place |
+| Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
+
+A source that has not answered yet adds nothing: the page does not tell you to
+fix something it has not heard about, and a half-loaded Home draws no severity
+until it knows whether a service is live.
+
+**Snooze** hides one problem until the next service starts, for everyone: the
+booth and the iPad agree on what is handled. Outside Planning Center it lasts
+12 hours. A problem that clears and comes back stays snoozed, but one that gets
+worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
+lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
+configuration backup and restoring one does not bring any back.
+
 ### Sizes
 
 Five shapes on a three-column grid:

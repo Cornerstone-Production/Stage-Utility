@@ -32,8 +32,11 @@ export function CardChrome({
   onRemove,
   onDragPointerDown,
   dragging,
+  note,
 }: {
   card: LayoutObject;
+  /** A line saying something about this card in context, e.g. that another card repeats it. */
+  note?: string | null;
   onSize: (s: HomeCardSize) => void;
   onWhen: (w: HomeVisibility) => void;
   onRemove: () => void;
@@ -73,6 +76,11 @@ export function CardChrome({
       <span className="absolute bottom-1.5 left-1.5 text-fg-subtle">
         <GripVerticalIcon className="size-3.5" />
       </span>
+      {note && (
+        <span className="absolute left-1.5 top-1.5 rounded-full border border-line bg-bg/90 px-2 py-px text-caption2 text-fg-subtle">
+          {note}
+        </span>
+      )}
 
       {/* At the BOTTOM, because the idiom puts a widget's CAPTION first and that
           caption is how you tell which widget you are editing. Sitting at the
