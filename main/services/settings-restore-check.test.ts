@@ -26,6 +26,7 @@ const SCREEN = { id: "1", name: "Main", viewId: null };
 
 const CASES: Record<string, Case> = {
   accentColor: { bad: "red", says: "#rrggbb" },
+  actionButtonsMigrated: { bad: "yes", says: "true or false" },
   allowedServiceTypeIds: { bad: [123], says: "list of text" },
   appIcon: { bad: "javascript:alert(1)", says: "PNG data URL" },
   appIcon192: { bad: "https://example.org/x.png", says: "PNG data URL" },
