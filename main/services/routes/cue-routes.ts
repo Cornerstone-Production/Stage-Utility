@@ -58,6 +58,8 @@ import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
 import { reservedCueNames } from "../builtin-cues.js";
+import { cueUsage } from "../button-ownership.js";
+import { viewsStore } from "../views-store.js";
 import { takenCueNames } from "../cue-aliases.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
@@ -198,6 +200,19 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // list a pair the operator hid from Home Assistant, which the default
     // manifest leaves out for the integration that reads it.
     json(res, await cueManifest({ includeHidden: url.searchParams.get("all") === "1" }));
+    return;
+  }
+
+  // ── Where a cue is used ───────────────────────────────────────────────────
+
+  if (method === "GET" && pathname === "/api/cues/usage") {
+    // Open, like the manifest: it names the screens a cue is on and the Buttons'
+    // labels, which the layouts themselves already serve to anyone on the LAN.
+    // Worked out on each request from the views store — views are small and this is
+    // read when a page or a dialog opens, so there is no timer and no cache to go
+    // stale. Strict: a views file that could not be read is a 503, never an empty
+    // answer that says no Button uses any cue.
+    json(res, cueUsage(await viewsStore.loadStrict()));
     return;
   }
 

@@ -12,7 +12,7 @@ import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
 import { scrub } from "./scrub.js";
 
-import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
+import type { AutomationSettings, ConditionCtx, OwnedBy, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
@@ -52,6 +52,13 @@ import { calledCueName, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
+import { ownedByProblem, watchOwnedRules } from "./button-ownership.js";
+
+/**
+ * What updateRule accepts. `ownedBy: null` clears it, which is how a rule is
+ * listed with the other cues; an absent key leaves it alone.
+ */
+type RulePatch = Partial<Omit<Rule, "id" | "ownedBy">> & { ownedBy?: OwnedBy | null };
 
 /** Why a call was refused. Each maps to one sentence the caller can speak. */
 export type CueBlockReason =
@@ -128,6 +135,7 @@ class AutomationEngine {
    *  nobody watching turning into a cue that fires on a call made yesterday. */
   private pendingConfirm = new Map<string, { token: string; expiresAt: number }>();
   private subscribed = false;
+  private watchingViews = false;
 
   async init(): Promise<void> {
     await automationLog.init();
@@ -166,6 +174,13 @@ class AutomationEngine {
     this.firedForService.clear();
     this.pendingConfirm.clear();
     this.serviceKeyFromBus = null;
+
+    // Said once per process however many times init runs: a Button that owned a
+    // rule went with a views save, and the rule was kept.
+    if (!this.watchingViews) {
+      this.watchingViews = true;
+      watchOwnedRules(() => this.rules);
+    }
 
     if (!this.subscribed) {
       this.subscribed = true;
@@ -221,6 +236,10 @@ class AutomationEngine {
           problem: `"${rule.id}" is reserved for the cues the app ships`,
         });
       }
+      // Before the called-cue check below, which skips a rule on any other trigger:
+      // that is exactly the rule an owner must not have.
+      const owned = ownedByProblem(rule);
+      if (owned) out.push({ rule: rule.name || rule.id, problem: owned });
       if (rule.trigger?.id !== CALL_TRIGGER_ID) continue;
       try {
         this.assertCueValid(rule, rule.id, rules);
@@ -280,7 +299,15 @@ class AutomationEngine {
    * refused — a name may not be another rule's former name, and a former name
    * may not be another rule's name.
    */
-  private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null, rules: readonly Rule[] = this.rules): void {
+  private assertCueValid(
+    rule: Pick<Rule, "trigger" | "ownedBy">,
+    exceptId: string | null,
+    rules: readonly Rule[] = this.rules,
+  ): void {
+    // A rule that belongs to a Button cannot leave Called by name: the Button is
+    // bound to a cue, so any other trigger would leave it reading Not set.
+    const owned = ownedByProblem(rule);
+    if (owned) throw new Error(owned);
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
     const name = calledCueName(rule.trigger);
     if (!name) throw new Error("A called cue needs a name");
@@ -399,25 +426,45 @@ class AutomationEngine {
 
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
     this.assertRulesRead();
-    this.assertCueValid(rule, null);
+    // A client that clears an owner by sending null on a create means "none".
     const next: Rule = { ...rule, id: randomUUID() };
+    if ((next as { ownedBy?: unknown }).ownedBy === null) delete next.ownedBy;
+    this.assertCueValid(next, null);
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
     const cue = calledCueName(next.trigger);
-    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})${cue ? ` as cue "${scrub(cue)}"` : ""}`);
+    console.log(
+      `[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})${cue ? ` as cue "${scrub(cue)}"` : ""}` +
+        (next.ownedBy ? ` for button ${scrub(next.ownedBy.objectId)} on view ${scrub(next.ownedBy.viewId)}` : ""),
+    );
     this.rulesChanged();
     return next;
   }
 
-  async updateRule(id: string, patch: Partial<Omit<Rule, "id">>): Promise<Rule[]> {
+  async updateRule(id: string, patch: RulePatch): Promise<Rule[]> {
     this.assertRulesRead();
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
-    this.assertCueValid({ ...r, ...patch }, id);
+    // `ownedBy: null` is the ask to clear it (List it with the other cues); the
+    // merged rule is what must be valid, so it is cleared before the check.
+    const { ownedBy, ...rest } = patch;
+    const releasing = ownedBy === null && r.ownedBy !== undefined;
+    const merged: Rule = { ...r, ...rest, ...(ownedBy ? { ownedBy } : {}) };
+    if (ownedBy === null) delete merged.ownedBy;
+    this.assertCueValid(merged, id);
     const cueBefore = calledCueName(r.trigger);
-    Object.assign(r, patch);
+    const ownerBefore = r.ownedBy;
+    Object.assign(r, rest, ownedBy ? { ownedBy } : {});
+    if (ownedBy === null) delete r.ownedBy;
     await automationStore.saveRules(this.rules);
-    console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})`);
+    console.log(
+      `[automation] rule updated "${scrub(r.name)}" (${scrub(id)})` +
+        (releasing && ownerBefore
+          ? ` — no longer belongs to button ${scrub(ownerBefore.objectId)} on view ${scrub(ownerBefore.viewId)}; listed with the other cues`
+          : r.ownedBy
+            ? ` — belongs to button ${scrub(r.ownedBy.objectId)} on view ${scrub(r.ownedBy.viewId)}`
+            : ""),
+    );
     // A cue's name is a URL somebody else holds. When it changes or goes, "a console
     // button reads Unbound" needs a line to be traced back to.
     const cueAfter = calledCueName(r.trigger);
