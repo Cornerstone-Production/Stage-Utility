@@ -38,7 +38,6 @@ const LONG = "Start the sermon countdown and bring up the lower thirds";
 
 const CONFIGS = {
   "cue-button": { type: "cue-button", cue: "", label: LONG, showDevice: true },
-  "action-button": { type: "action-button", actionId: "", params: {}, label: LONG },
   "osc-button": { type: "osc-button", targetId: null, label: LONG, address: "/x", args: [], feedback: null },
   "rosstalk-button": { type: "rosstalk-button", targetId: null, commandId: null, params: {}, label: LONG },
 } as const;

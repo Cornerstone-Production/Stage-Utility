@@ -40,7 +40,6 @@ import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
-import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -1511,8 +1510,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           ts={ts}
         />
       );
-    case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
       return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":

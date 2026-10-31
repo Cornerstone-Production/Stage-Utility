@@ -45,7 +45,6 @@ const BARE = [
 
 /** Every type that wears a card by default, sorted, one per line. */
 const CARDED = [
-  "action-button",
   "baptism-timer",
   "charger-battery",
   "checklist",

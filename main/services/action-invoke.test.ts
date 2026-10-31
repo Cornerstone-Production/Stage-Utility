@@ -84,7 +84,7 @@ describe("invokeAction — a refusal leaves a line on /log", () => {
     };
   }
 
-  it("logs an unknown id, generically — not a baptism action, on purpose: this must cover every action-button, not one", async () => {
+  it("logs an unknown id, generically — not a baptism action, on purpose: this must cover every action, not one", async () => {
     const { lines, restore } = captureActionWarnings();
     try {
       await invokeAction("nope.not.an.action");

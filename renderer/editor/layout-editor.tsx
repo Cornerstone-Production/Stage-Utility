@@ -2571,6 +2571,8 @@ export function LayoutEditor({
               <Inspector
                 key={selected.id}
                 o={selected}
+                viewId={view.id}
+                viewName={view.name}
                 canvas={canvas}
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}

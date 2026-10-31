@@ -1,12 +1,12 @@
 // An edit that lands after the inspector's click is undone one step at a time.
 //
-// Make it a cue (and an image upload, and Fit box to file) call the inspector's
-// onConfig LATER than the click that started them, and onConfig is withHistory(...),
-// whose pushHistory used to close over the layout as it was at the click. Anything
-// typed meanwhile was then missing from the undo entry the late call pushed, so one
-// Undo threw away the typing as well as the write. This drives the real LayoutEditor:
-// click Make it a cue, type a label while the rule write is in flight, let it land, press
-// Undo ONCE, save, and read what the layout holds.
+// Picking what a Button presses (and an image upload, and Fit box to file) call the
+// inspector's onConfig LATER than the click that started them, and onConfig is
+// withHistory(...), whose pushHistory used to close over the layout as it was at the
+// click. Anything typed meanwhile was then missing from the undo entry the late call
+// pushed, so one Undo threw away the typing as well as the write. This drives the real
+// LayoutEditor: pick an app action, type a label while the command's write is in
+// flight, let it land, press Undo ONCE, save, and read what the layout holds.
 //
 // Delete the ref in pushHistory (snapshot the `objects` the callback closed over) and
 // the saved Button has lost the label.
@@ -48,7 +48,7 @@ afterEach(() => {
 
 const settleAct = async () => act(async () => settle());
 
-describe("Make it a cue, landing after the operator typed", () => {
+describe("a Button pick, landing after the operator typed", () => {
   test("one Undo takes back the write and leaves what was typed", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
@@ -61,6 +61,7 @@ describe("Make it a cue, landing after the operator typed", () => {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           return gate.then(() => reply(201, { ...body, id: "rule-1", issues: [] }));
         }
+        // Not the rule just POSTed: this read is not what the test is about.
         return ok({ rules: [], settings: {} });
       }
       return url.endsWith("/api/state") ? ok(DEFAULT_STAGE_STATE)
@@ -71,7 +72,7 @@ describe("Make it a cue, landing after the operator typed", () => {
     const saved: { objects: { config: Record<string, unknown> }[] }[] = [];
     const view = {
       id: "wall", name: "Test", kind: "custom", createdAt: new Date().toISOString(),
-      layout: { version: 1, canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "o1", x: 0.1, y: 0.1, w: 0.3, h: 0.3, z: 1, config: { type: "action-button", actionId: "display.refresh", params: {} }, style: {} }] },
+      layout: { version: 1, canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "o1", x: 0.1, y: 0.1, w: 0.3, h: 0.3, z: 1, config: { type: "cue-button", cue: "", showDevice: true }, style: {} }] },
     };
     try {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -88,23 +89,24 @@ describe("Make it a cue, landing after the operator typed", () => {
       await settleAct();
       await settleAct();
 
-      const make = () => screen.getByRole("button", { name: "Make it a cue" });
-      await eventually(() => assert.equal(make().hasAttribute("disabled"), false));
-      fireEvent.click(make());
+      fireEvent.click(screen.getByRole("button", { name: "App action" }));
+      const refresh = () => screen.getByRole("option", { name: "Refresh displays" });
+      await eventually(() => refresh());
+      fireEvent.click(refresh());
       await settleAct();
       fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Walk" } });
       await settleAct();
-      await act(async () => {
-        release();
-        await eventually(() => assert.ok(screen.queryByRole("button", { name: "Make it a cue" }) === null, "the rebind never landed"));
-      });
+      release();
+      await eventually(() => assert.ok(screen.queryByText(/Fires the command/) !== null, "the rebind never landed"));
+      await settleAct();
 
       fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
       await settleAct();
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await settleAct();
 
-      assert.deepEqual(saved.at(-1)!.objects[0].config, { type: "action-button", actionId: "display.refresh", params: {}, label: "Walk" });
+      // The pick is taken back and the label typed meanwhile is not.
+      assert.deepEqual(saved.at(-1)!.objects[0].config, { type: "cue-button", cue: "", showDevice: true, label: "Walk" });
     } finally {
       f.restore();
     }

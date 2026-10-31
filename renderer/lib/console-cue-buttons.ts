@@ -25,7 +25,7 @@ import { invoke } from "./api";
 
 /** The widgets that are buttons an operator presses: what "sized like its other
  *  buttons" looks at. */
-const BUTTON_TYPES: ReadonlySet<string> = new Set(["cue-button", "action-button", "osc-button", "rosstalk-button"]);
+const BUTTON_TYPES: ReadonlySet<string> = new Set(["cue-button", "osc-button", "rosstalk-button"]);
 
 /** A button this wide and tall when the layout has none to copy: the size the
  *  layout editor gives a new widget with no size of its own. */

@@ -38,6 +38,22 @@ import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
 import { viewsStore } from "./views-store.js";
 
+/**
+ * What a Run an action Button was stored as. The type is gone from the config union
+ * (nothing makes one any more), but a layout saved before it went, or an import of
+ * one, still holds them, and this pass is what turns each into a Button of the one
+ * kind. Read from stored JSON, so every field is checked as it is used.
+ */
+interface StoredActionButton {
+  type: "action-button";
+  actionId: string;
+  params?: Record<string, unknown>;
+  label?: string;
+}
+
+const isStoredActionButton = (cfg: unknown): cfg is StoredActionButton =>
+  (cfg as { type?: unknown } | null | undefined)?.type === "action-button";
+
 /** What the pass would do. */
 export interface ActionButtonMigration {
   /** The views after the pass; the SAME array when nothing changed. */
@@ -79,8 +95,8 @@ export function planActionButtonMigration(
   // reads as "this view is untouched".
   const convert = (o: LayoutObject, view: View): LayoutObject => {
     let next = o;
-    const cfg = o.config;
-    if (cfg?.type === "action-button") {
+    const cfg: unknown = o.config;
+    if (isStoredActionButton(cfg)) {
       const known = ownedAlready.get(`${view.id}\n${o.id}`);
       const label = chosenLabel(cfg.label);
       const registryName = actionLabel(cfg.actionId)?.trim() || cfg.actionId;

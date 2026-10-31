@@ -226,9 +226,8 @@ const router = createRouter({
 // unloaded router cannot do.
 await router.load();
 
-// One of the 48 probe objects is an action-button, which reads the automation
-// registry through react-query — the same client the real app provides at
-// renderer/main/index.tsx, needed here only so that one object mounts at all.
+// The same client the real app provides at renderer/main/index.tsx, so a probe
+// object that reads through react-query mounts at all.
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 
 function mount() {
