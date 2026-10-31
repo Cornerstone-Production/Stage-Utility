@@ -263,9 +263,8 @@ describe("migrating Run an action Buttons", () => {
     assert.equal(rules.length, 5, "exactly one rule per migrated Button");
   });
 
-  test("the views were written, the flag recorded, and one line said how many and where", async () => {
+  test("the views were written and one line said how many and where", async () => {
     assert.deepEqual(buttonsOf(await viewsStore.load()), buttonsOf(migrated));
-    assert.equal((await settingsStore.get()).actionButtonsMigrated, true);
     const said = lines.filter((l) => l.includes("Run an action button"));
     assert.deepEqual(said, [
       "[automation] migrated 5 Run an action buttons to their own cues (Home 1, Booth console 2, FOH iPad 2)",
@@ -276,6 +275,46 @@ describe("migrating Run an action Buttons", () => {
     const again = captureConsole(t, "log");
     await runLoadPass(await viewsStore.load(), []);
     assert.deepEqual(again.filter((l) => l.includes("Run an action button")), []);
+    assert.equal((await automationStore.loadRules()).length, 5);
+  });
+
+  test("a Run an action Button saved AFTER the first start is converted at the next one", async (t) => {
+    // The layout editor can still make these, so a once-per-install pass would
+    // leave this one ignoring Simulate and Disarm for good.
+    const first = await viewsStore.load();
+    const added = first.map((v) =>
+      v.id !== "v-booth" || !v.layout
+        ? v
+        : {
+            ...v,
+            layout: {
+              ...v.layout,
+              objects: [
+                ...v.layout.objects,
+                { id: "b-late", ...place, config: { type: "action-button", actionId: "obs.record", params: {}, label: "Late" } },
+              ],
+            },
+          },
+    ) as unknown as View[];
+    await viewsStore.save(added);
+    const lines = captureConsole(t, "log");
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(buttonsOf(out.views).filter((b) => b.endsWith(":action-button")).length, 0, "the late Button was left as Run an action");
+    assert.ok(cueOf(out.views, "v-booth", "b-late"), "and has no cue");
+    assert.equal((await automationStore.loadRules()).length, 6);
+    assert.deepEqual(lines.filter((l) => l.includes("Run an action button")), [
+      "[automation] migrated 1 Run an action button to its own cue (Booth console 1)",
+    ]);
+  });
+});
+
+describe("a settings.json from an earlier beta", () => {
+  test("still carries the retired actionButtonsMigrated flag, which changes nothing", async () => {
+    await settingsStore.patch({ actionButtonsMigrated: true } as never);
+    await automationStore.saveRules([]);
+    await viewsStore.save(fixtureViews());
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(buttonsOf(out.views).filter((b) => b.endsWith(":action-button")).length, 0, "the stale flag skipped the pass");
     assert.equal((await automationStore.loadRules()).length, 5);
   });
 });
@@ -331,7 +370,6 @@ describe("the rule a Button's action becomes", () => {
 describe("migrating when something goes wrong", () => {
   test("an interrupted pass (rules written, views not) converts the Buttons next time WITHOUT a second rule each", async (t) => {
     await automationStore.saveRules([]);
-    await settingsStore.patch({ actionButtonsMigrated: false });
     await viewsStore.save(fixtureViews());
     const realSave = viewsStore.save.bind(viewsStore);
     viewsStore.save = (async () => {
@@ -346,7 +384,6 @@ describe("migrating when something goes wrong", () => {
     } finally {
       viewsStore.save = realSave;
     }
-    assert.equal((await settingsStore.get()).actionButtonsMigrated, false, "the flag was recorded over unconverted views");
     assert.equal((await automationStore.loadRules()).length, 5);
     assert.ok(buttonsOf(await viewsStore.load()).some((b) => b.endsWith(":action-button")), "the views changed on disk");
 
@@ -355,13 +392,11 @@ describe("migrating when something goes wrong", () => {
     assert.equal(buttonsOf(out.views).filter((b) => b.endsWith(":action-button")).length, 0);
     assert.equal((await automationStore.loadRules()).length, 5, "the second run made a second rule per Button");
     assert.equal(cueOf(out.views, "v-booth", "b-shutter"), "btn_shutter", "and bound to the first run's rule");
-    assert.equal((await settingsStore.get()).actionButtonsMigrated, true);
     assert.equal(lines.filter((l) => l.includes("Run an action button")).length, 1);
   });
 
-  test("rules that cannot be saved leave the Buttons as they were, say so, and do not record the pass", async (t) => {
+  test("rules that cannot be saved leave the Buttons as they were, and say so", async (t) => {
     await automationStore.saveRules([]);
-    await settingsStore.patch({ actionButtonsMigrated: false });
     await viewsStore.save(fixtureViews());
     const real = automationStore.saveRules.bind(automationStore);
     automationStore.saveRules = async () => {
@@ -374,7 +409,6 @@ describe("migrating when something goes wrong", () => {
     } finally {
       automationStore.saveRules = real;
     }
-    assert.equal((await settingsStore.get()).actionButtonsMigrated, false);
     assert.ok(
       lines.some((l) => l.includes("[automation]") && l.includes("were not converted") && l.includes("read-only file system")),
       `nothing said the Buttons were left alone: ${JSON.stringify(lines)}`,
@@ -396,7 +430,6 @@ describe("migrating when something goes wrong", () => {
         ownedBy: { viewId: "v-booth", objectId: "b-shutter" },
       },
     ]);
-    await settingsStore.patch({ actionButtonsMigrated: false });
     await viewsStore.save(fixtureViews());
     const out = await runLoadPass(await viewsStore.load(), []);
     assert.equal(cueOf(out.views, "v-booth", "b-shutter"), "btn_shutter", "the Button was bound to the unnamed rule");
@@ -404,13 +437,11 @@ describe("migrating when something goes wrong", () => {
     assert.deepEqual(bound.map((r) => r.trigger.params.name).sort(), ["", "btn_shutter"]);
   });
 
-  test("an install with no Run an action Buttons logs nothing and still records the pass", async (t) => {
-    await settingsStore.patch({ actionButtonsMigrated: false });
+  test("an install with no Run an action Buttons logs nothing", async (t) => {
     await viewsStore.save([]);
     const lines = captureConsole(t, "log");
     await runLoadPass([], []);
     assert.deepEqual(lines.filter((l) => l.includes("Run an action")), []);
-    assert.equal((await settingsStore.get()).actionButtonsMigrated, true);
   });
 });
 
@@ -418,7 +449,6 @@ describe("migrating when something goes wrong", () => {
 
 /** Rules routes need a started engine; the migration above left five rules in the store. */
 async function startEngine(): Promise<void> {
-  await settingsStore.patch({ actionButtonsMigrated: false });
   await automationStore.saveRules([]);
   await viewsStore.save(fixtureViews());
   await runLoadPass(await viewsStore.load(), []);

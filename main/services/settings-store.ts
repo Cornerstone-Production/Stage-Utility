@@ -181,13 +181,6 @@ export interface SettingsData extends AppIconSettings {
    */
   screenRolesFromView?: boolean;
   /**
-   * Whether every Run an action Button has become a Button bound to its own cue
-   * (action-button-migration.ts). Recorded only once the rules and the views were
-   * both written: a pass that could not write either leaves it unset and runs
-   * again at the next start. Absent means never run.
-   */
-  actionButtonsMigrated?: boolean;
-  /**
    * Which of a plan's notes become the pre-service checklist.
    *
    * Names, not ids. A plan note carries `category_name` on its own attributes

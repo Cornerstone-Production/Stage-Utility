@@ -25,7 +25,6 @@ await fs.mkdir(path.join(TMP, "automation-rules.json"), { recursive: true });
 
 const { stageController } = await import("./stage-controller.js");
 const { viewsStore } = await import("./views-store.js");
-const { settingsStore } = await import("./settings-store.js");
 const { automationStore } = await import("./automation-store.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
@@ -38,7 +37,7 @@ after(async () => {
   await fs.rm(TMP, { recursive: true, force: true });
 });
 
-test("unreadable rules: one precise line, no view changed, the flag unset", async (t) => {
+test("unreadable rules: one precise line, no view changed", async (t) => {
   const views = [
     {
       id: "v-booth",
@@ -55,7 +54,6 @@ test("unreadable rules: one precise line, no view changed, the flag unset", asyn
       },
     },
   ] as unknown as View[];
-  await settingsStore.patch({ actionButtonsMigrated: false });
   await viewsStore.save(views);
   const lines = captureConsole(t, "log", "error");
 
@@ -69,6 +67,5 @@ test("unreadable rules: one precise line, no view changed, the flag unset", asyn
   const typeIn = (list: readonly View[]) => list.find((v) => v.id === "v-booth")?.layout?.objects[0]?.config.type;
   assert.equal(typeIn(out.views), "action-button", "a Button was converted without its rule");
   assert.equal(typeIn(await viewsStore.load()), "action-button");
-  assert.equal((await settingsStore.get()).actionButtonsMigrated, false);
   assert.equal(automationStore.refusingSaves() !== null, true);
 });

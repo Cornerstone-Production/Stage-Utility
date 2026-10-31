@@ -146,8 +146,6 @@ export interface ActionButtonMigrationDeps {
 export interface ActionButtonMigrationRun {
   /** The views to save: the SAME array when nothing changed. */
   views: View[];
-  /** Whether the pass is finished, so the caller may record it. False when it was left for the next start. */
-  settled: boolean;
   /** How many new rules this run wrote. The caller says so when saving the views then fails. */
   rulesWritten: number;
   /** What to log on success, or null. */
@@ -172,22 +170,20 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
  * return the views. Writes the RULES and not the views, so the two writes are told
  * apart.
  *
- * A failure is returned as `failure` with `settled: false`, never swallowed into
- * "done": the caller leaves the flag unset and the next start tries again over the
- * same Buttons, which until then keep working as Run an action.
+ * Runs at every start and on import; with nothing to convert it writes and says
+ * nothing. A failure is returned as `failure`, never swallowed into "done": the
+ * next start tries again over the same Buttons, which until then keep working as
+ * Run an action.
  */
 export async function runActionButtonMigration(
   views: View[],
   opts: {
-    /** The start-up pass already ran: nothing to do, and the caller may record it. */
-    alreadyDone?: boolean;
     /** Views arriving through an import rather than the start-up pass: worded as such on the log. */
     onImport?: boolean;
     deps?: ActionButtonMigrationDeps;
   } = {},
 ): Promise<ActionButtonMigrationRun> {
-  const left = (failure: string | null): ActionButtonMigrationRun => ({ views, settled: false, rulesWritten: 0, line: null, failure });
-  if (opts.alreadyDone) return { ...left(null), settled: true };
+  const left = (failure: string | null): ActionButtonMigrationRun => ({ views, rulesWritten: 0, line: null, failure });
   const d = opts.deps ?? (await defaultDeps());
   let existing: Rule[];
   try {
@@ -202,7 +198,7 @@ export async function runActionButtonMigration(
   const refusal = d.refusal();
   if (refusal) return left(refusedSentence(refusal));
   const plan = planActionButtonMigration(views, existing, d.actionLabel);
-  if (plan.count === 0) return { ...left(null), settled: true };
+  if (plan.count === 0) return left(null);
   if (plan.rules.length > 0) {
     try {
       await d.saveRules([...existing, ...plan.rules]);
@@ -213,7 +209,7 @@ export async function runActionButtonMigration(
       );
     }
   }
-  return { views: plan.views, settled: true, rulesWritten: plan.rules.length, line: migrationLine(plan, opts.onImport), failure: null };
+  return { views: plan.views, rulesWritten: plan.rules.length, line: migrationLine(plan, opts.onImport), failure: null };
 }
 
 function refusedSentence(why: unknown): string {

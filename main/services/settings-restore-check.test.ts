@@ -26,7 +26,6 @@ const SCREEN = { id: "1", name: "Main", viewId: null };
 
 const CASES: Record<string, Case> = {
   accentColor: { bad: "red", says: "#rrggbb" },
-  actionButtonsMigrated: { bad: "yes", says: "true or false" },
   allowedServiceTypeIds: { bad: [123], says: "list of text" },
   appIcon: { bad: "javascript:alert(1)", says: "PNG data URL" },
   appIcon192: { bad: "https://example.org/x.png", says: "PNG data URL" },
@@ -192,6 +191,12 @@ describe("settings.json restore check", () => {
   test("a key no code reads is dropped", async () => {
     const result = await settingsRestoreCheck({ showQr: true, somethingElse: { x: 1 } });
     assert.ok(result.ok);
+    assert.deepEqual(result.value, { showQr: true });
+  });
+
+  test("the retired actionButtonsMigrated flag in an older backup is dropped, not refused", async () => {
+    const result = await settingsRestoreCheck({ showQr: true, actionButtonsMigrated: true });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
     assert.deepEqual(result.value, { showQr: true });
   });
 });

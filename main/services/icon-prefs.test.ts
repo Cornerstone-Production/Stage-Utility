@@ -69,7 +69,6 @@ describe("what the operator set is still there after a restart", () => {
     // that happens to still add up does not. A new setting moving this list is
     // the moment to check that boot reads it.
     assert.deepEqual(keys, [
-      "actionButtonsMigrated",
       "allowedServiceTypeIds",
       "autoUpdate",
       "autoUpdateMachines",

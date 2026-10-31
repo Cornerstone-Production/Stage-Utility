@@ -959,7 +959,7 @@ export class StageController {
     // Every Run an action Button becomes a cue Button with a rule of its own.
     // After the screens, so it sees the final views (a copy a role made carries
     // its Buttons too), and in this same pass for the reason Home is seeded here.
-    const actions = await runActionButtonMigration(roles.views, { alreadyDone: done.actionButtonsMigrated === true });
+    const actions = await runActionButtonMigration(roles.views);
     if (actions.failure) console.error(scrub(actions.failure));
     const result = { ...surfaced, views: actions.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims
@@ -987,12 +987,6 @@ export class StageController {
       }
     }
     if (actions.line) console.log(scrub(actions.line));
-    // After the views, so a crash between the two leaves a flag unset over views
-    // with nothing left to convert (which sets it next start) and never a flag
-    // set over views still holding the old Buttons.
-    if (actions.settled && done.actionButtonsMigrated !== true) {
-      await settingsStore.patch({ actionButtonsMigrated: true });
-    }
     // The screens and the flags in ONE patch, never two. The first pass reads a
     // screen with no stored role as a read-only display, so the screens (their
     // stored role now removed) landing without the flag is a state a crash could
