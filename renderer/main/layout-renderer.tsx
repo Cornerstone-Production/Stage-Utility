@@ -41,6 +41,7 @@ import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { CueButton } from "./cue-button";
+import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -1729,7 +1730,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // type this build has since dropped.)
       const _never: never = c;
       void _never;
-      return null;
+      // The one type this build has dropped on purpose: see unconverted-button.tsx.
+      return isUnconvertedButton(o.config) ? <UnconvertedButton ts={ts} /> : null;
     }
   }
 }

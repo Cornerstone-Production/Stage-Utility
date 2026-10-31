@@ -190,8 +190,8 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
  *
  * Runs at every start and on import; with nothing to convert it writes and says
  * nothing. A failure is returned as `failure`, never swallowed into "done": the
- * next start tries again over the same Buttons, which until then keep working as
- * Run an action.
+ * next start tries again over the same Buttons, which until then draw "Needs
+ * converting" and do nothing (the app has no renderer that presses one).
  */
 export async function runActionButtonMigration(
   views: View[],
@@ -223,7 +223,7 @@ export async function runActionButtonMigration(
     } catch (err) {
       return left(
         `[automation] ${plural(plan.count, "Run an action button")} were not converted: the cues could not be saved (${errorMessage(err)}). ` +
-          "They keep working as before and convert at the next start.",
+          "They show Needs converting and do nothing until the next start converts them.",
       );
     }
   }
@@ -231,5 +231,5 @@ export async function runActionButtonMigration(
 }
 
 function refusedSentence(why: unknown): string {
-  return `[automation] Run an action buttons were not converted: ${errorMessage(why)}. They keep working as before and convert at the next start that reads it.`;
+  return `[automation] Run an action buttons were not converted: ${errorMessage(why)}. They show Needs converting and do nothing until the next start that reads it converts them.`;
 }
