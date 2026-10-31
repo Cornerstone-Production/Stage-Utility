@@ -125,7 +125,7 @@ jobs:
       security-events: write
     with:
       language: swift
-      runner: macos-14
+      runner: macos-15
       build-mode: manual
       run: ${{ needs.changes.result != 'success' || needs.changes.outputs.swift == 'true' }}
 
@@ -138,7 +138,7 @@ jobs:
       security-events: write
     with:
       language: c-cpp
-      runner: macos-14
+      runner: macos-15
       build-mode: manual
       run: ${{ needs.changes.result != 'success' || needs.changes.outputs.c-cpp == 'true' }}
 
