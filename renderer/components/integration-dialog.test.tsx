@@ -149,9 +149,52 @@ describe("the dialog footer", () => {
     const test = [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test")!;
     fireEvent.click(test);
     await settleFor(60);
-    const shown = content.querySelector('[data-companion-card="outbound"] [data-companion-test]');
+    const shown = content.querySelector('[data-companion-card="outbound"] [data-test-result]');
     assert.ok(shown, "the Test's answer is not in the outbound card");
-    assert.equal(shown!.getAttribute("data-companion-test"), "ok");
+    assert.equal(shown!.getAttribute("data-test-result"), "ok");
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 1, "the answer is drawn in the footer as well as the card");
+  });
+
+  test("Companion opens with its saved host, an edit is saved with Save, and the write carries both fields", async () => {
+    // The guard the Companion card lacked: that the fields are the saved config, that typing
+    // in them is an edit, and that Save sends exactly what is on screen.
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const host = content.querySelector('[data-config-field="host"] input') as HTMLInputElement;
+    assert.equal(host.value, "10.0.0.5", "the saved host is not on screen");
+    assert.equal((content.querySelector('[data-config-field="port"] input') as HTMLInputElement).value, "8000");
+    const save = () => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save") as HTMLButtonElement;
+    assert.equal(save().disabled, true, "Save is live with nothing edited");
+    fireEvent.change(host, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(save().disabled, false, "an edit did not make the card dirty");
+    fireEvent.click(save());
+    await settleFor(60);
+    const wrote = server.posts.filter((p) => p.path === "/api/integrations/companion/config");
+    assert.equal(wrote.length, 1);
+    assert.deepEqual(wrote[0]!.body, { config: { host: "10.0.0.9", port: 8000 } });
+  });
+
+  test("Test waits for Save while the fields hold edits, and says so", async () => {
+    // Test reads the SAVED host and port. Beside edited fields it would answer for a Companion
+    // the operator is not looking at.
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const test = () => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test") as HTMLButtonElement;
+    assert.equal(test().disabled, false);
+    assert.equal(content.querySelector("[data-test-needs-save]") === null, true);
+    fireEvent.change(content.querySelector('[data-config-field="host"] input')!, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(test().disabled, true, "Test stayed live over unsaved fields");
+    assert.match(content.querySelector("[data-test-needs-save]")?.textContent ?? "", /Save first/);
   });
 
   test("Escape in Companion's page list closes the list, not the dialog behind it", async () => {

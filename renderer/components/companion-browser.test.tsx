@@ -163,7 +163,7 @@ describe("the page list", () => {
 describe("Browse buttons", () => {
   test("nothing is read until it is pressed, and Hide buttons puts it away again", async () => {
     mount(
-      <CompanionOutboundCard testing={false} result={null} onTest={() => {}}>
+      <CompanionOutboundCard testing={false} result={null} onTest={() => {}} dirty={false}>
         <span />
       </CompanionOutboundCard>,
     );

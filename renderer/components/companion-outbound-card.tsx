@@ -7,25 +7,28 @@
 // and presses nothing; Browse buttons draws its pages read-only.
 
 import { useState, type ReactNode } from "react";
-import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 
 import { CompanionBrowser } from "./companion-browser";
 import { COMPANION_CARD } from "./companion-info-panel";
 import { Button } from "./ui";
-import { cn } from "../lib/cn";
+import { TestResult, type TestOutcome } from "./test-result";
 
 export function CompanionOutboundCard({
   children,
   testing,
   result,
   onTest,
+  dirty,
 }: {
   /** The host and API port fields. */
   children: ReactNode;
   testing: boolean;
   /** The last Test's answer, or null before one. */
-  result: { ok: boolean; message?: string } | null;
+  result: TestOutcome | null;
   onTest: () => void;
+  /** The fields above hold changes that are not saved. */
+  dirty: boolean;
 }) {
   const [browsing, setBrowsing] = useState(false);
   return (
@@ -42,34 +45,19 @@ export function CompanionOutboundCard({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2.5">{children}</div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="filled" size="small" onClick={onTest} disabled={testing}>
+        {/* Test reads the SAVED host and port, not what is typed. Beside fields with unsaved edits
+            it would report on a Companion the operator is not looking at, so it waits for Save. */}
+        <Button variant="filled" size="small" onClick={onTest} disabled={testing || dirty}>
           {testing ? <Loader2Icon className="size-3.5 animate-spin text-gray-9" /> : null}
           Test
         </Button>
+        {dirty && <span className="text-caption1 text-fg-muted" data-test-needs-save="">Save first: Test reads the saved settings.</span>}
         <Button variant="transparent" size="small" aria-expanded={browsing} onClick={() => setBrowsing((b) => !b)}>
           {browsing ? "Hide buttons" : "Browse buttons"}
         </Button>
       </div>
 
-      {result !== null && (
-        <div
-          role="status"
-          data-companion-test={result.ok ? "ok" : "failed"}
-          className={cn(
-            "flex items-start gap-1.5 rounded-md bg-fill px-2.5 py-2 text-footnote",
-            result.ok ? "text-fg" : "text-danger-11",
-          )}
-        >
-          {result.ok ? (
-            <CheckCircle2Icon className="mt-px size-3.5 shrink-0 text-green-10" />
-          ) : (
-            <XCircleIcon className="mt-px size-3.5 shrink-0 text-red-10" />
-          )}
-          <span className="min-w-0 break-words">
-            {result.ok ? (result.message ?? "OK") : (result.message ?? "Failed")}
-          </span>
-        </div>
-      )}
+      {result !== null && <TestResult result={result} wrap />}
 
       {browsing && <CompanionBrowser />}
     </section>

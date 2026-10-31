@@ -14,6 +14,7 @@ import { ScoresTeamsPanel } from "../settings/panels/scores-teams-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CompanionInfoPanel } from "./companion-info-panel";
 import { CompanionOutboundCard } from "./companion-outbound-card";
+import { TestResult } from "./test-result";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import { YouTubeConnectRow } from "./youtube-connect-row";
 import { SenSourceScopePicker } from "./sensource-scope-picker";
@@ -55,7 +56,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "../components/ui";
-import { Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon, EraserIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
 
@@ -711,12 +712,16 @@ export function IntegrationDialog({
     </div>
   ));
 
+  // Where Test lives: in the body for Companion (its second card, beside Browse buttons),
+  // in the footer for everything else. One decision, read by the footer's button and its answer.
+  const testInBody = descriptor.id === "companion";
+
   const body =
     bespoke ??
     (descriptor.id === "companion" ? (
       <div className="flex flex-col gap-4">
         <CompanionInfoPanel state={state} />
-        <CompanionOutboundCard testing={isTesting} result={testResult} onTest={handleTest}>
+        <CompanionOutboundCard testing={isTesting} result={testResult} onTest={handleTest} dirty={schemaDirty}>
           {companionFields}
         </CompanionOutboundCard>
       </div>
@@ -834,8 +839,7 @@ export function IntegrationDialog({
 
           {!bespoke && (
             <DialogFooter className="mt-0 flex-wrap justify-start gap-2 border-t border-line px-5 py-3">
-              {/* Companion's Test lives in its second card, beside Browse buttons. */}
-              {descriptor.id !== "companion" && (
+              {!testInBody && (
                 <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
                   {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
                   Test connection
@@ -860,23 +864,7 @@ export function IntegrationDialog({
                   <span className="text-caption1 text-fg-muted tabular-nums">{fmtSynced(lastRefreshedAt)}</span>
                 </>
               )}
-              {testResult !== null && descriptor.id !== "companion" && (
-                <span
-                  className={cn(
-                    "text-caption1 flex min-w-0 items-center gap-1",
-                    testResult.ok ? "text-green-10" : "text-red-10",
-                  )}
-                >
-                  {testResult.ok ? (
-                    <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-                  ) : (
-                    <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-                  )}
-                  <span className="truncate">
-                    {testResult.ok ? (testResult.message ?? "OK") : (testResult.message ?? "Failed")}
-                  </span>
-                </span>
-              )}
+              {testResult !== null && !testInBody && <TestResult result={testResult} />}
               <div className="ml-auto flex items-center gap-2">
                 <Button
                   variant="transparent"
