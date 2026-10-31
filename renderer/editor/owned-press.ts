@@ -78,6 +78,7 @@ type Wrote = { ok: true; cue: string; rule: Rule } | { ok: false; error: string 
  * in a row would mint `btn_x` and `btn_x_2`. A rule that already belongs to this
  * Button has its action and name rewritten and is switched on; its trigger, and so
  * the command's name, is left alone.
+
  */
 export async function writeOwnedRule(opts: {
   owner: PressOwner;
@@ -116,12 +117,17 @@ export async function writeOwnedRule(opts: {
 }
 
 /**
- * List the command with the other commands: it stops belonging to its Button.
- * Nothing else about it changes, and the Button keeps pressing it.
+ * List the Button's own command with the other commands: it stops belonging to its
+ * Button. Nothing else changes, and the Button keeps pressing it. The rule is looked
+ * up now, not taken from what the panel last drew, so a write that has just landed is
+ * the one released.
  */
-export async function listWithCommands(rule: Rule): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function listWithCommands(owner: PressOwner, cue: string): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await invoke("automation:updateRule", { id: rule.id, patch: { ownedBy: null } });
+    const { rules } = await invoke<{ rules: Rule[] }>("automation:rules");
+    const own = ownedRuleFor(rules, owner, cue);
+    if (!own) return { ok: false, error: "This Button has no command of its own to list." };
+    await invoke("automation:updateRule", { id: own.id, patch: { ownedBy: null } });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };

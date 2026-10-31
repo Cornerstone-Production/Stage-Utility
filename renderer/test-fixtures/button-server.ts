@@ -15,6 +15,7 @@ export const OWNER = { viewId: "booth", objectId: "o1" };
 
 export const ACTIONS: { id: string; label: string; params: ParamDef[] }[] = [
   { id: "display.refresh", label: "Refresh displays", params: [] },
+  { id: "display.blank", label: "Blank displays", params: [] },
   { id: "companion.press", label: "Press a Companion button", params: [] },
   { id: "log.message", label: "Write a log message", params: [{ key: "message", label: "Message", type: "string" }] },
 ];
@@ -88,9 +89,18 @@ export function serve(opts: {
   usage?: Record<string, unknown>;
   refuse?: boolean;
   companionDown?: boolean;
+  /** Companion answers, with no page that has anything on it. */
+  noPages?: boolean;
+  /** Holds every rule write (POST or PATCH) until this settles, so a test can act while one is in flight. */
+  hold?: Promise<void>;
+  /** Answers first: a request it answers (anything but undefined) is not the shared server's. */
+  extra?: (url: string, init?: RequestInit) => unknown;
 } = {}): Server & { restore: () => void } {
   const s: Server & { restore: () => void } = { rules: opts.rules ?? [], posts: [], patches: [], restore: () => {} };
+  const held = <T>(answer: T): T | Promise<T> => (opts.hold ? opts.hold.then(() => answer) : answer);
   const f = stubFetchWithLog((url, init) => {
+    const own = opts.extra?.(url, init);
+    if (own !== undefined) return own;
     const path = url.replace(/^https?:\/\/[^/]+/, "");
     if (path.startsWith("/api/automation/registry")) return reply(200, { triggers: [], conditions: [], actions: ACTIONS });
     if (path.startsWith("/api/cues/manifest")) return reply(200, manifest().manifest);
@@ -98,7 +108,7 @@ export function serve(opts: {
     if (path.startsWith("/api/companion/buttons")) {
       return opts.companionDown
         ? reply(200, { ok: false, reason: "Companion refused the connection", buttons: [], pages: [] })
-        : reply(200, { ok: true, buttons: BUTTONS, pages: PAGES, cachedAt: 1 });
+        : reply(200, { ok: true, buttons: opts.noPages ? [] : BUTTONS, pages: opts.noPages ? [] : PAGES, cachedAt: 1 });
     }
     const pageAt = /^\/api\/companion\/pages\/(\d+)/.exec(path);
     if (pageAt) return reply(200, pageView(Number(pageAt[1])));
@@ -109,7 +119,7 @@ export function serve(opts: {
         if (opts.refuse) return reply(400, { error: 'The cue name "btn_x" is already used by "Walk"' });
         const made = { ...body, id: `rule-${s.posts.length}`, issues: [] } as unknown as Rule;
         s.rules.push(made);
-        return reply(201, made);
+        return held(reply(201, made));
       }
       return reply(200, { rules: s.rules, settings: {} });
     }
@@ -122,7 +132,7 @@ export function serve(opts: {
       const merged = { ...s.rules[at], ...patch } as Record<string, unknown>;
       if (patch.ownedBy === null) delete merged.ownedBy;
       s.rules[at] = merged as unknown as Rule;
-      return reply(200, { ...merged, issues: [] });
+      return held(reply(200, { ...merged, issues: [] }));
     }
     return reply(200, {});
   });

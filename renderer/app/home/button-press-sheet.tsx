@@ -7,10 +7,13 @@
 //
 // Companion and App action write the tile's own command the moment a pick is made,
 // owned by this tile on view `"home"`; Save then stores the tile's new config on
-// Home. Cancel leaves the tile as it was, and a command already written is found
-// again by the next pick, because it is looked up by its owner.
+// Home. Cancel stores nothing about the TILE, but it does not take back a command
+// already written: the tile then presses what it pressed before, and the command made
+// for the abandoned pick stays, owned by the tile, and is rewritten in place by the
+// next pick (it is looked up by its owner). Save waits for any write still running, so
+// the tile is never stored without the command it was just given.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { HOME_VIEW_ID } from "@main/services/home-view";
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
@@ -35,7 +38,16 @@ export function ButtonPressSheet({
   onSave: (next: LayoutObject) => void;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<CueButtonConfig>(() => buttonConfigOf(card) ?? { type: "cue-button", cue: "" });
+  const [draft, setDraftState] = useState<CueButtonConfig>(() => buttonConfigOf(card) ?? { type: "cue-button", cue: "" });
+  // Read by Save after it has waited for a write, which binds the draft from a promise: the ref is
+  // current at once, where the state is only current after the next render.
+  const draftNow = useRef(draft);
+  const setDraft = (next: CueButtonConfig) => {
+    draftNow.current = next;
+    setDraftState(next);
+  };
+  const settle = useRef<(() => Promise<void>) | null>(null);
+  const [saving, setSaving] = useState(false);
   const cues = useCueLive(true);
   return (
     <DialogRoot open onOpenChange={(open) => !open && onClose()}>
@@ -50,7 +62,7 @@ export function ButtonPressSheet({
               aria-label="Label"
               value={draft.label ?? ""}
               placeholder="Uses the name of what it presses"
-              onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
+              onChange={(e) => setDraft({ ...draftNow.current, label: e.target.value })}
             />
           </label>
           <ButtonPresses
@@ -59,14 +71,23 @@ export function ButtonPressSheet({
             c={draft}
             cues={cues}
             onConfig={(next) => setDraft(next as CueButtonConfig)}
+            settleRef={settle}
           />
         </div>
         <DialogFooter>
           <Button variant="transparent" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="filled" onClick={() => onSave({ ...card, config: draft })}>
-            Save
+          <Button
+            variant="filled"
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              await settle.current?.();
+              onSave({ ...card, config: draftNow.current });
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>

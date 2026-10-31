@@ -62,7 +62,8 @@ function serve(opts: Parameters<typeof serveButtons>[0] = {}) {
 }
 
 /** The panel with a real useState behind onConfig; `configs` is every write. */
-function mount(initial: ButtonConfig, owner = OWNER) {
+function mount(initial: ButtonConfig, owner = OWNER, opts: { throwOnce?: boolean } = {}) {
+  let threw = !opts.throwOnce;
   const cues = manifest();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const configs: LayoutObjectConfig[] = [];
@@ -75,6 +76,10 @@ function mount(initial: ButtonConfig, owner = OWNER) {
       viewName: "Booth console",
       objectId: owner.objectId,
       onConfig: (next: LayoutObjectConfig) => {
+        if (!threw) {
+          threw = true;
+          throw new Error("boom");
+        }
         configs.push(next);
         setC(next as ButtonConfig);
       },
@@ -83,6 +88,18 @@ function mount(initial: ButtonConfig, owner = OWNER) {
   const utils = render(React.createElement(QueryClientProvider as never, { client: qc }, React.createElement(Harness)));
   return { ...utils, configs };
 }
+
+/** A promise and the function that settles it: holds a write in flight until the test lets it land. */
+function gate() {
+  let release: () => void = () => {};
+  const hold = new Promise<void>((r) => (release = r));
+  return { hold, release };
+}
+const option = (root: HTMLElement, name: string) => {
+  const o = [...root.querySelectorAll('[role="option"]')].find((x) => x.textContent === name);
+  assert.ok(o, `no "${name}" option`);
+  return o as HTMLElement;
+};
 
 const UNSET: ButtonConfig = { type: "cue-button", cue: "", showDevice: true };
 
@@ -290,7 +307,7 @@ describe("App action", () => {
     fireEvent.click(seg(container, "App action"));
     await eventually(() => assert.ok(container.querySelector('[aria-label="App actions"] [role="option"]')));
     const options = [...container.querySelectorAll('[aria-label="App actions"] [role="option"]')].map((o) => o.textContent);
-    assert.deepEqual(options, ["Refresh displays", "Write a log message"]);
+    assert.deepEqual(options, ["Refresh displays", "Blank displays", "Write a log message"]);
     assert.ok(container.querySelector('[aria-label="App actions"] [role="group"]'), "grouped under headings");
   });
 
@@ -432,5 +449,117 @@ describe("Label and Show device", () => {
     cleanup();
     const lone = mount({ type: "cue-button", cue: "stage_reset", showDevice: true });
     assert.equal(lone.container.querySelector('[aria-label="Show device"]'), null, "stage_reset has no room: the switch would change nothing");
+  });
+});
+
+describe("writes that overlap", () => {
+  test("two picks in a row are written one after the other: one command, rewritten", async () => {
+    const { hold, release } = gate();
+    const s = serve({ hold });
+    const { container } = mount(UNSET);
+    fireEvent.click(seg(container, "App action"));
+    await eventually(() => option(container, "Refresh displays"));
+    fireEvent.click(option(container, "Refresh displays"));
+    fireEvent.click(option(container, "Blank displays"));
+    await settleAct();
+    release();
+    await eventually(() => assert.equal(s.patches.length, 1, "the second pick rewrites the command the first made"));
+    assert.equal(s.posts.length, 1, "one command, not one per pick");
+  });
+
+  test("the page grid is locked while a pick is being written", async () => {
+    const { hold, release } = gate();
+    const s = serve({ hold });
+    const { container } = mount(UNSET);
+    await gridReady(container);
+    fireEvent.click(keyAt(container, 2, 0)!);
+    await settleAct();
+    assert.equal(keyAt(container, 0, 0)!.hasAttribute("disabled"), true, "a second pick must not race the first");
+    fireEvent.click(keyAt(container, 0, 0)!);
+    release();
+    await eventually(() => assert.equal(s.posts.length, 1));
+    await settleAct();
+    assert.deepEqual([s.posts.length, s.patches.length], [1, 0], "the click on the locked key did nothing");
+  });
+
+  test("a typed field still waiting out its delay is written when the panel goes", async () => {
+    timing.fieldWriteMs = 60_000;
+    const s = serve();
+    const { container, unmount } = mount(UNSET);
+    fireEvent.click(seg(container, "App action"));
+    await eventually(() => option(container, "Write a log message"));
+    fireEvent.click(option(container, "Write a log message"));
+    await eventually(() => assert.ok(container.querySelector('[aria-label="Message"]')));
+    fireEvent.change(container.querySelector('[aria-label="Message"]')!, { target: { value: "Hello" } });
+    await settleAct();
+    assert.equal(s.posts.length, 0, "still waiting");
+    unmount();
+    await eventually(() => assert.equal(s.posts.length, 1, "a typed value must not be lost to a click elsewhere"));
+    assert.deepEqual(s.posts[0]!.action, { id: "log.message", params: { message: "Hello" } });
+  });
+
+  test("List it with the other commands writes a field that is still waiting first, and mints nothing", async () => {
+    timing.fieldWriteMs = 60_000;
+    const s = serve({ rules: [owned("btn_log", { id: "log.message", params: { message: "a" } })] });
+    const { container } = mount({ type: "cue-button", cue: "btn_log", showDevice: true });
+    await eventually(() => assert.ok(container.querySelector('[aria-label="Message"]')));
+    fireEvent.change(container.querySelector('[aria-label="Message"]')!, { target: { value: "ab" } });
+    await settleAct();
+    fireEvent.click(container.querySelector('[aria-label="List it with the other commands"]')!);
+    await eventually(() => assert.equal(s.patches.length, 2));
+    const [first, second] = s.patches;
+    assert.deepEqual((first!.patch.action as { params: unknown }).params, { message: "ab" }, "the typed field lands first");
+    assert.deepEqual(second!.patch, { ownedBy: null });
+    assert.equal(s.posts.length, 0, "no second command is made for the late write");
+  });
+
+  test("a command picked after switching away during a typed field's delay is not overwritten when that write lands", async () => {
+    timing.fieldWriteMs = 60_000;
+    const { hold, release } = gate();
+    const s = serve({ rules: [owned("btn_log", { id: "log.message", params: { message: "a" } })], hold });
+    const { container, configs } = mount({ type: "cue-button", cue: "btn_log", showDevice: true });
+    await eventually(() => assert.ok(container.querySelector('[aria-label="Message"]')));
+    fireEvent.change(container.querySelector('[aria-label="Message"]')!, { target: { value: "ab" } });
+    await settleAct();
+    fireEvent.click(seg(container, "A command"));
+    await eventually(() => assert.ok(container.querySelector("select")));
+    fireEvent.change(container.querySelector("select")!, { target: { value: "stage_reset" } });
+    release();
+    await eventually(() => assert.equal(s.patches.length, 1));
+    await settleAct();
+    await settleAct();
+    assert.equal((configs.at(-1) as { cue: string }).cue, "stage_reset", "the later pick wins");
+  });
+
+  test("a write that throws is shown, and the next one still runs", async () => {
+    const s = serve();
+    const { container } = mount(UNSET, OWNER, { throwOnce: true });
+    fireEvent.click(seg(container, "App action"));
+    await eventually(() => option(container, "Refresh displays"));
+    fireEvent.click(option(container, "Refresh displays"));
+    await eventually(() => assert.ok(container.querySelector('[role="alert"]')?.textContent?.includes("boom")));
+    fireEvent.click(option(container, "Blank displays"));
+    await eventually(() => assert.equal(s.patches.length, 1, "the chain survived the throw"));
+  });
+});
+
+describe("the page list", () => {
+  test("with no page that has anything on it, the pane says so instead of reading for ever", async () => {
+    serve({ noPages: true });
+    const { container } = mount(UNSET);
+    await eventually(() => assert.ok(container.textContent?.includes("Companion has no page with buttons on it")));
+    assert.equal(container.textContent?.includes("Reading Companion"), false);
+  });
+
+  test("a pick on a page that is no longer listed still steps to the nearest listed page either way", async () => {
+    const onEmpty = { id: "page-50", params: { page: 50, row: 0, col: 0, pageId: "id50", label: "Foyer ON", actionIds: "x", status: "in-place", lastSeenAt: "x", movedFrom: "" } };
+    serve({ rules: [owned("btn_old", { id: "companion.press", params: onEmpty.params })] });
+    const { container } = mount({ type: "cue-button", cue: "btn_old", showDevice: true });
+    await eventually(() => assert.ok(container.querySelector('[data-page-grid="50"]')));
+    const prev = container.querySelector('[aria-label="Previous page"]') as HTMLButtonElement;
+    const next = container.querySelector('[aria-label="Next page"]') as HTMLButtonElement;
+    assert.deepEqual([prev.disabled, next.disabled], [false, false]);
+    fireEvent.click(prev);
+    await eventually(() => assert.ok(container.querySelector('[data-page-grid="20"]')));
   });
 });

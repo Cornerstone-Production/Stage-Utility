@@ -7,7 +7,7 @@
 // server, and a Button bound to a command that refuses is worse than one bound to
 // nothing, so nothing is written until every required field is filled in.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { validateParams } from "@main/services/automation-param-validation";
@@ -25,12 +25,21 @@ import { COMPANION_PRESS, type PressTarget } from "./owned-press";
 export const timing = { fieldWriteMs: 500 };
 
 /** The action list as the rule editor groups it, then the action's own fields. */
+/** A typed field's write that is waiting out the debounce: its timer, and what sending it now does. */
+export interface PendingWrite {
+  timer: ReturnType<typeof setTimeout>;
+  send: () => void;
+}
+
 export function ActionPane({
   saved,
+  pendingRef,
   onWrite,
 }: {
   /** What this Button's own command does now, when it presses an app action. */
   saved: { actionId: string; params: Record<string, string | number> } | null;
+  /** Held by the host, which flushes it before anything else that writes or binds. */
+  pendingRef: MutableRefObject<PendingWrite | null>;
   onWrite: (target: PressTarget) => Promise<void>;
 }) {
   const { data: registry, isError } = useQuery(automationRegistryQuery);
@@ -49,32 +58,31 @@ export function ActionPane({
   );
   const headings = useMemo(() => pickerHeadings(entries), [entries]);
 
-  // A field is rewritten once it has stopped changing, and at once when the
-  // inspector closes under it: a typed value must not be lost to a click elsewhere.
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null);
+  // The pane going away under a typed field sends it at once: a typed value must not be lost
+  // to a click elsewhere.
   useEffect(
     () => () => {
-      if (!pending.current) return;
-      clearTimeout(pending.current.timer);
-      pending.current.send();
+      if (!pendingRef.current) return;
+      clearTimeout(pendingRef.current.timer);
+      pendingRef.current.send();
     },
-    [],
+    [pendingRef],
   );
 
   function change(next: { actionId: string; params: Record<string, string | number> }, delayMs: number) {
     setDraft(next);
-    if (pending.current) clearTimeout(pending.current.timer);
-    pending.current = null;
+    if (pendingRef.current) clearTimeout(pendingRef.current.timer);
+    pendingRef.current = null;
     const spec = actions?.find((a) => a.id === next.actionId);
     // A command with a field still blank would be refused by the server, and a
     // Button bound to a command that refuses is worse than one bound to nothing.
     if (!spec || validateParams(spec.params, next.params).length > 0) return;
     const send = () => {
-      pending.current = null;
+      pendingRef.current = null;
       void onWrite({ name: spec.label, action: { id: next.actionId, params: next.params } });
     };
     if (delayMs <= 0) send();
-    else pending.current = { timer: setTimeout(send, delayMs), send };
+    else pendingRef.current = { timer: setTimeout(send, delayMs), send };
   }
 
   if (isError) return <ErrorNote>Could not load the app&rsquo;s actions.</ErrorNote>;

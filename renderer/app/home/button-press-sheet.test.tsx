@@ -43,8 +43,8 @@ afterEach(() => {
 const card = (config: Record<string, unknown> = { type: "cue-button", cue: "", showDevice: true }): LayoutObject =>
   ({ id: "home-cue-button-5-4", x: 0, y: 0, w: 1, h: 1, z: 0, home: { size: "s" }, config }) as unknown as LayoutObject;
 
-function mount(c: LayoutObject) {
-  const server = serveButtons();
+function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = {}) {
+  const server = serveButtons(serveOpts);
   restores.push(server.restore);
   const saved: LayoutObject[] = [];
   let closed = 0;
@@ -92,7 +92,7 @@ describe("the Presses sheet", () => {
 
     await eventually(() => assert.ok(screen.queryByText(/Saved as this button/)));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    assert.equal(saved.length, 1);
+    await eventually(() => assert.equal(saved.length, 1));
     assert.deepEqual(saved[0]!.config, { type: "cue-button", cue: "btn_refresh", showDevice: true, label: "Refresh" });
     assert.equal(saved[0]!.id, "home-cue-button-5-4");
     assert.deepEqual(saved[0]!.home, { size: "s" }, "the rest of the card is untouched");
@@ -109,5 +109,35 @@ describe("the Presses sheet", () => {
   test("a tile that already presses a command opens on A command, with it chosen", async () => {
     mount(card({ type: "cue-button", cue: "stage_reset", showDevice: true }));
     await eventually(() => assert.equal(choice("A command").getAttribute("aria-pressed"), "true"));
+  });
+
+  test("Save waits for a pick that is still being written, and stores the tile with its command", async () => {
+    let release: () => void = () => {};
+    const hold = new Promise<void>((r) => (release = r));
+    const { server, saved } = mount(card(), { hold });
+    fireEvent.click(choice("App action"));
+    await eventually(() => assert.ok(document.querySelector('[role="option"]')));
+    fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
+    await eventually(() => assert.equal(server.posts.length, 1));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(saved.length, 0, "the tile must not be stored before its command is bound");
+    release();
+    await eventually(() => assert.equal(saved.length, 1));
+    assert.match((saved[0]!.config as { cue: string }).cue, /^btn_refresh/, "stored with the command it was just given");
+  });
+
+  test("Save writes a field that is still waiting out its delay, and stores the tile with its command", async () => {
+    timing.fieldWriteMs = 60_000;
+    const { server, saved } = mount(card());
+    fireEvent.click(choice("App action"));
+    await eventually(() => assert.ok(document.querySelector('[role="option"]')));
+    fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Write a log message")!);
+    await eventually(() => assert.ok(document.querySelector('[aria-label="Message"]')));
+    fireEvent.change(document.querySelector('[aria-label="Message"]')!, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.equal(saved.length, 1));
+    assert.equal(server.posts.length, 1);
+    assert.match((saved[0]!.config as { cue: string }).cue, /^btn_/);
   });
 });

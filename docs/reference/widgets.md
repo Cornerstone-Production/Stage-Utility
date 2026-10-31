@@ -650,7 +650,10 @@ Button. Its spoken name is the label, or the picked name when the label is blank
 and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this button's own command* with the name.
 Picking again on the same Button rewrites that command's action in place: its name
 does not change when the label or the pick does. Pointing the Button at the command
-is an edit like any other, so the layout still needs saving. If the server refuses
+is an edit like any other, so the layout still needs saving. The command itself
+is written at once and is not part of that edit: **Discard**, **Undo** and a Home
+sheet's **Cancel** put the Button back to the command it named, but not the command's
+action, so a re-pick that is then discarded leaves the Button pressing the new thing. If the server refuses
 the rule, the Button is left as it was and the reason is shown under the choice.
 
 **List it with the other commands** releases the command from its Button. Nothing

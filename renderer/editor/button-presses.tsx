@@ -15,7 +15,7 @@
 // The Label and Show device rows are the host's: this draws the choice and what
 // it saved as, nothing else.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { calledCueName } from "@main/services/cue-aliases";
@@ -27,7 +27,7 @@ import { ErrorNote, Switch } from "../components/ui";
 import { invoke } from "../lib/api";
 import { useLatestRef } from "../lib/use-latest-ref";
 import type { CuesLive } from "../main/use-cue-live";
-import { ActionPane } from "./action-pane";
+import { ActionPane, type PendingWrite } from "./action-pane";
 import { CommandPane } from "./command-pane";
 import { CompanionPane, type PickedCompanion } from "./companion-pane";
 import { RowToggle } from "./inspector-rows";
@@ -62,6 +62,7 @@ export function ButtonPresses({
   c,
   cues,
   onConfig,
+  settleRef,
 }: {
   owner: PressOwner;
   /** This view's name, for the Used on chip of a Button that is not saved yet. */
@@ -70,6 +71,13 @@ export function ButtonPresses({
   /** The command manifest, for the A command list. null until it loads. */
   cues: CuesLive | null;
   onConfig: (c: LayoutObjectConfig) => void;
+  /**
+   * Filled with a function that resolves once every write this control has started, or is
+   * about to start for a typed field, has landed and bound the Button. A host that stores
+   * the Button on its own Save (Home's sheet) waits on it first: a Save that raced a pick
+   * stored the Button without its command and left the command with no Button.
+   */
+  settleRef?: MutableRefObject<(() => Promise<void>) | null>;
 }) {
   const qc = useQueryClient();
   const rulesQ = useQuery(rulesQuery);
@@ -89,15 +97,51 @@ export function ButtonPresses({
   const latest = useLatestRef(c);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Writes go one after another: two picks in a row must not both mint `btn_x`.
+  // Writes go one after another: two picks in a row must not both mint `btn_x`. The chain
+  // never rejects: a job that throws is shown, and the next one still runs.
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const inflight = useRef(0);
+  // Bumped by anything that binds the Button on its own (picking a command): a write that
+  // was started before it must not bind the Button over it when it lands.
+  const epoch = useRef(0);
+  const pending = useRef<PendingWrite | null>(null);
+
+  function enqueue(job: () => Promise<void>): Promise<void> {
+    inflight.current += 1;
+    setBusy(true);
+    const run = queue.current
+      .then(job)
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => {
+        inflight.current -= 1;
+        if (inflight.current === 0) setBusy(false);
+      });
+    queue.current = run;
+    return run;
+  }
+
+  /** Send the typed field that is waiting out its debounce, now. */
+  function flushPending() {
+    const p = pending.current;
+    if (!p) return;
+    clearTimeout(p.timer);
+    p.send();
+  }
+
+  // Re-pointed every render, because flushPending reads refs and the closures above are new each time.
+  useEffect(() => {
+    if (!settleRef) return;
+    settleRef.current = async () => {
+      flushPending();
+      await queue.current;
+    };
+  });
 
   /** Write the Button's own command, then bind the Button to it. */
   function commit(target: PressTarget): Promise<void> {
-    const run = queue.current.then(async () => {
-      setBusy(true);
+    const started = epoch.current;
+    return enqueue(async () => {
       const made = await writeOwnedRule({ owner, cue: latest.current.cue, label: latest.current.label, target });
-      setBusy(false);
       if (!made.ok) {
         // The Button is left exactly as it was, and the reason stays on screen.
         setError(made.error);
@@ -105,15 +149,39 @@ export function ButtonPresses({
       }
       setError(null);
       refreshRules();
-      if (latest.current.cue !== made.cue) onConfig({ ...latest.current, cue: made.cue });
+      if (epoch.current === started && latest.current.cue !== made.cue) onConfig({ ...latest.current, cue: made.cue });
     });
-    queue.current = run;
-    return run;
+  }
+
+  /** List the Button's own command, after any typed field has been written. */
+  function list(): Promise<void> {
+    flushPending();
+    epoch.current += 1;
+    return enqueue(async () => {
+      const r = await listWithCommands(owner, latest.current.cue);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setError(null);
+      refreshRules();
+      // The Button presses a plain command now, and the pane says so.
+      setChosen("command");
+    });
   }
 
   return (
     <>
-      <RowToggle label="Presses" value={mode} options={PRESSES} onChange={setChosen} />
+      <RowToggle
+        label="Presses"
+        value={mode}
+        options={PRESSES}
+        onChange={(next) => {
+          // A typed field is written before the pane that holds it goes.
+          flushPending();
+          setChosen(next);
+        }}
+      />
 
       {mode === "companion" && (
         <CompanionPane
@@ -125,6 +193,7 @@ export function ButtonPresses({
       {mode === "action" && (
         <ActionPane
           saved={kind === "action" && own ? { actionId: own.action.id, params: own.action.params } : null}
+          pendingRef={pending}
           onWrite={commit}
         />
       )}
@@ -135,25 +204,17 @@ export function ButtonPresses({
           hide={ownedCueNames(rules, own)}
           where={where}
           owner={owner}
-          onChange={(cue) => onConfig({ ...c, cue })}
+          onChange={(cue) => {
+            epoch.current += 1;
+            onConfig({ ...c, cue });
+          }}
         />
       )}
 
       {rulesQ.isError && <ErrorNote>Could not read the commands: {errorMessage(rulesQ.error)}</ErrorNote>}
       {error && <ErrorNote>{error}</ErrorNote>}
 
-      <HowItIsSaved
-        c={c}
-        own={kind === "companion" || kind === "action" ? own : null}
-        busy={busy}
-        onListed={() => {
-          setError(null);
-          refreshRules();
-          // The Button presses a plain command now, and the pane says so.
-          setChosen("command");
-        }}
-        onError={setError}
-      />
+      <HowItIsSaved c={c} own={kind === "companion" || kind === "action" ? own : null} busy={busy} onList={list} />
     </>
   );
 }
@@ -189,17 +250,14 @@ function HowItIsSaved({
   c,
   own,
   busy,
-  onListed,
-  onError,
+  onList,
 }: {
   c: CueButtonConfig;
   /** The Button's own command, when it presses a Companion button or an app action. */
   own: Rule | null;
   busy: boolean;
-  onListed: () => void;
-  onError: (message: string) => void;
+  onList: () => Promise<void>;
 }) {
-  const [listing, setListing] = useState(false);
   if (!c.cue.trim()) {
     return (
       <div className="rounded-lg border border-line p-2.5 text-caption1 text-fg-muted">
@@ -228,14 +286,8 @@ function HowItIsSaved({
         <Switch
           aria-label="List it with the other commands"
           checked={false}
-          disabled={busy || listing}
-          onCheckedChange={async () => {
-            setListing(true);
-            const r = await listWithCommands(own);
-            setListing(false);
-            if (r.ok) onListed();
-            else onError(r.error);
-          }}
+          disabled={busy}
+          onCheckedChange={() => void onList()}
         />
       </label>
       <span className="text-caption2 leading-snug text-fg-subtle">
