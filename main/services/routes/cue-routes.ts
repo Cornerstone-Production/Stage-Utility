@@ -245,7 +245,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     companionApi.invalidate();
     const result = await companionApi.fetchExport({ force: true });
     if (!result.ok) {
-      json(res, { ok: false, reason: result.reason, buttons: [] });
+      json(res, { ok: false, reason: result.reason, buttons: [], pages: [] });
       return;
     }
     // Refresh means "read Companion again", and the cues are the reason anybody
@@ -261,6 +261,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     json(res, {
       ok: failed.length === 0,
       buttons: result.buttons,
+      pages: result.pages,
       cachedAt: result.cachedAt,
       reconcile: { applied: run?.applied ?? 0, failed },
     });
@@ -273,10 +274,30 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // show for "Companion is unreachable" — the three number fields — and a
     // failed request would only give it a toast.
     if (!result.ok) {
-      json(res, { ok: false, reason: result.reason, buttons: [] });
+      json(res, { ok: false, reason: result.reason, buttons: [], pages: [] });
       return;
     }
-    json(res, { ok: true, buttons: result.buttons, cachedAt: result.cachedAt });
+    json(res, { ok: true, buttons: result.buttons, pages: result.pages, cachedAt: result.cachedAt });
+    return;
+  }
+
+  // One page as the picker draws it: its used extent and every key's look, icons
+  // included. Fetched when the picker shows that page, so the icons (226 KB on a
+  // real install) never ride along with the button list other screens load.
+  const pageMatch = pathname.match(/^\/api\/companion\/pages\/(\d+)$/);
+  if (method === "GET" && pageMatch) {
+    const result = await companionApi.fetchExport();
+    if (!result.ok) {
+      json(res, { ok: false, reason: result.reason });
+      return;
+    }
+    const wanted = Number(pageMatch[1]);
+    const view = result.pageViews.find((p) => p.page === wanted);
+    if (!view) {
+      error(res, `Companion has no page ${wanted}`, 404);
+      return;
+    }
+    json(res, { ok: true, ...view, cachedAt: result.cachedAt });
     return;
   }
 
