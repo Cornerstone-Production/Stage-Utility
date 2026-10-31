@@ -92,7 +92,7 @@ Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
 
-![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
+![Home during a service: Needs attention reporting nothing wrong, the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
 
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and

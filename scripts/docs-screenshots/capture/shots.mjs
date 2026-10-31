@@ -155,7 +155,7 @@ export const SHOTS = [
   {
     name: "home-dashboard",
     phase: "live",
-    shows: "Home during a service: the live item, screens online, readiness and recent services.",
+    shows: "Home during a service: Needs attention with nothing wrong, the live item, screens online and recent services.",
     async run({ session, page }) {
       await session.goto(page, "/", { settle: 3500 });
       await session.shoot(page, "home-dashboard");
