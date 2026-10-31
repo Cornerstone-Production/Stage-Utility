@@ -3,14 +3,12 @@ import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 
 import { useStageState } from "../main/use-stage-state";
 import { Button, Input, toast } from "./ui";
+import { SETTINGS_CARD } from "../lib/card-classes";
 import { copyText } from "../lib/clipboard";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
 const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility";
-
-/** The look both Companion cards share: a card with its direction, its name and what it is for. */
-export const COMPANION_CARD = "flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-4";
 
 /** A read-only value with a Copy button. Companion takes host and port as separate fields and cannot resolve DNS, so each is copied on its own. */
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -95,7 +93,7 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
   const status = state.message ?? null;
 
   return (
-    <section className={COMPANION_CARD} data-companion-card="inbound">
+    <section className={SETTINGS_CARD} data-companion-card="inbound">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-caption2 tracking-wide text-fg-subtle">COMPANION → STAGE UTILITY</span>
         <h3 className="text-footnote font-semibold text-fg">Companion controls Stage Utility</h3>

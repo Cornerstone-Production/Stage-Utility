@@ -61,6 +61,7 @@ import {
   Status,
   toast,
 } from "../../components/ui";
+import { SETTINGS_CARD } from "../../lib/card-classes";
 import { copyText } from "../../lib/clipboard";
 import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
 import { plural } from "@main/services/plural";
@@ -1072,10 +1073,9 @@ export function CueAccessCard() {
     }
   }
 
-  const card = "flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-4";
   return (
     <div className="flex flex-col gap-4" data-automation-access="">
-      <section className={card} data-access-card="tokens">
+      <section className={SETTINGS_CARD} data-access-card="tokens">
         <div className="flex items-baseline gap-2">
           <h2 className="text-footnote font-semibold text-fg">Calling commands</h2>
           <span className="text-caption1 text-fg-muted">{plural(tokens.length, "token")}</span>
@@ -1156,7 +1156,7 @@ export function CueAccessCard() {
         )}
       </section>
 
-      <section className={card} data-access-card="home-assistant">
+      <section className={SETTINGS_CARD} data-access-card="home-assistant">
         <h2 className="text-footnote font-semibold text-fg">Home Assistant</h2>
         <p className="text-caption1 text-fg-muted">
           The Stage Utility integration from HACS reads every command with its Home Assistant switch on. This config is

@@ -10,7 +10,7 @@ import { useState, type ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { CompanionBrowser } from "./companion-browser";
-import { COMPANION_CARD } from "./companion-info-panel";
+import { SETTINGS_CARD } from "../lib/card-classes";
 import { Button } from "./ui";
 import { TestResult, type TestOutcome } from "./test-result";
 
@@ -32,7 +32,7 @@ export function CompanionOutboundCard({
 }) {
   const [browsing, setBrowsing] = useState(false);
   return (
-    <section className={COMPANION_CARD} data-companion-card="outbound">
+    <section className={SETTINGS_CARD} data-companion-card="outbound">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-caption2 tracking-wide text-fg-subtle">STAGE UTILITY → COMPANION</span>
         <h3 className="text-footnote font-semibold text-fg">Stage Utility presses Companion buttons</h3>
