@@ -1,11 +1,12 @@
-// The rules-list search field, wired into automation-section.tsx.
+// The Search tab, wired into automation-section.tsx.
 //
 // rule-search.test.ts covers the matching logic in isolation; this file is
-// only the wiring — that the field actually filters the rendered rows, that
-// the "N of M rules" count and the "No rules match" empty state track it, and
-// that clearing the field brings every row back. Each of the four fields the
-// spec calls out (cue name, says, former name, button label) gets one test
-// here so a search box that stopped reading one of them would go red.
+// only the wiring — that the one box filters the rendered rows across every list,
+// that the match count and the "Nothing matches" empty state track it, and that
+// clearing the field puts the hint back. Each of the fields the spec calls out
+// (command name, says, former name, Companion button label, and the screens a
+// command is used on) gets one test here so a search box that stopped reading one
+// of them would go red.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND — see
 // automation-rule-row.test.tsx for why.
@@ -26,6 +27,7 @@ interface StubRule {
   action: { id: string; params: Record<string, string | number> };
   cooldownSec: number;
   oncePerService: boolean;
+  ownedBy?: { viewId: string; objectId: string };
 }
 
 const CALL_TRIGGER_ID = "call.by-name";
@@ -50,6 +52,8 @@ const REGISTRY = {
 };
 
 let RULES: StubRule[] = [];
+/** What GET /api/cues/usage answers with. */
+let USAGE: Record<string, { viewId: string; viewName: string; objectId: string; label: string; home: boolean }[]> = {};
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   const url = String(input);
@@ -62,6 +66,7 @@ let RULES: StubRule[] = [];
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
   else if (url.includes("/api/rosstalk/commands")) body = [];
   else if (url.includes("/api/cues/tokens")) body = { tokens: [] };
+  else if (url.includes("/api/cues/usage")) body = USAGE;
   else if (url.includes("/api/companion/buttons")) body = { ok: true, buttons: [] };
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -82,13 +87,13 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+async function mount(tab: "commands" | "rules" | "search" = "search") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const view = render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab })),
     ),
   );
   await settle();
@@ -96,7 +101,7 @@ async function mount() {
 }
 
 const searchField = (): HTMLInputElement =>
-  document.querySelector('[aria-label="Search rules"]') as HTMLInputElement;
+  document.querySelector('[aria-label="Search automation"]') as HTMLInputElement;
 
 async function type(text: string) {
   await act(async () => {
@@ -124,6 +129,9 @@ const cue = (over: Partial<StubRule> = {}): StubRule => ({
 });
 
 beforeEach(() => {
+  USAGE = {
+    projectors_on: [{ viewId: "v1", viewName: "Booth console", objectId: "o1", label: "Big red one", home: false }],
+  };
   RULES = [
     cue({ id: "r1", name: "Projectors ON", trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } } }),
     cue({ id: "r2", name: "Foyer TVs OFF", trigger: { id: CALL_TRIGGER_ID, params: { name: "foyer_tvs_off", says: "the foyer screens" } } }),
@@ -138,6 +146,22 @@ beforeEach(() => {
       trigger: { id: CALL_TRIGGER_ID, params: { name: "spot_go", says: "" } },
       action: { id: "companion.press", params: { label: "Stage Left Spot", page: 1, row: 0, col: 1 } },
     }),
+    {
+      id: "r5",
+      name: "Wake displays at 6:00",
+      enabled: true,
+      trigger: { id: "schedule.weekly", params: {} },
+      conditions: [],
+      action: { id: "log.message", params: {} },
+      cooldownSec: 0,
+      oncePerService: false,
+    },
+    cue({
+      id: "r6",
+      name: "Shutter",
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "btn_shutter" } },
+      ownedBy: { viewId: "v2", objectId: "o9" },
+    } as Partial<StubRule>),
   ];
 });
 afterEach(async () => {
@@ -151,14 +175,15 @@ after(async () => {
   teardown();
 });
 
-describe("the rules-list search field", () => {
-  test("with no query, every rule shows and no count is shown", async () => {
+describe("the Search tab", () => {
+  test("with no query, no row shows and no count is shown, only what the box matches", async () => {
     await mount();
-    assert.equal(visibleRuleNames().length, 4);
+    assert.equal(visibleRuleNames().length, 0);
     assert.equal(countText(), "");
+    assert.match(document.body.textContent ?? "", /Matches command names/);
   });
 
-  test("filters by the cue name", async () => {
+  test("filters by the command name", async () => {
     await mount();
     await type("foyer_tvs_off");
     assert.deepEqual(visibleRuleNames(), ["Foyer TVs OFF"]);
@@ -182,25 +207,47 @@ describe("the rules-list search field", () => {
     assert.deepEqual(visibleRuleNames(), ["Spot cue"]);
   });
 
-  test("shows 'N of M rules' while a search is active", async () => {
+  test("finds a command by the screen it is used on", async () => {
     await mount();
-    await type("foyer");
-    assert.equal(countText(), "1 of 4 rules");
+    await type("booth console");
+    assert.deepEqual(visibleRuleNames(), ["Projectors ON"]);
   });
 
-  test("shows 'No rules match' for a query that hits nothing", async () => {
+  test("finds a command by the label of a Button that names it", async () => {
+    await mount();
+    await type("big red");
+    assert.deepEqual(visibleRuleNames(), ["Projectors ON"]);
+  });
+
+  test("searches across every list, each under its own heading", async () => {
+    await mount();
+    await type("wake");
+    assert.deepEqual(visibleRuleNames(), ["Wake displays at 6:00"]);
+    assert.deepEqual([...document.querySelectorAll("[data-owned-rule]")].length, 0);
+    await type("shutter");
+    assert.equal(document.querySelectorAll("[data-owned-rule]").length, 1);
+    assert.match(document.body.textContent ?? "", /Belongs to a button/);
+  });
+
+  test("shows the match count while a search is active", async () => {
+    await mount();
+    await type("foyer");
+    assert.equal(countText(), "1 match of 6 rules");
+  });
+
+  test("shows 'Nothing matches' for a query that hits nothing", async () => {
     await mount();
     await type("nothing-here-at-all");
     assert.equal(visibleRuleNames().length, 0);
-    assert.match(document.body.textContent ?? "", /No rules match/);
+    assert.match(document.body.textContent ?? "", /Nothing matches/);
   });
 
-  test("clearing the field restores every rule", async () => {
+  test("clearing the field takes the rows away again", async () => {
     await mount();
     await type("foyer");
     assert.equal(visibleRuleNames().length, 1);
     await type("");
-    assert.equal(visibleRuleNames().length, 4);
+    assert.equal(visibleRuleNames().length, 0);
     assert.equal(countText(), "");
   });
 });

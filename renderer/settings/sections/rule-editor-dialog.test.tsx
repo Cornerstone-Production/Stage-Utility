@@ -216,7 +216,14 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
+/**
+ * The Automation page is tabs now: commands (called-by-name rules) on one, every
+ * other rule on the next. These tests care about the editor, not the tab, so the
+ * page opens on the tab holding the rules the test seeded. A seed with both
+ * kinds opens Commands.
+ */
 async function mount() {
+  const tab = RULES.some((r) => r.trigger.id === CALL_TRIGGER_ID) || RULES.length === 0 ? "commands" : "rules";
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   // ConfirmHost as well as the section: the app mounts one beside the toaster,
   // and Delete asks through it. Without it the promise never resolves and the
@@ -228,7 +235,7 @@ async function mount() {
       React.createElement(
         TooltipProvider,
         null,
-        React.createElement(AutomationSection, {}),
+        React.createElement(AutomationSection, { tab }),
         React.createElement(ConfirmHost, {}),
       ),
     ),
@@ -488,7 +495,7 @@ describe("one rule", () => {
     await openRow("Lights at item 3");
     assert.equal(editor(), "rule-plan");
     assert.equal(document.querySelectorAll("[data-pair-settings]").length, 0);
-    assert.equal(document.querySelectorAll('[role="tab"]').length, 0);
+    assert.equal(document.querySelectorAll('[aria-label="Which half to edit"] [role="tab"]').length, 0);
   });
 });
 

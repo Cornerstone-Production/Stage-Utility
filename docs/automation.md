@@ -7,6 +7,24 @@ Built on the **Automation** page, in the sidebar.
 > action first, watch it through a real service, and only then attach the real
 > action. Simulate mode is on by default for the same reason.
 
+## The page
+
+The page has five tabs, each its own address, so Back moves between them and a
+link can be handed to someone. `/automation` opens **Commands**.
+
+| Tab | Address | Holds |
+|---|---|---|
+| **Commands** | `/automation/commands` | every command, with **New command** and **Import from Companion** above the list, then **Belongs to a button**, collapsed |
+| **Rules** | `/automation/rules` | the automatic rules, with **New rule** |
+| **Activity** | `/automation/activity` | what rules and commands did, and the reason when they did not |
+| **Access** | `/automation/access` | **Calling commands** (the tokens a caller needs) and the Home Assistant config |
+| **Search** | `/automation/search` | one box across every list |
+
+**Simulate** and **Disarm all** sit above the tabs, so they are in reach on every
+one. The strip answers the arrow keys, Home and End, and Cmd-F (Ctrl-F elsewhere)
+opens Search from any tab. The Search box keeps what you typed while you move
+between tabs.
+
 ## A rule
 
 | Part | |
@@ -17,10 +35,10 @@ Built on the **Automation** page, in the sidebar.
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
 
-![The Automation page: simulate mode, the Home Assistant cues and the other rules, each with a Run button](images/automation-rules.png)
+![The Automation page: Simulate and Disarm above the tabs, and the Commands tab listing each command with its badges, the screens it is used on and a Run button](images/automation-rules.png)
 
-A rule is made with **New cue**, under the list, which opens a dialog of steps —
-see [Creating a cue](#creating-a-cue). A rule is one of two kinds. An **automatic
+A rule is made with **New command** (Commands tab) or **New rule** (Rules tab),
+which open a dialog of steps — see [Creating a cue](#creating-a-cue). A rule is one of two kinds. An **automatic
 rule** has all five parts above. A **manual cue** has no When and no If: it runs
 only when something calls it (see [Cues](#cues)), so it is the same rule with the
 **Called by name** trigger and no conditions but its service guard.
@@ -119,7 +137,7 @@ stage message's groups are required, so a blank one needs setup.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
-| Called by name | something called `POST /api/cues/<name>` with a token, or a Button on one of this app's own consoles or on Home. This one NEVER fires by itself, and is not in the picker: make it with **New cue** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
+| Called by name | something called `POST /api/cues/<name>` with a token, or a Button on one of this app's own consoles or on Home. This one NEVER fires by itself, and is not in the picker: make it with **New command** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -338,9 +356,10 @@ happening in the building. It runs only when something calls
 script or Home Assistant reaches Stage Utility. A page on this app's own origin
 needs no token — that is how a [Button](reference/widgets.md#control) on a console
 or on Home fires, and such a call is logged as `console`. A Button set to
-Companion or App action saves a cue of its own, made the moment it is picked,
-that belongs to that Button; **List it with the other commands** on the Button
-releases it into this list.
+Companion or App action saves a command of its own, made the moment it is picked,
+that belongs to that Button; it is listed under
+[Belongs to a button](#belongs-to-a-button), and **List it with the other
+commands** on the Button (or here) releases it into the list.
 
 Getting cues into Home Assistant — and from there into Apple Home — is the
 [Home Assistant integration](integrations/companion.md#the-integration): install
@@ -358,29 +377,32 @@ start, and when Planning Center cannot be read.
 A cue's editor has an **Allowed during a service** switch that is the same
 condition in one control: off (the imported default) refuses the cue while a
 service is live or about to start, on removes the condition and lets it fire
-whenever it is called. A cue made with [New cue](#creating-a-cue) starts with it on. The rules list marks every cue that is on with a
+whenever it is called. A cue made with [New command](#creating-a-cue) starts with it on. The Commands tab marks every one that is on with a
 clearly visible **any time** badge, so the ones that can fire mid-service are
 easy to spot in a long list. A pair's row carries one badge over both halves,
 and reads **any time** if either half can fire — each half is evaluated against
 its own conditions, so one unguarded half is a pair that can fire mid-service.
 Its switch, in the pair's dialog, writes both halves at once.
 
-The rules list is in two sections. **Home Assistant** holds every cue that has
-an entity there — pairs as switches, single cues as buttons. **Everything else**
-holds the cues whose **Home Assistant** switch is off and every rule with a
-trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
-it is spoken as.
+The **Commands** tab is one list. Each row carries badges for what is true of
+the command: **Home Assistant** when it has an entity there (pairs as switches,
+single commands as buttons) and nothing when its Home Assistant switch is off,
+**Voice** when it has a spoken name, and **any time** when it can fire during a
+service. Beneath the line saying what it does, **Used on** lists the screens
+whose Buttons name it, one chip per screen and Home among them, or *nothing yet*.
+An ON/OFF pair is ONE row, named by the words it is spoken as, and is used by its
+base: a Button on either half counts. Pairs come first, then single commands,
+each alphabetical. Every rule with a trigger other than Called by name is on the
+**Rules** tab.
 
-A row is a summary: the enable switch, the name, any former names, the
-service-guard badge, whether Home Assistant has an entity for it, the
-one-line *when … then*, and a **Run** button (see
-[Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable switch
-or Run —
-opens the editor in a dialog over the list, so the list and the search field
-stay where they are. **Test** and **Delete** are in its footer beside **Cancel**
-and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
-the server refuses leaves the dialog open with the change still in it. Deleting
-asks first, naming the cues that go.
+A row is a summary: the enable switch, the name and the command name, any former
+names, the badges, the one-line *when … then*, **Used on**, and a **Run** button
+(see [Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable
+switch or Run — opens the editor in a dialog over the list, so the list and the
+tabs stay where they are. **Test** and **Delete** are in its footer beside
+**Cancel** and **Save**; Escape, the overlay and Cancel all discard the draft, and
+a save the server refuses leaves the dialog open with the change still in it.
+Deleting asks first, naming the cues that go.
 
 Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
 rule's name and id, so a bulk delete leaves a record of exactly which rules went.
@@ -398,15 +420,17 @@ selected and says which.
 
 A cue's editor has a **Home Assistant** switch under Allowed during a service.
 Off, the cue is voice-only: no entity is created for it, it is left out of the
-generated YAML and the manifest, and it moves to Everything else.
+generated YAML and the manifest, and loses its Home Assistant badge.
 `POST /api/cues/<name>` still fires it. For a pair the switch covers both halves
 — one switch, hidden or shown together — and Home Assistant removes the entity
 within a few seconds, breaking automations there that refer to it. See
 [Keeping a cue out of Home Assistant](integrations/companion.md#keeping-a-cue-out-of-home-assistant).
 
-The **Search rules** field is pinned to the top of the list and filters live by
-rule name, cue name, spoken name, former names, a Companion button's label, and
-the trigger and action's own names. A pair shows whenever either half matches.
+The **Search** tab filters live across the Commands, the Rules and Belongs to a
+button, each under its own heading, by rule name, command name, spoken name,
+former names, a Companion button's label, the trigger and action's own names, and
+the names of the screens a command is used on and the labels of the Buttons that
+name it. A pair shows whenever either half matches.
 
 | | |
 |---|---|
@@ -414,7 +438,7 @@ the trigger and action's own names. A pair shows whenever either half matches.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **Home Assistant** | on by default for a cue imported from Companion, and off for one made with [New cue](#creating-a-cue). Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
+| **Home Assistant** | on by default for a cue imported from Companion, and off for one made with [New command](#creating-a-cue). Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
 | **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
@@ -460,10 +484,33 @@ Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
 
+### Belongs to a button
+
+A Button set to press a Companion button or an app action keeps that press as a
+command of its own. It is an ordinary Called-by-name rule with one extra field, so
+Simulate, Disarm, the cooldown and the Activity log apply to its presses, and it
+is listed here rather than among the commands somebody wrote. **Belongs to a
+button** is collapsed under the Commands list, with the count, and is not drawn
+when nothing belongs to a button. Each row says which screen and Button it belongs
+to, and has **List it with the other commands**, which releases the rule so it
+shows in the list above, where Home Assistant, a spoken name and the rest can be
+set.
+
+When the Button goes the rule is **kept, never deleted for you**. The row reads
+**Button removed** (the Button was deleted, or its screen was) or **No longer used
+by its button** (the Button is still there and now presses another command), and
+gains **Delete**. The server says it once on the log:
+
+```
+[automation] btn_shutter belongs to a button that is gone (Booth console); kept, delete it from Automation
+```
+
 ### Creating a cue
 
-**New cue** opens a dialog. **Nothing is saved until Create**: Cancel, Escape, the
-close button and the overlay all discard it. The first step is the kind.
+**New command** and **New rule** open a dialog, on a manual cue and on an
+automatic rule respectively, already past the first step, which is the kind and
+which **Back** still reaches. **Nothing is saved until Create**: Cancel, Escape,
+the close button and the overlay all discard it.
 
 | | |
 |---|---|
@@ -514,8 +561,9 @@ Create that touches consoles writes one line to `/log`:
 ```
 
 `/automation?new=manual` opens the dialog on a manual cue, already past the first
-step, for a link from another page to use. The parameter is dropped from the
-address once the dialog is open, so a reload does not open it again.
+step, for a link from another page to use; the address moves to
+`/automation/commands` and keeps the parameter, which is dropped once the dialog
+is open, so a reload does not open it again.
 
 ### Editing a cue
 
@@ -750,7 +798,7 @@ is for stopping.
 
 ### Run by hand
 
-**Run**, on every rule row — a cue made with [New cue](#creating-a-cue) has one from the moment it exists — fires the rule's action once, now. It is explicit
+**Run**, on every rule row — a cue made with [New command](#creating-a-cue) has one from the moment it exists — fires the rule's action once, now. It is explicit
 operator intent, so it bypasses what decides *when* a rule fires: the trigger, the
 conditions, the cooldown, once per service, and the rule's own enable switch — a
 disabled rule can be run. It does not bypass what decides *whether* anything may

@@ -1,20 +1,23 @@
-// The two sections of the rules list, and the pair row that carries a cue's
-// Home Assistant switch.
+// The Commands tab: one list of commands, with Home Assistant, Voice and any time
+// as badges, and the pair row that carries a command's Home Assistant switch.
 //
 // What is guarded, and why each is a bug rather than a nicety:
 //
-//  - A HIDDEN CUE IS UNDER "EVERYTHING ELSE", and flipping its switch moves it.
-//    The sections are the only place the app says which cues Home Assistant has
-//    been told about; a cue in the wrong one is the operator being told the
-//    opposite of the truth.
-//  - A PAIR IS ONE ROW, and opens ONE editor holding both halves. Two rows —
-//    or two stacked editors — for one switch is the list disagreeing with Home
+//  - THE HOME ASSISTANT BADGE IS THE ONLY PLACE THE LIST SAYS which commands
+//    Home Assistant has been told about. A hidden command carrying it, or a shown
+//    one missing it, is the operator being told the opposite of the truth. The
+//    list used to say it by splitting into two sections; it is one list now, so
+//    the badge has to.
+//  - A RULE WITH ANOTHER TRIGGER IS NOT A COMMAND. It lives on the Rules tab, and
+//    a Commands tab that listed it would put an automatic rule where "called by
+//    name" is the whole description.
+//  - A PAIR IS ONE ROW, and opens ONE editor holding both halves. Two rows — or
+//    two stacked editors — for one switch is the list disagreeing with Home
 //    Assistant about what a pair is, which is exactly the confusion
 //    cue-pairs.ts exists to end.
-//  - EITHER HALF'S NAME FINDS THE PAIR. A search for the off cue that hid the
-//    row it lives on would be a pair unreachable by half its own names.
-//  - A SECTION WITH NO ROWS IS NOT RENDERED, so a query that matches only cues
-//    does not leave an empty "Everything else" heading behind.
+//  - EITHER HALF'S NAME FINDS THE PAIR, on the Search tab. A search for the off
+//    command that hid the row it lives on would be a pair unreachable by half its
+//    own names.
 //  - THE PAIR'S SWITCH WRITES THE ON HALF. The flag lives on the ON half (see
 //    cue-pairs.ts); written to the off rule it would be read only as a
 //    fallback, and a pair whose ON half says nothing would hide — until the
@@ -149,36 +152,35 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+async function mount(tab: "commands" | "rules" | "search" = "commands") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const view = render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab })),
     ),
   );
   await settle();
   return view;
 }
 
-/** The section titles on screen, in order. */
-const sectionTitles = (): string[] =>
-  [...document.querySelectorAll("[data-rule-section]")].map(
-    (el) => el.getAttribute("data-rule-section") ?? "",
-  );
-
-/** The rows under one section: pair rows by base, rule cards by rule name. */
-function rowsUnder(title: string): string[] {
-  const section = document.querySelector(`[data-rule-section="${title}"]`);
-  if (!section) return [];
+/** The rows on screen, in order: a pair by its base, a command or rule by its stored name. */
+function rows(): string[] {
   const out: string[] = [];
-  for (const el of section.querySelectorAll("[data-cue-pair-row], [data-rule-name]")) {
-    // A rule card INSIDE an expanded pair row is not a row of the section.
-    if (el.hasAttribute("data-rule-name") && el.closest("[data-cue-pair-row]")) continue;
+  for (const el of document.querySelectorAll("[data-cue-pair-row], [data-rule-name]")) {
     out.push(el.getAttribute("data-cue-pair-row") ?? el.getAttribute("data-rule-name") ?? "");
   }
   return out;
+}
+
+/** Which of the row's badges are showing, by the name each carries. */
+function badgesOf(row: string): string[] {
+  const el =
+    document.querySelector(`[data-cue-pair-row="${row}"]`) ??
+    document.querySelector(`[data-rule-name="${row}"]`)?.closest("[data-rule-row]");
+  assert.ok(el, `no row called ${row}`);
+  return [...el.querySelectorAll("[data-command-badge]")].map((b) => b.getAttribute("data-command-badge") ?? "");
 }
 
 /** How many rule editors are mounted. The dialog is the only thing that mounts one. */
@@ -189,7 +191,7 @@ const homeSwitches = (): number =>
   document.querySelectorAll('[aria-label="Shown in Home Assistant"]').length;
 
 const searchField = (): HTMLInputElement =>
-  document.querySelector('[aria-label="Search rules"]') as HTMLInputElement;
+  document.querySelector('[aria-label="Search automation"]') as HTMLInputElement;
 
 async function type(text: string) {
   await act(async () => {
@@ -235,29 +237,39 @@ after(async () => {
   teardown();
 });
 
-describe("the two sections", () => {
-  test("a shown cue is under Home Assistant and a hidden one is not", async () => {
+describe("the Commands list", () => {
+  test("a shown command carries the Home Assistant badge and a hidden one does not", async () => {
     RULES = [cue("take_screens"), cue("house_lights", { homeAssistant: "hidden" })];
     await mount();
-    assert.deepEqual(sectionTitles(), ["Home Assistant", "Everything else"]);
-    assert.deepEqual(rowsUnder("Home Assistant"), ["Rule take_screens"]);
-    assert.deepEqual(rowsUnder("Everything else"), ["Rule house_lights"]);
+    assert.deepEqual(rows(), ["Rule house_lights", "Rule take_screens"]);
+    assert.ok(badgesOf("Rule take_screens").includes("home-assistant"));
+    assert.ok(!badgesOf("Rule house_lights").includes("home-assistant"));
   });
 
-  test("a rule with another trigger is under Everything else, after the cues", async () => {
+  test("there is one list: no Home Assistant or Everything else section", async () => {
+    RULES = [cue("take_screens"), cue("house_lights", { homeAssistant: "hidden" })];
+    await mount();
+    assert.equal(document.querySelectorAll("[data-rule-section]").length, 0);
+    assert.ok(!/Everything else/.test(document.body.textContent ?? ""));
+  });
+
+  test("a command with a spoken name carries the Voice badge", async () => {
+    RULES = [cue("take_screens", { says: "take the screens" }), cue("house_lights")];
+    await mount();
+    assert.ok(badgesOf("Rule take_screens").includes("voice"));
+    assert.ok(!badgesOf("Rule house_lights").includes("voice"));
+  });
+
+  test("a rule with another trigger is on the Rules tab, not in Commands", async () => {
     RULES = [planRule("Lights at item 3"), cue("stage_wash", { homeAssistant: "hidden" })];
-    await mount();
-    assert.deepEqual(rowsUnder("Home Assistant"), []);
-    assert.deepEqual(rowsUnder("Everything else"), ["Rule stage_wash", "Lights at item 3"]);
+    await mount("commands");
+    assert.deepEqual(rows(), ["Rule stage_wash"]);
+    cleanup();
+    await mount("rules");
+    assert.deepEqual(rows(), ["Lights at item 3"]);
   });
 
-  test("a section with no rows is not rendered at all", async () => {
-    RULES = [cue("take_screens"), cue("house_lights")];
-    await mount();
-    assert.deepEqual(sectionTitles(), ["Home Assistant"]);
-  });
-
-  test("turning the switch off moves the cue, and saves `hidden`", async () => {
+  test("turning the switch off removes the badge, and saves `hidden`", async () => {
     RULES = [cue("take_screens")];
     await mount();
     await openCard("Rule take_screens");
@@ -265,7 +277,7 @@ describe("the two sections", () => {
 
     await click(homeSwitch(), "the Home Assistant switch");
     // The switch edits the DRAFT, exactly as the service guard does, so the
-    // section moves only once Save is pressed.
+    // badge goes only once Save is pressed.
     await click(
       [...document.querySelectorAll("button")].find((b) => b.textContent === "Save") ?? null,
       "Save",
@@ -274,8 +286,7 @@ describe("the two sections", () => {
     const saved = requests.find((r) => r.url.includes("/api/automation/rules/"));
     assert.ok(saved, "nothing was saved");
     assert.match(saved.body ?? "", /"homeAssistant":"hidden"/);
-    assert.deepEqual(rowsUnder("Home Assistant"), []);
-    assert.deepEqual(rowsUnder("Everything else"), ["Rule take_screens"]);
+    assert.ok(!badgesOf("Rule take_screens").includes("home-assistant"));
   });
 });
 
@@ -290,7 +301,7 @@ describe("a pair", () => {
 
   test("is ONE row, named by the words, showing both cue names", async () => {
     await mount();
-    assert.deepEqual(rowsUnder("Home Assistant"), ["projectors", "Rule take_screens"]);
+    assert.deepEqual(rows(), ["projectors", "Rule take_screens"]);
     const row = document.querySelector('[data-cue-pair-row="projectors"]');
     assert.equal(row?.querySelector("[data-cue-pair-name]")?.textContent, "the projectors");
     assert.match(row?.textContent ?? "", /projectors_on \/ projectors_off/);
@@ -306,22 +317,22 @@ describe("a pair", () => {
     assert.equal(homeSwitches(), 1, "the pair's Home Assistant switch rendered more than once");
   });
 
-  test("shows for a query that matches only its OFF half", async () => {
-    await mount();
+  test("shows on Search for a query that matches only its OFF half", async () => {
+    await mount("search");
     await type("projectors_off");
-    assert.deepEqual(rowsUnder("Home Assistant"), ["projectors"]);
-    assert.deepEqual(sectionTitles(), ["Home Assistant"]);
+    assert.deepEqual(rows(), ["projectors"]);
   });
 
-  test("hidden, it moves whole — neither half is left behind", async () => {
+  test("hidden, it loses its Home Assistant badge whole — neither half keeps one", async () => {
     RULES = [
       cue("projectors_on", { says: "the projectors on", homeAssistant: "hidden" }),
       cue("projectors_off"),
       cue("take_screens"),
     ];
     await mount();
-    assert.deepEqual(rowsUnder("Home Assistant"), ["Rule take_screens"]);
-    assert.deepEqual(rowsUnder("Everything else"), ["projectors"]);
+    assert.deepEqual(rows(), ["projectors", "Rule take_screens"]);
+    assert.ok(!badgesOf("projectors").includes("home-assistant"));
+    assert.ok(badgesOf("Rule take_screens").includes("home-assistant"));
   });
 
   test("the pair's switch writes the ON half's rule, and the ON half FIRST", async () => {
@@ -351,6 +362,6 @@ describe("a pair", () => {
       false,
       "the off half was hidden too; the flag belongs on the on half alone",
     );
-    assert.deepEqual(rowsUnder("Everything else"), ["projectors"]);
+    assert.ok(!badgesOf("projectors").includes("home-assistant"));
   });
 });

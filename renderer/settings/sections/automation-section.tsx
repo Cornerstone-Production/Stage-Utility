@@ -18,13 +18,20 @@ import type { AutomationOutcome, Rule } from "@main/types/automation";
 import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-param-validation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
+import { screenNames, useCueUsage, usesOf, type CueUse } from "./cue-usage";
+import { BelongsToButton, OwnedRows } from "./automation-owned";
+import { HomeAssistantChip, UsedOn, VoiceChip } from "./automation-chips";
 import { useOptionSources } from "./automation-option-sources";
 import { joinWithAnd } from "../../lib/join-with-and";
 
 /** A rule as GET /api/automation/rules sends it — its own fields plus the
  *  issues the server computed against the current registry. See
  *  automation-routes.ts and docs/automation.md. */
-export type RuleWithIssues = Rule & { issues: RuleIssue[] };
+export type RuleWithIssues = Rule & {
+  issues: RuleIssue[];
+  /** Computed by the list route, never stored: the Button this rule belongs to is gone. */
+  ownerMissing?: boolean;
+};
 // The editor itself, and the field shapes it and this list share. The list
 // renders the collapsed rows; the dialog is the only thing that mounts an
 // editor.
@@ -40,13 +47,23 @@ import { useSearchParam } from "../../lib/use-search-param";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { usePvpState } from "../../main/use-pvp-state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { automationRegistryQuery } from "../../lib/automation-registry";
-import { Button, Collapsible, Input, Separator, Switch, toast } from "../../components/ui";
+import { Button, Switch, toast } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
+import { logReadFailure } from "../../lib/client-log";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
+import { PageSearchBox, PageTabBar } from "../../components/page-tabs";
+import { usePageTabs } from "../../lib/use-page-tabs";
+import {
+  AUTOMATION_SEARCH_TAB_ID,
+  AUTOMATION_TABS,
+  DEFAULT_AUTOMATION_TAB,
+  parseAutomationTab,
+  type AutomationPageTab,
+} from "./automation-tabs";
 import { NewCueDialog } from "./new-cue-dialog";
 import type { CueKind } from "./new-cue-flow";
 import { plural } from "@main/services/plural";
@@ -94,15 +111,19 @@ function ActivityLog() {
   const entries = data?.entries ?? [];
 
   return (
-    <Collapsible label="Activity" summary={`${entries.length} recent`} className="su-card px-4 py-2.5">
-      <div className="flex flex-col gap-1 pt-2">
+    <div className="flex flex-col gap-2" data-automation-activity="">
+      <p className="text-caption1 text-fg-muted">{entries.length} recent</p>
+      <div className="rounded-lg border border-line bg-surface">
         {entries.length === 0 ? (
-          <p className="text-caption1 text-fg-muted">
+          <p className="px-3 py-3 text-caption1 text-fg-muted">
             Nothing yet. Rules log here when they fire — and when they are suppressed, with the reason.
           </p>
         ) : (
           entries.slice(0, 60).map((e, i) => (
-            <div key={`${e.at}-${i}`} className="flex items-baseline gap-2 text-caption1">
+            <div
+              key={`${e.at}-${i}`}
+              className="flex items-baseline gap-2 border-b border-line px-3 py-2 text-caption1 last:border-b-0"
+            >
               <span className="shrink-0 font-mono text-caption2 text-fg-subtle">
                 {formatClock(e.at, { seconds: true })}
               </span>
@@ -117,22 +138,26 @@ function ActivityLog() {
             </div>
           ))
         )}
-        {entries.length > 0 && (
-          <div className="pt-2">
-            <Button
-              variant="transparent"
-              size="small"
-              onClick={async () => {
-                await invoke("automation:clearLog");
-                refresh();
-              }}
-            >
-              Clear
-            </Button>
-          </div>
-        )}
       </div>
-    </Collapsible>
+      {entries.length > 0 && (
+        <div>
+          <Button
+            variant="transparent"
+            size="small"
+            onClick={async () => {
+              try {
+                await invoke("automation:clearLog");
+              } catch (e) {
+                toast.error(`Could not clear the log: ${errorMessage(e)}`);
+              }
+              refresh();
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -364,7 +389,10 @@ function RuleRow({
   onRan,
   onOpen,
   onChanged,
+  uses,
 }: {
+  /** The Buttons that name this command, or null while they are unread. Only a command shows them. */
+  uses: readonly CueUse[] | null;
   rule: RuleWithIssues;
   registry: Registry;
   /** The panic switch is on: nothing runs, by trigger or by hand. */
@@ -378,7 +406,9 @@ function RuleRow({
   const trigger = registry.triggers.find((t) => t.id === rule.trigger.id) ?? null;
   const action = registry.actions.find((a) => a.id === rule.action.id) ?? null;
   const isCue = rule.trigger.id === CALL_TRIGGER_ID;
+  const cueName = String(rule.trigger.params.name ?? "");
   const hidden = isHiddenFromHome(rule.trigger.params);
+  const spoken = String(rule.trigger.params.says ?? "").trim() !== "";
   // `?? []`: a kiosk tab left open across an update, or a test fixture written
   // before this field existed, is a server or a stub that never sends `issues`
   // at all — read as "nothing to report" rather than throwing and blanking the
@@ -391,7 +421,7 @@ function RuleRow({
     ` · then ${action?.label ?? rule.action.id}`;
 
   return (
-    <div className="rounded-lg border border-line bg-surface p-3">
+    <div data-rule-row={rule.id} className="border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-fill">
       <div className="flex items-center gap-2">
         {/* The one control on the row that is NOT the editor: arming a rule is
             a thing an operator does down a list, and it writes at once — except
@@ -423,6 +453,9 @@ function RuleRow({
         <button type="button" className="block w-full min-w-0 text-left" onClick={onOpen}>
           <div className="flex min-w-0 items-baseline gap-2">
             <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
+            {isCue && cueName !== rule.name && (
+              <span className="min-w-0 truncate font-mono text-caption2 text-fg-subtle">{cueName}</span>
+            )}
             {needsSetup && <NeedsSetupBadge issues={issues} />}
             {/* Two quiet pills from the Run mockup: a rule that is off can still
                 be run by hand, and a confirm rule's Run asks first. Hidden on a phone,
@@ -450,6 +483,8 @@ function RuleRow({
                 was {formerNames.join(", ")}
               </span>
             )}
+            {isCue && !hidden && <HomeAssistantChip />}
+            {isCue && spoken && <VoiceChip />}
             {isCue && <ServiceGuardBadge guarded={hasServiceGuard(rule.conditions)} />}
           </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
@@ -460,22 +495,9 @@ function RuleRow({
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
         </button>
+        {isCue && <UsedOn uses={uses} />}
         {lastRun && <RunResultLine result={lastRun} />}
         </div>
-        {/* The same one word a pair's row carries, for a cue with no partner:
-            which side of the Home Assistant / Everything else split this row is
-            on, without reading the heading above it. */}
-        {isCue && (
-          <span
-            data-cue-home={hidden ? "hidden" : "shown"}
-            className={
-              "shrink-0 rounded-md px-1.5 py-0.5 text-caption2 " +
-              (hidden ? "text-fg-subtle" : "bg-field text-fg-muted")
-            }
-          >
-            {hidden ? "voice only" : "Home"}
-          </span>
-        )}
         <RunButton rule={rule} label="Run" disarmed={disarmed} onRan={onRan} />
       </div>
     </div>
@@ -505,7 +527,10 @@ function PairRow({
   lastRuns,
   onRan,
   onOpen,
+  uses,
 }: {
+  /** The Buttons that name this pair (by its base or either half), or null while unread. */
+  uses: readonly CueUse[] | null;
   base: string;
   name: string;
   onName: string;
@@ -527,8 +552,10 @@ function PairRow({
 }) {
   const onResult = lastRuns.get(on.id);
   const offResult = lastRuns.get(off.id);
+  // A spoken name on either half: the pair's own settings live on the ON half, with the OFF half read as a fallback.
+  const spoken = [on, off].some((r) => String(r.trigger.params.says ?? "").trim() !== "");
   return (
-    <div className="rounded-lg border border-line bg-surface p-3" data-cue-pair-row={base}>
+    <div className="border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-fill" data-cue-pair-row={base}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
         <button
@@ -552,20 +579,12 @@ function PairRow({
               is a badge nobody saw: the halves are only rendered inside the
               dialog now, and a cue that can fire mid-service has to be
               spottable down a list of two hundred. */}
+          {!hidden && <HomeAssistantChip />}
+          {spoken && <VoiceChip />}
           <ServiceGuardBadge guarded={guarded} />
           {cueState && <CuePairState base={base} state={cueState} />}
-          {/* Compact, and only ever one word: the row is a summary, and the
-              sentence explaining what hidden means is in the dialog. */}
-          <span
-            data-cue-home={hidden ? "hidden" : "shown"}
-            className={
-              "shrink-0 rounded-md px-1.5 py-0.5 text-caption2 " +
-              (hidden ? "text-fg-subtle" : "bg-field text-fg-muted")
-            }
-          >
-            {hidden ? "voice only" : "Home"}
-          </span>
         </button>
+        <UsedOn uses={uses} />
         {onResult && <RunResultLine result={onResult} half="On" />}
         {offResult && <RunResultLine result={offResult} half="Off" />}
         </div>
@@ -581,38 +600,9 @@ function PairRow({
   );
 }
 
-/**
- * A list section's heading — the name, how many ROWS are under it (a pair is
- * one), and one sentence saying what lands here.
- *
- * The sentence is not decoration: "Everything else" holding both a hidden cue
- * and a PCO-triggered rule is not something a title can say.
- */
-function ListSection({
-  title,
-  blurb,
-  count,
-  children,
-}: {
-  title: string;
-  blurb: string;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-2" data-rule-section={title}>
-      <div className="pt-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
-          <span className="text-caption2 text-fg-subtle" data-rule-section-count={String(count)}>
-            {count}
-          </span>
-        </div>
-        <p className="text-caption2 text-fg-subtle">{blurb}</p>
-      </div>
-      {children}
-    </div>
-  );
+/** Whether a row's rule (either half, for a pair) is among the ids a search matched. */
+function entryMatches(e: RuleListEntry, ids: ReadonlySet<string>): boolean {
+  return e.kind === "pair" ? ids.has(e.pair.on.id) || ids.has(e.pair.off.id) : ids.has(e.rule.id);
 }
 
 // ── The deep link ─────────────────────────────────────────────────────────────
@@ -639,8 +629,23 @@ function useNewCueLink(open: (kind: CueKind) => void) {
 
 // ── Section ───────────────────────────────────────────────────────────────────
 
-export function AutomationSection() {
+export function AutomationSection({
+  tab: tabSegment,
+  onTabChange,
+}: {
+  /** The URL's tab segment. Anything that is not a tab shows Commands. */
+  tab?: string;
+  /** Called when the operator picks a tab, which the URL then hands back as `tab`. Without it the page keeps its own tab, starting at `tab`. */
+  onTabChange?: (tab: AutomationPageTab) => void;
+}) {
   const qc = useQueryClient();
+  const { tab, goTo, searchRef } = usePageTabs<AutomationPageTab>({
+    segment: tabSegment,
+    onTabChange,
+    parse: parseAutomationTab,
+    fallback: DEFAULT_AUTOMATION_TAB,
+    searchId: AUTOMATION_SEARCH_TAB_ID,
+  });
   const [importing, setImporting] = useState(false);
   // The New cue dialog: null while closed, and `kind` set when a link already says
   // which. NOTHING is saved by opening it — see new-cue-dialog.tsx.
@@ -692,10 +697,24 @@ export function AutomationSection() {
   const rules = useMemo(() => data?.rules ?? [], [data]);
   const settings = data?.settings ?? { simulate: true, disarmed: false };
 
+  // A rule a Button made for itself is listed under "Belongs to a button", not
+  // with the commands somebody wrote, and is not a half of a pair: its name is
+  // derived (`btn_…`), never `_on`/`_off`.
+  const ownedRules = useMemo(() => rules.filter((r) => r.ownedBy), [rules]);
+  const listed = useMemo(() => rules.filter((r) => !r.ownedBy), [rules]);
+
+  // Where each command is used: the Buttons that name it. Undefined until read.
+  const { usage, error: usageError } = useCueUsage();
+  // A failed read says so on the page and on /log, so a command that reads as
+  // unused over an unreadable usage is never the only evidence there was.
+  useEffect(() => {
+    if (usageError) logReadFailure("automation", "where each command is used", usageError);
+  }, [usageError]);
+
   // The ON/OFF pairs among the rules, resolved by the same module the server
   // generates the Home Assistant config from — so the row that offers a state
   // binding is exactly the row that would get one.
-  const pairs = useMemo(() => cuePairs(rules), [rules]);
+  const pairs = useMemo(() => cuePairs(listed), [listed]);
   // The `_on` half's rule id to its pair's base, which is what decides both the
   // row's state pill and whether the editor offers the three state fields at
   // all: a binding on a cue with no partner reads a variable nothing ever shows,
@@ -749,45 +768,47 @@ export function AutomationSection() {
     [pairRows],
   );
 
-  // The search field's value, in component state only — it is a filter over
-  // what is on screen right now, not something a maintainer with hundreds of
-  // cues would want restored on the next visit.
-  const [search, setSearch] = useState("");
-  const filteredRules = useMemo(() => {
-    if (!search.trim()) return rules;
-    return rules.filter((r) =>
-      ruleMatchesSearch(
-        r,
-        search,
-        labelFor(registry?.triggers ?? [], r.trigger.id),
-        labelFor(registry?.actions ?? [], r.action.id),
-      ),
-    );
-  }, [rules, search, registry]);
+  // The Search tab's query, in page state only: it outlives a move between tabs
+  // (the page is not remounted by one) and is not worth restoring on the next visit.
+  const [query, setQuery] = useState("");
 
   /**
-   * The two sections, in the order they render.
+   * The Buttons that name each rule's command, by rule id, or null while the usage is unread.
    *
-   * A PAIR IS ONE ROW and shows whenever EITHER half matches the query — the
-   * two halves are one thing, and a search for the off cue that hid the row it
-   * lives on would be a pair that cannot be found by half its own names.
-   *
-   * Ordering: pairs first, then single cues, each alphabetical by the words the
-   * cue is called; rules with any other trigger keep their stored order after
-   * the cues, because that order is the operator's own and nothing about a
-   * trigger name is worth sorting by.
+   * A pair's two halves share one answer: a Button stores the pair's BASE, and may
+   * name either half. A single command is looked up by its name and its former
+   * names, the names a Button still resolves through.
    */
-  const sections = useMemo(() => {
-    const matched = new Set(filteredRules.map((r) => r.id));
-    const home: RuleListEntry[] = [];
-    const other: RuleListEntry[] = [];
+  const usesByRuleId = useMemo(() => {
+    if (!usage) return null;
+    const out = new Map<string, CueUse[]>();
+    const paired = new Set<string>();
+    for (const p of pairRows) {
+      const names = [p.base, p.onName, p.offName, ...parseAliases(p.on.trigger.params), ...parseAliases(p.off.trigger.params)];
+      const uses = usesOf(usage, names);
+      out.set(p.on.id, uses);
+      out.set(p.off.id, uses);
+      paired.add(p.on.id);
+      paired.add(p.off.id);
+    }
+    for (const r of rules) {
+      if (paired.has(r.id) || r.trigger.id !== CALL_TRIGGER_ID) continue;
+      out.set(r.id, usesOf(usage, [String(r.trigger.params.name ?? ""), ...parseAliases(r.trigger.params)]));
+    }
+    return out;
+  }, [usage, pairRows, rules]);
 
+  /** The rows of the Commands and Rules tabs, in the order they render. */
+  const { commandEntries, ruleEntries } = useMemo(() => {
     const byName = (a: { sortBy: string }, b: { sortBy: string }) => a.sortBy.localeCompare(b.sortBy);
-    const pairEntries = pairRows
-      .filter((p) => matched.has(p.on.id) || matched.has(p.off.id))
+    // Pairs first, then single commands, each alphabetical by the words the
+    // command is called. Rules with any other trigger keep their stored order:
+    // that order is the operator's own and nothing about a trigger name is worth
+    // sorting by.
+    const pairEntries: RuleListEntry[] = pairRows
       .map((p) => ({ kind: "pair" as const, key: p.on.id, sortBy: p.name, pair: p }))
       .sort(byName);
-    const singles = filteredRules
+    const singles: RuleListEntry[] = listed
       .filter((r) => r.trigger.id === CALL_TRIGGER_ID && !pairedRuleIds.has(r.id))
       .map((r) => ({
         kind: "rule" as const,
@@ -796,16 +817,49 @@ export function AutomationSection() {
         rule: r,
       }))
       .sort(byName);
+    const others: RuleListEntry[] = listed
+      .filter((r) => r.trigger.id !== CALL_TRIGGER_ID)
+      .map((r) => ({ kind: "rule" as const, key: r.id, sortBy: r.name, rule: r }));
+    return { commandEntries: [...pairEntries, ...singles], ruleEntries: others };
+  }, [listed, pairRows, pairedRuleIds]);
 
-    for (const e of pairEntries) (e.pair.hidden ? other : home).push(e);
-    for (const e of singles) (isHiddenFromHome(e.rule.trigger.params) ? other : home).push(e);
-    // Everything that is not a cue at all, in the order the operator has them.
-    for (const r of filteredRules) {
-      if (r.trigger.id === CALL_TRIGGER_ID) continue;
-      other.push({ kind: "rule", key: r.id, sortBy: r.name, rule: r });
+  /**
+   * The Search tab: every rule the query matches, then which entries show.
+   *
+   * A PAIR IS ONE ROW and shows whenever EITHER half matches — the two halves are
+   * one thing, and a search for the off command that hid the row it lives on would
+   * be a pair that cannot be found by half its own names. The screens a command is
+   * used on, and its Buttons' labels, are part of what a rule is found by.
+   */
+  const searching = query.trim() !== "";
+  const matchedIds = useMemo(() => {
+    if (!searching) return new Set<string>();
+    const out = new Set<string>();
+    for (const r of rules) {
+      const uses = usesByRuleId?.get(r.id) ?? [];
+      const onScreens = [...screenNames(uses), ...uses.map((u) => u.label).filter((l) => l !== "")];
+      if (
+        ruleMatchesSearch(
+          r,
+          query,
+          labelFor(registry?.triggers ?? [], r.trigger.id),
+          labelFor(registry?.actions ?? [], r.action.id),
+          onScreens,
+        )
+      ) {
+        out.add(r.id);
+      }
     }
-    return { home, other };
-  }, [filteredRules, pairRows, pairedRuleIds]);
+    return out;
+  }, [rules, query, searching, registry, usesByRuleId]);
+  const found = useMemo(
+    () => ({
+      commands: commandEntries.filter((e) => entryMatches(e, matchedIds)),
+      rules: ruleEntries.filter((e) => entryMatches(e, matchedIds)),
+      owned: ownedRules.filter((r) => matchedIds.has(r.id)),
+    }),
+    [commandEntries, ruleEntries, ownedRules, matchedIds],
+  );
 
   // The custom variables Companion has, for the editor's select. Read from the
   // same offer the import dialog uses, and only worth asking for when there is
@@ -918,6 +972,7 @@ export function AutomationSection() {
           onRan={noteRan}
           onOpen={() => setEditing({ kind: "rule", id: entry.rule.id })}
           onChanged={refresh}
+          uses={usesByRuleId?.get(entry.rule.id) ?? null}
         />
       );
     }
@@ -939,165 +994,185 @@ export function AutomationSection() {
         lastRuns={lastRuns}
         onRan={noteRan}
         onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
+        uses={usesByRuleId?.get(p.on.id) ?? null}
       />
     );
   };
+
+  const counts: Record<string, number> = { commands: commandEntries.length, rules: ruleEntries.length };
+  const note = settings.disarmed
+    ? { text: "All rules disarmed. No rule will run, whatever its own switch says.", tone: "text-red-11" }
+    : settings.simulate
+      ? { text: "Simulate mode: rules evaluate and log what they would do. Nothing reaches a device.", tone: "text-amber-11" }
+      : { text: "Rules armed and acting on your devices.", tone: "text-fg-muted" };
+
+  const commandsTab = (
+    <div className="flex flex-col gap-3" data-automation-tab="commands">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="accent" size="small" onClick={() => openNewCue("manual")}>
+          <PlusIcon className="size-3.5" /> New command
+        </Button>
+        <Button variant="filled" size="small" onClick={() => setImporting(true)}>
+          <DownloadIcon className="size-3.5" /> Import from Companion
+        </Button>
+        <span className="text-caption1 text-fg-muted">
+          Fire when something calls them: a console button, a Home tile, Home Assistant, voice or Run.
+        </span>
+      </div>
+      {cueStateError !== null && anyBinding && (
+        // The route itself failed — not a pair reading unknown, which has its own
+        // pill and its own reason. Without this the pills simply stopped appearing,
+        // which looks exactly like a set of pairs with no bindings. One muted line
+        // above the list, because it is about all of them at once.
+        <p className="text-caption1 text-fg-muted" data-cue-state-error="">
+          Cue state unavailable: {errorMessage(cueStateError)}
+        </p>
+      )}
+      {usageError !== null && (
+        <p className="text-caption1 text-fg-muted" data-cue-usage-error="">
+          Where each command is used could not be read: {errorMessage(usageError)}
+        </p>
+      )}
+      {commandEntries.length === 0 ? (
+        <p className="text-caption1 text-fg-muted" data-empty="commands">
+          No commands yet. New command makes one; Import from Companion brings in the buttons Companion already has.
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-line bg-surface">{commandEntries.map(renderEntry)}</div>
+      )}
+      <BelongsToButton rules={ownedRules} usage={usage} onChanged={refresh} />
+    </div>
+  );
+
+  const rulesTab = (
+    <div className="flex flex-col gap-3" data-automation-tab="rules">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="accent" size="small" onClick={() => openNewCue("auto")}>
+          <PlusIcon className="size-3.5" /> New rule
+        </Button>
+        <span className="text-caption1 text-fg-muted">Fire on their own when something happens. New ones start off.</span>
+      </div>
+      {ruleEntries.length === 0 ? (
+        <p className="text-caption1 text-fg-muted" data-empty="rules">
+          No automatic rules yet. Start with the <span className="font-medium text-fg">Write a log message</span> action —
+          arm the rule, watch Activity through a service to confirm it fires when you expect, then swap in the real
+          action.
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-line bg-surface">{ruleEntries.map(renderEntry)}</div>
+      )}
+    </div>
+  );
+
+  const found_n = found.commands.length + found.rules.length + found.owned.length;
+  const searchTab = (
+    <div className="flex flex-col gap-3" data-automation-tab="search">
+      <PageSearchBox
+        value={query}
+        onChange={setQuery}
+        inputRef={searchRef}
+        name="automation-search"
+        label="Search automation"
+        placeholder="Search commands, rules, button labels and consoles"
+      />
+      {!searching ? (
+        <p className="text-caption1 text-fg-muted">
+          Matches command names, spoken names, Companion button labels, rule triggers and actions, and the consoles a
+          button sits on.
+        </p>
+      ) : found_n === 0 ? (
+        <p className="text-caption1 text-fg-muted" data-empty="search">
+          Nothing matches “{query.trim()}”.
+        </p>
+      ) : (
+        <>
+          <p className="text-caption1 text-fg-muted" aria-live="polite" data-rule-search-count="">
+            {plural(found_n, "match", "matches")} of {plural(rules.length, "rule")}
+          </p>
+          <div className="overflow-hidden rounded-lg border border-line bg-surface">
+            {found.commands.length > 0 && (
+              <>
+                <SearchGroupLabel>Commands</SearchGroupLabel>
+                {found.commands.map(renderEntry)}
+              </>
+            )}
+            {found.rules.length > 0 && (
+              <>
+                <SearchGroupLabel>Rules</SearchGroupLabel>
+                {found.rules.map(renderEntry)}
+              </>
+            )}
+            {found.owned.length > 0 && (
+              <>
+                <SearchGroupLabel>Belongs to a button</SearchGroupLabel>
+                <OwnedRows rules={found.owned} usage={usage} onChanged={refresh} />
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const panel =
+    tab === "commands" ? commandsTab : tab === "rules" ? rulesTab : tab === "activity" ? <ActivityLog /> : tab === "access" ? <CueAccessCard /> : searchTab;
 
   return (
     // The same wrapper every other section uses. This one had no horizontal or
     // vertical padding at all, so its cards ran to the pane edges while every
     // neighbouring tab inset them.
     <div className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* No title here — the shell renders the page heading and its blurb from
-          SECTION_DESC, same as every other section. A local h1 duplicated it. */}
-
-      {/* Safety first: these are the controls that decide whether anything real happens. */}
-      <div
-        className={
-          "flex flex-col gap-2 rounded-lg border p-3 " +
-          (settings.disarmed
-            ? "border-red-6 bg-red-2/50"
-            : settings.simulate
-              ? "border-amber-6 bg-amber-2/60"
-              : "border-line bg-surface")
-        }
-      >
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-footnote font-medium text-fg">Simulate mode</div>
-            <p className="mt-0.5 text-caption1 text-fg-muted">
-              {settings.simulate
-                ? "Rules evaluate and log what they would do. Nothing reaches a device."
-                : "Rules act on your devices."}
-            </p>
-          </div>
+      {/* Safety first, above the tabs: these are the controls that decide whether
+          anything real happens, and they stay in reach on every tab. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="mr-auto text-title3 font-semibold text-fg">Automation</h1>
+        <label className="flex items-center gap-2 text-footnote font-medium text-fg">
           <Switch
             checked={settings.simulate}
             onCheckedChange={(v) => void setSettings({ simulate: v })}
             aria-label="Simulate mode"
           />
-        </div>
-        <Separator />
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-footnote font-medium text-fg">
-              {settings.disarmed ? "All rules disarmed" : "Rules armed"}
-            </div>
-            <p className="mt-0.5 text-caption1 text-fg-muted">
-              {settings.disarmed
-                ? "No rule will run, whatever its own switch says."
-                : "Use this to stop everything at once."}
-            </p>
-          </div>
-          <Button
-            variant={settings.disarmed ? "accent" : "filled"}
-            size="small"
-            onClick={() => void setSettings({ disarmed: !settings.disarmed })}
-          >
-            <OctagonXIcon className="size-3.5" />
-            {settings.disarmed ? "Re-arm" : "Disarm all"}
-          </Button>
-        </div>
+          Simulate
+        </label>
+        <Button
+          variant={settings.disarmed ? "accent" : "filled"}
+          size="small"
+          onClick={() => void setSettings({ disarmed: !settings.disarmed })}
+        >
+          <OctagonXIcon className="size-3.5" />
+          {settings.disarmed ? "Re-arm" : "Disarm all"}
+        </Button>
       </div>
+      <p className={`-mt-2 text-caption1 ${note.tone}`} data-automation-note="">
+        {note.text}
+      </p>
 
-      {registry && (
-        <div className="flex flex-col gap-2">
-          {/* The route itself failed — not a pair reading unknown, which has its
-              own pill and its own reason. Without this the pills simply stopped
-              appearing, which looks exactly like a set of pairs with no
-              bindings. One muted line, above the list, because it is about all
-              of them at once; the pills are left alone rather than turned amber,
-              since nothing was read and a pill would be a guess. */}
-          {cueStateError !== null && anyBinding && (
-            <p className="text-caption1 text-fg-muted" data-cue-state-error="">
-              Cue state unavailable: {errorMessage(cueStateError)}
-            </p>
-          )}
-          {rules.length === 0 ? (
-            <p className="text-caption1 text-fg-muted">
-              No rules yet. Start with the <span className="font-medium text-fg">Write a log message</span> action —
-              arm the rule, watch Activity through a service to confirm it fires when you expect, then swap in the
-              real action.
-            </p>
-          ) : (
-            <>
-              {/* PINNED. The app has exactly one scroller — the shell's
-                  `<main>`; `html`, `body` and `#root` are all `overflow:
-                  hidden` (see renderer/app/shell.tsx) — and this list is
-                  rendered directly inside it, so `sticky top-0` sticks to the
-                  top of the pane rather than to a window that never scrolls.
-                  The background is the page's own, with a hairline under it, so
-                  rows pass beneath it instead of showing through.
-                  NOT unit-tested: jsdom loads no stylesheet, so `position:
-                  sticky` and a background are not observable in it at all and a
-                  test could only assert the class string is spelled how it is
-                  spelled. Driven in a browser. */}
-              <div
-                className={
-                  "sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg py-2 " +
-                  // The pane has 16px of its own top padding, and `sticky
-                  // top-0` sticks BELOW it — leaving a strip at the top of the
-                  // pane that rows scrolled through, half a row of text
-                  // hanging above the bar. This paints that strip in the page
-                  // background. A negative `top` would cover it too and would
-                  // hang the field off the top of the pane whenever the
-                  // padding is not there (it is dropped with the top band).
-                  "relative before:pointer-events-none before:absolute before:inset-x-0 " +
-                  "before:bottom-full before:h-4 before:bg-bg before:content-['']"
-                }
-              >
-                <span className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search rules"
-                    aria-label="Search rules"
-                    className="h-8 pl-7 text-footnote"
-                  />
-                </span>
-                {search.trim() && (
-                  <span className="shrink-0 text-caption1 text-fg-muted" data-rule-search-count="">
-                    {filteredRules.length} of {rules.length} rules
+      <PageTabBar<AutomationPageTab>
+        label="Automation"
+        tabs={AUTOMATION_TABS}
+        searchId={AUTOMATION_SEARCH_TAB_ID}
+        tab={tab}
+        onSelect={goTo}
+        onMove={(next) => goTo(next, false)}
+        idPrefix="automation-tab"
+        panelId="automation-tab-panel"
+        markFor={(id) =>
+          id in counts
+            ? {
+                said: String(counts[id]),
+                mark: (
+                  <span aria-hidden="true" className="font-mono text-caption2 font-normal tabular-nums text-fg-subtle">
+                    {counts[id]}
                   </span>
-                )}
-              </div>
-              {sections.home.length === 0 && sections.other.length === 0 ? (
-                <p className="text-caption1 text-fg-muted">No rules match.</p>
-              ) : (
-                <>
-                  {sections.home.length > 0 && (
-                    <ListSection
-                      title="Home Assistant"
-                      blurb="Cues shown in Home Assistant and Apple Home. Pairs are switches, singles are buttons."
-                      count={sections.home.length}
-                    >
-                      {sections.home.map(renderEntry)}
-                    </ListSection>
-                  )}
-                  {sections.other.length > 0 && (
-                    <ListSection
-                      title="Everything else"
-                      blurb="Cues kept out of Home Assistant, and rules with other triggers."
-                      count={sections.other.length}
-                    >
-                      {sections.other.map(renderEntry)}
-                    </ListSection>
-                  )}
-                </>
-              )}
-            </>
-          )}
-          <div className="flex items-center gap-2">
-            <Button variant="filled" size="small" onClick={() => openNewCue(null)}>
-              <PlusIcon className="size-3.5" /> New cue
-            </Button>
-            <Button variant="transparent" size="small" onClick={() => setImporting(true)}>
-              <DownloadIcon className="size-3.5" /> Import from Companion…
-            </Button>
-          </div>
-        </div>
-      )}
+                ),
+              }
+            : {}
+        }
+      />
+
+      <div role="tabpanel" id="automation-tab-panel" aria-labelledby={`automation-tab-${tab}`} className="flex flex-col gap-3">
+        {registry ? panel : null}
+      </div>
 
       {/* The editor, over the list. Mounted only while something is being
           edited, so its drafts are seeded on open and discarded on close —
@@ -1138,8 +1213,12 @@ export function AutomationSection() {
       )}
 
       <ImportPairsDialog open={importing} onOpenChange={setImporting} onImported={refresh} />
-      <CueAccessCard />
-      <ActivityLog />
     </div>
+  );
+}
+
+function SearchGroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-fill px-3 py-1 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{children}</div>
   );
 }

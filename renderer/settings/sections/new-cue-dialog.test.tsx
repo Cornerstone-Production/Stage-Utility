@@ -118,17 +118,17 @@ const rules = (): Rule[] => automationEngine.listRules();
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-function page() {
+function page(tab: "commands" | "rules" = "commands") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return React.createElement(
     QueryClientProvider,
     { client },
-    React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {}), React.createElement(Toaster, {})),
+    React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab }), React.createElement(Toaster, {})),
   );
 }
 
-async function mount() {
-  const view = render(page());
+async function mount(tab: "commands" | "rules" = "commands") {
+  const view = render(page(tab));
   await settle();
   await settle();
   await settle();
@@ -174,11 +174,9 @@ async function pickOption(id: string) {
   await press(document.querySelector(`[data-picker-option="${id}"]`), id);
 }
 
-/** New cue → Manual → Next, then the action: a log message with the given text. */
+/** New command (it opens past Kind, on the action), then a log message with the given text. */
 async function manualToName(message = "hello") {
-  await press(button("New cue"), "New cue");
-  await press(document.querySelector('[data-kind="manual"]'), "the Manual cue card");
-  await press(button("Next"), "Next past Kind");
+  await press(button("New command"), "New command");
   await pickOption("log.message");
   await typeInto(labelledInput("Message"), message, "Message");
   await press(button("Next"), "Next past What it does");
@@ -240,9 +238,9 @@ describe("nothing is saved until Create", () => {
     await manualToName();
     await press(document.querySelector('[aria-label="Close"]'), "the close button");
     assert.equal(dialog() === null, true);
-    await press(button("New cue"), "New cue again");
-    assert.ok(dialog(), "a second New cue did not open");
-    assert.equal(stepBody(), "kind", "a second dialog did not start from the first step");
+    await press(button("New command"), "New command again");
+    assert.ok(dialog(), "a second New command did not open");
+    assert.equal(stepBody(), "act", "a second dialog did not start from the first step");
     await act(async () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     });
@@ -317,9 +315,7 @@ describe("a manual cue", () => {
 
   test("a required field blocks Next, and says which", async () => {
     await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="manual"]'), "Manual");
-    await press(button("Next"), "Next");
+    await press(button("New command"), "New command");
     await pickOption("log.message");
     assert.equal(button("Next")?.disabled, true, "Next was open with the message empty");
     assert.match(document.querySelector("[data-needs]")?.textContent ?? "", /Message/);
@@ -566,10 +562,8 @@ describe("On a console", () => {
   });
 
   test("pressing Create twice at once makes one rule (an automatic rule has no duplicate check to refuse the second)", async () => {
-    await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
-    await press(button("Next"), "Next");
+    await mount("rules");
+    await press(button("New rule"), "New rule");
     await pickOption("pco.service-ended");
     await press(button("Next"), "Next");
     await press(button("Skip"), "Skip");
@@ -626,10 +620,8 @@ describe("On a console", () => {
 
 describe("an automatic rule", () => {
   test("Create writes one rule, OFF, with its cooldown of 30, as the steps chose it", async () => {
-    await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
-    await press(button("Next"), "Next past Kind");
+    await mount("rules");
+    await press(button("New rule"), "New rule");
     assert.equal(stepBody(), "trig");
     await pickOption("pco.service-started");
     await press(button("Next"), "Next past When");
@@ -666,10 +658,8 @@ describe("an automatic rule", () => {
   });
 
   test("a condition added on If is written, and its required field blocks Next", async () => {
-    await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
-    await press(button("Next"), "Next");
+    await mount("rules");
+    await press(button("New rule"), "New rule");
     await pickOption("pco.service-started");
     await press(button("Next"), "Next");
     await press(document.querySelector('[data-picker-field="condition"]'), "Add a condition");
@@ -687,20 +677,16 @@ describe("an automatic rule", () => {
   });
 
   test("Called by name is not a trigger the When step offers", async () => {
-    await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
-    await press(button("Next"), "Next");
+    await mount("rules");
+    await press(button("New rule"), "New rule");
     assert.equal(document.querySelector('[data-picker-option="call.by-name"]') === null, true);
     for (const h of [...document.querySelectorAll("[data-picker-group]")]) await press(h, "a heading");
     assert.equal(document.querySelector('[data-picker-option="call.by-name"]') === null, true);
   });
 
   test("turning an automatic rule ON warns that it will fire on its own", async () => {
-    await mount();
-    await press(button("New cue"), "New cue");
-    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
-    await press(button("Next"), "Next");
+    await mount("rules");
+    await press(button("New rule"), "New rule");
     await pickOption("pco.service-ended");
     await press(button("Next"), "Next");
     await press(button("Skip"), "Skip");
@@ -717,11 +703,9 @@ describe("an automatic rule", () => {
 describe("the stepper", () => {
   test("shows each finished step's choice, and a later step is not reachable until the earlier ones are done", async () => {
     await mount();
-    await press(button("New cue"), "New cue");
+    await press(button("New command"), "New command");
     const stepButton = (id: string) => document.querySelector(`[data-step="${id}"]`) as HTMLButtonElement | null;
-    await press(document.querySelector('[data-kind="manual"]'), "Manual");
     assert.equal(stepButton("name")?.disabled, true, "Name was reachable before an action was chosen");
-    await press(button("Next"), "Next");
     await pickOption("log.message");
     await typeInto(labelledInput("Message"), "x", "Message");
     await press(button("Next"), "Next");
@@ -785,7 +769,7 @@ describe("the deep link", () => {
 });
 
 describe("what was there before still works", () => {
-  test("a rule that needs setup is marked, and the New cue button is where Add rule was", async () => {
+  test("a rule that needs setup is marked, and the New rule button is where Add rule was", async () => {
     await automationEngine.addRule({
       name: "Needs a layer",
       enabled: false,
@@ -795,9 +779,9 @@ describe("what was there before still works", () => {
       cooldownSec: 0,
       oncePerService: false,
     });
-    await mount();
+    await mount("rules");
     assert.ok(document.querySelector("[data-needs-setup]"), "the needs-setup badge is gone");
-    assert.ok(button("New cue"), "no New cue button");
+    assert.ok(button("New rule"), "no New rule button");
     assert.equal(button("Add rule") === null, true, "Add rule is still on the page");
   });
 });

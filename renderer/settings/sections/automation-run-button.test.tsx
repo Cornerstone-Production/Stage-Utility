@@ -100,13 +100,13 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+async function mount(tab: "rules" | "commands" = "rules") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const view = render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab })),
     ),
   );
   await settle();
@@ -277,7 +277,7 @@ describe("a pair's row", () => {
   });
 
   test("is ONE row with one Run per half, labelled by the half", async () => {
-    await mount();
+    await mount("commands");
     assert.equal(document.querySelectorAll("[data-cue-pair-row]").length, 1);
     assert.equal(document.querySelectorAll("[data-run-button]").length, 2);
     assert.match(button("rule-on")?.textContent ?? "", /Run on/);
@@ -285,7 +285,7 @@ describe("a pair's row", () => {
   });
 
   test("each button runs its own rule, and the result names the half", async () => {
-    await mount();
+    await mount("commands");
     await click("rule-off");
     assert.deepEqual(
       runs().map((r) => r.url.split("/").at(-2)),
@@ -304,7 +304,7 @@ describe("a pair's row", () => {
 
   test("confirming one half does not arm the other", async () => {
     RULES = [half("on", { confirmRequired: true }), half("off")];
-    await mount();
+    await mount("commands");
     await click("rule-on");
     assert.equal(button("rule-on")?.getAttribute("data-run-button"), "armed");
     assert.equal(button("rule-off")?.getAttribute("data-run-button"), "idle");
@@ -320,7 +320,7 @@ describe("a pair's row", () => {
 
   test("both are disabled while disarmed", async () => {
     DISARMED = true;
-    await mount();
+    await mount("commands");
     assert.equal(button("rule-on")?.disabled, true);
     assert.equal(button("rule-off")?.disabled, true);
   });

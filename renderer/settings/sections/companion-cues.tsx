@@ -49,7 +49,6 @@ import { serverClock } from "../../lib/server-clock";
 import {
   Button,
   Checkbox,
-  Collapsible,
   DialogContent,
   DialogRoot,
   Input,
@@ -59,7 +58,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
   Status,
   toast,
 } from "../../components/ui";
@@ -1088,16 +1086,18 @@ export function CueAccessCard() {
     }
   }
 
+  const card = "flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-4";
   return (
-    <Collapsible
-      label="Calling cues"
-      summary={plural(tokens.length, "token")}
-      className="su-card px-4 py-2.5"
-    >
-      <div className="flex flex-col gap-2 pt-2">
+    <div className="flex flex-col gap-4" data-automation-access="">
+      <section className={card} data-access-card="tokens">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-footnote font-semibold text-fg">Calling commands</h2>
+          <span className="text-caption1 text-fg-muted">{plural(tokens.length, "token")}</span>
+        </div>
         <p className="text-caption1 text-fg-muted">
-          A cue is only reachable with a token. Mint one per caller — one for Home Assistant, one for a
-          script — so you can revoke it on its own.
+          Anything outside this app that calls a command is reachable only with a token. Mint one per caller — one for
+          Home Assistant, one for a script — so you can revoke it on its own. Consoles and Home tiles on this server
+          need none.
         </p>
 
         <div className="flex items-center gap-2">
@@ -1138,39 +1138,45 @@ export function CueAccessCard() {
           </div>
         )}
 
-        {tokens.map((t) => (
-          <div key={t.id} className="flex items-center gap-2 border-b border-line py-1 last:border-0">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-footnote text-fg">{t.label}</span>
-              <span className="block text-caption2 text-fg-subtle">
-                {t.lastUsedAt ? `last used ${new Date(t.lastUsedAt).toLocaleString()}` : "never used"}
-              </span>
-            </span>
-            <Button
-              variant="transparent"
-              size="small"
-              iconOnly
-              aria-label={`Revoke ${t.label}`}
-              onClick={async () => {
-                try {
-                  await invoke("cues:revokeToken", { id: t.id });
-                  refresh();
-                } catch (e) {
-                  toast.error(errorMessage(e));
-                }
-              }}
-            >
-              <Trash2Icon className="size-3.5 text-red-10" />
-            </Button>
+        {tokens.length > 0 && (
+          <div className="rounded-md border border-line">
+            {tokens.map((t) => (
+              <div key={t.id} className="flex items-center gap-2 border-b border-line px-2.5 py-1.5 last:border-0">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-footnote text-fg">{t.label}</span>
+                  <span className="block text-caption2 text-fg-subtle">
+                    {t.lastUsedAt ? `last used ${new Date(t.lastUsedAt).toLocaleString()}` : "never used"}
+                  </span>
+                </span>
+                <Button
+                  variant="transparent"
+                  size="small"
+                  iconOnly
+                  aria-label={`Revoke ${t.label}`}
+                  onClick={async () => {
+                    try {
+                      await invoke("cues:revokeToken", { id: t.id });
+                      refresh();
+                    } catch (e) {
+                      toast.error(errorMessage(e));
+                    }
+                  }}
+                >
+                  <Trash2Icon className="size-3.5 text-red-10" />
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+      </section>
 
-        <Separator />
-        <div className="flex items-center gap-2">
-          <p className="min-w-0 flex-1 text-caption1 text-fg-muted">
-            Home Assistant config for every cue on this server — one <code>rest_command</code> each, and a
-            switch per ON/OFF pair.
-          </p>
+      <section className={card} data-access-card="home-assistant">
+        <h2 className="text-footnote font-semibold text-fg">Home Assistant</h2>
+        <p className="text-caption1 text-fg-muted">
+          The Stage Utility integration from HACS reads every command with its Home Assistant switch on. This config is
+          the fallback: one <code>rest_command</code> for every command on this server, and a switch per ON/OFF pair.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="transparent" size="small" onClick={() => void showYaml()}>
             <CopyIcon className="size-3.5" /> Copy YAML
           </Button>
@@ -1184,7 +1190,7 @@ export function CueAccessCard() {
             </a>
           </Button>
         </div>
-      </div>
-    </Collapsible>
+      </section>
+    </div>
   );
 }

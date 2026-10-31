@@ -77,13 +77,15 @@ const cueRule = (params: Record<string, string | number> = {}, over: Partial<Omi
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+/** The page is tabs now: open the one holding the rules the test seeded (Commands when any is called by name). */
+async function mount(opens?: "commands" | "rules") {
+  const tab = opens ?? (rules().some((r) => r.trigger.id === "call.by-name") || rules().length === 0 ? "commands" : "rules");
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const view = render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {}), React.createElement(ConfirmHost, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab }), React.createElement(ConfirmHost, {})),
     ),
   );
   for (let i = 0; i < 3; i++) await settle();
@@ -434,7 +436,7 @@ describe("a conversion never renames a cue", () => {
   test("a rule made manual is never given a name another cue or former name holds", async () => {
     await automationEngine.addRule(cueRule({ aliases: "stage_reset_2" }, { name: "Existing" }));
     await automationEngine.addRule(base({ name: "Stage reset" }));
-    await mount();
+    await mount("rules");
     await openRow("Stage reset");
     await press(button("Make it manual"), "Make it manual");
     await save();

@@ -113,7 +113,7 @@ async function open(): Promise<void> {
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab: "rules" })),
     ),
   );
   await settle();

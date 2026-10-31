@@ -142,7 +142,7 @@ be edited into shape through the editor is visible rather than silent.
 
 ### Tokens
 
-Automation → **Calling cues** mints one token per caller. The token is
+Automation → Access → **Calling commands** mints one token per caller. The token is
 shown **once** — only a SHA-256 of it is stored — so a lost one is replaced, not
 recovered. Revoke them individually, which is why each has a label.
 
@@ -368,7 +368,7 @@ HACS, copy `custom_components/stage_utility` into Home Assistant's
 | | |
 |---|---|
 | **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
-| **Cue token** | an `su_…` secret from Automation → **Calling cues**, shown once when it is minted |
+| **Cue token** | an `su_…` secret from Automation → Access → **Calling commands**, shown once when it is minted |
 
 Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
 name that cannot exist to prove the token is accepted — a `404` means the token
@@ -480,8 +480,8 @@ so Home Assistant shows what it asked for rather than what the device did.
 
 Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
 voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
-and off the `cues` channel, so no entity is created for it and it appears under
-**Everything else** on the Automation page. `POST /api/cues/<name>` still fires
+and off the `cues` channel, so no entity is created for it and it loses its **Home Assistant** badge on the
+Automation page's Commands tab. `POST /api/cues/<name>` still fires
 it, and so does anything already calling it that way.
 
 A hidden pair's state is still read, and still shown on its row in the
@@ -803,7 +803,7 @@ refused, and a call that was itself skipped all leave the variable as the only
 thing worth comparing against.
 
 If the whole read fails rather than one pair — the server could not answer at all
-— the Automation page says so in one line above the rules list and shows no
+— the Automation page's Commands tab says so in one line above the list and shows no
 pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
