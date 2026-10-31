@@ -652,8 +652,9 @@ look and position, bound to a cue of its own that runs the same action with the
 same parameters. That cue is a **Called by name** rule named `btn_<label>`, hidden
 from Home Assistant, allowed during a service, with no cooldown, and it belongs to
 that Button. From then on the Button obeys Simulate mode and Disarm, as every cue
-does. The conversion runs once per install and logs one `[automation]` line saying
-how many Buttons it converted and on which views.
+does. The conversion runs at every start and on import, and logs one `[automation]` line,
+only when it converted something, saying how many Buttons it converted and on which
+views.
 
 **Make it a cue**, under an action's fields, turns the action into a manual cue
 and points the button at it, so the Automation page's Run button, Home
