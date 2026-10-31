@@ -5,6 +5,9 @@
 // page; `usePageTabs` holds the part every such page repeats (the URL-or-own-state
 // tab, the Search focus request, Cmd-F).
 //
+// ASSUMES A SEARCH TAB, and draws it last, pushed to the right edge (`ml-auto`) with a
+// magnifier: a page whose strip has no Search tab, or wants it elsewhere, needs another bar.
+//
 // One tab is the Search tab. It sits at the right end of the strip, shows a
 // magnifier, and is the one an arrow key must land on WITHOUT stealing focus into
 // its box mid-arrow, which is why the strip has both `onSelect` and `onMove`.

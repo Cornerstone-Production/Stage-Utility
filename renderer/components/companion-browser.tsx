@@ -12,7 +12,7 @@
 // Read-only: nothing here picks, presses or writes. Mounted only while the card's
 // Browse buttons is on, so Companion is not read for a page nobody opened.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
@@ -21,9 +21,9 @@ import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 
 import { invoke } from "../lib/api";
+import { companionButtonsQuery } from "../lib/companion-buttons";
 import { cn } from "../lib/cn";
 
-type ButtonsReply = { ok: true; pages: CompanionPageSummary[] } | { ok: false; reason: string };
 type PageReply =
   | { ok: true; page: number; name: string; cols: number; rows: number; keys: CompanionPageKey[] }
   | { ok: false; reason: string };
@@ -98,7 +98,7 @@ function PageGrid({ page }: { page: number }) {
   if (!data) return null;
   if (!data.ok) return <p className="text-caption1 text-danger-11">Could not read page {page}: {data.reason}</p>;
   const keys = new Map(data.keys.map((k) => [`${k.row},${k.col}`, k] as const));
-  const cells: React.ReactNode[] = [];
+  const cells: ReactNode[] = [];
   for (let r = 0; r < data.rows; r++) {
     for (let c = 0; c < data.cols; c++) cells.push(<Key key={`${r},${c}`} k={keys.get(`${r},${c}`)} page={page} />);
   }
@@ -266,17 +266,14 @@ function PagePicker({
 }
 
 export function CompanionBrowser() {
-  const { data, error, isLoading } = useQuery({
-    queryKey: ["companion:browse-pages"],
-    queryFn: () => invoke<ButtonsReply>("companion:buttons"),
-  });
+  const { data, error, isLoading } = useQuery(companionButtonsQuery);
   const [picked, setPicked] = useState<number | null>(null);
-  const pages = useMemo(() => (data?.ok ? listedPages(data.pages) : []), [data]);
+  const pages = useMemo(() => (data?.ok ? listedPages(data.pages ?? []) : []), [data]);
 
   if (isLoading) return <p className="text-caption1 text-fg-muted">Reading Companion's pages…</p>;
   if (error) return <p className="text-caption1 text-danger-11">Could not read Companion: {errorMessage(error)}</p>;
   if (!data) return null;
-  if (!data.ok) return <p className="text-caption1 text-danger-11">Could not read Companion: {data.reason}</p>;
+  if (!data.ok) return <p className="text-caption1 text-danger-11">Could not read Companion: {data.reason ?? "it did not answer"}</p>;
   if (pages.length === 0) return <p className="text-caption1 text-fg-muted">Companion has no page with a labelled button.</p>;
 
   // A page that has since gone empty falls back to the first listed one rather than drawing nothing.

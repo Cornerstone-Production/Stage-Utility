@@ -62,6 +62,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { companionButtonsQuery } from "../../lib/companion-buttons";
 import { plural } from "@main/services/plural";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
