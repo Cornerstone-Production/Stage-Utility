@@ -247,6 +247,15 @@ which, on a machine that already runs a Stage Utility, is somebody's live
 instance. The dev server prints its target on start; read it before you edit
 anything.
 
+Point a test server at an empty data dir:
+
+```bash
+STAGE_UTILITY_DATA="$(mktemp -d)" STAGE_UTILITY_PORT=8799 npm run server
+```
+
+Never a copy of a real install's data dir. Its config holds live device
+addresses and credentials, and the test server will connect to all of them.
+
 ## Before you open a PR
 
 ```bash
@@ -476,6 +485,51 @@ codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/exte
 Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes, with
 the CLI version the `models` job prints at the start. Record with that version: a
 newer CLI can change how the expected output is written.
+
+## Live data and storage
+
+Installs run on modest hardware, Raspberry Pi displays included, so new server
+work is efficient from the start rather than optimised later.
+
+- **One stream.** Live data reaches the browser over the single shared SSE
+  connection (`/api/events`, read with `onNotification(channel)`). A feature adds
+  a named channel to it; it never opens its own `EventSource` or socket.
+- **Broadcast on change, not on a timer.** Anything the browser can derive
+  (countdowns, clocks) is sent when it changes, plus a slow keepalive. A
+  change-driven channel needs a matching hydration read, or a freshly loaded page
+  shows "offline" until the next change.
+- **Idle when unwatched.** A producer of display-only data checks
+  `channelHasSubscribers(channel)` and skips its work when nobody is listening.
+  Anything a recorder needs keeps running.
+- **Serialise once per broadcast**, not once per client, and throttle
+  high-frequency or O(n) payloads and drop frames that change nothing.
+- **Persist through `DataStore`.** It writes atomically (temp file, then rename)
+  and, when a file will not parse, moves it aside as `.corrupt-<ts>` rather than
+  treating it as empty and overwriting it. Never hand-roll file writes. Each
+  store declares itself `"config"` or `"runtime"` in its constructor, which is
+  what decides whether backups carry it.
+- **Key request-derived lookups with `Map`.** A store indexed by anything that
+  arrives in a request (a view, display, plan or service-type id) holds a `Map`
+  in memory and converts to a plain object only at the disk boundary.
+  `obj[key] = value` with a request-derived key is a `js/remote-property-injection`
+  finding; `assertSafeKey` stays at the API boundary as the 400, but it is not
+  the fix. Fix the store rather than dismissing the alert.
+
+## Plain HTTP in production
+
+Installs are reached over plain HTTP on a LAN address, which browsers do not
+treat as a secure context. `localhost` is one, so a dev server hides the
+difference.
+
+- Do not call secure-context-only APIs (`crypto.randomUUID`, `crypto.subtle`,
+  clipboard writes, service workers) without a fallback. `randomUUID` missing in
+  production once made the layout editor's Add object do nothing.
+- Never gate anything on `Sec-Fetch-*` headers. Browsers send them only to HTTPS
+  and `localhost`, so production never sees them. Compare `Origin` with `Host`
+  instead.
+- Check UI work at the machine's LAN address, not `localhost`. To simulate a
+  missing API on a dev server, delete it in the page:
+  `Object.defineProperty(crypto, "randomUUID", { value: undefined })`.
 
 ## React state
 
