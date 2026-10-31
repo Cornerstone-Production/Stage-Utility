@@ -176,27 +176,32 @@ export function CueButton({
             : ts.background,
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          flexShrink: 0,
-          width: "0.55em",
-          height: "0.55em",
-          borderRadius: "50%",
-          background: liveOn
-            ? "var(--red-9)"
-            : state === "on"
-              ? "var(--green-9)"
-              : state === "settling"
-                ? "var(--amber-9)"
-                : "var(--su-fg-faint)",
-        }}
-      />
+      {!unset && (
+        <span
+          aria-hidden
+          style={{
+            flexShrink: 0,
+            width: "0.55em",
+            height: "0.55em",
+            borderRadius: "50%",
+            background: liveOn
+              ? "var(--red-9)"
+              : state === "on"
+                ? "var(--green-9)"
+                : state === "settling"
+                  ? "var(--amber-9)"
+                  : "var(--su-fg-faint)",
+          }}
+        />
+      )}
       <ButtonLabel
         style={{
-          fontWeight: 600,
+          fontWeight: unset ? 500 : 600,
           letterSpacing: "0.02em",
-          textTransform: "uppercase",
+          // A sentence, not a name: an unset tile is an instruction, and in capitals at a
+          // tile's size it shouted.
+          textTransform: unset ? "none" : "uppercase",
+          opacity: unset ? 0.7 : undefined,
           lineHeight: 1.05,
         }}
       >
