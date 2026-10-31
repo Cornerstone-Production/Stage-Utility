@@ -38,7 +38,7 @@ const { render, cleanup, fireEvent, act } = await import("@testing-library/react
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ButtonInspector, NEW_MANUAL_COMMAND_HREF } = await import("./button-inspector.js");
-const { timing } = await import("./button-presses.js");
+const { timing } = await import("./action-pane.js");
 type ButtonConfig = import("./button-inspector.js").ButtonConfig;
 
 after(() => {

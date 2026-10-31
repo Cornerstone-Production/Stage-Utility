@@ -32,7 +32,7 @@ function page(over: Partial<CardMenuDeps> = {}) {
     spl,
     splSummary: undefined,
     choosePress: (card) => chosen.push(card.id),
-    pressName: () => undefined,
+    cues: null,
     save: (update) => saved.push(update([c])),
     close: () => closed++,
     ...over,
@@ -138,7 +138,7 @@ describe("Size on a page arranged by hand", () => {
       spl,
       splSummary: undefined,
       choosePress: () => {},
-      pressName: () => undefined,
+      cues: null,
       save: (update) => (written = update(pageCards)),
       close: () => {},
     });
@@ -153,7 +153,10 @@ describe("a Button's right-click menu", () => {
   const button = card({ type: "cue-button", cue: "", showDevice: true });
 
   test("starts with Presses…, which says what it presses now, and the rest is the card's own", () => {
-    const named = buildCardMenu(button, page({ pressName: () => "Projectors" }).deps(button));
+    const projectors = { id: "projectors", name: "Projectors", room: "", cue: "projectors", available: true };
+    const cues = { manifest: { version: 1, server: { name: "t", lanUrl: null }, switches: [], buttons: [projectors] }, states: new Map() };
+    const bound = card({ type: "cue-button", cue: "projectors" });
+    const named = buildCardMenu(bound, page({ cues }).deps(bound));
     assert.deepEqual(shape(named), ["Presses…", "-", "Size", "Show", "-", "Remove Button"]);
     assert.equal(named[0]!.meta, "Projectors");
     assert.equal(buildCardMenu(button, page().deps(button))[0]!.meta, "Not set", "a Button with nothing chosen says so");

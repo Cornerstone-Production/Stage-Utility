@@ -33,7 +33,7 @@ function splMetricMenu(
     spl,
     splSummary: undefined,
     choosePress: () => {},
-    pressName: () => undefined,
+    cues: null,
     save: (update) => onPick((update([card])[0].config as { metricKey: string }).metricKey),
     close: () => {},
   });

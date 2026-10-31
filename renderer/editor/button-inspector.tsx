@@ -17,7 +17,7 @@ import { ButtonPresses, type CueButtonConfig } from "./button-presses";
 import { RowSwitch, RowText } from "./inspector-rows";
 
 export type ButtonConfig = CueButtonConfig;
-export { NEW_MANUAL_COMMAND_HREF } from "./button-presses";
+export { NEW_MANUAL_COMMAND_HREF } from "./command-pane";
 
 /** Whether Show device changes anything: a pair has a reading to show, and a lone
  *  command only has a room line when it has a room. */

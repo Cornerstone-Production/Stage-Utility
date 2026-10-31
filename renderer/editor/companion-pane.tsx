@@ -18,26 +18,17 @@
 // tested is which key a click picks and what it writes.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
 
-import { fingerprintParams } from "@main/services/companion-fingerprint";
 import type { CompanionPageKey, CompanionPageSummary, CompanionPageView } from "@main/services/companion-export";
 import { errorMessage } from "@main/services/errors";
 
 import { ErrorNote } from "../components/ui";
 import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
-import { serverClock } from "../lib/server-clock";
-import type { CompanionButton } from "../settings/sections/companion-cues";
+import { companionButtonsQuery, fingerprintFor, type CompanionButton } from "../settings/sections/companion-cues";
 import { COMPANION_PRESS, type PressTarget } from "./owned-press";
-
-interface ButtonsReply {
-  ok: boolean;
-  reason?: string;
-  buttons: CompanionButton[];
-  pages?: CompanionPageSummary[];
-}
 
 type PageReply = ({ ok: true } & CompanionPageView) | { ok: false; reason: string };
 
@@ -53,23 +44,24 @@ const MAX_RESULTS = 40;
 
 /** The press action for a picked button, with the identity the reconcile compares. */
 export function pressTargetFor(b: CompanionButton): PressTarget {
-  const label = b.label || `p${b.page} r${b.row} c${b.col}`;
-  return {
-    name: label,
-    action: {
-      id: COMPANION_PRESS,
-      params: fingerprintParams(
-        { page: b.page, row: b.row, col: b.col, pageId: b.pageId, label, actionIds: b.actionIds },
-        "in-place",
-        new Date(serverClock.now()).toISOString(),
-      ),
-    },
-  };
+  return { name: b.label || `p${b.page} r${b.row} c${b.col}`, action: { id: COMPANION_PRESS, params: fingerprintFor(b) } };
 }
 
 /** The pages worth listing: an empty page has nothing to pick. */
 export function listedPages(pages: readonly CompanionPageSummary[] | undefined): CompanionPageSummary[] {
   return (pages ?? []).filter((p) => p.labelled > 0);
+}
+
+/**
+ * The listed page next to `page` in a direction, or null at the end of the list.
+ * `page` need not be listed: a pick on a page that has since gone empty still steps
+ * to the nearest listed one either way, instead of leaving both arrows dead.
+ */
+export function neighbourPage(pages: readonly CompanionPageSummary[], page: number | null, d: -1 | 1): number | null {
+  const sorted = pages.map((p) => p.page).sort((a, b) => a - b);
+  if (page === null) return null;
+  const found = d === 1 ? sorted.find((n) => n > page) : [...sorted].reverse().find((n) => n < page);
+  return found ?? null;
 }
 
 /** Pages whose number starts with, or whose name contains, what was typed. */
@@ -96,15 +88,11 @@ export function CompanionPane({
   /** A write is in flight. */
   disabled?: boolean;
 }) {
-  const buttonsQ = useQuery({
-    queryKey: ["companion:buttons"],
-    queryFn: () => invoke<ButtonsReply>("companion:buttons"),
-  });
+  const buttonsQ = useQuery(companionButtonsQuery);
   const reply = buttonsQ.data;
   const pages = useMemo(() => listedPages(reply?.pages), [reply]);
   const [chosen, setChosen] = useState<number | null>(null);
   const page = chosen ?? current?.page ?? pages[0]?.page ?? null;
-  const here = pages.findIndex((p) => p.page === page);
 
   const pageQ = useQuery({
     queryKey: ["companion:page", page],
@@ -186,26 +174,23 @@ export function CompanionPane({
       <PageSelect
         pages={pages}
         page={page}
-        canPrev={here > 0}
-        canNext={here >= 0 && here < pages.length - 1}
+        canPrev={neighbourPage(pages, page, -1) !== null}
+        canNext={neighbourPage(pages, page, 1) !== null}
         onPage={setChosen}
         onStep={(d) => {
-          const next = pages[here + d];
-          if (next) setChosen(next.page);
+          const next = neighbourPage(pages, page, d);
+          if (next !== null) setChosen(next);
         }}
       />
 
-      {!reply || pageQ.isPending ? (
-        <p className="py-3 text-center text-caption1 text-fg-muted">Reading Companion…</p>
-      ) : pageQ.isError ? (
-        <ErrorNote>Could not read page {page}: {errorMessage(pageQ.error)}</ErrorNote>
-      ) : pageQ.data && !pageQ.data.ok ? (
-        <ErrorNote>Could not read page {page}: {pageQ.data.reason}</ErrorNote>
-      ) : pageQ.data?.ok ? (
-        <PageGrid view={pageQ.data} current={current} disabled={disabled} onPick={pickAt} />
-      ) : (
-        <p className="py-3 text-center text-caption1 text-fg-muted">Companion has no page with buttons on it.</p>
-      )}
+      <PageBody
+        reading={!reply}
+        page={page}
+        query={pageQ}
+        current={current}
+        disabled={disabled}
+        onPick={pickAt}
+      />
 
       {problem && <ErrorNote>{problem}</ErrorNote>}
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-caption1 text-fg-muted">
@@ -218,6 +203,36 @@ export function CompanionPane({
       </div>
     </div>
   );
+}
+
+/** What stands under the page dropdown: the page's grid, or the one line that says why there is none. */
+function PageBody({
+  reading,
+  page,
+  query,
+  current,
+  disabled,
+  onPick,
+}: {
+  /** The button list has not answered yet. */
+  reading: boolean;
+  page: number | null;
+  query: UseQueryResult<PageReply>;
+  current: PickedCompanion | null;
+  disabled?: boolean;
+  onPick: (at: { page: number; row: number; col: number }) => void;
+}) {
+  const quiet = "py-3 text-center text-caption1 text-fg-muted";
+  if (reading) return <p className={quiet}>Reading Companion…</p>;
+  // Checked before the query: with no page there is nothing to ask for, and a disabled
+  // query reads as pending for ever.
+  if (page === null) return <p className={quiet}>Companion has no page with buttons on it.</p>;
+  if (query.isPending) return <p className={quiet}>Reading Companion…</p>;
+  if (query.isError) return <ErrorNote>Could not read page {page}: {errorMessage(query.error)}</ErrorNote>;
+  const view = query.data;
+  if (!view) return <p className={quiet}>Companion has no page with buttons on it.</p>;
+  if (!view.ok) return <ErrorNote>Could not read page {page}: {view.reason}</ErrorNote>;
+  return <PageGrid view={view} current={current} disabled={disabled} onPick={onPick} />;
 }
 
 /** The page dropdown with its arrows: filter by number or name, empty pages left out. */

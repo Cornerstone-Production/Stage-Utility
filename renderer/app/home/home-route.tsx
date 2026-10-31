@@ -38,7 +38,7 @@ import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from 
 import { pickedValue } from "./card-toggles";
 import { buildCardMenu } from "./card-menu";
 import { ButtonPressSheet, buttonConfigOf } from "./button-press-sheet";
-import { cueEntry, useCueLive } from "../../main/use-cue-live";
+import { useCueLive } from "../../main/use-cue-live";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -368,10 +368,7 @@ export function HomeRoute() {
       spl,
       splSummary,
       choosePress: (c) => setPressingId(c.id),
-      pressName: (c) => {
-        const cue = buttonConfigOf(c)?.cue ?? "";
-        return cue ? (cueEntry(menuCues, cue)?.row.name ?? cue) : undefined;
-      },
+      cues: menuCues,
       save,
       close: () => setMenu(null),
     });

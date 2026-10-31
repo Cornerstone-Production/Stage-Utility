@@ -15,26 +15,21 @@
 // The Label and Show device rows are the host's: this draws the choice and what
 // it saved as, nothing else.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { validateParams } from "@main/services/automation-param-validation";
 import { calledCueName } from "@main/services/cue-aliases";
 import { errorMessage } from "@main/services/errors";
 import type { Rule } from "@main/types/automation";
 import type { LayoutObjectConfig } from "@main/types/views";
 
 import { ErrorNote, Switch } from "../components/ui";
-import { automationRegistryQuery } from "../lib/automation-registry";
 import { invoke } from "../lib/api";
-import { cn } from "../lib/cn";
 import { useLatestRef } from "../lib/use-latest-ref";
 import type { CuesLive } from "../main/use-cue-live";
-import { useOptionSources } from "../settings/sections/automation-option-sources";
-import { ActionParamsFields, seededParams } from "../settings/sections/rule-editor-dialog";
-import { pickerEntries, pickerHeadings } from "../settings/sections/automation-picker";
+import { ActionPane } from "./action-pane";
+import { CommandPane } from "./command-pane";
 import { CompanionPane, type PickedCompanion } from "./companion-pane";
-import { CuePicker } from "./cue-picker";
 import { RowToggle } from "./inspector-rows";
 import {
   COMPANION_PRESS,
@@ -49,14 +44,6 @@ import {
 
 export type CueButtonConfig = Extract<LayoutObjectConfig, { type: "cue-button" }>;
 
-/** Where "+ New manual command…" goes: the Automation page, which opens its creation
- *  flow for `new=manual`. */
-export const NEW_MANUAL_COMMAND_HREF = "/automation?new=manual";
-
-/** How long a typed field waits before its command is rewritten, so one edit is one
- *  write. An object so a test can set it to 0 rather than wait. */
-export const timing = { fieldWriteMs: 500 };
-
 const PRESSES: readonly { value: PressKind; label: string }[] = [
   { value: "companion", label: "Companion" },
   { value: "action", label: "App action" },
@@ -66,18 +53,8 @@ const PRESSES: readonly { value: PressKind; label: string }[] = [
 type RulesReply = { rules: Rule[] };
 
 /** The rules, under the key the Automation page reads, so a write here refreshes both. */
-export const rulesQuery = {
-  queryKey: ["automation:rules"],
-  queryFn: () => invoke<RulesReply>("automation:rules"),
-};
-
-interface UsageUse {
-  viewId: string;
-  viewName: string;
-  objectId: string;
-  label: string;
-  home: boolean;
-}
+const RULES_KEY = ["automation:rules"] as const;
+const rulesQuery = { queryKey: RULES_KEY, queryFn: () => invoke<RulesReply>("automation:rules") };
 
 export function ButtonPresses({
   owner,
@@ -97,6 +74,11 @@ export function ButtonPresses({
   const qc = useQueryClient();
   const rulesQ = useQuery(rulesQuery);
   const rules = useMemo(() => rulesQ.data?.rules ?? [], [rulesQ.data]);
+  /** What a write changed: the rules, and where each command is used. */
+  const refreshRules = () => {
+    void qc.invalidateQueries({ queryKey: RULES_KEY });
+    void qc.invalidateQueries({ queryKey: ["cues:usage"] });
+  };
   const own = ownedRuleFor(rules, owner, c.cue);
   const kind = pressKindOf(rules, owner, c.cue);
   // The choice shown is the operator's own until a pick makes the Button's rule say
@@ -122,8 +104,7 @@ export function ButtonPresses({
         return;
       }
       setError(null);
-      void qc.invalidateQueries({ queryKey: ["automation:rules"] });
-      void qc.invalidateQueries({ queryKey: ["cues:usage"] });
+      refreshRules();
       if (latest.current.cue !== made.cue) onConfig({ ...latest.current, cue: made.cue });
     });
     queue.current = run;
@@ -167,8 +148,7 @@ export function ButtonPresses({
         busy={busy}
         onListed={() => {
           setError(null);
-          void qc.invalidateQueries({ queryKey: ["automation:rules"] });
-          void qc.invalidateQueries({ queryKey: ["cues:usage"] });
+          refreshRules();
           // The Button presses a plain command now, and the pane says so.
           setChosen("command");
         }}
@@ -201,188 +181,6 @@ function ownedCueNames(rules: readonly Rule[], own: Rule | null): ReadonlySet<st
     if (name) names.add(name);
   }
   return names;
-}
-
-// ── App action ────────────────────────────────────────────────────────────────
-
-/** The action list as the rule editor groups it, then the action's own fields. */
-function ActionPane({
-  saved,
-  onWrite,
-}: {
-  /** What this Button's own command does now, when it presses an app action. */
-  saved: { actionId: string; params: Record<string, string | number> } | null;
-  onWrite: (target: PressTarget) => Promise<void>;
-}) {
-  const { data: registry, isError } = useQuery(automationRegistryQuery);
-  const optionSources = useOptionSources();
-  const actions = registry?.actions ?? null;
-  // What is being edited: the saved rule's action until the operator touches one.
-  const [draft, setDraft] = useState<{ actionId: string; params: Record<string, string | number> } | null>(null);
-  const shown = draft ?? saved;
-  const action = actions?.find((a) => a.id === shown?.actionId) ?? null;
-  const params = shown?.params ?? {};
-  const issues = action ? validateParams(action.params, params) : [];
-  const entries = useMemo(
-    // Press a Companion button is the Companion choice, not an app action.
-    () => pickerEntries("action", (actions ?? []).filter((a) => a.id !== COMPANION_PRESS)),
-    [actions],
-  );
-  const headings = useMemo(() => pickerHeadings(entries), [entries]);
-
-  // A field is rewritten once it has stopped changing, and at once when the
-  // inspector closes under it: a typed value must not be lost to a click elsewhere.
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null);
-  useEffect(
-    () => () => {
-      if (!pending.current) return;
-      clearTimeout(pending.current.timer);
-      pending.current.send();
-    },
-    [],
-  );
-
-  function change(next: { actionId: string; params: Record<string, string | number> }, delayMs: number) {
-    setDraft(next);
-    if (pending.current) clearTimeout(pending.current.timer);
-    pending.current = null;
-    const spec = actions?.find((a) => a.id === next.actionId);
-    // A command with a field still blank would be refused by the server, and a
-    // Button bound to a command that refuses is worse than one bound to nothing.
-    if (!spec || validateParams(spec.params, next.params).length > 0) return;
-    const send = () => {
-      pending.current = null;
-      void onWrite({ name: spec.label, action: { id: next.actionId, params: next.params } });
-    };
-    if (delayMs <= 0) send();
-    else pending.current = { timer: setTimeout(send, delayMs), send };
-  }
-
-  if (isError) return <ErrorNote>Could not load the app&rsquo;s actions.</ErrorNote>;
-  const unknown = shown && shown.actionId && actions && !action && shown.actionId !== COMPANION_PRESS;
-
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div role="listbox" aria-label="App actions" className="flex max-h-64 flex-col overflow-y-auto rounded-md border border-line">
-        {!actions && <p className="px-2.5 py-1.5 text-caption1 text-fg-muted">Loading actions…</p>}
-        {unknown && (
-          // A saved id the registry no longer has stays visible and marked, so the Button stays editable.
-          <ActionOption label={`${shown.actionId} (not found)`} selected onPick={() => undefined} />
-        )}
-        {headings.map((h) => (
-          <div key={h.name} role="group" aria-label={h.name}>
-            <div className="px-2.5 pb-1 pt-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{h.name}</div>
-            {entries
-              .filter((e) => e.group === h.name)
-              .map((e) => (
-                <ActionOption
-                  key={e.id}
-                  label={e.label}
-                  selected={e.id === shown?.actionId}
-                  onPick={() => {
-                    if (e.id === shown?.actionId) return;
-                    const spec = actions?.find((a) => a.id === e.id);
-                    change({ actionId: e.id, params: seededParams("action", e.id, spec?.params ?? []) }, 0);
-                  }}
-                />
-              ))}
-          </div>
-        ))}
-      </div>
-      {action?.help && <p className="text-caption2 leading-snug text-fg-muted">{action.help}</p>}
-      {shown && (
-        <ActionParamsFields
-          actionId={shown.actionId}
-          action={action}
-          params={params}
-          optionSources={optionSources}
-          onChange={(next) => change({ actionId: shown.actionId, params: next }, timing.fieldWriteMs)}
-          issues={Object.fromEntries(issues.map((i) => [i.key, i.message]))}
-          attempted
-        />
-      )}
-      {issues.length > 0 && (
-        <p className="text-caption2 leading-snug text-fg-muted">
-          Fill in what needs setup and the Button saves its command. Until then it keeps what it pressed before.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function ActionOption({ label, selected, onPick }: { label: string; selected: boolean; onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onClick={onPick}
-      className={cn(
-        "flex w-full items-center justify-between gap-2 border-b border-line px-2.5 py-1.5 text-left text-footnote text-fg last:border-b-0",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-        selected ? "bg-accent/12" : "hover:bg-fill",
-      )}
-    >
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
-  );
-}
-
-// ── A command ─────────────────────────────────────────────────────────────────
-
-function CommandPane({
-  cues,
-  value,
-  hide,
-  where,
-  owner,
-  onChange,
-}: {
-  cues: CuesLive | null;
-  value: string;
-  hide: ReadonlySet<string>;
-  where: string;
-  owner: PressOwner;
-  onChange: (cue: string) => void;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <CuePicker cues={cues} value={value} hide={hide} onChange={onChange} />
-      <a
-        href={NEW_MANUAL_COMMAND_HREF}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="self-start rounded text-footnote text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        + New manual command…
-      </a>
-      {value && <UsedOn cue={value} where={where} owner={owner} />}
-    </div>
-  );
-}
-
-/** The chips of every screen a command is used on. */
-function UsedOn({ cue, where, owner }: { cue: string; where: string; owner: PressOwner }) {
-  const { data, isError } = useQuery({
-    queryKey: ["cues:usage"],
-    queryFn: () => invoke<Record<string, UsageUse[]>>("cues:usage"),
-  });
-  if (isError) return <p className="text-caption2 text-fg-subtle">Could not read where it is used.</p>;
-  const uses = data ? ((Object.hasOwn(data, cue.trim().toLowerCase()) ? data[cue.trim().toLowerCase()] : null) ?? []) : null;
-  if (!uses) return null;
-  // A Button that is not saved yet is not in the views: it is on this screen all the same.
-  const places = new Map<string, string>(uses.map((u) => [u.viewId, u.home ? "Home" : u.viewName]));
-  if (!places.has(owner.viewId)) places.set(owner.viewId, where);
-  return (
-    <p className="flex flex-wrap items-center gap-1 text-caption1 text-fg-muted">
-      <span>Used on</span>
-      {[...places].map(([id, name]) => (
-        <span key={id} className="rounded bg-fill px-1.5 text-caption2 text-fg">
-          {name}
-        </span>
-      ))}
-    </p>
-  );
 }
 
 // ── What it saved as ──────────────────────────────────────────────────────────

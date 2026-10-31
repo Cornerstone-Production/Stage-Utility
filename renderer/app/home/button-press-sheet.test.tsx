@@ -27,7 +27,7 @@ const { render, cleanup, fireEvent, screen } = await import("@testing-library/re
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ButtonPressSheet } = await import("./button-press-sheet.js");
-const { timing } = await import("../../editor/button-presses.js");
+const { timing } = await import("../../editor/action-pane.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
