@@ -255,6 +255,13 @@ export interface LayoutRenderCtx {
    * anywhere else never receives one.
    */
   activeCardMenuId?: string | null;
+  /**
+   * Open the sheet that chooses what a Button presses, for the Button with this
+   * object id. Set by Home alone, which has no inspector: a Button with nothing
+   * chosen reads "Choose what it presses" there, and tapping it calls this.
+   * Absent everywhere else, where an unset Button reads Unbound and does nothing.
+   */
+  choosePress?: (objectId: string) => void;
 }
 
 /**
@@ -1511,7 +1518,16 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
+      return (
+        <CueButton
+          config={c}
+          cues={ctx.cues}
+          known={ctx.cuesKnown}
+          interactive={ctx.interactive}
+          onChoose={ctx.choosePress ? () => ctx.choosePress?.(o.id) : undefined}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton

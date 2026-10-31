@@ -159,7 +159,11 @@ const NOMINAL_H = ROW_PX * 6;
  * layout, so a Home with no SPL meter never opens an SPL subscription — the same
  * efficiency rule every other surface follows.
  */
-function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderCtx | null {
+function useHomeCtx(
+  layout: LayoutDTO,
+  menuCardId: string | null,
+  choosePress: ((objectId: string) => void) | undefined,
+): LayoutRenderCtx | null {
   // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
   // under the same cycle/depth limiter the renderer uses, so seeding it with
   // nothing would give the gate one more level of budget than the render and
@@ -216,6 +220,8 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     // by a card's own chart to stop tracking the pointer under the menu that
     // right-clicking that same card just opened.
     activeCardMenuId: menuCardId,
+    // Home has no inspector, so a Button with nothing chosen is chosen from here.
+    choosePress,
   };
 }
 
@@ -313,6 +319,7 @@ export function HomeGrid({
   gridRef,
   onCardContextMenu,
   menuCardId = null,
+  onChoosePress,
 }: {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
@@ -340,8 +347,11 @@ export function HomeGrid({
    *  the menu's whole lifecycle (position, items, close) — this is only the
    *  one bit of that state a widget underneath needs to see. */
   menuCardId?: string | null;
+  /** Open the sheet that chooses what a Button with nothing chosen presses, from
+   *  tapping its tile. Absent where Home cannot be edited. */
+  onChoosePress?: (objectId: string) => void;
 }) {
-  const ctx = useHomeCtx(layout, menuCardId);
+  const ctx = useHomeCtx(layout, menuCardId, onChoosePress);
   const boxes = boxesOverride ?? boxesOf(cards);
   const byId = new Map(boxes.map((b) => [b.id, b]));
   // A signature rather than the array: the effect must run when a card MOVES,

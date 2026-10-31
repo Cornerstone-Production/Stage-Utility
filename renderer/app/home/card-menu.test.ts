@@ -25,16 +25,19 @@ function card(config: Record<string, unknown>): LayoutObject {
 /** A page stand-in that records what the menu saved and how often it closed. */
 function page(over: Partial<CardMenuDeps> = {}) {
   const saved: LayoutObject[][] = [];
+  const chosen: string[] = [];
   let closed = 0;
   const deps = (c: LayoutObject): CardMenuDeps => ({
     scoresFavourites: [],
     spl,
     splSummary: undefined,
+    choosePress: (card) => chosen.push(card.id),
+    pressName: () => undefined,
     save: (update) => saved.push(update([c])),
     close: () => closed++,
     ...over,
   });
-  return { saved, closes: () => closed, deps };
+  return { saved, chosen, closes: () => closed, deps };
 }
 
 const shape = (items: ContextMenuItem[]) => items.map((i) => (i.separator ? "-" : i.label));
@@ -134,6 +137,8 @@ describe("Size on a page arranged by hand", () => {
       scoresFavourites: [],
       spl,
       splSummary: undefined,
+      choosePress: () => {},
+      pressName: () => undefined,
       save: (update) => (written = update(pageCards)),
       close: () => {},
     });
@@ -141,5 +146,29 @@ describe("Size on a page arranged by hand", () => {
     const home = (id: string) => written.find((o) => o.id === id)!.home!;
     assert.deepEqual([home("timer").size, home("timer").row], ["tall", 1]);
     assert.equal(home("below").row, 5, "the card below was left under the grown one");
+  });
+});
+
+describe("a Button's right-click menu", () => {
+  const button = card({ type: "cue-button", cue: "", showDevice: true });
+
+  test("starts with Presses…, which says what it presses now, and the rest is the card's own", () => {
+    const named = buildCardMenu(button, page({ pressName: () => "Projectors" }).deps(button));
+    assert.deepEqual(shape(named), ["Presses…", "-", "Size", "Show", "-", "Remove Button"]);
+    assert.equal(named[0]!.meta, "Projectors");
+    assert.equal(buildCardMenu(button, page().deps(button))[0]!.meta, "Not set", "a Button with nothing chosen says so");
+  });
+
+  test("choosing Presses… closes the menu and opens the sheet for that card", () => {
+    const p = page();
+    buildCardMenu(button, p.deps(button))[0]!.onSelect!();
+    assert.equal(p.closes(), 1);
+    assert.deepEqual(p.chosen, ["c1"]);
+    assert.deepEqual(p.saved, [], "nothing is saved until the sheet is saved");
+  });
+
+  test("no other card offers it", () => {
+    const clock = card({ type: "clock" });
+    assert.equal(buildCardMenu(clock, page().deps(clock)).some((i) => i.label === "Presses…"), false);
   });
 });

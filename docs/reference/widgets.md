@@ -687,6 +687,11 @@ state as the amber dashed ring.
 **Show device** appears for a pair, or a command that has a room, and turns off the
 line under the label.
 
+On Home, a Button's right-click menu has **Presses…**, which opens the same
+**Presses** choices and a **Label** in a sheet; **Save** stores them. A Button with
+nothing chosen reads **Choose what it presses**, and tapping it opens that sheet.
+A Button's own command made there belongs to Home.
+
 A Button saved by an earlier version as **Run an action** is converted when the
 server starts, and when a view carrying one is imported: it becomes a Button with
 the same label, look and position, bound to a command of its own that runs the same

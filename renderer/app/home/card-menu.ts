@@ -26,6 +26,10 @@ export interface CardMenuDeps {
   spl: SplMeters;
   /** History's per-service summaries, for Recent services' Metric submenu. */
   splSummary: SplServiceSummary[] | undefined;
+  /** Open the sheet that chooses what a Button presses. */
+  choosePress: (card: LayoutObject) => void;
+  /** What a Button presses now, by name, for the menu row; undefined when it presses nothing yet. */
+  pressName: (card: LayoutObject) => string | undefined;
   /** Apply a change to the card list and persist it. */
   save: (update: (objs: readonly LayoutObject[]) => LayoutObject[]) => void;
   /** Close the menu. A checkable row leaves it open; a choice closes it. */
@@ -42,7 +46,7 @@ export interface CardMenuDeps {
  * The settings themselves are derived — see card-toggles.
  */
 export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMenuItem[] {
-  const { scoresFavourites, spl, splSummary, save, close } = deps;
+  const { scoresFavourites, spl, splSummary, choosePress, pressName, save, close } = deps;
   const type = (card.config as { type: string }).type;
   // A retired timer is named as the Timer it opens as.
   const label = LAYOUT_OBJECTS[displayType(card.config) as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
@@ -54,6 +58,18 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
     close();
   };
 
+  // A Button's one setting that matters is what it presses, and Home has no
+  // inspector to set it in.
+  if (type === "cue-button") {
+    items.push({
+      label: "Presses…",
+      meta: pressName(card) ?? "Not set",
+      onSelect: () => {
+        close();
+        choosePress(card);
+      },
+    });
+  }
   for (const t of toggles) {
     items.push({
       label: t.label,
