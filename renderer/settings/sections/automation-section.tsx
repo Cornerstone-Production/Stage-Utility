@@ -658,13 +658,16 @@ export function AutomationSection({
     queryFn: () =>
       invoke<{ rules: RuleWithIssues[]; settings: { simulate: boolean; disarmed: boolean } }>("automation:rules"),
   });
-  // The rules, and where the commands are used: a save can rename a command, and its Buttons with it.
+  const refreshRules = useCallback(() => void qc.invalidateQueries({ queryKey: ["automation:rules"] }), [qc]);
+  // After a write of this page's own: the rules, and where the commands are used, because a
+  // save can rename a command and its Buttons with it. A broadcast refreshes the rules only:
+  // usage is read from the views file on each request, so it is not re-read for every rule event.
   const refresh = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ["automation:rules"] });
+    refreshRules();
     void qc.invalidateQueries({ queryKey: CUE_USAGE_KEY });
-  }, [qc]);
-  useEffect(() => onNotification("automation:rules", refresh), [refresh]);
-  useEffect(() => onNotification("automation:settings", refresh), [refresh]);
+  }, [qc, refreshRules]);
+  useEffect(() => onNotification("automation:rules", refreshRules), [refreshRules]);
+  useEffect(() => onNotification("automation:settings", refreshRules), [refreshRules]);
 
   // Runtime option sources, so a param declaring optionsFrom resolves to real
   // things. One record over the closed set main/types/automation.ts declares —
