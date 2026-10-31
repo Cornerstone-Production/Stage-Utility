@@ -91,7 +91,9 @@ export function planActionButtonMigration(
   // The same Button, found again by a pass that died before it finished.
   const ownedAlready = new Map<string, string>();
   for (const r of existingRules) {
-    if (r.ownedBy) ownedAlready.set(`${r.ownedBy.viewId}\n${r.ownedBy.objectId}`, calledCueName(r.trigger));
+    // A hand-edited owned rule with no cue name binds nothing: it is not "already there".
+    const name = r.ownedBy ? calledCueName(r.trigger) : "";
+    if (r.ownedBy && name) ownedAlready.set(`${r.ownedBy.viewId}\n${r.ownedBy.objectId}`, name);
   }
 
   const rules: Rule[] = [];
@@ -113,7 +115,7 @@ export function planActionButtonMigration(
         // has no letters in it.
         const ruleName = label ?? registryName;
         let cueName = known;
-        if (!cueName) {
+        if (cueName === undefined) {
           cueName = cueNameFor(cueSlug(ruleName) ? ruleName : registryName, taken, "btn_");
           taken.add(cueName);
           rules.push({

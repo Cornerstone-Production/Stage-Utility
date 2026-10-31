@@ -332,6 +332,28 @@ describe("migrating when something goes wrong", () => {
     assert.equal((await automationStore.loadRules()).length, 0);
   });
 
+  test("an owned rule with no cue name does not bind its Button: the Button gets a cue that has a name", async () => {
+    await automationStore.saveRules([
+      {
+        id: "hand-edited",
+        name: "Hand edited",
+        enabled: true,
+        trigger: { id: "call.by-name", params: { name: "" } },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+        ownedBy: { viewId: "v-booth", objectId: "b-shutter" },
+      },
+    ]);
+    await settingsStore.patch({ actionButtonsMigrated: false });
+    await viewsStore.save(fixtureViews());
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(cueOf(out.views, "v-booth", "b-shutter"), "btn_shutter", "the Button was bound to the unnamed rule");
+    const bound = (await automationStore.loadRules()).filter((r) => r.ownedBy?.objectId === "b-shutter");
+    assert.deepEqual(bound.map((r) => r.trigger.params.name).sort(), ["", "btn_shutter"]);
+  });
+
   test("an install with no Run an action Buttons logs nothing and still records the pass", async (t) => {
     await settingsStore.patch({ actionButtonsMigrated: false });
     await viewsStore.save([]);
