@@ -75,14 +75,14 @@ unsaved fields asks first.
 it found and how many of Companion's own connections are healthy — see
 [When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
 It never presses anything. Its answer appears in the card. It reads the **saved**
-host and port, so while the fields hold edits **Test** is off and says to save first.
+host and port, so while the fields hold edits **Test** is off and says to save first. An answer goes as soon as a field is edited, and when Save or Discard lands, so one never sits beside settings it did not run against.
 
 **Browse buttons** opens Companion's pages in the card, read-only, so you can see
 what Stage Utility can press and what it will call each button without opening a
 rule. One page shows at a time, as a grid of the keys it uses (never fewer than 8
 by 4; a page wider than the card scrolls sideways), in Companion's own colours and
 with its icons. A button that points at another is drawn as the one it points at,
-marked **↪**; page up, page down and page number keys are blank. The page
+marked with a small **ref** chip; page up, page down and page number keys are blank. The page
 control is a dropdown with a filter that takes a number or any part of a name,
 and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
 both, because a real install has about a hundred pages and more than half are
