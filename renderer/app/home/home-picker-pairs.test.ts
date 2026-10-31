@@ -130,6 +130,7 @@ describe("the wall palette is unchanged", () => {
     assert.deepEqual(
       offered.sort(),
       [
+        "home-attention",
         "home-next-service",
         "home-readiness",
         "home-recent-services",

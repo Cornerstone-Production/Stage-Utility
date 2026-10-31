@@ -53,7 +53,7 @@ function input(answered: Source | null): Input {
       labels: { from: "integrationsSnap" },
       known: answered === "integrationsSnap",
     },
-    onlinePresence: { onlineOutputIds: ["onlinePresence"], known: answered === "onlinePresence" },
+    onlinePresence: { onlineOutputIds: ["onlinePresence"], known: answered === "onlinePresence", lastSeen: new Map() },
   };
 }
 

@@ -27,6 +27,7 @@ import {
   ToggleRightIcon,
   type LucideIcon,
   RadioTowerIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
@@ -90,6 +91,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "view-embed": FrameIcon,
   "screen-embed": MonitorPlayIcon,
   "ndi-video": CastIcon,
+  "home-attention": TriangleAlertIcon,
   "home-readiness": CheckSquareIcon,
   "home-next-service": ListIcon,
   "home-live-status": GaugeIcon,

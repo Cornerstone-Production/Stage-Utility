@@ -472,6 +472,9 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "home:getSnoozes"
+  | "home:snooze"
+  | "home:unsnooze"
   | "messages:clearAlert"
   | "messages:get"
   | "messages:reply"
@@ -1642,6 +1645,12 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "notes:set":
       return post<T>("/api/notes", p);
 
+    case "home:getSnoozes":
+      return apiFetch<T>("/api/home/snoozes", { cache: "no-store" });
+    case "home:snooze":
+      return post<T>("/api/home/snoozes", { key: p.key, severity: p.severity });
+    case "home:unsnooze":
+      return del<T>(`/api/home/snoozes/${encodeURIComponent(String(p.key))}`);
     case "messages:get":
       // no-store, as the poll transport does: this read is also a clock sample (see
       // useMessagesStatus), so it must come from the server now and not a cache.

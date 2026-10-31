@@ -24,7 +24,7 @@
 // The one thing that genuinely differed is the failure clear below, which is now
 // an option on the shared hook rather than a reason to keep a second copy.
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { invoke } from "../lib/api";
 import { useStatusChannel } from "./use-status-channel";
@@ -36,6 +36,8 @@ interface PresenceDTO {
   connected?: string[];
   /** Which broadcast this set belongs to — see display-presence.ts. */
   rev?: number;
+  /** `[outputId, epochMs]` pairs; see display-presence.ts. */
+  lastSeen?: [string, number][];
 }
 
 export interface DisplayPresenceResult {
@@ -45,7 +47,12 @@ export interface DisplayPresenceResult {
    *  Home's readiness list and screens count must say so rather than reading
    *  every screen as offline for the width of one slow read. */
   known: boolean;
+  /** When each output last reported in, epoch ms. Exact for one that is not
+   *  connected; an output with no entry has never connected. */
+  lastSeen: ReadonlyMap<string, number>;
 }
+
+const NO_SEEN: ReadonlyMap<string, number> = new Map();
 
 /**
  * Output ids with a live heartbeat, plus whether presence has answered yet.
@@ -73,8 +80,15 @@ export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult 
   const { value: presence, known } = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
     clearOnReadFailure: true,
   });
+  // Rebuilt only when the frame is: a new Map per render would hand every
+  // consumer a new identity each second.
+  const lastSeen = useMemo(
+    () => (presence?.lastSeen?.length ? new Map(presence.lastSeen) : NO_SEEN),
+    [presence],
+  );
   return {
     onlineOutputIds: presence?.connected ?? EMPTY,
     known,
+    lastSeen,
   };
 }

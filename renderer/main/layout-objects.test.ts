@@ -343,7 +343,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
   // Home's own cards, so Home is built from the same widget set as every other
   // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
-  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "screen-embed" },
+  // Needs attention takes Readiness's place after the embedded screen; Readiness
+  // follows it, and stays in the palette.
+  { type: "home-attention", label: "Needs attention", group: "PCO / service", after: "screen-embed" },
+  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "home-attention" },
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with

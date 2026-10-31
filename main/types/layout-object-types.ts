@@ -22,6 +22,7 @@ export const LAYOUT_OBJECT_TYPES = [
   "current-service-item",
   "current-slide-notes",
   "current-slide-text",
+  "home-attention",
   "home-live-status",
   "home-next-service",
   "home-pvp",

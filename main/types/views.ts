@@ -485,6 +485,7 @@ export type LayoutObjectConfig =
   // Home's own cards, so Home is built from the same widget set as every other
   // surface rather than being a bespoke page. Neither takes options: what they
   // show is the state of this install, and there is nothing to choose.
+  | { type: "home-attention" }
   | { type: "home-readiness" }
   | { type: "home-next-service" }
   | { type: "home-live-status" }

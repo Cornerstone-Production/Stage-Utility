@@ -29,6 +29,7 @@ describe("routing a home card", () => {
     assert.deepEqual(
       [...HOME_TYPES].sort(),
       [
+        "home-attention",
         "home-live-status",
         "home-next-service",
         "home-pvp",

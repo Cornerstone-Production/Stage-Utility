@@ -35,7 +35,7 @@ const BARE = [
   // none at all, because Home's GRID draws one tile frame for everything on it.
   // A card here would be a second box inside that tile, and its padding would
   // inset a newly added widget further than one added before the change.
-  "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
+  "home-attention", "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
   "home-streaming", "home-streaming-resi", "home-streaming-youtube", "home-pvp", "home-pvp-now",
   "home-scores",
