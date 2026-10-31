@@ -1,4 +1,4 @@
-// The New cue dialog: a stepped flow for making a cue or an automatic rule.
+// The new command / new rule dialog: a stepped flow for making a command or an automatic rule.
 //
 // NOTHING IS SAVED UNTIL CREATE: the draft lives in this component and goes with
 // it, and Escape, the overlay, the close button and Cancel are all the same
@@ -83,6 +83,11 @@ interface Outcome {
   ruleName: string;
   cueName: string;
   results: ConsoleResult[];
+}
+
+/** What the dialog is called: New command, New rule, or both while the kind is not chosen. */
+export function dialogTitle(kind: CueKind | null): string {
+  return kind === "manual" ? "New command" : kind === "auto" ? "New rule" : "New command or rule";
 }
 
 export function NewCueDialog({
@@ -522,7 +527,7 @@ export function NewCueDialog({
           className="flex w-[210px] shrink-0 flex-col gap-0.5 border-r border-line bg-surface px-3 py-[18px] max-md:hidden"
         >
           <DialogTitle className="px-2.5 pb-2.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            New cue
+            {dialogTitle(draft.kind)}
           </DialogTitle>
           {steps.map((s, i) => {
             const done = outcome === null && i < stepIndex;

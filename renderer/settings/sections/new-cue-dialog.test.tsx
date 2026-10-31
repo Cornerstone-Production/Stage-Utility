@@ -69,6 +69,7 @@ const { TooltipProvider } = await import("../../components/ui/tooltip-provider.j
 const { Toaster } = await import("../../components/ui/index.js");
 const { AutomationSection } = await import("./automation-section.js");
 const { consoleButtonDeps } = await import("../../lib/console-cue-buttons.js");
+const { dialogTitle } = await import("./new-cue-dialog.js");
 
 type Rule = import("../../../main/types/automation.js").Rule;
 type View = import("../../../main/types/views.js").View;
@@ -722,6 +723,27 @@ describe("the stepper", () => {
     await press(button("Back"), "Back");
     assert.equal(stepBody(), "act");
     assert.equal(labelledInput("Message")?.value, "kept");
+  });
+});
+
+describe("the dialog's title", () => {
+  const title = () => dialog()?.querySelector("h2")?.textContent ?? "";
+
+  test("is by kind: New command for a manual cue, New rule for an automatic one, both while unchosen", async () => {
+    assert.equal(dialogTitle("manual"), "New command");
+    assert.equal(dialogTitle("auto"), "New rule");
+    assert.equal(dialogTitle(null), "New command or rule");
+  });
+
+  test("New command opens it titled New command, and New rule titled New rule", async () => {
+    await mount();
+    await press(button("New command"), "New command");
+    assert.equal(title(), "New command");
+    await press(button("Cancel"), "Cancel");
+    cleanup();
+    await mount("rules");
+    await press(button("New rule"), "New rule");
+    assert.equal(title(), "New rule");
   });
 });
 
