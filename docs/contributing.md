@@ -95,8 +95,8 @@ you write are the ones that count** — the PR title is not what gets released f
 
 ### Trailers
 
-Commits carry no tool or session attribution. The one trailer the tooling reads
-is `Beta-only: true`, below.
+Commits and pull requests carry no tool or session attribution, and no emoji. The
+one trailer the tooling reads is `Beta-only: true`, below.
 
 #### `Beta-only: true`
 
@@ -512,8 +512,9 @@ work is efficient from the start rather than optimised later.
   arrives in a request (a view, display, plan or service-type id) holds a `Map`
   in memory and converts to a plain object only at the disk boundary.
   `obj[key] = value` with a request-derived key is a `js/remote-property-injection`
-  finding; `assertSafeKey` stays at the API boundary as the 400, but it is not
-  the fix. Fix the store rather than dismissing the alert.
+  finding. `assertSafeKey` still refuses a forbidden key such as `__proto__`, but
+  CodeQL does not recognise it, so it is not the fix. Fix the store rather than
+  dismissing the alert.
 
 ## Plain HTTP in production
 

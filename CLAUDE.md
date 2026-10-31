@@ -54,10 +54,10 @@ broken path through them. Kill a test server by **port**, never `pkill -f` on an
 env-var prefix — the prefix is not in the process command line, so the old server
 survives and the next run tests stale code.
 
-Start a test server on an **empty** data dir (`STAGE_UTILITY_DATA` pointing at a
-fresh temp directory), never a copy of a real one: a copied config dials the real
-consoles, mics and Planning Center, and can log a production install out of a
-service it shares a session with. Before any `POST`, `PATCH` or `DELETE`, `GET
+Start a test server on an **empty** data dir, never a copy of a real one (see
+[Running it locally](docs/contributing.md#running-it-locally)): a copied config
+dials the real devices and can log a production install out of a service it
+shares a session with. Before any `POST`, `PATCH` or `DELETE`, `GET
 /api/version` on the port you are about to write to and check it is the build you
 started. 8788 is the default port, so a forgotten port flag lands on whatever
 instance already runs there; an agent once created views in a live install that
