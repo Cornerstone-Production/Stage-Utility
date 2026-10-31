@@ -380,6 +380,33 @@ describe("renaming a command", () => {
   });
 });
 
+describe("a pair's Used on", () => {
+  test("the dialog and the row both count a Button on a half's former name", async () => {
+    for (const r of rules()) await automationEngine.removeRule(r.id);
+    const half = (name: string, aliases?: string) => ({
+      name,
+      enabled: true,
+      trigger: { id: "call.by-name", params: { name, homeAssistant: "hidden", ...(aliases ? { aliases } : {}) } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    await automationEngine.addRule(half("beamers_on", "old_on"));
+    await automationEngine.addRule(half("beamers_off"));
+    const booth = ctl.state.views.find((v) => v.id === "booth")!;
+    booth.layout!.objects.push(cueButton("former-half", "old_on", "Old half") as never);
+    await viewsStore.save(ctl.state.views);
+    await mount();
+    const row = document.querySelector('[data-cue-pair-row="beamers"]')!;
+    await eventually(() => assert.match(row.querySelector("[data-used-on]")?.textContent ?? "", /Booth/));
+    await press(document.querySelector('[aria-label="the beamers pair"], [data-cue-pair-row="beamers"] button'), "the pair");
+    await eventually(() => assert.ok(document.querySelector("[data-rule-editor]")));
+    const header = document.querySelector("[data-rule-editor] [data-used-on]");
+    assert.match(header?.textContent ?? "", /Booth/, "the dialog does not see a Button on a half's former name");
+  });
+});
+
 describe("Make it automatic", () => {
   test("lists the same places as a warning, and Save repoints nothing", async () => {
     await mount();

@@ -70,7 +70,7 @@ import { logToServer } from "../../lib/client-log";
 import { repointCueButtons, repointLogLines, type RepointResult } from "../../lib/console-cue-buttons";
 import { UsedOn } from "./automation-chips";
 import { CueRenameNotice, RepointRefusals } from "./cue-rename-notice";
-import { usesOf, type CueUse, type CueUsageReply } from "./cue-usage";
+import { namesFor, usesOf, type CueUse, type CueUsageReply } from "./cue-usage";
 import {
   Button,
   confirm,
@@ -1681,10 +1681,8 @@ export function RuleEditorDialog({
   const cueTo = isPair ? "" : calledCueName(onDraft.trigger);
   // The names a Button may hold for it: its own and its former names, the same set the
   // Used on chips use, so the dialog and the row never disagree about where it is used.
-  const fromNames = isPair ? [] : [cueFrom, ...parseAliases(savedOn.trigger.params)];
-  const places = isPair
-    ? usesOf(usage, [target.pair.base, target.pair.onName, target.pair.offName])
-    : usesOf(usage, fromNames);
+  const fromNames = isPair ? [] : namesFor({ rule: savedOn });
+  const places = usesOf(usage, isPair ? namesFor({ pair: target.pair }) : fromNames);
   /** The name is being changed: Save will point each of `places` at the new one. */
   const renaming = cueFrom !== "" && cueTo !== "" && cueFrom !== cueTo;
   /** The command is being turned into an automatic rule: its Buttons will read Not set. */

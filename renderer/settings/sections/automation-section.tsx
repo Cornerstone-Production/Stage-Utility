@@ -18,7 +18,7 @@ import type { AutomationOutcome, Rule } from "@main/types/automation";
 import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-param-validation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
-import { CUE_USAGE_KEY, screenNames, useCueUsage, usesOf, type CueUse } from "./cue-usage";
+import { CUE_USAGE_KEY, namesFor, screenNames, useCueUsage, usesOf, type CueUse } from "./cue-usage";
 import { BelongsToButton, OwnedRows } from "./automation-owned";
 import { HomeAssistantChip, UsedOn, VoiceChip } from "./automation-chips";
 import { useOptionSources } from "./automation-option-sources";
@@ -611,12 +611,12 @@ function entryMatches(e: RuleListEntry, ids: ReadonlySet<string>): boolean {
 
 // ── The deep link ─────────────────────────────────────────────────────────────
 
-/** The `new` search value that opens the New cue dialog on a manual cue. */
+/** The `new` search value that opens the new-command dialog on a manual cue. */
 export const NEW_CUE_PARAM = "new";
 export const NEW_MANUAL_CUE = "manual";
 
 /**
- * `/automation?new=manual` opens the New cue dialog at the manual kind, for a link
+ * `/automation?new=manual` opens the new-command dialog at the manual kind, for a link
  * from another page. Read on arrival and on every resolved navigation, so a link
  * pressed while this page is already showing works too. The parameter is DROPPED
  * once it has opened the dialog, so a reload (or Back) does not open it a second
@@ -651,7 +651,7 @@ export function AutomationSection({
     searchId: AUTOMATION_SEARCH_TAB_ID,
   });
   const [importing, setImporting] = useState(false);
-  // The New cue dialog: null while closed, and `kind` set when a link already says
+  // The new command / new rule dialog: null while closed, and `kind` set when a link already says
   // which. NOTHING is saved by opening it — see new-cue-dialog.tsx.
   const [creating, setCreating] = useState<{ kind: CueKind | null } | null>(null);
   const openNewCue = useCallback((kind: CueKind | null) => setCreating({ kind }), []);
@@ -810,8 +810,7 @@ export function AutomationSection({
     const out = new Map<string, CueUse[]>();
     const paired = new Set<string>();
     for (const p of pairRows) {
-      const names = [p.base, p.onName, p.offName, ...parseAliases(p.on.trigger.params), ...parseAliases(p.off.trigger.params)];
-      const uses = usesOf(usage, names);
+      const uses = usesOf(usage, namesFor({ pair: p }));
       out.set(p.on.id, uses);
       out.set(p.off.id, uses);
       paired.add(p.on.id);
@@ -819,7 +818,7 @@ export function AutomationSection({
     }
     for (const r of rules) {
       if (paired.has(r.id) || r.trigger.id !== CALL_TRIGGER_ID) continue;
-      out.set(r.id, usesOf(usage, [String(r.trigger.params.name ?? ""), ...parseAliases(r.trigger.params)]));
+      out.set(r.id, usesOf(usage, namesFor({ rule: r })));
     }
     return out;
   }, [usage, pairRows, rules]);
