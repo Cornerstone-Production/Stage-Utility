@@ -145,9 +145,31 @@ export function EmptyBoardDrop({ boardId, children }: { boardId: string; childre
   );
 }
 
+/**
+ * Click, and focus, select a card; a click on the card already selected clears it.
+ *
+ * Focus lands on mousedown, before the click, and selects; so whether the card
+ * was ALREADY selected has to be read before that, on the way down, or every
+ * first click would select and then immediately clear.
+ */
+function useSelectToggle(id: string, selected: boolean, actions: BoardPreviewActions) {
+  const wasSelected = useRef(false);
+  const before = () => {
+    wasSelected.current = selected;
+  };
+  return {
+    onPointerDownCapture: before,
+    onMouseDownCapture: before,
+    onClick: () => (wasSelected.current ? actions.deselect() : actions.select(id)),
+    onFocus: () => actions.select(id),
+  };
+}
+
 /** What the page can do to a card from the keyboard or its handles. */
 export interface BoardPreviewActions {
   select: (slotId: string) => void;
+  /** Clear the selection, which also folds the inspector away. */
+  deselect: () => void;
   nudge: (slotId: string, dir: Nudge) => void;
   stack: (slotId: string) => void;
   unstack: (slotId: string) => void;
@@ -172,6 +194,7 @@ function Card({
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `card:${slot.id}`, data });
   const { active } = useDragging();
   const node = useRef<HTMLElement | null>(null);
+  const toggle = useSelectToggle(slot.id, selected, actions);
 
   useEffect(() => {
     if (refocus === slot.id) {
@@ -212,8 +235,7 @@ function Card({
       {...attributes}
       {...listeners}
       onKeyDown={onKeyDown}
-      onClick={() => actions.select(slot.id)}
-      onFocus={() => actions.select(slot.id)}
+      {...toggle}
       aria-label={`Slot ${slot.channel ? `${slot.channel} ` : ""}${slotTitle(slot)}`}
       aria-pressed={selected}
       data-mic-slot={slot.id}
@@ -273,13 +295,13 @@ function SpacerBlock({
   const lead = column[0]!;
   const data: DragData = { drag: { kind: "column", id: lead.id }, slotIds: column.map((s) => s.id), spacer: true, label: "Spacer" };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `col:${lead.id}`, data });
+  const toggle = useSelectToggle(lead.id, selected, actions);
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      onClick={() => actions.select(lead.id)}
-      onFocus={() => actions.select(lead.id)}
+      {...toggle}
       onKeyDown={(e) => {
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();

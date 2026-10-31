@@ -216,6 +216,7 @@ export function BoardSection({
 
   const actions = {
     select: mic.select,
+    deselect: () => mic.select(null),
     nudge: mic.nudgeSlot,
     stack: mic.stackSlot,
     unstack: mic.unstackSlot,
