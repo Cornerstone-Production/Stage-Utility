@@ -710,6 +710,26 @@ describe("a Run an action Button in an imported view", () => {
     );
   });
 
+  test("rules that cannot be saved import the Button as it was, and the report and the log say so", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const real = automationStore.saveRules.bind(automationStore);
+    automationStore.saveRules = async () => {
+      throw new Error("read-only file system");
+    };
+    const lines = captureConsole(t, "log", "error");
+    let report;
+    try {
+      report = await applyViewBundle(withActionButton());
+    } finally {
+      automationStore.saveRules = real;
+    }
+    assert.equal((await viewsStore.load())[0]!.layout!.objects[0]!.config.type, "action-button");
+    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported as they are")), JSON.stringify(report.skipped));
+    assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
+  });
+
   test("a second import of the same file gets its own cue and its own rule", async () => {
     const { automationStore } = await import("./automation-store.js");
     await automationStore.saveRules([]);
