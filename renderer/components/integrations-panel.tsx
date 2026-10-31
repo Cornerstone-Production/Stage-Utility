@@ -437,6 +437,8 @@ export function IntegrationDialog({
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(
     () => initialConfig(descriptor, state),
   );
+  /** Counts field edits, so a Test that finishes after one is not shown. */
+  const edits = useRef(0);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -477,6 +479,9 @@ export function IntegrationDialog({
     localConfig.clientSecret !== pristine.clientSecret;
 
   function setField(key: string, value: unknown) {
+    // A Test answers for the settings it ran against: an edit makes the answer stale, so it goes.
+    setTestResult(null);
+    edits.current++;
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -507,6 +512,8 @@ export function IntegrationDialog({
       // permanently unequal, so "Unsaved changes" stayed up after a successful
       // save — most visibly after changing a secret.
       setLocalConfig(initialConfig(descriptor, next));
+      // The saved settings are not the ones the last Test ran against.
+      setTestResult(null);
       // A password left unchanged that comes back empty was cleared by the
       // server because the address moved: see dropped-credentials.ts.
       const dropped = droppedCredentialNotice(`${descriptor.label} settings saved`, descriptor.configSchema, pristine, config, next.config);
@@ -571,10 +578,12 @@ export function IntegrationDialog({
   async function handleTest() {
     setIsTesting(true);
     setTestResult(null);
+    const editsAtStart = edits.current;
     try {
       const result = await ipc<{ ok: boolean; message?: string }>("integrations:test", { id: descriptor.id });
       console.log("[IntegrationsPanel:test]", descriptor.id, result);
-      setTestResult(result);
+      // A field edited while the Test ran: its answer is already about settings that are not on screen.
+      if (edits.current === editsAtStart) setTestResult(result);
     } catch (err) {
       console.error("[IntegrationsPanel:test] error", err);
       setTestResult({ ok: false, message: errorMessage(err) });
@@ -870,7 +879,10 @@ export function IntegrationDialog({
                   variant="transparent"
                   size="small"
                   disabled={!schemaDirty || isSaving}
-                  onClick={() => setLocalConfig(initialConfig(descriptor, state))}
+                  onClick={() => {
+                    setTestResult(null);
+                    setLocalConfig(initialConfig(descriptor, state));
+                  }}
                 >
                   Discard
                 </Button>

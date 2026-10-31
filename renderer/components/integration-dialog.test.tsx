@@ -179,6 +179,61 @@ describe("the dialog footer", () => {
     assert.deepEqual(wrote[0]!.body, { config: { host: "10.0.0.9", port: 8000 } });
   });
 
+  test("a Test's answer goes when a field changes and when Save lands: it never outlives the settings it ran against", async () => {
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const btn = (t: string) => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+    const answers = () => content.querySelectorAll("[data-test-result]").length;
+    fireEvent.click(btn("Test"));
+    await settleFor(60);
+    assert.equal(answers(), 1, "no answer to start from");
+    fireEvent.change(content.querySelector('[data-config-field="host"] input')!, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(answers(), 0, "an answer stayed over an edited field");
+  });
+
+  test("Save and Discard clear the answer too, and a Test that finishes after an edit is not shown", async () => {
+    const content = await open("obs");
+    const field = () => content.querySelector("[data-config-field] input") as HTMLInputElement;
+    const btn = (t: string) => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+    const answers = () => content.querySelectorAll("[data-test-result]").length;
+    // A footer dialog's Test is live over edits: it answers for what was saved.
+    fireEvent.change(field(), { target: { value: "edited" } });
+    fireEvent.click(btn("Test connection"));
+    await settleFor(60);
+    assert.equal(answers(), 1);
+    fireEvent.click(btn("Save"));
+    await settleFor(60);
+    assert.equal(answers(), 0, "an answer stayed after Save");
+    fireEvent.change(field(), { target: { value: "again" } });
+    fireEvent.click(btn("Test connection"));
+    await settleFor(60);
+    assert.equal(answers(), 1);
+    fireEvent.click(btn("Discard"));
+    await settleFor(20);
+    assert.equal(answers(), 0, "an answer stayed after Discard");
+    // Edited while the Test is still running: the answer, when it lands, is about the old settings.
+    fireEvent.click(btn("Test connection"));
+    fireEvent.change(field(), { target: { value: "during" } });
+    await settleFor(60);
+    assert.equal(answers(), 0, "a Test that finished after an edit was shown");
+  });
+
+  test("the same in a footer dialog: an edit clears the answer beside Test connection", async () => {
+    const content = await open("obs");
+    const fieldInput = content.querySelector("[data-config-field] input") as HTMLInputElement;
+    fireEvent.click([...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test connection")!);
+    await settleFor(60);
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 1);
+    fireEvent.change(fieldInput, { target: { value: "x" } });
+    await settleFor(20);
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 0, "the footer kept a stale answer");
+  });
+
   test("Test waits for Save while the fields hold edits, and says so", async () => {
     // Test reads the SAVED host and port. Beside edited fields it would answer for a Companion
     // the operator is not looking at.
