@@ -92,11 +92,12 @@ export async function writeOwnedRule(opts: {
     const { rules } = await invoke<{ rules: Rule[] }>("automation:rules");
     const existing = ownedRuleFor(rules, opts.owner, opts.cue);
     if (existing) {
-      await invoke("automation:updateRule", {
-        id: existing.id,
-        patch: { name: ruleName, action: opts.target.action, enabled: true },
-      });
-      return { ok: true, cue: calledCueName(existing.trigger), rule: { ...existing, name: ruleName, action: opts.target.action, enabled: true } };
+      // `says` is what a Button with no label of its own draws (the manifest names a command
+      // by it), so it follows the pick; the command's own name, beside it, never changes.
+      const trigger = { id: existing.trigger.id, params: { ...existing.trigger.params, says: ruleName } };
+      const patch = { name: ruleName, action: opts.target.action, enabled: true, trigger };
+      await invoke("automation:updateRule", { id: existing.id, patch });
+      return { ok: true, cue: calledCueName(existing.trigger), rule: { ...existing, ...patch } };
     }
     const manifest = await invoke<CueManifest>("cues:manifest");
     const taken = namesTakenForNewCue(rules, manifest);
@@ -104,7 +105,9 @@ export async function writeOwnedRule(opts: {
     const cueName = cueNameFor(cueSlug(ruleName) ? ruleName : opts.target.name, taken, "btn_");
     const made = await invoke<Rule>(
       "automation:addRule",
-      buttonCueRule({ name: ruleName, cueName, action: opts.target.action, ownedBy: opts.owner }),
+      // `says` because a Button with no label draws the command's spoken name, and without it the
+      // manifest falls back to the cue name humanised: "Btn Shutter" for a button called Shutter.
+      buttonCueRule({ name: ruleName, cueName, action: opts.target.action, ownedBy: opts.owner, says: ruleName }),
     );
     return { ok: true, cue: cueName, rule: made };
   } catch (e) {

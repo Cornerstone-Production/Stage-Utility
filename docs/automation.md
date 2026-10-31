@@ -69,10 +69,9 @@ still refuses to re-enable it if you turn it off yourself. It is enforced the
 next time *you* save or enable it, not the moment this build starts.
 
 The layout editor's **Button**, when set to **App action**, follows the same check, live as you
-edit — there is no Save step there. A field that needs setup is marked **Needs
-setup** in the editor's panel, and the Button keeps what it pressed before until
-every required field is filled in, so it is never bound to a command the server
-would refuse.
+edit — there is no Save step there. A required field left blank is marked in the
+editor's panel, and the Button keeps what it pressed before until every required
+field is filled in, so it is never bound to a command the server would refuse.
 
 An **optional** field is never a problem when it is empty. A field naming a
 runtime list — a RossTalk target, a ProPresenter macro — is never a problem

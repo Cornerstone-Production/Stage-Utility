@@ -622,9 +622,9 @@ drawing an empty page.
 same headings as the [automation rules editor](../automation.md), including
 advancing or stepping back through the
 [baptism timer](../features/servicecue-and-baptisms.md). Choosing one that takes
-parameters shows the same fields the rule editor shows for it. A field that
-needs setup is marked [Needs setup](../automation.md#needs-setup), and the Button
-keeps what it pressed before until every required field is filled in. An action
+parameters shows the same fields the rule editor shows for it. A required field
+left blank is marked, as in the rule editor ([Needs setup](../automation.md#needs-setup)),
+and the Button keeps what it pressed before until every required field is filled in. An action
 that has since been removed or renamed still shows its stored id, marked as not
 found, so the Button stays editable. **Press a Companion button** is not listed
 here: it is the Companion choice.
@@ -646,7 +646,8 @@ name made unique against every command name and former name; one ending `_on` or
 `_off` gets `_cue` added, because a lone one would read as half of an ON/OFF pair
 and never appear in the list. It is enabled, hidden from Home Assistant, allowed
 during a service, with no conditions and no cooldown, and it belongs to that
-Button. The panel says *Saved as this button's own command* with the name.
+Button. Its spoken name is the label, or the picked name when the label is blank,
+and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this button's own command* with the name.
 Picking again on the same Button rewrites that command's action in place: its name
 does not change when the label or the pick does. Pointing the Button at the command
 is an edit like any other, so the layout still needs saving. If the server refuses

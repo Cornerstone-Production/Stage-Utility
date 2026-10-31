@@ -146,7 +146,7 @@ describe("Companion", () => {
       {
         name: "Shutter",
         enabled: true,
-        trigger: { id: "call.by-name", params: { name: "btn_shutter", homeAssistant: "hidden" } },
+        trigger: { id: "call.by-name", params: { name: "btn_shutter", says: "Shutter", homeAssistant: "hidden" } },
         conditions: [],
         action: undefined,
         cooldownSec: 0,
@@ -174,6 +174,9 @@ describe("Companion", () => {
     // An _on ending would read as half of an ON/OFF pair, and a half with no partner never appears.
     assert.equal((s.posts[0]!.trigger as { params: { name: string } }).params.name, "btn_projectors_on_cue");
     assert.equal(s.posts[0]!.name, "Projectors ON");
+    // What a Button with no label draws: the manifest names a command by `says`, and without
+    // it that is the cue name humanised ("Btn Projectors On Cue").
+    assert.equal((s.posts[0]!.trigger as { params: { says: string } }).params.says, "Projectors ON");
   });
 
   test("picking again on the same Button rewrites its rule in place: one rule, the same name", async () => {
@@ -192,10 +195,15 @@ describe("Companion", () => {
     assert.equal(s.posts.length, 1, "no second rule");
     assert.equal(s.rules.length, 1);
     assert.equal(s.patches[0]!.id, "rule-1");
-    const patch = s.patches[0]!.patch as { action: { params: { row: number; col: number } }; enabled: boolean; trigger?: unknown };
+    const patch = s.patches[0]!.patch as {
+      action: { params: { row: number; col: number } };
+      enabled: boolean;
+      trigger: { params: { name: string; says: string } };
+    };
     assert.deepEqual([patch.action.params.row, patch.action.params.col], [0, 0]);
     assert.equal(patch.enabled, true, "a rewrite switches the command back on");
-    assert.equal(patch.trigger, undefined, "the trigger, and so the command's name, is never rewritten");
+    assert.equal(patch.trigger.params.name, cue, "the command's own name is never rewritten");
+    assert.equal(patch.trigger.params.says, "Totally different", "what a Button with no label draws follows the pick");
     assert.equal(configs.some((c) => (c as { cue?: string }).cue !== undefined && (c as { cue: string }).cue !== cue), false, "the Button keeps the same command name");
   });
 
@@ -298,7 +306,7 @@ describe("App action", () => {
     assert.equal((configs[0] as { cue: string }).cue, "btn_refresh");
   });
 
-  test("a blank required field is marked Needs setup and writes nothing until it is filled in", async () => {
+  test("a blank required field is marked and writes nothing until it is filled in", async () => {
     const s = serve();
     const { container, configs } = mount(UNSET);
     fireEvent.click(seg(container, "App action"));
@@ -308,7 +316,7 @@ describe("App action", () => {
     await settleAct();
     assert.equal(s.posts.length, 0, "the server would refuse a rule with a blank required field");
     assert.deepEqual(configs, []);
-    assert.ok(/needs setup/i.test(container.textContent ?? ""), "the blank field says it needs setup");
+    assert.ok(container.textContent?.includes("Required"), "the blank field is marked, as the rule editor marks it");
 
     fireEvent.change(container.querySelector('[aria-label="Message"]')!, { target: { value: "Hello" } });
     await eventually(() => assert.equal(s.posts.length, 1));
