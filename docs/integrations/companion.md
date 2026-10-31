@@ -22,7 +22,7 @@ outbound path says so rather than guessing at an address.
 
 The module marks its event stream with an `X-Companion-Module` header (or
 `?client=companion`). The server counts those streams and reports the total to
-the integration manager, which is what the settings panel's "N connected" shows.
+the integration manager, which is the count the first card's Status reports.
 The inbound half is therefore presence and guidance only — there is nothing to
 enable, and Test only reads Companion once a host is filled in below. It carries
 **no enable switch** for that reason: the server
@@ -47,22 +47,46 @@ and shows up in the module list, but the connection never starts — Companion
 reports "Connection not found or not running" and loads no config, which looks
 like a broken download rather than a version mismatch.
 
-**In Stage Utility** — Settings → Integrations → **Bitfocus Companion** shows the
-LAN IP and port split into separate copyable fields, because Companion takes host
-and port separately and cannot resolve a DNS name. A live connected-client count
-sits alongside them.
+**In Stage Utility** — Settings → Integrations → **Bitfocus Companion** is two
+cards, one for each direction.
+
+**Companion controls Stage Utility** is the inbound half. It shows the LAN IP and
+port split into separate copyable **Host** and **Port** fields, because Companion
+takes host and port separately and cannot resolve a DNS name, with a **Copy**
+beside each (on plain HTTP, where the browser has no clipboard, the field is
+selected for you to copy by hand). Beneath them is **Status**: the number of
+Companion clients connected, the health of Companion's own connections from the
+hourly check, and the reason a Test failed. There is no switch: the server
+listens either way.
+
+**Stage Utility presses Companion buttons** is the outbound half, with the host
+and API port below, **Test**, and **Browse buttons**. **Save** and **Discard** are
+in the dialog's footer and apply to the two fields, and closing the dialog over
+unsaved fields asks first.
 
 ### To press Companion buttons from here
 
 | Field | |
 |---|---|
-| **Companion Host** | Companion's IP. Leave blank and nothing outbound happens |
-| **API Port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
+| **Companion host** | Companion's IP. Leave blank and nothing outbound happens |
+| **API port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
 
 **Test** reads Companion's configuration and reports its build, how many buttons
 it found and how many of Companion's own connections are healthy — see
 [When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
-It never presses anything.
+It never presses anything. Its answer appears in the card.
+
+**Browse buttons** opens Companion's pages in the card, read-only, so you can see
+what Stage Utility can press and what it will call each button without opening a
+rule. One page shows at a time, as a grid of the keys it uses (never fewer than 8
+by 4; a page wider than the card scrolls sideways), in Companion's own colours and
+with its icons. A button that points at another is drawn as the one it points at,
+marked **↪**; page up, page down and page number keys are blank. The page
+control is a dropdown with a filter that takes a number or any part of a name,
+and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
+both, because a real install has about a hundred pages and more than half are
+empty. Nothing is read from Companion until Browse buttons is pressed, and
+nothing in the grid presses or changes anything.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has

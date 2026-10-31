@@ -1,54 +1,56 @@
-import { useStageState } from "../main/use-stage-state";
-import {
-  Button,
-  Field,
-  FieldGroup,
-  FieldContent,
-  FieldLabel,
-  FieldDescription,
-  toast,
-} from "./ui";
+import { useRef } from "react";
 import { CopyIcon, ExternalLinkIcon } from "lucide-react";
+
+import { useStageState } from "../main/use-stage-state";
+import { Button, Input, toast } from "./ui";
 import { copyText } from "../lib/clipboard";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
 const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility";
 
+/** The look both Companion cards share: a card with its direction, its name and what it is for. */
+export const COMPANION_CARD = "flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-4";
+
+/** A read-only value with a Copy button. Companion takes host and port as separate fields and cannot resolve DNS, so each is copied on its own. */
 function CopyField({ label, value }: { label: string; value: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const id = `companion-copy-${label.toLowerCase()}`;
   return (
-    <Field orientation="horizontal">
-      <FieldContent>
-        <FieldLabel>{label}</FieldLabel>
-      </FieldContent>
-      <div className="flex items-center gap-1.5 w-full min-w-0 sm:w-56">
-        <code className="flex-1 min-w-0 truncate rounded bg-gray-a3 px-2 py-1 text-caption1 text-gray-12 tabular-nums">
-          {value}
-        </code>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label htmlFor={id} className="text-caption1 font-medium text-fg-muted">
+        {label}
+      </label>
+      <div className="flex gap-1.5">
+        <Input ref={input} id={id} readOnly value={value} className="min-w-0 flex-1 font-mono tabular-nums" />
         <Button
-          variant="transparent"
+          variant="filled"
           size="small"
-          iconOnly
           onClick={async () => {
-            const ok = await copyText(value);
+            // Inside the dialog's focus trap, or the legacy copy path loses its selection to it.
+            const ok = await copyText(value, input.current?.closest<HTMLElement>('[role="dialog"]'));
             if (ok) toast.success(`${label} copied`);
-            else toast.error(`Couldn't copy — select and copy manually`);
+            else {
+              // Plain HTTP has no clipboard write; the field is selected so the operator can copy it by hand.
+              input.current?.select();
+              toast.error(`Couldn't copy — select and copy manually`);
+            }
           }}
           aria-label={`Copy ${label}`}
-          tooltip={`Copy ${label}`}
         >
-          <CopyIcon className="size-3.5 text-gray-9" />
+          <CopyIcon className="size-3.5" /> Copy
         </Button>
       </div>
-    </Field>
+    </div>
   );
 }
 
-// Informational panel shown under the "Bitfocus Companion" integration card.
-// There is nothing to configure here: the Companion module connects TO this app's
-// HTTP/SSE API. Companion can't resolve DNS and takes host + port as separate
-// fields, so we show the raw LAN IP and port split out (from state.lanUrl, not the
-// DNS publicUrl), plus the row's own status line.
+// The first Companion card: Companion controls Stage Utility. There is nothing to
+// configure here and no switch: the Companion module connects TO this app's
+// HTTP/SSE API, so what is shown is the address to give it and what the row says
+// about the modules that have. Companion can't resolve DNS and takes host + port as
+// separate fields, so we show the raw LAN IP and port split out (from state.lanUrl,
+// not the DNS publicUrl), plus the row's own status line.
 //
 // The Status field is where the Companion row's message is read. ConnectionBadge,
 // which every integration card and dialog header uses, shows a message only while
@@ -93,59 +95,50 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
   const status = state.message ?? null;
 
   return (
-    <FieldGroup>
-      <Field orientation="vertical">
-        <FieldContent>
-          <FieldLabel>Bitfocus Companion</FieldLabel>
-          <FieldDescription>
-            Add a connection in Bitfocus Companion — search its connection list for{" "}
-            <span className="text-gray-12 font-medium">Stage Utility</span> — and enter this
-            server&apos;s IP and port below. No password — it works on your local network.
-          </FieldDescription>
-          {/* The module is the missing half: this panel told you what to type
-              and never said where to get the thing you type it into. */}
-          <FieldDescription>
-            You need the module first —{" "}
-            <a
-              href={MODULE_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-accent hover:underline"
-            >
-              companion-module-stageutility-stageutility
-              <ExternalLinkIcon className="size-3" />
-            </a>
-            . Sideload it into Companion, then add the connection.
-          </FieldDescription>
-        </FieldContent>
-      </Field>
+    <section className={COMPANION_CARD} data-companion-card="inbound">
+      <div className="flex flex-col gap-1">
+        <span className="font-mono text-caption2 tracking-wide text-fg-subtle">COMPANION → STAGE UTILITY</span>
+        <h3 className="text-footnote font-semibold text-fg">Companion controls Stage Utility</h3>
+        <p className="max-w-[62ch] text-caption1 text-fg-muted">
+          Stream Deck buttons for plan control, view routing and blackout. Add a connection in Bitfocus Companion —
+          search its connection list for <span className="font-medium text-fg">Stage Utility</span> — and give it this
+          address. No password, and nothing to switch on here: it works on your local network.
+        </p>
+        {/* The module is the missing half: this panel told you what to type
+            and never said where to get the thing you type it into. */}
+        <p className="max-w-[62ch] text-caption1 text-fg-muted">
+          You need the module first —{" "}
+          <a
+            href={MODULE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-accent hover:underline"
+          >
+            companion-module-stageutility-stageutility
+            <ExternalLinkIcon className="size-3" />
+          </a>
+          . Sideload it into Companion, then add the connection.
+        </p>
+      </div>
 
       {host ? (
-        <>
-          <CopyField label="IP / Host" value={host} />
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2.5">
+          <CopyField label="Host" value={host} />
           <CopyField label="Port" value={port ?? "8788"} />
-        </>
+        </div>
       ) : (
-        <Field orientation="horizontal">
-          <FieldContent>
-            <FieldLabel>IP / Host</FieldLabel>
-          </FieldContent>
-          <span className="text-caption1 text-gray-9">LAN address unavailable.</span>
-        </Field>
+        <p className="text-caption1 text-fg-muted">LAN address unavailable.</p>
       )}
 
-      {/* Label above, message below. The message grew a second sentence once
-          Companion gained an outbound half ("… — 508 button(s), 39 on/off
-          pair(s)"), and as the right-hand cell of a horizontal row it ran back
-          over the label instead of wrapping. */}
-      <Field orientation="vertical">
-        <FieldContent>
-          <FieldLabel>Status</FieldLabel>
-          <FieldDescription className="break-words" data-testid="companion-status">
-            {status ?? "No Companion clients connected yet."}
-          </FieldDescription>
-        </FieldContent>
-      </Field>
-    </FieldGroup>
+      {/* The row's message, below the address: the client count, the connection health,
+          and the reason a Test failed. It grew a second sentence once Companion gained an
+          outbound half ("… — 508 button(s), 39 on/off pair(s)"), so it wraps. */}
+      <div className="flex flex-col gap-1 rounded-md border border-line px-2.5 py-2">
+        <span className="text-caption1 font-medium text-fg-muted">Status</span>
+        <span className="break-words text-footnote text-fg" data-testid="companion-status">
+          {status ?? "No Companion clients connected yet."}
+        </span>
+      </div>
+    </section>
   );
 }

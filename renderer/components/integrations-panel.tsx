@@ -13,6 +13,7 @@ import { OscTargetsPanel } from "./osc-targets-panel";
 import { ScoresTeamsPanel } from "../settings/panels/scores-teams-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CompanionInfoPanel } from "./companion-info-panel";
+import { CompanionOutboundCard } from "./companion-outbound-card";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import { YouTubeConnectRow } from "./youtube-connect-row";
 import { SenSourceScopePicker } from "./sensource-scope-picker";
@@ -47,7 +48,6 @@ import {
   confirm,
   SkeletonRows,
   InfoHint,
-  Separator,
   DialogRoot,
   DialogContent,
   DialogHeader,
@@ -287,21 +287,6 @@ function VideoFeedsLinkPanel() {
   );
 }
 
-/**
- * A panel rendered ABOVE the schema form, with the form and its footer kept.
- *
- * Companion has two halves. Inbound, the module dials this server: that half is
- * an address to copy and a client count, not a form. Outbound, this server
- * presses Companion's buttons: that half IS the descriptor's form (host, port)
- * and needs Save and Test. As a bespoke panel the info replaced the form, so
- * the two fields the server declared were never on screen and the docs
- * described controls nobody could find.
- */
-function preludePanelFor(descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode | null {
-  if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
-  return null;
-}
-
 // ---- the card ---------------------------------------------------------------
 
 /** One integration as a card: name, what it is pointed at, its connection, and
@@ -444,7 +429,6 @@ export function IntegrationDialog({
   onBeforeMove,
 }: IntegrationDialogProps) {
   const bespoke = bespokePanelFor(descriptor);
-  const prelude = preludePanelFor(descriptor, state);
   // Which ref the Setup guide link points at. Already fetched and cached for the
   // rail's version line, so this costs nothing.
   const { data: updateStatus } = useUpdateStatus();
@@ -625,14 +609,119 @@ export function IntegrationDialog({
     }
   }
 
-  const body = bespoke ?? (
+  /**
+   * One config field's control: what a field of each type is drawn as.
+   *
+   * `fill` makes it as wide as the box it is in. The generic form puts a control
+   * beside its label at a fixed width (`w-44` for a number or a select, `w-80`
+   * for text, which holds an ordinary work address); the Companion card sets its
+   * two fields in a two-column grid and wants them to fill their column.
+   */
+  function controlFor(field: IntegrationDescriptor["configSchema"][number], value: unknown, fill = false): ReactNode {
+    const narrow = fill ? "w-full" : "w-44 max-sm:w-full";
+    const wide = fill ? "w-full" : "w-80 max-sm:w-full";
+    return (
+      field.type === "oauth-device" ? (
+        <YouTubeConnectRow
+          disabled={connectFieldsUnready}
+          disabledHint="Save the client ID and secret first"
+          rawValue={value}
+          onRawChange={(v) => setField(field.key, v)}
+        />
+      ) : field.type === "select" ? (
+        <Select
+          value={typeof value === "string" ? value : ""}
+          onValueChange={(v: string) => setField(field.key, v)}
+        >
+          <SelectTrigger className={narrow} aria-label={field.label}>
+            <SelectValue placeholder="Select…" />
+          </SelectTrigger>
+          <SelectContent>
+            {(field.options ?? []).map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : field.type === "ip-list" ? (
+        <IpListField
+          value={Array.isArray(value) ? (value as string[]) : []}
+          onChange={(v) => setField(field.key, v)}
+          placeholder={field.placeholder}
+        />
+      ) : field.type === "number" ? (
+        <NumberInput
+          // `null` ONLY where the descriptor says blank is a setting.
+          // Everywhere else this is the old `Number(value) || 0` to
+          // the character, which is what keeps the ten number fields
+          // that mean a real number rendering exactly as before.
+          value={numberFieldValue(field, value)}
+          // The number, not String(n): initialConfig stores a number
+          // for a numeric field, so "4455" !== 4455 and one stepper
+          // click left the dialog permanently dirty — raising the
+          // unsaved-changes modal over a config identical to the saved one.
+          onChange={(n) => setField(field.key, n)}
+          // "" rather than deleting the key: it is what initialConfig
+          // seeds an unset number field with, so `pristine` and the
+          // form agree and the dialog is not born dirty — and every
+          // reader of these three treats "" exactly as absent.
+          onUnset={field.unsetHint == null ? undefined : () => setField(field.key, "")}
+          placeholder={field.unsetHint}
+          min={field.min}
+          max={field.max}
+          className={narrow}
+          aria-label={field.label}
+        />
+      ) : (
+        <Input
+          type={field.type === "password" ? "password" : "text"}
+          value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
+          placeholder={field.placeholder ?? ""}
+          // w-80, where a number or a select still gets w-44. What goes
+          // in here is an email, a host, a channel or a token, and 176px
+          // cut a long address such as `firstname.lastname@example.org`
+          // short — an ordinary work address, scrolled out of sight in the
+          // field an operator is trying to check. 320px holds a
+          // 44-character address with room; the row had 470px going spare
+          // to give it.
+          className={wide}
+          aria-label={field.label}
+        />
+      )
+    );
+  }
+
+  // Companion is two cards, not a form with a panel above it: what Companion does to
+  // this app (an address to give it, and what the row says), and what this app does
+  // to Companion (two fields, Test, Browse buttons). The fields are still the
+  // descriptor's, saved by Save and guarded by the unsaved-changes question, so they
+  // are drawn from its schema here, stacked label over control in the second card.
+  // Visible labels are the approved wording; the controls keep the descriptor's own
+  // names as their accessible names.
+  const COMPANION_LABELS: Record<string, string> = { host: "Companion host", port: "API port" };
+  const companionFields = descriptor.configSchema.map((field) => (
+    <div key={field.key} data-config-field={field.key} className="flex min-w-0 flex-col gap-1.5">
+      <span className="flex items-center gap-1.5 text-caption1 font-medium text-fg-muted">
+        {COMPANION_LABELS[field.key] ?? field.label}
+        {field.help && <InfoHint>{field.help}</InfoHint>}
+      </span>
+      {controlFor(field, localConfig[field.key], true)}
+    </div>
+  ));
+
+  const body =
+    bespoke ??
+    (descriptor.id === "companion" ? (
+      <div className="flex flex-col gap-4">
+        <CompanionInfoPanel state={state} />
+        <CompanionOutboundCard testing={isTesting} result={testResult} onTest={handleTest}>
+          {companionFields}
+        </CompanionOutboundCard>
+      </div>
+    ) : (
     <div className="flex flex-col gap-3">
-      {prelude && (
-        <>
-          {prelude}
-          <Separator />
-        </>
-      )}
       <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
@@ -656,75 +745,7 @@ export function IntegrationDialog({
                   )}
                 </FieldContent>
 
-                {field.type === "oauth-device" ? (
-                  <YouTubeConnectRow
-                    disabled={connectFieldsUnready}
-                    disabledHint="Save the client ID and secret first"
-                    rawValue={value}
-                    onRawChange={(v) => setField(field.key, v)}
-                  />
-                ) : field.type === "select" ? (
-                  <Select
-                    value={typeof value === "string" ? value : ""}
-                    onValueChange={(v: string) => setField(field.key, v)}
-                  >
-                    <SelectTrigger className="w-44 max-sm:w-full" aria-label={field.label}>
-                      <SelectValue placeholder="Select…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(field.options ?? []).map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : field.type === "ip-list" ? (
-                  <IpListField
-                    value={Array.isArray(value) ? (value as string[]) : []}
-                    onChange={(v) => setField(field.key, v)}
-                    placeholder={field.placeholder}
-                  />
-                ) : field.type === "number" ? (
-                  <NumberInput
-                    // `null` ONLY where the descriptor says blank is a setting.
-                    // Everywhere else this is the old `Number(value) || 0` to
-                    // the character, which is what keeps the ten number fields
-                    // that mean a real number rendering exactly as before.
-                    value={numberFieldValue(field, value)}
-                    // The number, not String(n): initialConfig stores a number
-                    // for a numeric field, so "4455" !== 4455 and one stepper
-                    // click left the dialog permanently dirty — raising the
-                    // unsaved-changes modal over a config identical to the saved one.
-                    onChange={(n) => setField(field.key, n)}
-                    // "" rather than deleting the key: it is what initialConfig
-                    // seeds an unset number field with, so `pristine` and the
-                    // form agree and the dialog is not born dirty — and every
-                    // reader of these three treats "" exactly as absent.
-                    onUnset={field.unsetHint == null ? undefined : () => setField(field.key, "")}
-                    placeholder={field.unsetHint}
-                    min={field.min}
-                    max={field.max}
-                    className="w-44 max-sm:w-full"
-                    aria-label={field.label}
-                  />
-                ) : (
-                  <Input
-                    type={field.type === "password" ? "password" : "text"}
-                    value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
-                    placeholder={field.placeholder ?? ""}
-                    // w-80, where a number or a select still gets w-44. What goes
-                    // in here is an email, a host, a channel or a token, and 176px
-                    // cut a long address such as `firstname.lastname@example.org`
-                    // short — an ordinary work address, scrolled out of sight in the
-                    // field an operator is trying to check. 320px holds a
-                    // 44-character address with room; the row had 470px going spare
-                    // to give it.
-                    className="w-80 max-sm:w-full"
-                    aria-label={field.label}
-                  />
-                )}
+                {controlFor(field, value)}
               </Field>
             );
           })}
@@ -742,7 +763,7 @@ export function IntegrationDialog({
       )}
       {descriptor.id === "prodcom" && <CaptionColorsPanel />}
     </div>
-  );
+    ));
 
   return (
     <>
@@ -759,6 +780,11 @@ export function IntegrationDialog({
           // it took focus from, and saving can move that card into the other
           // grid — which unmounts the node and drops focus onto <body>.
           onCloseAutoFocus={(e: Event) => e.preventDefault()}
+          // Escape belongs to an open list inside the dialog (Companion's page dropdown)
+          // before it belongs to the dialog: the list marks itself, and closes itself.
+          onEscapeKeyDown={(e: KeyboardEvent) => {
+            if ((e.target as Element | null)?.closest?.("[data-escape-first]")) e.preventDefault();
+          }}
         >
           <DialogHeader className="flex-row items-start gap-3 border-b border-line px-5 pb-3 pt-4 mb-0">
             <div className="min-w-0">
@@ -808,10 +834,13 @@ export function IntegrationDialog({
 
           {!bespoke && (
             <DialogFooter className="mt-0 flex-wrap justify-start gap-2 border-t border-line px-5 py-3">
-              <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
-                {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-                Test connection
-              </Button>
+              {/* Companion's Test lives in its second card, beside Browse buttons. */}
+              {descriptor.id !== "companion" && (
+                <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
+                  {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+                  Test connection
+                </Button>
+              )}
               {descriptor.id === "prodcom" && (
                 <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>
                   {isClearing
@@ -831,7 +860,7 @@ export function IntegrationDialog({
                   <span className="text-caption1 text-fg-muted tabular-nums">{fmtSynced(lastRefreshedAt)}</span>
                 </>
               )}
-              {testResult !== null && (
+              {testResult !== null && descriptor.id !== "companion" && (
                 <span
                   className={cn(
                     "text-caption1 flex min-w-0 items-center gap-1",
