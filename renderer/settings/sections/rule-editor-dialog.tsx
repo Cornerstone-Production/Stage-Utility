@@ -19,7 +19,7 @@
 // only ever mounted by this dialog, so the two files split along that line.
 
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, calledCueName, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
   choiceList,
   fieldsNeedAttention,
@@ -66,6 +66,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HandIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
+import { repointCueButtons, repointLogLine, type RepointResult } from "../../lib/console-cue-buttons";
+import { UsedOn } from "./automation-chips";
+import { CueRenameNotice, RepointRefusals } from "./cue-rename-notice";
+import { usesOf, type CueUse } from "./cue-usage";
 import {
   Button,
   confirm,
@@ -92,7 +97,7 @@ import {
   toast,
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
-import { homeImpact, impactQuestion, makeAutomatic, makeManual, setAside, type SetAside } from "./rule-conversion";
+import { homeEntity, homeImpact, impactQuestion, makeAutomatic, makeManual, setAside, type SetAside } from "./rule-conversion";
 import { NOT_PICKED_TRIGGERS, PickerField } from "./automation-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
@@ -1588,6 +1593,7 @@ export function RuleEditorDialog({
   pvpLayers,
   inferredFor,
   cueNamesTaken = NO_NAMES,
+  usage,
   onChanged,
 }: {
   target: RuleEditorTarget;
@@ -1602,6 +1608,8 @@ export function RuleEditorDialog({
   /** Every cue name in use, with former names and the built-ins: what Make it
    *  manual must not derive a name equal to. */
   cueNamesTaken?: ReadonlySet<string>;
+  /** Where each command is used (GET /api/cues/usage), by command name. Undefined until read; a rename then has nothing to follow. */
+  usage?: ReadonlyMap<string, readonly CueUse[]>;
   onChanged: () => void;
 }) {
   const isPair = target.kind === "pair";
@@ -1650,6 +1658,23 @@ export function RuleEditorDialog({
   // "turn it back on" branch. Never set from anything the server did on its
   // own (a restore, a maintenance patch): those never touch this dialog.
   const [forcedOff, setForcedOff] = useState(false);
+
+  // ── The Buttons that name this command ──────────────────────────────────────
+  // `cueFrom` is the name as the server holds it NOW (the last save, not the
+  // open), so a command renamed by a save the dialog stayed open over is not
+  // announced as being renamed again. A pair is not renamed from here: a Button
+  // stores the pair's base, which a half's name does not change on its own.
+  const cueFrom = isPair ? "" : calledCueName(savedOn.trigger);
+  const cueTo = isPair ? "" : calledCueName(onDraft.trigger);
+  const places = isPair
+    ? usesOf(usage, [target.pair.base, target.pair.onName, target.pair.offName])
+    : usesOf(usage, [cueFrom]);
+  /** The name is being changed: Save will point each of `places` at the new one. */
+  const renaming = cueFrom !== "" && cueTo !== "" && cueFrom !== cueTo;
+  /** The command is being turned into an automatic rule: its Buttons will read Not set. */
+  const leaving = cueFrom !== "" && onDraft.trigger.id !== CALL_TRIGGER_ID;
+  // What a rename's repoints did, kept while the dialog stays open over a screen that refused.
+  const [repointed, setRepointed] = useState<{ to: string; results: RepointResult[] } | null>(null);
 
   const lookup = useMemo(() => specLookupFor(registry), [registry]);
   // Recomputed on every keystroke, which is what "fields re-check live after
@@ -1825,6 +1850,17 @@ export function RuleEditorDialog({
         patch: onPatch,
       });
       let anyIssues = onResult.issues.length > 0;
+      // The command is renamed. Now the Buttons that named it follow, through the
+      // views API, one screen at a time. A screen that refuses is named in the
+      // dialog, which stays open over it, and the command stays renamed.
+      let refusedScreens = 0;
+      if (renaming && places.length > 0) {
+        const results = await repointCueButtons(places, cueFrom, cueTo);
+        const line = repointLogLine(cueFrom, cueTo, results);
+        if (line) logToServer("automation", line);
+        setRepointed({ to: cueTo, results });
+        refusedScreens = results.filter((r) => !r.ok).length;
+      }
       if (offDraft && seed.off) {
         writing = "Turn off";
         const liveOff = isPair ? target.pair.off : seed.off;
@@ -1841,8 +1877,9 @@ export function RuleEditorDialog({
       // bare "turn it on", caught below as a 409), so reaching here always
       // means something was written; the only question is whether it stayed
       // open, turned off, waiting to be fixed.
-      if (anyIssues) {
-        setForcedOff(true);
+      if (anyIssues) setForcedOff(true);
+      // Open over a refusal as well as over an issue, and with the saved name as the one now held.
+      if (anyIssues || refusedScreens > 0) {
         if (!isPair) setSavedOn(onHalfPatch());
       } else {
         onClose();
@@ -1968,6 +2005,9 @@ export function RuleEditorDialog({
           {!isPair && onDraft.trigger.id === CALL_TRIGGER_ID && (
             <p className="text-caption1 text-fg-subtle" data-manual-kind="">Manual cue</p>
           )}
+          {/* The screens whose Buttons name this command: what a rename follows
+              and what Make it automatic would leave reading Not set. */}
+          {(isPair || savedOn.trigger.id === CALL_TRIGGER_ID) && <UsedOn uses={usage ? places : null} />}
         </DialogHeader>
 
         {/* The BODY scrolls, not the page behind it: the editor is taller than
@@ -2064,6 +2104,17 @@ export function RuleEditorDialog({
             }
           />
         </div>
+
+        {/* Outside the scrolling body, so a rename's consequences are on screen
+            while the name field they follow from is edited, and a refusal is
+            still there after Save. Nothing is drawn when no Button names the command. */}
+        {(renaming || leaving || repointed) && (
+          <div className="flex flex-col gap-2 pb-2">
+            {renaming && <CueRenameNotice kind="rename" places={places} homeAssistant={homeEntity(savedOn) !== null} />}
+            {leaving && <CueRenameNotice kind="automatic" places={places} homeAssistant={homeEntity(savedOn) !== null} />}
+            {repointed && <RepointRefusals to={repointed.to} results={repointed.results} />}
+          </div>
+        )}
 
         <DialogFooter className="justify-between">
           <span className="flex shrink-0 items-center gap-2">

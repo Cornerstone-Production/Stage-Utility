@@ -402,7 +402,7 @@ switch or Run — opens the editor in a dialog over the list, so the list and th
 tabs stay where they are. **Test** and **Delete** are in its footer beside
 **Cancel** and **Save**; Escape, the overlay and Cancel all discard the draft, and
 a save the server refuses leaves the dialog open with the change still in it.
-Deleting asks first, naming the cues that go.
+Deleting asks first, naming the cues that go. The editor's header repeats **Used on**.
 
 Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
 rule's name and id, so a bulk delete leaves a record of exactly which rules went.
@@ -595,6 +595,26 @@ will not have.
 **A conversion never renames a cue.** Making a cue automatic and then manual again
 before saving puts back the trigger as it was when you left it — name, former
 names, spoken name and room, edits included.
+
+**Renaming a command repoints its Buttons.** While the name field differs from
+the saved one, the dialog lists, above its footer, each screen and Button that
+names the command (the same places the **Used on** chips show). **Save** writes
+the rule, then points each of those Buttons at the new name through the views API,
+with the layout's revision: a screen someone has open in the layout editor is
+refused rather than overwritten, after one retry from a fresh read. A Button inside
+a container is reached, and a Button that now names another command is left alone.
+A screen that refuses is named in the dialog with the reason, and the dialog stays
+open over it; **the command stays renamed** and the other screens still follow. A
+name the server refuses repoints nothing. Each save that touches screens leaves one
+line on `/log`:
+
+```
+[automation] renamed take_screens to take_the_screens; repointed Booth (1), FOH (2); refused Home (This view was changed by someone else …)
+```
+
+**Make it automatic** shows the same list as a warning (*reads Not set*) and
+repoints nothing: the command is gone, so a Button that named it has nothing to
+press until somebody picks another. A pair is not renamed from here.
 
 ### Built-in cues
 

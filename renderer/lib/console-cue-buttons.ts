@@ -196,3 +196,121 @@ export async function addCueButtonToConsoles(
   }
   return results;
 }
+
+// ── Repointing the Buttons of a renamed command ──────────────────────────────
+//
+// Renaming a command in its dialog lists the Buttons that name it (GET
+// /api/cues/usage) and, on Save, points each at the new name. Same write as above,
+// for the same reasons: each view is read fresh and written with its `layoutRev`, a
+// 409 is retried once from a fresh read, and a view that refuses is RETURNED — the
+// command is already renamed, and the dialog names the view and why.
+//
+// Unlike adding a Button, this changes objects the layout already holds, at any
+// depth, so a stale tab cannot be allowed to retarget the wrong one: an object is
+// repointed only while it is still a cue Button that names the OLD name. A Button
+// the operator has since pointed elsewhere is left alone and not counted.
+
+/** One view's outcome. `count` is the Buttons that were repointed in it. */
+export interface RepointResult {
+  viewId: string;
+  /** The view's name as it was when read, or the id when it was not found. */
+  name: string;
+  ok: boolean;
+  count: number;
+  /** Why it was not written. Absent when `ok`. */
+  error?: string;
+}
+
+const sameCue = (a: unknown, b: string): boolean => typeof a === "string" && a.trim().toLowerCase() === b;
+
+/**
+ * `layout` with every cue Button in `objectIds` that names `from` pointed at `to`,
+ * and how many that was. Immutable: a layout that changes nothing comes back as
+ * the very same object.
+ */
+export function withCueRepointed(
+  layout: LayoutDTO,
+  objectIds: ReadonlySet<string>,
+  from: string,
+  to: string,
+): { layout: LayoutDTO; count: number } {
+  let count = 0;
+  const walk = (objects: readonly LayoutObject[]): LayoutObject[] =>
+    objects.map((o) => {
+      const children = o.children?.length ? walk(o.children) : o.children;
+      const hit =
+        objectIds.has(o.id) &&
+        (o.config as { type?: string }).type === "cue-button" &&
+        sameCue((o.config as { cue?: unknown }).cue, from);
+      if (hit) count++;
+      const sameChildren = children === o.children || (children?.every((c, i) => c === o.children?.[i]) ?? true);
+      if (!hit && sameChildren) return o;
+      return { ...o, ...(children ? { children } : {}), ...(hit ? { config: { ...o.config, cue: to } } : {}) };
+    });
+  const objects = walk(layout.objects);
+  return count === 0 ? { layout, count } : { layout: { ...layout, objects }, count };
+}
+
+async function repointOne(viewId: string, objectIds: ReadonlySet<string>, from: string, to: string): Promise<RepointResult> {
+  for (let attempt = 0; ; attempt++) {
+    const view = (await consoleButtonDeps.readViews()).find((v) => v.id === viewId);
+    if (!view) return { viewId, name: viewId, ok: false, count: 0, error: "it no longer exists" };
+    if (!view.layout) return { viewId, name: view.name, ok: false, count: 0, error: "it has no layout" };
+    const placed = withCueRepointed(view.layout, objectIds, from, to);
+    // Nothing here names the old command any more (or the Button went): not a failure, nothing to write.
+    if (placed.count === 0) return { viewId, name: view.name, ok: true, count: 0 };
+    try {
+      await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev ?? 0);
+      return { viewId, name: view.name, ok: true, count: placed.count };
+    } catch (err) {
+      if ((err as { status?: number }).status === 409 && attempt === 0) continue;
+      return { viewId, name: view.name, ok: false, count: 0, error: errorMessage(err) };
+    }
+  }
+}
+
+/**
+ * Point each Button in `uses` (a command's places, as the usage lists them) from
+ * the command named `from` to the one named `to`, one view at a time.
+ *
+ * Never throws and never stops at a failure: every view gets a result. A caller
+ * that ignores the results is the one swallowing.
+ */
+export async function repointCueButtons(
+  uses: readonly { viewId: string; objectId: string }[],
+  from: string,
+  to: string,
+): Promise<RepointResult[]> {
+  const byView = new Map<string, Set<string>>();
+  for (const u of uses) {
+    const ids = byView.get(u.viewId);
+    if (ids) ids.add(u.objectId);
+    else byView.set(u.viewId, new Set([u.objectId]));
+  }
+  const fromName = from.trim().toLowerCase();
+  const results: RepointResult[] = [];
+  for (const [viewId, ids] of byView) {
+    try {
+      results.push(await repointOne(viewId, ids, fromName, to));
+    } catch (err) {
+      results.push({ viewId, name: viewId, ok: false, count: 0, error: errorMessage(err) });
+    }
+  }
+  return results;
+}
+
+/**
+ * The one `[automation]` line a rename's repoints leave on /log, or null when no
+ * view was involved. It says what was repointed and what was refused, with the
+ * reason, because "the console button reads Not set" is what somebody debugging
+ * a Sunday-morning screen goes looking for, and the log is where they look.
+ */
+export function repointLogLine(from: string, to: string, results: readonly RepointResult[]): string | null {
+  if (results.length === 0) return null;
+  const done = results.filter((r) => r.ok && r.count > 0).map((r) => `${r.name} (${r.count})`);
+  const refused = results.filter((r) => !r.ok).map((r) => `${r.name} (${r.error ?? "refused"})`);
+  const parts = [`renamed ${from} to ${to}`];
+  parts.push(done.length > 0 ? `repointed ${done.join(", ")}` : "repointed none");
+  if (refused.length > 0) parts.push(`refused ${refused.join(", ")}`);
+  return parts.join("; ");
+}

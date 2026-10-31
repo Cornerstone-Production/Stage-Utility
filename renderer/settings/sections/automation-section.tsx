@@ -18,7 +18,7 @@ import type { AutomationOutcome, Rule } from "@main/types/automation";
 import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-param-validation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
-import { screenNames, useCueUsage, usesOf, type CueUse } from "./cue-usage";
+import { CUE_USAGE_KEY, screenNames, useCueUsage, usesOf, type CueUse } from "./cue-usage";
 import { BelongsToButton, OwnedRows } from "./automation-owned";
 import { HomeAssistantChip, UsedOn, VoiceChip } from "./automation-chips";
 import { useOptionSources } from "./automation-option-sources";
@@ -658,7 +658,11 @@ export function AutomationSection({
     queryFn: () =>
       invoke<{ rules: RuleWithIssues[]; settings: { simulate: boolean; disarmed: boolean } }>("automation:rules"),
   });
-  const refresh = useCallback(() => void qc.invalidateQueries({ queryKey: ["automation:rules"] }), [qc]);
+  // The rules, and where the commands are used: a save can rename a command, and its Buttons with it.
+  const refresh = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["automation:rules"] });
+    void qc.invalidateQueries({ queryKey: CUE_USAGE_KEY });
+  }, [qc]);
   useEffect(() => onNotification("automation:rules", refresh), [refresh]);
   useEffect(() => onNotification("automation:settings", refresh), [refresh]);
 
@@ -1195,6 +1199,7 @@ export function AutomationSection({
           pvpLayers={pvpLayers}
           inferredFor={inferredFor}
           cueNamesTaken={cueNamesTaken}
+          usage={usage}
           onChanged={refresh}
         />
       )}
