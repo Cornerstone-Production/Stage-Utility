@@ -21,8 +21,7 @@ import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
-import { countActionButtons, migrationLine, planActionButtonMigration } from "./action-button-migration.js";
-import { automationStore } from "./automation-store.js";
+import { runActionButtonMigration } from "./action-button-migration.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -960,7 +959,8 @@ export class StageController {
     // Every Run an action Button becomes a cue Button with a rule of its own.
     // After the screens, so it sees the final views (a copy a role made carries
     // its Buttons too), and in this same pass for the reason Home is seeded here.
-    const actions = await this.migrateActionButtons(roles.views, done.actionButtonsMigrated === true);
+    const actions = await runActionButtonMigration(roles.views, done.actionButtonsMigrated === true);
+    if (actions.failure) console.error(scrub(actions.failure));
     const result = { ...surfaced, views: actions.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
@@ -1024,50 +1024,6 @@ export class StageController {
     }
     for (const line of roles.log) console.log(`[screens] ${scrub(line)}`);
     return { views: result.views, outputs: slugs.outputs };
-  }
-
-  /**
-   * Turn every Run an action Button into a Button bound to a cue of its own (see
-   * action-button-migration.ts), once.
-   *
-   * Writes the NEW RULES here and returns the views for the caller to save, so
-   * the two writes are told apart: `rulesWritten` says how many landed. A failure
-   * is returned as `settled: false` and logged, never swallowed into "done": the
-   * flag stays unset and the next start tries again over the same Buttons, which
-   * until then keep working as Run an action.
-   */
-  private async migrateActionButtons(
-    views: View[],
-    alreadyDone: boolean,
-  ): Promise<{ views: View[]; settled: boolean; rulesWritten: number; line: string | null }> {
-    const unchanged = { views, settled: false, rulesWritten: 0, line: null };
-    if (alreadyDone) return { ...unchanged, settled: true };
-    if (countActionButtons(views) === 0) return { ...unchanged, settled: true };
-    // The rules file unreadable reads as no rules at all, and writing over that is
-    // how an operator's cues are lost. Nothing is changed until a start reads it.
-    const unreadable = automationStore.rulesUnreadable() ?? viewsStore.refusingSaves();
-    if (unreadable) {
-      console.error(
-        `[automation] Run an action buttons were not converted: ${scrub(unreadable.message)}. They keep working as before and convert at the next start that reads it.`,
-      );
-      return unchanged;
-    }
-    // Lazily: the action registry reaches back into this controller.
-    const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
-    const existing = await automationStore.loadRules();
-    const plan = planActionButtonMigration(views, existing, (id) => AUTOMATION_ACTIONS[id]?.label);
-    if (plan.rules.length > 0) {
-      try {
-        await automationStore.saveRules([...existing, ...plan.rules]);
-      } catch (err) {
-        console.error(
-          `[automation] ${scrub(plural(plan.count, "Run an action button"))} were not converted: the cues could not be saved (${scrub(errorMessage(err))}). ` +
-            "They keep working as before and convert at the next start.",
-        );
-        return unchanged;
-      }
-    }
-    return { views: plan.views, settled: true, rulesWritten: plan.rules.length, line: migrationLine(plan) };
   }
 
   /**

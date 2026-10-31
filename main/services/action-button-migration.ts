@@ -15,10 +15,11 @@
 // The migration changes behaviour on purpose: those Buttons now obey Simulate and
 // Disarm.
 //
-// PURE: it plans, and the caller writes (stage-controller.ts, in the pass that
-// already owns the views file). A pass that died between its two writes is safe to
-// run again: a Button whose rule is already there (same `ownedBy`) is bound to that
-// rule rather than given a second.
+// `planActionButtonMigration` is PURE: it plans. `runActionButtonMigration` writes
+// the rules and hands the views back for the caller to save (stage-controller.ts,
+// in the pass that already owns the views file). A pass that died between its two
+// writes is safe to run again: a Button whose rule is already there (same
+// `ownedBy`) is bound to that rule rather than given a second.
 
 import { randomUUID } from "node:crypto";
 
@@ -28,7 +29,12 @@ import type { LayoutObject } from "../types/views.js";
 import { ownedCueRule } from "./button-ownership.js";
 import { calledCueName, takenCueNames } from "./cue-aliases.js";
 import { chosenLabel, cueNameFor, cueSlug } from "./cue-naming.js";
+import { migrateViews } from "./never-chosen-defaults.js";
+import { automationStore } from "./automation-store.js";
+import { errorMessage } from "./errors.js";
+import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
+import { viewsStore } from "./views-store.js";
 
 /** What the pass would do. */
 export interface ActionButtonMigration {
@@ -49,24 +55,6 @@ function ruleParams(params: Record<string, unknown> | undefined): Record<string,
     if (typeof v === "string" || typeof v === "number") out[k] = v;
   }
   return out;
-}
-
-/** Whether any object under `objects`, nested ones included, is an action-button. */
-function hasActionButton(objects: readonly LayoutObject[] | undefined): boolean {
-  return (objects ?? []).some((o) => o.config?.type === "action-button" || hasActionButton(o.children));
-}
-
-/** How many Run an action Buttons these views hold. For the caller's "nothing to do" check. */
-export function countActionButtons(views: readonly View[]): number {
-  let n = 0;
-  const walk = (objects: readonly LayoutObject[] | undefined) => {
-    for (const o of objects ?? []) {
-      if (o.config?.type === "action-button") n++;
-      walk(o.children);
-    }
-  };
-  for (const v of views) walk(v.layout?.objects);
-  return n;
 }
 
 /**
@@ -97,66 +85,57 @@ export function planActionButtonMigration(
   }
 
   const rules: Rule[] = [];
-  const perView: { viewName: string; count: number }[] = [];
+  // By view id: names are not unique, and two views called "Console" are two entries.
+  const perView = new Map<string, { viewName: string; count: number }>();
   let count = 0;
-  let changedAny = false;
 
-  const convert = (view: View, objects: readonly LayoutObject[]): LayoutObject[] | null => {
-    if (!hasActionButton(objects)) return null;
-    return objects.map((o) => {
-      let next = o;
-      const cfg = o.config;
-      if (cfg?.type === "action-button") {
-        const known = ownedAlready.get(`${view.id}\n${o.id}`);
-        const label = chosenLabel(cfg.label);
-        const registryName = actionLabel(cfg.actionId)?.trim() || cfg.actionId;
-        // The rule is read by an operator in a list: the label the Button wears, or
-        // the action's own name. The cue is named from the same, unless the label
-        // has no letters in it.
-        const ruleName = label ?? registryName;
-        let cueName = known;
-        if (cueName === undefined) {
-          cueName = cueNameFor(cueSlug(ruleName) ? ruleName : registryName, taken, "btn_");
-          taken.add(cueName);
-          rules.push({
-            ...ownedCueRule({
-              name: ruleName,
-              cueName,
-              action: { id: cfg.actionId, params: ruleParams(cfg.params) },
-              ownedBy: { viewId: view.id, objectId: o.id },
-            }),
-            id: randomUUID(),
-          });
-        }
-        next = {
-          ...o,
-          config: { type: "cue-button", cue: cueName, ...(typeof cfg.label === "string" ? { label: cfg.label } : {}) },
-        };
-        count++;
-        const entry = perView.find((p) => p.viewName === view.name);
-        if (entry) entry.count++;
-        else perView.push({ viewName: view.name, count: 1 });
+  // Returns `o` itself when nothing under it changed, which is what migrateViews
+  // reads as "this view is untouched".
+  const convert = (o: LayoutObject, view: View): LayoutObject => {
+    let next = o;
+    const cfg = o.config;
+    if (cfg?.type === "action-button") {
+      const known = ownedAlready.get(`${view.id}\n${o.id}`);
+      const label = chosenLabel(cfg.label);
+      const registryName = actionLabel(cfg.actionId)?.trim() || cfg.actionId;
+      // The rule is read by an operator in a list: the label the Button wears, or
+      // the action's own name. The cue is named from the same, unless the label
+      // has no letters in it.
+      const ruleName = label ?? registryName;
+      let cueName = known;
+      if (cueName === undefined) {
+        cueName = cueNameFor(cueSlug(ruleName) ? ruleName : registryName, taken, "btn_");
+        taken.add(cueName);
+        rules.push({
+          ...ownedCueRule({
+            name: ruleName,
+            cueName,
+            action: { id: cfg.actionId, params: ruleParams(cfg.params) },
+            ownedBy: { viewId: view.id, objectId: o.id },
+          }),
+          id: randomUUID(),
+        });
       }
-      if (o.children?.length) {
-        // Embedded views are separate entries in the store, reached by the outer
-        // loop; this recursion is for objects nested inside a container.
-        const kids = convert(view, o.children);
-        if (kids) next = { ...next, children: kids };
-      }
-      return next;
-    });
+      next = {
+        ...o,
+        config: { type: "cue-button", cue: cueName, ...(typeof cfg.label === "string" ? { label: cfg.label } : {}) },
+      };
+      count++;
+      const entry = perView.get(view.id);
+      if (entry) entry.count++;
+      else perView.set(view.id, { viewName: view.name, count: 1 });
+    }
+    if (o.children?.length) {
+      // Embedded views are separate entries in the store, reached by the outer
+      // loop; this recursion is for objects nested inside a container.
+      const kids = o.children.map((c) => convert(c, view));
+      if (kids.some((k, i) => k !== o.children![i])) next = { ...next, children: kids };
+    }
+    return next;
   };
 
-  const out = views.map((v) => {
-    const objects = v.layout?.objects;
-    if (!objects?.length) return v;
-    const converted = convert(v, objects);
-    if (!converted) return v;
-    changedAny = true;
-    return { ...v, layout: { ...v.layout!, objects: converted } };
-  });
-
-  return { views: changedAny ? out : (views as View[]), rules, count, perView };
+  const out = migrateViews(views, convert);
+  return { views: out, rules, count, perView: [...perView.values()] };
 }
 
 /** The one line a run logs, or null when there was nothing to migrate. */
@@ -165,4 +144,85 @@ export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView"
   const where = m.perView.map((p) => `${scrub(p.viewName)} ${p.count}`).join(", ");
   const what = m.count === 1 ? "1 Run an action button to its own cue" : `${m.count} Run an action buttons to their own cues`;
   return `[automation] migrated ${what} (${where})`;
+}
+
+/** What the pass reads and writes, so a test can swap any of it. */
+export interface ActionButtonMigrationDeps {
+  loadRules(): Promise<Rule[]>;
+  saveRules(rules: Rule[]): Promise<void>;
+  /** Why the rules or the views would refuse a save, or null. */
+  refusal(): Error | null;
+  /** The registry's name for an action id. */
+  actionLabel(actionId: string): string | undefined;
+}
+
+/** What one run did. */
+export interface ActionButtonMigrationRun {
+  /** The views to save: the SAME array when nothing changed. */
+  views: View[];
+  /** Whether the pass is finished, so the caller may record it. False when it was left for the next start. */
+  settled: boolean;
+  /** How many new rules this run wrote. The caller says so when saving the views then fails. */
+  rulesWritten: number;
+  /** What to log on success, or null. */
+  line: string | null;
+  /** What to log as an error, or null: why the Buttons were left alone. */
+  failure: string | null;
+}
+
+async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
+  // Lazily: the action registry reaches back into the stage controller, which calls this.
+  const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
+  return {
+    loadRules: () => automationStore.loadRules(),
+    saveRules: (rules) => automationStore.saveRules(rules),
+    refusal: () => automationStore.rulesUnreadable() ?? viewsStore.refusingSaves(),
+    actionLabel: (id) => AUTOMATION_ACTIONS[id]?.label,
+  };
+}
+
+/**
+ * The whole pass over the views the controller holds: plan, write the new rules,
+ * return the views. Writes the RULES and not the views, so the two writes are told
+ * apart.
+ *
+ * A failure is returned as `failure` with `settled: false`, never swallowed into
+ * "done": the caller leaves the flag unset and the next start tries again over the
+ * same Buttons, which until then keep working as Run an action.
+ */
+export async function runActionButtonMigration(
+  views: View[],
+  alreadyDone: boolean,
+  deps?: ActionButtonMigrationDeps,
+): Promise<ActionButtonMigrationRun> {
+  const left = (failure: string | null): ActionButtonMigrationRun => ({ views, settled: false, rulesWritten: 0, line: null, failure });
+  if (alreadyDone) return { ...left(null), settled: true };
+  const d = deps ?? (await defaultDeps());
+  // The rules file unreadable reads as no rules at all, and writing over that is
+  // how an operator's cues are lost. Nothing is changed until a start reads it.
+  const refusal = d.refusal();
+  if (refusal) return left(refusedSentence(refusal));
+  let existing: Rule[];
+  try {
+    existing = await d.loadRules();
+  } catch (err) {
+    return left(refusedSentence(err));
+  }
+  const plan = planActionButtonMigration(views, existing, d.actionLabel);
+  if (plan.count === 0) return { ...left(null), settled: true };
+  if (plan.rules.length > 0) {
+    try {
+      await d.saveRules([...existing, ...plan.rules]);
+    } catch (err) {
+      return left(
+        `[automation] ${plural(plan.count, "Run an action button")} were not converted: the cues could not be saved (${errorMessage(err)}). ` +
+          "They keep working as before and convert at the next start.",
+      );
+    }
+  }
+  return { views: plan.views, settled: true, rulesWritten: plan.rules.length, line: migrationLine(plan), failure: null };
+}
+
+function refusedSentence(why: unknown): string {
+  return `[automation] Run an action buttons were not converted: ${errorMessage(why)}. They keep working as before and convert at the next start that reads it.`;
 }
