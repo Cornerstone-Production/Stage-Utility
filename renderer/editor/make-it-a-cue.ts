@@ -16,34 +16,20 @@
 // widget as it was and tells the operator what the server said.
 
 import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
-import { homeVisibilityParams, isPairHalfName } from "@main/services/cue-pairs";
+import { homeVisibilityParams } from "@main/services/cue-pairs";
+import { chosenLabel, cueNameFor, cueSlug } from "@main/services/cue-naming";
 import type { CueManifest } from "@main/services/cue-manifest";
 import type { Rule } from "@main/types/automation";
-import { slugForCue } from "@main/services/companion-export";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../lib/api";
 
+// The naming is shared with the server, which names a migrated Button's cue the same way.
+export { chosenLabel, cueNameFor, cueSlug };
+
 /** Seconds a cue made this way waits before it may fire again. Short: a Button
  *  is pressed by hand, and two accidental taps should not run it twice. */
 const MADE_CUE_COOLDOWN_SEC = 2;
-
-/** The label every action button was created with, before a blank one meant "use
- *  the action's name". Saved buttons still carry it, and it names nothing. */
-const LEGACY_DEFAULT_LABEL = "Action";
-
-/** The label the operator actually chose, or undefined when it is blank or the old
- *  default. The rule and cue are named from this, and the rebound button keeps it. */
-export function chosenLabel(label: string | undefined): string | undefined {
-  const t = (label ?? "").trim();
-  return t && t !== LEGACY_DEFAULT_LABEL ? t : undefined;
-}
-
-/** lower_snake_case from any text, by the Companion import's own slug with accents
- *  folded first. "" when nothing usable is left. */
-export function cueSlug(text: string): string {
-  return slugForCue(text.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""));
-}
 
 /**
  * Every cue name something already answers to: each cue rule's name and former
@@ -71,25 +57,6 @@ export function takenCueNames(rules: readonly Rule[], manifest: CueManifest | nu
     taken.add(b.cue);
   }
   return taken;
-}
-
-/**
- * A cue name for this text that nothing else answers to.
- *
- * Two traps beyond a plain clash. A name ending `_on` or `_off` reads as half of
- * an ON/OFF pair, and a half with no partner is dropped from the manifest, so a
- * Button labelled "Projectors on" would be bound to a cue that never appears: it
- * gets `_cue` appended. An empty slug (a label of only symbols) falls back to
- * `button`.
- */
-export function cueNameFor(text: string, taken: ReadonlySet<string>): string {
-  let base = cueSlug(text) || "button";
-  if (isPairHalfName(base)) base = `${base}_cue`;
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) {
-    const candidate = `${base}_${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
 }
 
 /** Rule params hold strings and numbers only; every registry param type is one of
