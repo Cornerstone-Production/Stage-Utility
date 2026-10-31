@@ -30,6 +30,7 @@ const { cueRoutes } = await import("./routes/cue-routes.js");
 const { automationRoutes } = await import("./routes/automation-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
 const { companionDeps } = await import("./companion-api.js");
+const { planActionButtonMigration } = await import("./action-button-migration.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
 type Pass = (views: View[], outputs: Output[]) => Promise<{ views: View[]; outputs: Output[] }>;
@@ -275,6 +276,29 @@ describe("migrating Run an action Buttons", () => {
     await runLoadPass(await viewsStore.load(), []);
     assert.deepEqual(again.filter((l) => l.includes("Run an action button")), []);
     assert.equal((await automationStore.loadRules()).length, 5);
+  });
+});
+
+describe("planning the migration", () => {
+  test("two views with the same name are counted as two, each under its own id", () => {
+    const view = (id: string, objectId: string) =>
+      ({
+        id,
+        name: "Console",
+        kind: "custom",
+        createdAt: "",
+        layout: {
+          version: 1,
+          canvas: { width: 1920, height: 1080, background: null, fit: "responsive" },
+          objects: [{ id: objectId, ...place, config: { type: "action-button", actionId: "obs.record", params: {}, label: `Rec ${objectId}` } }],
+        },
+      }) as unknown as View;
+    const plan = planActionButtonMigration([view("v-a", "o-a"), view("v-b", "o-b")], [], () => undefined);
+    assert.equal(plan.count, 2);
+    assert.deepEqual(plan.perView, [
+      { viewName: "Console", count: 1 },
+      { viewName: "Console", count: 1 },
+    ]);
   });
 });
 
