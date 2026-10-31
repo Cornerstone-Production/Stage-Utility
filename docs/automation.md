@@ -692,7 +692,7 @@ That pair can be deleted whenever you like — the built-in appears in its place
 under the same name, so nothing in Home Assistant has to be repasted.
 
 The set changes when an integration is switched on or off, when Planning Center
-connects, and when ProVideoPlayer reports different layer names. The cue
+connects, and when ProVideoPlayer reports different layer names. The command
 manifest's version moves with it, so an integration re-reads. A ProVideoPlayer
 that goes offline keeps its layers listed, reading unknown, rather than removing
 every entity until it comes back.
