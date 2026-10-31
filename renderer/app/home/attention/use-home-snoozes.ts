@@ -24,8 +24,16 @@ export function useHomeSnoozes(enabled = true): HomeSnoozesHandle {
   const refresh = useCallback(async () => {
     setFresh(await read());
   }, [read]);
-  // Whichever is newer by the server's rev; a push that lands after wins again.
-  const value = fresh && (!channel.value || fresh.rev >= channel.value.rev) ? fresh : channel.value;
+  // `fresh` only bridges the gap until the channel next speaks. It is dropped the
+  // moment a new frame arrives, never compared to it by rev: the server's rev
+  // restarts at 0 with every process, so after a restart a LOWER rev is the newer
+  // truth, and a stale `fresh` that won on rev would hide live problems.
+  const [seen, setSeen] = useState(channel.value);
+  if (seen !== channel.value) {
+    setSeen(channel.value);
+    setFresh(null);
+  }
+  const value = fresh ?? channel.value;
   return { value, known: channel.known || fresh !== null, refresh };
 }
 
@@ -36,4 +44,21 @@ export function snoozeItem(key: string, severity: AttentionSeverity): Promise<un
 
 export function unsnoozeItem(key: string): Promise<unknown> {
   return invoke("home:unsnooze", { key });
+}
+
+/**
+ * Run a snooze or unsnooze, then re-read the list for instant local feedback.
+ *
+ * The action's own failure is the caller's to report ("Could not snooze"). The
+ * re-read is a courtesy: if it fails the snooze has still SAVED and the push still
+ * delivers it, so it must not make a saved snooze read as a failed one. It is
+ * named in the console instead.
+ */
+export async function thenRefresh(action: Promise<unknown>, refresh: () => Promise<void>): Promise<void> {
+  await action;
+  try {
+    await refresh();
+  } catch (err) {
+    console.warn("[home] saved, but re-reading the snoozes failed; the next push will show it:", err);
+  }
 }

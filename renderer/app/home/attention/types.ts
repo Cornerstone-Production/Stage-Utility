@@ -78,11 +78,31 @@ export interface AttentionSource {
   items: (input: AttentionInput) => AttentionItem[];
 }
 
+/** FNV-1a over the UTF-16 units, as 8 hex digits. Not crypto: a plain-HTTP page has
+ *  no crypto.subtle, and all this has to do is tell two subjects apart. */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/** The longest subject the server's key shape takes (SNOOZE_KEY). */
+const SUBJECT_MAX = 100;
+
 /**
  * A snooze key. The subject often comes from an id the app did not choose
  * (a wireless channel is `connection::bay`), and the server accepts only a fixed
- * alphabet, so anything outside it becomes `_`.
+ * alphabet, so anything outside it becomes `_`. That alone would let "a b" and
+ * "a_b" share a key, and so would cutting a long subject short: whenever anything
+ * was replaced or cut, a hash of the ORIGINAL subject is appended so two
+ * different subjects stay two keys. A subject that was already clean is untouched.
  */
 export function attentionKey(source: string, subject: string): string {
-  return `${source}:${subject.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 100)}`;
+  const clean = subject.replace(/[^A-Za-z0-9_.:-]/g, "_");
+  if (clean === subject && clean.length <= SUBJECT_MAX) return `${source}:${clean}`;
+  const suffix = `-${fnv1a(subject)}`;
+  return `${source}:${clean.slice(0, SUBJECT_MAX - suffix.length)}${suffix}`;
 }

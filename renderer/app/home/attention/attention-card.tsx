@@ -22,7 +22,7 @@ import { healthyLine } from "./healthy";
 import { partitionSnoozed } from "./snooze";
 import type { AttentionFix, AttentionInput, AttentionItem } from "./types";
 import { useAttentionInput } from "./use-attention";
-import { snoozeItem, unsnoozeItem, useHomeSnoozes } from "./use-home-snoozes";
+import { snoozeItem, thenRefresh, unsnoozeItem, useHomeSnoozes } from "./use-home-snoozes";
 
 /** Rows shown before "+N more", at least. A taller tile shows as many as fit. */
 const MIN_ROWS = 3;
@@ -309,8 +309,8 @@ function AttentionBody({
       input={input}
       snoozes={snoozes.value?.snoozes ?? []}
       interactive={interactive}
-      onSnooze={(item) => snoozeItem(item.key, item.severity).then(snoozes.refresh)}
-      onUnsnooze={(key) => unsnoozeItem(key).then(snoozes.refresh)}
+      onSnooze={(item) => thenRefresh(snoozeItem(item.key, item.severity), snoozes.refresh)}
+      onUnsnooze={(key) => thenRefresh(unsnoozeItem(key), snoozes.refresh)}
     />
   );
 }
