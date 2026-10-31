@@ -62,7 +62,7 @@ function serve(opts: Parameters<typeof serveButtons>[0] = {}) {
 }
 
 /** The panel with a real useState behind onConfig; `configs` is every write. */
-function mount(initial: ButtonConfig, owner = OWNER, opts: { throwOnce?: boolean } = {}) {
+function mount(initial: ButtonConfig, owner = OWNER, opts: { throwOnce?: boolean; draft?: unknown[] } = {}) {
   let threw = !opts.throwOnce;
   const cues = manifest();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -75,6 +75,7 @@ function mount(initial: ButtonConfig, owner = OWNER, opts: { throwOnce?: boolean
       viewId: owner.viewId,
       viewName: "Booth console",
       objectId: owner.objectId,
+      draftObjects: opts.draft ?? [],
       onConfig: (next: LayoutObjectConfig) => {
         if (!threw) {
           threw = true;
@@ -568,6 +569,29 @@ describe("a Button that copies of it also press", () => {
     const made = (s.posts[0]!.trigger as { params: { name: string } }).params.name;
     assert.notEqual(made, "btn_shutter");
     assert.equal((configs[0] as { cue: string }).cue, made);
+  });
+});
+
+describe("a copy made in the editor and not saved yet", () => {
+  test("is a sharer too: the saved views do not know it, the draft does", async () => {
+    const shared = owned("btn_shutter", PRESS_17_2_0);
+    // usage is empty: the copy was duplicated in the editor and the layout was not saved.
+    const s = serve({ rules: [shared], usage: {} });
+    const asButton = (id: string) => ({ id, x: 0, y: 0, w: 0.1, h: 0.1, z: 1, config: { type: "cue-button", cue: "btn_shutter" }, style: {} });
+    const draft = [
+      asButton("o1"),
+      // Nested, as a copy dropped into a container is.
+      { id: "box", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "container" }, style: {}, children: [asButton("copy")] },
+    ];
+    const { container, configs } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true }, OWNER, { draft });
+    await gridReady(container);
+    await eventually(() => assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true"));
+    fireEvent.click(keyAt(container, 0, 0)!);
+    await eventually(() => assert.equal(configs.length, 1));
+    const sharedNow = s.rules.find((r) => r.id === "own-1")!;
+    assert.deepEqual(sharedNow.action, PRESS_17_2_0, "what the unsaved copy presses is not rewritten under it");
+    assert.deepEqual(sharedNow.ownedBy, { viewId: "booth", objectId: "copy" });
+    assert.equal(s.posts.length, 1);
   });
 });
 

@@ -17,7 +17,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { LayoutObject } from "@main/types/views.js";
 import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
-import { serve as serveButtons } from "../../test-fixtures/button-server.js";
+import { owned, serve as serveButtons } from "../../test-fixtures/button-server.js";
 import { NoStream } from "../../test-fixtures/no-stream.js";
 
 const teardown = installDom();
@@ -43,7 +43,7 @@ afterEach(() => {
 const card = (config: Record<string, unknown> = { type: "cue-button", cue: "", showDevice: true }): LayoutObject =>
   ({ id: "home-cue-button-5-4", x: 0, y: 0, w: 1, h: 1, z: 0, home: { size: "s" }, config }) as unknown as LayoutObject;
 
-function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = {}) {
+function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = {}, cards: LayoutObject[] = [c]) {
   const server = serveButtons(serveOpts);
   restores.push(server.restore);
   const saved: LayoutObject[] = [];
@@ -55,6 +55,7 @@ function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = 
       { client: qc },
       React.createElement(ButtonPressSheet as never, {
         card: c,
+        cards,
         onSave: (next: LayoutObject) => saved.push(next),
         onClose: () => closed++,
       }),
@@ -139,5 +140,18 @@ describe("the Presses sheet", () => {
     await eventually(() => assert.equal(saved.length, 1));
     assert.equal(server.posts.length, 1);
     assert.match((saved[0]!.config as { cue: string }).cue, /^btn_/);
+  });
+
+  test("a copy of the tile on Home that is not saved yet keeps pressing what it pressed", async () => {
+    const mine = card({ type: "cue-button", cue: "btn_shared", showDevice: true });
+    const copy = { ...card({ type: "cue-button", cue: "btn_shared", showDevice: true }), id: "home-copy" } as LayoutObject;
+    const shared = owned("btn_shared", { id: "display.refresh", params: {} }, { ownedBy: { viewId: "home", objectId: mine.id } });
+    const { server } = mount(mine, { rules: [shared], usage: {} }, [mine, copy]);
+    await eventually(() => assert.equal(choice("App action").getAttribute("aria-pressed"), "true"));
+    fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Blank displays")!);
+    await eventually(() => assert.equal(server.posts.length, 1));
+    const sharedNow = server.rules.find((r) => r.id === "own-1")!;
+    assert.deepEqual(sharedNow.action, { id: "display.refresh", params: {} }, "the copy's command is rewritten under it");
+    assert.deepEqual(sharedNow.ownedBy, { viewId: "home", objectId: "home-copy" });
   });
 });

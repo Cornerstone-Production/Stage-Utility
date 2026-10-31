@@ -510,6 +510,7 @@ export function HomeRoute() {
       {pressingCard && (
         <ButtonPressSheet
           card={pressingCard}
+          cards={objects}
           onClose={() => setPressingId(null)}
           onSave={(next) => {
             save((objs) => replaceCard(objs, next));

@@ -816,12 +816,14 @@ export function ReaperLiveLabel() {
 }
 
 export function Inspector({
-  o, viewId, viewName, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, viewId, viewName, draftObjects, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   /** The view being edited (`"home"` for Home) and its name: which Buttons' own commands are this one's. */
   viewId: string;
   viewName: string;
+  /** Every object of the layout being edited, as drafted, nested ones inside their parents. */
+  draftObjects: readonly LayoutObject[];
   canvas: LayoutCanvas;
   /** Design-px size of this object's parent box (the canvas for top-level). */
   parentW: number;
@@ -1569,7 +1571,7 @@ export function Inspector({
         );
       })()}
       {c.type === "cue-button" && (
-        <ButtonInspector c={c} cues={cues} viewId={viewId} viewName={viewName} objectId={o.id} onConfig={onConfig} />
+        <ButtonInspector c={c} cues={cues} viewId={viewId} viewName={viewName} objectId={o.id} draftObjects={draftObjects} onConfig={onConfig} />
       )}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];

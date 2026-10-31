@@ -21,7 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { calledCueName } from "@main/services/cue-aliases";
 import { errorMessage } from "@main/services/errors";
 import type { Rule } from "@main/types/automation";
-import type { LayoutObjectConfig } from "@main/types/views";
+import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
 import { ErrorNote, Switch } from "../components/ui";
 import { invoke } from "../lib/api";
@@ -33,6 +33,7 @@ import { CompanionPane, type PickedCompanion } from "./companion-pane";
 import { RowToggle } from "./inspector-rows";
 import {
   COMPANION_PRESS,
+  draftUsers,
   listWithCommands,
   ownedRuleFor,
   pressKindOf,
@@ -63,6 +64,7 @@ export function ButtonPresses({
   cues,
   onConfig,
   settleRef,
+  draftObjects,
 }: {
   owner: PressOwner;
   /** This view's name, for the Used on chip of a Button that is not saved yet. */
@@ -78,6 +80,12 @@ export function ButtonPresses({
    * stored the Button without its command and left the command with no Button.
    */
   settleRef?: MutableRefObject<(() => Promise<void>) | null>;
+  /**
+   * The objects of the layout being edited, as drafted and not yet saved. A Button duplicated
+   * here and not yet saved presses the same command and is in no stored view, so the write
+   * has to be told about it or it would rewrite the command both press.
+   */
+  draftObjects: readonly LayoutObject[];
 }) {
   const qc = useQueryClient();
   const rulesQ = useQuery(rulesQuery);
@@ -95,6 +103,7 @@ export function ButtonPresses({
   const mode = chosen ?? kind ?? "companion";
 
   const latest = useLatestRef(c);
+  const drafted = useLatestRef(draftObjects);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Writes go one after another: two picks in a row must not both mint `btn_x`. The chain
@@ -141,7 +150,13 @@ export function ButtonPresses({
   function commit(target: PressTarget): Promise<void> {
     const started = epoch.current;
     return enqueue(async () => {
-      const made = await writeOwnedRule({ owner, cue: latest.current.cue, label: latest.current.label, target });
+      const made = await writeOwnedRule({
+        owner,
+        cue: latest.current.cue,
+        label: latest.current.label,
+        target,
+        draftUsersOf: (cue) => draftUsers(drafted.current, owner.viewId, cue),
+      });
       if (!made.ok) {
         // The Button is left exactly as it was, and the reason stays on screen.
         setError(made.error);

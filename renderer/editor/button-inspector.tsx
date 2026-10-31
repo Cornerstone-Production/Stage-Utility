@@ -10,7 +10,7 @@
 // device stays for a pair, or a command that has a room to show: the line under the
 // label, and the reason when a reading is stale.
 
-import type { LayoutObjectConfig } from "@main/types/views";
+import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import type { CuesLive } from "../main/use-cue-live";
 import { cueEntry } from "../main/use-cue-live";
 import { ButtonPresses, type CueButtonConfig } from "./button-presses";
@@ -33,6 +33,7 @@ export function ButtonInspector({
   viewId,
   viewName,
   objectId,
+  draftObjects,
   onConfig,
 }: {
   c: ButtonConfig;
@@ -43,6 +44,8 @@ export function ButtonInspector({
   viewId: string;
   viewName: string;
   objectId: string;
+  /** The layout being edited, as drafted: see ButtonPresses. */
+  draftObjects: readonly LayoutObject[];
   onConfig: (c: LayoutObjectConfig) => void;
 }) {
   const name = cueEntry(cues, c.cue)?.row.name;
@@ -55,7 +58,7 @@ export function ButtonInspector({
         placeholder={name ?? "What it presses"}
         onChange={(v) => onConfig({ ...c, label: v })}
       />
-      <ButtonPresses owner={{ viewId, objectId }} where={viewName} c={c} cues={cues} onConfig={onConfig} />
+      <ButtonPresses owner={{ viewId, objectId }} where={viewName} c={c} cues={cues} onConfig={onConfig} draftObjects={draftObjects} />
       {hasDeviceLine(cues, c.cue) && (
         <RowSwitch
           label="Show device"

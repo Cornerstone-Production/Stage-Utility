@@ -221,6 +221,7 @@ async function mountInspector(type: LayoutObjectType, configOver?: Partial<Layou
           o,
           viewId: "v1",
           viewName: "Test",
+          draftObjects: [],
           canvas: { width: 1920, height: 1080 },
           parentW: 1920,
           parentH: 1080,

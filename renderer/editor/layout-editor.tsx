@@ -2573,6 +2573,7 @@ export function LayoutEditor({
                 o={selected}
                 viewId={view.id}
                 viewName={view.name}
+                draftObjects={objects}
                 canvas={canvas}
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}

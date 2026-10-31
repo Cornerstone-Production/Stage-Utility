@@ -30,10 +30,13 @@ export function buttonConfigOf(card: LayoutObject): CueButtonConfig | null {
 
 export function ButtonPressSheet({
   card,
+  cards,
   onSave,
   onClose,
 }: {
   card: LayoutObject;
+  /** Every card on Home as it stands now, for a Button copied and not yet saved. */
+  cards: readonly LayoutObject[];
   /** The card with its new config, for Home to store. */
   onSave: (next: LayoutObject) => void;
   onClose: () => void;
@@ -72,6 +75,7 @@ export function ButtonPressSheet({
             cues={cues}
             onConfig={(next) => setDraft(next as CueButtonConfig)}
             settleRef={settle}
+            draftObjects={cards}
           />
         </div>
         <DialogFooter>

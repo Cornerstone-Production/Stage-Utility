@@ -20,6 +20,7 @@ import { buttonCueRule, chosenLabel, cueNameFor, cueSlug, namesTakenForNewCue } 
 import type { CueManifest } from "@main/services/cue-manifest";
 import { errorMessage } from "@main/services/errors";
 import type { OwnedBy, Rule } from "@main/types/automation";
+import type { LayoutObject } from "@main/types/views";
 
 import { invoke } from "../lib/api";
 
@@ -77,14 +78,41 @@ interface UsageUse {
 }
 
 /**
+ * The Buttons in a layout's objects, nested ones included, that name this command: what an
+ * editor holds as the draft, which `/api/cues/usage` (the SAVED views) does not know yet.
+ */
+export function draftUsers(objects: readonly LayoutObject[], viewId: string, cue: string): PressOwner[] {
+  const key = cue.trim().toLowerCase();
+  const out: PressOwner[] = [];
+  const visit = (list: readonly LayoutObject[]) => {
+    for (const o of list) {
+      const c = o.config as { type?: string; cue?: unknown };
+      if (c.type === "cue-button" && typeof c.cue === "string" && key !== "" && c.cue.trim().toLowerCase() === key) {
+        out.push({ viewId, objectId: o.id });
+      }
+      if (o.children?.length) visit(o.children);
+    }
+  };
+  visit(objects);
+  return out;
+}
+
+/**
  * Every Button OTHER than `owner` that names this command. A Button duplicated with
  * its command still pressing the original's has the same cue, so the rule is not the
  * one Button's alone any more, whoever it says it belongs to.
  */
-async function otherUsers(cue: string, owner: PressOwner): Promise<UsageUse[]> {
+async function otherUsers(cue: string, owner: PressOwner, inDraft: readonly PressOwner[]): Promise<UsageUse[]> {
   const usage = await invoke<Record<string, UsageUse[]>>("cues:usage");
   const key = cue.trim().toLowerCase();
-  return (Object.hasOwn(usage, key) ? usage[key]! : []).filter((u) => !sameOwner(u, owner));
+  // The saved views and the editor's draft, which may hold a copy that was never saved.
+  const seen = new Set<string>();
+  return [...(Object.hasOwn(usage, key) ? usage[key]! : []), ...inDraft].filter((u) => {
+    const id = `${u.viewId}\n${u.objectId}`;
+    if (sameOwner(u, owner) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /**
@@ -108,13 +136,16 @@ export async function writeOwnedRule(opts: {
   /** The Button's own label; blank, or the old default, falls back to the pick's name. */
   label: string | undefined;
   target: PressTarget;
+  /** The Buttons in the draft layout that name a command (a copy not saved yet is only here). */
+  draftUsersOf?: (cue: string) => PressOwner[];
 }): Promise<Wrote> {
   try {
     const ruleName = chosenLabel(opts.label) ?? (opts.target.name.trim() || opts.target.action.id);
     const { rules } = await invoke<{ rules: Rule[] }>("automation:rules");
     let existing = ownedRuleFor(rules, opts.owner, opts.cue);
     if (existing) {
-      const sharers = await otherUsers(calledCueName(existing.trigger), opts.owner);
+      const cue = calledCueName(existing.trigger);
+      const sharers = await otherUsers(cue, opts.owner, opts.draftUsersOf?.(cue) ?? []);
       if (sharers.length > 0) {
         await invoke("automation:updateRule", {
           id: existing.id,
