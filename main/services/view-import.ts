@@ -333,9 +333,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     // cues are left behind, since the Automation page shows them as ownerless.
     if (actions.cuesWritten.length > 0) {
       console.error(
-        scrub(
-          `[automation] import refused after its cues were written; kept ${actions.cuesWritten.join(", ")} with no Button, delete them from Automation`,
-        ),
+        `[automation] import refused after its cues were written; kept ${scrub(actions.cuesWritten.join(", "))} with no Button, delete them from Automation`,
       );
     }
     throw err;
