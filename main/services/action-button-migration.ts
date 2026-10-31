@@ -148,6 +148,8 @@ export interface ActionButtonMigrationRun {
   views: View[];
   /** How many new rules this run wrote. The caller says so when saving the views then fails. */
   rulesWritten: number;
+  /** The cue names of those rules, for a caller that has to say which were kept. */
+  cuesWritten: string[];
   /** What to log on success, or null. */
   line: string | null;
   /** What to log as an error, or null: why the Buttons were left alone. */
@@ -183,7 +185,7 @@ export async function runActionButtonMigration(
     deps?: ActionButtonMigrationDeps;
   } = {},
 ): Promise<ActionButtonMigrationRun> {
-  const left = (failure: string | null): ActionButtonMigrationRun => ({ views, rulesWritten: 0, line: null, failure });
+  const left = (failure: string | null): ActionButtonMigrationRun => ({ views, rulesWritten: 0, cuesWritten: [], line: null, failure });
   const d = opts.deps ?? (await defaultDeps());
   let existing: Rule[];
   try {
@@ -209,7 +211,7 @@ export async function runActionButtonMigration(
       );
     }
   }
-  return { views: plan.views, rulesWritten: plan.rules.length, line: migrationLine(plan, opts.onImport), failure: null };
+  return { views: plan.views, rulesWritten: plan.rules.length, cuesWritten: plan.rules.map((r) => String(r.trigger.params.name)), line: migrationLine(plan, opts.onImport), failure: null };
 }
 
 function refusedSentence(why: unknown): string {

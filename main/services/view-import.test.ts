@@ -730,6 +730,27 @@ describe("a Run an action Button in an imported view", () => {
     assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
   });
 
+  test("a views save that fails after the rules were written refuses the import with its reason and names the cues kept", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => {
+      throw new Error("disk full");
+    }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(withActionButton()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.deepEqual((await automationStore.loadRules()).map((r) => r.trigger.params.name), ["btn_record"]);
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[automation]")),
+      ["[automation] import refused after its cues were written; kept btn_record with no Button, delete them from Automation"],
+    );
+  });
+
   test("a second import of the same file gets its own cue and its own rule", async () => {
     const { automationStore } = await import("./automation-store.js");
     await automationStore.saveRules([]);

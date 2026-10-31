@@ -325,9 +325,23 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     console.error(scrub(actions.failure));
     skipped.push("Run an action buttons were imported as they are: their cues could not be made (see the log)");
   }
+  try {
+    await viewsStore.save([...existing, ...actions.views]);
+  } catch (err) {
+    // The rules are already on disk and their Buttons will not land: the import is
+    // refused (rethrown, the save's reason intact) and the operator is told which
+    // cues are left behind, since the Automation page shows them as ownerless.
+    if (actions.cuesWritten.length > 0) {
+      console.error(
+        scrub(
+          `[automation] import refused after its cues were written; kept ${actions.cuesWritten.join(", ")} with no Button, delete them from Automation`,
+        ),
+      );
+    }
+    throw err;
+  }
+  // After the save: a conversion whose import was refused is not one to announce.
   if (actions.line) console.log(scrub(actions.line));
-
-  await viewsStore.save([...existing, ...actions.views]);
 
   // Keyed by the board that ends up on disk — (board, service type) — and
   // holding the row count of whatever wrote it LAST. Counting writes instead
