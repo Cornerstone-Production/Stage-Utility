@@ -94,8 +94,13 @@ export interface StageState {
   appIcon192: string | null;
   /** The same icon drawn for Android's adaptive masks, with its art inside the safe zone. */
   appIconMaskable: string | null;
-  /** `#rrggbb` behind the icon's transparent areas. */
+  /** `#rrggbb` behind the home-screen icon's art: phones fill transparency with black. */
   appIconBackground: string;
+  /** The browser tab's background: `#rrggbb`, or "none" for the logo alone on the tab strip. */
+  appIconTabBackground: string;
+  /** The icon's square art, transparent where the upload was: the stored image the
+   *  tab icon is drawn from (in the browser, in the ink the tab needs). Null with no custom icon. */
+  appIconArt: string | null;
   /** Show NDI-related controls in settings (off by default; native client only). */
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */

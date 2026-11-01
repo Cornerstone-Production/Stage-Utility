@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { iconInput, pngDataUrl } from "./app-icon-fixture.js";
-import { parseAppIcon, pngSize } from "./app-icon.js";
+import { iconBackgrounds, iconToSettings, parseAppIcon, pngSize } from "./app-icon.js";
 
 function rejected(body: unknown): string {
   const r = parseAppIcon(body);
@@ -102,6 +102,41 @@ describe("parseAppIcon", () => {
     for (const bg of ["black", "#000", "#00000g", "000000", "#0000000", null, 0]) {
       assert.match(rejected({ ...iconInput({ background: bg as never }) }), /body\.icon\.background must be a #rrggbb hex/, String(bg));
     }
+  });
+
+  test("the home-screen background is never \"none\": phones fill transparency with black", () => {
+    assert.match(rejected({ ...iconInput({ background: "none" }) }), /body\.icon\.background must be a #rrggbb hex/);
+  });
+
+  test("the tab background is a colour or \"none\", lowercased, and \"none\" when left out", () => {
+    for (const [given, kept] of [["none", "none"], ["#FFFFFF", "#ffffff"], ["#2e6691", "#2e6691"]] as const) {
+      const r = parseAppIcon({ ...iconInput({ tabBackground: given }) });
+      assert.ok(r.ok && r.value, given);
+      assert.equal(r.value.tabBackground, kept);
+    }
+    const { tabBackground: _omitted, ...rest } = iconInput();
+    const left = parseAppIcon(rest);
+    assert.ok(left.ok && left.value);
+    assert.equal(left.value.tabBackground, "none");
+    assert.equal(iconToSettings(left.value).appIconTabBackground, "none");
+  });
+
+  test("a tab background that is neither is refused, naming the field", () => {
+    for (const bg of ["transparent", "black", "#fff", "#00000g", "", null, 0]) {
+      assert.match(rejected({ ...iconInput({ tabBackground: bg as never }) }), /body\.icon\.tabBackground must be a #rrggbb hex or "none"/, String(bg));
+    }
+  });
+
+  test("the two backgrounds are stored apart", () => {
+    const s = iconToSettings(iconInput({ background: "#ffffff", tabBackground: "#2e6691" }));
+    assert.equal(s.appIconBackground, "#ffffff");
+    assert.equal(s.appIconTabBackground, "#2e6691");
+  });
+
+  test("settings from before the tab had its own background: the old one is the home screen's, the tab is transparent", () => {
+    assert.deepEqual(iconBackgrounds({ appIconBackground: "#2e6691" }), { home: "#2e6691", tab: "none" });
+    assert.deepEqual(iconBackgrounds({}), { home: "#000000", tab: "none" });
+    assert.deepEqual(iconBackgrounds({ appIconBackground: "#ffffff", appIconTabBackground: "#000000" }), { home: "#ffffff", tab: "#000000" });
   });
 
   test("the original must be an image data URL when given", () => {

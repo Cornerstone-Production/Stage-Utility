@@ -35,6 +35,7 @@ const CASES: Record<string, Case> = {
   appIconCrop: { in: { scale: "big", x: 0, y: 0 }, out: null },
   appIconMaskable: { bad: {}, says: "PNG data URL" },
   appIconOriginal: { bad: "/etc/passwd", says: "image" },
+  appIconTabBackground: { bad: "transparent", says: "#rrggbb hex or \"none\"" },
   appLogo: { bad: "javascript:alert(1)", says: "image" },
   appLogoCrop: { in: { scale: 1, x: 2, y: 3, extra: true }, out: { scale: 1, x: 2, y: 3 } },
   appLogoMonochrome: { bad: "yes", says: "true or false" },

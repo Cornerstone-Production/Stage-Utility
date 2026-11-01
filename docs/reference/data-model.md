@@ -443,16 +443,19 @@ folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
 Uploaded logos and layout images are files in `branding-images/` and
 `layout-images/`, named by content hash and carried by a config snapshot.
 
-The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
+The custom tab and home-screen icon is nine `settings.json` fields: `appIcon`
 (the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`
-(the upload and its crop, which the crop editor reopens on), `appIconBackground` (`#rrggbb`, `#000000`
-by default) and the four sizes served to browsers and phones, `appIconApple`
+(the upload and its crop, which the crop editor reopens on), `appIconBackground`
+(the home-screen background, `#rrggbb`, `#000000` by default), `appIconTabBackground`
+(the tab's background: `#rrggbb`, or `none` for the logo alone, which is the default and
+what a file without the field reads as) and the four sizes served to browsers and phones, `appIconApple`
 (180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
 safe zone). The image fields are references into `branding-images/`. The icon is
 set or removed as a whole, so the seven image and crop fields are null until one is set; only
 `appIconOriginal` and `appIconCrop` may stay null in a set icon (one made through
-the API has no upload to adjust). The state carries `appIcon192`,
-`appIconMaskable` and `appIconBackground`, and nothing else of it.
+the API has no upload to adjust). The state carries `appIcon192`, `appIconMaskable`,
+`appIconBackground`, `appIconTabBackground` and `appIconArt` (the stored art, which the
+browser tab is drawn from), and nothing else of it.
 
 ## How state reaches a screen
 
