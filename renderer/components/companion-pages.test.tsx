@@ -234,6 +234,28 @@ describe("the grid, read-only", () => {
     assert.equal(keyAt("p17 r4 c11")!.style.backgroundColor, "", "a key with no colour of its own was given one");
   });
 
+  test("text the same colour as its background is drawn in a colour that contrasts", () => {
+    const view = {
+      page: 1,
+      name: "Contrast",
+      cols: 8,
+      rows: 4,
+      keys: [
+        key(0, 0, { label: "Dark", bg: "#000000", fg: "#000000" }),
+        key(0, 1, { label: "Light", bg: "#ffffff", fg: "#ffffff" }),
+        key(0, 2, { label: "Close", bg: "#101010", fg: "#202020" }),
+        key(0, 3, { label: "Fine", bg: "#000000", fg: "#ffff00" }),
+        key(0, 4, { label: "Unset", bg: null, fg: "#000000" }),
+      ],
+    };
+    render(<CompanionPageGrid view={view} />);
+    assert.equal(keyAt("p1 r0 c0")!.style.color, "rgb(255, 255, 255)", "black on black stayed unreadable");
+    assert.equal(keyAt("p1 r0 c1")!.style.color, "rgb(0, 0, 0)", "white on white stayed unreadable");
+    assert.equal(keyAt("p1 r0 c2")!.style.color, "rgb(255, 255, 255)", "near-equal dark colours stayed unreadable");
+    assert.equal(keyAt("p1 r0 c3")!.style.color, "rgb(255, 255, 0)", "a readable pair was overridden");
+    assert.equal(keyAt("p1 r0 c4")!.style.color, "rgb(255, 255, 255)", "black text on the default dark key stayed unreadable");
+  });
+
   test("an icon is drawn above its label", () => {
     mount();
     const withIcon = keyAt("p17 r0 c1")!;
