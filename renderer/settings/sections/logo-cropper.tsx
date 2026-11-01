@@ -6,6 +6,7 @@ import { cn } from "../../lib/cn";
 import { logToServer } from "../../lib/client-log";
 import { drawableSource } from "../../lib/sized-svg";
 import { errorMessage } from "@main/services/errors";
+import { CHECKER } from "./branding-cards";
 
 // On-screen crop square. The exported PNG matches the cropped region's native
 // resolution (so a high-res upload stays crisp on the kiosk/wall), capped to
@@ -29,6 +30,8 @@ interface LogoCropperProps {
   noun?: string;
   /** Say so when the area being saved is fewer than this many source pixels across. */
   sharpFrom?: number;
+  /** Draw the viewport as a transparency checker, for art whose see-through areas matter. */
+  checker?: boolean;
   /** Extra classes for the outer panel, e.g. to drop its border inside a dialog. */
   className?: string;
   onCancel: () => void;
@@ -48,7 +51,7 @@ interface LogoCropperProps {
  * displayed-pixels per source-pixel. Both are clamped so the image always
  * covers the viewport (no empty corners).
  */
-export function LogoCropper({ src, initial, monochrome = false, noun = "logo", sharpFrom, className, onCancel, onSave }: LogoCropperProps) {
+export function LogoCropper({ src, initial, monochrome = false, noun = "logo", sharpFrom, checker = false, className, onCancel, onSave }: LogoCropperProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   /** What the image element is given: `src`, or a sized copy when it is an SVG
    *  (see sized-svg.ts). The ORIGINAL saved is always `src` itself. */
@@ -180,7 +183,10 @@ export function LogoCropper({ src, initial, monochrome = false, noun = "logo", s
           // text-fg is explicit rather than inherited: the recoloured preview fills
           // from currentColor, so the viewport must state the colour it is previewing
           // against, exactly as the thumbnail tiles do.
-          className="relative rounded-md overflow-hidden bg-gray-3 text-fg touch-none cursor-grab active:cursor-grabbing shrink-0"
+          className={cn(
+            "relative rounded-md overflow-hidden text-fg touch-none cursor-grab active:cursor-grabbing shrink-0",
+            checker ? cn("bg-gray-2", CHECKER) : "bg-gray-3",
+          )}
           style={{ width: VIEWPORT, height: VIEWPORT }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

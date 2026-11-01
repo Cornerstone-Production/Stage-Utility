@@ -21,7 +21,7 @@ import { JSDOM } from "jsdom";
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
-const { applyFavicon, customIconHref, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
+const { applyFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
 
 after(() => teardown());
 
@@ -35,10 +35,16 @@ const OTHER = "/branding-images/bb.png";
 
 /** A rasterizer that records its calls and answers when told to. */
 function controlled() {
-  const calls: { logo: string; ink: string; resolve: (url: string) => void; reject: (e: Error) => void }[] = [];
-  const fn = (logo: string, ink: string) =>
+  const calls: {
+    logo: string;
+    ink: string | null;
+    background: string | null;
+    resolve: (url: string) => void;
+    reject: (e: Error) => void;
+  }[] = [];
+  const fn = (logo: string, ink: string | null, background: string | null) =>
     new Promise<string>((resolve, reject) => {
-      calls.push({ logo, ink, resolve, reject });
+      calls.push({ logo, ink, background, resolve, reject });
     });
   return { calls, fn };
 }
@@ -127,52 +133,101 @@ describe("applyFavicon without recoloring", () => {
 });
 
 describe("a custom tab and home-screen icon", () => {
-  const ICON = "/branding-images/cc.png";
+  const ART = "/branding-images/cc.png";
+  const transparent = { art: ART, background: "none" };
 
-  test("points at the route that falls back to the built-in icon, never at the stored file", () => {
-    // A restore that carried settings.json and not branding-images/ leaves the
-    // stored URL a 404; the route answers with the built-in icon instead.
-    applyFavicon(LOGO, false, ICON);
-    assert.match(href() ?? "", /^\/icon-192\.png\?v=/);
-    assert.ok(!(href() ?? "").includes("/branding-images/"), `the tab points at ${href()}`);
-  });
-
-  test("a changed icon is a new URL, so the tab shows it at once", () => {
-    applyFavicon(LOGO, false, "/branding-images/0123456789abcdef.png");
-    const first = href();
-    applyFavicon(LOGO, false, "/branding-images/fedcba9876543210.png");
-    assert.notEqual(href(), first);
-    assert.equal(customIconHref("/branding-images/0123456789abcdef.png"), "/icon-192.png?v=0123456789abcdef");
-  });
-
-  test("wins over the logo, and is declared as the PNG it is", () => {
-    applyFavicon(LOGO, false, ICON);
-    assert.equal(href(), customIconHref(ICON));
+  test("is drawn from its art, never pointed at the stored file or the home-screen image", async () => {
+    // The home-screen sizes carry the home-screen background; the tab has its own.
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, transparent);
+    assert.equal(r.calls.length, 1);
+    assert.equal(r.calls[0]?.logo, ART, "the tab was not drawn from the icon's art");
+    r.calls[0]?.resolve("data:image/png;base64,TAB");
+    await tick();
+    assert.equal(href(), "data:image/png;base64,TAB");
     assert.equal(links()[0]?.getAttribute("type"), "image/png");
   });
 
-  test("is never recolored, with Recolor on, and never rasterizes the logo", async () => {
+  test("a transparent tab is just the art, in the ink that suits the browser's scheme", async () => {
+    const scheme = fakeScheme(false);
     const r = controlled();
     __resetForTests(r.fn);
-    applyFavicon(LOGO, true, ICON);
+    applyFavicon(null, true, transparent);
+    assert.deepEqual([r.calls[0]?.ink, r.calls[0]?.background], [INK.light, null]);
+    r.calls[0]?.resolve("data:image/png;base64,LIGHTBROWSER");
     await tick();
-    assert.equal(href(), customIconHref(ICON), "the icon was replaced by a tinted logo");
-    assert.equal(r.calls.length, 0, "the logo was rasterized although the icon is what shows");
+    scheme.flip(true);
+    assert.deepEqual([r.calls[1]?.ink, r.calls[1]?.background], [INK.dark, null], "a dark browser did not get the light ink");
+    r.calls[1]?.resolve("data:image/png;base64,DARKBROWSER");
+    await tick();
+    assert.equal(href(), "data:image/png;base64,DARKBROWSER");
+    scheme.flip(false);
+    assert.equal(href(), "data:image/png;base64,LIGHTBROWSER", "back to a light browser comes from the cache");
+    assert.equal(r.calls.length, 2);
   });
 
-  test("with no logo at all, still shows the icon rather than the stock one", () => {
-    applyFavicon(null, true, ICON);
-    assert.equal(href(), customIconHref(ICON));
+  test("a coloured tab keeps its colour, and its ink follows the colour, not the browser", async () => {
+    const scheme = fakeScheme(true);
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(null, true, { art: ART, background: "#ffffff" });
+    assert.deepEqual([r.calls[0]?.ink, r.calls[0]?.background], [INK.light, "#ffffff"], "white art on white must turn dark, dark browser or not");
+    r.calls[0]?.resolve("data:image/png;base64,WHITE");
+    await tick();
+    scheme.flip(false);
+    assert.equal(r.calls.length, 1, "the scheme changed nothing about a coloured tab");
+    applyFavicon(null, true, { art: ART, background: "#000000" });
+    assert.deepEqual([r.calls[1]?.ink, r.calls[1]?.background], [INK.dark, "#000000"]);
+  });
+
+  test("with Recolor off the art is drawn as uploaded: no ink, on its background if it has one", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(null, false, transparent);
+    applyFavicon(null, false, { art: ART, background: "#2e6691" });
+    assert.deepEqual(r.calls.map((c) => [c.ink, c.background]), [[null, null], [null, "#2e6691"]]);
+  });
+
+  test("wins over the logo", () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, transparent);
+    applyFavicon(LOGO, false, transparent);
+    assert.ok(r.calls.every((c) => c.logo === ART), "the logo was drawn although the icon is what shows");
+    assert.notEqual(href(), LOGO);
+  });
+
+  test("with no logo at all, still shows the icon rather than the stock one", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(null, true, transparent);
+    r.calls[0]?.resolve("data:image/png;base64,ICON");
+    await tick();
+    assert.equal(href(), "data:image/png;base64,ICON");
+  });
+
+  test("when the art cannot be drawn (its file is gone) the tab falls back to the built-in icon, and the log says so", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 0 });
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, transparent);
+    r.calls[0]?.reject(new Error("the logo image failed to load"));
+    await tick();
+    assert.equal(href(), STOCK_FAVICON, "a blank tab: the broken art URL was used as the icon");
+    assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
+    assert.equal(posts.length, 1);
+    assert.match(posts[0]!.message, /the tab icon could not be drawn from the custom icon; using the built-in icon/);
   });
 
   test("removing it falls back to the logo with today's logic, then to the stock icon", async () => {
     const r = controlled();
     __resetForTests(r.fn);
-    applyFavicon(LOGO, true, ICON);
+    applyFavicon(LOGO, true, transparent);
     applyFavicon(LOGO, false, null);
     assert.equal(href(), LOGO, "removing the icon did not bring the logo back");
     assert.equal(links()[0]?.hasAttribute("type"), false);
-    applyFavicon(LOGO, true, ICON);
+    applyFavicon(LOGO, true, transparent);
     applyFavicon(null, true, null);
     assert.equal(href(), STOCK_FAVICON);
     assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
@@ -182,10 +237,10 @@ describe("a custom tab and home-screen icon", () => {
     const r = controlled();
     __resetForTests(r.fn);
     applyFavicon(LOGO, true);
-    applyFavicon(LOGO, true, ICON);
+    applyFavicon(LOGO, true, transparent);
     r.calls[0]!.resolve("data:image/png;base64,LATE");
     await tick();
-    assert.equal(href(), customIconHref(ICON), "a late tint replaced the custom icon");
+    assert.notEqual(href(), "data:image/png;base64,LATE", "a late tint of the logo replaced the custom icon");
   });
 });
 

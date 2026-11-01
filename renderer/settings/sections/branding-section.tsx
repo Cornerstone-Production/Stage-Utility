@@ -7,7 +7,7 @@ import { cn } from "../../lib/cn";
 import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { errorMessage } from "@main/services/errors";
-import { DEFAULT_ICON_BACKGROUND } from "@main/services/install-metadata";
+import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
 import { ART_MAX, renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
@@ -55,8 +55,9 @@ export function BrandingSection({
   const [iconBusy, setIconBusy] = useState(false);
   /** The same fact for the handlers: state would still read false in a second click's closure. */
   const iconRunning = useRef(false);
-  /** The background a NEW icon will be drawn over; once one is set, the saved one rules. */
+  /** The backgrounds a NEW icon will be drawn over; once one is set, the saved ones rule. */
   const [draftBackground, setDraftBackground] = useState(DEFAULT_ICON_BACKGROUND);
+  const [draftTabBackground, setDraftTabBackground] = useState(NO_TAB_BACKGROUND);
   const fileRef = useRef<HTMLInputElement>(null);
   const pickTarget = useRef<Target>("app");
   const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
@@ -172,8 +173,9 @@ export function BrandingSection({
     if (file) loadFile(pickTarget.current, file);
   }
 
-  /** The saved background once an icon exists, else the pick for the one about to be made. */
+  /** The saved backgrounds once an icon exists, else the picks for the one about to be made. */
   const iconBackground = stageState.appIcon192 ? stageState.appIconBackground : draftBackground;
+  const iconTabBackground = stageState.appIcon192 ? stageState.appIconTabBackground : draftTabBackground;
 
   /** The saved upload and crop behind a target, for re-editing. The icon also hands
    *  back its art, which a new background is redrawn from. Rejects when it cannot be
@@ -243,7 +245,12 @@ export function BrandingSection({
     art: string;
     original: string | null;
     crop: Crop | null;
+    /** The home-screen background. */
     background: string;
+    tabBackground: string;
+    /** Recolor, when this save changes it too: both go in one request, so the
+     *  setting and the icon drawn with it never disagree. */
+    monochrome?: boolean;
   }
 
   /**
@@ -260,10 +267,13 @@ export function BrandingSection({
     iconRunning.current = true;
     setIconBusy(true);
     try {
-      const spec = await build();
+      const { monochrome, ...spec } = await build();
       const art = await toIconArt(spec.art);
-      const sizes = await renderIconSizes(art, spec.background);
-      return await handlers.handleSetBranding({ icon: { ...spec, art, ...sizes } });
+      const sizes = await renderIconSizes(art, spec.background, monochrome ?? stageState.appLogoMonochrome);
+      return await handlers.handleSetBranding({
+        icon: { ...spec, art, ...sizes },
+        ...(monochrome === undefined ? {} : { monochrome }),
+      });
     } catch (err) {
       logToServer("branding", `the tab and home-screen icon could not be made: ${errorMessage(err)}`);
       toast.error(`Could not make the icon: ${errorMessage(err)}`);
@@ -280,23 +290,59 @@ export function BrandingSection({
     if (!logo) return;
     const ok = await makeIcon(async () => {
       const source = await sourceOf("app");
-      return { art: logo, original: source.original, crop: source.crop, background: iconBackground };
+      return {
+        art: logo,
+        original: source.original,
+        crop: source.crop,
+        background: iconBackground,
+        tabBackground: iconTabBackground,
+      };
     });
     if (ok) closeDialog();
   }
 
-  /** A swatch: redraw the saved icon over the new colour, or just remember it for the next one. */
-  async function pickBackground(hex: string) {
-    if (!stageState.appIcon192) {
-      setDraftBackground(hex);
-      return;
-    }
-    if (hex === stageState.appIconBackground) return;
+  /** Redraw the saved icon from its own art with `change` applied, or, with no icon
+   *  yet, just remember the pick for the one about to be made. */
+  async function redrawIcon(change: Partial<Pick<IconSpec, "background" | "tabBackground" | "monochrome">>) {
     await makeIcon(async () => {
       const source = await sourceOf("icon");
       if (!source.art) throw new Error("the saved icon has no art to redraw; replace the icon instead");
-      return { art: source.art, original: source.original, crop: source.crop, background: hex };
+      return {
+        art: source.art,
+        original: source.original,
+        crop: source.crop,
+        background: stageState.appIconBackground,
+        tabBackground: stageState.appIconTabBackground,
+        ...change,
+      };
     });
+  }
+
+  /** A home-screen swatch. */
+  async function pickBackground(hex: string) {
+    if (!stageState.appIcon192) return setDraftBackground(hex);
+    if (hex === stageState.appIconBackground) return;
+    await redrawIcon({ background: hex });
+  }
+
+  /** A tab swatch: a colour, or "none" for the logo alone. */
+  async function pickTabBackground(value: string) {
+    if (!stageState.appIcon192) return setDraftTabBackground(value);
+    if (value === stageState.appIconTabBackground) return;
+    await redrawIcon({ tabBackground: value });
+  }
+
+  /**
+   * Recolor to match theme, from the logo card or the icon dialog: one setting. The
+   * icon's images are drawn with it, so once an icon exists they are redrawn in the
+   * same save; the setting does not change if they cannot be.
+   */
+  async function setRecolor(on: boolean) {
+    if (!stageState.appIcon192) {
+      await handlers.handleSetBranding({ monochrome: on });
+      return;
+    }
+    await redrawIcon({ monochrome: on });
   }
 
   async function onCropSave(result: { logo: string; original: string; crop: Crop }) {
@@ -309,6 +355,7 @@ export function BrandingSection({
         original: result.original,
         crop: result.crop,
         background: iconBackground,
+        tabBackground: iconTabBackground,
       }));
       if (ok) closeAfter(seq);
       return;
@@ -358,8 +405,10 @@ export function BrandingSection({
           initial={edit.initial}
           noun={NOUN[target]}
           // The empty-slot image and the avatar are always drawn recoloured; the
-          // logo follows the toggle; the icon is drawn exactly as it is.
-          monochrome={target === "app" ? stageState.appLogoMonochrome : target !== "icon"}
+          // logo and the icon follow the toggle, so a white logo is visible here.
+          monochrome={target === "app" || target === "icon" ? stageState.appLogoMonochrome : true}
+          // The icon's art is transparent where the upload was; show where.
+          checker={target === "icon"}
           // An icon is drawn up to 512 px: a smaller crop is scaled up and looks soft.
           sharpFrom={target === "icon" ? ART_MAX : undefined}
           className="border-0 bg-transparent p-0"
@@ -471,7 +520,7 @@ export function BrandingSection({
               </div>
               <Switch
                 checked={stageState.appLogoMonochrome}
-                onCheckedChange={(v: boolean) => handlers.handleSetBranding({ monochrome: v })}
+                onCheckedChange={(v: boolean) => void setRecolor(v)}
                 aria-label="Recolor logo to match theme"
               />
             </div>
@@ -508,10 +557,15 @@ export function BrandingSection({
       <IconDialog
         open={dialog === "icon"}
         brand={stageState}
-        background={iconBackground}
+        accentColor={stageState.accentColor}
+        homeBackground={iconBackground}
+        tabBackground={iconTabBackground}
+        recolor={stageState.appLogoMonochrome}
         busy={iconBusy}
         editor={editorFor("icon")}
-        onBackground={(hex) => void pickBackground(hex)}
+        onHomeBackground={(hex) => void pickBackground(hex)}
+        onTabBackground={(v) => void pickTabBackground(v)}
+        onRecolor={(on) => void setRecolor(on)}
         onUseLogo={() => void buildIconFromLogo()}
         onClose={closeDialog}
         onUpload={() => openPicker("icon")}

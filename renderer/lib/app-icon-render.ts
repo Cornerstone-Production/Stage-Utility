@@ -11,6 +11,7 @@
 
 import { clamp } from "@main/services/clamp";
 import { ICON_SIZES, type IconField } from "@main/services/install-metadata";
+import { iconInk } from "./icon-ink";
 
 /** The longest side the stored art is kept at: the largest icon is 512. */
 export const ART_MAX = 512;
@@ -97,9 +98,30 @@ export async function toIconArt(src: string): Promise<string> {
   return canvas.toDataURL("image/png");
 }
 
-/** Every size of the icon, as PNG data URLs, drawn from `art` over `background`. */
-export async function renderIconSizes(art: string, background: string): Promise<Record<IconField, string>> {
-  const img = await loadImage(art);
+/** `img` with its colour replaced by `ink`, its transparency kept: the same
+ *  recolouring the page does with a CSS mask. */
+function tinted(img: HTMLImageElement, ink: string): HTMLCanvasElement {
+  const w = img.naturalWidth || ART_MAX;
+  const h = img.naturalHeight || ART_MAX;
+  const { canvas, ctx } = canvasOf(Math.max(w, h));
+  ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = ink;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/**
+ * Every size of the icon, as PNG data URLs, drawn from `art` over `background`.
+ *
+ * With `recolor` the art is drawn in whichever ink reads against `background`
+ * (dark on a light one, light on a dark one), so a white logo on a white
+ * home-screen icon is not lost; without it the art is drawn as uploaded.
+ */
+export async function renderIconSizes(art: string, background: string, recolor: boolean): Promise<Record<IconField, string>> {
+  const loaded = await loadImage(art);
+  const ink = iconInk(background, recolor);
+  const img: CanvasImageSource = ink ? tinted(loaded, ink) : loaded;
   const out = {} as Record<IconField, string>;
   for (const field of Object.keys(ICON_SIZES) as IconField[]) {
     const size = ICON_SIZES[field];
