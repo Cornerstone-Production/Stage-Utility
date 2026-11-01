@@ -97,7 +97,7 @@ describe("idempotence", () => {
       .find((v) => v.id === HOME_VIEW_ID)!
       .layout!.objects.map((o) => (o.config.type === "home-attention" ? { ...o, config: { type: "home-readiness" } } : o));
     assert.deepEqual(typesOf(seedHomeView(edited(once, objects))), [
-      "home-readiness", "timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services",
+      "home-readiness", "timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services", "message-composer",
     ]);
   });
 
