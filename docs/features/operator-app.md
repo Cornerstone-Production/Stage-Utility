@@ -153,6 +153,12 @@ a first press again. **Start** shows a spinner until the recorder itself reports
 that it is recording, and says so on the tile if it has not within ten seconds.
 A failed action names the problem on the tile for five seconds.
 
+Start and Stop press the built-in commands **REAPER recording** and **OBS
+recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
+ones a Button, a Companion key or Home Assistant presses. So the press is in the
+Automation page's activity, **Simulate** and **Disarm** apply (the tile says
+"Reaper: Simulated: nothing was sent", or why it was refused).
+
 The action is dropped from a tile too narrow to hold it beside its reading, such
 as a Small tile on a narrow tablet; make the tile Medium to get it back. On a
 touch screen every control on a tile is at least 44 px square.

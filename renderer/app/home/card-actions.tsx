@@ -14,7 +14,11 @@
 //  - Stop takes two presses. A stray tap mid-sermon must not end the recording.
 //    Prev and Next are one press, because they are reversible.
 //  - A failure says so on the tile for a few seconds. The server already logs a
-//    failed invoke on its own tag (`action-invoke`), so nothing is logged here.
+//    refused or failed command on its own tag (`cues`), so nothing is logged here.
+//
+// Start and Stop press the built-in recorder commands, the same ones a Button, a
+// Companion key or Home Assistant presses. So Simulate and Disarm apply, and the
+// press is in the Automation page's activity.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
@@ -22,6 +26,7 @@ import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../../lib/api";
+import { callAnswerNote, type CallAnswer } from "../../lib/command-answer";
 import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/button";
 import { useLiveStep } from "../../main/live-controls";
@@ -138,11 +143,11 @@ function Note({ children }: { children: ReactNode }) {
 
 // ── Recording ───────────────────────────────────────────────────────────────
 
-/** How each recorder is told to start and stop: an action in the automation
- *  registry, the same ones a rule or a console button runs. */
-const RECORDER_ACTION: Record<string, { actionId: string; start: string; stop: string; label: string }> = {
-  REAPER: { actionId: "reaper.transport", start: "record", stop: "stop", label: "Reaper" },
-  OBS: { actionId: "obs.record", start: "start", stop: "stop", label: "OBS" },
+/** Each recorder's built-in switch command (see main/services/builtin-cues.ts):
+ *  `<base>_on` starts it and `<base>_off` stops it. */
+const RECORDER_COMMAND: Record<string, { base: string; label: string }> = {
+  REAPER: { base: "reaper_record", label: "Reaper" },
+  OBS: { base: "obs_record", label: "OBS" },
 };
 
 type Verb = "start" | "stop";
@@ -164,7 +169,7 @@ function missing(list: readonly Recorder[], names: readonly string[], verb: Verb
 }
 
 export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
-  const targets = chosen.filter((r) => r.connected && RECORDER_ACTION[r.name]);
+  const targets = chosen.filter((r) => r.connected && RECORDER_COMMAND[r.name]);
   const recording = targets.some((r) => r.recording);
   const [pending, setPending] = useState<{ verb: Verb; names: string[] } | null>(null);
   const [note, showNote] = useTransientNote();
@@ -185,7 +190,7 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
   useEffect(() => {
     if (!waiting || !pending) return;
     const t = setTimeout(() => {
-      const label = (n: string) => RECORDER_ACTION[n]?.label ?? n;
+      const label = (n: string) => RECORDER_COMMAND[n]?.label ?? n;
       const now = latest.current;
       const gone = missing(now, pending.names, pending.verb);
       const off = gone.filter((n) => !now.find((r) => r.name === n)?.connected);
@@ -209,13 +214,11 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
       const failures: string[] = [];
       await Promise.all(
         these.map(async (r) => {
-          const a = RECORDER_ACTION[r.name]!;
+          const a = RECORDER_COMMAND[r.name]!;
           try {
-            const res = await invoke<{ ok: boolean; detail: string }>("action:invoke", {
-              actionId: a.actionId,
-              params: { command: a[verb] },
-            });
-            if (!res?.ok) failures.push(res?.detail || `${a.label} did not answer`);
+            const res = await invoke<CallAnswer>("cues:call", { name: `${a.base}_${verb === "start" ? "on" : "off"}` });
+            const said = callAnswerNote(res);
+            if (said !== null) failures.push(`${a.label}: ${said}`);
           } catch (e) {
             failures.push(`${a.label} did not answer: ${errorMessage(e)}`);
           }
