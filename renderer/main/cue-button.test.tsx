@@ -162,6 +162,16 @@ describe("cue button", () => {
     assert.equal(calls, 0);
   });
 
+  test("a press that dispatched and failed says why", async () => {
+    // The route answers 200 once the command ran, with ok: false when the device
+    // call inside it failed. Silence there read as a press that worked.
+    cueButtonDeps.call = async () => ({ status: 200, ok: false, detail: "Companion did not answer" });
+    const { container } = mount(live(), "confetti");
+    fireEvent.click(container.querySelector("button")!);
+    await settle();
+    assert.match(container.textContent ?? "", /Companion did not answer/);
+  });
+
   test("a press answered as simulated says nothing was sent", async () => {
     // Automation's Simulate mode accepts the call and sends nothing, and a press
     // that did nothing must not look like one that did.

@@ -12,19 +12,9 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
+import { callAnswerNote, type CallAnswer } from "../lib/command-answer";
 import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
-
-export interface CallAnswer {
-  status: number;
-  ok?: boolean;
-  detail?: string;
-  error?: string;
-  reason?: string;
-  skipped?: boolean;
-  /** Automation is in Simulate mode: the cue was accepted and nothing reached a device. */
-  simulated?: boolean;
-}
 
 /** The seam a test replaces; production posts the cue. */
 export const cueButtonDeps = {
@@ -123,14 +113,7 @@ export function CueButton({
     setBusy(true);
     setSaid(null);
     try {
-      const r = await cueButtonDeps.call(target);
-      if (r.status === 200) {
-        if (r.skipped) setSaid(r.detail ?? "Already there");
-        // Said, not silent: a press that reached no device must not look like one
-        // that did.
-        else if (r.simulated) setSaid("Simulated: nothing was sent");
-      } else if (r.status === 202) setSaid("Needs confirmation; use the rules page");
-      else setSaid(r.error ?? r.detail ?? "Refused");
+      setSaid(callAnswerNote(await cueButtonDeps.call(target)));
     } catch {
       // The only case with no body to read a reason out of. Said on the button
       // rather than logged away: this is the answer to the operator's press.
