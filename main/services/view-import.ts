@@ -10,6 +10,7 @@ import { errorMessage } from "./errors.js";
 
 import { remapBundle } from "./view-remap.js";
 import { collectRefsFrom } from "./view-refs.js";
+import { runActionButtonMigration } from "./action-button-migration.js";
 import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
@@ -315,7 +316,30 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     return next;
   });
 
-  await viewsStore.save([...existing, ...named]);
+  // A Run an action Button in the file ignores Simulate and Disarm, so it is made a
+  // cue Button with a rule of its own, as the start-up pass does. The rules are
+  // written first and the views after, so a crash between them leaves rules whose
+  // Buttons never landed (kept, and listed as such) and never Buttons bound to nothing.
+  const actions = await runActionButtonMigration(named, { onImport: true });
+  if (actions.failure) {
+    console.error(scrub(actions.failure));
+    skipped.push("Run an action buttons were imported as they are: their cues could not be made (see the log)");
+  }
+  try {
+    await viewsStore.save([...existing, ...actions.views]);
+  } catch (err) {
+    // The rules are already on disk and their Buttons will not land: the import is
+    // refused (rethrown, the save's reason intact) and the operator is told which
+    // cues are left behind, since the Automation page shows them as ownerless.
+    if (actions.cuesWritten.length > 0) {
+      console.error(
+        `[automation] import refused after its cues were written; kept ${scrub(actions.cuesWritten.join(", "))} with no Button, delete them from Automation`,
+      );
+    }
+    throw err;
+  }
+  // After the save: a conversion whose import was refused is not one to announce.
+  if (actions.line) console.log(scrub(actions.line));
 
   // Keyed by the board that ends up on disk — (board, service type) — and
   // holding the row count of whatever wrote it LAST. Counting writes instead

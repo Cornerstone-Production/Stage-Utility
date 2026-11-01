@@ -646,6 +646,16 @@ console never shows it, and pressing the button there keeps refusing exactly as
 it always has. The layout still saves — a button is part of a screen, so a field
 it is missing marks the button, not the whole layout.
 
+A Button saved as Run an action is converted when the server starts, and when a
+view carrying one is imported: it becomes a Fire a cue Button with the same label,
+look and position, bound to a cue of its own that runs the same action with the
+same parameters. That cue is a **Called by name** rule named `btn_<label>`, hidden
+from Home Assistant, allowed during a service, with no cooldown, and it belongs to
+that Button. From then on the Button obeys Simulate mode and Disarm, as every cue
+does. The conversion runs at every start and on import, and logs one `[automation]` line,
+only when it converted something, saying how many Buttons it converted and on which
+views.
+
 **Make it a cue**, under an action's fields, turns the action into a manual cue
 and points the button at it, so the Automation page's Run button, Home
 Assistant, voice and other consoles can fire it too. It is off until an action is
@@ -672,9 +682,9 @@ action's own name).
 Switching **Does** rewrites the widget in place. The label, the look and the
 position stay. Going to **Run an action** drops the cue and **Show device**;
 going to **Fire a cue** drops the action and its parameters. **Undo** brings them
-back. What **Does** shows is simply the widget's stored type, so nothing is
-migrated: a stored cue button opens on **Fire a cue**, a stored action button on
-**Run an action**.
+back. What **Does** shows is the widget's stored type: a stored cue button opens
+on **Fire a cue**, and a Button switched to **Run an action** and saved is
+converted to a cue of its own at the next start, as above.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and

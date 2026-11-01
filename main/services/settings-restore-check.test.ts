@@ -193,4 +193,10 @@ describe("settings.json restore check", () => {
     assert.ok(result.ok);
     assert.deepEqual(result.value, { showQr: true });
   });
+
+  test("the retired actionButtonsMigrated flag in an older backup is dropped, not refused", async () => {
+    const result = await settingsRestoreCheck({ showQr: true, actionButtonsMigrated: true });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
+    assert.deepEqual(result.value, { showQr: true });
+  });
 });
