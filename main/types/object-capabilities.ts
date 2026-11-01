@@ -38,8 +38,6 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "osc-button": ["control"],
   "rosstalk-button": ["control"],
   "live-controls": ["control"],
-  // The general form of the two above: bound to any action in the registry.
-  "action-button": ["control"],
   // A cue with its state on it. A control on a panel; a readout on a wall.
   "cue-button": ["control"],
   // The stage messages for a screen's groups: a readout on a wall, and on a panel

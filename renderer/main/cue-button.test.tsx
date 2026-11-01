@@ -55,9 +55,9 @@ function live(over: Partial<ManifestSwitch> = {}, state?: LiveState): CuesLive {
   };
 }
 
-function mount(cues: CuesLive | null, cue: string, interactive = true) {
+function mount(cues: CuesLive | null, cue: string, interactive = true, choosePress?: (id: string) => void) {
   cleanup();
-  const ctx = makeRenderCtx({ cues, interactive });
+  const ctx = makeRenderCtx({ cues, interactive, choosePress });
   const obj = {
     id: "o1",
     x: 0,
@@ -290,5 +290,46 @@ describe("the live tone", () => {
       ),
       "stale",
     );
+  });
+});
+
+describe("a Button with nothing chosen, on Home", () => {
+  test("reads Choose what it presses, and a tap opens the sheet for that Button instead of firing", async () => {
+    let calls = 0;
+    cueButtonDeps.call = async () => {
+      calls++;
+      return { status: 200, ok: true, detail: "" };
+    };
+    const opened: string[] = [];
+    const { container } = mount(live(), "", true, (id) => opened.push(id));
+    assert.match(container.textContent ?? "", /Choose what it presses/);
+    assert.doesNotMatch(container.textContent ?? "", /Unbound/);
+    assert.equal(container.querySelector("button")!.getAttribute("data-state"), "unset");
+    fireEvent.click(container.querySelector("button")!);
+    await settle();
+    assert.deepEqual(opened, ["o1"], "the sheet is opened for this Button's own object id");
+    assert.equal(calls, 0);
+  });
+
+  test("a Button that has a command is not offered the sheet by a tap: it fires", async () => {
+    const opened: string[] = [];
+    const names: string[] = [];
+    cueButtonDeps.call = async (n) => {
+      names.push(n);
+      return { status: 200, ok: true, detail: "" };
+    };
+    const { container } = mount(live(), "confetti", true, (id) => opened.push(id));
+    fireEvent.click(container.querySelector("button")!);
+    await settle();
+    assert.deepEqual([opened, names], [[], ["confetti"]]);
+  });
+
+  test("where Home is not giving a way to choose, an unset Button stays Unbound and inert", async () => {
+    const opened: string[] = [];
+    const { container } = mount(live(), "", true);
+    assert.match(container.textContent ?? "", /Unbound/);
+    fireEvent.click(container.querySelector("button")!);
+    await settle();
+    assert.deepEqual(opened, []);
   });
 });

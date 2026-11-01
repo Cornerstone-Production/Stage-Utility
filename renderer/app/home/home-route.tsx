@@ -34,9 +34,11 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, cardsForNow, removeCard, setSize, setWhen } from "./home-cards";
+import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from "./home-cards";
 import { pickedValue } from "./card-toggles";
 import { buildCardMenu } from "./card-menu";
+import { ButtonPressSheet, buttonConfigOf } from "./button-press-sheet";
+import { useCueLive } from "../../main/use-cue-live";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -163,6 +165,8 @@ export function HomeRoute() {
    * writes can never disagree.
    */
   const [menu, setMenu] = useState<{ x: number; y: number; cardId: string } | null>(null);
+  // The Button whose Presses sheet is open: chosen from its menu, or by tapping it unset.
+  const [pressingId, setPressingId] = useState<string | null>(null);
   const gridEl = useRef<HTMLDivElement | null>(null);
   /** The card list as the operator has it, ahead of the server. See `save`. */
   const [pending, setPending] = useState<LayoutObject[] | null>(null);
@@ -192,6 +196,12 @@ export function HomeRoute() {
   });
 
   const hasHome = homeView != null;
+  // The commands, for the name beside Presses… in a Button's menu. Read only while that
+  // menu is open on a Button: Home with no Button on it opens no cue channel at all.
+  const menuIsButton =
+    menu !== null &&
+    (pending ?? homeView?.layout?.objects ?? []).some((o) => o.id === menu.cardId && buttonConfigOf(o) !== null);
+  const menuCues = useCueLive(menuIsButton);
   /**
    * The followed teams, for the "Game" submenu on a scores card.
    *
@@ -357,6 +367,8 @@ export function HomeRoute() {
       scoresFavourites: scoresConfig?.favourites ?? [],
       spl,
       splSummary,
+      choosePress: (c) => setPressingId(c.id),
+      cues: menuCues,
       save,
       close: () => setMenu(null),
     });
@@ -372,6 +384,8 @@ export function HomeRoute() {
   // The card the open menu belongs to, read fresh. A card removed from under an
   // open menu closes it rather than leaving a menu of dead actions.
   const menuCard = menu ? (objects.find((o) => o.id === menu.cardId) ?? null) : null;
+  // The Button the Presses sheet is open on, read fresh: a card removed under an open sheet closes it.
+  const pressingCard = pressingId ? (objects.find((o) => o.id === pressingId && buttonConfigOf(o) !== null) ?? null) : null;
 
   /**
    * The grid cell under a pointer.
@@ -469,6 +483,7 @@ export function HomeRoute() {
             setMenu({ x: point.x, y: point.y, cardId: o.id });
           }}
           menuCardId={menu?.cardId ?? null}
+          onChoosePress={setPressingId}
           boxes={previewBoxes}
           animate={!!dragId}
           chrome={
@@ -490,6 +505,18 @@ export function HomeRoute() {
 
       {menuCard && (
         <ContextMenu x={menu!.x} y={menu!.y} items={cardMenu(menuCard)} onClose={() => setMenu(null)} />
+      )}
+
+      {pressingCard && (
+        <ButtonPressSheet
+          card={pressingCard}
+          cards={objects}
+          onClose={() => setPressingId(null)}
+          onSave={(next) => {
+            save((objs) => replaceCard(objs, next));
+            setPressingId(null);
+          }}
+        />
       )}
 
       <AddWidgetSheet

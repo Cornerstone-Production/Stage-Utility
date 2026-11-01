@@ -111,7 +111,7 @@ describe("withCueButton", () => {
 
   test("any kind of button is a button to copy, and an object that is not one is not", () => {
     const l = layoutOf(
-      obj({ id: "act", config: { type: "action-button", actionId: "log.message" }, w: 0.5, h: 0.2, y: 0.1 }),
+      obj({ id: "act", config: { type: "rosstalk-button", targetId: null, commandId: null, params: {}, label: "RossTalk" }, w: 0.5, h: 0.2, y: 0.1 }),
       obj({ id: "clock", w: 0.9, h: 0.05, y: 0.4 }),
     );
     const b = added(withCueButton(l, "x", "").layout);

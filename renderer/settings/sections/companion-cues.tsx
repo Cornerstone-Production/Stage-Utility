@@ -31,7 +31,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";
-import { togglePairSlug } from "@main/services/companion-export";
+import { togglePairSlug, type CompanionPageSummary } from "@main/services/companion-export";
 import type { InferredStateSource } from "@main/services/companion-state-source";
 import {
   type ButtonFingerprint,
@@ -88,10 +88,41 @@ export interface CompanionButton {
   stateSource?: InferredStateSource | null;
 }
 
-interface ButtonsReply {
+export interface ButtonsReply {
   ok: boolean;
   reason?: string;
   buttons: CompanionButton[];
+  /** Every page, empty ones included (`labelled` is 0). Absent from an older server's answer. */
+  pages?: CompanionPageSummary[];
+}
+
+/** Companion's buttons and page list, under one key so the rule editor's picker and the
+ *  Button inspector's share one read. */
+export const companionButtonsQuery = {
+  queryKey: ["companion:buttons"],
+  queryFn: () => invoke<ButtonsReply>("companion:buttons"),
+};
+
+/**
+ * The press action's params for a picked button, with the identity the reconcile
+ * compares. The fingerprint is written HERE, not left for the next reconcile:
+ * re-picking is what an operator does about a `button missing` cue, and it has to
+ * clear that status in the same save. See companion-fingerprint.ts. Stamped with
+ * the SERVER's clock, as every other time on these pages is.
+ */
+export function fingerprintFor(b: CompanionButton): Record<string, string | number> {
+  return fingerprintParams(
+    {
+      page: b.page,
+      row: b.row,
+      col: b.col,
+      pageId: b.pageId,
+      label: b.label || `p${b.page} r${b.row} c${b.col}`,
+      actionIds: b.actionIds,
+    },
+    "in-place",
+    new Date(serverClock.now()).toISOString(),
+  );
 }
 
 /**
@@ -360,24 +391,7 @@ export function CompanionPressFields({
         open={open}
         onOpenChange={setOpen}
         onPick={(b) => {
-          // The fingerprint is written HERE, not left for the next reconcile:
-          // re-picking is what an operator does about a `button missing` cue,
-          // and it has to clear that status in the same save. See
-          // companion-fingerprint.ts.
-          onChange(
-            fingerprintParams(
-              {
-                page: b.page,
-                row: b.row,
-                col: b.col,
-                pageId: b.pageId,
-                label: b.label || `p${b.page} r${b.row} c${b.col}`,
-                actionIds: b.actionIds,
-              },
-              "in-place",
-              new Date().toISOString(),
-            ),
-          );
+          onChange(fingerprintFor(b));
           setOpen(false);
         }}
       />
@@ -396,11 +410,7 @@ function ButtonPickerDialog({
 }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const { data, isFetching } = useQuery({
-    queryKey: ["companion:buttons"],
-    queryFn: () => invoke<ButtonsReply>("companion:buttons"),
-    enabled: open,
-  });
+  const { data, isFetching } = useQuery({ ...companionButtonsQuery, enabled: open });
 
   const groups = useMemo(() => {
     const needle = search.trim().toLowerCase();

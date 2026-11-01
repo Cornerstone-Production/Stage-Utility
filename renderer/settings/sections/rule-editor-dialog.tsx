@@ -128,7 +128,7 @@ export interface Registry {
 
 /** A registry, as a `StepSpecLookup` — the shape ruleIssues needs, over the
  *  SAME arrays every Select here already reads. Exported so the layout
- *  editor's action-button inspector (a single action, not a whole rule) can
+ *  editor's Button inspector (a single action, not a whole rule) can
  *  build the same lookup without a second copy of this three-way switch. */
 export function specLookupFor(registry: Registry): StepSpecLookup {
   return (kind, id) => {
@@ -336,7 +336,7 @@ function withExclusiveChoice(next: string[], held: string[], exclusive: string |
 }
 
 /** Renders one param from its spec — the reason a new provider needs no UI work.
- *  Exported so the layout editor's action-button inspector renders the SAME
+ *  Exported so the layout editor's Button inspector renders the SAME
  *  fields the rule editor does for the same action, rather than a second copy
  *  that could drift from it. */
 export function ParamField({
@@ -545,7 +545,7 @@ export function hasCustomParamsPicker(kind: "trigger" | "condition" | "action", 
  *  default, or nothing at all for an id with its own picker (see
  *  hasCustomParamsPicker) — never both computed separately, which is how the
  *  two drifted apart the first time. Exported for the same reason
- *  hasCustomParamsPicker is: the layout editor's action-button inspector
+ *  hasCustomParamsPicker is: the layout editor's Button inspector
  *  seeds an action pick too, and must not grow its own copy of this check. */
 export function seededParams(kind: "trigger" | "condition" | "action", id: string, specs: ParamDef[]): Record<string, string | number> {
   return hasCustomParamsPicker(kind, id) ? {} : seedNumberDefaults(specs);
@@ -555,7 +555,7 @@ export function seededParams(kind: "trigger" | "condition" | "action", id: strin
  * What an action's params look like below its Select: the companion.press
  * coordinate picker for that one action, or one ParamField per param
  * otherwise. Exported for the same reason ParamField is — the layout editor's
- * action-button inspector renders this SAME choice, not a second copy that
+ * Button inspector renders this SAME choice, not a second copy that
  * could drift from it.
  */
 export function ActionParamsFields({

@@ -726,7 +726,7 @@ describe("a Run an action Button in an imported view", () => {
       automationStore.saveRules = real;
     }
     assert.equal((await viewsStore.load())[0]!.layout!.objects[0]!.config.type, "action-button");
-    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported as they are")), JSON.stringify(report.skipped));
+    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported unconverted")), JSON.stringify(report.skipped));
     assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
   });
 

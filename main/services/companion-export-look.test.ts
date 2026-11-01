@@ -137,3 +137,30 @@ describe("a page's extent", () => {
     assert.deepEqual([v.cols, v.rows], [13, 8]);
   });
 });
+
+describe("the page's keys and the button list agree", () => {
+  // An unlabelled control whose only action names no connection is in neither: the list drops
+  // it, so the page must not offer it, or picking it finds nothing to press.
+  const doc = companionExportFixture() as { pages: Record<string, { controls: Record<string, Record<string, unknown>> }> };
+  doc.pages["1"]!.controls["6"] = {
+    ...(doc.pages["1"]!.controls["6"] ?? {}),
+    "6": {
+      type: "button-layered",
+      style: { layers: [] },
+      steps: { "0": { action_sets: { down: [{ type: "action", id: "x", definitionId: "power", connectionId: "", options: {}, children: {} }], up: [] }, options: {} } },
+    },
+  };
+  const listed = new Set(parseButtons(doc).map((b) => `${b.page}/${b.row}/${b.col}`));
+  const pickable = parsePages(doc).views.flatMap((v) =>
+    v.keys.filter((k) => k.pickable).map((k) => (k.target ? `${k.target.page}/${k.target.row}/${k.target.col}` : `${v.page}/${k.row}/${k.col}`)),
+  );
+
+  test("every key a page offers is a button the list has", () => {
+    assert.deepEqual(pickable.filter((p) => !listed.has(p)), []);
+  });
+
+  test("and the odd control is the case that tells them apart", () => {
+    assert.equal(listed.has("1/6/6"), false);
+    assert.equal(pickable.includes("1/6/6"), false);
+  });
+});

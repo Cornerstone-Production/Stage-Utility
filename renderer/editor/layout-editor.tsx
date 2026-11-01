@@ -1635,7 +1635,7 @@ export function LayoutEditor({
   }
 
   // The snapshot is read when pushHistory is CALLED, not when the callback was made: an
-  // async caller (Make it a cue, an image upload, Fit box to file) holds the pushHistory
+  // async caller (a Button pick, an image upload, Fit box to file) holds the pushHistory
   // of the click and would otherwise push the layout as it was then, over edits made since.
   const objectsNow = useLatestRef(objects);
   const pushHistory = useCallback(() => {
@@ -2571,6 +2571,9 @@ export function LayoutEditor({
               <Inspector
                 key={selected.id}
                 o={selected}
+                viewId={view.id}
+                viewName={view.name}
+                draftObjects={objects}
                 canvas={canvas}
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}

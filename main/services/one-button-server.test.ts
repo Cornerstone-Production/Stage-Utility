@@ -784,3 +784,32 @@ describe("a view saved without the Button that owns a rule", () => {
 function AUTOMATION_RECORD_CUE(): string {
   return automationEngine.listRules().find((r) => r.ownedBy?.objectId === "f-rec")!.trigger.params.name as string;
 }
+
+describe("a layout saved with a Run an action Button in it", () => {
+  before(startEngine);
+
+  test("is converted on save, with its own owned rule and one logged line, as at start-up", async (t) => {
+    // An older tab sends the type back; the next start may be weeks away.
+    const held = stageController as unknown as { state: { views: View[] } };
+    held.state = { ...held.state, views: await viewsStore.load() };
+    const lines = captureConsole(t, "log");
+    const booth = (await viewsStore.load()).find((v) => v.id === "v-booth")!;
+    const layout = {
+      ...booth.layout!,
+      objects: [
+        ...booth.layout!.objects,
+        { id: "late-act", x: 0.5, y: 0.5, w: 0.2, h: 0.1, z: 9, config: { type: "action-button", actionId: "obs.record", params: { mode: "toggle" }, label: "Late" } },
+      ],
+    };
+    await stageController.setViewLayout("v-booth", layout as never);
+    const saved = (await viewsStore.load()).find((v) => v.id === "v-booth")!.layout!.objects.find((o) => o.id === "late-act")!;
+    assert.equal((saved.config as { type: string }).type, "cue-button", "the saved layout still holds the old type");
+    // In the RUNNING engine, not only on disk: a Button bound to a cue the engine does not know refuses every press.
+    const rule = ruleFor(automationEngine.listRules(), "v-booth", "late-act");
+    assert.ok(rule, "no rule of its own was made, or the engine was not told");
+    assert.ok((await automationStore.loadRules()).some((r) => r.id === rule.id), "the rule is not on disk");
+    assert.deepEqual(rule.action, { id: "obs.record", params: { mode: "toggle" } });
+    assert.equal((saved.config as { cue: string }).cue, String(rule.trigger.params.name));
+    assert.deepEqual(lines.filter((l) => l.includes("on save")), ["[automation] converted 1 Run an action button to its own cue on save (Booth console 1)"]);
+  });
+});

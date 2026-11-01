@@ -333,11 +333,6 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // it follows a routing change. Sits directly after the embedded view it is the
   // sibling of, which moved `home-readiness` one place down on purpose.
   { type: "screen-embed", label: "Embedded screen", group: "PCO / service", after: "view-embed" },
-  // The general form of the two buttons above: bound to any entry in the
-  // automation action registry rather than one integration. Folded into the
-  // palette's one "Button" (see FOLDED): its `group` is null, so the placement
-  // claims below skip it and `notes` follows `rosstalk-button`.
-  { type: "action-button", label: "Button", group: "Control", after: "rosstalk-button" },
   // The operator's own work product, stored outside the layout in notes.json.
   { type: "notes", label: "Notes", group: "Control", after: "rosstalk-button" },
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
@@ -387,10 +382,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // holding a single entry is a heading with nothing under it.
   { type: "scores", label: "Live scores", group: "Status", after: "stream-status" },
   { type: "home-scores", label: "Scores", group: "Status", after: "scores" },
-  // A cue with its live state on it, for a console or a panel. At the END of
-  // Control rather than beside the action button it is a specialised form of:
-  // `notes` already claims to sit directly after `action-button`, and that claim
-  // is a pinned fact about what shipped.
+  // A Button, for a console or a panel. At the END of Control: `notes` already
+  // claims to sit directly after `rosstalk-button`, and that claim is a pinned
+  // fact about what shipped.
   { type: "cue-button", label: "Button", group: "Control", after: "checklist" },
   // Stage messages: the screen's feed of them, after the cue button for the same
   // reason the cue button follows the checklist.
@@ -434,22 +428,9 @@ const RETIRED: { type: string; label: string; replacedBy: string }[] = [
   { type: "home-streaming-youtube", label: "YouTube status", replacedBy: "home-streaming" },
 ];
 
-/**
- * Types that are NOT retired but are not offered on their own either: another
- * type's palette entry stands for them, and the inspector switches a widget
- * between the two. Both stored types stay registered, rendered and restorable,
- * so nothing is migrated.
- *
- * Listed so that leaving the palette is a deliberate edit here, the same bar as
- * a retirement. `into` is the type whose entry the operator sees instead.
- */
-const FOLDED: { type: string; into: string }[] = [
-  { type: "action-button", into: "cue-button" },
-];
-
-/** Retirements and folds, by type — the two assertions over ADDED_SINCE that only
- *  hold while a type is still ON the palette skip these. Its label is still pinned. */
-const OFF_PALETTE = new Set([...RETIRED.map((r) => r.type), ...FOLDED.map((f) => f.type)]);
+/** Retirements, by type — the two assertions over ADDED_SINCE that only hold while a
+ *  type is still ON the palette skip these. Its label is still pinned. */
+const OFF_PALETTE = new Set(RETIRED.map((r) => r.type));
 
 // ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -486,20 +467,6 @@ describe("layout-object registry vs. the structures it replaced", () => {
       assert.equal(spec.retired?.replacedBy, r.replacedBy, `${r.type} must name its replacement`);
       // Still constructs — an old layout containing one has to keep working.
       assert.equal(defaultConfig(r.type as never).type, r.type);
-    }
-  });
-
-  test("folded types leave the palette, and the type they fold into is on it", () => {
-    const inPalette = PALETTE_GROUPS.flatMap((g) => g.types as string[]);
-    for (const f of FOLDED) {
-      const spec = LAYOUT_OBJECTS[f.type as LayoutObjectType];
-      assert.equal(spec.group, null, `${f.type} must not be offered in the palette on its own`);
-      assert.equal(spec.retired, undefined, `${f.type} is folded, not retired: it keeps no conversion`);
-      assert.ok(inPalette.includes(f.into), `${f.into} must carry the palette entry for ${f.type}`);
-      // Both read "Button", so the layer list and the inspector header do not
-      // change their word when a widget is switched.
-      assert.equal(typeLabel(f.type as never), typeLabel(f.into as never));
-      assert.equal(defaultConfig(f.type as never).type, f.type);
     }
   });
 

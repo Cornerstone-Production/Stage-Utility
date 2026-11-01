@@ -267,6 +267,9 @@ describe("the full Inspector, for a Video object", () => {
           null,
           React.createElement(Inspector, {
             o,
+            viewId: "v1",
+            viewName: "Test",
+            draftObjects: [],
             canvas: { width: 1920, height: 1080 },
             parentW: 1920,
             parentH: 1080,
