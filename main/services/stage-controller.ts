@@ -978,8 +978,8 @@ export class StageController {
         // other half: the next start converts them WITHOUT a second rule each.
         if (actions.rulesWritten > 0) {
           throw new Error(
-            `${plural(actions.rulesWritten, "cue")} for Run an action buttons were saved, but views.json was not: ` +
-              `${errorMessage(err)}. The buttons convert at the next start, which reuses those cues.`,
+            `${plural(actions.rulesWritten, "command")} for Run an action buttons were saved, but views.json was not: ` +
+              `${errorMessage(err)}. The buttons convert at the next start, which reuses those commands.`,
             { cause: err },
           );
         }

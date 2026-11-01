@@ -39,7 +39,7 @@ const RULE = {
   oncePerService: false,
 };
 const REGISTRY = {
-  triggers: [{ id: CALL, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Cue name", type: "string" }] }],
+  triggers: [{ id: CALL, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Command name", type: "string" }] }],
   conditions: [],
   actions: [{ id: "log.message", label: "Write a log message", params: [] }],
 };

@@ -448,7 +448,7 @@ describe("the token list will not parse", () => {
         () => call("projectors_on"),
         (err: unknown) => {
           thrown = err;
-          return /cue tokens are unreadable/.test(errorMessage(err));
+          return /command tokens are unreadable/.test(errorMessage(err));
         },
       );
       assert.equal(handlerErrorStatus(thrown), 500);
@@ -467,7 +467,7 @@ describe("the token list will not parse", () => {
     try {
       await assert.rejects(
         () => callRoute(cueRoutes, "/api/cues/tokens", { method: "GET" }),
-        /cue tokens are unreadable/,
+        /command tokens are unreadable/,
       );
     } finally {
       await secretsStore.setSecret("companion", "cueTokens", "[]");
@@ -2111,7 +2111,7 @@ describe("reconciling a cue's Companion button", () => {
     try {
       companionApi.invalidate();
       const r = await integrationManager.test("companion");
-      assert.match(r.message ?? "", /1 cue status\(es\) could not be saved\./);
+      assert.match(r.message ?? "", /1 command status\(es\) could not be saved\./);
     } finally {
       automationEngine.updateRule = realUpdate;
       restore();

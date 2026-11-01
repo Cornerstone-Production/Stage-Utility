@@ -267,7 +267,7 @@ describe("migrating Run an action Buttons", () => {
     assert.deepEqual(buttonsOf(await viewsStore.load()), buttonsOf(migrated));
     const said = lines.filter((l) => l.includes("Run an action button"));
     assert.deepEqual(said, [
-      "[automation] migrated 5 Run an action buttons to their own cues (Home 1, Booth console 2, FOH iPad 2)",
+      "[automation] migrated 5 Run an action buttons to their own commands (Home 1, Booth console 2, FOH iPad 2)",
     ]);
   });
 
@@ -303,7 +303,7 @@ describe("migrating Run an action Buttons", () => {
     assert.ok(cueOf(out.views, "v-booth", "b-late"), "and has no cue");
     assert.equal((await automationStore.loadRules()).length, 6);
     assert.deepEqual(lines.filter((l) => l.includes("Run an action button")), [
-      "[automation] migrated 1 Run an action button to its own cue (Booth console 1)",
+      "[automation] migrated 1 Run an action button to its own command (Booth console 1)",
     ]);
   });
 });
@@ -379,7 +379,7 @@ describe("migrating when something goes wrong", () => {
       // The views are what failed; the error says the rules DID land.
       await assert.rejects(
         runLoadPass(await viewsStore.load(), []),
-        /5 cues for Run an action buttons were saved, but views\.json was not: disk full/,
+        /5 commands for Run an action buttons were saved, but views\.json was not: disk full/,
       );
     } finally {
       viewsStore.save = realSave;
@@ -810,6 +810,6 @@ describe("a layout saved with a Run an action Button in it", () => {
     assert.ok((await automationStore.loadRules()).some((r) => r.id === rule.id), "the rule is not on disk");
     assert.deepEqual(rule.action, { id: "obs.record", params: { mode: "toggle" } });
     assert.equal((saved.config as { cue: string }).cue, String(rule.trigger.params.name));
-    assert.deepEqual(lines.filter((l) => l.includes("on save")), ["[automation] converted 1 Run an action button to its own cue on save (Booth console 1)"]);
+    assert.deepEqual(lines.filter((l) => l.includes("on save")), ["[automation] converted 1 Run an action button to its own command on save (Booth console 1)"]);
   });
 });

@@ -400,7 +400,7 @@ class means for backups.
 |---|---|---|
 | `attendance-history.json` | runtime | Attendance recordings, one file per service in a folder of the same name |
 | `automation-log.json` | runtime | The Activity log |
-| `automation-rules.json` | config | [Automation](../automation.md) rules and cues |
+| `automation-rules.json` | config | [Automation](../automation.md) rules and commands |
 | `automation-settings.json` | config | Simulate and disarm |
 | `baptism-triggers.json` | config | Which plan items start the baptism timer's phases, per plan |
 | `baptism.json` | runtime | The baptism timer's live state and its saved sessions |

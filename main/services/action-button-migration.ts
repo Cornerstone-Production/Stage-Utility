@@ -144,7 +144,7 @@ export function planActionButtonMigration(
 export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView">, via: boolean | "save" = false): string | null {
   if (m.count === 0) return null;
   const where = m.perView.map((p) => `${scrub(p.viewName)} ${p.count}`).join(", ");
-  const what = m.count === 1 ? "1 Run an action button to its own cue" : `${m.count} Run an action buttons to their own cues`;
+  const what = m.count === 1 ? "1 Run an action button to its own command" : `${m.count} Run an action buttons to their own commands`;
   const arrived = via === "save" ? " on save" : via ? " on import" : "";
   return `[automation] ${via ? "converted" : "migrated"} ${what}${arrived} (${where})`;
 }

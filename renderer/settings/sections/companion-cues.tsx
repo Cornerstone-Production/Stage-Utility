@@ -419,7 +419,7 @@ function ButtonPickerDialog({
       const failed = r.reconcile?.failed ?? [];
       if (failed.length > 0) {
         toast.error(
-          `Read Companion, but could not save ${failed.length} cue status(es): ` +
+          `Read Companion, but could not save ${failed.length} command status(es): ` +
             `${failed.map((f) => f.label).join(", ")}`,
         );
       }
@@ -736,7 +736,7 @@ export function ImportPairsDialog({
         { pairs: send, buttons: sendButtons },
       );
       // Both halves reported. "12 created" alone hides the four that clashed.
-      if (r.created.length) toast.success(`Created ${plural(r.created.length, "cue")}`);
+      if (r.created.length) toast.success(`Created ${plural(r.created.length, "command")}`);
       if (r.skipped.length) toast.error(`Skipped ${r.skipped.length}: ${r.skipped.map((s) => s.name).join(", ")}`);
       if (!r.created.length && !r.skipped.length) toast.error("Nothing was selected");
       onImported();
@@ -769,7 +769,7 @@ export function ImportPairsDialog({
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Every cue is created with <span className="text-fg">no service is live</span> on it and a three
+          Every command is created with <span className="text-fg">no service is live</span> on it and a three
           second cooldown. Pairs that drive a projector, television, plug, lighting console or recorder
           are ticked for you; nothing else is.
         </p>
@@ -790,7 +790,7 @@ export function ImportPairsDialog({
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search buttons, pages and cue names…"
+                placeholder="Search buttons, pages and command names…"
                 className="h-7 flex-1 text-footnote"
                 aria-label="Search buttons"
               />
@@ -827,7 +827,7 @@ export function ImportPairsDialog({
             <p className="pb-1 text-caption2 text-fg-subtle">
               Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown, START/STOP or
               Open/Closed.
-              Each becomes two cues — <span className="text-fg">_on</span> and{" "}
+              Each becomes two commands — <span className="text-fg">_on</span> and{" "}
               <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
               Assistant switch. Select all and Clear act on the rows a search has left on screen.
               {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
@@ -931,7 +931,7 @@ export function ImportPairsDialog({
                 }}
               />
               <p className="pb-1 text-caption2 text-fg-subtle">
-                Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
+                Every other labelled button. Each becomes one command and one Home Assistant script — nothing
                 here is ticked for you. Select all and Clear act on the rows a search has left on screen.
                 {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
                   <>

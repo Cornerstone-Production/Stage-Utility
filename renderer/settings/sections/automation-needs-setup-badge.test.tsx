@@ -40,7 +40,7 @@ const CALL_TRIGGER_ID = "call.by-name";
  *  shapes (spl.crossed-above, rosstalk.command), not a stub invention. */
 const REGISTRY = {
   triggers: [
-    { id: CALL_TRIGGER_ID, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Cue name", type: "string" }] },
+    { id: CALL_TRIGGER_ID, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Command name", type: "string" }] },
     {
       id: "spl.crossed-above",
       label: "SPL rises above",

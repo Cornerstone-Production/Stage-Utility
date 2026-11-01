@@ -691,7 +691,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
     const slug = typeof o.slug === "string" && o.slug ? slugForCue(o.slug) : slugForCue(label);
 
     if (!button || !slug) {
-      skipped.push({ name: label || "(unnamed)", why: "no usable cue name for this button" });
+      skipped.push({ name: label || "(unnamed)", why: "no usable command name for this button" });
       continue;
     }
 

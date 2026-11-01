@@ -171,14 +171,14 @@ describe("the name is reserved", () => {
   test("saving a rule with a built-in's name is refused", async () => {
     await assert.rejects(
       () => automationEngine.addRule(cue("obs_record_on")),
-      /^Error: "obs_record_on" is a built-in cue$/,
+      /^Error: "obs_record_on" is a built-in command$/,
     );
     // Reserved whatever is enabled: a rule saved today must not collide with a
     // built-in that appears the moment somebody switches OBS on.
     ENABLED = new Set();
     await assert.rejects(
       () => automationEngine.addRule(cue("display_refresh")),
-      /^Error: "display_refresh" is a built-in cue$/,
+      /^Error: "display_refresh" is a built-in command$/,
     );
   });
 
@@ -192,7 +192,7 @@ describe("the name is reserved", () => {
           ...cue("rec_on"),
           trigger: { id: CALL_TRIGGER_ID, params: { name: "rec_on", aliases: "obs_record_on" } },
         }),
-      /^Error: "obs_record_on" is a built-in cue$/,
+      /^Error: "obs_record_on" is a built-in command$/,
     );
   });
 
@@ -238,7 +238,7 @@ describe("the name is reserved", () => {
         automationEngine.updateRule(r.id, {
           trigger: { id: CALL_TRIGGER_ID, params: { name: "obs_record_on" } },
         }),
-      /is a built-in cue/,
+      /is a built-in command/,
     );
   });
 
@@ -361,7 +361,7 @@ describe("a stored rule may not wear a built-in's id", () => {
       await automationEngine.setSettings({ simulate: false, disarmed: false });
     }
     assert.equal(
-      warnings.some((w) => w.includes("reserved for the cues the app ships")),
+      warnings.some((w) => w.includes("reserved for the commands the app ships")),
       true,
       `nothing was said about it: ${warnings.join(" | ")}`,
     );
