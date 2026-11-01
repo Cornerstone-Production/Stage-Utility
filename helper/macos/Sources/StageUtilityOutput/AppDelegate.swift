@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import StageUtilityOutputCore
 import SwiftUI
 
@@ -10,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var statusItem: NSStatusItem!
   private var window: NSWindow?
   private var showObserver: NSObjectProtocol?
+  private var hotKey: GlobalHotKey?
 
   init(options: Options, paths: HelperPaths) {
     self.options = options
@@ -18,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     model = AppModel(options: options, paths: paths)
+    // Before any output can cover the icon, and not waiting for Chromium: this is the
+    // way back to the window, so it must not depend on the thing that can be slow.
+    registerHotKey()
     // Outputs make browsers, which CEF allows only once its context is up.
     CEFEngine.whenReady { [weak self] in self?.launch() }
   }
@@ -43,6 +48,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       forName: SingleInstance.showWindowRequest, object: nil, queue: .main
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.showWindow() }
+    }
+  }
+
+  /// The way to the window that an output cannot cover (`HelperHotKey`).
+  private func registerHotKey() {
+    let key = GlobalHotKey { [weak self] in
+      Log.notice(.app, "\(HelperHotKey.label) pressed: opening the window")
+      self?.showWindow()
+    }
+    let status = key.register()
+    if status == noErr {
+      hotKey = key
+      Log.notice(.app, "\(HelperHotKey.label) opens the window from anywhere")
+      model.hotKeyRegistered(nil)
+    } else {
+      let taken = status == OSStatus(eventHotKeyExistsErr)
+      let why = taken ? "another app has it" : "macOS refused it (error \(status))"
+      Log.error(.app, "could not register \(HelperHotKey.label) to open the window: \(why)")
+      model.hotKeyRegistered(
+        "\(HelperHotKey.label) cannot open this window: \(why). The menu bar icon still does, unless an output covers it.")
     }
   }
 

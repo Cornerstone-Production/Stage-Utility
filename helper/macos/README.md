@@ -94,6 +94,16 @@ An output window sits above the menu bar, so one over the Mac's main display cov
 the icon. The window therefore opens by itself at launch whenever an output covers the
 main display, and again when a change in the displays newly covers it.
 
+**Control-Option-Command-O** opens the window from any app, whatever an output has covered, so an output that covers the icon is never the end of the
+way back. It is registered with Carbon's `RegisterEventHotKey`, which needs no
+permission (a key monitor would need Accessibility), and the window's footer says it
+while it is registered. If macOS refuses the registration, the log says so, the window
+carries a note, and the footer line is left out; another app registering the same
+combination is not refused (which of the two gets the press is not defined). The key is
+the one at the QWERTY O position, so on another layout the label and the key differ. Switching the display with
+the menu bar **on** in the window asks first, and the question names the key; with the
+key unavailable it says so instead.
+
 **Starting at login.** `install-macos.sh` writes the system-wide LaunchAgent
 `/Library/LaunchAgents/com.stageutility.output.plist`. Where that file exists, the window's footer reads
 **Starts at login (installed)** and has no switch, since a per-user login item beside it
