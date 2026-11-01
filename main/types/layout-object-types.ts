@@ -10,7 +10,6 @@
 // same-line collision resolves as "keep both". Each guard asserts the
 // registry's keys, sorted, equal this list exactly.
 export const LAYOUT_OBJECT_TYPES = [
-  "action-button",
   "baptism-timer",
   "brand-logo",
   "charger-battery",

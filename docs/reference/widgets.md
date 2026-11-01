@@ -319,7 +319,7 @@ thumbnail or frame of any kind, so these report names, states and times only.
 
 **On screen now**'s right-click menu has the **Layout** choice (Full, Compact,
 Countdown only), **Label** while the layout is Compact, and the **Progress bar**,
-**Next cue**, **Warn near the end** and **Count down stills** switches. Next cue
+**Next command**, **Warn near the end** and **Count down stills** switches. Next command
 is offered only while the layout is Full, the one layout that draws it.
 
 ### The layer list
@@ -356,8 +356,8 @@ Home card shows up to three layers and does the same.
 The same data as one reading rather than a list, leading with how long is left:
 while a clip is rolling, the countdown IS the value, with the file it belongs to
 and the file's total length underneath. A layer with nothing left to count —
-still, ended, or nothing on it at all — falls back to the current cue's name (or
-the file name, without its extension, when there is no cue to read), with a state
+still, ended, or nothing on it at all — falls back to the current command's name (or
+the file name, without its extension, when there is no command to read), with a state
 word — **playing**, **paused**, **still**, **ended**, **empty** or **not
 found** — beside the caption.
 
@@ -373,14 +373,14 @@ PVP is not currently reporting reads **not found**, with its own sentence — ne
 
 **Progress bar** draws a hairline rule under the countdown. It advances smoothly
 rather than a step a second, and snaps instead of sliding whenever the change is
-not a tick — a cue change, a scrub, or a display waking up. A paused clip holds
+not a tick — a command change, a scrub, or a display waking up. A paused clip holds
 its bar where it stopped.
 
-**Next cue** names the entry after the current one in its playlist. Read the
+**Next command** names the entry after the current one in its playlist. Read the
 caveat before you rely on it: **that is the next playlist entry, which is what
-plays next only while the playlist keeps auto-advancing.** Fire a cue by hand and
+plays next only while the playlist keeps auto-advancing.** Fire a command by hand and
 this line is wrong until the next poll. It is the quietest line on the widget for
-that reason, it is never drawn without a current cue to anchor it, and it can be
+that reason, it is never drawn without a current command to anchor it, and it can be
 switched off.
 
 **Layout** chooses how much the widget draws. **Full** is the composition above.
@@ -388,17 +388,17 @@ switched off.
 `PVP · <label>` (or `PVP · <layer name>` when a layer is pinned, in every state),
 and the value is the countdown alone while there is one. With nothing to count —
 a still, an ended clip, or an empty layer's dash — the value falls back to
-whichever of the cue name or the file name is NOT already the caption, so the
+whichever of the command name or the file name is NOT already the caption, so the
 tile never repeats itself and never reads the literal "no duration". **Label**
 chooses what the Compact caption names when no layer is pinned: the layer's
-current cue, the media file's name with or without its extension, or the
-layer's own name. It falls back to the file name when there is no cue name to
+current command, the media file's name with or without its extension, or the
+layer's own name. It falls back to the file name when there is no command name to
 read, and it has no effect on a pinned tile, whose caption is always the layer's
 own name. A widget saved before Layout existed with Compact switched on opens as
 Compact.
 
 **Countdown only** draws the time left and nothing else: no caption, no state
-word, no cue name, no sub-line, no next cue. The number fills the widget — as
+word, no command name, no sub-line, no next command. The number fills the widget — as
 tall as 62% of its height allows, and never wider than its width allows for the
 digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
 an hour. With nothing counting — nothing on the layer, a layer PVP does not
@@ -408,8 +408,8 @@ bar and in red when **Warn near the end** is on, until the layer moves on. A pau
 reverse: it draws its frozen time with no state word, since there is no room for
 one here — switch to Full or Compact to see **paused**. **Progress bar**,
 **Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
-hairline along the bottom edge). **Next cue** and **Label** are not shown in
-the inspector, since neither is drawn in it. (Next cue is also unused by
+hairline along the bottom edge). **Next command** and **Label** are not shown in
+the inspector, since neither is drawn in it. (Next command is also unused by
 Compact, and Label by Full, and they are not shown there either.)
 
 **Warn near the end**, off by default so an existing widget is unchanged, turns
@@ -435,7 +435,7 @@ its own number. It is off by default and
 per-widget on purpose: a still's Duration is set at import and stored on every
 image in the library, including ones whose Next Behavior is None and that never
 advance — a countdown on a graphic that is not going anywhere would be a lie, so
-this is the operator opting IN a specific widget, for a layer whose cue actually
+this is the operator opting IN a specific widget, for a layer whose command actually
 advances on the hold (a rotating pre-roll, say). Once the hold runs out the
 countdown holds at 0:00 with a full bar rather than switching to another state.
 
@@ -446,7 +446,7 @@ screen** reads (Compact and Countdown only show nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the
-same cue while showing nothing — and it disagrees with the file that is actually
+same command while showing nothing — and it disagrees with the file that is actually
 up even on a layer that is playing. See
 [ProVideoPlayer](../integrations/provideoplayer.md).
 
@@ -580,7 +580,7 @@ nothing.
 |---|---|---|
 | **OSC button** | Sends an OSC message, and can reflect the device's state back | LAN gear over UDP |
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
-| **Button** | Fires a cue, or runs one of the app's own actions. Set under **Does**: see [below](#control) | This app, via Companion for a cue |
+| **Button** | Presses a Companion button, an app action or a command. Set under **Presses**: see [below](#control) | This app, via Companion for a Companion button |
 | **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 | **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
@@ -602,26 +602,84 @@ See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 A button's label is centered on it, in the middle both ways, and wraps inside it
 with a margin on every side. A word longer than the button breaks, and text that
 still does not fit is clipped at the button's edge rather than drawn over its
-neighbours. The OSC button, the RossTalk button and both kinds of Button draw it the same way.
+neighbours. The OSC button, the RossTalk button and the Button draw it the same way.
 
-**Button** is one widget with a **Does** choice at the top of its settings.
+**Button** presses one thing, and every press is a command, so Simulate mode,
+Disarm, the cooldown and the service guard apply to all of it. **Presses**, at the
+top of its settings, has three choices:
 
-**Fire a cue** binds the button to a cue. The **Cue** dropdown lists **Your cues**
-first — the ones from the rules list, including those hidden from Home
-Assistant — and then **Built in**: the cues the app ships for OBS, REAPER,
-ProVideoPlayer and itself, which need no rule behind them
-([built-in cues](../automation.md#built-in-cues)). **+ New manual cue…** opens
-the [Automation](../automation.md#cues) page in a new tab, and a cue made there
-appears in the dropdown without reloading the editor. Two cues that would read
-the same show their cue name beside the entry. The button shows the cue's
-state: on, off, settling after a press, stale when Companion has lost the
-device, dimmed when the cue refuses.
+- **Companion**: one Companion button, from the live export.
+- **App action**: one of the app's own actions, with its fields.
+- **A command**: a command that already exists.
+
+**Companion** reads the connected Companion's own configuration. **Find a button
+by label** searches every label on every page. The page dropdown, with ‹ and ›
+arrows beside it, filters by number or name and leaves out pages with nothing on
+them, so an install with a hundred pages stays usable. The page is drawn as
+Companion draws it: its own colours, an icon above the label, at least 8 keys by 4,
+and wider than that only as far as the page uses, scrolling sideways inside the
+panel. A page-number, page-up or page-down key is drawn blank and cannot be
+picked. A reference key is drawn as the button it points at, marked **ref**, and
+picking it presses that button. The picked button's page, row and column are shown
+under the grid. There are no typed coordinates: a button that is not in the export
+cannot be pressed safely. With Companion unreachable the panel says so rather than
+drawing an empty page.
+
+**App action** lists every action in [Actions](../automation.md#actions), under the
+same headings as the [automation rules editor](../automation.md), including
+advancing or stepping back through the
+[baptism timer](../features/servicecue-and-baptisms.md). Choosing one that takes
+parameters shows the same fields the rule editor shows for it. A required field
+left blank is marked, as in the rule editor ([Needs setup](../automation.md#needs-setup)),
+and the Button keeps what it pressed before until every required field is filled in. An action
+that has since been removed or renamed still shows its stored id, marked as not
+found, so the Button stays editable. **Press a Companion button** is not listed
+here: it is the Companion choice.
+
+**A command** binds the Button to a command that exists. The **Command** dropdown
+lists **Your commands** first, including those hidden from Home Assistant, and then
+**Built in**: the commands the app ships for OBS, REAPER, ProVideoPlayer and
+itself, which need no rule behind them ([built-in commands](../automation.md#built-in-commands)).
+A command that belongs to another Button is not offered. **+ New manual command…**
+opens the [Automation](../automation.md#commands) page in a new tab, and a command made
+there appears in the dropdown without reloading the editor. Two commands that would
+read the same show their command name beside the entry. **Used on** lists the
+screens that have a Button for the command, Home included.
+
+A Companion or App action pick saves a command of its own for the Button, at once,
+before the layout is saved. It is a **Called by name** rule named `btn_<label>`
+(the picked button's or action's name when the label is blank), a `lower_snake_case`
+name made unique against every command name and former name; one ending `_on` or
+`_off` gets `_cue` added, because a lone one would read as half of an ON/OFF pair
+and never appear in the list. It is enabled, hidden from Home Assistant, allowed
+during a service, with no conditions and no cooldown, and it belongs to that
+Button. Its spoken name is the label, or the picked name when the label is blank,
+and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this Button's own command* with the name.
+Picking again on the same Button rewrites that command's action in place: its name
+does not change when the label or the pick does. Pointing the Button at the command
+is an edit like any other, so the layout still needs saving. The command itself
+is written at once and is not part of that edit: **Discard**, **Undo** and a Home
+sheet's **Cancel** put the Button back to the command it named, but not the command's
+action, so a re-pick that is then discarded leaves the Button pressing the new thing. A Button duplicated with its command shares it until
+one of the two is picked again: that pick leaves the shared command as it is for the
+other and gives this Button a new one. If the server refuses
+the rule, the Button is left as it was and the reason is shown under the choice.
+
+**List it with the other commands** releases the command from its Button. Nothing
+else changes, and the Button keeps pressing it; it then shows in the Automation
+page's list, where it can get a voice name, a Home Assistant entity and other
+Buttons pointing at it. Choosing **A command** on a Button that had its own command
+leaves that command in place; when its Button is removed or pointed elsewhere the
+command is kept, never deleted.
+
+The button shows the command's state: on, off, settling after a press, stale when
+Companion has lost the device, dimmed when the command refuses.
 
 A pair shows on or off from its state variable; a tap presses the opposite half,
 and a pair whose reading is unknown presses ON. In the eight seconds after a
 press it shows what was asked for and says it is settling. A dashed amber ring
-means Companion has lost the device and the reading cannot be trusted. A cue that
-refuses — switched off, disarmed, not allowed during a service — says why on the
+means Companion has lost the device and the reading cannot be trusted. A command
+that refuses — switched off, disarmed, not allowed during a service — says why on the
 button. In Automation's Simulate mode a press is accepted and sends nothing, and
 the button says *Simulated: nothing was sent*. One that needs a confirmation
 cannot be fired from a panel; the rules page has the Test button for that. A press is recorded in the
@@ -638,60 +696,25 @@ The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
 
-**Run an action** picks an **Action** from the same registry the
-[automation rules editor](../automation.md) offers — every action in
-[Actions](../automation.md#actions), including advancing or stepping back
-through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
-one that takes parameters (a Companion button coordinate, a RossTalk command)
-shows the same fields the rule editor would show for it. The action belongs to
-this button alone; nothing else can fire it. A button saved against an action
-that has since been removed or renamed still shows its stored id, marked as
-unknown, rather than doing nothing when pressed. One with a required field left
-blank — see [Needs setup](../automation.md#needs-setup) — shows a **Needs setup**
-marker over the tile in the layout editor's own canvas only; a live display or a
-console never shows it, and pressing the button there keeps refusing exactly as
-it always has. The layout still saves — a button is part of a screen, so a field
-it is missing marks the button, not the whole layout.
+**Label** is blank by default, which draws the name of what the Button presses.
+**Show device** appears for a pair, or a command that has a room, and turns off the
+line under the label.
 
-A Button saved as Run an action is converted when the server starts, and when a
-view carrying one is imported: it becomes a Fire a cue Button with the same label,
-look and position, bound to a cue of its own that runs the same action with the
-same parameters. That cue is a **Called by name** rule named `btn_<label>`, hidden
-from Home Assistant, allowed during a service, with no cooldown, and it belongs to
-that Button. From then on the Button obeys Simulate mode and Disarm, as every cue
-does. The conversion runs at every start and on import, and logs one `[automation]` line,
-only when it converted something, saying how many Buttons it converted and on which
-views.
+On Home, a Button's right-click menu has **Presses…**, which opens the same
+**Presses** choices and a **Label** in a sheet; **Save** stores them. A Button with
+nothing chosen reads **Choose what it presses**, and tapping it opens that sheet.
+A Button's own command made there belongs to Home.
 
-**Make it a cue**, under an action's fields, turns the action into a manual cue
-and points the button at it, so the Automation page's Run button, Home
-Assistant, voice and other consoles can fire it too. It is off until an action is
-chosen and its fields are complete. The cue is a **Called by name** rule named
-after the button's label (the action's name when the label is blank, or is the
-default "Action" that older buttons were saved with), with a
-`lower_snake_case` cue name that is made unique against every cue name and former
-name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
-read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
-with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
-Assistant** off; change any of that on the Automation page. A cue obeys what a Button
-set to Run an action does not: Simulate mode (the button then says it sent nothing),
-Disarm, the cooldown, and the service guard if it is switched back on. While the
-rule is being written, **Does** and **Make it a cue** are inert. If the server
-refuses the rule, the button is left as it was and the reason is shown under the
-button. The rule is written at once, but pointing the button at it is an edit like
-any other, so the layout still needs saving; if it is left unsaved, pressing
-**Make it a cue** again offers the enabled rule of that name, action and
-parameters that already exists instead of making a second.
-
-**Label** is blank by default, which draws the cue's name (or, for an action, the
-action's own name).
-
-Switching **Does** rewrites the widget in place. The label, the look and the
-position stay. Going to **Run an action** drops the cue and **Show device**;
-going to **Fire a cue** drops the action and its parameters. **Undo** brings them
-back. What **Does** shows is the widget's stored type: a stored cue button opens
-on **Fire a cue**, and a Button switched to **Run an action** and saved is
-converted to a cue of its own at the next start, as above.
+A Button saved by an earlier version as **Run an action** is converted when the
+server starts, when a view carrying one is imported, and when a layout carrying one
+is saved (an older browser tab can send the old type back): it becomes a Button with
+the same label, look and position, bound to a command of its own that runs the same
+action with the same parameters, named `btn_<label>` as above. From then on the
+Button obeys Simulate mode and Disarm, as every command does. The conversion runs at
+every start, on import and on save, and logs one `[automation]` line, only when it
+converted something, saying how many Buttons it converted and on which views. Until a
+Button is converted (the rules could not be saved: the log says why) it draws **Needs
+converting** and does nothing.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and
@@ -878,7 +901,7 @@ chooses which; with one, it is not shown.
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
 | **OSC button** | **Target**, **Label**, **Address**, **Arguments** (int, float, string, true or false, in order), **Feedback** (off; when on, **Watch address**, **Active when =** and **Active color**) |
 | **RossTalk button** | **Target**, **Command** and its parameters, **Label** |
-| **Button** | **Does** (Fire a cue or Run an action). Fire a cue: **Cue**, **Show device** (on), **Label** (blank uses the cue's name). Run an action: **Action**, its parameters, **Make it a cue**, **Label** (blank uses the action's name). See [Control](#control) |
+| **Button** | **Label** (blank draws the name of what it presses), **Presses** (Companion, App action or A command, each with its own picker), **Show device** (on, for a pair). See [Control](#control) |
 | **Messages** | **Groups**: see [Control](#control) |
 | **Checklist**, **Notes** | Nothing beyond the look; their content is typed into the widget |
 | **Shape** | **Shape**: Rect or Ellipse |

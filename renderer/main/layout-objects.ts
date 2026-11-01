@@ -834,20 +834,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
-  // One "Button" in the palette covers this and the cue button: the inspector's
-  // Does control switches a button between the two stored types. This one stays
-  // a full registry entry (every saved layout holds them, and the renderer, the
-  // capability table and the type union all key on it) but is not offered on its
-  // own, and carries the same label so the layer list and the inspector header
-  // read "Button" whichever way a widget is set.
-  "action-button": {
-    label: "Button",
-    blurb: "Runs one of the app's own actions",
-    group: null,
-    config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
-    style: () => PILL({ fontSize: 0.045 }),
-  },
-
   notes: {
     label: "Notes",
     blurb: "A shared note anyone can type into",
@@ -864,11 +850,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
-  // The palette's Button: it arrives firing a cue, and the inspector's Does
-  // control turns it into an action button (and back). See action-button above.
+  // The palette's Button. It starts with nothing chosen; the inspector's Presses
+  // control makes it press a Companion button, an app action or a command.
   "cue-button": {
     label: "Button",
-    blurb: "Fires a cue, or runs an action, from a console",
+    blurb: "Presses a Companion button, an app action or a command",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
     // The size every other button starts at, small enough that the lamp, label and

@@ -3,9 +3,31 @@
 Rules of the form **when something happens in Stage, do something to a device.**
 Built on the **Automation** page, in the sidebar.
 
+A rule that runs when something calls it is a **command**. The API and Home Assistant
+still say `cue` for the same thing: `/api/cues/<name>`, the `cues` channel, the
+`cue` field on a Button.
+
 > Rules fire with nobody present. Build every rule with the **Write a log message**
 > action first, watch it through a real service, and only then attach the real
 > action. Simulate mode is on by default for the same reason.
+
+## The page
+
+The page has five tabs, each its own address, so Back moves between them and a
+link can be handed to someone. `/automation` opens **Commands**.
+
+| Tab | Address | Holds |
+|---|---|---|
+| **Commands** | `/automation/commands` | every command, with **New command** and **Import from Companion** above the list, then **Belongs to a button**, collapsed |
+| **Rules** | `/automation/rules` | the automatic rules, with **New rule** |
+| **Activity** | `/automation/activity` | what rules and commands did, and the reason when they did not |
+| **Access** | `/automation/access` | **Calling commands** (the tokens a caller needs) and the Home Assistant config |
+| **Search** | `/automation/search` | one box across every list |
+
+**Simulate** and **Disarm all** sit above the tabs, so they are in reach on every
+one. The strip answers the arrow keys, Home and End, and Cmd-F (Ctrl-F elsewhere)
+opens Search from any tab. The Search box keeps what you typed while you move
+between tabs.
 
 ## A rule
 
@@ -17,12 +39,12 @@ Built on the **Automation** page, in the sidebar.
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
 
-![The Automation page: simulate mode, the Home Assistant cues and the other rules, each with a Run button](images/automation-rules.png)
+![The Automation page: Simulate and Disarm above the tabs, and the Commands tab listing each command with its badges, the screens it is used on and a Run button](images/automation-rules.png)
 
-A rule is made with **New cue**, under the list, which opens a dialog of steps —
-see [Creating a cue](#creating-a-cue). A rule is one of two kinds. An **automatic
-rule** has all five parts above. A **manual cue** has no When and no If: it runs
-only when something calls it (see [Cues](#cues)), so it is the same rule with the
+A rule is made with **New command** (Commands tab) or **New rule** (Rules tab),
+which open a dialog of steps — see [Creating a command](#creating-a-command). A rule is one of two kinds. An **automatic
+rule** has all five parts above. A **manual command** has no When and no If: it runs
+only when something calls it (see [Commands](#commands)), so it is the same rule with the
 **Called by name** trigger and no conditions but its service guard.
 
 Triggers, conditions and actions are chosen from a grouped, searchable list, in
@@ -68,11 +90,10 @@ unrelated field never turns it off. The list still shows the badge; the switch
 still refuses to re-enable it if you turn it off yourself. It is enforced the
 next time *you* save or enable it, not the moment this build starts.
 
-The layout editor's **Button**, when set to **Run an action**, follows the same check, live as you
-edit — there is no Save step there. A button needing setup is marked in the
-editor's canvas only, never on a live display; pressing it on a display or a
-console keeps refusing exactly as it always has (`action-invoke.ts`) if nothing
-is configured.
+The layout editor's **Button**, when set to **App action**, follows the same check, live as you
+edit — there is no Save step there. A required field left blank is marked in the
+editor's panel, and the Button keeps what it pressed before until every required
+field is filled in, so it is never bound to a command the server would refuse.
 
 An **optional** field is never a problem when it is empty. A field naming a
 runtime list — a RossTalk target, a ProPresenter macro — is never a problem
@@ -120,7 +141,7 @@ stage message's groups are required, so a blank one needs setup.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
-| Called by name | something called `POST /api/cues/<name>` with a token, or a Button set to Fire a cue on one of this app's own consoles. This one NEVER fires by itself, and is not in the picker: make it with **New cue** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
+| Called by name | something called `POST /api/cues/<name>` with a token, or a Button on one of this app's own consoles or on Home. This one NEVER fires by itself, and is not in the picker: make it with **New command** or **Make it manual** (see [Creating a command](#creating-a-command)) — see [Commands](#commands) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -202,7 +223,7 @@ a switch. They are not opposites. **No service is live** fails closed: it holds 
 when Planning Center says nothing is on, so it refuses while a service is running or
 about to start (within the hour before it), and when Planning Center is configured
 and cannot be read at all. With no Planning Center configured there is nothing to
-check and it holds. It is what a cue carries so it cannot be run during setup or
+check and it holds. It is what a command carries so it cannot be run during setup or
 mid-service.
 
 Conditions only **hold** or don't — unlike a trigger they never fire on their own.
@@ -254,9 +275,9 @@ for "idle", because before it runs we do not know that it is idle.
 > A command that was accepted and ignored is recorded as a **failure**, not a
 > success — which is the opposite of what the log would otherwise show.
 >
-> There is no action for firing a cue onto a layer you choose, because
+> There is no action for firing a command onto a layer you choose, because
 > ProVideoPlayer does not offer one: its layer-addressed endpoint accepts the
-> argument and ignores it, playing the cue on its own configured layer. Which
+> argument and ignores it, playing the command on its own configured layer. Which
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
 
@@ -265,7 +286,7 @@ for "idle", because before it runs we do not know that it is idle.
 > its websocket, not a second one. A command sent while the output is already in
 > that state is answered `already recording` / `already stopped` and nothing goes
 > to OBS: obs-websocket rejects a redundant `StartRecord` with a request error,
-> which would read as a failed cue over a recording that is running perfectly
+> which would read as a failed command over a recording that is running perfectly
 > well. With OBS disconnected the action fails and says so; it never queues.
 
 > **REAPER transport** needs REAPER's web interface switched on — the same
@@ -328,108 +349,117 @@ for "idle", because before it runs we do not know that it is idle.
 > [baptism timer's](features/servicecue-and-baptisms.md) own operator panel
 > would do right now — start a session, begin person 1 once a grouped session
 > arms, close a testimony or a baptism, move to the next person — so a single
-> [Button](reference/widgets.md#control) set to Run an action, or a Companion key, runs the whole
+> [Button](reference/widgets.md#control) set to that App action, or a Companion key, runs the whole
 > service and nobody has to know which press is legal in which phase.
 
-## Cues
+## Commands
 
-A **cue** is a rule triggered by **Called by name** rather than by anything
+A **command** is a rule triggered by **Called by name** rather than by anything
 happening in the building. It runs only when something calls
 `POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
 script or Home Assistant reaches Stage Utility. A page on this app's own origin
-needs no token — that is how a [Button](reference/widgets.md#control) set to Fire a
-cue on a console fires, and such a call is logged as `console`. A Button set to
-Run an action has **Make it a cue**, which creates a cue like this one from its
-action and points the button at it.
+needs no token — that is how a [Button](reference/widgets.md#control) on a console
+or on Home fires, and such a call is logged as `console`. A Button set to
+Companion or App action saves a command of its own, made the moment it is picked,
+that belongs to that Button; it is listed under
+[Belongs to a button](#belongs-to-a-button), and **List it with the other
+commands** on the Button (or here) releases it into the list.
 
-Getting cues into Home Assistant — and from there into Apple Home — is the
+Getting commands into Home Assistant — and from there into Apple Home — is the
 [Home Assistant integration](integrations/companion.md#the-integration): install
-it from HACS, give it this server's address and a cue token, and every cue is a
+it from HACS, give it this server's address and a command token, and every command is a
 switch or a button there. A generated
 [YAML fragment](integrations/companion.md#the-generated-yaml) is the fallback
 for an install that cannot run a custom integration.
 
-**For setup and teardown, not for cues during a service.** Turning the projectors
-on before a rehearsal, turning the foyer televisions off after. Every cue imported
+**For setup and teardown, not for commands during a service.** Turning the projectors
+on before a rehearsal, turning the foyer televisions off after. Every command imported
 from Companion carries the **no service is live** condition, and refuses with a
 sentence — *"Sunday Service is live"* — while a service is running or about to
 start, and when Planning Center cannot be read.
 
-A cue's editor has an **Allowed during a service** switch that is the same
-condition in one control: off (the imported default) refuses the cue while a
+A command's editor has an **Allowed during a service** switch that is the same
+condition in one control: off (the imported default) refuses the command while a
 service is live or about to start, on removes the condition and lets it fire
-whenever it is called. A cue made with [New cue](#creating-a-cue) starts with it on. The rules list marks every cue that is on with a
+whenever it is called. A command made with [New command](#creating-a-command) starts with it on. The Commands tab marks every one that is on with a
 clearly visible **any time** badge, so the ones that can fire mid-service are
 easy to spot in a long list. A pair's row carries one badge over both halves,
 and reads **any time** if either half can fire — each half is evaluated against
 its own conditions, so one unguarded half is a pair that can fire mid-service.
 Its switch, in the pair's dialog, writes both halves at once.
 
-The rules list is in two sections. **Home Assistant** holds every cue that has
-an entity there — pairs as switches, single cues as buttons. **Everything else**
-holds the cues whose **Home Assistant** switch is off and every rule with a
-trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
-it is spoken as.
+The **Commands** tab is one list. Each row carries badges for what is true of
+the command: **Home Assistant** when it has an entity there (pairs as switches,
+single commands as buttons) and nothing when its Home Assistant switch is off,
+**Voice** when it has a spoken name, and **any time** when it can fire during a
+service. Beneath the line saying what it does, **Used on** lists the screens
+whose Buttons name it, one chip per screen and Home among them, or *nothing yet*.
+An ON/OFF pair is ONE row, named by the words it is spoken as, and is used by its
+base: a Button on either half counts. Pairs come first, then single commands,
+each alphabetical. Every rule with a trigger other than Called by name is on the
+**Rules** tab.
 
-A row is a summary: the enable switch, the name, any former names, the
-service-guard badge, whether Home Assistant has an entity for it, the
-one-line *when … then*, and a **Run** button (see
-[Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable switch
-or Run —
-opens the editor in a dialog over the list, so the list and the search field
-stay where they are. **Test** and **Delete** are in its footer beside **Cancel**
-and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
-the server refuses leaves the dialog open with the change still in it. Deleting
-asks first, naming the cues that go.
+A row is a summary: the enable switch, the name and the command name, any former
+names, the badges, the one-line *when … then*, **Used on**, and a **Run** button
+(see [Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable
+switch or Run — opens the editor in a dialog over the list, so the list and the
+tabs stay where they are. **Test** and **Delete** are in its footer beside
+**Cancel** and **Save**; Escape, the overlay and Cancel all discard the draft, and
+a save the server refuses leaves the dialog open with the change still in it.
+Deleting asks first, naming the commands that go. The editor's header repeats **Used on**. Where a command is used is read again
+whenever any view is added, removed, renamed or saved, from this page or anywhere
+else, after a short pause, so the chips follow a Button as it is added or deleted.
 
 Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
 rule's name and id, so a bulk delete leaves a record of exactly which rules went.
-A cue's name is on its add line, and a line of its own says when a cue's name
-changes or a rule stops being a cue, which is where to look when a console button
+A command's name is on its add line, and a line of its own says when a command's name
+changes or a rule stops being a command, which is where to look when a console button
 reads **Unbound**.
 
 A pair opens ONE dialog. **This pair** holds the settings that belong to the
 pair rather than to one direction of it — Home Assistant, Allowed during a
 service, State variable, Room — and a **Turn on** / **Turn off** control below
-it swaps the fields that differ: cue name, spoken as, former names, the button
+it swaps the fields that differ: command name, spoken as, former names, the button
 it presses, cooldown, once per service, enabled. Saving writes both halves, and
 the pair's own settings land on the `_on` rule. **Test** fires the half that is
 selected and says which.
 
-A cue's editor has a **Home Assistant** switch under Allowed during a service.
-Off, the cue is voice-only: no entity is created for it, it is left out of the
-generated YAML and the manifest, and it moves to Everything else.
+A command's editor has a **Home Assistant** switch under Allowed during a service.
+Off, the command is voice-only: no entity is created for it, it is left out of the
+generated YAML and the manifest, and loses its Home Assistant badge.
 `POST /api/cues/<name>` still fires it. For a pair the switch covers both halves
 — one switch, hidden or shown together — and Home Assistant removes the entity
 within a few seconds, breaking automations there that refer to it. See
-[Keeping a cue out of Home Assistant](integrations/companion.md#keeping-a-cue-out-of-home-assistant).
+[Keeping a command out of Home Assistant](integrations/companion.md#keeping-a-command-out-of-home-assistant).
 
-The **Search rules** field is pinned to the top of the list and filters live by
-rule name, cue name, spoken name, former names, a Companion button's label, and
-the trigger and action's own names. A pair shows whenever either half matches.
+The **Search** tab filters live across the Commands, the Rules and Belongs to a
+button, each under its own heading, by rule name, command name, spoken name,
+former names, a Companion button's label, the trigger and action's own names, and
+the names of the screens a command is used on and the labels of the Buttons that
+name it. A pair shows whenever either half matches.
 
 | | |
 |---|---|
-| **Cue name** | `lower_snake_case`, unique across rules — and across every cue's former names. This is the URL |
-| **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
+| **Command name** | `lower_snake_case`, unique across rules — and across every command's former names. This is the URL |
+| **Former names** | names this command still answers to, kept when its Companion button was relabelled and the command renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **Home Assistant** | on by default for a cue imported from Companion, and off for one made with [New cue](#creating-a-cue). Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
+| **Home Assistant** | on by default for a command imported from Companion, and off for one made with [New command](#creating-a-command). Off keeps the command out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
 | **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
 
 The rule's own conditions, cooldown and enable switch all apply to a call exactly
-as they do to a trigger — a cue is a rule, not a second path through the engine.
+as they do to a trigger — a command is a rule, not a second path through the engine.
 Every call, allowed or refused, is in the Activity log with the calling token's
 label.
 
-**A bound cue only presses when it needs to.** When a cue is half of a pair with
+**A bound command only presses when it needs to.** When a command is half of a pair with
 a [State variable](integrations/companion.md#real-state), the variable is read
 before the press. If it already says what the call is asking for, nothing is
 pressed and the answer is `200 {ok: true, detail: "already on", state: "on",
-skipped: true}` — mirrored for off. This is checked before the cue's cooldown,
+skipped: true}` — mirrored for off. This is checked before the command's cooldown,
 so a repeated call is answered "already on" rather than refused `cooldown`.
 Within eight seconds of a press the last press is what a repeat is compared
 against rather than the variable, which lags it by however long Companion takes
@@ -448,31 +478,54 @@ A read never stops a press, though an unreachable Companion delays one by up to
 three seconds. Only a call is checked this way; a rule the engine
 fires from a trigger of its own presses without reading anything.
 
-A cue that presses a Companion button remembers which button, not just where it
+A command that presses a Companion button remembers which button, not just where it
 was: if somebody moves it, the coordinates follow it and the rule's row says so;
-if it is gone, the cue answers `button-missing` and presses nothing rather than
-pressing whatever is now at those coordinates; if it is RELABELLED, the cue is
+if it is gone, the command answers `button-missing` and presses nothing rather than
+pressing whatever is now at those coordinates; if it is RELABELLED, the command is
 renamed to match and the old name keeps answering. See
 [When a button moves](integrations/companion.md#when-a-button-moves) and
 [When a button is renamed](integrations/companion.md#when-a-button-is-renamed).
 
-Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
+Set the whole thing up under [Companion](integrations/companion.md#calling-a-command-by-name):
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
 
-### Creating a cue
+### Belongs to a button
 
-**New cue** opens a dialog. **Nothing is saved until Create**: Cancel, Escape, the
-close button and the overlay all discard it. The first step is the kind.
+A Button set to press a Companion button or an app action keeps that press as a
+command of its own. It is an ordinary Called-by-name rule with one extra field, so
+Simulate, Disarm, the cooldown and the Activity log apply to its presses, and it
+is listed here rather than among the commands somebody wrote. **Belongs to a
+button** is collapsed under the Commands list, with the count, and is not drawn
+when nothing belongs to a button. Each row says which screen and Button it belongs
+to, and has **List it with the other commands**, which releases the rule so it
+shows in the list above, where Home Assistant, a spoken name and the rest can be
+set.
+
+When the Button goes the rule is **kept, never deleted for you**. The row reads
+**Button removed** (the Button was deleted, or its screen was) or **No longer used
+by its button** (the Button is still there and now presses another command), and
+gains **Delete**. The server says it once on the log:
+
+```
+[automation] btn_shutter belongs to a button that is gone (Booth console); kept, delete it from Automation
+```
+
+### Creating a command
+
+**New command** and **New rule** open a dialog, on a manual command and on an
+automatic rule respectively, already past the first step, which is the kind and
+which **Back** still reaches. **Nothing is saved until Create**: Cancel, Escape,
+the close button and the overlay all discard it.
 
 | | |
 |---|---|
-| **Manual cue** | fires only when something fires it — its Run button, a cue button on a console, Home Assistant or voice. It never fires by itself, so it starts **on**, with a cooldown of 2 seconds |
+| **Manual command** | fires only when something fires it — its Run button, a Button on a console, Home Assistant or voice. It never fires by itself, so it starts **on**, with a cooldown of 2 seconds |
 | **Automatic rule** | fires on its own when something happens. It starts **off**, with a cooldown of 30 seconds, and **Review** says to watch it with a log message before giving it a real action |
 
 The steps that follow depend on the kind. An automatic rule: **When**, **If**
 (optional — **Skip** leaves it empty), **Then**, **Name and safety** (name,
-cooldown, once per service), **Review**. A manual cue: **What it does**, **Name and
+cooldown, once per service), **Review**. A manual command: **What it does**, **Name and
 where it fires** (name, **Home Assistant**, **Allowed during a service**), **On a
 console** (optional), **Review**. The sidebar shows each finished step's choice and
 goes to any step whose earlier steps are finished; **Review** has a **Change** link
@@ -480,50 +533,51 @@ on each row. A step with a required field — a RossTalk target, a meter key —
 not move on until it is filled, by the same check the editor's
 [Needs setup](#needs-setup) uses.
 
-**Review** shows what will be made and the **On** (a manual cue) or **Enabled** (an automatic rule) switch, which you can flip before Create. Switching an automatic rule on says it will fire on its own from the moment it exists; Simulate mode still applies.
+**Review** shows what will be made and the **On** (a manual command) or **Enabled** (an automatic rule) switch, which you can flip before Create. Switching an automatic rule on says it will fire on its own from the moment it exists; Simulate mode still applies.
 
-A manual cue is made with **Home Assistant off** and **Allowed during a service
+A manual command is made with **Home Assistant off** and **Allowed during a service
 on**: it is voice-only and console-only until you switch Home Assistant on, and it
-carries no [service guard](#cues) unless you switch that off. The cue name is
+carries no [service guard](#commands) unless you switch that off. The command name is
 derived from the name you type, `lower_snake_case`, and shown read-only on
-Review. It is never one that another cue, a former name or a
-[built-in](#built-in-cues) holds — a clash gets `_2`, `_3` — and a name that would
+Review. It is never one that another command, a former name or a
+[built-in](#built-in-commands) holds — a clash gets `_2`, `_3` — and a name that would
 end in `_on` or `_off` gets `_cue` after it: "Projectors on" is `projectors_on_cue`.
 The manifest reads `projectors_on` with no `projectors_off` as half of an ON/OFF
-pair and leaves it out of Home Assistant and out of the cue buttons on consoles,
-so the cue would read **Unbound** on the console it was put on.
+pair and leaves it out of Home Assistant and out of the Buttons on consoles,
+so the command would read **Unbound** on the console it was put on.
 
 **On a console** lists the consoles that have a layout of their own — not a wall
-view, a calendar console or Home — and adds a **Cue button** bound to the new cue
-to each one ticked, after the cue is made. The button goes under the lowest object
+view, a calendar console or Home — and adds a **Button** bound to the new command
+to each one ticked, after the command is made. The button goes under the lowest object
 in the layout, in the column of the layout's last button and sized and styled like
 it; with no button to copy it is the widget's default size, centered, with its text
-sized to fit its name. The label is yours, or the cue's name when blank. A
+sized to fit its name. The label is yours, or the command's name when blank. A
 full-canvas background is not counted as content. When nothing fits below the other
 objects the button sits against the bottom edge and the confirmation says so. Drag it where you want it in the layout editor.
 
 The buttons are written through the views API with the layout's revision, so a
 console someone has open in the layout editor is refused rather than overwritten
-(one retry, from a fresh read). **A refusal does not undo the cue**: it stays made,
+(one retry, from a fresh read). **A refusal does not undo the command**: it stays made,
 the other consoles keep their buttons, and the dialog stays open on a panel naming
-which console did not get one and why, with the cue name to bind by hand. Each
+which console did not get one and why, with the command name to bind by hand. Each
 Create that touches consoles writes one line to `/log`:
 
 ```
 [automation] cue button for projectors_on_cue added to "Booth console"; failed on "FOH iPad": This view was changed by someone else …
 ```
 
-`/automation?new=manual` opens the dialog on a manual cue, already past the first
-step, for a link from another page to use. The parameter is dropped from the
-address once the dialog is open, so a reload does not open it again.
+`/automation?new=manual` opens the dialog on a manual command, already past the first
+step, for a link from another page to use; the address moves to
+`/automation/commands` and keeps the parameter, which is dropped once the dialog
+is open, so a reload does not open it again.
 
-### Editing a cue
+### Editing a command
 
-A rule's editor is one page. A **manual cue** — a cue that is not half of an
+A rule's editor is one page. A **manual command** — a command that is not half of an
 ON/OFF pair — has no **When** or **If** in it: a box says **Runs only when called**
 and holds **Make it automatic**, and the action, Home Assistant, Allowed during a
-service and cooldown follow, with the cue's own fields (cue name, spoken as, room,
-former names, once per service, ask twice) below. A cue that carries conditions
+service and cooldown follow, with the command's own fields (command name, spoken as, room,
+former names, once per service, ask twice) below. A command that carries conditions
 other than the service guard shows them under **Also only when**, so they can still
 be read and removed; the manual kind does not add one. An **automatic rule** has
 **Make it manual** beside **When**. A pair's halves have neither.
@@ -531,34 +585,62 @@ be read and removed; the manual kind does not add one. An **automatic rule** has
 Converting changes the draft, and nothing is written until **Save**. It keeps the
 action, name, enabled state and cooldown.
 
-- **Make it manual** gives the rule a cue name derived from its name, as above, with
+- **Make it manual** gives the rule a command name derived from its name, as above, with
   Home Assistant off.
 - **Make it automatic** leaves the trigger empty for you to choose; **Save** waits
-  for one. The cue name, spoken name and former names go with the trigger.
+  for one. The command name, spoken name and former names go with the trigger.
 
-**A cue that stops being one is asked about first.** Saving **Make it automatic**
-asks before it writes: the cue name goes, so `POST /api/cues/<name>` stops
-finding it and a cue button on a console bound to it reads **Unbound**, and when
+**A command that stops being one is asked about first.** Saving **Make it automatic**
+asks before it writes: the command name goes, so `POST /api/cues/<name>` stops
+finding it and a Button on a console bound to it reads **Unbound**, and when
 Home Assistant had an entity for it that goes too, with the automations there that
 refer to it. Saving a rule made manual whose Home Assistant switch you then turned
 on asks as well, because Home Assistant gets a new entity a pasted YAML fragment
 will not have.
 
-**A conversion never renames a cue.** Making a cue automatic and then manual again
+**A conversion never renames a command.** Making a command automatic and then manual again
 before saving puts back the trigger as it was when you left it — name, former
 names, spoken name and room, edits included.
 
-### Built-in cues
+**Renaming a command repoints its Buttons.** While the name field differs from
+the saved one, the dialog lists, above its footer, each screen and Button that
+names the command or any of its former names (the same places the **Used on**
+chips show). **Save** writes the rule, with the old name added to its former
+names so a URL, a Home Assistant call or a Companion button still using it keeps
+working. It then reads where the command is used **again**, because the list on
+screen is as old as the page, and points each Button found at the new name
+through the views API, with the layout's revision: a screen someone has open in
+the layout editor is refused rather than overwritten, after one retry from a
+fresh read. A Button inside a container is reached, and a Button that now names
+another command is left alone. A screen that refuses is named in the dialog with
+the reason, and the dialog stays open over it; **the command stays renamed** and
+the other screens still follow. If where it is used cannot be read, nothing is
+repointed, the dialog says so, and the old name keeps working as a former name. A
+name the server refuses repoints nothing. A save that touches screens leaves a
+short line on `/log` (the count and the screens, and how many refused), and one
+more line for each screen that refused, with its reason:
 
-Some cues need no rule behind them. Stage Utility ships them, and they appear
-wherever a cue appears — in the cue manifest, in Home Assistant, on a cue
+```
+[automation] renamed take_screens to take_the_screens; repointed 3 buttons on Booth, FOH; 1 refused
+[automation] could not point the buttons on Home at take_the_screens: This view was changed by someone else …
+```
+
+**Make it automatic** shows the same list as a warning (*reads Not set*) and
+repoints nothing: the command is gone, so a Button that named it has nothing to
+press until somebody picks another. A pair is not renamed from here: each half's
+command name is shown and cannot be edited.
+
+### Built-in commands
+
+Some commands need no rule behind them. Stage Utility ships them, and they appear
+wherever a command appears — in the command manifest, in Home Assistant, on a command
 button, at `POST /api/cues/<name>` — without anything being saved. They are not
 on the Automation page, they are not in a config export, and they cannot be
 edited or deleted.
 
 Switches, listed while the integration is switched on under Settings → Integrations:
 
-| Cue | What it does | State |
+| Command | What it does | State |
 |---|---|---|
 | `obs_record_on` / `obs_record_off` | OBS recording | `app:obs.recording` |
 | `obs_stream_on` / `obs_stream_off` | OBS stream | `app:obs.streaming` |
@@ -568,7 +650,7 @@ Switches, listed while the integration is switched on under Settings → Integra
 Two more per ProVideoPlayer layer, named from the layer — `Lower Thirds` becomes
 `lower_thirds`:
 
-| Cue | What it does | State |
+| Command | What it does | State |
 |---|---|---|
 | `pvp_<layer>_shown_on` / `_off` | shows and hides the layer | the layer is not hidden |
 | `pvp_<layer>_muted_on` / `_off` | mutes and unmutes the layer | the layer is muted |
@@ -578,7 +660,7 @@ screen.
 
 Buttons, which are momentary:
 
-| Cue | What it does | Listed while |
+| Command | What it does | Listed while |
 |---|---|---|
 | `pvp_<layer>_clear` | takes everything off that layer | ProVideoPlayer is on |
 | `pvp_clear_workspace` | blanks every PVP layer at once | ProVideoPlayer is on |
@@ -591,8 +673,8 @@ recording answers `already on` and sends nothing. None of them involve
 Companion, and none carry the **no service is live** condition: a panel button
 has to work during a service.
 
-**The names are reserved.** A rule that tries to take one, as its cue name or as
-a former name, is refused with *"obs_record_on" is a built-in cue*. The
+**The names are reserved.** A rule that tries to take one, as its command name or as
+a former name, is refused with *"obs_record_on" is a built-in command*. The
 per-layer ProVideoPlayer names are the exception: they are made from your own
 layer names, so reserving `pvp_lyrics_shown_on` would refuse a rule that was
 legal until somebody renamed a layer. A rule holding one of those simply
@@ -610,14 +692,14 @@ That pair can be deleted whenever you like — the built-in appears in its place
 under the same name, so nothing in Home Assistant has to be repasted.
 
 The set changes when an integration is switched on or off, when Planning Center
-connects, and when ProVideoPlayer reports different layer names. The cue
+connects, and when ProVideoPlayer reports different layer names. The command
 manifest's version moves with it, so an integration re-reads. A ProVideoPlayer
 that goes offline keeps its layers listed, reading unknown, rather than removing
 every entity until it comes back.
 
 ### State from Stage Utility
 
-A cue that does not press a Companion button has no Companion variable to read,
+A command that does not press a Companion button has no Companion variable to read,
 and does not need one — Stage Utility is already talking to the device. Those
 bindings are written `app:<source>` and are offered in the **State variable**
 select whenever the integration behind them is set up.
@@ -643,8 +725,8 @@ layers of one name read unknown too — PVP allows the duplicate, and a switch
 that silently picked one of them would report a layer nobody chose.
 
 `app:youtube.live` and `app:resi.live` are read-only: there is no action here that
-starts or stops a broadcast on either platform. Bind a pair to one when the cue
-that goes on air is something else — an operator's own Companion button, or a cue
+starts or stops a broadcast on either platform. Bind a pair to one when the command
+that goes on air is something else — an operator's own Companion button, or a command
 that starts the encoder feeding it — and the switch then reports what the
 platform says rather than what the button asked for.
 
@@ -673,7 +755,7 @@ and is idempotent — "start the recording" said twice while it is recording
 answers `already on` and sends nothing, which matters because REAPER's Record is
 a toggle and because OBS rejects a redundant start outright.
 
-None of them involve Companion: the cue drives the recorder directly and the
+None of them involve Companion: the command drives the recorder directly and the
 state comes off the same connection, so there is no button to build and no
 module variable to wait for.
 
@@ -750,7 +832,7 @@ is for stopping.
 
 ### Run by hand
 
-**Run**, on every rule row — a cue made with [New cue](#creating-a-cue) has one from the moment it exists — fires the rule's action once, now. It is explicit
+**Run**, on every rule row — a command made with [New command](#creating-a-command) has one from the moment it exists — fires the rule's action once, now. It is explicit
 operator intent, so it bypasses what decides *when* a rule fires: the trigger, the
 conditions, the cooldown, once per service, and the rule's own enable switch — a
 disabled rule can be run. It does not bypass what decides *whether* anything may
@@ -760,7 +842,7 @@ act:
   nothing. The row says so.
 - **Disarm all** — while disarmed the button is disabled, and the server refuses
   the request with `409` and the reason.
-- **Ask twice** — a cue with that switch on needs a second press
+- **Ask twice** — a command with that switch on needs a second press
   within five seconds: the first turns the button into **Run it?**, and it lapses
   back if nobody presses again. The server also refuses such a rule with `428`
   unless the request says `confirmed: true`, so a stray API call cannot skip the

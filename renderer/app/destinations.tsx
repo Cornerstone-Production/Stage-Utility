@@ -31,7 +31,6 @@ import { PatchView } from "../main/patch-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
-import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
@@ -50,6 +49,8 @@ import {
 import {
   AdvancedRoute,
   AdvancedTabRoute,
+  AutomationRoute,
+  AutomationTabRoute,
   BrandingRoute,
   MessagesRoute,
   PlanRoute,
@@ -123,7 +124,7 @@ export const DESTINATIONS: readonly Destination[] = [
     label: "Automation",
     description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
-    Component: AutomationSection,
+    Component: AutomationRoute,
   },
   {
     path: "/plan",
@@ -313,6 +314,8 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.
   { path: "/settings/advanced/$tab", Component: AdvancedTabRoute },
+  // One tab of Automation, nested and untitled for the same reason.
+  { path: "/automation/$tab", Component: AutomationTabRoute },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
   // A console, in the shell. Phase 3 gave a View a surface but gave a console

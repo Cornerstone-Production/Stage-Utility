@@ -275,7 +275,7 @@ the browser.
 
 ## From automation and Companion
 
-A rule, or a **Button** set to Run an action on any console, can send a message and clear the
+A rule, or a **Button** set to App action on any console, can send a message and clear the
 running alerts: the automation actions **Send a stage message** and **Clear stage
 message alerts**, sent from `Automation`. See
 [Automation](../automation.md#actions).

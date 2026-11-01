@@ -39,7 +39,6 @@ describe("capability registry", () => {
       .map(([t]) => t)
       .sort();
     assert.deepEqual(controls, [
-      "action-button",
       "cue-button",
       "live-controls",
       "message-composer",

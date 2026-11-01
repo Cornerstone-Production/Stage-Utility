@@ -644,11 +644,6 @@ export type LayoutObjectConfig =
   // per plan — so the reset happens because a new plan is a new set of keys,
   // not because a flag asked for it.
   | { type: "checklist"; title?: string }
-  // A button bound to an entry in the automation action registry. The general
-  // form of osc-button/rosstalk-button, which stay as they are so existing
-  // layouts keep working — this is for everything else the registry can already
-  // do, including advancing PCO Live.
-  | { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }
   // A cue from the cue manifest, with its live state on the button. `cue` is the
   // manifest id: a pair's base for a switch, the cue name for a lone button.
   // Empty is unbound and renders as such, never as a fake state.

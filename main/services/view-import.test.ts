@@ -706,7 +706,7 @@ describe("a Run an action Button in an imported view", () => {
     assert.deepEqual(rules[0]!.action, { id: "obs.record", params: { mode: "toggle" } });
     assert.deepEqual(
       lines.filter((l) => l.startsWith("[automation]")),
-      ["[automation] converted 1 Run an action button to its own cue on import (Booth 1)"],
+      ["[automation] converted 1 Run an action button to its own command on import (Booth 1)"],
     );
   });
 
@@ -726,7 +726,7 @@ describe("a Run an action Button in an imported view", () => {
       automationStore.saveRules = real;
     }
     assert.equal((await viewsStore.load())[0]!.layout!.objects[0]!.config.type, "action-button");
-    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported as they are")), JSON.stringify(report.skipped));
+    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported unconverted")), JSON.stringify(report.skipped));
     assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
   });
 

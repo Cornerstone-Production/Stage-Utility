@@ -42,8 +42,8 @@ import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
-import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
+import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -258,6 +258,13 @@ export interface LayoutRenderCtx {
    * anywhere else never receives one.
    */
   activeCardMenuId?: string | null;
+  /**
+   * Open the sheet that chooses what a Button presses, for the Button with this
+   * object id. Set by Home alone, which has no inspector: a Button with nothing
+   * chosen reads "Choose what it presses" there, and tapping it calls this.
+   * Absent everywhere else, where an unset Button reads Unbound and does nothing.
+   */
+  choosePress?: (objectId: string) => void;
 }
 
 /**
@@ -1525,10 +1532,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           ts={ts}
         />
       );
-    case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
+      return (
+        <CueButton
+          config={c}
+          cues={ctx.cues}
+          known={ctx.cuesKnown}
+          interactive={ctx.interactive}
+          onChoose={ctx.choosePress ? () => ctx.choosePress?.(o.id) : undefined}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton
@@ -1730,7 +1744,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // type this build has since dropped.)
       const _never: never = c;
       void _never;
-      return null;
+      // The one type this build has dropped on purpose: see unconverted-button.tsx.
+      return isUnconvertedButton(o.config) ? <UnconvertedButton ts={ts} /> : null;
     }
   }
 }

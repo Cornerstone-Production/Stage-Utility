@@ -190,6 +190,12 @@ a first press again. **Start** shows a spinner until the recorder itself reports
 that it is recording, and says so on the tile if it has not within ten seconds.
 A failed action names the problem on the tile for five seconds.
 
+Start and Stop press the built-in commands **REAPER recording** and **OBS
+recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
+ones a Button, a Companion key or Home Assistant presses. So the press is in the
+Automation page's activity, **Simulate** and **Disarm** apply (the tile says
+"Reaper: Simulated: nothing was sent", or why it was refused).
+
 The action is dropped from a tile too narrow to hold it beside its reading, such
 as a Small tile on a narrow tablet; make the tile Medium to get it back. On a
 touch screen every control on a tile is at least 44 px square.
@@ -426,8 +432,8 @@ control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
-has nothing to operate. A **Button** on one, set to Fire a cue, fires a cue and shows what its
-device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+has nothing to operate. A **Button** on one presses a Companion button, an app action or a command, and shows what
+its device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 

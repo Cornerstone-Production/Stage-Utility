@@ -49,7 +49,6 @@ import { serverClock } from "../../lib/server-clock";
 import {
   Button,
   Checkbox,
-  Collapsible,
   DialogContent,
   DialogRoot,
   Input,
@@ -59,11 +58,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
   Status,
   toast,
 } from "../../components/ui";
+import { SETTINGS_CARD } from "../../lib/card-classes";
 import { copyText } from "../../lib/clipboard";
+import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
 import { plural } from "@main/services/plural";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
@@ -88,10 +88,26 @@ export interface CompanionButton {
   stateSource?: InferredStateSource | null;
 }
 
-interface ButtonsReply {
-  ok: boolean;
-  reason?: string;
-  buttons: CompanionButton[];
+/**
+ * The press action's params for a picked button, with the identity the reconcile
+ * compares. The fingerprint is written HERE, not left for the next reconcile:
+ * re-picking is what an operator does about a `button missing` cue, and it has to
+ * clear that status in the same save. See companion-fingerprint.ts. Stamped with
+ * the SERVER's clock, as every other time on these pages is.
+ */
+export function fingerprintFor(b: CompanionButton): Record<string, string | number> {
+  return fingerprintParams(
+    {
+      page: b.page,
+      row: b.row,
+      col: b.col,
+      pageId: b.pageId,
+      label: b.label || `p${b.page} r${b.row} c${b.col}`,
+      actionIds: b.actionIds,
+    },
+    "in-place",
+    new Date(serverClock.now()).toISOString(),
+  );
 }
 
 /**
@@ -360,24 +376,7 @@ export function CompanionPressFields({
         open={open}
         onOpenChange={setOpen}
         onPick={(b) => {
-          // The fingerprint is written HERE, not left for the next reconcile:
-          // re-picking is what an operator does about a `button missing` cue,
-          // and it has to clear that status in the same save. See
-          // companion-fingerprint.ts.
-          onChange(
-            fingerprintParams(
-              {
-                page: b.page,
-                row: b.row,
-                col: b.col,
-                pageId: b.pageId,
-                label: b.label || `p${b.page} r${b.row} c${b.col}`,
-                actionIds: b.actionIds,
-              },
-              "in-place",
-              new Date().toISOString(),
-            ),
-          );
+          onChange(fingerprintFor(b));
           setOpen(false);
         }}
       />
@@ -396,11 +395,7 @@ function ButtonPickerDialog({
 }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const { data, isFetching } = useQuery({
-    queryKey: ["companion:buttons"],
-    queryFn: () => invoke<ButtonsReply>("companion:buttons"),
-    enabled: open,
-  });
+  const { data, isFetching } = useQuery({ ...companionButtonsQuery, enabled: open });
 
   const groups = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -424,7 +419,7 @@ function ButtonPickerDialog({
       const failed = r.reconcile?.failed ?? [];
       if (failed.length > 0) {
         toast.error(
-          `Read Companion, but could not save ${failed.length} cue status(es): ` +
+          `Read Companion, but could not save ${failed.length} command status(es): ` +
             `${failed.map((f) => f.label).join(", ")}`,
         );
       }
@@ -741,7 +736,7 @@ export function ImportPairsDialog({
         { pairs: send, buttons: sendButtons },
       );
       // Both halves reported. "12 created" alone hides the four that clashed.
-      if (r.created.length) toast.success(`Created ${plural(r.created.length, "cue")}`);
+      if (r.created.length) toast.success(`Created ${plural(r.created.length, "command")}`);
       if (r.skipped.length) toast.error(`Skipped ${r.skipped.length}: ${r.skipped.map((s) => s.name).join(", ")}`);
       if (!r.created.length && !r.skipped.length) toast.error("Nothing was selected");
       onImported();
@@ -774,7 +769,7 @@ export function ImportPairsDialog({
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Every cue is created with <span className="text-fg">no service is live</span> on it and a three
+          Every command is created with <span className="text-fg">no service is live</span> on it and a three
           second cooldown. Pairs that drive a projector, television, plug, lighting console or recorder
           are ticked for you; nothing else is.
         </p>
@@ -795,7 +790,7 @@ export function ImportPairsDialog({
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search buttons, pages and cue names…"
+                placeholder="Search buttons, pages and command names…"
                 className="h-7 flex-1 text-footnote"
                 aria-label="Search buttons"
               />
@@ -832,7 +827,7 @@ export function ImportPairsDialog({
             <p className="pb-1 text-caption2 text-fg-subtle">
               Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown, START/STOP or
               Open/Closed.
-              Each becomes two cues — <span className="text-fg">_on</span> and{" "}
+              Each becomes two commands — <span className="text-fg">_on</span> and{" "}
               <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
               Assistant switch. Select all and Clear act on the rows a search has left on screen.
               {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
@@ -936,7 +931,7 @@ export function ImportPairsDialog({
                 }}
               />
               <p className="pb-1 text-caption2 text-fg-subtle">
-                Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
+                Every other labelled button. Each becomes one command and one Home Assistant script — nothing
                 here is ticked for you. Select all and Clear act on the rows a search has left on screen.
                 {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
                   <>
@@ -1079,15 +1074,16 @@ export function CueAccessCard() {
   }
 
   return (
-    <Collapsible
-      label="Calling cues"
-      summary={plural(tokens.length, "token")}
-      className="su-card px-4 py-2.5"
-    >
-      <div className="flex flex-col gap-2 pt-2">
+    <div className="flex flex-col gap-4" data-automation-access="">
+      <section className={SETTINGS_CARD} data-access-card="tokens">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-footnote font-semibold text-fg">Calling commands</h2>
+          <span className="text-caption1 text-fg-muted">{plural(tokens.length, "token")}</span>
+        </div>
         <p className="text-caption1 text-fg-muted">
-          A cue is only reachable with a token. Mint one per caller — one for Home Assistant, one for a
-          script — so you can revoke it on its own.
+          Anything outside this app that calls a command is reachable only with a token. Mint one per caller — one for
+          Home Assistant, one for a script — so you can revoke it on its own. Consoles and Home tiles on this server
+          need none.
         </p>
 
         <div className="flex items-center gap-2">
@@ -1128,39 +1124,45 @@ export function CueAccessCard() {
           </div>
         )}
 
-        {tokens.map((t) => (
-          <div key={t.id} className="flex items-center gap-2 border-b border-line py-1 last:border-0">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-footnote text-fg">{t.label}</span>
-              <span className="block text-caption2 text-fg-subtle">
-                {t.lastUsedAt ? `last used ${new Date(t.lastUsedAt).toLocaleString()}` : "never used"}
-              </span>
-            </span>
-            <Button
-              variant="transparent"
-              size="small"
-              iconOnly
-              aria-label={`Revoke ${t.label}`}
-              onClick={async () => {
-                try {
-                  await invoke("cues:revokeToken", { id: t.id });
-                  refresh();
-                } catch (e) {
-                  toast.error(errorMessage(e));
-                }
-              }}
-            >
-              <Trash2Icon className="size-3.5 text-red-10" />
-            </Button>
+        {tokens.length > 0 && (
+          <div className="rounded-md border border-line">
+            {tokens.map((t) => (
+              <div key={t.id} className="flex items-center gap-2 border-b border-line px-2.5 py-1.5 last:border-0">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-footnote text-fg">{t.label}</span>
+                  <span className="block text-caption2 text-fg-subtle">
+                    {t.lastUsedAt ? `last used ${new Date(t.lastUsedAt).toLocaleString()}` : "never used"}
+                  </span>
+                </span>
+                <Button
+                  variant="transparent"
+                  size="small"
+                  iconOnly
+                  aria-label={`Revoke ${t.label}`}
+                  onClick={async () => {
+                    try {
+                      await invoke("cues:revokeToken", { id: t.id });
+                      refresh();
+                    } catch (e) {
+                      toast.error(errorMessage(e));
+                    }
+                  }}
+                >
+                  <Trash2Icon className="size-3.5 text-red-10" />
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+      </section>
 
-        <Separator />
-        <div className="flex items-center gap-2">
-          <p className="min-w-0 flex-1 text-caption1 text-fg-muted">
-            Home Assistant config for every cue on this server — one <code>rest_command</code> each, and a
-            switch per ON/OFF pair.
-          </p>
+      <section className={SETTINGS_CARD} data-access-card="home-assistant">
+        <h2 className="text-footnote font-semibold text-fg">Home Assistant</h2>
+        <p className="text-caption1 text-fg-muted">
+          The Stage Utility integration from HACS reads every command with its Home Assistant switch on. This config is
+          the fallback: one <code>rest_command</code> for every command on this server, and a switch per ON/OFF pair.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="transparent" size="small" onClick={() => void showYaml()}>
             <CopyIcon className="size-3.5" /> Copy YAML
           </Button>
@@ -1174,7 +1176,7 @@ export function CueAccessCard() {
             </a>
           </Button>
         </div>
-      </div>
-    </Collapsible>
+      </section>
+    </div>
   );
 }

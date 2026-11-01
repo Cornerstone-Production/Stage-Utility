@@ -323,7 +323,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   const actions = await runActionButtonMigration(named, { onImport: true });
   if (actions.failure) {
     console.error(scrub(actions.failure));
-    skipped.push("Run an action buttons were imported as they are: their cues could not be made (see the log)");
+    skipped.push("Run an action buttons were imported unconverted: their commands could not be made, so they show Needs converting and do nothing (see the log)");
   }
   try {
     await viewsStore.save([...existing, ...actions.views]);

@@ -198,6 +198,16 @@ function actionsOf(control: Record<string, unknown>): Record<string, unknown>[] 
   return out;
 }
 
+/**
+ * Is a pressable control worth offering: it says something, or it drives a connection.
+ * One predicate for the button list and for a page's keys, because a key the page draws
+ * as pickable is looked up in the list when it is picked, and a key that is not there
+ * cannot be pressed.
+ */
+function isListed(control: Record<string, unknown>, label: string): boolean {
+  return label !== "" || connectionsOf(control).length > 0;
+}
+
 /** Connection ids referenced by any action of a control. */
 function connectionsOf(control: Record<string, unknown>): string[] {
   return actionEntriesOf(control)
@@ -378,7 +388,7 @@ export function parseButtons(raw: unknown): CompanionButton[] {
 
       const label = labelOf(control);
       const driven = connectionsOf(control);
-      if (!label && driven.length === 0) continue;
+      if (!isListed(control, label)) continue;
 
       const drives = [...new Set(driven)]
         .map((id) => connections[id]?.moduleId ?? "")
@@ -481,7 +491,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
           col,
           kind: "reference",
           ...look,
-          pickable: !!resolved && (!!look.label || actionsOf(resolved).length > 0),
+          pickable: !!resolved && isListed(resolved, look.label),
           ...(target ? { target } : {}),
         });
       } else if (isPressable(control)) {
@@ -492,7 +502,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
           col,
           kind: "button",
           ...look,
-          pickable: !!look.label || actionsOf(control).length > 0,
+          pickable: isListed(control, look.label),
         });
       } else {
         keys.push({ row, col, kind: "page-control", label: "", bg: null, fg: null, icon: null, pickable: false });

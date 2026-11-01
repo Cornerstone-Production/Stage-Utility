@@ -1,7 +1,7 @@
 // A Home tile's own action: Start and Stop on a recorder, Prev and Next on the
 // live timer.
 //
-// There is no fake Reaper in this repository, so the action invoke is a stubbed
+// There is no fake Reaper in this repository, so the command press is a stubbed
 // fetch that records every request. What is asserted is the request the press
 // makes (or does not make) and what the tile then says; REAPER's own answer
 // arrives as the `chosen` prop, which is what `reaper:status` feeds in the app.
@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
-import { ok } from "../../test-fixtures/fetch-log.js";
+import { ok, reply } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -50,7 +50,10 @@ afterEach(() => {
 const reaper = (over: Partial<{ connected: boolean; recording: boolean }> = {}) => ({
   name: "REAPER", connected: true, recording: false, timecode: null, ...over,
 });
-const invokes = () => requests.filter((r) => r.url.endsWith("/api/action/invoke"));
+// The tile presses the built-in recorder commands, by name, through the same
+// route a Button, Companion or Home Assistant uses.
+const invokes = () => requests.filter((r) => r.url.includes("/api/cues/"));
+const pressed = () => invokes().map((r) => r.url.slice(r.url.lastIndexOf("/") + 1));
 
 function tile(chosen: ReturnType<typeof reaper>[]) {
   return React.createElement(RecordingAction, { chosen });
@@ -67,8 +70,7 @@ describe("Stop takes two presses", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     mock.timers.reset();
     await settle();
-    assert.equal(invokes().length, 1);
-    assert.deepEqual(invokes()[0]?.body, { actionId: "reaper.transport", params: { command: "stop" } });
+    assert.deepEqual(pressed(), ["reaper_record_off"]);
   });
 
   test("two presses 4 seconds apart do not stop", async () => {
@@ -98,12 +100,12 @@ describe("Stop takes two presses", () => {
     assert.equal(invokes().length, 0, "one press only asks again");
   });
 
-  test("OBS stops through its own action", async () => {
+  test("OBS stops through its own command", async () => {
     render(tile([{ name: "OBS", connected: true, recording: true, timecode: null }]));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop recording, press again to confirm" }));
     await settle();
-    assert.deepEqual(invokes()[0]?.body, { actionId: "obs.record", params: { command: "stop" } });
+    assert.deepEqual(pressed(), ["obs_record_off"]);
   });
 });
 
@@ -112,7 +114,7 @@ describe("Start", () => {
     const { rerender } = render(tile([reaper()]));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await settle();
-    assert.deepEqual(invokes()[0]?.body, { actionId: "reaper.transport", params: { command: "record" } });
+    assert.deepEqual(pressed(), ["reaper_record_on"]);
     // The request was accepted. That is not the recording.
     assert.ok(screen.getByRole("button", { name: "Starting" }), "must not read as done on an accepted request");
     assert.ok(screen.queryByRole("button", { name: "Stop" }) === null);
@@ -148,7 +150,7 @@ describe("Start", () => {
     const { rerender } = render(tile([reaper(), obs(false)]));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await settle();
-    assert.equal(invokes().length, 2, "each recorder is told");
+    assert.deepEqual(pressed().sort(), ["obs_record_on", "reaper_record_on"], "each recorder is told");
     rerender(tile([reaper({ recording: true }), obs(false)]));
     await settle();
     assert.ok(screen.getByRole("button", { name: "Starting" }), "one of two is not done");
@@ -171,6 +173,25 @@ describe("Start", () => {
     assert.ok(screen.queryByRole("button", { name: "Starting" }) === null, "no spinner under the note");
     assert.ok(screen.getByRole("button", { name: "Start" }));
   });
+
+  // What the command route answers when nothing reaches the recorder. Each one
+  // must clear the spinner and say so: a press that moved nothing must not sit
+  // on "Starting" for the give-up window and then blame the recorder.
+  for (const [what, res, said] of [
+    ["Simulate is on", ok({ ok: true, detail: "dispatched (simulated)", simulated: true }), /Reaper: Simulated: nothing was sent/],
+    ["automation is disarmed", reply(409, { error: "Automation is disarmed, so nothing will run", reason: "disarmed" }), /Reaper: Automation is disarmed/],
+    ["the command is switched off", reply(409, { error: "The command reaper_record_on is switched off", reason: "disabled" }), /switched off/],
+    ["the command does not exist", reply(404, { error: "There is no command called reaper_record_on", reason: "unknown" }), /no command called reaper_record_on/],
+  ] as const) {
+    test(`when ${what}, the spinner clears and the tile says so`, async () => {
+      answer = () => res;
+      render(tile([reaper()]));
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      await settle();
+      assert.match(screen.getByRole("alert").textContent ?? "", said);
+      assert.ok(screen.queryByRole("button", { name: "Starting" }) === null, "the spinner must clear");
+    });
+  }
 
   test("a refusal that lands after the recorder is already recording shows no failure", async () => {
     let release: (v: unknown) => void = () => {};

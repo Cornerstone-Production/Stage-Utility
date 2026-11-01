@@ -12,19 +12,9 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
+import { callAnswerNote, type CallAnswer } from "../lib/command-answer";
 import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
-
-export interface CallAnswer {
-  status: number;
-  ok?: boolean;
-  detail?: string;
-  error?: string;
-  reason?: string;
-  skipped?: boolean;
-  /** Automation is in Simulate mode: the cue was accepted and nothing reached a device. */
-  simulated?: boolean;
-}
 
 /** The seam a test replaces; production posts the cue. */
 export const cueButtonDeps = {
@@ -83,6 +73,7 @@ export function CueButton({
   cues,
   known,
   interactive,
+  onChoose,
   ts,
 }: {
   config: { type: "cue-button"; cue: string; label?: string; showDevice?: boolean };
@@ -91,6 +82,9 @@ export function CueButton({
    *  names nothing rather than calling itself "Unbound". */
   known: boolean;
   interactive: boolean;
+  /** Given by Home alone: a Button with no command chosen reads "Choose what it presses"
+   *  and tapping it calls this. Without it an unset Button reads Unbound and is inert. */
+  onChoose?: () => void;
   ts: CSSProperties;
 }) {
   const [busy, setBusy] = useState(false);
@@ -105,6 +99,8 @@ export function CueButton({
   const liveStandby = tone === "live" && state === "idle";
   const entry = cueEntry(cues, config.cue);
   const canFire = interactive && !busy && entry !== null && state !== "unavailable";
+  // Nothing chosen yet, on a surface that can choose: the tile is the way in.
+  const unset = onChoose !== undefined && !config.cue.trim();
 
   async function fire() {
     if (!canFire || !entry) return;
@@ -117,14 +113,7 @@ export function CueButton({
     setBusy(true);
     setSaid(null);
     try {
-      const r = await cueButtonDeps.call(target);
-      if (r.status === 200) {
-        if (r.skipped) setSaid(r.detail ?? "Already there");
-        // Said, not silent: a press that reached no device must not look like one
-        // that did.
-        else if (r.simulated) setSaid("Simulated: nothing was sent");
-      } else if (r.status === 202) setSaid("Needs confirmation; use the rules page");
-      else setSaid(r.error ?? r.detail ?? "Refused");
+      setSaid(callAnswerNote(await cueButtonDeps.call(target)));
     } catch {
       // The only case with no body to read a reason out of. Said on the button
       // rather than logged away: this is the answer to the operator's press.
@@ -134,23 +123,23 @@ export function CueButton({
     }
   }
 
-  const label = config.label || name || (known ? "Unbound" : "—");
-  const line2 = said ?? (config.showDevice === false ? "" : sub);
+  const label = unset ? "Choose what it presses" : config.label || name || (known ? "Unbound" : "—");
+  const line2 = unset ? "" : (said ?? (config.showDevice === false ? "" : sub));
 
   return (
     <button
       type="button"
-      data-state={state}
+      data-state={unset ? "unset" : state}
       data-tone={tone}
-      onClick={fire}
-      disabled={!canFire}
+      onClick={unset ? () => interactive && onChoose?.() : fire}
+      disabled={unset ? !interactive : !canFire}
       aria-label={label}
       style={{
         ...ts,
         ...BUTTON_BASE_STYLE,
         flexDirection: "column",
         gap: "0.15em",
-        cursor: canFire ? "pointer" : "default",
+        cursor: canFire || unset ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
         opacity: state === "unavailable" ? 0.4 : 1,
         boxShadow: liveOn
@@ -162,35 +151,40 @@ export function CueButton({
               : state === "stale"
                 ? "inset 0 0 0 0.08em var(--amber-9)"
                 : undefined,
-        outline: state === "stale" ? "0.08em dashed var(--amber-9)" : undefined,
-        outlineOffset: state === "stale" ? "-0.16em" : undefined,
+        outline: state === "stale" ? "0.08em dashed var(--amber-9)" : unset ? "0.06em dashed var(--su-fg-faint)" : undefined,
+        outlineOffset: state === "stale" || unset ? "-0.16em" : undefined,
         background:
           state === "settling"
             ? "color-mix(in srgb, var(--brand-accent) 30%, transparent)"
             : ts.background,
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          flexShrink: 0,
-          width: "0.55em",
-          height: "0.55em",
-          borderRadius: "50%",
-          background: liveOn
-            ? "var(--red-9)"
-            : state === "on"
-              ? "var(--green-9)"
-              : state === "settling"
-                ? "var(--amber-9)"
-                : "var(--su-fg-faint)",
-        }}
-      />
+      {!unset && (
+        <span
+          aria-hidden
+          style={{
+            flexShrink: 0,
+            width: "0.55em",
+            height: "0.55em",
+            borderRadius: "50%",
+            background: liveOn
+              ? "var(--red-9)"
+              : state === "on"
+                ? "var(--green-9)"
+                : state === "settling"
+                  ? "var(--amber-9)"
+                  : "var(--su-fg-faint)",
+          }}
+        />
+      )}
       <ButtonLabel
         style={{
-          fontWeight: 600,
+          fontWeight: unset ? 500 : 600,
           letterSpacing: "0.02em",
-          textTransform: "uppercase",
+          // A sentence, not a name: an unset tile is an instruction, and in capitals at a
+          // tile's size it shouted.
+          textTransform: unset ? "none" : "uppercase",
+          opacity: unset ? 0.7 : undefined,
           lineHeight: 1.05,
         }}
       >

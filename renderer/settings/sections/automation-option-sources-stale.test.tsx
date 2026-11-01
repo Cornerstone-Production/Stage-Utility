@@ -1,9 +1,9 @@
-// useOptionSources(), remounted the way the layout editor's action-button
-// Inspector remounts it: once per selection.
+// useOptionSources(), remounted the way the layout editor's Button
+// inspector remounts it: once per selection.
 //
 // react-query's default staleTime is 0, so a bare useQuery re-fetches on every
 // remount even when nothing behind it could plausibly have changed a moment
-// later. Selecting between four action buttons issued ~28 GETs for lists none
+// later. Selecting between four buttons issued ~28 GETs for lists none
 // of them used — six sources, refetched on each of four selections (plus the
 // first mount), all for a param picker nobody opened. Reverting
 // OPTION_SOURCE_STALE_MS's use in useOptionSources() (or dropping it back to
@@ -60,7 +60,7 @@ test("remounting the hook four times (like switching between four buttons) fetch
     const el = () =>
       React.createElement(QueryClientProvider, { client }, React.createElement(Harness));
 
-    // Four remounts, exactly the shape ActionButtonInspector produces when the
+    // Four remounts, exactly the shape the Button inspector's App action pane produces when the
     // operator selects a different button on the canvas: the whole component
     // (and every hook in it, including this one) unmounts and remounts.
     for (let i = 0; i < 4; i++) {
