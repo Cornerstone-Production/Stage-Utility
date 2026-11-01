@@ -54,6 +54,35 @@ broken path through them. Kill a test server by **port**, never `pkill -f` on an
 env-var prefix — the prefix is not in the process command line, so the old server
 survives and the next run tests stale code.
 
+Start a test server on an **empty** data dir, never a copy of a real one (see
+[Running it locally](docs/contributing.md#running-it-locally)): a copied config
+dials the real devices and can log a production install out of a service it
+shares a session with. Before any `POST`, `PATCH` or `DELETE`, `GET
+/api/version` on the port you are about to write to and check it is the build you
+started. 8788 is the default port, so a forgotten port flag lands on whatever
+instance already runs there; an agent once created views in a live install that
+way.
+
+Open the page at the machine's LAN address, not `localhost`. Production is plain
+HTTP, and `localhost` is a secure context that hides the difference (see
+[Plain HTTP in production](docs/contributing.md#plain-http-in-production)).
+
+## UI work starts from an approved mockup
+
+A change to what an operator sees gets an interactive mockup in the app's real
+tokens and type ([STYLE_GUIDE.md](STYLE_GUIDE.md)) before it gets code, and the
+approved mockup is the spec: match its layout, hierarchy, copy and spacing. Where
+the mockup and the written spec disagree, the mockup wins and the spec is updated.
+A page that keeps old sections the mockup removed, or trims what it added, is not
+done.
+
+A rewrite of an existing surface ships a feature parity table before any tasks:
+every behaviour the old surface has, built by reading its code (hooks, keyboard
+handlers, persisted keys, responsive branches), each marked carried, replaced
+(naming the replacement) or dropped (with the reason). A settings-shell rewrite
+once lost nine controls nobody listed because they were shell behaviour, not
+settings.
+
 ## Fixing a repeated pattern
 
 Before committing a fix to something that appears more than once, grep for every
@@ -152,6 +181,32 @@ how a failed save read as saved until the next restart lost the work.
 
 A function that can partially fail returns what failed; the caller decides what to
 tell the operator.
+
+## Working beside other agents
+
+Several agents often work this repo at once, each in its own worktree. Worktrees
+share more than they look like they do:
+
+- **No `git stash`.** The stash stack is repository-wide, so a `pop` in one
+  worktree takes another agent's work. For a red/green proof, copy the file aside
+  and copy it back, or reverse-apply a commit's diff (`git show <sha> -- <path> |
+  git apply -R`).
+- **No plain `git config` in a worktree.** A worktree has no config of its own;
+  the write lands in the shared `.git/config` and re-authors every agent's
+  commits. A trial merge needs no identity (`git merge --no-commit`), or pass
+  `-c user.email=…` on the one command.
+- **A reviewer is read-only or isolated.** An agent with no edit tool still has a
+  shell, and proving a guard red is exactly the job that makes it `sed` or `cp`
+  over a file. Commit or copy your own edits first, and give a reviewer that
+  mutates code its own worktree.
+- **Remove only the worktrees you made**, as soon as their work is done, after
+  checking `git status`. A leftover worktree holds its branch, and removing one an
+  agent is still in drops that agent into the shared checkout.
+
+Before pushing more commits to a branch, check its PR is not already merged; new
+work after a merge gets a fresh branch off `beta`. Work that depends on an
+unmerged PR opens with `--base <that-branch>`, never by merging sibling branches
+into a new one, which reads as a conflict once the siblings land.
 
 ## When something breaks in production
 

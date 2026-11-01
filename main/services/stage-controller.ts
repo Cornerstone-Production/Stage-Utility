@@ -21,6 +21,7 @@ import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
+import { runActionButtonMigration } from "./action-button-migration.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -955,7 +956,12 @@ export class StageController {
     // older build stored on each screen leaves the data here, on every path that
     // loads it (a restored backup is loaded like any other).
     const roles = await this.applyScreenRoles(surfaced.views, surfaced.outputs, !rolesAlreadyFromView, surfaced.liveScreenIds);
-    const result = { ...surfaced, views: roles.views, outputs: roles.outputs };
+    // Every Run an action Button becomes a cue Button with a rule of its own.
+    // After the screens, so it sees the final views (a copy a role made carries
+    // its Buttons too), and in this same pass for the reason Home is seeded here.
+    const actions = await runActionButtonMigration(roles.views);
+    if (actions.failure) console.error(scrub(actions.failure));
+    const result = { ...surfaced, views: actions.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
     // on both load paths, for the same reason the surface migration is.
@@ -963,7 +969,24 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
-    if (viewsChanged) await viewsStore.save(result.views);
+    if (viewsChanged) {
+      try {
+        await viewsStore.save(result.views);
+      } catch (err) {
+        // The rules were written first. Said, because "the buttons did not
+        // convert" is half of what happened and the operator has to be told the
+        // other half: the next start converts them WITHOUT a second rule each.
+        if (actions.rulesWritten > 0) {
+          throw new Error(
+            `${plural(actions.rulesWritten, "cue")} for Run an action buttons were saved, but views.json was not: ` +
+              `${errorMessage(err)}. The buttons convert at the next start, which reuses those cues.`,
+            { cause: err },
+          );
+        }
+        throw err;
+      }
+    }
+    if (actions.line) console.log(scrub(actions.line));
     // The screens and the flags in ONE patch, never two. The first pass reads a
     // screen with no stored role as a read-only display, so the screens (their
     // stored role now removed) landing without the flag is a state a crash could

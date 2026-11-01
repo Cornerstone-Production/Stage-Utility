@@ -103,6 +103,8 @@ item** on (how a new Timer starts), which is a stat card like the cards beside i
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
+**Recent services**, **Screens**, the service **Timer** and **Current item** also expand on Home; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
+
 **Recent services** shows the active service type's average attendance, peak,
 length and start time, and — when its tile is tall enough — an attendance trend
 like the Trends card on **History**. Right-click it — or tap and hold it — for **SPL trend line** — the service level
@@ -238,6 +240,8 @@ Per widget you can turn that off (**Fill green when live** / **Fill when
 recording**, which colors just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
+
+On Home, the **Recording** tile carries **Start** and **Stop**, and a live service **Timer** carries **Prev** and **Next**; see [Actions on a tile](../features/operator-app.md#actions-on-a-tile). A wall draws neither.
 
 The Home **Streaming** tile is one object in two presentations. On Home it is a
 card in a row of cards; put one on a screen and it wears the composition above,
@@ -500,6 +504,8 @@ widgets and the Timer pick which instance they follow. See
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
 | **Charger battery** | Battery levels in the charger bays | Shure SBC chargers |
 
+**Wireless summary** can be expanded on Home to list every channel with its battery, time left, RF bars and whether it is muted or offline; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
+
 **Wireless summary** leads with the online count and qualifies it underneath with
 the lowest battery in the fleet, and — if you turn it on — the **shortest runtime
 remaining**. Both are minimums: the pack that runs out first is the one that
@@ -647,6 +653,16 @@ console never shows it, and pressing the button there keeps refusing exactly as
 it always has. The layout still saves — a button is part of a screen, so a field
 it is missing marks the button, not the whole layout.
 
+A Button saved as Run an action is converted when the server starts, and when a
+view carrying one is imported: it becomes a Fire a cue Button with the same label,
+look and position, bound to a cue of its own that runs the same action with the
+same parameters. That cue is a **Called by name** rule named `btn_<label>`, hidden
+from Home Assistant, allowed during a service, with no cooldown, and it belongs to
+that Button. From then on the Button obeys Simulate mode and Disarm, as every cue
+does. The conversion runs at every start and on import, and logs one `[automation]` line,
+only when it converted something, saying how many Buttons it converted and on which
+views.
+
 **Make it a cue**, under an action's fields, turns the action into a manual cue
 and points the button at it, so the Automation page's Run button, Home
 Assistant, voice and other consoles can fire it too. It is off until an action is
@@ -673,9 +689,9 @@ action's own name).
 Switching **Does** rewrites the widget in place. The label, the look and the
 position stay. Going to **Run an action** drops the cue and **Show device**;
 going to **Fire a cue** drops the action and its parameters. **Undo** brings them
-back. What **Does** shows is simply the widget's stored type, so nothing is
-migrated: a stored cue button opens on **Fire a cue**, a stored action button on
-**Run an action**.
+back. What **Does** shows is the widget's stored type: a stored cue button opens
+on **Fire a cue**, and a Button switched to **Run an action** and saved is
+converted to a cue of its own at the next start, as above.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and

@@ -34,6 +34,8 @@ import {
 } from "./companion-connections.js";
 import {
   type CompanionButton,
+  type CompanionPageSummary,
+  type CompanionPageView,
   type CompanionPair,
   customVariableNames,
   exportBuild,
@@ -41,6 +43,7 @@ import {
   isCompanionVariableName,
   isCompanionVariableRef,
   parseButtons,
+  parsePages,
   parseVariableRef,
 } from "./companion-export.js";
 
@@ -146,6 +149,9 @@ interface ExportCache {
   build: string | null;
   /** The names of Companion's custom variables — what a pair's state can bind to. */
   customVariables: string[];
+  /** The page list, and every page as the picker draws it (icons included). */
+  pages: CompanionPageSummary[];
+  pageViews: CompanionPageView[];
 }
 
 export type ExportResult =
@@ -155,6 +161,8 @@ export type ExportResult =
       pairs: CompanionPair[];
       build: string | null;
       customVariables: string[];
+      pages: CompanionPageSummary[];
+      pageViews: CompanionPageView[];
       cachedAt: number;
     }
   | { ok: false; reason: string };
@@ -251,6 +259,8 @@ class CompanionApi {
         pairs: c.pairs,
         build: c.build,
         customVariables: c.customVariables,
+        pages: c.pages,
+        pageViews: c.pageViews,
         cachedAt: c.at,
       };
     }
@@ -292,13 +302,13 @@ class CompanionApi {
       const pairs = findPairs(buttons);
       const build = exportBuild(raw);
       const customVariables = customVariableNames(raw);
-      const pages = new Set(buttons.map((b) => b.page)).size;
+      const { summaries: pages, views: pageViews } = parsePages(raw);
       console.log(
-        `[companion] export fetched: ${pages} pages, ${buttons.length} buttons, ` +
-          `${customVariables.length} custom variables`,
+        `[companion] export fetched: ${pages.length} pages (${pages.filter((p) => p.labelled > 0).length} with buttons), ` +
+          `${buttons.length} buttons, ${customVariables.length} custom variables`,
       );
-      this.cache = { at: Date.now(), buttons, pairs, build, customVariables };
-      return { ok: true, buttons, pairs, build, customVariables, cachedAt: this.cache.at };
+      this.cache = { at: Date.now(), buttons, pairs, build, customVariables, pages, pageViews };
+      return { ok: true, buttons, pairs, build, customVariables, pages, pageViews, cachedAt: this.cache.at };
     } catch (e) {
       const reason = fetchFailureMessage(e, base);
       console.warn(`[companion] export unavailable: ${scrub(reason)}`);

@@ -22,6 +22,7 @@ import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger"
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { displayType } from "../../main/timer-config";
+import { ExpandableTile } from "./expanded/expandable-tile";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -388,7 +389,9 @@ export function HomeGrid({
               chrome={chrome}
             >
               <CardFrame o={o}>
-                <ObjectContent o={o} ctx={ctx} />
+                <ExpandableTile o={o} ctx={ctx} editing={!!chrome}>
+                  <ObjectContent o={o} ctx={ctx} />
+                </ExpandableTile>
               </CardFrame>
             </HomeCardCell>
           );

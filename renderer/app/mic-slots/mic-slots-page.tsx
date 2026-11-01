@@ -23,10 +23,12 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useBlocker } from "@tanstack/react-router";
-import { Loader2Icon, PlusIcon } from "lucide-react";
+import { Loader2Icon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, EmptyState, ErrorNote, confirm } from "../../components/ui";
+import { cn } from "../../lib/cn";
+import { usePageActions } from "../page-actions";
 import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
@@ -146,6 +148,36 @@ export function MicSlotsPage() {
 
   // ── the inspector's slot ────────────────────────────────────────────────
   const sel = mic.selection;
+  // The inspector folds away when nothing is selected, so the boards get the
+  // width. Selecting a slot opens it; the button opens it on its own to read the
+  // drag help, and selecting anything ends that.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const selId = sel?.slotId ?? null;
+  const [seenSel, setSeenSel] = useState(selId);
+  if (selId !== seenSel) {
+    setSeenSel(selId);
+    if (selId) setHelpOpen(false);
+  }
+  const inspectorOpen = !!sel || helpOpen;
+  usePageActions(
+    <Button
+      variant="filled"
+      size="medium"
+      aria-pressed={inspectorOpen}
+      onClick={() => {
+        if (inspectorOpen) {
+          mic.select(null);
+          setHelpOpen(false);
+        } else setHelpOpen(true);
+      }}
+      tooltip="Show or hide the inspector"
+      className={inspectorOpen ? "border border-accent/55 bg-accent/12" : "border border-line-strong"}
+    >
+      <PanelRightIcon className="size-4" />
+      Inspector
+    </Button>,
+    [inspectorOpen],
+  );
   const selBoard = sel ? mic.boards.find((b) => b.id === sel.boardId) : undefined;
 
   async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) {
@@ -182,7 +214,7 @@ export function MicSlotsPage() {
       {mic.targetsFailed != null && (
         <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. Boards that failed show as empty; do not save over them.</ErrorNote>
       )}
-      <div className="lg:flex lg:items-start lg:gap-4">
+      <div className="lg:flex lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
           {mic.boards.length === 0 ? (
             <EmptyState
@@ -235,41 +267,55 @@ export function MicSlotsPage() {
           )}
           <PlanCheck mic={mic} />
         </div>
-        <aside aria-label="Inspector" className="mt-4 flex w-full flex-col gap-3.5 lg:sticky lg:top-14 lg:mt-0 lg:w-[340px] lg:shrink-0">
-          {sel && mic.selectedSlot && selBoard ? (
-            isSpacer(mic.selectedSlot) ? (
-              <SpacerInspector
-                slot={mic.selectedSlot}
-                boardName={selBoard.name}
-                aligned={selBoard.columnWidthIn != null}
-                onChange={(fn) => mic.updateSlot(sel.slotId, fn)}
-                onRemove={() => mic.removeSelected(sel.slotId)}
-              />
-            ) : (
-              <SlotInspector
-                slot={mic.selectedSlot}
-                resolved={resolvedByBoard[sel.boardId]?.get(sel.slotId)}
-                boardName={selBoard.name}
-                where={where}
-                columnWidthIn={selBoard.columnWidthIn}
-                stack={stackState(mic.boardsMap, sel.slotId)}
-                sharesWith={makeSharesWith(mic.boardsMap[sel.boardId] ?? [])(mic.selectedSlot)}
-                planLabel={mic.side === "plan" ? mic.label : null}
-                wirelessChannels={wirelessChannels}
-                onChange={(fn) => mic.updateSlot(sel.slotId, fn)}
-                onToggleStack={() => mic.toggleStack(sel.slotId)}
-                onDuplicate={() => mic.duplicateSlot(sel.slotId)}
-                onRemove={() => mic.removeSelected(sel.slotId)}
-              />
-            )
-          ) : (
-            <p className="text-footnote text-fg-muted">Select a slot to edit who fills it, its hardware and where it sits.</p>
+        {/* The outer box animates its width; the inner one keeps the inspector's
+            own, so nothing reflows while it slides. Closed, it is inert: nothing
+            in it can take focus while it cannot be seen. */}
+        <aside
+          aria-label="Inspector"
+          data-mic-inspector={inspectorOpen ? "open" : "closed"}
+          inert={!inspectorOpen}
+          className={cn(
+            "lg:sticky lg:top-14 lg:shrink-0 lg:overflow-hidden lg:transition-[width,margin-left] lg:duration-(--motion-settled) lg:ease-(--motion-ease) motion-reduce:transition-none",
+            inspectorOpen ? "mt-4 lg:mt-0 lg:ml-4 lg:w-[340px]" : "max-lg:hidden lg:ml-0 lg:w-0",
           )}
-          <p className="rounded-[10px] bg-fill px-3.5 py-3 text-caption1 leading-normal text-fg-muted">
-            Drag a card into a gap to make it its own column, or onto the lower half of another card to stack it. The bar on top of a
-            column drags the whole stack. Cards also move between boards. With a card focused, the arrow keys move it, Shift+Down stacks
-            it onto the column to its left, Shift+Up takes it out of a stack, and Delete removes it.
-          </p>
+        >
+          <div className="flex w-full flex-col gap-3.5 lg:w-[340px]">
+            {sel && mic.selectedSlot && selBoard ? (
+              isSpacer(mic.selectedSlot) ? (
+                <SpacerInspector
+                  slot={mic.selectedSlot}
+                  boardName={selBoard.name}
+                  aligned={selBoard.columnWidthIn != null}
+                  onChange={(fn) => mic.updateSlot(sel.slotId, fn)}
+                  onRemove={() => mic.removeSelected(sel.slotId)}
+                />
+              ) : (
+                <SlotInspector
+                  slot={mic.selectedSlot}
+                  resolved={resolvedByBoard[sel.boardId]?.get(sel.slotId)}
+                  boardName={selBoard.name}
+                  where={where}
+                  columnWidthIn={selBoard.columnWidthIn}
+                  stack={stackState(mic.boardsMap, sel.slotId)}
+                  sharesWith={makeSharesWith(mic.boardsMap[sel.boardId] ?? [])(mic.selectedSlot)}
+                  planLabel={mic.side === "plan" ? mic.label : null}
+                  wirelessChannels={wirelessChannels}
+                  onChange={(fn) => mic.updateSlot(sel.slotId, fn)}
+                  onToggleStack={() => mic.toggleStack(sel.slotId)}
+                  onDuplicate={() => mic.duplicateSlot(sel.slotId)}
+                  onRemove={() => mic.removeSelected(sel.slotId)}
+                />
+              )
+            ) : (
+              <p className="text-footnote text-fg-muted">Select a slot to edit who fills it, its hardware and where it sits.</p>
+            )}
+            <p className="rounded-[10px] bg-fill px-3.5 py-3 text-caption1 leading-normal text-fg-muted">
+              Drag a card into a gap to make it its own column, or onto the lower half of another card to stack it. The bar on top of a
+              column drags the whole stack. Cards also move between boards. With a card focused, the arrow keys move it, Shift+Down stacks
+              it onto the column to its left, Shift+Up takes it out of a stack, and Delete removes it. Click the selected card again to
+              put the inspector away.
+            </p>
+          </div>
         </aside>
       </div>
 

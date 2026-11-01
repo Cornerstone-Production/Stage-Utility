@@ -18,6 +18,8 @@ import {
   type StepSpecLookup,
 } from "../automation-param-validation.js";
 import { reservedCueNames } from "../builtin-cues.js";
+import { ownerHolds } from "../button-ownership.js";
+import { viewsStore } from "../views-store.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { propresenterManager } from "../propresenter-service.js";
 import { scrub } from "../scrub.js";
@@ -180,7 +182,17 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
   // the list still shows "Needs setup": the badge comes from here, not from a
   // flag the write path set.
   if (method === "GET" && pathname === "/api/automation/rules") {
-    const rules = automationEngine.listRules().map((rule) => ({ ...rule, issues: issuesFor(rule) }));
+    // `ownerMissing` is computed here, never stored: whether a rule's Button is
+    // still on its view is a fact about the views, which change without the rules
+    // file hearing of it. Left off (not false) when the views could not be read,
+    // because "its Button is gone" cannot be said of a list that was not read.
+    const owned = automationEngine.listRules().some((r) => r.ownedBy);
+    const views = owned && !viewsStore.unreadable() ? await viewsStore.load() : null;
+    const rules = automationEngine.listRules().map((rule) => ({
+      ...rule,
+      issues: issuesFor(rule),
+      ...(views && !ownerHolds(rule, views) ? { ownerMissing: true as const } : {}),
+    }));
     json(res, { rules, settings: automationEngine.getSettings() });
     return;
   }

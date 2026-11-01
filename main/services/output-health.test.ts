@@ -164,3 +164,55 @@ describe("what a person reads of a report", () => {
     }
   });
 });
+
+describe("the switch in a health report", () => {
+  const off = { enabled: false };
+
+  it("an output that is off sends no figures and is taken as sent", () => {
+    assert.deepEqual(parseHealthReport(off), { report: { fps: 0, repeated: 0, dropped: 0, at: 0, enabled: false } });
+  });
+
+  it("an output that is on sends its figures as before, and says so", () => {
+    assert.deepEqual(parseHealthReport({ ...ok(), enabled: true }), { report: ok({ enabled: true }) });
+    // A helper older than the switch says nothing, and no key appears.
+    const r = parseHealthReport(ok());
+    assert.ok("report" in r);
+    assert.equal("enabled" in r.report, false);
+  });
+
+  it("enabled is a boolean and nothing else", () => {
+    for (const enabled of [0, 1, "false", null]) {
+      const r = parseHealthReport({ ...ok(), enabled });
+      assert.ok("error" in r && /enabled/.test(r.error), String(enabled));
+    }
+  });
+
+  it("an output that is off and sends figures is refused, naming the field", () => {
+    for (const k of ["fps", "repeated", "dropped", "at", "latencyMs"]) {
+      const r = parseHealthReport({ ...off, [k]: 1 });
+      assert.ok("error" in r && r.error.startsWith(k), k);
+    }
+  });
+
+  it("changed is an id of 1 to 64 characters, and needs enabled", () => {
+    assert.deepEqual(parseHealthReport({ ...off, changed: "c1" }), {
+      report: { fps: 0, repeated: 0, dropped: 0, at: 0, enabled: false }, changed: "c1",
+    });
+    for (const changed of [true, false, 1, "", "x".repeat(65)]) {
+      assert.ok("error" in parseHealthReport({ ...off, changed }), String(changed));
+    }
+    assert.ok("error" in parseHealthReport({ ...ok(), changed: "c1" }), "changed with no enabled was taken");
+  });
+
+  it("an output that is off is never struggling, and starts again from a fresh baseline", () => {
+    const struggling: HealthTrend = { dropped: 40, run: 0, struggling: true };
+    assert.deepEqual(judge(struggling, { fps: 0, repeated: 0, dropped: 0, at: 0, enabled: false }, "decklink"), FRESH_TREND);
+  });
+
+  it("a change of the switch is news to Screens, a steady one is not", () => {
+    const base = { fps: 0, repeated: 0, dropped: 0, struggling: false };
+    assert.notEqual(displaySignature({ ...base, enabled: false }), displaySignature({ ...base, enabled: true }));
+    assert.notEqual(displaySignature({ ...base, enabled: true }), displaySignature(base));
+    assert.equal(displaySignature({ ...base, enabled: false }), displaySignature({ ...base, enabled: false }));
+  });
+});

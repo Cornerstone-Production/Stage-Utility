@@ -4,6 +4,27 @@ import { invoke } from "../lib/api";
 import { confirm, toast } from "../components/ui";
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RotateCcwIcon } from "lucide-react";
 
+/**
+ * Step PCO Live back or on. The one place that makes the call, so the console
+ * widget (which reports a failure as a toast) and Home's tile (which reports it
+ * on the tile) cannot drift apart. `onError` is the caller's way of saying it.
+ */
+export function useLiveStep(onError: (message: string) => void) {
+  const [busy, setBusy] = useState<"previous" | "next" | null>(null);
+  async function go(dir: "previous" | "next") {
+    if (busy) return;
+    setBusy(dir);
+    try {
+      await invoke(dir === "next" ? "pco:liveNext" : "pco:livePrevious");
+    } catch (e) {
+      onError(`PCO ${dir} failed: ${errorMessage(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+  return { busy, go };
+}
+
 // Previous / Next buttons that drive PCO's Services Live timer — the same
 // "go to previous / next item" controls as PCO's own live page. Always active
 // (per the dashboards); PCO rejections (e.g. not a live controller) surface as a
@@ -18,21 +39,10 @@ export function LiveControls({
    *  directly and PCO itself answers if there is nothing to step through. */
   live?: boolean;
 }) {
-  const [busy, setBusy] = useState<"previous" | "next" | "reset-pacing" | null>(null);
-
-  async function go(dir: "previous" | "next") {
-    if (busy) return;
-    setBusy(dir);
-    try {
-      await invoke(dir === "next" ? "pco:liveNext" : "pco:livePrevious");
-    } catch (e) {
-      toast.error(
-        `PCO ${dir} failed: ${errorMessage(e)}`,
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
+  const step = useLiveStep((message) => toast.error(message));
+  const [resetting, setResetting] = useState(false);
+  const busy = step.busy ?? (resetting ? "reset-pacing" : null);
+  const go = step.go;
 
   async function resetPacing() {
     if (busy) return;
@@ -41,14 +51,14 @@ export function LiveControls({
       message: "Items before now stop counting toward the pacing readout. The recording itself is untouched.",
       confirmLabel: "Reset pacing",
     }))) return;
-    setBusy("reset-pacing");
+    setResetting(true);
     try {
       await invoke("serviceTimeline:resetPacing");
       toast.success("Pacing reset");
     } catch (e) {
       toast.error(`Couldn't reset pacing: ${errorMessage(e)}`);
     } finally {
-      setBusy(null);
+      setResetting(false);
     }
   }
 

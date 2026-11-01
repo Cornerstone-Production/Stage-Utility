@@ -58,6 +58,11 @@ describe("takenCueNames", () => {
     );
     assert.deepEqual([...taken].sort(), ["a_one", "old_a", "older_a"]);
   });
+  test("a pair's base is taken as well as its halves, as the server counts it", () => {
+    const taken = takenCueNames([rule({ name: "btn_x_on" }), rule({ name: "btn_x_off" })], null);
+    assert.deepEqual([...taken].sort(), ["btn_x", "btn_x_off", "btn_x_on"]);
+    assert.equal(cueNameFor("x", taken, "btn_"), "btn_x_2");
+  });
   test("reads every id and call name from the manifest, which is where built-ins and pair bases are", () => {
     const manifest = {
       version: 1,

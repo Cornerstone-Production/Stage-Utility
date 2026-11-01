@@ -4,9 +4,9 @@
 // redirects to the display it is bound to, or shows the holding screen — so the
 // SD card holds no display number and the server decides what a screen shows.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
 import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
@@ -357,8 +357,21 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, parsed.error, 400);
       return;
     }
+    // The Mac says it changed its own switch: that is the one post allowed to
+    // override Screens. Any other only echoes what the Mac holds.
+    const heard = parsed.report.enabled;
+    if (parsed.changed !== undefined && heard !== undefined && takeChange(id, parsed.changed) && (known.enabled !== false) !== heard) {
+      await updateDevices((current) => setEnabled(current, id, heard));
+      const now = heard ? "on" : "off";
+      console.log(`[output-helper] ${scrub(id)} was switched ${scrub(now)} on its Mac`);
+    }
+    // Read again: the line above may just have changed it.
+    const wanted = findById(await kioskDevicesStore.loadStrict(), id)?.enabled !== false;
     recordHealth(id, parsed.report, known.output?.kind);
-    json(res, { ok: true });
+    // An old helper says nothing about it, and an output that is on in Screens has
+    // nothing to say, so only a switch that is off or a helper that answers counts.
+    if (heard !== undefined || !wanted) noteSwitchAnswer(id, wanted, heard);
+    json(res, { ok: true, enabled: wanted });
     return;
   }
 
@@ -564,6 +577,44 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       }
       stageController.refreshDisplays("all");
       json(res, { ok: true });
+    } catch (err) {
+      if (err instanceof StoreReadError) throw err;
+      error(res, errorMessage(err));
+    }
+    return;
+  }
+
+  // Switch one output of a Mac helper on or off. The helper hears it in the
+  // answer to its next health post. Same-origin like every other write here.
+  if (method === "POST" && pathname === "/api/devices/enabled") {
+    // A body of `null` or an array is a 400 here, not a 500.
+    const body = await readBodyOrEmpty(req);
+    const id = typeof body.deviceId === "string" ? body.deviceId : "";
+    if (!id) {
+      error(res, "body.deviceId is required");
+      return;
+    }
+    if (typeof body.enabled !== "boolean") {
+      error(res, "body.enabled must be true or false");
+      return;
+    }
+    const device = findById(await kioskDevicesStore.loadStrict(), id);
+    if (!device) {
+      error(res, "no output with that device id is set up", 404);
+      return;
+    }
+    if (!device.output) {
+      error(res, "only an output of a Mac helper can be switched on or off", 400);
+      return;
+    }
+    const enabled = body.enabled;
+    try {
+      const changed = await updateDevices((current) => setEnabled(current, id, enabled));
+      if (changed) {
+        const now = enabled ? "on" : "off";
+        console.log(`[output-helper] ${scrub(id)} (${scrub(device.output.kind)} "${scrub(device.output.name)}") switched ${scrub(now)} from Screens`);
+      }
+      json(res, { ok: true, enabled });
     } catch (err) {
       if (err instanceof StoreReadError) throw err;
       error(res, errorMessage(err));

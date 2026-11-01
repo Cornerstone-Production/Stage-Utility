@@ -340,9 +340,8 @@ const kioskDiscoveryPort: KeyCheck = (v, k) => {
 
 /**
  * Every settings key, and what a restore holds it to. The three migration
- * flags (layoutDefaultsCleaned, cardHairlineRaised, screenRolesFromView) are
- * restored with the backup's views.json, which they describe: a backup taken
- * after a pass carries views that pass already changed, and dropping the flag
+ * flags (layoutDefaultsCleaned, cardHairlineRaised, screenRolesFromView) are restored with the backup's views.json, which they
+ * describe: a backup taken after a pass carries views that pass already changed, and dropping the flag
  * would run it again over them (the first of those passes, run twice, took the
  * operator's own alignment away). A backup from before a pass has no flag, and
  * the pass runs on its views at the next start, as it should.

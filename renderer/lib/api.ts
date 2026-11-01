@@ -13,6 +13,7 @@ import { startPublicLive, type PublicLiveDeps } from "./public-live";
 import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
+import { createSubscribeReporter } from "./subscribe-reporter";
 
 type Params = Record<string, unknown> | undefined;
 
@@ -444,6 +445,7 @@ export type IpcChannel =
   | "devices:claim"
   | "devices:list"
   | "devices:release"
+  | "devices:setEnabled"
   | "devices:requestUpdate"
   | "devices:scan"
   | "displays:getPresence"
@@ -1098,6 +1100,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/devices/claim", p);
     case "devices:release":
       return post<T>("/api/devices/release", p);
+    case "devices:setEnabled":
+      return post<T>("/api/devices/enabled", p);
     // Update now, or Try again, for one Mac helper or Windows kiosk.
     case "devices:requestUpdate":
       return post<T>("/api/machine-updates/request", p);
@@ -1888,19 +1892,27 @@ const CLIENT_ID = genClientId();
 // batch the burst of subscribes when a view mounts. A failed report just means the
 // server keeps sending everything — filtering is an optimization, never required.
 let reportTimer: ReturnType<typeof setTimeout> | null = null;
+// Derived from the CALLBACK registry, not the wire listeners: the polling
+// transport registers no EventSource listener at all, so reading sseListeners
+// alone reported an empty set and the server filtered every channel out for that
+// client. sseListeners is still unioned in because the shared-worker fallback
+// wrappers live only there.
+//
+// One report in flight at a time, each built when it is SENT: the debounce below
+// does not help when a POST outlasts it (a slow Pi), and a stale report landing
+// last would drop channels added after it. See subscribe-reporter.ts.
+const subscribeReporter = createSubscribeReporter(
+  () => [...new Set([...directHandlers.keys(), ...sseListeners.map((l) => l.channel)])],
+  (channels) => post("/api/events/subscribe", { cid: CLIENT_ID, channels }),
+  (err) => console.warn("[sse] subscribe report failed", err),
+);
 function reportChannels(): void {
   // The public page writes nothing to the Worker.
   if (isPublicMode()) return;
   if (reportTimer) return;
   reportTimer = setTimeout(() => {
     reportTimer = null;
-    // Derived from the CALLBACK registry, not the wire listeners: the polling
-    // transport registers no EventSource listener at all, so reading
-    // sseListeners alone reported an empty set and the server filtered every
-    // channel out for that client. sseListeners is still unioned in because the
-    // shared-worker fallback wrappers live only there.
-    const channels = [...new Set([...directHandlers.keys(), ...sseListeners.map((l) => l.channel)])];
-    void post("/api/events/subscribe", { cid: CLIENT_ID, channels }).catch(() => {});
+    subscribeReporter.report();
   }, 200);
 }
 

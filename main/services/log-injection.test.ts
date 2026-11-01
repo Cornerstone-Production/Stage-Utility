@@ -81,6 +81,7 @@ const REQUEST_FACING = [
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
   "builtin-cues.ts",
+  "button-ownership.ts",
   // Fed by POST /api/events/subscribe with any cid; its one line is a count.
   "channel-reports.ts",
   "checklist-ticks-store.ts",
@@ -437,6 +438,9 @@ function requestFacingFiles(): string[] {
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
     path.join(HERE, "builtin-cues.ts"),
+    // The rule it says was kept and the view it names are typed into an HTTP body
+    // (a rule name, a view name), and the line is scrubbed at the logger.
+    path.join(HERE, "button-ownership.ts"),
     // Fed by POST /api/events/subscribe, which anyone on the LAN can call with
     // any cid. Its one line carries only a count, scrubbed like everything else.
     path.join(HERE, "channel-reports.ts"),
