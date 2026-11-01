@@ -378,15 +378,19 @@ export function parseButtons(raw: unknown): CompanionButton[] {
   const doc = rec(raw);
   const connections = parseConnections(raw);
   const out: CompanionButton[] = [];
+  const pages = pagesOf(doc);
+  const index = indexControls(pages);
 
-  for (const [pageNum, page] of pagesOf(doc)) {
+  for (const [pageNum, page] of pages) {
     const pageName = collapse(str(page.name)) || `Page ${pageNum}`;
     const pageId = str(page.id);
 
     for (const [row, col, control] of controlsOf(page)) {
       if (!isPressable(control)) continue;
 
-      const label = labelOf(control);
+      // The label the key DISPLAYS, so a button drawn with another's style is listed and
+      // found by that name. The press target stays this control's own location.
+      const { label, bg, fg } = lookOf(control, index);
       const driven = connectionsOf(control);
       if (!isListed(control, label)) continue;
 
@@ -413,7 +417,8 @@ export function parseButtons(raw: unknown): CompanionButton[] {
         actionIds: actionIdsOf(control),
         stateSource: inferStateSource(entries, connections),
         learnConnections: learnableConnections(entries, connections),
-        ...colorsOf(control),
+        bg,
+        fg,
       });
     }
   }
@@ -431,9 +436,60 @@ function isPressable(control: Record<string, unknown>): boolean {
   return type.startsWith("button") && type !== "button-reference";
 }
 
-/** A control's own look, which is what a page draws for it. */
-function lookOf(control: Record<string, unknown>) {
+/** A control's own look: what its own layers draw. */
+function ownLookOf(control: Record<string, unknown>) {
   return { label: labelOf(control), ...colorsOf(control), icon: iconOf(control) };
+}
+
+/** Every pressable-or-not control in an export by "page/row/col", so a location can be followed. */
+type ControlIndex = Map<string, Record<string, unknown>>;
+
+/** The deepest chain of "use another button's style" followed. A real install has chains of one or two. */
+const MAX_STYLE_DEPTH = 8;
+
+/**
+ * Where a control borrows its look from: the static location of its first enabled
+ * internal `bank_style` feedback ("use another button's style"), or null.
+ * An expression location, a disabled feedback and a malformed location borrow nothing.
+ */
+function styleSourceOf(control: Record<string, unknown>): string | null {
+  for (const entry of arr(control.feedbacks)) {
+    const f = rec(entry);
+    if (f.disabled === true) continue;
+    if (str(f.connectionId) !== "internal" || str(f.definitionId) !== "bank_style") continue;
+    const at = parseLocation(rec(f.options).location);
+    return at ? `${at.page}/${at.row}/${at.col}` : null;
+  }
+  return null;
+}
+
+/**
+ * A control's look as Companion draws it. A button using another button's style
+ * (feedback `bank_style`) is drawn with the look of the button at that location, and
+ * its own layers are blank, so the key and its label are those of the source,
+ * followed through a chain. A missing target, a target that is not a button, and a chain
+ * deeper than MAX_STYLE_DEPTH (which is what a cycle is) leave the control's own look.
+ */
+function lookOf(control: Record<string, unknown>, index: ControlIndex) {
+  let current = control;
+  for (let depth = 0; depth < MAX_STYLE_DEPTH; depth++) {
+    const at = styleSourceOf(current);
+    if (at === null) return ownLookOf(current);
+    const next = index.get(at);
+    if (!next || !isPressable(next)) return ownLookOf(control);
+    current = next;
+  }
+  return ownLookOf(control);
+}
+
+function indexControls(pages: ReturnType<typeof pagesOf>): ControlIndex {
+  const index: ControlIndex = new Map();
+  for (const [n, page] of pages) {
+    for (const [row, col, control] of controlsOf(page)) {
+      if (Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < MAX_ROWS && col < MAX_COLS) index.set(`${n}/${row}/${col}`, control);
+    }
+  }
+  return index;
 }
 
 /** A button's own background and text colour: the part of its look a rule's button list needs too. */
@@ -463,11 +519,8 @@ const MAX_ROWS = 64;
  */
 export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; views: CompanionPageView[] } {
   const pages = pagesOf(rec(raw));
-  const controlAt = new Map<string, Record<string, unknown>>();
   const inGrid = ([row, col]: [number, number, unknown]) => Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < MAX_ROWS && col < MAX_COLS;
-  for (const [n, page] of pages) {
-    for (const [row, col, control] of controlsOf(page).filter(inGrid)) controlAt.set(`${n}/${row}/${col}`, control);
-  }
+  const controlAt = indexControls(pages);
 
   const summaries: CompanionPageSummary[] = [];
   const views: CompanionPageView[] = [];
@@ -485,7 +538,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
         const target = parseLocation(rec(control.options).location);
         const pointed = target ? controlAt.get(`${target.page}/${target.row}/${target.col}`) : undefined;
         const resolved = pointed && isPressable(pointed) ? pointed : null;
-        const look = resolved ? lookOf(resolved) : { label: "", bg: null, fg: null, icon: null };
+        const look = resolved ? lookOf(resolved, controlAt) : { label: "", bg: null, fg: null, icon: null };
         keys.push({
           row,
           col,
@@ -495,7 +548,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
           ...(target ? { target } : {}),
         });
       } else if (isPressable(control)) {
-        const look = lookOf(control);
+        const look = lookOf(control, controlAt);
         if (look.label) labelled++;
         keys.push({
           row,

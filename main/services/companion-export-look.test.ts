@@ -164,3 +164,84 @@ describe("the page's keys and the button list agree", () => {
     assert.equal(pickable.includes("1/6/6"), false);
   });
 });
+
+// "Use another button's style": Companion draws a button carrying an internal `bank_style`
+// feedback with the look of the button at that location; its own layers are blank.
+// Shapes read off a real export; labels here are invented.
+describe("a button that uses another button's style", () => {
+  const ICON = "data:image/png;base64,AAAA";
+  const layers = (text: string, bg: number, fg: number, icon: string | null = null) => [
+    { id: "box0", type: "box", color: { value: bg, isExpression: false } },
+    { id: "image0", type: "image", base64Image: { value: icon, isExpression: false } },
+    { id: "text0", type: "text", text: { value: text, isExpression: false }, color: { value: fg, isExpression: false } },
+  ];
+  const button = (text: string, bg: number, fg: number, extra: Record<string, unknown> = {}, icon: string | null = null) => ({
+    type: "button-layered",
+    style: { layers: layers(text, bg, fg, icon) },
+    steps: { "0": { action_sets: { down: [{ type: "action", connectionId: "c1", definitionId: "go" }] } } },
+    ...extra,
+  });
+  const styleFrom = (loc: unknown, over: Record<string, unknown> = {}) => ({
+    feedbacks: [
+      { type: "feedback", connectionId: "internal", definitionId: "bank_style", options: { location: loc }, ...over },
+    ],
+  });
+  const at = (value: string) => ({ isExpression: false, value });
+  const doc = (controls: Record<string, Record<string, unknown>>) => ({
+    instances: { c1: { label: "Dev", moduleId: "mod" } },
+    pages: { "1": { name: "P", controls } },
+  });
+  const key = (controls: Record<string, Record<string, unknown>>, row: number, col: number) =>
+    parsePages(doc(controls)).views[0]!.keys.find((k) => k.row === row && k.col === col)!;
+
+  // The copier's own layers are the blank black box a real one carries.
+  const copier = (loc: unknown, over: Record<string, unknown> = {}) => button("", 0, 0, styleFrom(loc, over));
+
+  test("takes the label, colours and icon of the button it copies, and the press stays its own", () => {
+    const controls = { "0": { "0": button("Source", 0x112233, 0xffeedd, {}, ICON), "1": copier(at("1/0/0")) } };
+    const k = key(controls, 0, 1);
+    assert.deepEqual([k.label, k.bg, k.fg, k.icon], ["Source", "#112233", "#ffeedd", ICON]);
+    const listed = parseButtons(doc(controls)).find((b) => b.col === 1)!;
+    assert.deepEqual([listed.label, listed.bg, listed.fg, listed.page, listed.row, listed.col], ["Source", "#112233", "#ffeedd", 1, 0, 1]);
+    assert.equal(k.pickable, true);
+  });
+
+  test("a chain of two is followed to the end", () => {
+    const controls = { "0": { "0": button("End", 0x010203, 0x040506), "1": copier(at("1/0/0")), "2": copier(at("1/0/1")) } };
+    assert.equal(key(controls, 0, 2).label, "End");
+    assert.equal(key(controls, 0, 2).bg, "#010203");
+  });
+
+  test("a cycle falls back to the button's own look and does not hang", () => {
+    const controls = { "0": { "0": { ...button("A", 0x111111, 0xffffff), ...styleFrom(at("1/0/1")) }, "1": { ...button("B", 0x222222, 0xffffff), ...styleFrom(at("1/0/0")) } } };
+    assert.equal(key(controls, 0, 0).label, "A");
+    assert.equal(key(controls, 0, 1).label, "B");
+  });
+
+  test("a cycle of three does too, whichever button the depth cap runs out on", () => {
+    const loop = (name: string, next: number) => ({ ...button(name, 0x111111, 0xffffff), ...styleFrom(at(`1/0/${next}`)) });
+    const controls = { "0": { "0": loop("A", 1), "1": loop("B", 2), "2": loop("C", 0) } };
+    assert.deepEqual([0, 1, 2].map((c) => key(controls, 0, c).label), ["A", "B", "C"]);
+  });
+
+  test("an expression location, a disabled feedback and a missing target leave the own look", () => {
+    const src = button("Source", 0x112233, 0xffffff);
+    const controls = {
+      "0": {
+        "0": src,
+        "1": { ...button("Own1", 0, 0xffffff), ...styleFrom({ isExpression: true, value: "1/0/0" }) },
+        "2": { ...button("Own2", 0, 0xffffff), ...styleFrom(at("1/0/0"), { disabled: true }) },
+        "3": { ...button("Own3", 0, 0xffffff), ...styleFrom(at("1/5/5")) },
+      },
+    };
+    for (const col of [1, 2, 3]) assert.equal(key(controls, 0, col).label, `Own${col}`);
+  });
+
+  test("a copier with no text of its own is listed and found by the label it shows", () => {
+    const controls = { "0": { "0": button("Source", 0, 0xffffff), "1": copier(at("1/0/0")) } };
+    assert.deepEqual(
+      parseButtons(doc(controls)).map((b) => b.label),
+      ["Source", "Source"],
+    );
+  });
+});

@@ -82,7 +82,7 @@ what Stage Utility can press and what it will call each button without opening a
 rule. One page shows at a time, as a grid of the keys it uses (never fewer than 8
 by 4; a page wider than the card scrolls sideways), in Companion's own colours and
 with its icons. A button that points at another is drawn as the one it points at,
-marked with a small **ref** chip; page up, page down and page number keys are blank. The page
+marked with a small **ref** chip, and a button set to use another button's style is drawn (and listed, and searched) with that style's label, colours and icon, while a press still goes to the button itself. Text that would be the same colour as its background is drawn in black or white so it can be read; page up, page down and page number keys are blank. The page
 control is a dropdown with a filter that takes a number or any part of a name,
 and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
 both, because a real install has about a hundred pages and more than half are
