@@ -125,7 +125,7 @@ next login with the real state.
 | What | Where |
 |---|---|
 | The Mac's device id, the optional `server` file, the Mac's token, the `migrated-from-kiosk` marker | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
-| Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format) | `~/Library/Application Support/StageUtilityOutput/` |
+| Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format, a switch change the server has not taken yet) | `~/Library/Application Support/StageUtilityOutput/` |
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when `device-id` is missing from the folder above | `generated-device-id` in the same user folder. The window says so. |
 | `helper-status.json`: for the updater, this copy's version and pid, whether Chromium started (and why not), and whether Local Network access looks refused | The same user folder. Rewritten only when one of those changes. See [Updates](#updates) |
@@ -172,7 +172,7 @@ Its name is the driver's ("DeckLink Quad 2 (3)"), and it announces the modes the
 plays in 8-bit YUV that the server lists. A virtual one (`--virtual-sdi`) is
 `virtual-sdi-<n>`.
 
-The display with the menu bar is **off** until it is switched on, so the Mac keeps
+The display with the menu bar is **off** until it is switched on, in the window or from Screens (the window then opens by itself, since the output covers its icon), so the Mac keeps
 its desktop. Every other display starts on. The default is decided once, when the
 display is first seen, and stored.
 
@@ -274,8 +274,8 @@ then it will not follow another server.
 
 ## Health
 
-Every 10 s, an output that is showing a set-up screen posts
-`{ at, dropped, fps, latencyMs, repeated }` to `/api/devices/<id>/health` with its token in the
+Every 10 s, an output that is showing a set-up screen posts (and one that is switched off but set up posts that it is off: [The switch](#the-switch))
+`{ at, dropped, enabled, fps, latencyMs, repeated }` to `/api/devices/<id>/health` with its token in the
 `x-device-token` header. A display's fps is its display link's tick rate; `repeated`
 and `dropped` are 0. A card output's come from the shim's scheduler (`CardCounters`),
 the same for a DeckLink port and a virtual one: fps is frames sent per second, repeats
@@ -289,6 +289,31 @@ picture's content being drawn to its slot going out of the card (see
 [DECKLINK.md](DECKLINK.md#latency)); the server shows it in Screen settings > Device.
 It is left out for a display, for a window with no new picture, and for a figure
 outside the 0 to 10,000 ms the server takes.
+
+### The switch
+
+Whether an output is on is decided in Screens, and the helper obeys. `enabled` in the
+post is what the Mac holds, and the server's answer, `{ok, enabled}`, is what Screens
+wants: when they differ the helper turns the output on or off to match, and logs
+`turned off by the server` (or on). An answer without `enabled` (a server older than the
+switch) or with anything but a JSON boolean changes nothing. A server older than the
+switch refuses the post of an output that is off (it has no figures), logged once as a
+refused health post; that output cannot be switched on from Screens until the server is
+updated, and still can in the window.
+
+An output that is **off but set up on a server** goes on probing it, to know where it
+is, and keeps posting `{ enabled: false }` every 10 s with no figures (the server
+refuses figures sent with it), so Screens can switch it back on. One that is off and
+not set up, or whose server has forgotten it, probes nothing, as before.
+
+A switch changed in the helper's own window is the one change that goes the other
+way. It is saved with an id (`pendingChange` in `outputs.json`) and sent as `changed`
+in every post until an accepted one carries it, so a Mac switched off by hand is not
+switched straight back on by an answer that was true a moment before. An answer to a
+post that went out before the change is dropped for the same reason. The server takes
+each id once: if Screens has said something newer since, its answer wins and the
+change is not sent again. An output switched off in the window posts at once rather
+than at the next tick.
 
 A **401 or 404** means the server does not recognise this output with this token (it
 was released in Screens, or never set up; the server answers 401 for both so ids cannot

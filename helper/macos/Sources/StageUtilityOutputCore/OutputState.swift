@@ -21,15 +21,21 @@ public struct OutputRecord: Codable, Equatable {
   /// next start, rather than in the default and again in this once the screen has
   /// been read.
   public var videoMode: String?
+  /// The id of a change made to this output's switch in the window that the server
+  /// has not taken yet. Kept in the file, so a helper quit before the next post
+  /// still sends it at the next start, and is not told its own change back.
+  public var pendingChange: String?
 
   public init(
-    enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil, videoMode: String? = nil
+    enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil, videoMode: String? = nil,
+    pendingChange: String? = nil
   ) {
     self.enabled = enabled
     self.token = token
     self.boundTo = boundTo
     self.kioskIdentity = kioskIdentity
     self.videoMode = videoMode
+    self.pendingChange = pendingChange
   }
 
   /// The id this output announces itself and enrols under.
@@ -163,6 +169,24 @@ public final class OutputStateStore {
     try update(key, \.enabled, to: enabled)
   }
 
+  /// A change made in the window: the value and the id the server will be sent it
+  /// under, saved together so one cannot outlive the other. Nothing is done for a
+  /// key with no record.
+  public func setEnabledLocally(_ enabled: Bool, changeId: String, key: String) throws {
+    guard var record = records[key] else { return }
+    record.enabled = enabled
+    record.pendingChange = changeId
+    records[key] = record
+    try save()
+  }
+
+  /// The server has taken the change with this id. A different id is left alone: a
+  /// newer change is still on its way.
+  public func acknowledgeChange(_ changeId: String, key: String) throws {
+    guard records[key]?.pendingChange == changeId else { return }
+    try update(key, \.pendingChange, to: nil)
+  }
+
   /// The format a card output's screen set, normalised; nil for the default.
   public func setVideoMode(_ mode: String?, key: String) throws {
     try update(key, \.videoMode, to: VideoModes.normalised(mode))
@@ -188,7 +212,11 @@ public final class OutputStateStore {
     switch change {
     case .keep: return
     case .bind(let server): try setBoundTo(server, key: key)
-    case .forget: try setBoundTo(nil, key: key)
+    case .forget:
+      try setBoundTo(nil, key: key)
+      // Nobody is waiting to be told about a change any more, and a later set-up
+      // elsewhere must not be sent the id of one made before it.
+      try update(key, \.pendingChange, to: nil)
     }
   }
 

@@ -66,6 +66,10 @@ final class AppModel: ObservableObject {
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
+    /// Counts the changes made to this output's switch in the window. A health post
+    /// remembers the count it went out under, and its answer is dropped when the
+    /// count has moved: it describes the value from before the change.
+    var switchGeneration = 0
     /// A card output's render-to-air latency over the last health window.
     var latencyMs: Double?
     /// Times the page's renderer has ended since launch, for the window.
@@ -269,6 +273,9 @@ final class AppModel: ObservableObject {
       }
       if record.enabled, rt.sink == nil { activate(key) }
       if !record.enabled, rt.sink != nil { deactivate(key) }
+      // An output that is off but set up still checks in, so Screens can switch it
+      // back on: it needs the server's address, which discovery finds.
+      if !record.enabled, rt.sink == nil, rt.discovery == nil, record.boundTo != nil { listen(key) }
     }
     let covered = menuBarCovered
     refresh()
@@ -300,13 +307,40 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// The switch in the window. The change is sent to the server under an id until it
+  /// has taken it (`OutputSwitch`), so Screens shows it and does not undo it.
   func setEnabled(_ key: String, _ on: Bool) {
     guard let rt = runtimes[key] else { return }
-    save { try store.setEnabled(on, key: key) }
+    rt.switchGeneration += 1
+    save { try store.setEnabledLocally(on, changeId: OutputSwitch.newChangeId(), key: key) }
     Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") in the window")
-    if on { activate(key) } else { deactivate(key) }
+    switchOutput(key, on)
     // Done from the window itself, which is up: nothing to pop.
     wasMenuBarCovered = menuBarCovered
+    // Said at once rather than at the next health tick, so Screens shows it now.
+    if !on { postOff(key, rt) }
+  }
+
+  /// The server's answer to a health post says this output should be `on`.
+  private func applyFromServer(_ key: String, _ on: Bool) {
+    guard let rt = runtimes[key] else { return }
+    // A post still on its way was sent under the value from before this: its answer
+    // must not turn the output back.
+    rt.switchGeneration += 1
+    save { try store.setEnabled(on, key: key) }
+    Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") by the server")
+    switchOutput(key, on)
+    // Nobody is at the window: if this covered the menu bar, the icon is under the
+    // page, so the window comes up, as it does for a display change.
+    let covered = menuBarCovered
+    if HelperWindowPolicy.opensOnChange(wasCovered: wasMenuBarCovered, isCovered: covered) { onMenuBarCovered?() }
+    wasMenuBarCovered = covered
+  }
+
+  /// Open or close an output to match its stored switch. An output that is off but
+  /// set up goes on listening to its server.
+  private func switchOutput(_ key: String, _ on: Bool) {
+    if on { activate(key) } else { deactivate(key, keepListening: true) }
     refresh()
   }
 
@@ -354,6 +388,19 @@ final class AppModel: ObservableObject {
       return self.localNetworkEvidence(rt, since: since)
     }
 
+    beginDiscovery(key, rt)
+  }
+
+  /// An output that is off but set up on a server keeps probing it, and keeps
+  /// posting that it is off (`postOff`), so the server can switch it back on.
+  private func listen(_ key: String) {
+    guard !stopping, let rt = runtimes[key], rt.sink == nil, rt.discovery == nil else { return }
+    beginDiscovery(key, rt)
+  }
+
+  private func beginDiscovery(_ key: String, _ rt: Runtime) {
+    // An output that was off and set up has one running already.
+    rt.discovery?.stop()
     // With a `server` file the page loads from it at once and the probes go to that
     // server alone, so the output still shows up under "Not set up yet". The latency
     // test page needs no server: it is up from the start.
@@ -362,7 +409,8 @@ final class AppModel: ObservableObject {
       rt.serverURL = server
       if let host = EnrollURL.host(of: server) { mode = .unicast(host: host) }
     }
-    if rt.serverURL != nil || options.testPattern != nil { navigate(rt) }
+    if rt.sink != nil, rt.serverURL != nil || options.testPattern != nil { navigate(rt) }
+    let d = rt.descriptor
     let discovery = OutputDiscovery(
       label: d.port, port: options.discoveryPort, mode: mode,
       boundTo: { [weak self] in self?.store.record(for: key)?.boundTo },
@@ -376,7 +424,10 @@ final class AppModel: ObservableObject {
     discovery.start()
   }
 
-  private func deactivate(_ key: String) {
+  /// `keepListening`: the output is switched off but stays set up on its server, so
+  /// it keeps probing it and posting that it is off. Not for one that is gone or
+  /// for quit.
+  private func deactivate(_ key: String, keepListening: Bool = false) {
     guard let rt = runtimes[key] else { return }
     rt.discovery?.stop()
     rt.discovery = nil
@@ -393,9 +444,13 @@ final class AppModel: ObservableObject {
     rt.fps = nil
     rt.latencyMs = nil
     healthBoard.forget(key)
+    // Switched off but set up on a server: it stays reachable from it, to be switched
+    // on, so it keeps the address it has.
+    let staysReachable = keepListening && (store.record(for: key).map { !$0.enabled && $0.boundTo != nil } ?? false)
     // A server from discovery is looked for again on the next turn-on; one from the
     // server file stays.
-    if identity.server == nil { rt.serverURL = nil }
+    if identity.server == nil, !staysReachable { rt.serverURL = nil }
+    if staysReachable { listen(key) }
   }
 
   private func probe(for rt: Runtime?, unreachable: Bool) -> Data {
@@ -428,6 +483,13 @@ final class AppModel: ObservableObject {
       Log.notice(.discovery, "\(rt.descriptor.port): \"\(reply.name)\" (\(server)) no longer has this output set up; forgot it, so any server can set it up")
     }
     save { try store.apply(change, key: key) }
+    // Off and no longer set up anywhere: nothing to say, so stop probing, as an off
+    // output always did.
+    if rt.sink == nil, let record = store.record(for: key), !record.enabled, record.boundTo == nil {
+      rt.discovery?.stop()
+      rt.discovery = nil
+      if identity.server == nil { rt.serverURL = nil }
+    }
     refresh()
   }
 
@@ -546,24 +608,55 @@ final class AppModel: ObservableObject {
   // MARK: Health
 
   private func healthTick() {
+    guard !stopping else { return }
     readScreens()
     let now = Date()
     for key in order {
-      guard let rt = runtimes[key], let sink = rt.sink else { continue }
+      guard let rt = runtimes[key] else { continue }
+      guard let sink = rt.sink else {
+        postOff(key, rt)
+        continue
+      }
       let sample = sink.takeHealthSample()
       rt.fps = sample.fps
       rt.latencyMs = sample.latencyMs
-      guard rt.showingBound, healthBoard.isDue(key, at: now), let server = rt.serverURL,
-        let token = store.record(for: key)?.token,
-        let request = HealthPost.request(
-          server: server, deviceId: deviceId(rt), token: token, body: HealthPost.body(sample, at: now))
-      else { continue }
-      Task { @MainActor in
-        let outcome = await HealthReporter.post(request)
-        self.healthResult(key, rt, outcome)
-      }
+      guard rt.showingBound else { continue }
+      let change = store.record(for: key)?.pendingChange
+      send(key, rt, body: HealthPost.body(sample, at: now, changeId: change), change: change, at: now)
     }
     refresh()
+  }
+
+  /// An output that is switched off posts `{enabled: false}`, so that Screens sees it
+  /// is off and can switch it back on. Only one that is set up on a server: any other
+  /// has nobody to tell.
+  private func postOff(_ key: String, _ rt: Runtime) {
+    guard rt.sink == nil, let record = store.record(for: key), !record.enabled, record.boundTo != nil else { return }
+    send(key, rt, body: HealthPost.offBody(changeId: record.pendingChange), change: record.pendingChange, at: Date())
+  }
+
+  /// Post one health body, if this output is due and its server is known, and act on
+  /// the answer.
+  private func send(_ key: String, _ rt: Runtime, body: Data, change: String?, at now: Date) {
+    guard healthBoard.isDue(key, at: now), let server = rt.serverURL, let token = store.record(for: key)?.token,
+      let request = HealthPost.request(server: server, deviceId: deviceId(rt), token: token, body: body)
+    else { return }
+    let generation = rt.switchGeneration
+    Task { @MainActor in
+      let reply = await HealthReporter.post(request)
+      self.healthResult(key, rt, reply.outcome)
+      self.switchAnswered(key, rt, reply, sentChange: change, generation: generation)
+    }
+  }
+
+  /// What the answer to an accepted post says about the switch.
+  private func switchAnswered(_ key: String, _ rt: Runtime, _ reply: HealthReply, sentChange: String?, generation: Int) {
+    // The output this post was for, not one made since with the same key.
+    guard case .accepted = reply.outcome, runtimes[key] === rt, let record = store.record(for: key) else { return }
+    let decision = OutputSwitch.decide(
+      held: record.enabled, answer: reply.enabled, sentChange: sentChange, stale: generation != rt.switchGeneration)
+    if let id = decision.acknowledged { save { try store.acknowledgeChange(id, key: key) } }
+    if let on = decision.apply { applyFromServer(key, on) }
   }
 
   private func healthResult(_ key: String, _ rt: Runtime, _ outcome: HealthOutcome) {
