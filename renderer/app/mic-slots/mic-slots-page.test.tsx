@@ -171,6 +171,7 @@ const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { Toaster } = await import("../../components/ui/toast.js");
+const { PageActionsProvider, PageActionsSlot } = await import("../page-actions.js");
 
 const settle = async () => {
   for (let i = 0; i < 8; i++) {
@@ -1130,5 +1131,76 @@ describe("Overwrite on a saved layout", () => {
     await mount();
     await click(screen.getByRole("button", { name: "Saved layouts" }));
     assert.notEqual(screen.getByRole("button", { name: "Reorder Opening" }).getAttribute("tabindex"), "-1");
+  });
+});
+
+describe("the inspector folds away with nothing selected", () => {
+  async function mountWithChrome() {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client },
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(PageActionsProvider, null, React.createElement(PageActionsSlot, null), React.createElement(MicSlotsPage, null)),
+          React.createElement(ConfirmHost, null),
+          React.createElement(Toaster, null),
+        ),
+      ),
+    );
+    await settle();
+  }
+  const inspector = () => document.querySelector("[data-mic-inspector]") as HTMLElement;
+  const isOpen = () => inspector().getAttribute("data-mic-inspector") === "open";
+  const toggle = () => screen.getByRole("button", { name: /inspector/i });
+  /** What a real click does: down (focus lands here, and selects), then up, then click. */
+  const press = async (el: HTMLElement) => {
+    await act(async () => {
+      fireEvent.pointerDown(el, { button: 0 });
+      fireEvent.mouseDown(el, { button: 0 });
+      el.focus();
+      fireEvent.pointerUp(el, { button: 0 });
+      fireEvent.mouseUp(el, { button: 0 });
+      fireEvent.click(el);
+    });
+    await settle();
+  };
+
+  test("closed and inert until a slot is selected", async () => {
+    await mountWithChrome();
+    assert.equal(isOpen(), false);
+    assert.ok(inspector().hasAttribute("inert"), "a folded inspector must not take focus");
+    assert.equal(toggle().getAttribute("aria-pressed"), "false");
+  });
+
+  test("selecting a slot opens it, and pressing the same slot again folds it away", async () => {
+    await mountWithChrome();
+    await press(card("a"));
+    assert.equal(isOpen(), true, "a selected slot opens the inspector");
+    assert.equal(card("a").getAttribute("aria-pressed"), "true");
+    await press(card("b"));
+    assert.equal(isOpen(), true, "another slot moves the selection, the inspector stays");
+    assert.equal(card("b").getAttribute("aria-pressed"), "true");
+    await press(card("b"));
+    assert.equal(isOpen(), false, "the selected slot pressed again folds the inspector away");
+    assert.equal(card("b").getAttribute("aria-pressed"), "false");
+    await press(card("b"));
+    assert.equal(isOpen(), true, "and pressing it once more opens it again");
+  });
+
+  test("the button opens it on the drag help, and closes it with a slot selected", async () => {
+    await mountWithChrome();
+    await click(toggle());
+    assert.equal(isOpen(), true);
+    assert.match(inspector().textContent ?? "", /Drag a card into a gap/);
+    await click(toggle());
+    assert.equal(isOpen(), false);
+    await press(card("a"));
+    assert.equal(isOpen(), true);
+    await click(toggle());
+    assert.equal(isOpen(), false, "closing by the button clears the selection");
+    assert.equal(card("a").getAttribute("aria-pressed"), "false");
   });
 });

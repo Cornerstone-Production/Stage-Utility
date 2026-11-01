@@ -114,6 +114,59 @@ live value. Pick one and the tile shows that metric, captioned
 once a metric is picked, "loudest" is judged on that metric. A picked metric the
 meter stops reporting reads `—` and names it, never another metric's number.
 
+### Expanding a tile
+
+Some tiles open over Home instead of sending you to another page. Press the
+corner control on a tile — or, on a tile with no controls of its own, the tile
+itself — and it fills the window. The panel's header carries the tile's name,
+an **Open** link to the page the tile belongs to (**Open Screens**, for one), and **Close**; Escape closes it
+too. Nothing navigates, so Home is exactly where you left it.
+
+| Tile | Collapsed | Expanded | Open link goes to |
+|---|---|---|---|
+| **Wireless summary** | online count, lowest battery | every channel: name, battery, time left, RF bars, muted, offline | Mic slots |
+| **Screens** | connected of total | every screen: name, the view it shows, online or offline | Screens |
+| **Timer** (service) and **Current item** | the live item and its countdown | the whole rundown, the live item marked, planned against actual so far | Plan |
+| **Recent services** | the figures | the attendance trend with its readout | History |
+
+A tile with no expanded body does what it always did. Only the tiles with no
+controls of their own — Wireless summary, Screens and Recent services — expand on
+a press of the tile; on the others only the corner control does, so a button on a
+tile is never swallowed. While you are editing Home nothing expands.
+
+### Actions on a tile
+
+A tile may carry **one** action, drawn on the tile itself.
+
+| Tile | Action | Does |
+|---|---|---|
+| **Timer** (service source, showing the next item), while an item is live | **Next** — and **Prev** beside it from Medium up | moves Planning Center Live on or back, one press each |
+| **Recording** | **Start** when stopped, **Stop** while recording | starts or stops REAPER and OBS, whichever are connected |
+| **Streaming**, **Wireless summary**, **Screens** | none | |
+
+Streaming has none on purpose: starting a broadcast from a tile is too easy to do
+by accident and too public to get wrong.
+
+**Stop takes two presses.** The first turns the button into **Stop recording?**
+for three seconds; a second press inside that stops, and one after it lapses is
+a first press again. **Start** shows a spinner until the recorder itself reports
+that it is recording, and says so on the tile if it has not within ten seconds.
+A failed action names the problem on the tile for five seconds.
+
+Start and Stop press the built-in commands **REAPER recording** and **OBS
+recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
+ones a Button, a Companion key or Home Assistant presses. So the press is in the
+Automation page's activity, **Simulate** and **Disarm** apply (the tile says
+"Reaper: Simulated: nothing was sent", or why it was refused).
+
+The action is dropped from a tile too narrow to hold it beside its reading, such
+as a Small tile on a narrow tablet; make the tile Medium to get it back. On a
+touch screen every control on a tile is at least 44 px square.
+
+A fresh Home includes the **Message composer** across the page, so a stage
+message can be sent without leaving it. A Home you have edited is left as you
+made it; **Add widget** offers the composer at any time.
+
 ### Sizes
 
 Five shapes on a three-column grid:
@@ -342,8 +395,8 @@ control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
-has nothing to operate. A **Button** on one, set to Fire a cue, fires a cue and shows what its
-device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+has nothing to operate. A **Button** on one presses a Companion button, an app action or a command, and shows what
+its device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 

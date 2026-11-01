@@ -1,6 +1,8 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
+import { ActionTile, StepAction } from "../app/home/card-actions";
+import { sizeOf } from "../app/home/home-cards";
 import { readConfig, timerSource } from "./timer-config";
 import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
@@ -40,8 +42,8 @@ import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
-import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
+import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -256,6 +258,13 @@ export interface LayoutRenderCtx {
    * anywhere else never receives one.
    */
   activeCardMenuId?: string | null;
+  /**
+   * Open the sheet that chooses what a Button presses, for the Button with this
+   * object id. Set by Home alone, which has no inspector: a Button with nothing
+   * chosen reads "Choose what it presses" there, and tapping it calls this.
+   * Absent everywhere else, where an unset Button reads Unbound and does nothing.
+   */
+  choosePress?: (objectId: string) => void;
 }
 
 /**
@@ -561,7 +570,7 @@ function fmtSignedDuration(sec: number): string {
 }
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
-function rfBarsGlyph(bars: number): string {
+export function rfBarsGlyph(bars: number): string {
   const n = clamp(Math.round(bars), 0, 5);
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
@@ -1019,6 +1028,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
+          actionable={live}
+          linked={ctx.interactive && !ctx.home}
         />
       </div>
     );
@@ -1372,7 +1383,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // A stored `home-live-status` is that Stat on a wall too: it drew Home's card
       // wherever it was placed, and keeps its look off Home.
       if ((ctx.home || o.config?.type === "home-live-status") && timerSource(c) === "service" && (c.nextItem ?? false)) {
-        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        const stat = <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        // Prev / Next on the tile, for an operator on Home with a service live.
+        // Never on a wall: the same Timer is drawn there and has no press.
+        return ctx.home && ctx.interactive && ctx.pcoLive?.mode === "item" ? (
+          <ActionTile reserveCorner action={<StepAction showPrev={sizeOf(o) !== "s"} />}>{stat}</ActionTile>
+        ) : (
+          stat
+        );
       }
       // The baptism readout never sized itself to Home's uniform tile, and still
       // does not: its value fills the box as it did.
@@ -1511,10 +1529,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           ts={ts}
         />
       );
-    case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
+      return (
+        <CueButton
+          config={c}
+          cues={ctx.cues}
+          known={ctx.cuesKnown}
+          interactive={ctx.interactive}
+          onChoose={ctx.choosePress ? () => ctx.choosePress?.(o.id) : undefined}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton
@@ -1716,7 +1741,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // type this build has since dropped.)
       const _never: never = c;
       void _never;
-      return null;
+      // The one type this build has dropped on purpose: see unconverted-button.tsx.
+      return isUnconvertedButton(o.config) ? <UnconvertedButton ts={ts} /> : null;
     }
   }
 }

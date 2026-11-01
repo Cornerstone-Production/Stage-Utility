@@ -1,13 +1,14 @@
-// The naming half of "Make it a cue". The write itself, and the fields of the rule
-// it makes, are driven through the real inspector in button-inspector.test.tsx.
+// cue-naming.ts: the name a Button's own command gets. The server names a migrated
+// Button's command with it and the Button inspector names a new one, so it is tested
+// here, beside the module, and not in either caller.
 
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { CALL_TRIGGER_ID } from "@main/services/cue-aliases.js";
-import { cueNameFor, cueSlug, takenCueNames } from "./make-it-a-cue.js";
-import type { CueManifest } from "@main/services/cue-manifest.js";
-import type { Rule } from "@main/types/automation.js";
+import type { Rule } from "../types/automation.js";
+import { CALL_TRIGGER_ID } from "./cue-aliases.js";
+import type { CueManifest } from "./cue-manifest.js";
+import { cueNameFor, cueSlug, namesTakenForNewCue as takenCueNames } from "./cue-naming.js";
 
 const rule = (params: Record<string, string | number>, trigger: string = CALL_TRIGGER_ID): Rule => ({
   id: "r",
@@ -57,6 +58,11 @@ describe("takenCueNames", () => {
       null,
     );
     assert.deepEqual([...taken].sort(), ["a_one", "old_a", "older_a"]);
+  });
+  test("a pair's base is taken as well as its halves, as the server counts it", () => {
+    const taken = takenCueNames([rule({ name: "btn_x_on" }), rule({ name: "btn_x_off" })], null);
+    assert.deepEqual([...taken].sort(), ["btn_x", "btn_x_off", "btn_x_on"]);
+    assert.equal(cueNameFor("x", taken, "btn_"), "btn_x_2");
   });
   test("reads every id and call name from the manifest, which is where built-ins and pair bases are", () => {
     const manifest = {

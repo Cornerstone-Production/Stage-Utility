@@ -140,7 +140,7 @@ class CueTokenStore {
       // Not swallowed: a token list that will not parse means every caller is
       // about to get a 401, and the operator has to be told which failure that
       // is. Rethrown so the route answers 500 rather than "your token is wrong".
-      throw new Error(`cue tokens are unreadable: ${errorMessage(e)}`, { cause: e });
+      throw new Error(`command tokens are unreadable: ${errorMessage(e)}`, { cause: e });
     }
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((t): t is CueTokenRecord => {

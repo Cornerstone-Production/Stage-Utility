@@ -98,7 +98,7 @@ const GOOD: Record<string, unknown> = {
 const BAD: Record<string, { value: unknown; says: string }> = {
   "automation-rules.json": {
     value: [{ ...(GOOD["automation-rules.json"] as object[])[0], trigger: { id: "call.by-name", params: { name: "Lights Off!" } } }],
-    says: "not a usable cue name",
+    says: "not a usable command name",
   },
   "automation-settings.json": { value: { simulate: "no" }, says: "simulate" },
   "baptism-triggers.json": { value: { "plan-1": "item-1" }, says: "plan-1" },
@@ -296,7 +296,7 @@ describe("config restore checks", () => {
       () => configSnapshot.apply(bundleOf({ "automation-rules.json": [other, bare] })),
       (err: Error) => {
         assert.ok(err instanceof RestoreRefusedError, String(err));
-        assert.deepEqual(err.failures, ['automation-rules.json: rule "Bare cue" is a called cue with no trigger params']);
+        assert.deepEqual(err.failures, ['automation-rules.json: rule "Bare cue" is a called command with no trigger params']);
         return true;
       },
     );

@@ -1951,7 +1951,7 @@ class IntegrationManager {
         // it here would print it twice on the row.
         const said =
           (outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`) +
-          (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
+          (unsaved > 0 ? ` ${unsaved} command status(es) could not be saved.` : "");
         this.setCompanionOutbound(said, { failed: !outbound.ok });
         // The RETURNED message keeps both halves. It is the Test button's own
         // one-shot answer in the dialog footer, which composes nothing.

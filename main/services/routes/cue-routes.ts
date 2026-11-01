@@ -44,10 +44,10 @@ import {
   cueSlugs,
   isSuggestedPair,
   singleButtons,
-  slugForCue,
   splitToggleLabel,
   togglePairSlug,
 } from "../companion-export.js";
+import { slugForCue } from "../cue-slug.js";
 import { learnableOffer } from "../companion-state-learn.js";
 import { stateBindingParams, stateBindingProblem } from "../cue-pairs.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
@@ -58,6 +58,8 @@ import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
 import { reservedCueNames } from "../builtin-cues.js";
+import { cueUsage } from "../button-ownership.js";
+import { viewsStore } from "../views-store.js";
 import { takenCueNames } from "../cue-aliases.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
@@ -201,6 +203,19 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
+  // ── Where a cue is used ───────────────────────────────────────────────────
+
+  if (method === "GET" && pathname === "/api/cues/usage") {
+    // Open, like the manifest: it names the screens a cue is on and the Buttons'
+    // labels, which the layouts themselves already serve to anyone on the LAN.
+    // Worked out on each request from the views store — views are small and this is
+    // read when a page or a dialog opens, so there is no timer and no cache to go
+    // stale. Strict: a views file that could not be read is a 503, never an empty
+    // answer that says no Button uses any cue.
+    json(res, cueUsage(await viewsStore.loadStrict()));
+    return;
+  }
+
   // ── Calling a cue ─────────────────────────────────────────────────────────
 
   const callMatch = pathname.match(/^\/api\/cues\/([^/]+)$/);
@@ -245,7 +260,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     companionApi.invalidate();
     const result = await companionApi.fetchExport({ force: true });
     if (!result.ok) {
-      json(res, { ok: false, reason: result.reason, buttons: [] });
+      json(res, { ok: false, reason: result.reason, buttons: [], pages: [] });
       return;
     }
     // Refresh means "read Companion again", and the cues are the reason anybody
@@ -261,6 +276,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     json(res, {
       ok: failed.length === 0,
       buttons: result.buttons,
+      pages: result.pages,
       cachedAt: result.cachedAt,
       reconcile: { applied: run?.applied ?? 0, failed },
     });
@@ -273,10 +289,30 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // show for "Companion is unreachable" — the three number fields — and a
     // failed request would only give it a toast.
     if (!result.ok) {
-      json(res, { ok: false, reason: result.reason, buttons: [] });
+      json(res, { ok: false, reason: result.reason, buttons: [], pages: [] });
       return;
     }
-    json(res, { ok: true, buttons: result.buttons, cachedAt: result.cachedAt });
+    json(res, { ok: true, buttons: result.buttons, pages: result.pages, cachedAt: result.cachedAt });
+    return;
+  }
+
+  // One page as the picker draws it: its used extent and every key's look, icons
+  // included. Fetched when the picker shows that page, so the icons (226 KB on a
+  // real install) never ride along with the button list other screens load.
+  const pageMatch = pathname.match(/^\/api\/companion\/pages\/(\d+)$/);
+  if (method === "GET" && pageMatch) {
+    const result = await companionApi.fetchExport();
+    if (!result.ok) {
+      json(res, { ok: false, reason: result.reason });
+      return;
+    }
+    const wanted = Number(pageMatch[1]);
+    const view = result.pageViews.find((p) => p.page === wanted);
+    if (!view) {
+      error(res, `Companion has no page ${wanted}`, 404);
+      return;
+    }
+    json(res, { ok: true, ...view, cachedAt: result.cachedAt });
     return;
   }
 
@@ -655,7 +691,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
     const slug = typeof o.slug === "string" && o.slug ? slugForCue(o.slug) : slugForCue(label);
 
     if (!button || !slug) {
-      skipped.push({ name: label || "(unnamed)", why: "no usable cue name for this button" });
+      skipped.push({ name: label || "(unnamed)", why: "no usable command name for this button" });
       continue;
     }
 

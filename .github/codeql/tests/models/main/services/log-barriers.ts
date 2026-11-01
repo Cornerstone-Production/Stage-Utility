@@ -5,7 +5,7 @@
 import * as http from "http";
 
 import { layerSlug } from "./builtin-cues.js";
-import { slugForCue } from "./companion-export.js";
+import { slugForCue } from "./cue-slug.js";
 import { filenameSlug } from "./export-filename.js";
 import { scrub, scrubError } from "./scrub.js";
 

@@ -682,7 +682,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     params: [
       {
         key: "name",
-        label: "Cue name",
+        label: "Command name",
         type: "string",
         help: "lower_snake_case, unique across rules. This is the URL: /api/cues/<name>.",
       },
@@ -692,8 +692,8 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
         type: "string",
         optional: true,
         help:
-          "Names this cue also answers to, comma-separated. Written when a Companion button is " +
-          "relabelled and the cue is renamed to match, so an already-pasted Home Assistant " +
+          "Names this command also answers to, comma-separated. Written when a Companion button is " +
+          "relabelled and the command is renamed to match, so an already-pasted Home Assistant " +
           "config keeps working. Remove one and that URL stops resolving.",
       },
       {
@@ -708,7 +708,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
         label: "Room",
         type: "string",
         optional: true,
-        help: "Where the thing this cue drives is. Shown in the log; not used to route anything.",
+        help: "Where the thing this command drives is. Shown in the log; not used to route anything.",
       },
       // The state binding, on the `_on` half of a pair. Declared here so the
       // registry documents it and the rules route validates it, but rendered by

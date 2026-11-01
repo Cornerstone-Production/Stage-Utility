@@ -176,10 +176,10 @@ card, a directory where the file should be — is never treated as empty:
   screens are skipped, layout images are not pruned, kiosk discovery answers no
   probe while `kiosk-devices.json` cannot be read (a screen that hears no answer
   keeps its server and probes again), and the device routes fail rather than
-  answer from an empty list. With `automation-rules.json` unreadable the cue
-  manifest, states and YAML fail rather than list no cues, so Home Assistant
-  marks the cue entities unavailable instead of removing them, the app's own
-  cue buttons are gone, and rule edits are refused.
+  answer from an empty list. With `automation-rules.json` unreadable the command
+  manifest, states and YAML fail rather than list no commands, so Home Assistant
+  marks the command entities unavailable instead of removing them, the app's own
+  Buttons are gone, and rule edits are refused.
 - **A backup** fails rather than leaving the file out, and the same goes for an
   uploaded image it cannot read.
 
@@ -320,7 +320,7 @@ Two backups exist in the app, and they cover different things:
 ### Restoring a config snapshot
 
 A restore is checked the way a save is. Every file in the snapshot goes through
-the rules its settings page applies — a video feed's address, a cue's name, a
+the rules its settings page applies — a video feed's address, a command's name, a
 screen's address, a port range, a color. Where a save trims, lowercases, clamps
 or leaves out a value rather than refusing it, the restore does the same to that
 value; where a save refuses, the restore refuses. A value of a type no settings
@@ -338,7 +338,7 @@ cleared, and nothing that runs in the background is paused.
   rather than stored, and a screen binding's token is restored empty, so the
   screen pins a new one when it next connects.
 - An automation rule with fields that need attention restores as it was saved,
-  showing Needs setup, as it does after an upgrade; a cue name that would clash
+  showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.
 - A `settings.json` key no part of the app reads is dropped and logged. A field
   inside a setting that its page does not send (in the backup schedule, the
