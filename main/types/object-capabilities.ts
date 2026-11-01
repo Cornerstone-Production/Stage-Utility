@@ -113,6 +113,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   // the page that fixes what they are reporting.
   // Readout only: the card's own rows already link to the page that fixes each
   // check, so the OBJECT has nowhere separate to drill to.
+  "home-attention": ["readout"],
   "home-readiness": ["readout"],
   "home-next-service": ["readout"],
   "home-live-status": ["readout"],

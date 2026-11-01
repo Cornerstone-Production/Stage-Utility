@@ -32,6 +32,16 @@ const NO_CHANNELS: DeviceStatus[] = [];
  * moves a bar.
  */
 export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
+  return useWirelessTelemetryStatus(enabled).channels;
+}
+
+/**
+ * The same telemetry, plus whether it has answered. An empty list is both "no
+ * receivers" and "nothing yet", and a consumer that says something about the
+ * wireless gear (Home's Needs attention) must not say it on the strength of the
+ * second.
+ */
+export function useWirelessTelemetryStatus(enabled = true): { channels: DeviceStatus[]; known: boolean } {
   // Adding or removing a connection changes which channels exist at all, which
   // no telemetry broadcast will report — a removed receiver simply stops
   // sending. Bumping this re-identifies `read`, which is what useStatusChannel
@@ -47,6 +57,6 @@ export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
     return invoke<DeviceStatus[]>("wireless:channelStatuses");
   }, [connectionsRev]);
 
-  const { value: channels } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
-  return Array.isArray(channels) ? channels : NO_CHANNELS;
+  const { value: channels, known } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
+  return { channels: Array.isArray(channels) ? channels : NO_CHANNELS, known };
 }

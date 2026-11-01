@@ -110,6 +110,9 @@ const REQUEST_FACING = [
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
+  // Its snooze and unsnooze lines name the key, typed into POST /api/home/snoozes
+  // (and the DELETE path); scrubbed, and the key must also match a fixed shape.
+  "home-snoozes.ts",
   // Every line names a Host header: whatever name the sender chose, verbatim.
   "host-names.ts",
   "integration-manager.ts",
@@ -172,6 +175,9 @@ const REQUEST_FACING = [
   "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
+  // Logs nothing itself; the lines for a snooze are home-snoozes.ts's, above.
+  // Listed because every routes/ file is.
+  "routes/home-routes.ts",
   "routes/host-name-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
@@ -487,6 +493,8 @@ function requestFacingFiles(): string[] {
     // a `/log` entry. It is scrubbed at the logger.
     path.join(HERE, "history-milestones-store.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
+    // Its snooze lines name a key typed into POST /api/home/snoozes.
+    path.join(HERE, "home-snoozes.ts"),
     // Its lines name a request's Host header, which the sender writes freely: a
     // newline in one would forge a `/log` entry. Scrubbed at each line.
     path.join(HERE, "host-names.ts"),

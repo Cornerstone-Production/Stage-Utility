@@ -74,6 +74,11 @@ export function defaultHomeLayout() {
     version: 1 as const,
     canvas: { width: 1920, height: 1080, background: null, fit: "responsive" as const },
     objects: [
+      // Needs attention leads, in place of Readiness: it lists the same failing
+      // checks plus what is wrong live, and Home opens on what is wrong. It is
+      // the first thing in the approved mockup, above the timer. Readiness stays
+      // in the registry and in Add widget.
+      card({ type: "home-attention" }),
       // Live first, so a service that starts while Home is open puts the timer
       // at the top. It is the only card of its mood, so its position among the
       // idle cards never shows.
@@ -85,7 +90,6 @@ export function defaultHomeLayout() {
       card({ type: "home-spl" }),
       card({ type: "home-screens" }),
       card({ type: "home-next-service" }),
-      card({ type: "home-readiness" }),
       card({ type: "home-recent-services" }),
       // Stage messages without leaving Home. An unedited Home gains this on
       // upgrade; an edited one is left alone, like every other seeded card.

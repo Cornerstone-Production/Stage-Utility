@@ -23,6 +23,7 @@ import { ActionTile, RecordingAction } from "./card-actions";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
+import { AttentionCard } from "./attention/attention-card";
 import type { LayoutObjectConfig, PvpNowLayout } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a
@@ -71,6 +72,7 @@ import { plural } from "@main/services/plural";
  * a two-line ALL-CAPS tile in a row of three-line cards.
  */
 const HOME_CARD_TYPES: Record<HomeCardType, true> = {
+  "home-attention": true,
   "home-readiness": true,
   "home-next-service": true,
   "home-recent-services": true,
@@ -1037,6 +1039,9 @@ export function HomeCard({
   onlineOutputIds,
   onlineKnown,
   secondsToStart,
+  pcoLive = null,
+  pcoLiveKnown = false,
+  interactive = false,
   hoverSuppressed = false,
   actionable = false,
   linked = false,
@@ -1068,6 +1073,13 @@ export function HomeCard({
   /** Whether presence has answered yet — see useDisplayPresenceStatus. */
   onlineKnown: boolean;
   secondsToStart: number | null;
+  /** The live payload and whether it has answered, for the cards that need more
+   *  than the countdown (Needs attention reads the mood and the service's length). */
+  pcoLive?: PcoLiveDTO | null;
+  pcoLiveKnown?: boolean;
+  /** Home's own page, where controls fire (`ctx.home && ctx.interactive`). On a
+   *  wall or console a card that carries buttons draws none. */
+  interactive?: boolean;
   /** This card's own right-click menu is open, so its chart (if it has one)
    *  must stop tracking the pointer underneath it. Only `home-recent-services`
    *  reads it today; every other case ignores it, the same way most of them
@@ -1123,6 +1135,8 @@ export function HomeCard({
       );
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
+    case "home-attention":
+      return <AttentionCard state={state} now={now} pcoLive={pcoLive} pcoLiveKnown={pcoLiveKnown} secondsToStart={secondsToStart} interactive={interactive} />;
     case "home-readiness":
       return <ReadinessCard checks={readinessChecks(state, onlineOutputIds, onlineKnown)} />;
     case "home-recent-services":

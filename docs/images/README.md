@@ -21,7 +21,7 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 | `history-overview.png` | History: the Trends chart across three service types, the month calendar and the recorded services list. |
 | `history-service.png` | A recorded service: its rundown with each item's actual time against the plan. |
 | `history-trends.png` | The History Trends card on its own: attendance per service type over 16 weeks, with milestones. |
-| `home-dashboard.png` | Home during a service: the live item, screens online, wireless, the clock and recent services. |
+| `home-dashboard.png` | Home during a service: Needs attention with nothing wrong, the live item, screens online, wireless, the clock and recent services. |
 | `integrations-overview.png` | Settings → Integrations: connected integrations above, the ones not set up below. |
 | `integrations-wireless.png` | The Wireless Gear dialog: two receivers, each connected. |
 | `layout-editor.png` | The layout editor on a wall layout: canvas, layers, and the inspector for the selected object. |

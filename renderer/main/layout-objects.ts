@@ -188,7 +188,7 @@ export const CARD_RADIUS = 0.0148;
  * fail the build rather than silently never match.
  */
 export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
-  "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
+  "home-attention", "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
   "home-pvp",
@@ -467,6 +467,15 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     // whatever the screen is routed to should look like it does on that screen.
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
     homeSize: "l",
+  },
+  "home-attention": {
+    label: "Needs attention",
+    blurb: "What is wrong now, with its fix and a healthy line",
+    group: "PCO / service",
+    config: () => ({ type: "home-attention" }),
+    style: BARE,
+    homeSize: "xl",
+    homeWhen: "always",
   },
   "home-readiness": {
     label: "Readiness",

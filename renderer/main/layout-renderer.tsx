@@ -1027,6 +1027,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           onlineOutputIds={ctx.onlineOutputIds}
           onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
+          pcoLive={ctx.pcoLive}
+          pcoLiveKnown={ctx.pcoLiveKnown}
+          interactive={!!live}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
           actionable={live}
           linked={ctx.interactive && !ctx.home}

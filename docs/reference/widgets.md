@@ -95,6 +95,7 @@ item** on (how a new Timer starts), which is a stat card like the cards beside i
 | **PCO Prev/Next** | Buttons that move the service on | Planning Center Live (writes) |
 | **Service pacing** | How far ahead or behind the whole plan the service is, or when it is projected to end | Recorded service timeline · Planning Center Live |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
+| **Needs attention** | What is wrong right now, each problem with a Snooze and its fix, and one line naming everything healthy. See [Needs attention](../features/operator-app.md#needs-attention) | Readiness checks, wireless, screen presence, REAPER and OBS, integration states |
 | **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
@@ -911,7 +912,7 @@ chooses which; with one, it is not shown.
 On Home, the settings a tile supports (a clock's seconds, a status tile's hide
 and fill switches, a scores tile's game and the like) are also on its
 right-click menu; see [Home tiles and wall widgets](#home-tiles-and-wall-widgets).
-Home's own cards (Readiness, Next service, Screens online and the rest) carry no
+Home's own cards (Needs attention, Readiness, Next service, Screens online and the rest) carry no
 settings: only a size, when they show, and remove.
 ---
 

@@ -92,7 +92,7 @@ Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
 
-![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
+![Home during a service: Needs attention reporting nothing wrong, the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
 
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
@@ -113,6 +113,43 @@ live value. Pick one and the tile shows that metric, captioned
 `<metric> · <meter>`. With **Loudest meter**, the list is the loudest meter's, and
 once a metric is picked, "loudest" is judged on that metric. A picked metric the
 meter stops reporting reads `—` and names it, never another metric's number.
+
+### Needs attention
+
+**Needs attention** lists what is wrong right now, one row per problem: a dot,
+what it is, the reason, **Snooze**, and the fix as a button. Everything healthy
+folds into one line beneath it ("5 of 6 screens · 7 of 8 mics · ProPresenter ·
+Planning Center · Resi streaming"; a streaming platform says "streaming" or
+"idle"). With nothing wrong the tile is captioned **Needs attention**, says
+**All clear** with a green dot, and puts that line beneath it. It is on a new
+Home by default, in place of Readiness, and **Add widget** offers both; a Home
+somebody has edited is left as it is. Placed on a wall or console, it draws the
+same rows with no buttons.
+
+A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
+takes the colour of the worst problem showing. At the medium size the list is
+three rows and **+N more**, which opens the rest inside the tile.
+
+| Problem | When it appears | Severity | The fix |
+|---|---|---|---|
+| Readiness | Each readiness check that fails, in the order to fix them (Planning Center, a plan, a view of your own, every screen has a view). "Screens online" is not repeated here: the next row says it per screen | Warn | The page and control the check names |
+| Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
+| Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
+| Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
+| Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which presses the built-in recording command in place, so Simulate and Disarm apply as they do to the Recording tile |
+| Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
+
+A source that has not answered yet adds nothing: the page does not tell you to
+fix something it has not heard about, and a half-loaded Home draws no severity
+until it knows whether a service is live.
+
+**Snooze** hides one problem until the next service starts, for everyone: the
+booth and the iPad agree on what is handled. Outside Planning Center it lasts
+12 hours, and with it a snooze still lapses after 7 days if no service starts
+in that time. At most 500 can be held at once. A problem that clears and comes back stays snoozed, but one that gets
+worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
+lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
+configuration backup and restoring one does not bring any back.
 
 ### Expanding a tile
 
