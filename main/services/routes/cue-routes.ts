@@ -312,7 +312,8 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       error(res, `Companion has no page ${wanted}`, 404);
       return;
     }
-    json(res, { ok: true, ...view, cachedAt: result.cachedAt });
+    // The variables in this page's keys, as Companion shows them now. Only this page's.
+    json(res, { ok: true, ...(await companionApi.withLiveText(view)), cachedAt: result.cachedAt });
     return;
   }
 

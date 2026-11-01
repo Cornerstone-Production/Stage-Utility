@@ -24,7 +24,7 @@
 // jsdom loads no stylesheet and measures nothing, so the grid's overflow and the
 // popover's placement are driven in a browser, not unit-tested.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
 import type { CompanionPageKey, CompanionPageSummary, CompanionPageView } from "@main/services/companion-export";
@@ -219,10 +219,13 @@ export interface CompanionPick {
   disabled?: boolean;
 }
 
-/** One key's own words: the label, or what the reference points at. */
+/** What a key says, on one line: its text as Companion draws it, line breaks as spaces. */
+export const keyText = (k: Pick<CompanionPageKey, "text">): string => k.text.replace(/\s*\n\s*/g, " ");
+
+/** One key's own words: its text, or what the reference points at. */
 function keyTitle(k: CompanionPageKey, page: number): string {
   const where = `p${page} r${k.row} c${k.col}`;
-  const what = k.label || "(no label)";
+  const what = keyText(k) || "(no label)";
   return k.kind === "reference" ? `${what} · reference · ${where}` : `${what} · ${where}`;
 }
 
@@ -234,7 +237,15 @@ function KeyFace({ k }: { k: CompanionPageKey }): ReactNode {
   return (
     <>
       {k.icon && <img src={k.icon} alt="" draggable={false} className="min-h-0 max-h-[55%] max-w-full flex-1 object-contain" />}
-      <span className={cn("w-full min-w-0 [overflow-wrap:anywhere]", k.icon ? "line-clamp-1" : "line-clamp-3")}>{k.label}</span>
+      <span
+        className={cn(
+          "w-full min-w-0 whitespace-pre-line [overflow-wrap:anywhere]",
+          // Companion's own size is the key's to keep: the box clips what does not fit.
+          k.size === null && (k.icon ? "line-clamp-1" : "line-clamp-3"),
+        )}
+      >
+        {k.text}
+      </span>
       {k.kind === "reference" && (
         <span
           aria-hidden="true"
@@ -249,7 +260,11 @@ function KeyFace({ k }: { k: CompanionPageKey }): ReactNode {
 
 const KEY_CHROME =
   "relative flex aspect-square min-w-0 flex-col items-center justify-center gap-px overflow-hidden rounded-[3px] p-0.5 text-center " +
-  "bg-(--su-companion-key) text-(--su-companion-key-fg) text-[9px] font-semibold leading-[1.1]";
+  "bg-(--su-companion-key) text-(--su-companion-key-fg) font-semibold leading-[1.1] [container-type:inline-size]";
+
+/** Auto-fit text is a fixed small size; Companion's own size is a percentage of the key's width, never under 6px. */
+const AUTO_SIZE = "text-[9px]";
+const OWN_SIZE = "text-[length:max(6px,calc(var(--key-size)*1cqw))]";
 
 /** WCAG relative luminance of a #rrggbb colour, or null when it is not one. */
 function luminance(hex: string): number | null {
@@ -286,11 +301,26 @@ export function readableText(bg: string | null, fg: string | null): string | nul
   return contrast(b, 1) >= contrast(b, 0) ? "#ffffff" : "#000000";
 }
 
-/** Companion's own colours for a key: set per key, because they are Companion's, not the app's. */
-const colours = (k: CompanionPageKey) => {
+const ALIGN_H = { left: "flex-start", center: "center", right: "flex-end" } as const;
+const ALIGN_V = { top: "flex-start", center: "center", bottom: "flex-end" } as const;
+
+/**
+ * Companion's own look for a key, set per key because it is Companion's, not the app's:
+ * its colours, where its text sits, and (as a custom property the size class reads) its size.
+ */
+const colours = (k: CompanionPageKey): CSSProperties => {
   const fg = readableText(k.bg, k.fg);
-  return { ...(k.bg ? { backgroundColor: k.bg } : {}), ...(fg ? { color: fg } : {}) };
+  return {
+    ...(k.bg ? { backgroundColor: k.bg } : {}),
+    ...(fg ? { color: fg } : {}),
+    ...(k.halign ? { alignItems: ALIGN_H[k.halign], textAlign: k.halign } : {}),
+    ...(k.valign ? { justifyContent: ALIGN_V[k.valign] } : {}),
+    ...(k.size !== null ? ({ "--key-size": k.size } as CSSProperties) : {}),
+  };
 };
+
+/** The size class of a key: its own, or the auto-fit one. */
+const sizeClass = (k: CompanionPageKey): string => (k.size === null ? AUTO_SIZE : OWN_SIZE);
 
 export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pick?: CompanionPick }) {
   const byPlace = useMemo(() => new Map<string, CompanionPageKey>(view.keys.map((k) => [`${k.row},${k.col}`, k])), [view]);
@@ -306,7 +336,7 @@ export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pic
       const where = `p${view.page} r${k.row} c${k.col}`;
       if (!pick) {
         cells.push(
-          <div key={id} data-companion-key={where} data-key-kind={k.kind} title={keyTitle(k, view.page)} style={colours(k)} className={KEY_CHROME}>
+          <div key={id} data-companion-key={where} data-key-kind={k.kind} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, sizeClass(k))}>
             <KeyFace k={k} />
           </div>,
         );
@@ -315,7 +345,7 @@ export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pic
       if (!k.pickable) {
         // Drawn, dimmed, and not a control: it presses nothing.
         cells.push(
-          <span key={id} aria-hidden="true" data-companion-key={where} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, "opacity-50")}>
+          <span key={id} aria-hidden="true" data-companion-key={where} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, sizeClass(k), "opacity-50")}>
             <KeyFace k={k} />
           </span>,
         );
@@ -341,6 +371,7 @@ export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pic
           style={colours(k)}
           className={cn(
             KEY_CHROME,
+            sizeClass(k),
             "hover:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             picked && "outline outline-2 -outline-offset-2 outline-(--su-companion-key-fg) ring-2 ring-accent",
           )}

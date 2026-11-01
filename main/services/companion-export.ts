@@ -99,6 +99,9 @@ export interface CompanionPageSummary {
 }
 
 /** What one key on a page is. */
+export type TextAlign = "left" | "center" | "right";
+export type TextVAlign = "top" | "center" | "bottom";
+
 export type CompanionKeyKind = "button" | "reference" | "page-control";
 
 /** One key as the picker draws it. Icons travel here and never on CompanionButton. */
@@ -106,7 +109,20 @@ export interface CompanionPageKey {
   row: number;
   col: number;
   kind: CompanionKeyKind;
+  /** The text with whitespace collapsed: identity, search and naming. Never what the key shows. */
   label: string;
+  /**
+   * The text as Companion draws it: line breaks kept (a literal newline or a typed `\n`),
+   * whitespace within a line collapsed. `$(...)` variables are still raw here; the page
+   * route fills them from Companion (see `vars`). An expression layer shows as `label` does.
+   */
+  text: string;
+  /** Companion's own text size, as a percentage of the key's height, or null for auto-fit. */
+  size: number | null;
+  halign: TextAlign | null;
+  valign: TextVAlign | null;
+  /** The variables `text` names that Companion can answer for, as `label:name`, distinct. */
+  vars: string[];
   bg: string | null;
   fg: string | null;
   /** A `data:image/` URI, or null. Companion's built-in `$(image:...)` names are not images here. */
@@ -153,19 +169,121 @@ export function exportBuild(raw: unknown): string | null {
   return build || null;
 }
 
-/** Every text a button draws, joined — 5.x text layers first, 3.x flat style too. */
-function labelOf(control: Record<string, unknown>): string {
+/** One text a button draws. An expression is Companion's to evaluate, so it is shown as written. */
+interface TextPart {
+  text: string;
+  expression: boolean;
+}
+
+/** Every text a button draws, in order — the 3.x flat style first, then each 5.x text layer. */
+function textPartsOf(control: Record<string, unknown>): TextPart[] {
   const style = rec(control.style);
-  const parts: string[] = [];
-  if (typeof style.text === "string") parts.push(style.text);
+  const parts: TextPart[] = [];
+  if (typeof style.text === "string") parts.push({ text: style.text, expression: false });
   for (const layer of arr(style.layers)) {
     const l = rec(layer);
     if (l.type !== "text") continue;
     const t = l.text;
-    if (typeof t === "string") parts.push(t);
-    else if (typeof rec(t).value === "string") parts.push(rec(t).value as string);
+    if (typeof t === "string") parts.push({ text: t, expression: false });
+    else if (typeof rec(t).value === "string") parts.push({ text: rec(t).value as string, expression: rec(t).isExpression === true });
   }
-  return collapse(parts.join(" "));
+  return parts;
+}
+
+/** Every text a button draws, joined — 5.x text layers first, 3.x flat style too. */
+function labelOf(control: Record<string, unknown>): string {
+  return collapse(textPartsOf(control).map((p) => p.text).join(" "));
+}
+
+/** A line's inner whitespace collapsed, its ends trimmed. */
+const tidyLine = (line: string): string => line.replace(/[ \t\u00a0]+/g, " ").trim();
+
+/**
+ * Text as Companion draws it: a newline, or the two characters `\n` typed into the field,
+ * breaks the line; nothing else about the whitespace survives. An expression keeps the
+ * collapsed form `label` has, because it is not text until Companion evaluates it.
+ */
+function displayTextOf(control: Record<string, unknown>): { text: string; vars: string[] } {
+  const lines: string[] = [];
+  const vars = new Set<string>();
+  for (const part of textPartsOf(control)) {
+    if (part.expression) {
+      const flat = collapse(part.text);
+      if (flat) lines.push(flat);
+      continue;
+    }
+    for (const line of part.text.replace(/\\n/g, "\n").split(/\r\n|\r|\n/)) lines.push(tidyLine(line));
+    for (const ref of variableRefsIn(part.text)) vars.add(ref);
+  }
+  // Blank lines at either end are padding; one inside is a deliberate gap.
+  while (lines.length && lines[0] === "") lines.shift();
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return { text: lines.join("\n"), vars: [...vars] };
+}
+
+/** Variables Companion does not hold on its API: they are about the button being drawn. */
+const LOCAL_LABELS = new Set(["this", "local", "image"]);
+
+/** `$(label:name)`: the whole reference, for a global replace. */
+const VARIABLE_TOKEN = /\$\(([^()\s]+)\)/g;
+
+/**
+ * The distinct variables a text names that Companion can be asked for, as written
+ * (`Stage_Utility:people_occupancy`, `custom:x`, `internal:time_hms`). A button's own
+ * `$(this:...)` and `$(local:...)` are not readable through the API, so they stay raw.
+ */
+export function variableRefsIn(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(VARIABLE_TOKEN)) {
+    const ref = m[1]!;
+    const parsed = parseVariableRef(ref);
+    if (!parsed || !ref.includes(":")) continue;
+    if (parsed.kind === "module" && LOCAL_LABELS.has(parsed.label.toLowerCase())) continue;
+    out.add(ref);
+  }
+  return [...out];
+}
+
+/** `text` with each `$(ref)` whose value is known replaced by it. An unknown one is left as written. */
+export function substituteVariables(text: string, values: ReadonlyMap<string, string>): string {
+  return text.replace(VARIABLE_TOKEN, (whole, ref: string) => values.get(ref) ?? whole);
+}
+
+const H_ALIGNS: readonly string[] = ["left", "center", "right"];
+const V_ALIGNS: readonly string[] = ["top", "center", "bottom"];
+
+/** Companion's legacy `size` option is points on a 60 point key; a 5.x `fontsize` is a percentage of the key. */
+const PT_TO_PERCENT = 100 / 60;
+
+/**
+ * How the first text layer that says something is laid out: the size, as a percentage of
+ * the key (null for auto-fit, which a 5.x layer says with shrink-to-fit on or an expression),
+ * and where in the key it sits. A 3.x button keeps the same three flat as `size` and `alignment`.
+ */
+function textLayoutOf(control: Record<string, unknown>): { size: number | null; halign: TextAlign | null; valign: TextVAlign | null } {
+  const style = rec(control.style);
+  for (const layer of arr(style.layers)) {
+    const l = rec(layer);
+    if (l.type !== "text" || rec(l.enabled).value === false) continue;
+    const t = rec(l.text);
+    if (typeof l.text !== "string" && !(typeof t.value === "string" && t.value.trim() !== "")) continue;
+    const fs = rec(l.fontsize);
+    const shrink = rec(l.fontsizeAllowShrink).value === true;
+    const ha = rec(l.halign);
+    const va = rec(l.valign);
+    return {
+      size: !shrink && fs.isExpression !== true && typeof fs.value === "number" && fs.value > 0 && Number.isFinite(fs.value) ? fs.value : null,
+      halign: ha.isExpression !== true && H_ALIGNS.includes(String(ha.value)) ? (ha.value as TextAlign) : null,
+      valign: va.isExpression !== true && V_ALIGNS.includes(String(va.value)) ? (va.value as TextVAlign) : null,
+    };
+  }
+  const pt = typeof style.size === "string" || typeof style.size === "number" ? Number(style.size) : NaN;
+  const [h, v] = (typeof style.alignment === "string" ? style.alignment : "").split(":");
+  return {
+    size: Number.isFinite(pt) && pt > 0 ? Math.round(pt * PT_TO_PERCENT * 10) / 10 : null,
+    halign: H_ALIGNS.includes(h ?? "") ? (h as TextAlign) : null,
+    valign: V_ALIGNS.includes(v ?? "") ? (v as TextVAlign) : null,
+  };
 }
 
 /**
@@ -438,7 +556,7 @@ function isPressable(control: Record<string, unknown>): boolean {
 
 /** A control's own look: what its own layers draw. */
 function ownLookOf(control: Record<string, unknown>) {
-  return { label: labelOf(control), ...colorsOf(control), icon: iconOf(control) };
+  return { label: labelOf(control), ...displayTextOf(control), ...textLayoutOf(control), ...colorsOf(control), icon: iconOf(control) };
 }
 
 /** Every pressable-or-not control in an export by "page/row/col", so a location can be followed. */
@@ -497,6 +615,19 @@ function colorsOf(control: Record<string, unknown>): { bg: string | null; fg: st
   return { bg: layerColor(control, "box"), fg: layerColor(control, "text") };
 }
 
+/** What a key with nothing to draw looks like: a reference that points nowhere, a page control. */
+const noLook = (): Pick<CompanionPageKey, "label" | "text" | "size" | "halign" | "valign" | "vars" | "bg" | "fg" | "icon"> => ({
+  label: "",
+  text: "",
+  size: null,
+  halign: null,
+  valign: null,
+  vars: [],
+  bg: null,
+  fg: null,
+  icon: null,
+});
+
 const MIN_COLS = 8;
 const MIN_ROWS = 4;
 /** The most columns and rows a page is drawn with. A real surface is a few dozen keys; the
@@ -538,7 +669,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
         const target = parseLocation(rec(control.options).location);
         const pointed = target ? controlAt.get(`${target.page}/${target.row}/${target.col}`) : undefined;
         const resolved = pointed && isPressable(pointed) ? pointed : null;
-        const look = resolved ? lookOf(resolved, controlAt) : { label: "", bg: null, fg: null, icon: null };
+        const look = resolved ? lookOf(resolved, controlAt) : noLook();
         keys.push({
           row,
           col,
@@ -558,7 +689,7 @@ export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; v
           pickable: isListed(control, look.label),
         });
       } else {
-        keys.push({ row, col, kind: "page-control", label: "", bg: null, fg: null, icon: null, pickable: false });
+        keys.push({ row, col, kind: "page-control", ...noLook(), pickable: false });
       }
     }
     summaries.push({ page: n, name, labelled });

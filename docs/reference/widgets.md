@@ -618,7 +618,7 @@ arrows beside it, filters by number or name and leaves out pages with nothing on
 them, so an install with a hundred pages stays usable. The page is drawn as
 Companion draws it: its own colours, an icon above the label, at least 8 keys by 4,
 and wider than that only as far as the page uses, scrolling sideways inside the
-panel. A page-number, page-up or page-down key is drawn blank and cannot be
+panel. A key's text is drawn as Companion draws it, with its line breaks, size and alignment, and its variables filled in with their current values. A page-number, page-up or page-down key is drawn blank and cannot be
 picked. A reference key is drawn as the button it points at, marked **ref**, and
 picking it presses that button. The picked button's page, row and column are shown
 under the grid. There are no typed coordinates: a button that is not in the export

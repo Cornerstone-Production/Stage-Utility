@@ -1406,6 +1406,41 @@ describe("the button and pair endpoints", () => {
     assert.equal(icon.keys.filter((k) => k.icon?.startsWith("data:image/png")).length, 1);
   });
 
+  test("a page's keys carry the live values of their variables, and only that page's are read", async () => {
+    const real = companionDeps.fetch;
+    const reads: string[] = [];
+    const key = (text: string) => ({ type: "button-layered", style: { layers: [{ type: "text", text: { value: text, isExpression: false } }] } });
+    const doc = {
+      pages: {
+        "1": { name: "One", controls: { "0": { "0": key("Seats $(Hall:free)"), "1": key("Plain") } } },
+        "2": { name: "Two", controls: { "0": { "0": key("Other $(Elsewhere:n)") } } },
+      },
+    };
+    companionDeps.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/api/variable/")) {
+        reads.push(url);
+        return new Response("42", { status: 200 });
+      }
+      return Response.json(doc);
+    };
+    companionApi.invalidate();
+    try {
+      const r = await callRoute(cueRoutes, "/api/companion/pages/1");
+      const keys = (r.json as { keys: { label: string; text: string }[] }).keys;
+      assert.deepEqual(
+        keys.map((k) => `${k.label}|${k.text}`),
+        ["Seats $(Hall:free)|Seats 42", "Plain|Plain"],
+        "the label is the identity string and stays raw; the text is what the key shows",
+      );
+      assert.equal(reads.length, 1, reads.join(" "));
+      assert.match(reads[0]!, /\/api\/variable\/Hall\/free\/value$/);
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+
   test("a page Companion does not have is 404, and an unreachable Companion is 200 with the reason", async () => {
     assert.equal((await callRoute(cueRoutes, "/api/companion/pages/99")).status, 404);
     const real = companionDeps.fetch;

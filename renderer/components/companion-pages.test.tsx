@@ -41,6 +41,11 @@ type Key = {
   col: number;
   kind: "button" | "reference" | "page-control";
   label: string;
+  text: string;
+  size: number | null;
+  halign: "left" | "center" | "right" | null;
+  valign: "top" | "center" | "bottom" | null;
+  vars: string[];
   bg: string | null;
   fg: string | null;
   icon: string | null;
@@ -52,6 +57,11 @@ const key = (row: number, col: number, over: Partial<Key> = {}): Key => ({
   col,
   kind: "button",
   label: "Key",
+  text: over.label ?? "Key",
+  size: null,
+  halign: null,
+  valign: null,
+  vars: [],
   bg: null,
   fg: null,
   icon: null,
@@ -254,6 +264,39 @@ describe("the grid, read-only", () => {
     assert.equal(keyAt("p1 r0 c2")!.style.color, "rgb(255, 255, 255)", "near-equal dark colours stayed unreadable");
     assert.equal(keyAt("p1 r0 c3")!.style.color, "rgb(255, 255, 0)", "a readable pair was overridden");
     assert.equal(keyAt("p1 r0 c4")!.style.color, "rgb(255, 255, 255)", "black text on the default dark key stayed unreadable");
+  });
+
+  test("a key draws its text as Companion does: line breaks kept, not collapsed", () => {
+    const view = { page: 1, name: "Text", cols: 8, rows: 4, keys: [key(0, 0, { label: "Occupants 12", text: "Occupants\n12" })] };
+    render(<CompanionPageGrid view={view} />);
+    const face = keyAt("p1 r0 c0")!.querySelector("span")!;
+    assert.equal(face.textContent, "Occupants\n12", "the line break was not carried to the face");
+    assert.match(face.getAttribute("class") ?? "", /whitespace-pre-line/, "the face collapses a line break to a space");
+    assert.match(keyAt("p1 r0 c0")!.getAttribute("title") ?? "", /^Occupants 12 · p1 r0 c0$/);
+  });
+
+  test("Companion's own text size and alignment are kept; auto-fit keeps the clamp", () => {
+    const view = {
+      page: 1,
+      name: "Size",
+      cols: 8,
+      rows: 4,
+      keys: [
+        key(0, 0, { label: "Big", size: 40, halign: "left", valign: "bottom" }),
+        key(0, 1, { label: "Auto" }),
+      ],
+    };
+    render(<CompanionPageGrid view={view} />);
+    const big = keyAt("p1 r0 c0")!;
+    assert.equal(big.style.getPropertyValue("--key-size"), "40");
+    assert.match(big.getAttribute("class") ?? "", /var\(--key-size\)/, "the size is set but nothing reads it");
+    assert.equal(big.style.textAlign, "left");
+    assert.equal(big.style.alignItems, "flex-start");
+    assert.equal(big.style.justifyContent, "flex-end");
+    assert.doesNotMatch(big.querySelector("span")!.getAttribute("class") ?? "", /line-clamp/, "a sized key is still clamped to three lines");
+    const auto = keyAt("p1 r0 c1")!;
+    assert.equal(auto.style.getPropertyValue("--key-size"), "", "an auto-fit key was given a size");
+    assert.match(auto.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-3/);
   });
 
   test("an icon is drawn above its label", () => {
