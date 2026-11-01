@@ -673,6 +673,94 @@ describe("presets", () => {
   });
 });
 
+describe("a Run an action Button in an imported view", () => {
+  const withActionButton = () =>
+    bundle({
+      views: [{
+        id: "view-1", name: "Booth", kind: "custom", createdAt: 0,
+        layout: {
+          version: 1, canvas: { width: 1920, height: 1080 },
+          objects: [{
+            id: "o-rec", x: 0.1, y: 0.1, w: 0.2, h: 0.1, z: 1,
+            config: { type: "action-button", actionId: "obs.record", params: { mode: "toggle" }, label: "Record" },
+          }],
+        },
+      }],
+    });
+
+  test("becomes a cue Button bound to a rule of its own, under the ids the import gave, and says so", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const lines = captureConsole(t, "log");
+    const report = await applyViewBundle(withActionButton());
+    const [stored] = await viewsStore.load();
+    assert.equal(stored!.id, report.views[0]!.id);
+    const button = stored!.layout!.objects[0]!;
+    assert.equal(button.config.type, "cue-button", "the Button still runs its action directly, ignoring Simulate and Disarm");
+    assert.equal((button.config as { cue: string }).cue, "btn_record");
+    const rules = await automationStore.loadRules();
+    assert.equal(rules.length, 1);
+    assert.deepEqual(rules[0]!.ownedBy, { viewId: stored!.id, objectId: button.id });
+    assert.equal(rules[0]!.trigger.params.name, "btn_record");
+    assert.deepEqual(rules[0]!.action, { id: "obs.record", params: { mode: "toggle" } });
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[automation]")),
+      ["[automation] converted 1 Run an action button to its own command on import (Booth 1)"],
+    );
+  });
+
+  test("rules that cannot be saved import the Button as it was, and the report and the log say so", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const real = automationStore.saveRules.bind(automationStore);
+    automationStore.saveRules = async () => {
+      throw new Error("read-only file system");
+    };
+    const lines = captureConsole(t, "log", "error");
+    let report;
+    try {
+      report = await applyViewBundle(withActionButton());
+    } finally {
+      automationStore.saveRules = real;
+    }
+    assert.equal((await viewsStore.load())[0]!.layout!.objects[0]!.config.type, "action-button");
+    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported unconverted")), JSON.stringify(report.skipped));
+    assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
+  });
+
+  test("a views save that fails after the rules were written refuses the import with its reason and names the cues kept", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => {
+      throw new Error("disk full");
+    }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(withActionButton()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.deepEqual((await automationStore.loadRules()).map((r) => r.trigger.params.name), ["btn_record"]);
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[automation]")),
+      ["[automation] import refused after its cues were written; kept btn_record with no Button, delete them from Automation"],
+    );
+  });
+
+  test("a second import of the same file gets its own cue and its own rule", async () => {
+    const { automationStore } = await import("./automation-store.js");
+    await automationStore.saveRules([]);
+    await applyViewBundle(withActionButton());
+    await applyViewBundle(withActionButton());
+    const cues = (await automationStore.loadRules()).map((r) => r.trigger.params.name).sort();
+    assert.deepEqual(cues, ["btn_record", "btn_record_2"]);
+  });
+});
+
 // NOT GUARDED HERE, deliberately: view-import clones the patch file before
 // touching it, because patchStore.load() hands back the DataStore's own cached
 // object. A test for that clone could not be made to fail — as the code stands

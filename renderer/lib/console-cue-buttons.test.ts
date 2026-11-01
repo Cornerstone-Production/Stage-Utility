@@ -16,7 +16,10 @@ import {
   consoleButtonDeps,
   consolesWithLayouts,
   fitFontSize,
+  repointCueButtons,
+  repointLogLines,
   withCueButton,
+  withCueRepointed,
 } from "./console-cue-buttons.js";
 
 const obj = (over: Partial<LayoutObject> & { config?: LayoutObject["config"] }): LayoutObject => ({
@@ -111,7 +114,7 @@ describe("withCueButton", () => {
 
   test("any kind of button is a button to copy, and an object that is not one is not", () => {
     const l = layoutOf(
-      obj({ id: "act", config: { type: "action-button", actionId: "log.message" }, w: 0.5, h: 0.2, y: 0.1 }),
+      obj({ id: "act", config: { type: "rosstalk-button", targetId: null, commandId: null, params: {}, label: "RossTalk" }, w: 0.5, h: 0.2, y: 0.1 }),
       obj({ id: "clock", w: 0.9, h: 0.05, y: 0.4 }),
     );
     const b = added(withCueButton(l, "x", "").layout);
@@ -249,5 +252,163 @@ describe("addCueButtonToConsoles", () => {
     const results = await addCueButtonToConsoles(["a"], "x", "");
     assert.equal(results[0].ok, false);
     assert.equal(results[0].error, "server down");
+  });
+});
+
+describe("withCueRepointed", () => {
+  const cueAt = (id: string, cue: string, extra: Partial<LayoutObject> = {}): LayoutObject =>
+    obj({ id, config: { type: "cue-button", cue }, ...extra });
+
+  test("points only the listed Buttons that still name the old command", () => {
+    const l = layoutOf(cueAt("a", "old_name"), cueAt("b", "old_name"), cueAt("c", "something_else"), cueAt("d", "OLD_NAME "));
+    const { layout, count } = withCueRepointed(l, new Set(["a", "c", "d"]), ["old_name"], "new_name");
+    assert.equal(count, 2, "a (listed, names it) and d (listed, same name in other case); b is not listed and c names another");
+    assert.deepEqual(
+      layout.objects.map((o) => (o.config as { cue?: string }).cue),
+      ["new_name", "old_name", "something_else", "new_name"],
+    );
+  });
+
+  test("reaches a Button inside a container, and leaves the container's other children whole", () => {
+    const inner = cueAt("inner", "old_name");
+    const sibling = obj({ id: "sib" });
+    const l = layoutOf(obj({ id: "box", children: [sibling, inner] }));
+    const { layout, count } = withCueRepointed(l, new Set(["inner"]), ["old_name"], "new_name");
+    assert.equal(count, 1);
+    const kids = layout.objects[0]!.children!;
+    assert.equal(kids[0], sibling, "an untouched child is the same object");
+    assert.equal((kids[1]!.config as { cue?: string }).cue, "new_name");
+  });
+
+  test("changes nothing, and returns the very same layout, when nothing matches", () => {
+    const l = layoutOf(cueAt("a", "other"));
+    const out = withCueRepointed(l, new Set(["a"]), ["old_name"], "new_name");
+    assert.equal(out.count, 0);
+    assert.equal(out.layout, l);
+  });
+
+  test("never repoints an object that is not a cue Button, whatever it holds", () => {
+    const l = layoutOf(obj({ id: "a", config: { type: "label", cue: "old_name" } as unknown as LayoutObject["config"] }));
+    assert.equal(withCueRepointed(l, new Set(["a"]), ["old_name"], "new_name").count, 0);
+  });
+});
+
+describe("repointCueButtons", () => {
+  const original = { ...consoleButtonDeps };
+  afterEach(() => Object.assign(consoleButtonDeps, original));
+
+  const viewWith = (id: string, name: string, ...objects: LayoutObject[]): View =>
+    ({ id, name, kind: "custom", surface: "console", layout: layoutOf(...objects), layoutRev: 4 }) as unknown as View;
+  const btn = (id: string, cue: string) => obj({ id, config: { type: "cue-button", cue } });
+
+  test("writes each view once, with its own revision, and reports what each did", async () => {
+    const views = [viewWith("a", "Booth", btn("o1", "old"), btn("o2", "old")), viewWith("b", "FOH", btn("o3", "old"))];
+    const written: { id: string; rev: number | undefined; cues: unknown[] }[] = [];
+    consoleButtonDeps.readViews = async () => views;
+    consoleButtonDeps.writeLayout = async (id, layout, rev) => {
+      written.push({ id, rev, cues: layout.objects.map((o) => (o.config as { cue?: string }).cue) });
+    };
+    const results = await repointCueButtons(
+      [{ viewId: "a", objectId: "o1" }, { viewId: "a", objectId: "o2" }, { viewId: "b", objectId: "o3" }],
+      ["old"],
+      "new",
+    );
+    assert.deepEqual(results.map((r) => [r.name, r.ok, r.count]), [["Booth", true, 2], ["FOH", true, 1]]);
+    assert.deepEqual(written, [
+      { id: "a", rev: 4, cues: ["new", "new"] },
+      { id: "b", rev: 4, cues: ["new"] },
+    ]);
+  });
+
+  test("a view that refuses is named with the reason, and the next view is still written", async () => {
+    consoleButtonDeps.readViews = async () => [viewWith("a", "Booth", btn("o1", "old")), viewWith("b", "FOH", btn("o2", "old"))];
+    const wrote: string[] = [];
+    consoleButtonDeps.writeLayout = async (id) => {
+      if (id === "a") throw Object.assign(new Error("This view was changed by someone else"), { status: 400 });
+      wrote.push(id);
+    };
+    const results = await repointCueButtons([{ viewId: "a", objectId: "o1" }, { viewId: "b", objectId: "o2" }], ["old"], "new");
+    assert.deepEqual(results.map((r) => [r.name, r.ok]), [["Booth", false], ["FOH", true]]);
+    assert.match(results[0]!.error ?? "", /changed by someone else/);
+    assert.deepEqual(wrote, ["b"]);
+  });
+
+  test("a 409 is retried once from a fresh read, and a second one is a refusal", async () => {
+    let reads = 0;
+    consoleButtonDeps.readViews = async () => {
+      reads++;
+      return [viewWith("a", "Booth", btn("o1", "old"))];
+    };
+    let writes = 0;
+    consoleButtonDeps.writeLayout = async () => {
+      writes++;
+      if (writes <= 2) throw Object.assign(new Error("stale"), { status: 409 });
+    };
+    const [r] = await repointCueButtons([{ viewId: "a", objectId: "o1" }], ["old"], "new");
+    assert.equal(r!.ok, false);
+    assert.equal(reads, 2, "one retry, from a fresh read");
+    assert.equal(writes, 2);
+  });
+
+  test("a view that no longer exists, or whose Button no longer names the command, is reported or skipped without a write", async () => {
+    consoleButtonDeps.readViews = async () => [viewWith("b", "FOH", btn("o2", "already_changed"))];
+    let writes = 0;
+    consoleButtonDeps.writeLayout = async () => {
+      writes++;
+    };
+    const results = await repointCueButtons([{ viewId: "gone", objectId: "o1" }, { viewId: "b", objectId: "o2" }], ["old"], "new");
+    assert.deepEqual(results.map((r) => [r.viewId, r.ok, r.count]), [["gone", false, 0], ["b", true, 0]]);
+    assert.match(results[0]!.error ?? "", /no longer exists/);
+    assert.equal(writes, 0);
+  });
+});
+
+describe("repointLogLines", () => {
+  const ok = (name: string, count: number) => ({ viewId: name, name, ok: true, count });
+  const no = (name: string, error: string) => ({ viewId: name, name, ok: false, count: 0, error });
+
+  test("a short head line with a count and the screens, and a line of its own for each refusal", () => {
+    const lines = repointLogLines("old", "new", [ok("Booth", 2), ok("Home", 1), no("FOH", "changed by someone else"), no("Lobby", "no such view")]);
+    assert.deepEqual(lines, [
+      "renamed old to new; repointed 3 buttons on Booth, Home; 2 refused",
+      "could not point the buttons on FOH at new: changed by someone else",
+      "could not point the buttons on Lobby at new: no such view",
+    ]);
+  });
+
+  test("no line can outgrow the log route's 300 characters, and a long reason is still said, cut", () => {
+    const long = "x".repeat(600);
+    const screens = Array.from({ length: 9 }, (_, i) => `A screen with a rather long name number ${i}`);
+    const lines = repointLogLines("old_name", "new_name", [...screens.map((n) => ok(n, 1)), ...screens.map((n) => no(n, long))]);
+    for (const l of lines) assert.ok(l.length <= 300, `${l.length} characters: ${l.slice(0, 80)}`);
+    assert.ok(lines[0]!.includes("; 9 refused"), "the refused count is cut off the head line");
+    assert.ok(lines[1]!.includes("xxxx"), "the reason is gone");
+    assert.ok(lines.some((l) => l.startsWith("3 more screens refused")), "refusals past the cap are not counted");
+  });
+
+  test("two long command names cannot push the head line past 300 characters", () => {
+    const long = "c".repeat(200);
+    const screens = Array.from({ length: 5 }, (_, i) => `A screen with a rather long name number ${i}`);
+    const lines = repointLogLines(long, long + "x", [...screens.map((n) => ok(n, 1)), no("Lobby", "refused")]);
+    for (const l of lines) assert.ok(l.length <= 300, `${l.length} characters`);
+    assert.ok(lines[0]!.includes("…"), "the names were not cut");
+    assert.ok(lines[1]!.length < 300 && !lines[1]!.includes("c".repeat(70)), "the refusal line carries the whole name");
+  });
+
+  test("nothing involved, nothing said", () => {
+    assert.deepEqual(repointLogLines("a", "b", []), []);
+  });
+
+  test("a rename that only some screens took says none were refused by saying nothing of it", () => {
+    assert.deepEqual(repointLogLines("a", "b", [ok("Booth", 1)]), ["renamed a to b; repointed 1 button on Booth"]);
+  });
+});
+
+describe("withCueRepointed with several names", () => {
+  test("points a Button on any of the names: the command's own and its former names", () => {
+    const l = layoutOf(obj({ id: "a", config: { type: "cue-button", cue: "now" } }), obj({ id: "b", config: { type: "cue-button", cue: "was" } }), obj({ id: "c", config: { type: "cue-button", cue: "other" } }));
+    const { layout, count } = withCueRepointed(l, new Set(["a", "b", "c"]), ["now", "was"], "next");
+    assert.equal(count, 2);
+    assert.deepEqual(layout.objects.map((o) => (o.config as { cue?: string }).cue), ["next", "next", "other"]);
   });
 });

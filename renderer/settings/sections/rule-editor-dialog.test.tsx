@@ -58,7 +58,7 @@ const REGISTRY = {
       label: "Called by name (voice or HTTP)",
       channel: "cue:call",
       params: [
-        { key: "name", label: "Cue name", type: "string" },
+        { key: "name", label: "Command name", type: "string" },
         { key: "says", label: "Spoken as", type: "string", optional: true },
         { key: "room", label: "Room", type: "string", optional: true },
         { key: "stateVariable", label: "State variable", type: "string", optional: true },
@@ -216,7 +216,14 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
+/**
+ * The Automation page is tabs now: commands (called-by-name rules) on one, every
+ * other rule on the next. These tests care about the editor, not the tab, so the
+ * page opens on the tab holding the rules the test seeded. A seed with both
+ * kinds opens Commands.
+ */
 async function mount() {
+  const tab = RULES.some((r) => r.trigger.id === CALL_TRIGGER_ID) || RULES.length === 0 ? "commands" : "rules";
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   // ConfirmHost as well as the section: the app mounts one beside the toaster,
   // and Delete asks through it. Without it the promise never resolves and the
@@ -228,7 +235,7 @@ async function mount() {
       React.createElement(
         TooltipProvider,
         null,
-        React.createElement(AutomationSection, {}),
+        React.createElement(AutomationSection, { tab }),
         React.createElement(ConfirmHost, {}),
       ),
     ),
@@ -345,7 +352,7 @@ describe("one rule", () => {
     await openRow("Rule take_screens");
     assert.equal(editor(), "rule-take_screens");
     assert.equal(field("Name")?.value, "Rule take_screens");
-    assert.equal(field("Cue name")?.value, "take_screens");
+    assert.equal(field("Command name")?.value, "take_screens");
     assert.equal(field("Spoken as")?.value, "the screens");
   });
 
@@ -378,14 +385,14 @@ describe("one rule", () => {
   test("Cancel throws the change away and writes nothing", async () => {
     await mount();
     await openRow("Rule take_screens");
-    await typeIn(field("Cue name"), "the_screens", "Cue name");
+    await typeIn(field("Command name"), "the_screens", "Command name");
     await press(button("Cancel"), "Cancel");
 
     assert.equal(editors(), 0, "Cancel left the editor open");
     assert.deepEqual(writes(), [], "Cancel saved the draft");
     // And re-opening shows the stored rule, not what was typed.
     await openRow("Rule take_screens");
-    assert.equal(field("Cue name")?.value, "take_screens");
+    assert.equal(field("Command name")?.value, "take_screens");
   });
 
   test("Save writes the change and closes", async () => {
@@ -447,11 +454,13 @@ describe("one rule", () => {
     });
     await settle();
 
-    await typeIn(field("Cue name"), "the_screens", "Cue name");
+    await typeIn(field("Command name"), "the_screens", "Command name");
     await press(button("Save"), "Save");
 
     const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
     assert.deepEqual(body.trigger?.params, {
+      // A rename keeps the old name as a former name.
+      aliases: "take_screens",
       name: "the_screens",
       says: "the screens",
       stateCandidates: "kasa:power_state",
@@ -488,7 +497,7 @@ describe("one rule", () => {
     await openRow("Lights at item 3");
     assert.equal(editor(), "rule-plan");
     assert.equal(document.querySelectorAll("[data-pair-settings]").length, 0);
-    assert.equal(document.querySelectorAll('[role="tab"]').length, 0);
+    assert.equal(document.querySelectorAll('[aria-label="Which half to edit"] [role="tab"]').length, 0);
   });
 });
 
@@ -520,18 +529,26 @@ describe("a pair", () => {
     assert.equal(field("Room")?.value, "Auditorium");
   });
 
+  test("a half's cue name is shown and cannot be edited: a pair is not renamed from here", async () => {
+    await mount();
+    await openPair("the projectors");
+    assert.equal(field("Command name")?.readOnly, true, "the ON half's name is editable");
+    await press(tab("Turn off"), "the Turn off tab");
+    assert.equal(field("Command name")?.readOnly, true, "the OFF half's name is editable");
+  });
+
   test("the segmented control swaps the cue name between the halves", async () => {
     await mount();
     await openPair("the projectors");
-    assert.equal(field("Cue name")?.value, "projectors_on");
+    assert.equal(field("Command name")?.value, "projectors_on");
     await press(tab("Turn off"), "the Turn off tab");
     assert.equal(
-      field("Cue name")?.value,
+      field("Command name")?.value,
       "projectors_off",
       "the Turn off tab still showed the ON half's fields",
     );
     await press(tab("Turn on"), "the Turn on tab");
-    assert.equal(field("Cue name")?.value, "projectors_on");
+    assert.equal(field("Command name")?.value, "projectors_on");
   });
 
   test("Save writes BOTH halves, the ON half first", async () => {
@@ -727,13 +744,13 @@ describe("a pair", () => {
     await mount();
     await openPair("the projectors");
     await press(tab("Turn off"), "the Turn off tab");
-    await typeIn(field("Cue name"), "beamers_off", "Cue name");
+    await typeIn(field("Spoken as"), "switch the beamers off", "Spoken as");
     await press(button("Save"), "Save");
 
     assert.equal(editors(), 1, "a refused save closed the editor");
-    assert.equal(field("Cue name")?.value, "beamers_off", "the refused draft was thrown away");
+    assert.equal(field("Spoken as")?.value, "switch the beamers off", "the refused draft was thrown away");
     await press(tab("Turn on"), "the Turn on tab");
-    assert.equal(field("Cue name")?.value, "projectors_on", "the other half's draft was thrown away");
+    assert.equal(field("Command name")?.value, "projectors_on", "the other half's draft was thrown away");
     assert.deepEqual(
       writes().map((r) => r.url.split("/").pop()),
       ["rule-projectors_on", "rule-projectors_off"],

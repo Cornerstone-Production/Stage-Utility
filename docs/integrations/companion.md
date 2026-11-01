@@ -14,7 +14,7 @@ Companion runs in **both directions**, and they are independent:
 | | |
 |---|---|
 | **In** | the Companion module connects to this app's HTTP/SSE server on port 8788. Nothing to set up here; the row counts the clients attached |
-| **Out** | with a host and port filled in, this app can press a named Companion button — for a rule, or for a cue called by voice |
+| **Out** | with a host and port filled in, this app can press a named Companion button — for a rule, or for a command called by voice |
 
 The inbound half needs no config and no enable switch. The outbound half is off
 until you fill in the host: blank means "we do not dial Companion", and every
@@ -22,7 +22,7 @@ outbound path says so rather than guessing at an address.
 
 The module marks its event stream with an `X-Companion-Module` header (or
 `?client=companion`). The server counts those streams and reports the total to
-the integration manager, which is what the settings panel's "N connected" shows.
+the integration manager, which is the count the first card's Status reports.
 The inbound half is therefore presence and guidance only — there is nothing to
 enable, and Test only reads Companion once a host is filled in below. It carries
 **no enable switch** for that reason: the server
@@ -47,22 +47,47 @@ and shows up in the module list, but the connection never starts — Companion
 reports "Connection not found or not running" and loads no config, which looks
 like a broken download rather than a version mismatch.
 
-**In Stage Utility** — Settings → Integrations → **Bitfocus Companion** shows the
-LAN IP and port split into separate copyable fields, because Companion takes host
-and port separately and cannot resolve a DNS name. A live connected-client count
-sits alongside them.
+**In Stage Utility** — Settings → Integrations → **Bitfocus Companion** is two
+cards, one for each direction.
+
+**Companion controls Stage Utility** is the inbound half. It shows the LAN IP and
+port split into separate copyable **Host** and **Port** fields, because Companion
+takes host and port separately and cannot resolve a DNS name, with a **Copy**
+beside each (on plain HTTP, where the browser has no clipboard, the field is
+selected for you to copy by hand). Beneath them is **Status**: the number of
+Companion clients connected, the health of Companion's own connections from the
+hourly check, and the reason a Test failed. There is no switch: the server
+listens either way.
+
+**Stage Utility presses Companion buttons** is the outbound half, with the host
+and API port below, **Test**, and **Browse buttons**. **Save** and **Discard** are
+in the dialog's footer and apply to the two fields, and closing the dialog over
+unsaved fields asks first.
 
 ### To press Companion buttons from here
 
 | Field | |
 |---|---|
-| **Companion Host** | Companion's IP. Leave blank and nothing outbound happens |
-| **API Port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
+| **Companion host** | Companion's IP. Leave blank and nothing outbound happens |
+| **API port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
 
 **Test** reads Companion's configuration and reports its build, how many buttons
 it found and how many of Companion's own connections are healthy — see
 [When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
-It never presses anything.
+It never presses anything. Its answer appears in the card. It reads the **saved**
+host and port, so while the fields hold edits **Test** is off and says to save first. An answer goes as soon as a field is edited, and when Save or Discard lands, so one never sits beside settings it did not run against.
+
+**Browse buttons** opens Companion's pages in the card, read-only, so you can see
+what Stage Utility can press and what it will call each button without opening a
+rule. One page shows at a time, as a grid of the keys it uses (never fewer than 8
+by 4; a page wider than the card scrolls sideways), in Companion's own colours and
+with its icons. A button that points at another is drawn as the one it points at,
+marked with a small **ref** chip; page up, page down and page number keys are blank. The page
+control is a dropdown with a filter that takes a number or any part of a name,
+and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
+both, because a real install has about a hundred pages and more than half are
+empty. Nothing is read from Companion until Browse buttons is pressed, and
+nothing in the grid presses or changes anything.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has
@@ -86,15 +111,15 @@ says what was sent, not what happened.
 sequence and press that. A rule that half-ran a chain would be worse than one that
 did nothing.
 
-## Calling a cue by name
+## Calling a command by name
 
-**Scope: setup and teardown, not for cues during a service.** These are the
+**Scope: setup and teardown, not for commands during a service.** These are the
 things somebody walks in and turns on, and walks out and turns off. Every
-imported cue carries the condition **no service is live**, which fails closed: it
+imported command carries the condition **no service is live**, which fails closed: it
 refuses while a service is running or about to start, and when Planning Center
 cannot be read — each with a sentence a voice assistant can read out.
 
-A cue is an ordinary automation rule whose trigger is **Called by name**. It has
+A command is an ordinary automation rule whose trigger is **Called by name**. It has
 a `name` in `lower_snake_case`, unique across rules, and runs only when something
 calls it:
 
@@ -108,41 +133,41 @@ snapshot, no schedule reaches it.
 
 | Answer | |
 |---|---|
-| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device. A cue on a pair with a [state variable](#real-state) also carries `state`, and answers `{detail: "already on", skipped: true}` without pressing when the device is already there |
-| `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
+| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device. A command on a pair with a [state variable](#real-state) also carries `state`, and answers `{detail: "already on", skipped: true}` without pressing when the device is already there |
+| `202` | this command is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
 | `401` | no token, or a revoked one |
-| `404` | no cue by that name |
+| `404` | no command by that name |
 | `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"Sunday Service is live"* |
 
 | `reason` | |
 |---|---|
 | `service-live` | a service is running, or starts within the hour. Carries `plan` when the plan has a title |
 | `planning-center-unknown` | Planning Center is configured and cannot be read, so we will not guess. Also on a `[cues]` line in the server log |
-| `button-missing` | the Companion button this cue presses is not in the export any more. Nothing is pressed — see [When a button moves](#when-a-button-moves) |
+| `button-missing` | the Companion button this command presses is not in the export any more. Nothing is pressed — see [When a button moves](#when-a-button-moves) |
 | `condition-not-met` | one of the rule's other conditions did not hold |
-| `cooldown` | the cue ran within its cooldown |
-| `once-per-service` | the cue is set to run once per service and already has, this occurrence |
+| `cooldown` | the command ran within its cooldown |
+| `once-per-service` | the command is set to run once per service and already has, this occurrence |
 | `disabled` | the rule's own switch is off |
 | `disarmed` | automation is disarmed |
 
 Every call, allowed or refused, lands in the automation Activity log with the
 calling token's label, and on a `[cues]` line in the server log.
 
-A cue name is checked when it is saved, and a rules file is not always something
+A command name is checked when it is saved, and a rules file is not always something
 this app wrote — a restored config archive replaces `automation-rules.json`
-whole. At boot, every cue the save path would refuse is named on its own line
+whole. At boot, every command the save path would refuse is named on its own line
 with the reason, and nothing is removed:
 
 ```
-[cues] rule "Bad name from a restore" would be refused if you saved it: "__proto___on" is not a usable cue name — use lower_snake_case
+[cues] rule "Bad name from a restore" would be refused if you saved it: "__proto___on" is not a usable command name — use lower_snake_case
 ```
 
-The cue still loads and still fires; the line is there so a name that can never
+The command still loads and still fires; the line is there so a name that can never
 be edited into shape through the editor is visible rather than silent.
 
 ### Tokens
 
-Automation → **Calling cues** mints one token per caller. The token is
+Automation → Access → **Calling commands** mints one token per caller. The token is
 shown **once** — only a SHA-256 of it is stored — so a lost one is replaced, not
 recovered. Revoke them individually, which is why each has a label.
 
@@ -154,7 +179,7 @@ pages are unaffected.
 **What the token is, and what it is not.** It identifies the caller in the activity
 log, and it keeps the call route closed to anything that has not been handed one. It
 is not a perimeter: anyone with write access to the app over the LAN can change any
-setting, including the cue rules and the tokens themselves, as they always could.
+setting, including the command rules and the tokens themselves, as they always could.
 The perimeter is the network — do not expose Stage Utility beyond the LAN or
 Tailscale. Companion's own HTTP API is unauthenticated in the same way, and the
 mitigation there is the same: an ACL on the switch port Companion is on.
@@ -164,8 +189,8 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 Automation → **Import from Companion…** finds, per page, buttons whose
 labels differ only by a trailing direction word — `ON`/`OFF`,
 `Startup`/`Shutdown`, `START`/`STOP` or `Open`/`Closed` (`Open`/`Close` is read
-the same way) — and offers each pair as two cues, `<name>_on` and `<name>_off`.
-Whichever pair of words the buttons use, the cues are named `_on` and `_off`:
+the same way) — and offers each pair as two commands, `<name>_on` and `<name>_off`.
+Whichever pair of words the buttons use, the commands are named `_on` and `_off`:
 "REC START" and "REC STOP" become `rec_on` and `rec_off`, and "Distribution
 Open" and "Distribution Closed" become `distribution_on` and `distribution_off`.
 
@@ -173,18 +198,18 @@ The word is the **trailing word** and the base is everything before it, so a
 "Deck 2 START" beside an "Encoder STOP" on one page is two single buttons and
 not a pair. `Record`/`Stop` is deliberately not a pair of words: a lone "Stop"
 has too many partners. `Open` only pairs when a matching `Closed` or `Close`
-shares its base on the same page — a lone "Open" stays a single cue, because
+shares its base on the same page — a lone "Open" stays a single command, because
 what it means on somebody's lighting console is not a guess this should make.
 
 A pair whose buttons drive a utility device — a projector, a television, a smart
 plug or bulb, a lighting console, a recorder or stream encoder — is ticked by
-default; everything else is offered unticked, because a cue that presses it is a
-cue somebody can say by accident. A camera is not on that list: it is pointed at
+default; everything else is offered unticked, because a command that presses it is a
+command somebody can say by accident. A camera is not on that list: it is pointed at
 things during a service, not turned on before one.
 
 Pairs are matched **within a page**: "Conf TVs ON" on two auditoriums' pages are
 different televisions, and crossing them is the kind of mistake found out during
-setup. When the same label does appear on two pages, both cues are named after
+setup. When the same label does appear on two pages, both commands are named after
 their page so neither is lost.
 
 Each pair row has a **State** column: pick the Companion custom variable that
@@ -194,7 +219,7 @@ reports that rather than what it last asked for. See
 `projectors_state`) is picked for you.
 
 One **search** field at the top of the dialog filters both sections at once, by
-label, page, base and cue name — `projectors_off` finds its pair. A section with
+label, page, base and command name — `projectors_off` finds its pair. A section with
 nothing left shows *No matches* under its heading rather than disappearing, and
 each section's **Select all** and **Clear** act on the rows the search has left
 on screen. The counter beside the field says how many of the offered rows match.
@@ -207,12 +232,12 @@ which.
 ### Single buttons
 
 Under the pairs, the same dialog lists **Single buttons** — every other labelled
-button, one cue each, named after the button's own label. A button with no label
-is left out: a cue called nothing cannot be called.
+button, one command each, named after the button's own label. A button with no label
+is left out: a command called nothing cannot be called.
 
 **Nothing in this section is ticked for you.** A pair is plainly a thing being
 turned on and off; a single button is whatever somebody put on a Companion page,
-and a pre-ticked camera shot or playback macro is a cue somebody can say by
+and a pre-ticked camera shot or playback macro is a command somebody can say by
 accident. Use the search at the top of the dialog and tick what you want.
 Choosing a **Toggle with state** variable for a row ticks that row, because
 picking one is saying you want that button.
@@ -225,13 +250,13 @@ there is no on and no off to give a switch a state — unless it is a **toggle**
 #### Toggle buttons
 
 A button that is really a **toggle** — one key that turns the thing on and off in
-turn, with no OFF partner — is the exception. Imported as a single cue it becomes
+turn, with no OFF partner — is the exception. Imported as a single command it becomes
 a `script`, which HomeKit shows as a momentary button that snaps back: every tap
 presses the toggle again, and the light ends up whichever way the taps happened to
 land.
 
 Give the row a **Toggle with state** variable and it is imported as an ON/OFF
-**pair** instead. Both cues press the same button; the variable is what tells the
+**pair** instead. Both commands press the same button; the variable is what tells the
 two directions apart, so `<name>_on` presses when the variable says off — and when
 it cannot be read at all — but not when it already says on. `<name>_off` mirrors
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
@@ -242,15 +267,15 @@ comes off the name first:
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to
-`off` in the branch that turns it off. A button with no variable is a single cue
+`off` in the branch that turns it off. A button with no variable is a single command
 and a `script`.
 
-A toggle already imported is not offered again: the dialog knows its two cue
+A toggle already imported is not offered again: the dialog knows its two command
 names as well as its own. Importing one whose name is taken creates **neither**
-half — a lone `_off` cue would carry no variable and would pair itself with
+half — a lone `_off` command would carry no variable and would pair itself with
 whatever `<name>_on` was already there.
 
-A toggle **needs** the variable. Two cues pointed at one button with nothing bound
+A toggle **needs** the variable. Two commands pointed at one button with nothing bound
 generate a switch that reports what it last asked for while the device does the
 opposite every other press; the generated YAML carries a `# WARNING` comment on it,
 the rule's **State variable** field says so, and the server logs:
@@ -262,7 +287,7 @@ the rule's **State variable** field says so, and the server logs:
 ### When a button moves
 
 Coordinates are the one thing about a Companion button that does not last.
-Somebody drags a button one key over, or inserts a page ahead of it, and a cue
+Somebody drags a button one key over, or inserts a page ahead of it, and a command
 built on `p17 r2 c6` presses whatever is there now — Companion answers `204` for
 an empty coordinate and a cheerful `200` for the wrong button, so nothing says
 so.
@@ -284,10 +309,10 @@ second request. Three outcomes, each a pill on the rule's row on the Automation 
 | **moved** | exactly one button on that page runs them, and it is somewhere else. The coordinates are updated, the pill says where it went, and it stays amber until you re-pick the button — the point of it is telling you about a move you did not make |
 | **button missing** | none on that page runs them, or more than one does, or the page is gone |
 
-**A missing button refuses.** The cue answers `409 button-missing` and presses
+**A missing button refuses.** The command answers `409 button-missing` and presses
 nothing; so does the rule firing from any other trigger, and the editor's Test.
 It does not fall back to the coordinates and it does not pick the closest label —
-a cue that presses the wrong button during setup is worse than one that says it
+a command that presses the wrong button during setup is worse than one that says it
 cannot. More than one match is refused for the same reason: two buttons carrying
 one identity is a Companion somebody duplicated, and guessing between them is a
 coin toss on real gear. Open the rule and pick the button again to clear it.
@@ -297,53 +322,53 @@ reported in place while something is there and missing when it is not. It is
 never searched for.
 
 **When Companion cannot be reached, nothing changes.** No status is touched and
-no cue is refused — a pass that downgraded every cue while a switch was
-rebooting would refuse every cue in the building. The failure is on a
+no command is refused — a pass that downgraded every command while a switch was
+rebooting would refuse every command in the building. The failure is on a
 `[companion] export unavailable` line in the server log; every move, adoption
 and disappearance is on a `[companion] cue <name>:` line, and each run ends with
 `[companion] reconciled N cues: N in place, N moved, N missing`.
 
-Cues imported from Companion and buttons chosen with the picker are fingerprinted
+Commands imported from Companion and buttons chosen with the picker are fingerprinted
 as they are created. A rule that predates this has no fingerprint, shows no pill,
 and is adopted at its own coordinates by the first check.
 
 ### When a button is renamed
 
-Relabel a button in Companion and the cue named after it is renamed to match, so
+Relabel a button in Companion and the command named after it is renamed to match, so
 `projectors_on` becomes `screens_on` when the button starts saying "Screens ON".
 The old name **keeps answering**: `POST /api/cues/projectors_on` still fires the
-cue, so a Home Assistant config already pasted into `configuration.yaml` — and
+command, so a Home Assistant config already pasted into `configuration.yaml` — and
 any HomeKit switch made from it — carries on working. Re-paste the YAML when
-convenient; the generated fragment names each renamed cue in a comment. The
+convenient; the generated fragment names each renamed command in a comment. The
 [integration](#the-integration) needs none of that: the rename reaches it on the
 `cues` channel and the entity follows.
 
-A cue keeps up to five former names, oldest dropped first, and they share one
-namespace with live names: no other cue may take a name or a former name that is
+A command keeps up to five former names, oldest dropped first, and they share one
+namespace with live names: no other command may take a name or a former name that is
 already in use. Remove one in the rule editor and that URL stops resolving.
 
 Four cases where the name is kept, each on a `[companion] cue <name>:` line:
 
 | | |
 |---|---|
-| **you named the cue yourself** | a name that is not the one the import would have produced from the button's old label is never touched. A Companion label is not authority over a name you typed into Home Assistant |
-| **the new name is taken** | by another cue's name, by another cue's former name, or by another cue being renamed in the same check |
+| **you named the command yourself** | a name that is not the one the import would have produced from the button's old label is never touched. A Companion label is not authority over a name you typed into Home Assistant |
+| **the new name is taken** | by another command's name, by another command's former name, or by another command being renamed in the same check |
 | **one half of an ON/OFF pair** | a pair renames together or not at all. Renaming one half leaves a Home Assistant switch with no off |
 | **the button is missing** | its label is whatever it said the last time anybody could see it |
 
 The label on the rule's action is refreshed either way — that is what the button
-says, not what the cue is called. **Spoken as** is left alone unless it was the
+says, not what the command is called. **Spoken as** is left alone unless it was the
 button's label exactly, so words you chose for an assistant survive a relabel; a
 pair's spoken name is composed by the import and never follows.
 
 ### Home Assistant
 
 Two ways in, and they are alternatives rather than layers. The **integration**
-is the supported one: cues arrive as real entities, follow the cue list as it
+is the supported one: commands arrive as real entities, follow the command list as it
 changes, and report what the gear is actually doing. The **generated YAML** is
 the fallback for an install that cannot run a custom integration.
 
-Do not run both. Each produces its own controls for the same cues, so a cue
+Do not run both. Each produces its own controls for the same commands, so a command
 would appear twice in Home Assistant under two different entity ids, and an
 Apple Home household would see two switches for one projector.
 
@@ -368,9 +393,9 @@ HACS, copy `custom_components/stage_utility` into Home Assistant's
 | | |
 |---|---|
 | **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
-| **Cue token** | an `su_…` secret from Automation → **Calling cues**, shown once when it is minted |
+| **Command token** | an `su_…` secret from Automation → Access → **Calling commands**, shown once when it is minted |
 
-Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
+Setup reads the command manifest to prove it found a Stage Utility, then calls a command
 name that cannot exist to prove the token is accepted — a `404` means the token
 was fine, a `401` means it was not. Nothing on stage is pressed to find out. A
 server older than 1.18.0 is told apart from an unreachable one and says so.
@@ -380,10 +405,10 @@ appliance a second time by another name is refused rather than doubling every
 switch.
 
 **What appears.** One device per server, carrying a switch for every ON/OFF pair
-and a button for every cue that is not half of one. The cues Stage Utility ships
-itself ([built-in cues](../automation.md#built-in-cues) — OBS, REAPER,
+and a button for every command that is not half of one. The commands Stage Utility ships
+itself ([built-in commands](../automation.md#built-in-commands) — OBS, REAPER,
 ProVideoPlayer and the app) are entities here like any other, and appear and
-disappear as their integration is switched on and off. Each is named by the cue
+disappear as their integration is switched on and off. Each is named by the command
 alone, and the room named here is offered as the Home Assistant area. A switch
 whose Companion button has gone missing goes **unavailable** rather than
 pretending a press would do something. A pair with a state source reports what
@@ -397,7 +422,7 @@ Each switch carries `reason`, `state_source` (the Companion variable it reads, o
 what the last call did: `dispatched`, `skipped` (the gear was already there),
 `simulated` or `failed`. **`simulated` means nothing was pressed**: the server's
 automation engine is in simulate mode, so the call succeeds and a warning is logged.
-`failed` is the server answering `200` with `ok: false` (it reached the cue and
+`failed` is the server answering `200` with `ok: false` (it reached the command and
 Companion did not answer); the call raises, a warning is logged, and the switch stays
 where the gear left it.
 
@@ -409,7 +434,7 @@ the same [settle window](#the-settle-window) the server keeps.
 
 **No polling.** The integration holds one subscription to the `cues` channel on
 this server's event stream and is pushed both state changes and changes to the
-cue list, so a cue added, renamed or deleted here reaches Home Assistant in
+command list, so a command added, renamed or deleted here reaches Home Assistant in
 seconds with nothing to re-paste and nothing to restart. It falls back to
 reading `/api/cues/states` every thirty seconds (backing off to no more than a
 minute) only while the stream is down, and reads the manifest again the moment the
@@ -421,35 +446,35 @@ warning.
 Two options on the entry, under **Configure**: whether the server's own web
 interface appears in the Home Assistant sidebar (left out, with a log line, when
 Home Assistant is served over HTTPS and cannot frame a plain-HTTP server), and
-whether a HomeKit Bridge is reloaded when the cue list changes — a bridge only works
-out what to publish on reload, so without that a new cue is missing from the Apple
+whether a HomeKit Bridge is reloaded when the command list changes — a bridge only works
+out what to publish on reload, so without that a new command is missing from the Apple
 Home app and a deleted one shows as *No Response*. The reload comes fifteen seconds
-after the cue list stops changing.
+after the command list stops changing.
 
 #### The generated YAML
 
 The fallback, for an install not running the integration. It is a snapshot: it
-does not follow the cue list, so it is re-pasted whenever cues change.
+does not follow the command list, so it is re-pasted whenever commands change.
 
 **Copy YAML** and **Download YAML** in the same panel both produce the whole
-configuration fragment: one `rest_command` per cue, a template switch per pair
-under the `template:` key, and a `script` per cue that is not half of a pair.
+configuration fragment: one `rest_command` per command, a template switch per pair
+under the `template:` key, and a `script` per command that is not half of a pair.
 That is the current template format — the legacy `platform: template` under
 `switch:`, which Home Assistant now refuses with a repair notice, is not
 generated, and a fragment saved from an older version needs replacing. Each
 switch's entity id follows its name, so an automation of your own naming an old
-`switch.…` may need its id updating. A cue that has been renamed carries a
+`switch.…` may need its id updating. A command that has been renamed carries a
 comment naming the `rest_command` it used to be; former names are never emitted
 as commands of their own. Copy YAML writes it to the clipboard, which needs a
 secure browsing context and fails on the plain-HTTP LAN address most installs
 run on — use **Download YAML** there instead.
 
-A cue named `<base>_on` or `<base>_off` whose partner does not exist gets its
+A command named `<base>_on` or `<base>_off` whose partner does not exist gets its
 `rest_command` and nothing else — no switch, because half a pair is not one, and
 no script either, because a script for half a switch is a button in the house
 that turns the projectors on with no way to turn them off. `/api/cues/manifest`
 answers the same way. `POST /api/cues/<name>` and voice still fire it; to give
-such a cue an entity in Home Assistant, rename it without the `_on`/`_off`
+such a command an entity in Home Assistant, rename it without the `_on`/`_off`
 suffix.
 
 Save the download as `packages/stage_utility.yaml` in Home Assistant's config
@@ -476,16 +501,16 @@ and reload. A switch is `optimistic: true` unless its pair has a **state
 variable** — Stage Utility reports that it dispatched the press and nothing more,
 so Home Assistant shows what it asked for rather than what the device did.
 
-### Keeping a cue out of Home Assistant
+### Keeping a command out of Home Assistant
 
-Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
+Each command's editor carries a **Home Assistant** switch. Turned off, the command is
 voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
-and off the `cues` channel, so no entity is created for it and it appears under
-**Everything else** on the Automation page. `POST /api/cues/<name>` still fires
+and off the `cues` channel, so no entity is created for it and it loses its **Home Assistant** badge on the
+Automation page's Commands tab. `POST /api/cues/<name>` still fires
 it, and so does anything already calling it that way.
 
 A hidden pair's state is still read, and still shown on its row in the
-Automation page — hiding a cue changes which entities Home Assistant is told
+Automation page — hiding a command changes which entities Home Assistant is told
 to create and nothing else. `GET /api/cues/states` therefore still carries the
 pair, marked `hiddenFromHome: true`; the generated sensor only lifts the pairs
 the YAML listed, which are the shown ones.
@@ -496,17 +521,17 @@ Assistant within a few seconds, and automations there that refer to it stop
 working; the entity comes back under the same id when the switch is turned on
 again.
 
-### Cues that are not Companion buttons
+### Commands that are not Companion buttons
 
-A cue is a rule, and every rule has an action — a Companion press is only the
-most common one. A cue whose action is anything else appears in Home Assistant
-the same way, through the same manifest and the same generated YAML: cues named
-`<base>_on` and `<base>_off` become one switch, and a cue on its own — one whose
+A command is a rule, and every rule has an action — a Companion press is only the
+most common one. A command whose action is anything else appears in Home Assistant
+the same way, through the same manifest and the same generated YAML: commands named
+`<base>_on` and `<base>_off` become one switch, and a command on its own — one whose
 name does not end `_on` or `_off` — becomes a script.
 
 The **REAPER transport** action is the worked example:
 
-| Cue | Action |
+| Command | Action |
 |---|---|
 | `reaper_record_on` | REAPER transport → Start recording |
 | `reaper_record_off` | REAPER transport → Stop |
@@ -521,7 +546,7 @@ Companion for it, and the pair is never probed for a state source or marked
 **OBS recording** and **OBS streaming** pair up the same way — `obs_record_on` /
 `obs_record_off` against `app:obs.recording` — over the websocket the
 [OBS](obs.md) integration already holds. See [Driving OBS from a
-cue](obs.md#driving-obs-from-a-cue).
+command](obs.md#driving-obs-from-a-command).
 
 ### Real state
 
@@ -660,7 +685,7 @@ In Companion:
    `on`, and one to the OFF button setting it to `off`.
 
 In Stage Utility, either pick the variable in the **State** column when you import
-the pair, or open the pair's `_on` cue and set **State variable**. The `_off` half
+the pair, or open the pair's `_on` command and set **State variable**. The `_off` half
 inherits it. Picking an inferred source brings its two values with it. If your buttons set something other than `on`/`off` — `POWER=ON`,
 `1` — set **Value meaning on** and **Value meaning off** to match; they may not be
 the same string.
@@ -703,7 +728,7 @@ purpose, because an unavailable entity cannot be commanded and an unreachable
 Companion would then also stop you turning the device on. A state that cannot be
 read always presses.
 
-**A bound cue is idempotent.** Calling `<pair>_on` while the variable already
+**A bound command is idempotent.** Calling `<pair>_on` while the variable already
 says `on` presses nothing and answers `200 {detail: "already on", state: "on",
 skipped: true}`; the Activity log records it as `skipped`. Inside the
 [settle window](#the-settle-window) the last press is what a repeat is compared
@@ -715,7 +740,7 @@ without reading anything.
 
 The read is the same one `/api/cues/states` makes, so it costs one round of
 Companion reads shared with any poller, and its answer is served for five
-seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
+seconds. An unreachable Companion makes a bound command wait up to **three seconds**
 before it presses — the read's timeout. It still presses.
 
 #### A Companion trigger, when the device has a feedback but no variable
@@ -803,7 +828,7 @@ refused, and a call that was itself skipped all leave the variable as the only
 thing worth comparing against.
 
 If the whole read fails rather than one pair — the server could not answer at all
-— the Automation page says so in one line above the rules list and shows no
+— the Automation page's Commands tab says so in one line above the list and shows no
 pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
@@ -873,9 +898,9 @@ reported as a fault.
 What the [integration](#the-integration) is built on, and what anything else
 talking to this server can use:
 
-- `GET /api/cues/manifest` — every cue as JSON, with a `version` that goes up on
+- `GET /api/cues/manifest` — every command as JSON, with a `version` that goes up on
   any rule change, this server's name and LAN address, one entry per ON/OFF pair
-  with its current state, and one per single cue. A cue whose Companion button
+  with its current state, and one per single command. A command whose Companion button
   has gone missing is listed with `available: false` rather than dropped.
 - the `cues` [SSE channel](../reference/api.md#channels) — a `state` event when a
   bound pair's device changes, and a `manifest` event carrying the new version
@@ -989,7 +1014,7 @@ yet, and after the nightly clear; `message_alert_active` reads `false`.
 addressed to Everyone and editable after it is placed, and a **Clear alerts**
 button that wears the **Alert running** feedback.
 
-The same two things are available to rules and to any console's Button, set to Run an action, as
+The same two things are available to rules and to any console's Button, set to App action, as
 the automation actions **Send a stage message** and **Clear stage message
 alerts**; see [Automation](../automation.md#actions). Those send from
 `Automation`.

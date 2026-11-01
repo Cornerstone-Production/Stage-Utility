@@ -512,7 +512,7 @@ the moment of submersion by itself. There is nothing to pause while armed, so
 that button is hidden until the first press.
 
 Every route that steps the timer forward while armed — the panel, a Companion
-action, an automation cue — starts "First person in" the same way; none of
+action, an automation command — starts "First person in" the same way; none of
 them skips person 1. Finish while armed still ends the session with nobody
 baptized, which is what it is for.
 

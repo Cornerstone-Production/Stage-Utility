@@ -41,6 +41,7 @@ describe("seeding", () => {
       "home-next-service",
       "home-readiness",
       "home-recent-services",
+      "message-composer",
     ]);
   });
 
@@ -83,7 +84,7 @@ describe("idempotence", () => {
     const after = seedHomeView(edited(once, objects));
     assert.deepEqual(
       typesOf(after),
-      ["timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services"],
+      ["timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services", "message-composer"],
       "the deleted card came back",
     );
   });
@@ -119,7 +120,26 @@ describe("idempotence", () => {
       "home-next-service",
       "home-readiness",
       "home-recent-services",
+      "message-composer",
     ]);
+  });
+
+  test("the message composer arrives on an unedited Home, as an extra large always-on tile", () => {
+    const composer = seedHomeView([])
+      .find((v) => v.id === HOME_VIEW_ID)!
+      .layout!.objects.find((o) => o.config.type === "message-composer");
+    assert.deepEqual(composer?.home, { size: "xl", when: "always" });
+  });
+
+  test("an edited Home that lacks the composer is left without it", () => {
+    const once = seedHomeView([]);
+    const objects = once
+      .find((v) => v.id === HOME_VIEW_ID)!
+      .layout!.objects.filter((o) => o.config.type !== "message-composer");
+    assert.ok(
+      !typesOf(seedHomeView(edited(once, objects))).includes("message-composer"),
+      "an operator's saved Home is theirs; the seed must not add a card to it",
+    );
   });
 
   test("a renamed Home is not duplicated", () => {

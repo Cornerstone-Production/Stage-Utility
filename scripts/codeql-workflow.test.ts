@@ -623,7 +623,7 @@ describe("the model pack", () => {
       rows.map((r) => `${r.kind} | ${r.type} | ${r.path} | ${r.rest}`).sort(),
       [
         "barrierModel | file:main/services/builtin-cues.ts | Member[layerSlug].ReturnValue | log-injection",
-        "barrierModel | file:main/services/companion-export.ts | Member[slugForCue].ReturnValue | log-injection",
+        "barrierModel | file:main/services/cue-slug.ts | Member[slugForCue].ReturnValue | log-injection",
         "barrierModel | file:main/services/export-filename.ts | Member[filenameSlug].ReturnValue | log-injection",
         "barrierModel | file:main/services/scrub.ts | Member[scrubError].ReturnValue | log-injection",
         "barrierModel | file:main/services/scrub.ts | Member[scrub].ReturnValue | log-injection",

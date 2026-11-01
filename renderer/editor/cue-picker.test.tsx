@@ -13,7 +13,7 @@
 //  - EVERY CUE IS STILL IN THE LIST. A filter that dropped one would be a cue
 //    that cannot be bound to a button at all, with nothing saying why.
 //  - AN EMPTY GROUP IS NOT RENDERED. An install with no cues of its own must
-//    not show an empty "Your cues" heading.
+//    not show an empty "Your commands" heading.
 //
 // NOT unit-tested here: how the closed control looks. jsdom loads no stylesheet.
 
@@ -85,7 +85,7 @@ describe("the cue picker", () => {
       ],
     );
     const groups = [...container.querySelectorAll("optgroup")];
-    assert.deepEqual(groups.map((g) => g.label), ["Your cues", "Built in"]);
+    assert.deepEqual(groups.map((g) => g.label), ["Your commands", "Built in"]);
     assert.deepEqual(
       groups.map((g) => [...g.querySelectorAll("option")].map((o) => o.value)),
       [
@@ -129,7 +129,7 @@ describe("the cue picker", () => {
     const onlyMine = mount([sw({})], []);
     assert.deepEqual(
       [...onlyMine.container.querySelectorAll("optgroup")].map((g) => g.label),
-      ["Your cues"],
+      ["Your commands"],
     );
   });
 

@@ -136,11 +136,11 @@ ProVideoPlayer stops the rule**, silently. Nothing else will tell you. A name th
 is only digits cannot be used at all: PVP reads an all-digits value as a position
 rather than a name, and Stage refuses it rather than firing at the wrong thing.
 
-## Layer state on a cue pair
+## Layer state on a command pair
 
-A cue pair can report a layer's own state instead of a Companion variable, so the
+A command pair can report a layer's own state instead of a Companion variable, so the
 switch in Home Assistant says what ProVideoPlayer is doing rather than what the
-cue asked for. The two sources are `app:pvp.layer-hidden:<layer name>` and
+command asked for. The two sources are `app:pvp.layer-hidden:<layer name>` and
 `app:pvp.layer-muted:<layer name>`, picked under **ProVideoPlayer layers** in the
 rule editor's **State variable** select, which lists every layer PVP currently
 has. A pair whose ON half is **Hide a ProVideoPlayer layer** or **Mute a
@@ -153,13 +153,13 @@ same way: rename the layer in PVP and the state reads unknown with `No PVP layer
 called "<name>"`, beside an action that has stopped working. A PVP that is not
 connected reads unknown too — never "shown".
 
-**Every layer already has three cues.** While ProVideoPlayer is switched on,
+**Every layer already has three commands.** While ProVideoPlayer is switched on,
 Stage Utility offers `pvp_<layer>_shown_on` / `_off`, `pvp_<layer>_muted_on` /
 `_off` and `pvp_<layer>_clear` for each layer it reports, plus
-`pvp_clear_workspace`, as [built-in cues](../automation.md#built-in-cues) with no
+`pvp_clear_workspace`, as [built-in commands](../automation.md#built-in-commands) with no
 rule to write. `<layer>` is the layer's name in lower_snake_case — `Lower
 Thirds` becomes `lower_thirds` — and **shown** is the operator's direction, so
-the switch is on when the layer is on screen. Rename a layer in PVP and its cues
+the switch is on when the layer is on screen. Rename a layer in PVP and its commands
 are renamed with it.
 
 ## What is verified, and what is not
