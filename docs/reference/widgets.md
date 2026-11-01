@@ -102,6 +102,8 @@ item** on (how a new Timer starts), which is a stat card like the cards beside i
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
+**Recent services**, **Screens**, the service **Timer** and **Current item** also expand on Home; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
+
 **Recent services** shows the active service type's average attendance, peak,
 length and start time, and — when its tile is tall enough — an attendance trend
 like the Trends card on **History**. Right-click it — or tap and hold it — for **SPL trend line** — the service level
@@ -237,6 +239,8 @@ Per widget you can turn that off (**Fill green when live** / **Fill when
 recording**, which colors just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
+
+On Home, the **Recording** tile carries **Start** and **Stop**, and a live service **Timer** carries **Prev** and **Next**; see [Actions on a tile](../features/operator-app.md#actions-on-a-tile). A wall draws neither.
 
 The Home **Streaming** tile is one object in two presentations. On Home it is a
 card in a row of cards; put one on a screen and it wears the composition above,
@@ -498,6 +502,8 @@ widgets and the Timer pick which instance they follow. See
 | **Wireless summary** | How many packs are online, and their batteries | Every wireless connection |
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
 | **Charger battery** | Battery levels in the charger bays | Shure SBC chargers |
+
+**Wireless summary** can be expanded on Home to list every channel with its battery, time left, RF bars and whether it is muted or offline; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
 
 **Wireless summary** leads with the online count and qualifies it underneath with
 the lowest battery in the fleet, and — if you turn it on — the **shortest runtime

@@ -52,7 +52,7 @@ export function defaultHomeLayout() {
   // compiling here rather than seeding an object nothing renders. The Timer is
   // the one card that is not a `home-*` type: it is the wall widget too, and
   // takes its tile from the `home` it is seeded with.
-  type HomeCardConfig = Extract<LayoutObjectConfig, { type: `home-${string}` | "timer" }>;
+  type HomeCardConfig = Extract<LayoutObjectConfig, { type: `home-${string}` | "timer" | "message-composer" }>;
   // The id IS the type. One card of each kind, so there is nothing else it could
   // usefully be, and the editor mints the same id when a card is switched back
   // on — two schemes for the same objects would only be confusing in the file.
@@ -65,7 +65,7 @@ export function defaultHomeLayout() {
   let row = 0;
   const card = (config: HomeCardConfig, home?: LayoutObject["home"]) => ({
     id: config.type,
-    x: 0.04, y: 0.04 + row++ * 0.135, w: 0.92, h: 0.12, z: 1,
+    x: 0.04, y: 0.04 + row++ * 0.11, w: 0.92, h: 0.1, z: 1,
     ...(home ? { home } : {}),
     config,
     style: {},
@@ -87,6 +87,9 @@ export function defaultHomeLayout() {
       card({ type: "home-next-service" }),
       card({ type: "home-readiness" }),
       card({ type: "home-recent-services" }),
+      // Stage messages without leaving Home. An unedited Home gains this on
+      // upgrade; an edited one is left alone, like every other seeded card.
+      card({ type: "message-composer" }, { size: "xl", when: "always" }),
     ],
   };
 }

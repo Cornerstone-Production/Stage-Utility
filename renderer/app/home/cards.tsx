@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { AppLink } from "../app-link";
+import { ActionTile, RecordingAction } from "./card-actions";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
@@ -521,10 +522,13 @@ export function RecentServicesCard({
   showSpl = false,
   splMetric = null,
   hoverSuppressed = false,
+  inPanel = false,
 }: {
   state: StageState;
   showSpl?: boolean;
   splMetric?: string | null;
+  /** Drawn in Home's expand panel, whose own header carries Open History. */
+  inPanel?: boolean;
   /** Home's own right-click menu is open over this card. Same problem History
    *  solved for its copy of this chart: without it, the tooltip draws through
    *  the menu and keeps tracking the pointer underneath it. */
@@ -545,7 +549,11 @@ export function RecentServicesCard({
   );
 
   const empty = !(overview.attPoints.length > 0 || list?.length);
-  if (empty && !failed.has("timeline") && !failed.has("attendance")) return null;
+  if (empty && !failed.has("timeline") && !failed.has("attendance")) {
+    // The tile draws nothing until something has been recorded. An opened panel
+    // is blank for the same reason, which reads as broken, so it says so.
+    return inPanel ? <p className="px-5 py-6 text-callout text-fg-subtle">No services recorded yet.</p> : null;
+  }
   const unread = [
     failed.has("timeline") && "service timings",
     failed.has("attendance") && "attendance history",
@@ -568,9 +576,11 @@ export function RecentServicesCard({
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
         </h2>
-        <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
-          Open History
-        </AppLink>
+        {!inPanel && (
+          <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
+            Open History
+          </AppLink>
+        )}
       </header>
       {unread.length > 0 && <ErrorNote className="mx-3 my-2 shrink-0">Couldn't load {theList(unread)}.</ErrorNote>}
       {!empty && (
@@ -635,7 +645,11 @@ export function RecordingCard({
   recorder = "any",
   now,
   showElapsed = true,
+  actionable = false,
 }: {
+  /** Draw Start / Stop on the tile. Only where a press can land: Home, for an
+   *  operator. A wall draws the same card and must not grow a button. */
+  actionable?: boolean;
   recorder?: string;
   /** The SERVER's clock, from the one tick the page already runs — the same
    *  argument StreamingCard makes below. OBS's record timecode is interpolated
@@ -659,7 +673,7 @@ export function RecordingCard({
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
   // way the SPL card's value is: on Home the caption and the sub-line carry the
   // grey, and the value is the thing you read.
-  return (
+  const stat = (
     <Stat
       label={recorder === "any" ? "Recording" : recorder}
       value={ind.value}
@@ -667,6 +681,8 @@ export function RecordingCard({
       tone={ind.state === "live" ? "live" : undefined}
     />
   );
+  if (!actionable || !chosen.some((r) => r.connected)) return stat;
+  return <ActionTile action={<RecordingAction chosen={chosen} />}>{stat}</ActionTile>;
 }
 
 /**
@@ -978,7 +994,11 @@ export function ScreensCard({
   outputs,
   onlineOutputIds,
   onlineKnown,
+  linked = false,
 }: {
+  /** Link the tile to the Screens page. Off on Home, where the tile expands and
+   *  its panel carries Open Screens; on for the same card placed on a console. */
+  linked?: boolean;
   outputs: readonly Output[];
   onlineOutputIds: readonly string[];
   /** Whether presence has answered yet — see useDisplayPresenceStatus. Unknown
@@ -988,7 +1008,7 @@ export function ScreensCard({
 }) {
   const total = outputs.length;
   if (!onlineKnown) {
-    return <Stat label="Screens" value={`—/${total}`} to="/screens" />;
+    return <Stat label="Screens" value={`—/${total}`} to={linked ? "/screens" : undefined} />;
   }
   const online = splitByPresence(outputs, onlineOutputIds).online.length;
   return (
@@ -996,7 +1016,7 @@ export function ScreensCard({
       label="Screens"
       value={`${online}/${total}`}
       sub={online === total ? "all connected" : "one or more offline"}
-      to="/screens"
+      to={linked ? "/screens" : undefined}
       tone={online === total ? undefined : "danger"}
     />
   );
@@ -1018,7 +1038,13 @@ export function HomeCard({
   onlineKnown,
   secondsToStart,
   hoverSuppressed = false,
+  actionable = false,
+  linked = false,
 }: {
+  /** Whether Screens links to its page: an interactive surface that is not Home. */
+  linked?: boolean;
+  /** Whether a tile's own action (Start / Stop) is drawn. See RecordingCard. */
+  actionable?: boolean;
   /**
    * The card's WHOLE config, not just its type.
    *
@@ -1051,11 +1077,11 @@ export function HomeCard({
   const c = config;
   switch (c.type) {
     case "home-recording":
-      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} actionable={actionable} />;
     case "home-recording-obs":
-      return <RecordingCard recorder="OBS" now={now} />;
+      return <RecordingCard recorder="OBS" now={now} actionable={actionable} />;
     case "home-recording-reaper":
-      return <RecordingCard recorder="REAPER" now={now} />;
+      return <RecordingCard recorder="REAPER" now={now} actionable={actionable} />;
     case "home-streaming":
       return (
         <StreamingCard
@@ -1092,6 +1118,7 @@ export function HomeCard({
           outputs={state.outputs ?? []}
           onlineOutputIds={onlineOutputIds}
           onlineKnown={onlineKnown}
+          linked={linked}
         />
       );
     case "home-next-service":

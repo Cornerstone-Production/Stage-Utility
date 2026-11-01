@@ -208,7 +208,13 @@ describe("a layout that draws none of a source neither reads it nor subscribes t
 
   test("Home's default cards", async () => {
     await mount((l) => useLayoutData(l, HOME_VIEW_ID), defaultHomeLayout() as LayoutDTO);
-    assert.deepEqual(await unwanted(), []);
+    // The seeded Message composer draws messages, so that source is paid for and
+    // is the ONLY one: an exact list, so a second source slipping in is a failure
+    // and not slack under a floor.
+    assert.deepEqual(await unwanted(), [
+      "messages: read /api/messages 1 time(s)",
+      "messages: subscribed messages:state",
+    ]);
   });
 });
 
