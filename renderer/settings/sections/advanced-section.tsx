@@ -59,7 +59,9 @@ import {
   type AdvancedTabId,
 } from "./advanced-settings";
 import { searchSettings, wordsOf } from "./advanced-search";
-import { ADVANCED_PANEL_ID, AdvancedSearchBox, AdvancedTabBar, searchShortcutLabel, tabButtonId } from "./advanced-tabs";
+import { ADVANCED_PANEL_ID, AdvancedSearchBox, AdvancedTabBar, tabButtonId } from "./advanced-tabs";
+import { searchShortcutLabel } from "../../components/page-tabs";
+import { usePageTabs } from "../../lib/use-page-tabs";
 import { useAdvancedSignals } from "../../app/advanced-signals";
 
 /** Words that find the Server log from Search. */
@@ -1293,50 +1295,19 @@ export function AdvancedSection({
   const [showCommands, setShowCommands] = useState(false);
 
   // The tab belongs to the URL when the route hands it down, and to this page when not.
-  const [ownTab, setOwnTab] = useState<AdvancedPageTab>(() => parseAdvancedTab(tabSegment) ?? DEFAULT_ADVANCED_TAB);
-  const tab: AdvancedPageTab = onTabChange ? (parseAdvancedTab(tabSegment) ?? DEFAULT_ADVANCED_TAB) : ownTab;
-  const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
-  // Bumped each time the operator asks for Search; the effect below answers it once the box exists.
-  const [searchAsked, setSearchAsked] = useState(0);
-  const searchAnswered = useRef(0);
-
-  const latest = useRef({ tab, onTabChange });
-  useEffect(() => {
-    latest.current = { tab, onTabChange };
+  const { tab, goTo, searchRef } = usePageTabs<AdvancedPageTab>({
+    segment: tabSegment,
+    onTabChange,
+    parse: parseAdvancedTab,
+    fallback: DEFAULT_ADVANCED_TAB,
+    searchId: SEARCH_TAB_ID,
   });
-  /** Open a tab. Opening Search also puts the cursor in its box, unless an arrow key got there: focus stays on the strip. */
-  function goTo(next: AdvancedPageTab, focusSearch = true) {
-    if (next === SEARCH_TAB_ID && focusSearch) setSearchAsked((n) => n + 1);
-    if (latest.current.onTabChange) latest.current.onTabChange(next);
-    else setOwnTab(next);
-  }
-
-  useEffect(() => {
-    if (tab !== SEARCH_TAB_ID || searchAnswered.current === searchAsked) return;
-    searchAnswered.current = searchAsked;
-    searchRef.current?.focus();
-    searchRef.current?.select();
-  }, [tab, searchAsked]);
-
-  // Cmd-F (Ctrl-F elsewhere) opens Search, with the text in the box selected, from any tab.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
-      // Something nearer already took the key, or a dialog is open and the page behind it is not the operator's focus.
-      if (e.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
-      e.preventDefault();
-      goTo(SEARCH_TAB_ID);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // goTo reads the newest tab and handler through a ref, so one listener serves every render.
-  }, []);
+  const [query, setQuery] = useState("");
 
   // A deep link into a card on another tab opens that tab first.
   useRevealTarget((flashId) => {
     const target = FLASH_TABS[flashId];
-    if (target && target !== latest.current.tab) goTo(target);
+    if (target && target !== tab) goTo(target);
   });
 
   function commitPublicUrl() {

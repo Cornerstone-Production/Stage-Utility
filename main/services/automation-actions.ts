@@ -313,7 +313,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
     help:
       "Drives REAPER through the same web interface the REAPER integration polls, so nothing else has to be set up " +
       "(Preferences → Control/OSC/web → \"Web browser interface\"). Record does NOTHING when REAPER is already " +
-      "recording: REAPER's Record is a toggle, and a cue said twice would otherwise end the recording.",
+      "recording: REAPER's Record is a toggle, and a command said twice would otherwise end the recording.",
     params: [
       {
         key: "command",
@@ -346,7 +346,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       "Starts or stops OBS's recording over the SAME obs-websocket connection the OBS integration holds, so there " +
       "is nothing else to set up and no Companion button in the middle. Start does nothing when OBS is already " +
       "recording, and Stop does nothing when it is not — OBS answers a redundant one with a request error, which " +
-      "would read as a failed cue over a recording that is running perfectly well.",
+      "would read as a failed command over a recording that is running perfectly well.",
     params: [
       {
         key: "command",

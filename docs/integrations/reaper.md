@@ -49,13 +49,13 @@ poll reports the same thing on the REAPER row rather than a green badge over a
 machine it cannot read. Stop and Play are idempotent in REAPER itself and still
 go out.
 
-A `_on`/`_off` cue pair built from Record and Stop reports its real state to Home
+A `_on`/`_off` command pair built from Record and Stop reports its real state to Home
 Assistant, read from this poll rather than from Companion. See
 [Automation](../automation.md#state-from-stage-utility).
 
 **That pair is already built.** While REAPER is switched on under Settings → Integrations,
 `reaper_record_on` / `reaper_record_off` is a
-[built-in cue](../automation.md#built-in-cues) — a switch in Home Assistant, a
+[built-in command](../automation.md#built-in-commands) — a switch in Home Assistant, a
 Button on a panel — with no rule to write, and those two names are reserved.
 
 The transport is also readable: **REAPER starts recording** and **REAPER stops

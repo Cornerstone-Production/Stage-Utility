@@ -51,9 +51,9 @@ export const SHOTS = [
   {
     name: "automation-rules",
     phase: "week",
-    shows: "Automation: the rules list with simulate mode, the Home Assistant group and everything else.",
+    shows: "Automation, Commands tab: Simulate and Disarm above the tabs, each command with its badges and the screens it is used on.",
     async run({ session, page }) {
-      await session.goto(page, "/automation");
+      await session.goto(page, "/automation/commands");
       await session.shoot(page, "automation-rules");
     },
   },

@@ -117,20 +117,170 @@ describe("the dialog footer", () => {
     );
   });
 
-  test("Companion shows its address to copy AND the two outbound fields with Save and Test", async () => {
-    // Two halves in one dialog. The info panel is the inbound half (what to type
-    // into Companion); the form is the outbound half (where this server dials
+  test("Companion is two cards: its address to copy, and the outbound fields with Test, Browse buttons and Save", async () => {
+    // Two halves in one dialog. The first card is the inbound half (what to type
+    // into Companion); the second is the outbound half (where this server dials
     // Companion to press buttons). As a bespoke panel the info REPLACED the form,
     // so the host and port the server declared were never on screen, and the
     // fixture's empty schema let the "declares N fields and rendered none" guard
     // above pass over it.
     const content = await open("companion");
-    assert.match(content.textContent ?? "", /IP \/ Host/, "the copyable address is gone");
+    const cards = [...content.querySelectorAll("[data-companion-card]")].map((c) => c.getAttribute("data-companion-card"));
+    assert.deepEqual(cards, ["inbound", "outbound"], "Companion is not two cards, inbound then outbound");
+    const headings = [...content.querySelectorAll("[data-companion-card] h3")].map((h) => h.textContent);
+    assert.deepEqual(headings, ["Companion controls Stage Utility", "Stage Utility presses Companion buttons"]);
+    // The fake server never delivers a LAN address, so what the card says in its place is the address's state.
+    assert.match(content.querySelector('[data-companion-card="inbound"]')?.textContent ?? "", /Host|LAN address unavailable/, "the address is gone from the first card");
     const fields = [...content.querySelectorAll("[data-config-field]")].map((f) => f.getAttribute("data-config-field"));
     assert.deepEqual(fields, ["host", "port"], "the outbound host and port fields are not rendered");
+    for (const f of content.querySelectorAll("[data-config-field]")) {
+      assert.ok(f.closest('[data-companion-card="outbound"]'), "a field is outside the outbound card");
+    }
     const l = labels(content);
-    assert.ok(l.includes("Test connection"), "no Test for the outbound half");
+    assert.ok(l.includes("Test"), "no Test for the outbound half");
+    assert.ok(l.includes("Browse buttons"), "no Browse buttons");
     assert.ok(l.includes("Save"), "no Save for the outbound half");
+    assert.ok(l.includes("Discard"), "no Discard for the outbound half");
+    assert.equal(l.includes("Test connection"), false, "Test is in the footer as well as the card");
+  });
+
+  test("Companion's Test runs from its card and its answer is read in that card", async () => {
+    const content = await open("companion");
+    const test = [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test")!;
+    fireEvent.click(test);
+    await settleFor(60);
+    const shown = content.querySelector('[data-companion-card="outbound"] [data-test-result]');
+    assert.ok(shown, "the Test's answer is not in the outbound card");
+    assert.equal(shown!.getAttribute("data-test-result"), "ok");
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 1, "the answer is drawn in the footer as well as the card");
+  });
+
+  test("Companion opens with its saved host, an edit is saved with Save, and the write carries both fields", async () => {
+    // The guard the Companion card lacked: that the fields are the saved config, that typing
+    // in them is an edit, and that Save sends exactly what is on screen.
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const host = content.querySelector('[data-config-field="host"] input') as HTMLInputElement;
+    assert.equal(host.value, "10.0.0.5", "the saved host is not on screen");
+    assert.equal((content.querySelector('[data-config-field="port"] input') as HTMLInputElement).value, "8000");
+    const save = () => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save") as HTMLButtonElement;
+    assert.equal(save().disabled, true, "Save is live with nothing edited");
+    fireEvent.change(host, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(save().disabled, false, "an edit did not make the card dirty");
+    fireEvent.click(save());
+    await settleFor(60);
+    const wrote = server.posts.filter((p) => p.path === "/api/integrations/companion/config");
+    assert.equal(wrote.length, 1);
+    assert.deepEqual(wrote[0]!.body, { config: { host: "10.0.0.9", port: 8000 } });
+  });
+
+  test("a Test's answer goes when a field changes and when Save lands: it never outlives the settings it ran against", async () => {
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const btn = (t: string) => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+    const answers = () => content.querySelectorAll("[data-test-result]").length;
+    fireEvent.click(btn("Test"));
+    await settleFor(60);
+    assert.equal(answers(), 1, "no answer to start from");
+    fireEvent.change(content.querySelector('[data-config-field="host"] input')!, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(answers(), 0, "an answer stayed over an edited field");
+  });
+
+  test("Save and Discard clear the answer too, and a Test that finishes after an edit is not shown", async () => {
+    const content = await open("obs");
+    const field = () => content.querySelector("[data-config-field] input") as HTMLInputElement;
+    const btn = (t: string) => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+    const answers = () => content.querySelectorAll("[data-test-result]").length;
+    // A footer dialog's Test is live over edits: it answers for what was saved.
+    fireEvent.change(field(), { target: { value: "edited" } });
+    fireEvent.click(btn("Test connection"));
+    await settleFor(60);
+    assert.equal(answers(), 1);
+    fireEvent.click(btn("Save"));
+    await settleFor(60);
+    assert.equal(answers(), 0, "an answer stayed after Save");
+    fireEvent.change(field(), { target: { value: "again" } });
+    fireEvent.click(btn("Test connection"));
+    await settleFor(60);
+    assert.equal(answers(), 1);
+    fireEvent.click(btn("Discard"));
+    await settleFor(20);
+    assert.equal(answers(), 0, "an answer stayed after Discard");
+    // Edited while the Test is still running: the answer, when it lands, is about the old settings.
+    fireEvent.click(btn("Test connection"));
+    fireEvent.change(field(), { target: { value: "during" } });
+    await settleFor(60);
+    assert.equal(answers(), 0, "a Test that finished after an edit was shown");
+  });
+
+  test("the same in a footer dialog: an edit clears the answer beside Test connection", async () => {
+    const content = await open("obs");
+    const fieldInput = content.querySelector("[data-config-field] input") as HTMLInputElement;
+    fireEvent.click([...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test connection")!);
+    await settleFor(60);
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 1);
+    fireEvent.change(fieldInput, { target: { value: "x" } });
+    await settleFor(20);
+    assert.equal(content.querySelectorAll("[data-test-result]").length, 0, "the footer kept a stale answer");
+  });
+
+  test("Test waits for Save while the fields hold edits, and says so", async () => {
+    // Test reads the SAVED host and port. Beside edited fields it would answer for a Companion
+    // the operator is not looking at.
+    server = installFakeServer({ companion: { config: { host: "10.0.0.5", port: 8000 }, configured: true } });
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    const test = () => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test") as HTMLButtonElement;
+    assert.equal(test().disabled, false);
+    assert.equal(content.querySelector("[data-test-needs-save]") === null, true);
+    fireEvent.change(content.querySelector('[data-config-field="host"] input')!, { target: { value: "10.0.0.9" } });
+    await settleFor(20);
+    assert.equal(test().disabled, true, "Test stayed live over unsaved fields");
+    assert.match(content.querySelector("[data-test-needs-save]")?.textContent ?? "", /Save first/);
+  });
+
+  test("Escape in Companion's page list closes the list, not the dialog behind it", async () => {
+    // The list is a popover of its own inside the dialog. Escape pressed in its filter was
+    // Radix's too, and closed the whole dialog, over unsaved fields and all.
+    server = installFakeServer(
+      {},
+      {
+        "/api/companion/buttons": { ok: true, buttons: [], pages: [{ page: 1, name: "Main", labelled: 2 }, { page: 3, name: "Looks", labelled: 4 }] },
+        "/api/companion/pages/1": { ok: true, page: 1, name: "Main", cols: 8, rows: 4, keys: [] },
+      },
+    );
+    const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
+    await actIdle();
+    fireEvent.click(await integrationCard(c.container, "companion"));
+    await settleFor(60);
+    const content = dialog()!;
+    fireEvent.click([...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Browse buttons")!);
+    await settleFor(60);
+    fireEvent.click(content.querySelector('[aria-label="Companion page"]')!);
+    await settleFor(20);
+    const filter = content.querySelector('[aria-label="Filter pages"]') as HTMLElement;
+    assert.ok(filter, "the page list did not open");
+    fireEvent.keyDown(filter, { key: "Escape" });
+    await settleFor(60);
+    assert.equal(content.querySelector('[aria-label="Filter pages"]') === null, true, "Escape left the list open");
+    assert.equal(dialog() !== null, true, "Escape closed the dialog as well as the list");
+    // And with the list closed, Escape is the dialog's again.
+    fireEvent.keyDown(content.querySelector('[aria-label="Companion page"]')!, { key: "Escape" });
+    await settleFor(60);
+    assert.equal(dialog() === null, true, "Escape no longer closes the dialog once the list is shut");
   });
 
   test("Planning Center keeps Refresh now and its synced label", async () => {
@@ -159,8 +309,8 @@ describe("the dialog footer", () => {
 
   test("a panel that saves its own list gets no Save, Discard or Test", async () => {
     // wireless, osc, rosstalk and scores each save as they are edited and had
-    // none of these in the row either. Companion is not in this list: its info
-    // panel sits ABOVE a real form, which keeps all three.
+    // none of these in the row either. Companion is not in this list: its cards
+    // hold a real form, which keeps Save and Discard and has its own Test.
     for (const id of ["wireless", "osc", "rosstalk", "scores"]) {
       const content = await open(id);
       const l = labels(content);

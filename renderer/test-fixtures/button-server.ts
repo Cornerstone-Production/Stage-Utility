@@ -116,7 +116,7 @@ export function serve(opts: {
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         s.posts.push(body);
-        if (opts.refuse) return reply(400, { error: 'The cue name "btn_x" is already used by "Walk"' });
+        if (opts.refuse) return reply(400, { error: 'The command name "btn_x" is already used by "Walk"' });
         const made = { ...body, id: `rule-${s.posts.length}`, issues: [] } as unknown as Rule;
         s.rules.push(made);
         return held(reply(201, made));

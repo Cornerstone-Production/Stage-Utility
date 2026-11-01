@@ -56,7 +56,7 @@ import { ownedByProblem, watchOwnedRules } from "./button-ownership.js";
 
 /**
  * What updateRule accepts. `ownedBy: null` clears it, which is how a rule is
- * listed with the other cues; an absent key leaves it alone.
+ * listed with the other commands; an absent key leaves it alone.
  */
 type RulePatch = Partial<Omit<Rule, "id" | "ownedBy">> & { ownedBy?: OwnedBy | null };
 
@@ -76,7 +76,7 @@ function withOwner(rule: Rule, ownedBy: unknown): Rule {
 function ownerNote(before: OwnedBy | undefined, after: OwnedBy | undefined): string {
   if (after) return ` — belongs to button ${after.objectId} on view ${after.viewId}`;
   if (before) {
-    return ` — no longer belongs to button ${before.objectId} on view ${before.viewId}; listed with the other cues`;
+    return ` — no longer belongs to button ${before.objectId} on view ${before.viewId}; listed with the other commands`;
   }
   return "";
 }
@@ -254,7 +254,7 @@ class AutomationEngine {
       if (rule.id?.startsWith(BUILTIN_ID_PREFIX)) {
         out.push({
           rule: rule.name || rule.id,
-          problem: `"${rule.id}" is reserved for the cues the app ships`,
+          problem: `"${rule.id}" is reserved for the commands the app ships`,
         });
       }
       // Before the called-cue check below, which skips a rule on any other trigger:
@@ -331,9 +331,9 @@ class AutomationEngine {
     if (owned) throw new Error(owned);
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
     const name = calledCueName(rule.trigger);
-    if (!name) throw new Error("A called cue needs a name");
+    if (!name) throw new Error("A called command needs a name");
     if (!isValidCueName(name)) {
-      throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
+      throw new Error(`"${name}" is not a usable command name — use lower_snake_case`);
     }
 
     // A BUILT-IN'S NAME IS TAKEN. The app ships a rule answering to it, so a
@@ -361,7 +361,7 @@ class AutomationEngine {
     );
     const reserved = reservedCueNames();
     if (!alreadyHeld.has(name) && reserved.has(name)) {
-      throw new Error(`"${name}" is a built-in cue`);
+      throw new Error(`"${name}" is a built-in command`);
     }
 
     // One index of everything the OTHER rules answer to, so both checks below
@@ -381,20 +381,20 @@ class AutomationEngine {
     if (clash) {
       throw new Error(
         clash.former
-          ? `The cue name "${name}" is a former name of "${clash.rule.name}"`
-          : `The cue name "${name}" is already used by "${clash.rule.name}"`,
+          ? `The command name "${name}" is a former name of "${clash.rule.name}"`
+          : `The command name "${name}" is already used by "${clash.rule.name}"`,
       );
     }
 
     for (const alias of parseAliases(rule.trigger.params ?? {})) {
       if (!isValidCueName(alias)) {
-        throw new Error(`"${alias}" is not a usable former cue name — use lower_snake_case`);
+        throw new Error(`"${alias}" is not a usable former command name — use lower_snake_case`);
       }
       if (alias === name) {
-        throw new Error(`"${alias}" is this cue's own name, not a former one`);
+        throw new Error(`"${alias}" is this command's own name, not a former one`);
       }
       if (!alreadyHeld.has(alias) && reserved.has(alias)) {
-        throw new Error(`"${alias}" is a built-in cue`);
+        throw new Error(`"${alias}" is a built-in command`);
       }
       const takenBy = held.get(alias);
       if (takenBy) {
@@ -598,7 +598,7 @@ class AutomationEngine {
 
     if (!rule) {
       console.warn(`[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: blocked (unknown)`);
-      return { status: 404, body: { error: `There is no cue called ${wanted}`, reason: "unknown" } };
+      return { status: 404, body: { error: `There is no command called ${wanted}`, reason: "unknown" } };
     }
 
     const blocked = (
@@ -622,7 +622,7 @@ class AutomationEngine {
     };
 
     if (!rule.enabled) {
-      return blocked("disabled", `The cue ${wanted} is switched off`);
+      return blocked("disabled", `The command ${wanted} is switched off`);
     }
     if (this.settings.disarmed) {
       return blocked("disarmed", "Automation is disarmed, so nothing will run");

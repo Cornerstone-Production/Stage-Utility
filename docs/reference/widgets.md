@@ -318,7 +318,7 @@ thumbnail or frame of any kind, so these report names, states and times only.
 
 **On screen now**'s right-click menu has the **Layout** choice (Full, Compact,
 Countdown only), **Label** while the layout is Compact, and the **Progress bar**,
-**Next cue**, **Warn near the end** and **Count down stills** switches. Next cue
+**Next command**, **Warn near the end** and **Count down stills** switches. Next command
 is offered only while the layout is Full, the one layout that draws it.
 
 ### The layer list
@@ -355,8 +355,8 @@ Home card shows up to three layers and does the same.
 The same data as one reading rather than a list, leading with how long is left:
 while a clip is rolling, the countdown IS the value, with the file it belongs to
 and the file's total length underneath. A layer with nothing left to count —
-still, ended, or nothing on it at all — falls back to the current cue's name (or
-the file name, without its extension, when there is no cue to read), with a state
+still, ended, or nothing on it at all — falls back to the current command's name (or
+the file name, without its extension, when there is no command to read), with a state
 word — **playing**, **paused**, **still**, **ended**, **empty** or **not
 found** — beside the caption.
 
@@ -372,14 +372,14 @@ PVP is not currently reporting reads **not found**, with its own sentence — ne
 
 **Progress bar** draws a hairline rule under the countdown. It advances smoothly
 rather than a step a second, and snaps instead of sliding whenever the change is
-not a tick — a cue change, a scrub, or a display waking up. A paused clip holds
+not a tick — a command change, a scrub, or a display waking up. A paused clip holds
 its bar where it stopped.
 
-**Next cue** names the entry after the current one in its playlist. Read the
+**Next command** names the entry after the current one in its playlist. Read the
 caveat before you rely on it: **that is the next playlist entry, which is what
-plays next only while the playlist keeps auto-advancing.** Fire a cue by hand and
+plays next only while the playlist keeps auto-advancing.** Fire a command by hand and
 this line is wrong until the next poll. It is the quietest line on the widget for
-that reason, it is never drawn without a current cue to anchor it, and it can be
+that reason, it is never drawn without a current command to anchor it, and it can be
 switched off.
 
 **Layout** chooses how much the widget draws. **Full** is the composition above.
@@ -387,17 +387,17 @@ switched off.
 `PVP · <label>` (or `PVP · <layer name>` when a layer is pinned, in every state),
 and the value is the countdown alone while there is one. With nothing to count —
 a still, an ended clip, or an empty layer's dash — the value falls back to
-whichever of the cue name or the file name is NOT already the caption, so the
+whichever of the command name or the file name is NOT already the caption, so the
 tile never repeats itself and never reads the literal "no duration". **Label**
 chooses what the Compact caption names when no layer is pinned: the layer's
-current cue, the media file's name with or without its extension, or the
-layer's own name. It falls back to the file name when there is no cue name to
+current command, the media file's name with or without its extension, or the
+layer's own name. It falls back to the file name when there is no command name to
 read, and it has no effect on a pinned tile, whose caption is always the layer's
 own name. A widget saved before Layout existed with Compact switched on opens as
 Compact.
 
 **Countdown only** draws the time left and nothing else: no caption, no state
-word, no cue name, no sub-line, no next cue. The number fills the widget — as
+word, no command name, no sub-line, no next command. The number fills the widget — as
 tall as 62% of its height allows, and never wider than its width allows for the
 digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
 an hour. With nothing counting — nothing on the layer, a layer PVP does not
@@ -407,8 +407,8 @@ bar and in red when **Warn near the end** is on, until the layer moves on. A pau
 reverse: it draws its frozen time with no state word, since there is no room for
 one here — switch to Full or Compact to see **paused**. **Progress bar**,
 **Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
-hairline along the bottom edge). **Next cue** and **Label** are not shown in
-the inspector, since neither is drawn in it. (Next cue is also unused by
+hairline along the bottom edge). **Next command** and **Label** are not shown in
+the inspector, since neither is drawn in it. (Next command is also unused by
 Compact, and Label by Full, and they are not shown there either.)
 
 **Warn near the end**, off by default so an existing widget is unchanged, turns
@@ -434,7 +434,7 @@ its own number. It is off by default and
 per-widget on purpose: a still's Duration is set at import and stored on every
 image in the library, including ones whose Next Behavior is None and that never
 advance — a countdown on a graphic that is not going anywhere would be a lie, so
-this is the operator opting IN a specific widget, for a layer whose cue actually
+this is the operator opting IN a specific widget, for a layer whose command actually
 advances on the hold (a rotating pre-roll, say). Once the hold runs out the
 countdown holds at 0:00 with a full bar rather than switching to another state.
 
@@ -445,7 +445,7 @@ screen** reads (Compact and Countdown only show nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the
-same cue while showing nothing — and it disagrees with the file that is actually
+same command while showing nothing — and it disagrees with the file that is actually
 up even on a layer that is playing. See
 [ProVideoPlayer](../integrations/provideoplayer.md).
 
@@ -638,9 +638,9 @@ here: it is the Companion choice.
 **A command** binds the Button to a command that exists. The **Command** dropdown
 lists **Your commands** first, including those hidden from Home Assistant, and then
 **Built in**: the commands the app ships for OBS, REAPER, ProVideoPlayer and
-itself, which need no rule behind them ([built-in cues](../automation.md#built-in-cues)).
+itself, which need no rule behind them ([built-in commands](../automation.md#built-in-commands)).
 A command that belongs to another Button is not offered. **+ New manual command…**
-opens the [Automation](../automation.md#cues) page in a new tab, and a command made
+opens the [Automation](../automation.md#commands) page in a new tab, and a command made
 there appears in the dropdown without reloading the editor. Two commands that would
 read the same show their command name beside the entry. **Used on** lists the
 screens that have a Button for the command, Home included.

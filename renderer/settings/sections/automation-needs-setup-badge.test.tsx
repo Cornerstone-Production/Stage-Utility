@@ -40,7 +40,7 @@ const CALL_TRIGGER_ID = "call.by-name";
  *  shapes (spl.crossed-above, rosstalk.command), not a stub invention. */
 const REGISTRY = {
   triggers: [
-    { id: CALL_TRIGGER_ID, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Cue name", type: "string" }] },
+    { id: CALL_TRIGGER_ID, label: "Called by name (voice or HTTP)", channel: "cue:call", params: [{ key: "name", label: "Command name", type: "string" }] },
     {
       id: "spl.crossed-above",
       label: "SPL rises above",
@@ -169,13 +169,13 @@ const settle = async () => {
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+async function mount(tab: "rules" | "commands" = "rules") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab })),
     ),
   );
   await settle();
@@ -183,7 +183,7 @@ async function mount() {
 
 const badge = (): HTMLElement | null => document.querySelector("[data-needs-setup]");
 const switchFor = (name: string): HTMLButtonElement | null =>
-  document.querySelector(`[data-rule-name="${name}"]`)?.closest(".rounded-lg")?.querySelector('button[role="switch"]') ?? null;
+  document.querySelector(`[data-rule-name="${name}"]`)?.closest("[data-rule-row]")?.querySelector('button[role="switch"]') ?? null;
 
 beforeEach(() => {
   RULES = [];
@@ -213,7 +213,7 @@ describe("the Needs setup badge", () => {
 
   test("a rule with no issues shows no badge at all", async () => {
     RULES = [clean()];
-    await mount();
+    await mount("commands");
     assert.equal(badge(), null, "a clean rule got a Needs setup badge");
   });
 
@@ -225,7 +225,7 @@ describe("the Needs setup badge", () => {
   // turns this red.
   test("a pair with an issue on one half shows the badge on the pair's own row", async () => {
     RULES = pair("projectors");
-    await mount();
+    await mount("commands");
     const row = document.querySelector('[data-cue-pair-row="projectors"]');
     assert.ok(row, "no pair row rendered");
     const b = row!.querySelector("[data-needs-setup]");
@@ -237,7 +237,7 @@ describe("the Needs setup badge", () => {
   test("a pair with no issues on either half shows no badge", async () => {
     const [on, off] = pair("projectors");
     RULES = [on!, { ...off!, action: { id: "rosstalk.command", params: { targetId: "t1" } } }];
-    await mount();
+    await mount("commands");
     const row = document.querySelector('[data-cue-pair-row="projectors"]');
     assert.ok(row, "no pair row rendered");
     assert.equal(row!.querySelector("[data-needs-setup]"), null, "a clean pair got a Needs setup badge");
@@ -288,7 +288,7 @@ describe("turning a needs-setup rule ON", () => {
 
   test("a clean rule's switch is never blocked", async () => {
     RULES = [clean({ enabled: false })];
-    await mount();
+    await mount("commands");
     const sw = switchFor("Walk-in music");
     await act(async () => {
       sw!.click();
