@@ -19,9 +19,13 @@
 //    a reference picks what it points at, the picked key says so, and a key that cannot
 //    be picked (a page control, an unresolved reference) is not a control at all.
 //
-// NOT unit-tested here, and driven in a browser instead: the keys' square size, the
-// sideways scroll of a page wider than its box, and the dropdown's stacking over the
-// grid. jsdom loads no stylesheet and reports every offsetWidth as 0.
+//  - THE GRID FITS ITS BOX: its columns are minmax(0, 1fr), so no key has a minimum width
+//    and the page never scrolls sideways; and a line under it reads out the hovered or
+//    focused key in full, the picked one at rest.
+//
+// NOT unit-tested here, and driven in a browser instead: that the keys really do shrink to
+// the box, the keys' square size, and the dropdown's stacking over the grid. jsdom loads no
+// stylesheet and reports every offsetWidth as 0.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND (see test-dom.ts).
 
@@ -325,7 +329,7 @@ describe("the grid, read-only", () => {
   test("draws the extent the server sent, each key in its own row and column", () => {
     mount();
     const grid = document.querySelector('[role="img"]') as HTMLElement;
-    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(2.25rem, 1fr))");
+    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))", "a key has a minimum width, so a wide page would scroll sideways");
     assert.equal(grid.children.length, 12 * 5, "the grid is not cols x rows cells");
     assert.equal(grid.children[4 * 12 + 11] === keyAt("p17 r4 c11"), true, "the last key is not in the last cell");
     assert.equal(grid.children[1 * 12 + 3] === keyAt("p17 r1 c3"), true, "a key is not in its own row and column");
@@ -343,6 +347,51 @@ describe("the grid, read-only", () => {
     assert.match(classes, /--su-companion-canvas/);
     assert.match(classes, /--su-companion-key/);
     assert.doesNotMatch(classes, /\bbg-(black|white)\b|bg-\[#|bg-white\/|bg-black\//);
+  });
+});
+
+describe("the readout under the grid", () => {
+  const readout = () => document.querySelector("[data-key-readout]")!.textContent ?? "";
+
+  test("the grid has no horizontal scroller around it", () => {
+    render(<CompanionPageGrid view={VIEW} />);
+    const classes = [...document.querySelectorAll("[class]")].map((e) => e.getAttribute("class") ?? "").join(" ");
+    assert.doesNotMatch(classes, /overflow-x-auto|overflow-x-scroll/, "the grid scrolls sideways again");
+  });
+
+  test("a read-only key is read out in full when hovered, and the line goes back to its hint", async () => {
+    render(<CompanionPageGrid view={{ ...VIEW, keys: [key(0, 0, { label: "A very long label that the key clips", text: "A very long label\nthat the key clips" })] }} />);
+    assert.match(readout(), /Hover a key/);
+    await act(async () => {
+      fireEvent.mouseEnter(keyAt("p17 r0 c0")!);
+    });
+    assert.equal(readout(), "A very long label that the key clipsp17 r0 c0");
+    await act(async () => {
+      fireEvent.mouseLeave(keyAt("p17 r0 c0")!);
+    });
+    assert.match(readout(), /Hover a key/);
+  });
+
+  test("a picking key is read out on focus, and blur returns to the picked key", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={{ onPick: () => {}, isPicked: (at) => at.page === 17 && at.row === 0 && at.col === 1 }} />);
+    assert.equal(readout(), "Lamp offp17 r0 c1", "at rest the line should name the picked key");
+    await act(async () => {
+      fireEvent.focus(keyAt("p17 r4 c11")!);
+    });
+    assert.equal(readout(), "Far rightp17 r4 c11", "focus did not move the readout");
+    await act(async () => {
+      fireEvent.blur(keyAt("p17 r4 c11")!);
+    });
+    assert.equal(readout(), "Lamp offp17 r0 c1");
+  });
+
+  test("a reference is marked, and a picked key on another page is named at rest from `current`", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={{ onPick: () => {}, isPicked: () => false, current: { text: "Elsewhere", page: 3, row: 1, col: 2 } }} />);
+    assert.equal(readout(), "Elsewherep3 r1 c2");
+    await act(async () => {
+      fireEvent.focus(keyAt("p17 r1 c3")!);
+    });
+    assert.equal(readout(), "Shutterp17 r1 c3 · ref");
   });
 });
 

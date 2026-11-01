@@ -80,14 +80,14 @@ host and port, so while the fields hold edits **Test** is off and says to save f
 **Browse buttons** opens Companion's pages in the card, read-only, so you can see
 what Stage Utility can press and what it will call each button without opening a
 rule. One page shows at a time, as a grid of the keys it uses (never fewer than 8
-by 4; a page wider than the card scrolls sideways), in Companion's own colours and
+by 4; the keys shrink to fit the card, so the page never scrolls sideways), in Companion's own colours and
 with its icons. A button that points at another is drawn as the one it points at,
 marked with a small **ref** chip, and a button set to use another button's style is drawn (and listed, and searched) with that style's label, colours and icon, while a press still goes to the button itself. A key's text is drawn as Companion draws it: line breaks kept, its own text size and alignment honoured, and the `$(connection:name)`, `$(custom:name)` and `$(internal:name)` variables in it replaced by their current values, read from Companion for the page on screen only and reused for a few seconds. A variable Companion does not answer for (or answers too slowly, within three seconds) stays as written, and a text layer set to an expression is shown as written, not evaluated. Text that would be the same colour as its background is drawn in black or white so it can be read; page up, page down and page number keys are blank. The page
 control is a dropdown with a filter that takes a number or any part of a name,
 and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
 both, because a real install has about a hundred pages and more than half are
 empty. Nothing is read from Companion until Browse buttons is pressed, and
-nothing in the grid presses or changes anything.
+nothing in the grid presses or changes anything. A line under the grid names the key under the pointer or focus in full, with its page, row and column.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has
