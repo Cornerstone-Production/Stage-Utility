@@ -520,6 +520,9 @@ export function BrandingSection({
               </div>
               <Switch
                 checked={stageState.appLogoMonochrome}
+                // While an icon is being drawn and saved a toggle would be dropped
+                // (makeIcon runs one at a time), so it waits, as the dialog's does.
+                disabled={iconBusy}
                 onCheckedChange={(v: boolean) => void setRecolor(v)}
                 aria-label="Recolor logo to match theme"
               />

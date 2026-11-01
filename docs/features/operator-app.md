@@ -591,7 +591,8 @@ Once set, the dialog opens with the icon's square in the crop editor, and offers
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
 A custom icon wins over the logo for the tab. The browser draws the tab icon itself,
-on every page and display, from the icon's art; if that file is ever missing (a restore
+in the operator app and on every display, from the icon's art (the public Service Cue
+page keeps the built-in icon); if that file is ever missing (a restore
 that carried the settings and not the images) the tab shows the built-in icon and the
 log says so. The home-screen label is the
 app name, read by iOS when the app is added, so renaming the app does not rename an
