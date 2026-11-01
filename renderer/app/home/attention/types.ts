@@ -18,8 +18,9 @@ export interface AttentionFix {
   route?: string;
   /** `data-flash-id` of the control on that page that fixes it. */
   flash?: string;
-  /** Instead of opening a page: an action to run now (POST /api/action/invoke). */
-  action?: { actionId: string; params: Record<string, unknown> };
+  /** Instead of opening a page: a command to press now (POST /api/cues/:name), so
+   *  Simulate, Disarm and the activity log apply as they do to any Button. */
+  command?: string;
 }
 
 export interface AttentionItem {

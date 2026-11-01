@@ -14,6 +14,7 @@ import { flashTarget } from "../../flash";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/cn";
 import { invoke } from "../../../lib/api";
+import { callAnswerNote, type CallAnswer } from "../../../lib/command-answer";
 import { errorMessage } from "@main/services/errors";
 import type { HomeSnooze } from "@main/types/home-snoozes";
 import { homeMode } from "../home-mode";
@@ -59,17 +60,18 @@ function FixButton({ fix, onFailed }: { fix: AttentionFix; onFailed: (why: strin
       </Button>
     );
   }
-  const action = fix.action;
+  const command = fix.command;
   return (
     <Button
       variant="accent"
-      disabled={busy || !action}
+      disabled={busy || !command}
       onClick={() => {
-        if (!action) return;
+        if (!command) return;
         setBusy(true);
-        invoke<{ ok: boolean; detail: string }>("action:invoke", action)
+        invoke<CallAnswer>("cues:call", { name: command })
           .then((r) => {
-            if (!r.ok) onFailed(r.detail);
+            const said = callAnswerNote(r);
+            if (said !== null) onFailed(said);
           })
           .catch((err: unknown) => onFailed(errorMessage(err)))
           .finally(() => setBusy(false));

@@ -18,8 +18,8 @@ describe("recorder-idle source", () => {
     assert.deepEqual(items.map((i) => i.key), ["recorder-idle:reaper", "recorder-idle:obs"]);
     assert.equal(items[0].severity, "warn");
     assert.equal(items[0].title, "REAPER is not recording");
-    assert.deepEqual(items[0].fix, { label: "Start recording", action: { actionId: "reaper.transport", params: { command: "record" } } });
-    assert.deepEqual(items[1].fix.action, { actionId: "obs.record", params: { command: "start" } });
+    assert.deepEqual(items[0].fix, { label: "Start recording", command: "reaper_record_on" });
+    assert.equal(items[1].fix.command, "obs_record_on");
   });
 
   it("does not fire when recording, when idle (not live), when disabled, or when not connected", () => {

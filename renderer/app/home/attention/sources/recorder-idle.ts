@@ -8,12 +8,13 @@ import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSo
 
 interface Recorder {
   id: "reaper" | "obs";
-  fix: { actionId: string; params: Record<string, unknown> };
+  /** The built-in command that starts it (main/services/builtin-cues.ts). */
+  start: string;
 }
 
 const RECORDERS: Recorder[] = [
-  { id: "reaper", fix: { actionId: "reaper.transport", params: { command: "record" } } },
-  { id: "obs", fix: { actionId: "obs.record", params: { command: "start" } } },
+  { id: "reaper", start: "reaper_record_on" },
+  { id: "obs", start: "obs_record_on" },
 ];
 
 export const recorderIdle: AttentionSource = {
@@ -32,7 +33,7 @@ export const recorderIdle: AttentionSource = {
         severity: "warn",
         title: `${label} is not recording`,
         detail: `The service is live and ${label} is connected but idle`,
-        fix: { label: "Start recording", action: r.fix },
+        fix: { label: "Start recording", command: r.start },
       });
     }
     return out;

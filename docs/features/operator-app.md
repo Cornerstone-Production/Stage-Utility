@@ -136,7 +136,7 @@ three rows and **+N more**, which opens the rest inside the tile.
 | Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
 | Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
 | Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
-| Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which starts it in place |
+| Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which presses the built-in recording command in place, so Simulate and Disarm apply as they do to the Recording tile |
 | Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
 
 A source that has not answered yet adds nothing: the page does not tell you to

@@ -167,12 +167,17 @@ test("more than three problems: three rows and '+N more', which expands in place
   assert.equal(container.querySelectorAll("li").length, 3);
 });
 
-test("an in-place fix (Start recording) posts the action and does not navigate", async () => {
+// What the stubbed command route answers the next press.
+let answer: Record<string, unknown> = { ok: true, detail: "record" };
+let answerStatus = 200;
+
+test("an in-place fix (Start recording) presses its command and does not navigate", async () => {
   const posted: unknown[] = [];
   const orig = globalThis.fetch;
   globalThis.fetch = (async (url: string, init?: { body?: string }) => {
-    if (String(url).includes("/api/action/invoke")) posted.push(JSON.parse(init?.body ?? "null"));
-    return new Response(JSON.stringify({ ok: true, detail: "record" }), { status: 200, headers: { "content-type": "application/json" } });
+    if (String(url).includes("/api/cues/")) posted.push(String(url).slice(String(url).lastIndexOf("/") + 1));
+    void init;
+    return new Response(JSON.stringify(answer), { status: answerStatus, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
     view({
@@ -182,8 +187,33 @@ test("an in-place fix (Start recording) posts the action and does not navigate",
     });
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
     await settle();
-    assert.deepEqual(posted, [{ actionId: "reaper.transport", params: { command: "record" } }]);
+    assert.deepEqual(posted, ["reaper_record_on"]);
   } finally {
     globalThis.fetch = orig;
+  }
+});
+
+test("a Start recording that Simulate stops says so on the card", async () => {
+  const posted: unknown[] = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: { body?: string }) => {
+    if (String(url).includes("/api/cues/")) posted.push(String(url).slice(String(url).lastIndexOf("/") + 1));
+    void init;
+    return new Response(JSON.stringify(answer), { status: answerStatus, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  answer = { ok: true, detail: "would send record", simulated: true };
+  try {
+    view({
+      mood: "live", state: stateOf([OUTPUTS[0]]), onlineOutputIds: ["o0"],
+      integrations: [integration("reaper")], integrationLabels: { reaper: "REAPER" },
+      reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await settle();
+    assert.deepEqual(posted, ["reaper_record_on"]);
+    assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed: Simulated: nothing was sent/);
+  } finally {
+    globalThis.fetch = orig;
+    answer = { ok: true, detail: "record" };
   }
 });
