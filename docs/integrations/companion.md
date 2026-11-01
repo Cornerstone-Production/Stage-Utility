@@ -212,6 +212,16 @@ different televisions, and crossing them is the kind of mistake found out during
 setup. When the same label does appear on two pages, both commands are named after
 their page so neither is lost.
 
+The dialog opens on **Pick by page**: choose a page and it is drawn as Companion draws
+it, and a click on a key ticks it. Clicking half of an ON/OFF pair ticks both keys,
+because it is imported as one switch. A key already imported is marked **imported**
+and cannot be ticked, and a key the import does not offer is dimmed. Under the grid,
+**Picked** lists everything ticked so far, across pages, each with its own **State**
+choice (or **Toggle with state**, for a single button). **All buttons** is the
+searchable list described below. Both views are one selection: what is ticked in
+one is ticked in the other, **Select all** in the list shows in the grid, and
+switching views loses nothing. The Import button counts the same in both.
+
 Each pair row has a **State** column: pick the Companion custom variable that
 holds what the device is actually doing, and the generated Home Assistant switch
 reports that rather than what it last asked for. See

@@ -279,7 +279,7 @@ describe("the grid, read-only", () => {
     assert.match(keyAt("p1 r0 c0")!.getAttribute("title") ?? "", /^Occupants 12 · p1 r0 c0$/);
   });
 
-  test("Companion's own text size and alignment are kept; auto-fit keeps the clamp", () => {
+  test("Companion's own text size and alignment are kept, and a sized key is still clamped", () => {
     const view = {
       page: 1,
       name: "Size",
@@ -293,14 +293,28 @@ describe("the grid, read-only", () => {
     render(<CompanionPageGrid view={view} />);
     const big = keyAt("p1 r0 c0")!;
     assert.equal(big.style.getPropertyValue("--key-size"), "40");
-    assert.match(big.getAttribute("class") ?? "", /var\(--key-size\)/, "the size is set but nothing reads it");
+    // On the text and not on the key: a container unit on the container itself reads the container above it.
+    assert.match(big.querySelector("span")!.getAttribute("class") ?? "", /var\(--key-size\)/, "the size is set but nothing reads it");
+    assert.doesNotMatch(big.getAttribute("class") ?? "", /var\(--key-size\)/, "the size unit is on the container itself, where it resolves against nothing");
     assert.equal(big.style.textAlign, "left");
     assert.equal(big.style.alignItems, "flex-start");
     assert.equal(big.style.justifyContent, "flex-end");
-    assert.doesNotMatch(big.querySelector("span")!.getAttribute("class") ?? "", /line-clamp/, "a sized key is still clamped to three lines");
+    assert.match(big.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-3/, "a sized key lost its clamp and can run out of its box");
     const auto = keyAt("p1 r0 c1")!;
     assert.equal(auto.style.getPropertyValue("--key-size"), "", "an auto-fit key was given a size");
     assert.match(auto.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-3/);
+  });
+
+  test("the large grid draws bigger type and allows a fourth line", () => {
+    const view = { page: 1, name: "L", cols: 8, rows: 4, keys: [key(0, 0, { label: "Plain" }), key(0, 1, { label: "Sized", size: 30 })] };
+    render(<CompanionPageGrid view={view} size="large" />);
+    const plain = keyAt("p1 r0 c0")!;
+    assert.match(plain.getAttribute("class") ?? "", /text-\[12px\]/, "the large key kept the small type");
+    assert.match(plain.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-4/);
+    assert.match(keyAt("p1 r0 c1")!.querySelector("span")!.getAttribute("class") ?? "", /max\(12px,/, "a sized key in the large grid can go under the large type");
+    cleanup();
+    render(<CompanionPageGrid view={view} />);
+    assert.match(keyAt("p1 r0 c0")!.getAttribute("class") ?? "", /text-\[9px\]/);
   });
 
   test("an icon is drawn above its label", () => {

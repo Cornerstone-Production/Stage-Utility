@@ -40,7 +40,7 @@ import {
   readFingerprint,
   shortLocation,
 } from "@main/services/companion-fingerprint";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
@@ -64,6 +64,8 @@ import {
 import { SETTINGS_CARD } from "../../lib/card-classes";
 import { copyText } from "../../lib/clipboard";
 import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
+import { CompanionPageBody, CompanionPageSelect, listedPages, type CompanionPick } from "../../components/companion-pages";
+import { Segmented } from "../../editor/inspector-rows";
 import { plural } from "@main/services/plural";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
@@ -594,6 +596,49 @@ function SectionHeading({
   );
 }
 
+/**
+ * Import's page view: a page dropdown over the page as Companion draws it, where a click
+ * ticks a key, then everything ticked so far (across pages) with its own State or toggle
+ * choice. `picked` are the rows the All buttons list draws, so a choice made here is the
+ * same control and the same state as there.
+ */
+function PickByPage({
+  pick,
+  picked,
+  chosenPage,
+  onPage,
+}: {
+  pick: CompanionPick;
+  picked: ReactNode[];
+  /** The page showing, kept by the dialog so it is the same page when the view is switched back to. */
+  chosenPage: number | null;
+  onPage: (page: number) => void;
+}) {
+  const buttonsQ = useQuery(companionButtonsQuery);
+  const pages = useMemo(() => listedPages(buttonsQ.data?.pages), [buttonsQ.data]);
+  const page = chosenPage ?? pages[0]?.page ?? null;
+  const reason = buttonsQ.isError ? errorMessage(buttonsQ.error) : buttonsQ.data && !buttonsQ.data.ok ? (buttonsQ.data.reason ?? "it did not answer") : null;
+  return (
+    <div className="flex flex-col gap-2" data-import-by-page="">
+      {reason !== null ? (
+        <p className="py-2 text-caption1 text-fg-muted">Could not read Companion&rsquo;s pages: {reason}. All buttons still lists what it found.</p>
+      ) : (
+        <>
+          <CompanionPageSelect pages={pages} page={page} onPage={onPage} />
+          <CompanionPageBody reading={buttonsQ.isPending} page={page} pick={pick} />
+        </>
+      )}
+      <div className="flex items-baseline gap-2 pt-1">
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Picked</span>
+        <span className="font-mono text-caption2 tabular-nums text-fg-subtle" data-picked-count="">
+          {picked.length}
+        </span>
+      </div>
+      {picked.length === 0 ? <p className="py-1 text-caption1 text-fg-muted">Nothing picked yet. Click a key above.</p> : picked}
+    </div>
+  );
+}
+
 export function ImportPairsDialog({
   open,
   onOpenChange,
@@ -630,6 +675,10 @@ export function ImportPairsDialog({
   const [toggleVars, setToggleVars] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which way in: the pages as Companion draws them, or the searchable list. Both show and
+  // change the one selection above, so switching between them loses nothing.
+  const [view, setView] = useState<"page" | "list">("page");
+  const [byPage, setByPage] = useState<number | null>(null);
 
   const pairs = data?.pairs ?? [];
   const singles = data?.buttons ?? [];
@@ -715,6 +764,181 @@ export function ImportPairsDialog({
   const matches = shownPairs.length + shown.length;
   const offered = pairs.length + singles.length;
 
+  /**
+   * Every offer by where its buttons are, so a key on a page finds what it would import.
+   * Both halves of a pair map to the pair: ticking either key ticks the pair, which is
+   * imported as one switch.
+   */
+  const place = (at: { page: number; row: number; col: number }) => `${at.page}/${at.row}/${at.col}`;
+  const offers = new Map<string, { pair: Pair } | { single: Single }>();
+  for (const p of pairs) {
+    offers.set(place(p.on), { pair: p });
+    offers.set(place(p.off), { pair: p });
+  }
+  for (const b of singles) offers.set(place(b), { single: b });
+
+  /** The same checks the list's checkboxes make, for a key on a page. An imported key is not a control (see isLocked), so onPick never hears of one. */
+  const tickPick: CompanionPick = {
+    isPicked: (at) => {
+      const o = offers.get(place(at));
+      return !!o && ("pair" in o ? chosen.has(key(o.pair)) : pickedButtons.has(buttonKey(o.single)));
+    },
+    onPick: (at) => {
+      const o = offers.get(place(at));
+      if (!o) return;
+      if ("pair" in o) {
+        const next = new Set(chosen);
+        if (!next.delete(key(o.pair))) next.add(key(o.pair));
+        setPicked(next);
+      } else {
+        const next = new Set(pickedButtons);
+        if (!next.delete(buttonKey(o.single))) next.add(buttonKey(o.single));
+        setPickedButtons(next);
+      }
+    },
+    tick: {
+      isOffered: (at) => offers.has(place(at)),
+      isLocked: (at) => {
+        const o = offers.get(place(at));
+        return !!o && ("pair" in o ? o.pair.exists : o.single.exists);
+      },
+    },
+  };
+
+  // One row per offer, drawn by both views: the list shows every row, Pick by page shows the
+  // ticked ones, and the State and toggle choices are made in the same control in each.
+  const pairRow = (p: Pair) => (
+      // A DIV with the label around the checkbox and the words only.
+      // With the whole row as one <label>, every click on the State
+      // select also toggled the checkbox — choosing a variable
+      // unticked the pair it was for.
+      <div key={key(p)} className="flex items-center gap-2 border-b border-line py-1.5">
+        <label className="flex min-w-0 flex-1 items-center gap-2">
+          <Checkbox
+            checked={chosen.has(key(p))}
+            disabled={p.exists}
+            aria-label={`${p.base} · ${p.pageName}`}
+            onCheckedChange={(v) => {
+              const next = new Set(chosen);
+              if (v) next.add(key(p));
+              else next.delete(key(p));
+              setPicked(next);
+            }}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-footnote text-fg">{p.base}</span>
+            <span className="block truncate text-caption2 text-fg-subtle">
+              {p.pageName} · {p.slug}_on / {p.slug}_off
+              {p.exists ? " · already imported" : ""}
+            </span>
+          </span>
+        </label>
+        {/* Offered only when Companion HAS custom variables, and never
+            for a pair that is already imported — its cues exist, and
+            the binding is an edit to the rule from here on. */}
+        {/* Nothing to offer and nothing to build: this pair's state
+            source is learned from a press. Said here rather than left
+            blank, because a blank State column reads as "this pair
+            cannot report its state" — which is the opposite of what is
+            about to happen. See companion-state-learn.ts. */}
+        {p.learnable && !p.exists && customVariables.length === 0 && (
+          <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
+        )}
+        {(customVariables.length > 0 || p.stateSource) && !p.exists && (
+          <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
+            {/* The PAGE is in the accessible name, exactly as the
+                checkbox's is: the fixture Companion has "Projectors" on
+                two pages, and two selects called "State variable for
+                Projectors" are indistinguishable to a screen reader and
+                to anything driving the page. */}
+            <SelectTrigger
+              className="w-40 shrink-0"
+              aria-label={`State variable for ${p.base} · ${p.pageName}`}
+            >
+              <SelectValue placeholder="No state" />
+            </SelectTrigger>
+            <SelectContent>
+              {/* "will learn" is the EMPTY option's own text for a
+                  learnable pair, not a placeholder beside it: Select
+                  drops a placeholder whenever the caller supplies an
+                  empty item, and an operator who leaves this alone
+                  gets learning — "No state" would say the opposite. */}
+              <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
+              {optionsFor(p.stateSource).map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <KindTag kind="switch" />
+      </div>
+  );
+
+  const singleRow = (b: Single) => {
+      const chosenVar = toggleVarFor(b);
+      return (
+        // A DIV with the label around the checkbox and the words only,
+        // exactly as the pairs rows are: with the whole row as one
+        // <label>, every click on the select also toggled the
+        // checkbox, so choosing a variable unticked the button it was
+        // for.
+        <div key={buttonKey(b)} className="flex items-center gap-2 border-b border-line py-1.5">
+          <label className="flex min-w-0 flex-1 items-center gap-2">
+            <Checkbox
+              checked={pickedButtons.has(buttonKey(b))}
+              disabled={b.exists}
+              aria-label={`${b.label} · ${b.pageName}`}
+              onCheckedChange={(v) => {
+                const next = new Set(pickedButtons);
+                if (v) next.add(buttonKey(b));
+                else next.delete(buttonKey(b));
+                setPickedButtons(next);
+              }}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-footnote text-fg">{b.label}</span>
+              <span className="block truncate text-caption2 text-fg-subtle">
+                {b.pageName} · {chosenVar ? `${toggleSlug(b)}_on / ${toggleSlug(b)}_off` : b.slug}
+                {b.exists ? " · already imported" : ""}
+              </span>
+            </span>
+          </label>
+          {/* Offered only when Companion HAS custom variables, and
+              never for a button that is already imported. */}
+          {(customVariables.length > 0 || b.stateSource) && !b.exists && (
+            <Select
+              value={chosenVar}
+              onValueChange={(v) => {
+                setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
+                // Choosing a variable TICKS the row. Nothing here is
+                // ticked for you, but picking a variable for one
+                // button is the operator saying they want that button
+                // — and in a browser the choice otherwise sat there
+                // with the footer still reading "Import 3 pairs" and
+                // the button imported as nothing at all. Clearing it
+                // does not untick: unticking is the checkbox's job.
+                if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
+              }}
+            >
+              <SelectTrigger
+                className="w-40 shrink-0"
+                aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}
+              >
+                <SelectValue placeholder="Not a toggle" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Not a toggle</SelectItem>
+                {optionsFor(b.stateSource).map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <KindTag kind={chosenVar ? "switch" : "script"} />
+        </div>
+      );
+  };
+
   async function run() {
     setBusy(true);
     try {
@@ -762,6 +986,8 @@ export function ImportPairsDialog({
           setStateVars({});
           setToggleVars({});
           setSearch("");
+          setView("page");
+          setByPage(null);
         }
         onOpenChange(v);
       }}
@@ -779,244 +1005,141 @@ export function ImportPairsDialog({
         ) : (
           // The dialog's own scroller, NOT the page's: this list scrolls inside
           // the dialog, so the field below sticks to the top of THIS element.
-          <div className="max-h-[50vh] overflow-y-auto">
-            {/* `z-20`, above the two section headings, which are sticky at
-                `z-10` and would otherwise slide over the field. */}
-            {/* `h-9` is not decoration: the section headings below stick at
-                `top-9`, so the two numbers are one number. Without it a heading
-                pinned at the same offset as this field and disappeared behind
-                it — the list scrolled with no heading visible at all. */}
-            <div className="sticky top-0 z-20 flex h-9 items-center gap-2 bg-bg">
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search buttons, pages and command names…"
-                className="h-7 flex-1 text-footnote"
-                aria-label="Search buttons"
+          <>
+            <div className="mb-2">
+              <Segmented
+                label="Import view"
+                compact
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "page", label: "Pick by page" },
+                  { value: "list", label: "All buttons" },
+                ]}
               />
-              {search.trim() !== "" && (
-                <span className="shrink-0 text-caption2 text-fg-muted" data-import-search-count="">
-                  {matches} of {offered}
-                </span>
-              )}
             </div>
-            {isFetching && pairs.length === 0 && singles.length === 0 && (
-              <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
-            )}
-
-            <SectionHeading
-              title="ON/OFF pairs"
-              count={shownPairs.length}
-              selectAllLabel={`Select all ${shownPairs.filter((p) => !p.exists).length} shown pairs`}
-              clearLabel="Clear pairs"
-              // The VISIBLE rows, both ways. Select all over every pair while a
-              // search is on screen is an import of things the operator cannot
-              // see, and Clear over all of them throws away a selection made
-              // before they typed.
-              onSelectAll={() => {
-                const next = new Set(chosen);
-                for (const p of shownPairs) if (!p.exists) next.add(key(p));
-                setPicked(next);
-              }}
-              onClear={() => {
-                const next = new Set(chosen);
-                for (const p of shownPairs) next.delete(key(p));
-                setPicked(next);
-              }}
-            />
-            <p className="pb-1 text-caption2 text-fg-subtle">
-              Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown, START/STOP or
-              Open/Closed.
-              Each becomes two commands — <span className="text-fg">_on</span> and{" "}
-              <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
-              Assistant switch. Select all and Clear act on the rows a search has left on screen.
-              {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
+            <div className="max-h-[50vh] overflow-y-auto">
+              {view === "page" ? (
+                <PickByPage
+                  pick={tickPick}
+                  chosenPage={byPage}
+                  onPage={setByPage}
+                  picked={[...pairs.filter((p) => chosen.has(key(p))).map(pairRow), ...singles.filter((b) => pickedButtons.has(buttonKey(b))).map(singleRow)]}
+                />
+              ) : (
                 <>
-                  {" "}
-                  Pick a <span className="text-fg">state</span> variable and the switch reports what the
-                  device is doing rather than what it was asked to do.
-                </>
-              )}
-            </p>
-            {/* The section stays, with a word, rather than disappearing: a
-                heading that vanishes reads as "this Companion has no pairs",
-                which is a different answer from "none of them match". */}
-            {shownPairs.length === 0 && !isFetching && (
-              <p className="py-2 text-caption1 text-fg-muted">
-                {pairs.length === 0 ? "No ON/OFF pairs on this Companion." : "No matches."}
-              </p>
-            )}
-            {shownPairs.map((p) => (
-              // A DIV with the label around the checkbox and the words only.
-              // With the whole row as one <label>, every click on the State
-              // select also toggled the checkbox — choosing a variable
-              // unticked the pair it was for.
-              <div key={key(p)} className="flex items-center gap-2 border-b border-line py-1.5">
-                <label className="flex min-w-0 flex-1 items-center gap-2">
-                  <Checkbox
-                    checked={chosen.has(key(p))}
-                    disabled={p.exists}
-                    aria-label={`${p.base} · ${p.pageName}`}
-                    onCheckedChange={(v) => {
+                  {/* `z-20`, above the two section headings, which are sticky at
+                      `z-10` and would otherwise slide over the field. */}
+                  {/* `h-9` is not decoration: the section headings below stick at
+                      `top-9`, so the two numbers are one number. Without it a heading
+                      pinned at the same offset as this field and disappeared behind
+                      it — the list scrolled with no heading visible at all. */}
+                  <div className="sticky top-0 z-20 flex h-9 items-center gap-2 bg-bg">
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search buttons, pages and command names…"
+                      className="h-7 flex-1 text-footnote"
+                      aria-label="Search buttons"
+                    />
+                    {search.trim() !== "" && (
+                      <span className="shrink-0 text-caption2 text-fg-muted" data-import-search-count="">
+                        {matches} of {offered}
+                      </span>
+                    )}
+                  </div>
+                  {isFetching && pairs.length === 0 && singles.length === 0 && (
+                    <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
+                  )}
+
+                  <SectionHeading
+                    title="ON/OFF pairs"
+                    count={shownPairs.length}
+                    selectAllLabel={`Select all ${shownPairs.filter((p) => !p.exists).length} shown pairs`}
+                    clearLabel="Clear pairs"
+                    // The VISIBLE rows, both ways. Select all over every pair while a
+                    // search is on screen is an import of things the operator cannot
+                    // see, and Clear over all of them throws away a selection made
+                    // before they typed.
+                    onSelectAll={() => {
                       const next = new Set(chosen);
-                      if (v) next.add(key(p));
-                      else next.delete(key(p));
+                      for (const p of shownPairs) if (!p.exists) next.add(key(p));
+                      setPicked(next);
+                    }}
+                    onClear={() => {
+                      const next = new Set(chosen);
+                      for (const p of shownPairs) next.delete(key(p));
                       setPicked(next);
                     }}
                   />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-footnote text-fg">{p.base}</span>
-                    <span className="block truncate text-caption2 text-fg-subtle">
-                      {p.pageName} · {p.slug}_on / {p.slug}_off
-                      {p.exists ? " · already imported" : ""}
-                    </span>
-                  </span>
-                </label>
-                {/* Offered only when Companion HAS custom variables, and never
-                    for a pair that is already imported — its cues exist, and
-                    the binding is an edit to the rule from here on. */}
-                {/* Nothing to offer and nothing to build: this pair's state
-                    source is learned from a press. Said here rather than left
-                    blank, because a blank State column reads as "this pair
-                    cannot report its state" — which is the opposite of what is
-                    about to happen. See companion-state-learn.ts. */}
-                {p.learnable && !p.exists && customVariables.length === 0 && (
-                  <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
-                )}
-                {(customVariables.length > 0 || p.stateSource) && !p.exists && (
-                  <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
-                    {/* The PAGE is in the accessible name, exactly as the
-                        checkbox's is: the fixture Companion has "Projectors" on
-                        two pages, and two selects called "State variable for
-                        Projectors" are indistinguishable to a screen reader and
-                        to anything driving the page. */}
-                    <SelectTrigger
-                      className="w-40 shrink-0"
-                      aria-label={`State variable for ${p.base} · ${p.pageName}`}
-                    >
-                      <SelectValue placeholder="No state" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {/* "will learn" is the EMPTY option's own text for a
-                          learnable pair, not a placeholder beside it: Select
-                          drops a placeholder whenever the caller supplies an
-                          empty item, and an operator who leaves this alone
-                          gets learning — "No state" would say the opposite. */}
-                      <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
-                      {optionsFor(p.stateSource).map((o) => (
-                        <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                <KindTag kind="switch" />
-              </div>
-            ))}
-
-            <div className="mt-3">
-              <SectionHeading
-                title="Single buttons"
-                count={shown.length}
-                selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown buttons`}
-                clearLabel="Clear single buttons"
-                onSelectAll={() => {
-                  const next = new Set(pickedButtons);
-                  for (const b of shown) if (!b.exists) next.add(buttonKey(b));
-                  setPickedButtons(next);
-                }}
-                onClear={() => {
-                  const next = new Set(pickedButtons);
-                  for (const b of shown) next.delete(buttonKey(b));
-                  setPickedButtons(next);
-                }}
-              />
-              <p className="pb-1 text-caption2 text-fg-subtle">
-                Every other labelled button. Each becomes one command and one Home Assistant script — nothing
-                here is ticked for you. Select all and Clear act on the rows a search has left on screen.
-                {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
-                  <>
-                    {" "}
-                    A button that is really a <span className="text-fg">toggle</span> — one key for both
-                    directions — becomes an ON/OFF pair instead when you give it a state variable, so Home
-                    Assistant gets a switch rather than a button that snaps back.
-                  </>
-                )}
-              </p>
-              {/* The search field is at the TOP of the dialog now, over both
-                  sections — a field inside one section could only ever filter
-                  that one, and an operator who could not find a button had no
-                  way to tell whether it was imported as half of a pair. */}
-              {shown.length === 0 && !isFetching && (
-                <p className="py-2 text-caption1 text-fg-muted">
-                  {singles.length === 0 ? "Every labelled button is part of a pair." : "No matches."}
-                </p>
-              )}
-              {shown.map((b) => {
-                const chosenVar = toggleVarFor(b);
-                return (
-                  // A DIV with the label around the checkbox and the words only,
-                  // exactly as the pairs rows are: with the whole row as one
-                  // <label>, every click on the select also toggled the
-                  // checkbox, so choosing a variable unticked the button it was
-                  // for.
-                  <div key={buttonKey(b)} className="flex items-center gap-2 border-b border-line py-1.5">
-                    <label className="flex min-w-0 flex-1 items-center gap-2">
-                      <Checkbox
-                        checked={pickedButtons.has(buttonKey(b))}
-                        disabled={b.exists}
-                        aria-label={`${b.label} · ${b.pageName}`}
-                        onCheckedChange={(v) => {
-                          const next = new Set(pickedButtons);
-                          if (v) next.add(buttonKey(b));
-                          else next.delete(buttonKey(b));
-                          setPickedButtons(next);
-                        }}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-footnote text-fg">{b.label}</span>
-                        <span className="block truncate text-caption2 text-fg-subtle">
-                          {b.pageName} · {chosenVar ? `${toggleSlug(b)}_on / ${toggleSlug(b)}_off` : b.slug}
-                          {b.exists ? " · already imported" : ""}
-                        </span>
-                      </span>
-                    </label>
-                    {/* Offered only when Companion HAS custom variables, and
-                        never for a button that is already imported. */}
-                    {(customVariables.length > 0 || b.stateSource) && !b.exists && (
-                      <Select
-                        value={chosenVar}
-                        onValueChange={(v) => {
-                          setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
-                          // Choosing a variable TICKS the row. Nothing here is
-                          // ticked for you, but picking a variable for one
-                          // button is the operator saying they want that button
-                          // — and in a browser the choice otherwise sat there
-                          // with the footer still reading "Import 3 pairs" and
-                          // the button imported as nothing at all. Clearing it
-                          // does not untick: unticking is the checkbox's job.
-                          if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
-                        }}
-                      >
-                        <SelectTrigger
-                          className="w-40 shrink-0"
-                          aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}
-                        >
-                          <SelectValue placeholder="Not a toggle" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">Not a toggle</SelectItem>
-                          {optionsFor(b.stateSource).map((o) => (
-                            <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  <p className="pb-1 text-caption2 text-fg-subtle">
+                    Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown, START/STOP or
+                    Open/Closed.
+                    Each becomes two commands — <span className="text-fg">_on</span> and{" "}
+                    <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
+                    Assistant switch. Select all and Clear act on the rows a search has left on screen.
+                    {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
+                      <>
+                        {" "}
+                        Pick a <span className="text-fg">state</span> variable and the switch reports what the
+                        device is doing rather than what it was asked to do.
+                      </>
                     )}
-                    <KindTag kind={chosenVar ? "switch" : "script"} />
+                  </p>
+                  {/* The section stays, with a word, rather than disappearing: a
+                      heading that vanishes reads as "this Companion has no pairs",
+                      which is a different answer from "none of them match". */}
+                  {shownPairs.length === 0 && !isFetching && (
+                    <p className="py-2 text-caption1 text-fg-muted">
+                      {pairs.length === 0 ? "No ON/OFF pairs on this Companion." : "No matches."}
+                    </p>
+                  )}
+                  {shownPairs.map(pairRow)}
+
+                  <div className="mt-3">
+                    <SectionHeading
+                      title="Single buttons"
+                      count={shown.length}
+                      selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown buttons`}
+                      clearLabel="Clear single buttons"
+                      onSelectAll={() => {
+                        const next = new Set(pickedButtons);
+                        for (const b of shown) if (!b.exists) next.add(buttonKey(b));
+                        setPickedButtons(next);
+                      }}
+                      onClear={() => {
+                        const next = new Set(pickedButtons);
+                        for (const b of shown) next.delete(buttonKey(b));
+                        setPickedButtons(next);
+                      }}
+                    />
+                    <p className="pb-1 text-caption2 text-fg-subtle">
+                      Every other labelled button. Each becomes one command and one Home Assistant script — nothing
+                      here is ticked for you. Select all and Clear act on the rows a search has left on screen.
+                      {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
+                        <>
+                          {" "}
+                          A button that is really a <span className="text-fg">toggle</span> — one key for both
+                          directions — becomes an ON/OFF pair instead when you give it a state variable, so Home
+                          Assistant gets a switch rather than a button that snaps back.
+                        </>
+                      )}
+                    </p>
+                    {/* The search field is at the TOP of the dialog now, over both
+                        sections — a field inside one section could only ever filter
+                        that one, and an operator who could not find a button had no
+                        way to tell whether it was imported as half of a pair. */}
+                    {shown.length === 0 && !isFetching && (
+                      <p className="py-2 text-caption1 text-fg-muted">
+                        {singles.length === 0 ? "Every labelled button is part of a pair." : "No matches."}
+                      </p>
+                    )}
+                    {shown.map(singleRow)}
                   </div>
-                );
-              })}
+                </>
+              )}
             </div>
-          </div>
+          </>
         )}
 
         <div className="mt-3 flex items-center gap-2">
