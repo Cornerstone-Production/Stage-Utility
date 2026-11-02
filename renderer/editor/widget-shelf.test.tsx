@@ -36,8 +36,8 @@ interface Spy {
   folded: boolean[];
 }
 
-function Harness({ spy, types = ALL_TYPES, dimmed = new Set<LayoutObjectType>(), startFolded = false }: {
-  spy: Spy; types?: LayoutObjectType[]; dimmed?: Set<LayoutObjectType>; startFolded?: boolean;
+function Harness({ spy, types = ALL_TYPES, dimmed = new Set<LayoutObjectType>(), startFolded = false, focusSignal = 0 }: {
+  spy: Spy; types?: LayoutObjectType[]; dimmed?: Set<LayoutObjectType>; startFolded?: boolean; focusSignal?: number;
 }) {
   const [folded, setFolded] = React.useState(startFolded);
   const ref = React.useRef<HTMLInputElement | null>(null);
@@ -51,7 +51,7 @@ function Harness({ spy, types = ALL_TYPES, dimmed = new Set<LayoutObjectType>(),
     onDragEnd: noop,
     folded,
     onFoldedChange: (f: boolean) => { spy.folded.push(f); setFolded(f); },
-    focusSignal: 0,
+    focusSignal,
     searchRef: ref,
     onLeave: () => { spy.lefts.push("left"); },
   } as never);
@@ -91,6 +91,36 @@ describe("the widget shelf", () => {
     assert.equal(spy.added.length, 1);
     // The outlined tile IS what Enter added.
     assert.equal(outlined[0]!.getAttribute("aria-label")?.startsWith(`${LAYOUT_OBJECTS[spy.added[0] as LayoutObjectType].label}:`), true);
+  });
+
+  test("Enter adds the best match: a name beats a group, whatever is drawn first", () => {
+    // "time" matches all of Text & time by its group, and Text is drawn first;
+    // Timer's own name starts with it, so Timer is what Enter adds.
+    const spy = spyOf();
+    const { getByLabelText } = render(React.createElement(Harness, { spy }));
+    const box = getByLabelText("Search widgets");
+    fireEvent.change(box, { target: { value: "time" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    assert.equal(LAYOUT_OBJECTS[spy.added[0] as LayoutObjectType]?.label, "Timer");
+  });
+
+  test("Enter that ends an IME composition adds nothing", () => {
+    const spy = spyOf();
+    const { getByLabelText } = render(React.createElement(Harness, { spy }));
+    const box = getByLabelText("Search widgets");
+    fireEvent.change(box, { target: { value: "clock" } });
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    assert.deepEqual(spy.added, []);
+    fireEvent.keyDown(box, { key: "Escape", isComposing: true });
+    assert.equal((box as HTMLInputElement).value, "clock", "Escape inside a composition cleared the query");
+  });
+
+  test("a focus request already handled does not grab focus when the shelf mounts again", () => {
+    // Editing off unmounts the shelf; editing on mounts it with the signal it last saw.
+    const spy = spyOf();
+    const { getByLabelText } = render(React.createElement(Harness, { spy, focusSignal: 3 }));
+    assert.ok(document.activeElement !== getByLabelText("Search widgets"), "the search stole focus on mount");
   });
 
   test("Enter with nothing matching adds nothing", () => {

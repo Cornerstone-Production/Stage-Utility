@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 
-import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
+import { widgetMatchRank, LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
 import { cn } from "../lib/cn";
 import { Checkbox } from "../components/ui/checkbox";
 import { searchShortcutLabel } from "../components/page-tabs";
@@ -75,8 +75,12 @@ export function WidgetShelf({
   useEffect(() => () => { if (jumpTimer.current) clearTimeout(jumpTimer.current); }, []);
   const { tileProps, ghostEl } = usePaletteDrag({ onDragStart, onDragEnd, onDropAt });
 
+  // The signal outlives the shelf: it unmounts when editing ends and remounts on the
+  // next edit, and a signal already handled must not grab focus on that remount.
+  const handledSignal = useRef(focusSignal);
   useEffect(() => {
-    if (focusSignal === 0) return;
+    if (focusSignal === handledSignal.current) return;
+    handledSignal.current = focusSignal;
     // The whole shelf, not just the box: focus alone scrolls only the search into
     // view, and on a short window the widgets would stay below the fold.
     shelfRef.current?.scrollIntoView?.({ block: "nearest" });
@@ -90,10 +94,18 @@ export function WidgetShelf({
   }));
   const visible = sections.filter((s) => s.items.length > 0);
   const total = types.length;
-  // First in the order they are DRAWN, which is what Enter adds.
-  const first = visible[0]?.items[0] ?? null;
+  // What Enter adds: the best match, and among equals the first DRAWN. A name match
+  // beats a group match, so "text" adds Text rather than whatever leads Text & time.
+  let first: LayoutObjectType | null = null;
+  let best = Infinity;
+  for (const s of visible) for (const t of s.items) {
+    const r = widgetMatchRank(t, needle) ?? Infinity;
+    if (r < best) { best = r; first = t; }
+  }
 
   function jumpTo(group: PaletteGroup) {
+    // An empty group has nothing to jump to, and highlighting it would point at nothing.
+    if (!sections.some((s) => s.group === group && s.items.length > 0)) return;
     setCurrent(group);
     const pane = paneRef.current;
     // Compared rather than put in a selector: a group name carries "/" and "&".
@@ -142,6 +154,8 @@ export function WidgetShelf({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
+              // A key that ends an IME composition belongs to the composition.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter") {
                 if (first) onAdd(first);
               } else if (e.key === "Escape") {
