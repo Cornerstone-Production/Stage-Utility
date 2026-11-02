@@ -21,10 +21,24 @@ import Testing
   @Test func theServerTurnsAnOutputOffAndItStaysOff() throws {
     try withTempDir { dir in
       let (flow, store) = try make(dir)
-      let ticket = flow.ticket(for: "k")
-      #expect(flow.answered(ticket, answer: false) == false)
+      #expect(flow.answered(flow.ticket(for: "k"), answer: false) == false)
       #expect(store.record(for: "k")?.enabled == false)
-      #expect(store.record(for: "k")?.pendingChange == nil, "the server's own change was sent back to it")
+      #expect(flow.ticket(for: "k").change == nil, "the server's own change is sent back to it")
+    }
+  }
+
+  /// Off in the window, then Screens says on: the post that carried the change is
+  /// answered with the newer value, which is taken, and the change is not sent again.
+  @Test func aChangeTheServerOverrulesIsNotSentAgain() throws {
+    try withTempDir { dir in
+      let (flow, store) = try make(dir)
+      flow.changeInWindow("k", false)
+      let ticket = flow.ticket(for: "k")
+      #expect(ticket.change == "c1")
+      #expect(flow.answered(ticket, answer: true) == true)
+      #expect(store.record(for: "k")?.enabled == true)
+      #expect(store.record(for: "k")?.pendingChange == nil)
+      #expect(flow.ticket(for: "k").change == nil, "a change the server overruled is still being sent")
     }
   }
 
@@ -112,6 +126,35 @@ import Testing
       #expect(!failures.errors.isEmpty, "a save that failed was not reported")
       #expect(store.record(for: "k")?.enabled == false)
       #expect(store.record(for: "k")?.pendingChange == "c1")
+    }
+  }
+
+  /// A save that fails is told to the caller from every write, not only the window's:
+  /// the acknowledge and the apply each have their own catch.
+  @Test func aFailedSaveWhileAcknowledgingIsReported() throws {
+    try withTempDir { dir in
+      let failures = ErrorBox()
+      let (flow, store) = try make(dir, failures: failures)
+      flow.changeInWindow("k", false)
+      let ticket = flow.ticket(for: "k")
+      try FileManager.default.removeItem(at: dir)
+      try Data().write(to: dir)
+      #expect(flow.answered(ticket, answer: false) == nil)  // agrees: only the acknowledge is written
+      #expect(failures.errors.count == 1, "a failed acknowledge was swallowed")
+      #expect(store.record(for: "k")?.pendingChange == nil)
+    }
+  }
+
+  @Test func aFailedSaveWhileApplyingIsReportedAndTheValueIsTaken() throws {
+    try withTempDir { dir in
+      let failures = ErrorBox()
+      let (flow, store) = try make(dir, failures: failures)
+      let ticket = flow.ticket(for: "k")
+      try FileManager.default.removeItem(at: dir)
+      try Data().write(to: dir)
+      #expect(flow.answered(ticket, answer: false) == false)
+      #expect(failures.errors.count == 1, "a failed apply was swallowed")
+      #expect(store.record(for: "k")?.enabled == false)
     }
   }
 }
