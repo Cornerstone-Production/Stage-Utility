@@ -31,7 +31,13 @@ const realDeadline = pageVariableDeps.deadlineMs;
 const realWarn = console.warn;
 const realLog = console.log;
 
-afterEach(() => {
+// A stuck read holds one of the shared slots until it ends, so a test that sticks one lets it go.
+const stuck: Array<() => void> = [];
+const stick = (): Promise<Response> => new Promise<Response>((resolve) => stuck.push(() => resolve(new Response("late", { status: 200 }))));
+
+afterEach(async () => {
+  for (const release of stuck.splice(0)) release();
+  await new Promise((r) => setTimeout(r, 5));
   companionDeps.fetch = realFetch;
   companionDeps.getTarget = realTarget;
   pageVariableDeps.deadlineMs = realDeadline;
@@ -209,11 +215,71 @@ describe("withLiveText", () => {
     companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
     pageVariableDeps.deadlineMs = 60;
     // Ignores its abort signal, as a stuck socket might: only the page's own deadline can end the wait.
-    companionDeps.fetch = async (input) => (String(input).includes("/Slow/") ? new Promise<Response>(() => {}) : new Response("fast", { status: 200 }));
+    companionDeps.fetch = async (input) => (String(input).includes("/Slow/") ? stick() : new Response("fast", { status: 200 }));
     const started = Date.now();
     const out = await companionApi.withLiveText(view(key(0, 0, "$(Slow:s)"), key(0, 1, "$(Quick:q)")));
     assert.ok(Date.now() - started < 1500, "the page waited on the stuck read");
     assert.deepEqual(textsOf(out), ["$(Slow:s)", "fast"]);
+  });
+
+  test("two overlapping views of a hung Companion never have more than four reads out in all", async () => {
+    companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+    pageVariableDeps.deadlineMs = 40;
+    let live = 0;
+    let peak = 0;
+    companionDeps.fetch = () => {
+      live++;
+      peak = Math.max(peak, live);
+      return stick().finally(() => live--);
+    };
+    const page = (p: string) => view(...Array.from({ length: 12 }, (_, i) => key(0, i, `$(${p}:v${i})`)));
+    await Promise.all([companionApi.withLiveText(page("A")), companionApi.withLiveText(page("B"))]);
+    assert.equal(peak, 4, `${peak} reads were in flight at once across two views`);
+  });
+
+  test("after the deadline a view starts no new read", async () => {
+    companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+    pageVariableDeps.deadlineMs = 30;
+    let started = 0;
+    companionDeps.fetch = async () => {
+      started++;
+      await new Promise((r) => setTimeout(r, 80));
+      return new Response("v", { status: 200 });
+    };
+    const keys = Array.from({ length: 12 }, (_, i) => key(0, i, `$(D:v${i})`));
+    await companionApi.withLiveText(view(...keys));
+    // The four reads out finish after the deadline; the other eight must not follow them.
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(started, 4, `${started} reads started for a view that gave up after four`);
+  });
+
+  test("a view during a read already out for the same variable joins it", async () => {
+    companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+    let calls = 0;
+    companionDeps.fetch = async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 40));
+      return new Response("7", { status: 200 });
+    };
+    const v = view(key(0, 0, "$(J:x)"));
+    const [a, b] = await Promise.all([companionApi.withLiveText(v), companionApi.withLiveText(v)]);
+    assert.equal(calls, 1, "the variable was read once per view");
+    assert.deepEqual([textsOf(a), textsOf(b)], [["7"], ["7"]]);
+  });
+
+  test("a read of the old Companion lands after invalidate() and is not remembered for the new one", async () => {
+    companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return new Response("old", { status: 200 });
+    };
+    const v = view(key(0, 0, "$(H:x)"));
+    const first = companionApi.withLiveText(v);
+    await new Promise((r) => setTimeout(r, 5));
+    companionApi.invalidate();
+    await first;
+    companionDeps.fetch = async () => new Response("new", { status: 200 });
+    assert.equal((await companionApi.withLiveText(v)).keys[0]!.text, "new");
   });
 
   test("a getTarget that rejects leaves the text as written and does not throw", async () => {
