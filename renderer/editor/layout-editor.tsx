@@ -97,6 +97,8 @@ import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { adoptSavedGridPointers } from "./slots-grid-source";
 import { Palette } from "./palette";
+import { WidgetShelf, opensShelfSearch } from "./widget-shelf";
+import { readShelfFolded, writeShelfFolded } from "./shelf-folded";
 import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
@@ -1347,12 +1349,22 @@ export function LayoutEditor({
   // and dismissing the picker clears it WITHOUT creating anything, so a
   // cancelled draw costs neither an object nor an undo step.
   const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
-  // Closed until asked for. The palette replaced the toolbar's Add-object
-  // dropdown -- the "Add object" button now toggles this -- and behaves the way
-  // the dropdown did: nothing on screen until you go looking for it, and the
-  // canvas gets the width in the meantime. The right-click menu offers the same
-  // set as a second route in.
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  // The widget shelf under the canvas. Open by default and remembered per
+  // browser once folded. "Add object" and Cmd/Ctrl+F both unfold it and put the
+  // cursor in its search: the signal is a counter because the SAME request
+  // twice in a row must still focus the box.
+  const [shelfFolded, setShelfFolded] = useState(() => readShelfFolded());
+  const [shelfFocusSignal, setShelfFocusSignal] = useState(0);
+  const shelfSearchRef = useRef<HTMLInputElement | null>(null);
+  const changeShelfFolded = useCallback((folded: boolean) => {
+    setShelfFolded(folded);
+    writeShelfFolded(folded);
+  }, []);
+  const openShelfSearch = useCallback(() => {
+    setShelfFolded(false);
+    writeShelfFolded(false);
+    setShelfFocusSignal((n) => n + 1);
+  }, []);
   // The type mid-drag from the palette. A ref as well as state: the drop
   // handler runs from a DOM event and would otherwise read a stale closure.
   const paletteDragType = useRef<LayoutObjectType | null>(null);
@@ -1878,9 +1890,22 @@ export function LayoutEditor({
 
   // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
   // -C copies, -V pastes. Ignored while typing in a form field.
+  //
+  // Cmd/Ctrl-F is the exception to "ignored in a field": it opens the widget
+  // shelf's search from anywhere in the editor, and stands aside only for a text
+  // field that is not that search (opensShelfSearch), so finding a word in a
+  // textarea keeps the browser's find. Cmd/Ctrl-A is not bound: Select all stays
+  // the browser's.
   useEffect(() => {
     if (!isEditing) return;
     const onKey = (e: KeyboardEvent) => {
+      if (opensShelfSearch(e, shelfSearchRef.current)) {
+        // A dialog over the editor owns the keyboard.
+        if (document.querySelector('[role="dialog"]')) return;
+        e.preventDefault();
+        openShelfSearch();
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       const mod = e.metaKey || e.ctrlKey;
@@ -1893,7 +1918,7 @@ export function LayoutEditor({
     return () => window.removeEventListener("keydown", onKey);
     // Handlers close over selectedIds/objects; re-bind when those change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, selectedIds, objects]);
+  }, [isEditing, selectedIds, objects, openShelfSearch]);
   // Move a nested object out to the top level, keeping its on-screen position by
   // converting its parent-local rect to an absolute canvas rect.
   function reparentToRoot(id: string) {
@@ -2053,59 +2078,18 @@ export function LayoutEditor({
           dirty && "pr-64",
         )}
       >
-        {/* One button for one job. It replaces a dropdown, a Widgets toggle and
-            a filter icon: three controls that all answered "what can I add?".
-            The palette it opens carries the same set the dropdown listed, and
-            the hide-unconfigured filter now lives in the palette's own header,
-            beside the list it filters. */}
-        {/* The palette floats from this button rather than sitting in the
-            canvas row. In the row it was capped at the canvas's own height,
-            which on a 1366x203 Ultritouch strip left a 160px list with a
-            search box and one visible widget. Non-modal and kept open across
-            clicks on the canvas so a drag, or three clicks to add three
-            widgets, does not keep reopening it; a click anywhere else closes
-            it, and so does the button. */}
-        <Popover.Root open={isEditing && paletteOpen} onOpenChange={setPaletteOpen} modal={false}>
-          <Popover.Trigger asChild>
-            <Button
-              variant={paletteOpen ? "accent" : "filled"}
-              size="small"
-              onClick={() => setPaletteOpen((v) => !v)}
-              aria-label="Add an object"
-              aria-pressed={paletteOpen}
-              tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
-            >
-              <PlusIcon className="size-3.5" /> Add object
-            </Button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              align="start"
-              sideOffset={6}
-              // A click on the CANVAS keeps it open: that is where a widget is
-              // dropped or placed, and three widgets in a row should not mean
-              // three reopenings. A click anywhere else, or Escape, closes it,
-              // so it does not sit over the layers list once you are done.
-              onInteractOutside={(e) => {
-                const t = e.target as Node | null;
-                if (t && canvasCellRef.current?.contains(t)) e.preventDefault();
-              }}
-              onOpenAutoFocus={(e) => e.preventDefault()}
-              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto quiet-scroll rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
-            >
-              <Palette
-                types={paletteTypes}
-                dimmed={dimmedTypes}
-                hideUnconfigured={hideUnconfigured}
-                onToggleHideUnconfigured={toggleHideUnconfigured}
-                onAdd={addObject}
-                onDragStart={(t) => { paletteDragType.current = t; }}
-                onDragEnd={() => { paletteDragType.current = null; }}
-                onDropAt={dropObjectAtClient}
-              />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+        {/* One button for one job: the same as Cmd/Ctrl-F. The widgets themselves
+            sit in the shelf under the canvas; this unfolds it and puts the
+            cursor in its search. */}
+        <Button
+          variant="filled"
+          size="small"
+          onClick={openShelfSearch}
+          aria-label="Add an object"
+          tooltip="Search every widget in the shelf under the canvas. Drag one onto the canvas, or click to add it."
+        >
+          <PlusIcon className="size-3.5" /> Add object
+        </Button>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
@@ -2337,7 +2321,11 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl/editor:flex-none" style={{ height: canvasH ?? undefined }}>
+        {/* The centre column: the canvas, and under it the widget shelf. The canvas
+            cell keeps its measured height; the page scrolls before either is
+            squashed. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3 @max-4xl/editor:flex-none">
+        <div ref={canvasCellRef} className="min-w-0 shrink-0" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the
             // change you just made against another shape before saving it.
@@ -2387,6 +2375,23 @@ export function LayoutEditor({
               Loading…
             </div>
           )}
+        </div>
+        {isEditing && (
+          <WidgetShelf
+            types={paletteTypes}
+            dimmed={dimmedTypes}
+            hideUnconfigured={hideUnconfigured}
+            onToggleHideUnconfigured={toggleHideUnconfigured}
+            onAdd={addObject}
+            onDragStart={(t) => { paletteDragType.current = t; }}
+            onDragEnd={() => { paletteDragType.current = null; }}
+            onDropAt={dropObjectAtClient}
+            folded={shelfFolded}
+            onFoldedChange={changeShelfFolded}
+            focusSignal={shelfFocusSignal}
+            searchRef={shelfSearchRef}
+          />
+        )}
         </div>
 
         {/* Right-click menu. Positioned fixed to the viewport, so it lives outside

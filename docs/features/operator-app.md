@@ -96,7 +96,8 @@ other surface draws from — anything you can put on a wall you can put here. Se
 
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
-**Add widget** offers the whole registry. The tick finishes.
+**Add widget** offers the whole registry, searchable by a widget's name, description or
+group (the same search as the layout editor's widget shelf). The tick finishes.
 
 **Right-click a tile** — or tap and hold it — for its size, when it shows,
 remove, and the few settings that widget supports — seconds and the hour cycle

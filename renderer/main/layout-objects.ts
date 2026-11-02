@@ -1159,15 +1159,29 @@ export function isKnownObjectType(t: LayoutObjectType): boolean {
  * which is exactly the sort of thing nobody notices until a service.
  */
 export function widgetMatchesQuery(t: LayoutObjectType, query: string): boolean {
+  return widgetMatchRank(t, query) !== null;
+}
+
+/**
+ * How well a widget matches a search, lower is better, or null for no match:
+ * 0 its name starts with it, 1 its name contains it, 2 its type id does, 3 its
+ * description does, 4 only its group does. The group is matched so "obs" or "mics"
+ * brings in everything under that heading -- the shelf's headings are words an
+ * operator reads and will type back -- but ranked last, so typing "text" puts the
+ * Text widget ahead of the rest of "Text & time".
+ */
+export function widgetMatchRank(t: LayoutObjectType, query: string): number | null {
   const needle = query.trim().toLowerCase();
-  if (!needle) return true;
+  if (!needle) return 0;
   const spec = findLayoutObjectSpec(t);
-  if (!spec) return t.toLowerCase().includes(needle);
-  return (
-    spec.label.toLowerCase().includes(needle) ||
-    t.toLowerCase().includes(needle) ||
-    spec.blurb.toLowerCase().includes(needle)
-  );
+  if (!spec) return t.toLowerCase().includes(needle) ? 2 : null;
+  const label = spec.label.toLowerCase();
+  if (label.startsWith(needle)) return 0;
+  if (label.includes(needle)) return 1;
+  if (t.toLowerCase().includes(needle)) return 2;
+  if (spec.blurb.toLowerCase().includes(needle)) return 3;
+  if ((spec.group ?? "").toLowerCase().includes(needle)) return 4;
+  return null;
 }
 
 // Fallbacks are chosen so an unknown object is INERT rather than plausible: it
