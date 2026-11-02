@@ -282,6 +282,13 @@ describe("withLiveText", () => {
     assert.equal((await companionApi.withLiveText(v)).keys[0]!.text, "new");
   });
 
+  test("a huge value is cut at 200 characters and ends in an ellipsis; a value of exactly 200 is whole", async () => {
+    serve({ "A:big": "x".repeat(5000), "A:edge": "y".repeat(200) });
+    const out = await companionApi.withLiveText(view(key(0, 0, "$(A:big)"), key(0, 1, "$(A:edge)")));
+    assert.equal(out.keys[0]!.text, `${"x".repeat(200)}\u2026`);
+    assert.equal(out.keys[1]!.text, "y".repeat(200));
+  });
+
   test("a getTarget that rejects leaves the text as written and does not throw", async () => {
     companionDeps.getTarget = async () => {
       throw new Error("config store gone");

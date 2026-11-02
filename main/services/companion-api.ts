@@ -101,6 +101,13 @@ const PAGE_VARIABLE_CACHE_MS = 5000;
 const PAGE_VARIABLE_CONCURRENCY = 4;
 /** A page of keys names at most this many distinct variables; the rest stay as written. */
 const MAX_PAGE_VARIABLES = 100;
+/** A substituted value longer than this is cut and ends in an ellipsis: one huge variable must not bloat the page. */
+const MAX_PAGE_VALUE_CHARS = 200;
+
+function capValue(value: string): string {
+  const chars = Array.from(value);
+  return chars.length <= MAX_PAGE_VALUE_CHARS ? value : `${chars.slice(0, MAX_PAGE_VALUE_CHARS).join("")}\u2026`;
+}
 
 /**
  * The seams for a drawn page's variable reads. `deadlineMs` is how long the page waits for
@@ -513,7 +520,7 @@ class CompanionApi {
       ...view,
       keys: view.keys.map((k) => {
         if (k.vars.length === 0) return k;
-        const own = new Map(k.vars.flatMap((ref) => (values.has(ref) ? [[ref, values.get(ref)!] as const] : [])));
+        const own = new Map(k.vars.flatMap((ref) => (values.has(ref) ? [[ref, capValue(values.get(ref)!)] as const] : [])));
         return own.size === 0 ? k : { ...k, text: substituteVariables(k.text, own) };
       }),
     };
