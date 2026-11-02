@@ -76,7 +76,8 @@ keeps its shape and the page scrolls before either is squashed.
 - **Click** a widget to add it, **drag** it onto the canvas to place it where you
   drop it. Nothing covers the canvas, so several in a row is several clicks.
 - **Search** over the shelf matches a widget's name, its description and its
-  group. **Enter** adds the first match, which is outlined while you type;
+  group. **Enter** adds the best match, which is outlined while you type: a
+  match on the name beats one on the description or group, so "time" adds Timer;
   **Esc** clears the search, and **Esc** again returns to the canvas. Groups with
   nothing left are dimmed.
 - **⌘F** (**Ctrl F** on Windows and Linux) opens the shelf if it is folded and
