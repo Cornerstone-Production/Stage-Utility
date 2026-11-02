@@ -7,9 +7,13 @@
 //    hundred pages and more than half are empty, so the list filters by number or name
 //    and leaves the empty ones out, and the arrows step over them.
 //  - <CompanionPageGrid>: the page as Companion draws it, in its own colours and icons,
-//    over its USED extent (never fewer than 8 by 4), scrolling sideways inside its box
-//    when the page is wider. With no `pick` every key is a plain div; with one, a key
+//    over its USED extent (never fewer than 8 by 4). The columns are `minmax(0, 1fr)`:
+//    keys shrink to fit the box and the page never scrolls sideways. Under it a readout
+//    names the hovered or focused key in full (a key's own label is clipped), and at
+//    rest the picked one. With no `pick` every key is a plain div; with one, a key
 //    that can be picked is a button.
+//  - <CompanionPageBody>: one page's grid, read from the server, for every screen that
+//    draws a page it can pick from (the inspector, its large dialog).
 //
 // Companion's look is the `--su-companion-*` tokens and each key's own colours, which
 // are Companion's data. Nothing here is a hard-coded colour.
@@ -21,16 +25,20 @@
 // `data-escape-first` so a capture-phase owner (the dialog) can see the press began there
 // and leave it alone. Focus goes back to the button that opened it.
 //
-// jsdom loads no stylesheet and measures nothing, so the grid's overflow and the
-// popover's placement are driven in a browser, not unit-tested.
+// jsdom loads no stylesheet and measures nothing, so the keys' size, the grid fitting its
+// box and the popover's placement are driven in a browser, not unit-tested.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
 import type { CompanionPageKey, CompanionPageSummary, CompanionPageView } from "@main/services/companion-export";
+import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 
+import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
+import { ErrorNote } from "./ui";
 
 // ── The page list ────────────────────────────────────────────────────────────
 
@@ -217,12 +225,27 @@ export interface CompanionPick {
   isPicked: (at: { page: number; row: number; col: number }) => boolean;
   /** A write is in flight. */
   disabled?: boolean;
+  /** The picked key when it is on another page, so the readout can still name it at rest. */
+  current?: { text: string; page: number; row: number; col: number } | null;
+  /**
+   * Tick mode: a click toggles a key instead of choosing one, so any number can be picked
+   * (`isPicked` is "ticked" and a ticked key wears a check). A key `isOffered` says no to is
+   * drawn dimmed and is not a control; one that is `isLocked` (already imported) is drawn,
+   * marked, and cannot be ticked.
+   */
+  tick?: {
+    isOffered: (at: { page: number; row: number; col: number }) => boolean;
+    isLocked: (at: { page: number; row: number; col: number }) => boolean;
+  };
 }
 
-/** One key's own words: the label, or what the reference points at. */
+/** What a key says, on one line: its text as Companion draws it, line breaks as spaces. */
+export const keyText = (k: Pick<CompanionPageKey, "text">): string => k.text.replace(/\s*\n\s*/g, " ");
+
+/** One key's own words: its text, or what the reference points at. */
 function keyTitle(k: CompanionPageKey, page: number): string {
   const where = `p${page} r${k.row} c${k.col}`;
-  const what = k.label || "(no label)";
+  const what = keyText(k) || "(no label)";
   return k.kind === "reference" ? `${what} · reference · ${where}` : `${what} · ${where}`;
 }
 
@@ -230,15 +253,26 @@ function keyTitle(k: CompanionPageKey, page: number): string {
 const BLANK = "aspect-square rounded-[3px] bg-(--su-companion-key)";
 
 /** What is drawn on a key, picked or not: its icon, its label, the mark of a reference. */
-function KeyFace({ k }: { k: CompanionPageKey }): ReactNode {
+function KeyFace({ k, large }: { k: CompanionPageKey; large: boolean }): ReactNode {
   return (
     <>
       {k.icon && <img src={k.icon} alt="" draggable={false} className="min-h-0 max-h-[55%] max-w-full flex-1 object-contain" />}
-      <span className={cn("w-full min-w-0 [overflow-wrap:anywhere]", k.icon ? "line-clamp-1" : "line-clamp-3")}>{k.label}</span>
+      <span
+        className={cn(
+          "w-full min-w-0 whitespace-pre-line [overflow-wrap:anywhere]",
+          k.icon ? "line-clamp-1" : large ? "line-clamp-4" : "line-clamp-3",
+          // Companion's own size, when it has one. It is set here and not on the key, because a
+          // container-query unit on the container itself resolves against the container ABOVE
+          // it, which is no container at all.
+          k.size !== null && (large ? OWN_SIZE_LARGE : OWN_SIZE),
+        )}
+      >
+        {k.text}
+      </span>
       {k.kind === "reference" && (
         <span
           aria-hidden="true"
-          className="absolute right-px top-px rounded-[2px] bg-(--su-companion-canvas)/60 px-[2px] text-[7px] leading-none text-(--su-companion-key-fg)"
+          className="absolute left-px top-px rounded-[2px] bg-(--su-companion-canvas)/60 px-[2px] text-[7px] leading-none text-(--su-companion-key-fg)"
         >
           ref
         </span>
@@ -249,7 +283,19 @@ function KeyFace({ k }: { k: CompanionPageKey }): ReactNode {
 
 const KEY_CHROME =
   "relative flex aspect-square min-w-0 flex-col items-center justify-center gap-px overflow-hidden rounded-[3px] p-0.5 text-center " +
-  "bg-(--su-companion-key) text-(--su-companion-key-fg) text-[9px] font-semibold leading-[1.1]";
+  "bg-(--su-companion-key) text-(--su-companion-key-fg) font-semibold leading-[1.1] [container-type:inline-size]";
+
+/**
+ * Auto-fit text is a fixed small size. Companion's own size is its percentage of a 60 point
+ * key: 14 points (23.3) on a 72 pixel key is 14 pixels, so a percentage is 0.83% of the key's
+ * width. It never goes under the auto-fit size: a key drawn at a third of its real size would
+ * otherwise carry type nobody can read, and the readout under the grid says the rest.
+ */
+const AUTO_SIZE = "text-[9px]";
+const OWN_SIZE = "text-[length:max(9px,calc(var(--key-size)*0.83cqw))]";
+/** The same, in the large dialog, where there is room to read a label in full. */
+const AUTO_SIZE_LARGE = "text-[12px]";
+const OWN_SIZE_LARGE = "text-[length:max(12px,calc(var(--key-size)*0.83cqw))]";
 
 /** WCAG relative luminance of a #rrggbb colour, or null when it is not one. */
 function luminance(hex: string): number | null {
@@ -286,15 +332,44 @@ export function readableText(bg: string | null, fg: string | null): string | nul
   return contrast(b, 1) >= contrast(b, 0) ? "#ffffff" : "#000000";
 }
 
-/** Companion's own colours for a key: set per key, because they are Companion's, not the app's. */
-const colours = (k: CompanionPageKey) => {
+const ALIGN_H = { left: "flex-start", center: "center", right: "flex-end" } as const;
+const ALIGN_V = { top: "flex-start", center: "center", bottom: "flex-end" } as const;
+
+/**
+ * Companion's own look for a key, set per key because it is Companion's, not the app's:
+ * its colours, where its text sits, and (as a custom property the size class reads) its size.
+ */
+const colours = (k: CompanionPageKey): CSSProperties => {
   const fg = readableText(k.bg, k.fg);
-  return { ...(k.bg ? { backgroundColor: k.bg } : {}), ...(fg ? { color: fg } : {}) };
+  return {
+    ...(k.bg ? { backgroundColor: k.bg } : {}),
+    ...(fg ? { color: fg } : {}),
+    ...(k.halign ? { alignItems: ALIGN_H[k.halign], textAlign: k.halign } : {}),
+    ...(k.valign ? { justifyContent: ALIGN_V[k.valign] } : {}),
+    ...(k.size !== null ? ({ "--key-size": k.size } as CSSProperties) : {}),
+  };
 };
 
-export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pick?: CompanionPick }) {
+/** The size class of a key; a key with a size of its own overrides it on its text (see KeyFace). */
+const sizeClass = (large: boolean): string => (large ? AUTO_SIZE_LARGE : AUTO_SIZE);
+
+export function CompanionPageGrid({ view, pick, size }: { view: CompanionPageView; pick?: CompanionPick; size?: "large" }) {
+  const large = size === "large";
   const byPlace = useMemo(() => new Map<string, CompanionPageKey>(view.keys.map((k) => [`${k.row},${k.col}`, k])), [view]);
+  // The key the pointer is over or focus is on: the readout names it in full. It carries its
+  // page, so the page changing under a still pointer or a held focus does not name a key of the old one.
+  const [active, setActive] = useState<{ page: number; id: string } | null>(null);
+  const hover = (id: string) => ({
+    onMouseEnter: () => setActive({ page: view.page, id }),
+    onFocus: () => setActive({ page: view.page, id }),
+    onMouseLeave: () => setActive((a) => (a?.id === id ? null : a)),
+    onBlur: () => setActive((a) => (a?.id === id ? null : a)),
+  });
+  // Dropped as soon as the page differs, so coming back to the old page does not revive it.
+  if (active !== null && active.page !== view.page) setActive(null);
+  const importedIds = new Set<string>();
   const cells: ReactNode[] = [];
+  let pickedKey: CompanionPageKey | null = null;
   for (let r = 0; r < view.rows; r++) {
     for (let c = 0; c < view.cols; c++) {
       const id = `${r},${c}`;
@@ -306,24 +381,52 @@ export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pic
       const where = `p${view.page} r${k.row} c${k.col}`;
       if (!pick) {
         cells.push(
-          <div key={id} data-companion-key={where} data-key-kind={k.kind} title={keyTitle(k, view.page)} style={colours(k)} className={KEY_CHROME}>
-            <KeyFace k={k} />
+          <div key={id} data-companion-key={where} data-key-kind={k.kind} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, sizeClass(large))} {...hover(id)}>
+            <KeyFace k={k} large={large} />
           </div>,
-        );
-        continue;
-      }
-      if (!k.pickable) {
-        // Drawn, dimmed, and not a control: it presses nothing.
-        cells.push(
-          <span key={id} aria-hidden="true" data-companion-key={where} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, "opacity-50")}>
-            <KeyFace k={k} />
-          </span>,
         );
         continue;
       }
       // A reference is picked as what it points at: that is where the press goes.
       const at = k.target ?? { page: view.page, row: k.row, col: k.col };
+      if (!k.pickable || (pick.tick && !pick.tick.isOffered(at))) {
+        // Drawn, dimmed, and not a control: it presses (or imports) nothing.
+        cells.push(
+          <span key={id} aria-hidden="true" data-companion-key={where} title={keyTitle(k, view.page)} style={colours(k)} className={cn(KEY_CHROME, sizeClass(large), "opacity-50")} {...hover(id)}>
+            <KeyFace k={k} large={large} />
+          </span>,
+        );
+        continue;
+      }
+      if (pick.tick?.isLocked(at)) {
+        // Already imported: marked, and not something to pick, but reachable by keyboard so
+        // the readout can name it (a span that cannot take focus is invisible to a keyboard user).
+        importedIds.add(id);
+        cells.push(
+          <span
+            key={id}
+            role="gridcell"
+            tabIndex={0}
+            aria-disabled="true"
+            data-companion-key={where}
+            data-imported=""
+            aria-label={`${keyTitle(k, view.page)} · already imported`}
+            title={`${keyTitle(k, view.page)} · already imported`}
+            style={colours(k)}
+            className={cn(KEY_CHROME, sizeClass(large), "opacity-60")}
+            {...hover(id)}
+          >
+            <KeyFace k={k} large={large} />
+            <span aria-hidden="true" className="absolute inset-x-0 bottom-0 bg-(--su-companion-canvas)/70 text-center text-[7px] leading-tight text-(--su-companion-key-fg)">
+              imported
+            </span>
+          </span>,
+        );
+        continue;
+      }
       const picked = pick.isPicked(at);
+      // The readout names the key itself rather than a reference to it, when both are drawn.
+      if (picked && (pickedKey === null || (pickedKey.kind === "reference" && k.kind !== "reference"))) pickedKey = k;
       cells.push(
         <button
           key={id}
@@ -341,29 +444,98 @@ export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pic
           style={colours(k)}
           className={cn(
             KEY_CHROME,
+            sizeClass(large),
             "hover:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-            picked && "outline outline-2 -outline-offset-2 outline-(--su-companion-key-fg) ring-2 ring-accent",
+            picked && (pick.tick ? "ring-2 ring-inset ring-accent" : "outline outline-2 -outline-offset-2 outline-(--su-companion-key-fg) ring-2 ring-accent"),
           )}
+          {...hover(id)}
         >
-          <KeyFace k={k} />
+          <KeyFace k={k} large={large} />
+          {pick.tick && picked && (
+            <span aria-hidden="true" data-ticked="" className="absolute right-0.5 top-0.5 flex size-[11px] items-center justify-center rounded-[3px] bg-accent text-on-accent">
+              <CheckIcon className="size-2" strokeWidth={3} />
+            </span>
+          )}
         </button>,
       );
     }
   }
+
+  // What the line under the grid says: the key being looked at, else the picked one.
+  const lookedId = active?.page === view.page ? active.id : null;
+  const looked = lookedId !== null ? byPlace.get(lookedId) : undefined;
+  const shown = looked
+    ? {
+        text: keyText(looked),
+        where: `p${view.page} r${looked.row} c${looked.col}${looked.kind === "reference" ? " · ref" : ""}${importedIds.has(lookedId!) ? " · imported" : ""}`,
+      }
+    : pick?.tick
+      ? null // many keys are ticked, so there is no one key to name at rest
+      : pickedKey
+        ? { text: keyText(pickedKey), where: `p${view.page} r${pickedKey.row} c${pickedKey.col}` }
+        : pick?.current
+          ? { text: pick.current.text, where: `p${pick.current.page} r${pick.current.row} c${pick.current.col}` }
+          : null;
+
   return (
-    <div
-      data-page-grid={view.page}
-      className="max-w-full overflow-x-auto rounded-md border border-(--su-companion-line) bg-(--su-companion-canvas) p-1"
-    >
-      <div
-        role={pick ? "grid" : "img"}
-        aria-label={pick ? `Buttons on page ${view.page}` : `Companion page ${view.page}, ${pageName(view)}, read from Companion's export`}
-        className="grid gap-[3px]"
-        // Keys keep a minimum size, so a wide page scrolls inside its box rather than shrinking to dots.
-        style={{ gridTemplateColumns: `repeat(${view.cols}, minmax(2.25rem, 1fr))` }}
-      >
-        {cells}
+    <div className="flex min-w-0 max-w-full flex-col gap-1.5">
+      <div data-page-grid={view.page} className="max-w-full rounded-md border border-(--su-companion-line) bg-(--su-companion-canvas) p-1">
+        <div
+          role={pick ? "grid" : "img"}
+          aria-label={pick ? `Buttons on page ${view.page}` : `Companion page ${view.page}, ${pageName(view)}, read from Companion's export`}
+          className="grid gap-[3px]"
+          // minmax(0, ...): a key has no minimum width, so the page shrinks to its box and never scrolls sideways.
+          style={{ gridTemplateColumns: `repeat(${view.cols}, minmax(0, 1fr))` }}
+        >
+          {cells}
+        </div>
+      </div>
+      <div data-key-readout="" className={cn("flex min-h-[34px] items-start justify-between gap-2 text-caption1 text-fg-muted", large && "text-footnote")}>
+        {shown ? (
+          <>
+            <b className="min-w-0 font-semibold text-fg [overflow-wrap:anywhere]">{shown.text || "(no label)"}</b>
+            <span className="shrink-0 whitespace-nowrap font-mono text-caption2 tabular-nums">{shown.where}</span>
+          </>
+        ) : (
+          <span>Hover a key to read its full name.</span>
+        )}
       </div>
     </div>
   );
+}
+
+/** The reply of `companion:page`: a page's keys, or the one sentence that says why there are none. */
+type PageReply = ({ ok: true } & CompanionPageView) | { ok: false; reason: string };
+
+/**
+ * What stands under a page dropdown: the page's grid, or the one line that says why
+ * there is none. `reading` is the button list still being read, which the page waits for.
+ */
+export function CompanionPageBody({
+  page,
+  reading,
+  pick,
+  size,
+}: {
+  page: number | null;
+  reading: boolean;
+  pick?: CompanionPick;
+  size?: "large";
+}) {
+  const query = useQuery({
+    queryKey: ["companion:page", page],
+    queryFn: () => invoke<PageReply>("companion:page", { page }),
+    enabled: page !== null && !reading,
+  });
+  const quiet = "py-3 text-center text-caption1 text-fg-muted";
+  if (reading) return <p className={quiet}>Reading Companion…</p>;
+  // Checked before the query: with no page there is nothing to ask for, and a disabled
+  // query reads as pending for ever.
+  if (page === null) return <p className={quiet}>Companion has no page with buttons on it.</p>;
+  if (query.isPending) return <p className={quiet}>Reading Companion…</p>;
+  if (query.isError) return <ErrorNote>Could not read page {page}: {errorMessage(query.error)}</ErrorNote>;
+  const view = query.data;
+  if (!view) return <p className={quiet}>Companion has no page with buttons on it.</p>;
+  if (!view.ok) return <ErrorNote>Could not read page {page}: {view.reason}</ErrorNote>;
+  return <CompanionPageGrid view={view} pick={pick} size={size} />;
 }

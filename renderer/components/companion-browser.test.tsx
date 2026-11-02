@@ -29,6 +29,11 @@ type Key = {
   col: number;
   kind: "button" | "reference" | "page-control";
   label: string;
+  text: string;
+  size: number | null;
+  halign: "left" | "center" | "right" | null;
+  valign: "top" | "center" | "bottom" | null;
+  vars: string[];
   bg: string | null;
   fg: string | null;
   icon: string | null;
@@ -40,6 +45,11 @@ const key = (row: number, col: number, over: Partial<Key> = {}): Key => ({
   col,
   kind: "button",
   label: "Key",
+  text: over.label ?? "Key",
+  size: null,
+  halign: null,
+  valign: null,
+  vars: [],
   bg: null,
   fg: null,
   icon: null,

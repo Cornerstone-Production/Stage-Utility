@@ -25,6 +25,7 @@
 
 import { fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
+import { OutageLog } from "./repeat-log.js";
 import {
   type ConnectionHealth,
   type ConnectionsResult,
@@ -45,6 +46,7 @@ import {
   parseButtons,
   parsePages,
   parseVariableRef,
+  substituteVariables,
 } from "./companion-export.js";
 
 /** Companion's default HTTP/web port. */
@@ -92,6 +94,26 @@ const CONNECTIONS_CACHE_MS = 60_000;
  * which is the whole bug.
  */
 export const CONNECTIONS_TIMEOUT_MS = 3000;
+
+/** How long a variable read for a drawn page is reused: paging back and forth must not re-read. */
+const PAGE_VARIABLE_CACHE_MS = 5000;
+/** Variable reads in flight at once for drawn pages, across all of them. Companion is a small box on the same LAN. */
+const PAGE_VARIABLE_CONCURRENCY = 4;
+/** A page of keys names at most this many distinct variables; the rest stay as written. */
+const MAX_PAGE_VARIABLES = 100;
+/** A substituted value longer than this is cut and ends in an ellipsis: one huge variable must not bloat the page. */
+const MAX_PAGE_VALUE_CHARS = 200;
+
+function capValue(value: string): string {
+  const chars = Array.from(value);
+  return chars.length <= MAX_PAGE_VALUE_CHARS ? value : `${chars.slice(0, MAX_PAGE_VALUE_CHARS).join("")}\u2026`;
+}
+
+/**
+ * The seams for a drawn page's variable reads. `deadlineMs` is how long the page waits for
+ * all of them together; a test shortens it, because the real one is the variable timeout.
+ */
+export const pageVariableDeps = { deadlineMs: VARIABLE_TIMEOUT_MS };
 
 export interface CompanionTarget {
   host: string;
@@ -185,6 +207,17 @@ class CompanionApi {
   private inFlight: Promise<ExportResult> | null = null;
   /** The last connection list read, and when. See CONNECTIONS_CACHE_MS. */
   private connections: { at: number; health: ConnectionHealth } | null = null;
+  /** Values (null: unreadable) of the variables a drawn page names, for PAGE_VARIABLE_CACHE_MS. */
+  private pageVariables = new Map<string, { at: number; value: string | null }>();
+  /** Reads out at Companion for a drawn page, by variable: every call joins one rather than starting its own. */
+  private pageReads = new Map<string, Promise<string | null>>();
+  /** Page reads in flight, across every call, and the ones waiting for a slot. See PAGE_VARIABLE_CONCURRENCY. */
+  private pageSlotsUsed = 0;
+  private pageSlotWaiters: Array<() => void> = [];
+  /** Bumped by invalidate(), so a read of the old host cannot write the cache of the new one. */
+  private pageGeneration = 0;
+  /** One run per variable, so a variable that is gone is one line, not one per page view. */
+  private variableOutages = new OutageLog();
 
   private async baseUrl(): Promise<string | null> {
     const target = await companionDeps.getTarget();
@@ -469,10 +502,138 @@ class CompanionApi {
     }
   }
 
+  /**
+   * A page with the variables in its keys' text replaced by their live values, as Companion
+   * draws them. Only THIS page's variables are read, in parallel with a small cap, and
+   * together they get no longer than the variable timeout: whatever has not answered by
+   * then, and whatever fails or does not exist, stays as the `$(...)` text it was.
+   *
+   * NEVER throws: every read returns its failure, and a failure is a key drawn with its raw
+   * text, not a page that does not draw. Returns a new view; the cached export is not touched.
+   */
+  async withLiveText(view: CompanionPageView): Promise<CompanionPageView> {
+    const wanted = [...new Set(view.keys.flatMap((k) => k.vars))].slice(0, MAX_PAGE_VARIABLES);
+    if (wanted.length === 0) return view;
+    const values = await this.readPageVariables(wanted);
+    if (values.size === 0) return view;
+    return {
+      ...view,
+      keys: view.keys.map((k) => {
+        if (k.vars.length === 0) return k;
+        const own = new Map(k.vars.flatMap((ref) => (values.has(ref) ? [[ref, capValue(values.get(ref)!)] as const] : [])));
+        return own.size === 0 ? k : { ...k, text: substituteVariables(k.text, own) };
+      }),
+    };
+  }
+
+  /** The values that could be read, by variable as written. Never throws. */
+  private async readPageVariables(refs: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const now = Date.now();
+    const todo: string[] = [];
+    for (const ref of refs) {
+      const hit = this.pageVariables.get(ref);
+      if (hit && now - hit.at < PAGE_VARIABLE_CACHE_MS) {
+        if (hit.value !== null) out.set(ref, hit.value);
+      } else {
+        todo.push(ref);
+      }
+    }
+    if (todo.length === 0) return out;
+
+    const queue = [...todo];
+    // This call's own clock. Once it is set no worker of this call starts another read, so a
+    // page left behind by a hung Companion leaves at most the reads already out, never the rest.
+    const call = { over: false };
+    const worker = async (): Promise<void> => {
+      for (let ref = queue.shift(); ref !== undefined && !call.over; ref = queue.shift()) {
+        const value = await this.pageRead(ref, call);
+        if (value !== null) out.set(ref, value);
+      }
+    };
+    // The page waits for the deadline, not for the slowest read: a read that is still out
+    // when it passes finishes into the cache on its own timeout and is used on the next view.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        call.over = true;
+        resolve();
+      }, pageVariableDeps.deadlineMs);
+    });
+    try {
+      await Promise.race([Promise.all(Array.from({ length: Math.min(PAGE_VARIABLE_CONCURRENCY, queue.length) }, worker)), deadline]);
+    } finally {
+      call.over = true;
+      clearTimeout(timer);
+    }
+    // A snapshot: a read that lands after the deadline must not change a reply already built.
+    return new Map(out);
+  }
+
+  /**
+   * One variable's value for a drawn page, or null. A read already out for this variable is
+   * joined rather than repeated, and a new one waits for one of the PAGE_VARIABLE_CONCURRENCY
+   * slots that every call shares, so no mix of pages and views puts more reads than that in
+   * flight at Companion. Never throws.
+   */
+  private async pageRead(ref: string, call: { over: boolean }): Promise<string | null> {
+    const joined = this.pageReads.get(ref);
+    if (joined) return joined;
+    await this.takePageSlot();
+    // Waiting can outlast the call, and another call can have started this very read meanwhile.
+    const again = this.pageReads.get(ref);
+    if (call.over || again) {
+      this.freePageSlot();
+      return again ?? null;
+    }
+    const generation = this.pageGeneration;
+    let read: Promise<string | null> | undefined;
+    read = (async (): Promise<string | null> => {
+      try {
+        const result = await this.readVariable(ref);
+        const value = "value" in result ? result.value : null;
+        // invalidate() ran while this was out: the answer belongs to the old host.
+        if (generation === this.pageGeneration) this.pageVariables.set(ref, { at: Date.now(), value });
+        if (value !== null) {
+          const back = this.variableOutages.ok(ref, Date.now());
+          if (back.log) console.log(`[companion] page variable $(${ref}) readable again${back.note}`);
+        } else {
+          const error = "error" in result ? result.error : "";
+          const d = this.variableOutages.fail(ref, error, Date.now());
+          if (d.log) console.warn(`[companion] page variable $(${ref}) not read, drawn as written: ${scrub(error)}${d.note}`);
+        }
+        return value;
+      } finally {
+        if (this.pageReads.get(ref) === read) this.pageReads.delete(ref);
+        this.freePageSlot();
+      }
+    })();
+    this.pageReads.set(ref, read);
+    return read;
+  }
+
+  private async takePageSlot(): Promise<void> {
+    if (this.pageSlotsUsed < PAGE_VARIABLE_CONCURRENCY) {
+      this.pageSlotsUsed++;
+      return;
+    }
+    // The slot is handed over still counted, so a newcomer cannot slip in between.
+    await new Promise<void>((resolve) => this.pageSlotWaiters.push(resolve));
+  }
+
+  private freePageSlot(): void {
+    const next = this.pageSlotWaiters.shift();
+    if (next) next();
+    else this.pageSlotsUsed--;
+  }
+
   /** Drop the cache, so the next read goes to Companion. */
   invalidate(): void {
     this.cache = null;
     this.connections = null;
+    this.pageVariables.clear();
+    this.pageReads.clear();
+    this.pageGeneration++;
   }
 
   /**

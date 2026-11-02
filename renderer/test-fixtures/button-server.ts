@@ -55,7 +55,7 @@ const PAGES = [
 ];
 
 const key = (row: number, col: number, label: string, extra: Record<string, unknown> = {}) => ({
-  row, col, kind: "button", label, bg: "#333333", fg: "#ffffff", icon: null, pickable: true, ...extra,
+  row, col, kind: "button", label, text: label, size: null, halign: null, valign: null, vars: [], bg: "#333333", fg: "#ffffff", icon: null, pickable: true, ...extra,
 });
 const pageView = (page: number) => {
   const name = PAGES.find((p) => p.page === page)?.name ?? "";

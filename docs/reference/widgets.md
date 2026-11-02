@@ -617,11 +617,14 @@ by label** searches every label on every page. The page dropdown, with â€¹ and â
 arrows beside it, filters by number or name and leaves out pages with nothing on
 them, so an install with a hundred pages stays usable. The page is drawn as
 Companion draws it: its own colours, an icon above the label, at least 8 keys by 4,
-and wider than that only as far as the page uses, scrolling sideways inside the
-panel. A page-number, page-up or page-down key is drawn blank and cannot be
+and wider than that only as far as the page uses, its keys shrinking to fit the
+panel so the page never scrolls sideways. A line under the grid names the hovered
+or focused key in full, with its page, row and column, and the picked button at
+rest. **Open large** shows the same page in a dialog with bigger keys and type;
+picking a key there picks it on the Button and closes the dialog. A key's text is drawn as Companion draws it, with its line breaks, size and alignment, and its variables filled in with their current values. A page-number, page-up or page-down key is drawn blank and cannot be
 picked. A reference key is drawn as the button it points at, marked **ref**, and
 picking it presses that button. The picked button's page, row and column are shown
-under the grid. There are no typed coordinates: a button that is not in the export
+in that line. There are no typed coordinates: a button that is not in the export
 cannot be pressed safely. With Companion unreachable the panel says so rather than
 drawing an empty page.
 

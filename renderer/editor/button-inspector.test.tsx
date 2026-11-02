@@ -239,10 +239,51 @@ describe("Companion", () => {
     assert.deepEqual([p.page, p.row, p.col], [17, 2, 0], "a press goes to the reference's own target");
   });
 
+  const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
+  const openLarge = async (container: HTMLElement) => {
+    await gridReady(container);
+    fireEvent.click([...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Open large")!);
+    await eventually(() => assert.ok(dialog()?.querySelector("[data-page-grid]"), "the large picker never drew its page"));
+    return dialog()!;
+  };
+
+  test("Open large shows the page in a dialog, and picking there picks on the Button and closes it", async () => {
+    const s = serve();
+    const { container, configs } = mount(UNSET);
+    const d = await openLarge(container);
+    assert.equal(d.getAttribute("data-page-grid") === null && d.querySelector('[data-page-grid="17"]') !== null, true, "the dialog is not on the panel's page");
+    fireEvent.click(d.querySelector<HTMLElement>('[role="gridcell"][data-row="2"][data-col="0"]')!);
+    await eventually(() => assert.equal(configs.length, 1));
+    const p = (s.posts[0]!.action as { params: Record<string, unknown> }).params;
+    assert.deepEqual([p.page, p.row, p.col], [17, 2, 0], "the large picker picked a different button");
+    await eventually(() => assert.equal(dialog(), null, "picking did not close the dialog"));
+  });
+
+  test("the large picker pages with its own arrows, and what it picks is on that page", async () => {
+    const s = serve();
+    const { container, configs } = mount(UNSET);
+    const d = await openLarge(container);
+    fireEvent.click(d.querySelector<HTMLElement>('[aria-label="Next page"]')!);
+    await eventually(() => assert.ok(d.querySelector('[data-page-grid="20"]'), "the dialog did not move to page 20"));
+    fireEvent.click(d.querySelector<HTMLElement>('[role="gridcell"][data-row="0"][data-col="0"]')!);
+    await eventually(() => assert.equal(configs.length, 1));
+    const p = (s.posts[0]!.action as { params: Record<string, unknown> }).params;
+    assert.equal(p.page, 20);
+  });
+
+  test("closing the large picker without picking writes nothing", async () => {
+    const s = serve();
+    const { container, configs } = mount(UNSET);
+    const d = await openLarge(container);
+    fireEvent.click(d.querySelector<HTMLElement>('[aria-label="Close"]')!);
+    await eventually(() => assert.equal(dialog(), null));
+    assert.deepEqual([configs, s.posts], [[], []]);
+  });
+
   test("the picked button's page, row and column are shown, and there are no typed coordinates", async () => {
     serve({ rules: [owned("btn_shutter", PRESS_17_2_0)] });
     const { container } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true });
-    await eventually(() => assert.ok(container.textContent?.includes("page 17 · row 2 · column 0")));
+    await eventually(() => assert.ok(container.querySelector("[data-key-readout]")?.textContent?.includes("p17 r2 c0")));
     assert.equal(container.querySelectorAll('input[type="number"], [aria-label="Row"], [aria-label="Column"]').length, 0);
     await gridReady(container);
     assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true");

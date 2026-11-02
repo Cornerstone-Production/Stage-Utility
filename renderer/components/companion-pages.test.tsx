@@ -19,9 +19,13 @@
 //    a reference picks what it points at, the picked key says so, and a key that cannot
 //    be picked (a page control, an unresolved reference) is not a control at all.
 //
-// NOT unit-tested here, and driven in a browser instead: the keys' square size, the
-// sideways scroll of a page wider than its box, and the dropdown's stacking over the
-// grid. jsdom loads no stylesheet and reports every offsetWidth as 0.
+//  - THE GRID FITS ITS BOX: its columns are minmax(0, 1fr), so no key has a minimum width
+//    and the page never scrolls sideways; and a line under it reads out the hovered or
+//    focused key in full, the picked one at rest.
+//
+// NOT unit-tested here, and driven in a browser instead: that the keys really do shrink to
+// the box, the keys' square size, and the dropdown's stacking over the grid. jsdom loads no
+// stylesheet and reports every offsetWidth as 0.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND (see test-dom.ts).
 
@@ -41,6 +45,11 @@ type Key = {
   col: number;
   kind: "button" | "reference" | "page-control";
   label: string;
+  text: string;
+  size: number | null;
+  halign: "left" | "center" | "right" | null;
+  valign: "top" | "center" | "bottom" | null;
+  vars: string[];
   bg: string | null;
   fg: string | null;
   icon: string | null;
@@ -52,6 +61,11 @@ const key = (row: number, col: number, over: Partial<Key> = {}): Key => ({
   col,
   kind: "button",
   label: "Key",
+  text: over.label ?? "Key",
+  size: null,
+  halign: null,
+  valign: null,
+  vars: [],
   bg: null,
   fg: null,
   icon: null,
@@ -256,6 +270,53 @@ describe("the grid, read-only", () => {
     assert.equal(keyAt("p1 r0 c4")!.style.color, "rgb(255, 255, 255)", "black text on the default dark key stayed unreadable");
   });
 
+  test("a key draws its text as Companion does: line breaks kept, not collapsed", () => {
+    const view = { page: 1, name: "Text", cols: 8, rows: 4, keys: [key(0, 0, { label: "Occupants 12", text: "Occupants\n12" })] };
+    render(<CompanionPageGrid view={view} />);
+    const face = keyAt("p1 r0 c0")!.querySelector("span")!;
+    assert.equal(face.textContent, "Occupants\n12", "the line break was not carried to the face");
+    assert.match(face.getAttribute("class") ?? "", /whitespace-pre-line/, "the face collapses a line break to a space");
+    assert.match(keyAt("p1 r0 c0")!.getAttribute("title") ?? "", /^Occupants 12 · p1 r0 c0$/);
+  });
+
+  test("Companion's own text size and alignment are kept, and a sized key is still clamped", () => {
+    const view = {
+      page: 1,
+      name: "Size",
+      cols: 8,
+      rows: 4,
+      keys: [
+        key(0, 0, { label: "Big", size: 40, halign: "left", valign: "bottom" }),
+        key(0, 1, { label: "Auto" }),
+      ],
+    };
+    render(<CompanionPageGrid view={view} />);
+    const big = keyAt("p1 r0 c0")!;
+    assert.equal(big.style.getPropertyValue("--key-size"), "40");
+    // On the text and not on the key: a container unit on the container itself reads the container above it.
+    assert.match(big.querySelector("span")!.getAttribute("class") ?? "", /var\(--key-size\)/, "the size is set but nothing reads it");
+    assert.doesNotMatch(big.getAttribute("class") ?? "", /var\(--key-size\)/, "the size unit is on the container itself, where it resolves against nothing");
+    assert.equal(big.style.textAlign, "left");
+    assert.equal(big.style.alignItems, "flex-start");
+    assert.equal(big.style.justifyContent, "flex-end");
+    assert.match(big.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-3/, "a sized key lost its clamp and can run out of its box");
+    const auto = keyAt("p1 r0 c1")!;
+    assert.equal(auto.style.getPropertyValue("--key-size"), "", "an auto-fit key was given a size");
+    assert.match(auto.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-3/);
+  });
+
+  test("the large grid draws bigger type and allows a fourth line", () => {
+    const view = { page: 1, name: "L", cols: 8, rows: 4, keys: [key(0, 0, { label: "Plain" }), key(0, 1, { label: "Sized", size: 30 })] };
+    render(<CompanionPageGrid view={view} size="large" />);
+    const plain = keyAt("p1 r0 c0")!;
+    assert.match(plain.getAttribute("class") ?? "", /text-\[12px\]/, "the large key kept the small type");
+    assert.match(plain.querySelector("span")!.getAttribute("class") ?? "", /line-clamp-4/);
+    assert.match(keyAt("p1 r0 c1")!.querySelector("span")!.getAttribute("class") ?? "", /max\(12px,/, "a sized key in the large grid can go under the large type");
+    cleanup();
+    render(<CompanionPageGrid view={view} />);
+    assert.match(keyAt("p1 r0 c0")!.getAttribute("class") ?? "", /text-\[9px\]/);
+  });
+
   test("an icon is drawn above its label", () => {
     mount();
     const withIcon = keyAt("p17 r0 c1")!;
@@ -282,7 +343,7 @@ describe("the grid, read-only", () => {
   test("draws the extent the server sent, each key in its own row and column", () => {
     mount();
     const grid = document.querySelector('[role="img"]') as HTMLElement;
-    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(2.25rem, 1fr))");
+    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))", "a key has a minimum width, so a wide page would scroll sideways");
     assert.equal(grid.children.length, 12 * 5, "the grid is not cols x rows cells");
     assert.equal(grid.children[4 * 12 + 11] === keyAt("p17 r4 c11"), true, "the last key is not in the last cell");
     assert.equal(grid.children[1 * 12 + 3] === keyAt("p17 r1 c3"), true, "a key is not in its own row and column");
@@ -300,6 +361,85 @@ describe("the grid, read-only", () => {
     assert.match(classes, /--su-companion-canvas/);
     assert.match(classes, /--su-companion-key/);
     assert.doesNotMatch(classes, /\bbg-(black|white)\b|bg-\[#|bg-white\/|bg-black\//);
+  });
+});
+
+describe("the readout under the grid", () => {
+  const readout = () => document.querySelector("[data-key-readout]")!.textContent ?? "";
+
+  test("the grid has no horizontal scroller around it", () => {
+    render(<CompanionPageGrid view={VIEW} />);
+    const classes = [...document.querySelectorAll("[class]")].map((e) => e.getAttribute("class") ?? "").join(" ");
+    assert.doesNotMatch(classes, /overflow-x-auto|overflow-x-scroll/, "the grid scrolls sideways again");
+  });
+
+  test("a read-only key is read out in full when hovered, and the line goes back to its hint", async () => {
+    render(<CompanionPageGrid view={{ ...VIEW, keys: [key(0, 0, { label: "A very long label that the key clips", text: "A very long label\nthat the key clips" })] }} />);
+    assert.match(readout(), /Hover a key/);
+    await act(async () => {
+      fireEvent.mouseEnter(keyAt("p17 r0 c0")!);
+    });
+    assert.equal(readout(), "A very long label that the key clipsp17 r0 c0");
+    await act(async () => {
+      fireEvent.mouseLeave(keyAt("p17 r0 c0")!);
+    });
+    assert.match(readout(), /Hover a key/);
+  });
+
+  test("a picking key is read out on focus, and blur returns to the picked key", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={{ onPick: () => {}, isPicked: (at) => at.page === 17 && at.row === 0 && at.col === 1 }} />);
+    assert.equal(readout(), "Lamp offp17 r0 c1", "at rest the line should name the picked key");
+    await act(async () => {
+      fireEvent.focus(keyAt("p17 r4 c11")!);
+    });
+    assert.equal(readout(), "Far rightp17 r4 c11", "focus did not move the readout");
+    await act(async () => {
+      fireEvent.blur(keyAt("p17 r4 c11")!);
+    });
+    assert.equal(readout(), "Lamp offp17 r0 c1");
+  });
+
+  test("a reference is marked, and a picked key on another page is named at rest from `current`", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={{ onPick: () => {}, isPicked: () => false, current: { text: "Elsewhere", page: 3, row: 1, col: 2 } }} />);
+    assert.equal(readout(), "Elsewherep3 r1 c2");
+    await act(async () => {
+      fireEvent.focus(keyAt("p17 r1 c3")!);
+    });
+    assert.equal(readout(), "Shutterp17 r1 c3 · ref");
+  });
+});
+
+describe("the readout, tick mode and page changes", () => {
+  const readout = () => document.querySelector("[data-key-readout]")!.textContent ?? "";
+  const tickPick = {
+    onPick: () => {},
+    isPicked: () => false,
+    tick: { isOffered: () => true, isLocked: (at: { row: number; col: number }) => at.row === 0 && at.col === 1 },
+  };
+
+  test("an imported key can take focus, is disabled and not a button, and the readout names it as imported", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={tickPick} />);
+    const locked = keyAt("p17 r0 c1")!;
+    assert.equal(locked.tagName === "BUTTON", false);
+    assert.equal(locked.getAttribute("tabindex"), "0", "a keyboard user cannot reach an imported key");
+    assert.equal(locked.getAttribute("aria-disabled"), "true");
+    await act(async () => {
+      fireEvent.focus(locked);
+    });
+    assert.equal(readout(), "Lamp offp17 r0 c1 · imported");
+  });
+
+  test("the readout's key is forgotten when the page changes", async () => {
+    const { rerender } = render(<CompanionPageGrid view={VIEW} />);
+    await act(async () => {
+      fireEvent.mouseEnter(keyAt("p17 r0 c0")!);
+    });
+    assert.equal(readout(), "Lamp onp17 r0 c0");
+    rerender(<CompanionPageGrid view={{ ...VIEW, page: 18, keys: [key(0, 0, { label: "Other page" })] }} />);
+    assert.match(readout(), /Hover a key/, "the readout still names a key of the old page");
+    // Back on the first page the pointer never left, but the old page's hover is not revived.
+    rerender(<CompanionPageGrid view={VIEW} />);
+    assert.match(readout(), /Hover a key/);
   });
 });
 
