@@ -251,11 +251,46 @@ const KEY_CHROME =
   "relative flex aspect-square min-w-0 flex-col items-center justify-center gap-px overflow-hidden rounded-[3px] p-0.5 text-center " +
   "bg-(--su-companion-key) text-(--su-companion-key-fg) text-[9px] font-semibold leading-[1.1]";
 
+/** WCAG relative luminance of a #rrggbb colour, or null when it is not one. */
+function luminance(hex: string): number | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 16);
+  const lin = (c: number) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+}
+
+const contrast = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
+/** --su-companion-key in styles.css: what a key with no background of its own is drawn on. */
+const DEFAULT_KEY_BG = "#1c1c1c";
+
+/** Below this a label is not readable. Companion draws such a key by letting a feedback set the live text colour. */
+const MIN_TEXT_CONTRAST = 2;
+
+/**
+ * The text colour a key is drawn in. A button's own text colour is often the same as its
+ * background (black on black) because a feedback sets the real one live, and an export
+ * carries only the static look: with under 2:1 between them the text is drawn in white or
+ * black, whichever contrasts with the background.
+ */
+export function readableText(bg: string | null, fg: string | null): string | null {
+  if (!fg) return fg;
+  // No colour of its own: the key is drawn on --su-companion-key.
+  const b = luminance(bg ?? DEFAULT_KEY_BG);
+  const f = luminance(fg);
+  if (b === null || f === null || contrast(b, f) >= MIN_TEXT_CONTRAST) return fg;
+  return contrast(b, 1) >= contrast(b, 0) ? "#ffffff" : "#000000";
+}
+
 /** Companion's own colours for a key: set per key, because they are Companion's, not the app's. */
-const colours = (k: CompanionPageKey) => ({
-  ...(k.bg ? { backgroundColor: k.bg } : {}),
-  ...(k.fg ? { color: k.fg } : {}),
-});
+const colours = (k: CompanionPageKey) => {
+  const fg = readableText(k.bg, k.fg);
+  return { ...(k.bg ? { backgroundColor: k.bg } : {}), ...(fg ? { color: fg } : {}) };
+};
 
 export function CompanionPageGrid({ view, pick }: { view: CompanionPageView; pick?: CompanionPick }) {
   const byPlace = useMemo(() => new Map<string, CompanionPageKey>(view.keys.map((k) => [`${k.row},${k.col}`, k])), [view]);
