@@ -19,7 +19,7 @@ import { isRotation, isVideoMode } from "../types/output-format.js";
 import { isUpdateMode } from "../types/state.js";
 import { isStorableTextSize } from "../types/text-size.js";
 import { isDisplayKind } from "../types/views.js";
-import { ICON_IMAGE_KEYS, iconPngProblem, parseCrop, type IconImageField } from "./app-icon.js";
+import { ICON_IMAGE_KEYS, iconPngProblem, isTabBackground, parseCrop, type IconImageField } from "./app-icon.js";
 import { isValidTimeZone } from "./app-timezone.js";
 import { brandingImageProblem, looksLikeStoredRef } from "./branding-image-store.js";
 import { SLUG_PATTERN, isReservedSlug, validateSlug } from "./reserved-slugs.js";
@@ -371,6 +371,10 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   appIcon512: iconImage("any512"),
   appIconMaskable: iconImage("maskable"),
   appIconBackground: hex6,
+  appIconTabBackground: (v, k) => {
+    if (!isTabBackground(v)) refuse(`${k} must be a #rrggbb hex or "none"`);
+    return v;
+  },
   // Display settings
   showQr: bool,
   kioskDiscovery: bool,

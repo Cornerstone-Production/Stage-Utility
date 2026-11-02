@@ -325,20 +325,28 @@ describe("the tab icon", () => {
     assert.equal(link()?.getAttribute("type"), STOCK_FAVICON_TYPE);
   });
 
-  test("a custom icon in the state wins over the logo, and removing it brings the logo back", async () => {
-    // The hook has to hand the icon to applyFavicon at all: a favicon helper that
-    // is right in isolation and never given the field leaves the tab on the logo.
-    const ICON = "/branding-images/feedbeef.png"; // its tab href is the route, keyed by this name
+  test("a custom icon in the state wins over the logo, with its own tab background, and removing it brings the logo back", async () => {
+    // The hook has to hand the art and the TAB background to applyFavicon: a helper
+    // that is right in isolation and never given the fields leaves the tab on the logo.
+    const ART = "/branding-images/feedbeef.png";
+    const drawn: string[] = [];
+    __resetFavicon(async (src, ink, background) => {
+      drawn.push(`${src} ${ink} ${background}`);
+      return "data:image/png;base64,ICONTAB";
+    });
     render(React.createElement(OneConsumer));
     await settle();
     act(() => {
-      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: ICON });
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIconArt: ART, appIconTabBackground: "#ffffff" });
     });
-    assert.equal(href(), "/icon-192.png?v=feedbeef", "the custom icon never reached the tab");
+    await settle();
+    await eventually(() => assert.equal(href(), "data:image/png;base64,ICONTAB", "the custom icon never reached the tab"));
+    assert.deepEqual(drawn, [`${ART} null #ffffff`], "the tab's background, not the home screen's, is what it is drawn on");
     act(() => {
-      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: null });
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIconArt: null });
     });
-    assert.equal(href(), LOGO, "removing the icon left it in the tab");
+    await eventually(() => assert.equal(href(), LOGO, "removing the icon left it in the tab"));
+    __resetFavicon();
   });
 
   test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {

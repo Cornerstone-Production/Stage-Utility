@@ -12,8 +12,13 @@ import { escapeHtml } from "./html-escape.js";
 
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
-/** What a new icon is drawn over until the operator picks something else. */
+/** What a new icon's home-screen image is drawn over until the operator picks
+ *  something else. Never transparent: iOS fills a transparent one with black. */
 export const DEFAULT_ICON_BACKGROUND = "#000000";
+
+/** The tab icon's background when it has none: just the logo, on whatever the
+ *  browser's tab strip is. A stored tab background is this or a `#rrggbb`. */
+export const NO_TAB_BACKGROUND = "none";
 
 /** The public paths a custom icon is served at, and the settings field behind each.
  *  The paths are the ones the HTML documents and the manifest already name, so a

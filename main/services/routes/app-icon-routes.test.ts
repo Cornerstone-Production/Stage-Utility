@@ -70,10 +70,19 @@ describe("with no custom icon", () => {
     assert.equal(s.appIcon192, null);
     assert.equal(s.appIconMaskable, null);
     assert.equal(s.appIconBackground, "#000000");
+    assert.equal(s.appIconTabBackground, "none");
+    assert.equal(s.appIconArt, null);
   });
 });
 
 describe("POST /api/branding with an icon", () => {
+  test("a home-screen background of none is refused: it would reach a phone as black", async () => {
+    const r = await post({ icon: iconInput({ background: "none" }) });
+    assert.equal(r.status, 400);
+    assert.match(String((r.json as { error: string }).error), /body\.icon\.background must be a #rrggbb hex/);
+    assert.equal(stageController.getState().appIcon192, null);
+  });
+
   test("a refused icon is a 400 naming the field, and changes nothing", async () => {
     const r = await post({ icon: { ...iconInput(), apple: pngDataUrl(192) } });
     assert.equal(r.status, 400);
@@ -83,22 +92,25 @@ describe("POST /api/branding with an icon", () => {
   });
 
   test("a good one is stored as files, and the state carries references, never bytes", async () => {
-    const r = await post({ icon: iconInput({ background: "#2e6691" }) });
+    const r = await post({ icon: iconInput({ background: "#2e6691", tabBackground: "#ffffff" }) });
     assert.equal(r.status, 200, r.body.slice(0, 200));
     assert.deepEqual(
       branding().filter((m) => m.includes("icon set")),
-      ["[branding] custom tab and home-screen icon set, background #2e6691"],
+      ["[branding] custom tab and home-screen icon set, home-screen background #2e6691, tab background #ffffff"],
     );
     const s = stageController.getState();
     assert.match(s.appIcon192 as string, REF);
     assert.match(s.appIconMaskable as string, REF);
     assert.equal(s.appIconBackground, "#2e6691");
+    assert.equal(s.appIconTabBackground, "#ffffff");
+    assert.match(s.appIconArt as string, REF, "the tab draws itself from the art, which therefore rides in state");
 
     const onDisk = await settings();
     for (const key of ["appIcon", "appIconOriginal", "appIconApple", "appIcon192", "appIcon512", "appIconMaskable"]) {
       assert.match(onDisk[key] as string, REF, `${key} is not a stored reference`);
     }
     assert.equal(onDisk.appIconBackground, "#2e6691");
+    assert.equal(onDisk.appIconTabBackground, "#ffffff");
     assert.deepEqual(onDisk.appIconCrop, { scale: 1, x: 0, y: 0 });
   });
 
@@ -238,6 +250,8 @@ describe("removing the icon", () => {
       assert.equal(onDisk[key], null, `${key} survived removal`);
     }
     assert.equal(onDisk.appIconBackground, "#000000");
+    assert.equal(onDisk.appIconTabBackground, "none");
+    assert.equal(stageController.getState().appIconArt, null);
     assert.deepEqual(await stageController.getBrandingSource("icon"), { original: null, crop: null, art: null });
   });
 });

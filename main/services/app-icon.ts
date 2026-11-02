@@ -13,7 +13,7 @@
 import { MAX_BRANDING_DATA_URL_CHARS, looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
 import { isHex6 } from "./settings-rules.js";
-import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, type IconField } from "./install-metadata.js";
+import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, NO_TAB_BACKGROUND, type IconField } from "./install-metadata.js";
 
 export interface IconCrop {
   scale: number;
@@ -31,8 +31,13 @@ export interface AppIconInput {
    *  original exists, or arrived through the API. */
   original: string | null;
   crop: IconCrop | null;
-  /** `#rrggbb`, filled behind transparent areas. */
+  /** `#rrggbb`, the home-screen icon's background. Never "none": phones fill
+   *  transparency with black. */
   background: string;
+  /** The browser tab's background: `#rrggbb`, or "none" for just the logo. Optional
+   *  on the wire so a client written before the tab had its own setting still
+   *  saves; it reads as "none". */
+  tabBackground?: string;
   apple: string;
   any192: string;
   any512: string;
@@ -44,7 +49,10 @@ export interface AppIconSettings {
   appIcon: string | null;
   appIconOriginal: string | null;
   appIconCrop: IconCrop | null;
+  /** The home-screen icon's background. Installs that had one setting keep it here. */
   appIconBackground: string;
+  /** The tab icon's background; absent in settings written before it existed, which read as "none". */
+  appIconTabBackground: string;
   appIconApple: string | null;
   appIcon192: string | null;
   appIcon512: string | null;
@@ -57,6 +65,7 @@ export const NO_APP_ICON: AppIconSettings = {
   appIconOriginal: null,
   appIconCrop: null,
   appIconBackground: DEFAULT_ICON_BACKGROUND,
+  appIconTabBackground: NO_TAB_BACKGROUND,
   appIconApple: null,
   appIcon192: null,
   appIcon512: null,
@@ -76,6 +85,29 @@ export function pngSize(dataUrl: string): { width: number; height: number } | nu
   if (!signature.every((b, i) => head[i] === b)) return null;
   if (head.toString("ascii", 12, 16) !== "IHDR") return null;
   return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+}
+
+/** A tab background: a colour, or "none" for the logo alone. */
+export function isTabBackground(v: unknown): v is string {
+  return v === NO_TAB_BACKGROUND || isHex6(v);
+}
+
+/**
+ * The two backgrounds a saved icon is drawn over, from the settings file.
+ *
+ * Installs from before the tab had its own setting stored one `appIconBackground`,
+ * which filled every size including the tab's. It stays the home-screen
+ * background (phones still need a colour); the tab, which has no stored value,
+ * starts transparent.
+ */
+export function iconBackgrounds(settings: { appIconBackground?: string; appIconTabBackground?: string }): {
+  home: string;
+  tab: string;
+} {
+  return {
+    home: settings.appIconBackground ?? DEFAULT_ICON_BACKGROUND,
+    tab: settings.appIconTabBackground ?? NO_TAB_BACKGROUND,
+  };
 }
 
 type IconParse = { ok: true; value: AppIconInput | null } | { ok: false; error: string };
@@ -139,6 +171,10 @@ export function parseAppIcon(v: unknown): IconParse {
   if (!isHex6(background)) {
     return { ok: false, error: "body.icon.background must be a #rrggbb hex" };
   }
+  const tabBackground = body.tabBackground === undefined ? NO_TAB_BACKGROUND : body.tabBackground;
+  if (!isTabBackground(tabBackground)) {
+    return { ok: false, error: `body.icon.tabBackground must be a #rrggbb hex or "${NO_TAB_BACKGROUND}"` };
+  }
 
   let original: string | null = null;
   if (body.original !== null && body.original !== undefined) {
@@ -160,6 +196,7 @@ export function parseAppIcon(v: unknown): IconParse {
       original,
       crop: parseCrop(body.crop),
       background: background.toLowerCase(),
+      tabBackground: tabBackground.toLowerCase(),
       apple: body.apple as string,
       any192: body.any192 as string,
       any512: body.any512 as string,
@@ -178,6 +215,7 @@ export function iconToSettings(icon: AppIconInput | null): AppIconSettings {
     appIconOriginal: icon.original,
     appIconCrop: icon.crop,
     appIconBackground: icon.background,
+    appIconTabBackground: icon.tabBackground ?? NO_TAB_BACKGROUND,
     appIconApple: icon.apple,
     appIcon192: icon.any192,
     appIcon512: icon.any512,

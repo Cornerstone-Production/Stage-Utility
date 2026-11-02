@@ -80,7 +80,11 @@ function adoptState(next: StageState): void {
   // The tab icon follows the custom icon, else the uploaded logo, from a hydrated
   // state only, for the accent's reason: a consumer that has not loaded yet must
   // not reset it.
-  applyFavicon(next.appLogo, next.appLogoMonochrome, next.appIcon192);
+  applyFavicon(
+    next.appLogo,
+    next.appLogoMonochrome,
+    next.appIconArt ? { art: next.appIconArt, background: next.appIconTabBackground } : null,
+  );
   publish({ state: next, isLoading: false, error: null });
 }
 

@@ -56,6 +56,8 @@ export const DEFAULT_STAGE_STATE: StageState = {
   appIcon192: null,
   appIconMaskable: null,
   appIconBackground: "#000000",
+  appIconTabBackground: "none",
+  appIconArt: null,
   ndiEnabled: false,
   publicUrl: null,
   captionChannelColors: {},

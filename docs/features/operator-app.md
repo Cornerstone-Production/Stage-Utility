@@ -547,9 +547,9 @@ image.
 |---|---|
 | **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
-| **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
+| **Recolor to match theme** | shown once a logo is set; the tab and home-screen icon dialog has the same switch, because the icon follows it. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
 | **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set) and **Remove**, and the square crop edited in the dialog. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
-| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
+| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon. The tab and the home screen have their own background |
 | **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Remove** and crop editor |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
@@ -561,19 +561,40 @@ The connect QR toggle is the last card on this page — see
 Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP (512 x 512 or larger looks sharpest),
 or press **Use my logo** to build it from the logo already set. Smaller art is never refused: the editor, and the dialog for **Use my logo**, say when it is smaller than 512 x 512 and may look soft. Stage Utility draws
 every size from that one square in your browser: 180 px for the iPhone and iPad
-home screen, 192 and 512 px for Android and the tab, and a second 512 px version
-for Android's round and rounded-square masks with the art kept inside the center
-80%. The dialog previews it at tab, iPhone and Android sizes.
+home screen, 192 and 512 px for Android, and a second 512 px version for Android's
+round and rounded-square masks with the art kept inside the center 80%. The browser
+tab is drawn separately (below). The dialog previews it as a tab on a light and on a
+dark tab strip, and as an iPhone and an Android icon, each in its own shape. The
+editor shows the art over a transparency checker, in the ink the icon will be drawn in.
 
-**Background** fills the transparent areas of your art (black, two blues or white);
-phones would otherwise fill them with black. Changing it redraws every size at once.
+**Recolor to match theme** is the logo's setting, repeated in the dialog because the
+icon follows it. On, the art is drawn in one ink: dark where it sits on a light
+background, light where it sits on a dark one, so a white logo stays visible. Off, the
+art is drawn as uploaded. Changing it redraws the icon.
+
+**Tab background** and **Home-screen background** are set apart. Each offers black,
+white, the accent and a custom color; the tab also offers **Transparent**, which is its
+default. **Accent** is stored as the color the accent is when you pick it, not as a
+promise to follow it, because the home-screen images are PNGs the server keeps. Phones
+fill transparency with black, so the home screen always has a color. Changing either
+redraws the icon at once. Installs from before the two were separate keep their one
+background on the home screen and get a transparent tab.
+
+With Recolor on, the home-screen art is drawn in whichever ink reads against its
+background (white art on a white background turns dark). The tab follows the same rule
+once it has a background color. On a transparent tab there is no background to read
+against, so the tab shows just the art, dark on a light browser and light on a dark
+one, and changes with the browser's setting.
+
 Once set, the dialog opens with the icon's square in the crop editor, and offers
 **Replace** and **Remove**. Removing it puts
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
-A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.
-The tab loads it from `/icon-192.png`, which answers with the built-in icon if the
-stored file is ever missing, so the tab is never blank. The home-screen label is the
+A custom icon wins over the logo for the tab. The browser draws the tab icon itself,
+in the operator app and on every display, from the icon's art (the public Service Cue
+page keeps the built-in icon); if that file is ever missing (a restore
+that carried the settings and not the images) the tab shows the built-in icon and the
+log says so. The home-screen label is the
 app name, read by iOS when the app is added, so renaming the app does not rename an
 icon already on a home screen; adding it again does. The manifest and icon files
 behind this are listed in the [API](../reference/api.md).

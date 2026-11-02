@@ -87,8 +87,8 @@ import { presetsStore } from "./presets-store.js";
 import { PrepTagBook } from "./pco-prep-tags.js";
 import { resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
-import { iconToSettings, type AppIconInput } from "./app-icon.js";
-import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
+import { iconBackgrounds, iconToSettings, type AppIconInput } from "./app-icon.js";
+import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "./install-metadata.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsOverride, type SlotsTarget, type SlotsWrite } from "./slots-store.js";
@@ -438,6 +438,8 @@ export class StageController {
     appIcon192: null,
     appIconMaskable: null,
     appIconBackground: DEFAULT_ICON_BACKGROUND,
+    appIconTabBackground: NO_TAB_BACKGROUND,
+    appIconArt: null,
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
@@ -704,7 +706,9 @@ export class StageController {
       defaultAvatar: settings.defaultAvatar ?? null,
       appIcon192: settings.appIcon192 ?? null,
       appIconMaskable: settings.appIconMaskable ?? null,
-      appIconBackground: settings.appIconBackground ?? DEFAULT_ICON_BACKGROUND,
+      appIconBackground: iconBackgrounds(settings).home,
+      appIconTabBackground: iconBackgrounds(settings).tab,
+      appIconArt: settings.appIcon ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       // Both of these are written to settings.json by their setters and were
@@ -3357,7 +3361,7 @@ export class StageController {
     icon?: AppIconInput | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar" | "appIcon192" | "appIconMaskable" | "appIconBackground">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar" | "appIcon192" | "appIconMaskable" | "appIconBackground" | "appIconTabBackground">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
@@ -3371,6 +3375,7 @@ export class StageController {
       stateNext.appIcon192 = iconSettings.appIcon192;
       stateNext.appIconMaskable = iconSettings.appIconMaskable;
       stateNext.appIconBackground = iconSettings.appIconBackground;
+      stateNext.appIconTabBackground = iconSettings.appIconTabBackground;
     }
 
     // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
@@ -3420,11 +3425,16 @@ export class StageController {
         avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
       }),
     );
-    this.state = { ...this.state, ...stored };
+    // The tab draws itself from the icon's art, so the art's stored reference
+    // rides in state too (the five images are not sent; the art is one of them).
+    const artRef = iconSettings ? { appIconArt: (settingsStored.appIcon as string | null) ?? null } : {};
+    this.state = { ...this.state, ...stored, ...artRef };
     await settingsStore.patch(settingsStored);
     // After the write, so the line is only ever true. One per change, never per request.
     if (partial.icon) {
-      console.log("[branding] custom tab and home-screen icon set, background", scrub(partial.icon.background));
+      console.log(
+        `[branding] custom tab and home-screen icon set, home-screen background ${scrub(partial.icon.background)}, tab background ${scrub(partial.icon.tabBackground ?? NO_TAB_BACKGROUND)}`,
+      );
     } else if (partial.icon === null) {
       console.log("[branding] custom tab and home-screen icon removed; the tab follows the logo and phones show the built-in icon");
     }
