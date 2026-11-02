@@ -272,7 +272,7 @@ function KeyFace({ k, large }: { k: CompanionPageKey; large: boolean }): ReactNo
       {k.kind === "reference" && (
         <span
           aria-hidden="true"
-          className="absolute left-px top-px rounded-[2px] bg-(--su-companion-canvas)/60 px-[2px] text-[7px] leading-none text-(--su-companion-key-fg)"
+          className="absolute left-px top-px rounded-[2px] bg-(--su-companion-plate)/60 px-[2px] text-[7px] leading-none text-(--su-companion-key-fg)"
         >
           ref
         </span>
@@ -417,7 +417,7 @@ export function CompanionPageGrid({ view, pick, size }: { view: CompanionPageVie
             {...hover(id)}
           >
             <KeyFace k={k} large={large} />
-            <span aria-hidden="true" className="absolute inset-x-0 bottom-0 bg-(--su-companion-canvas)/70 text-center text-[7px] leading-tight text-(--su-companion-key-fg)">
+            <span aria-hidden="true" className="absolute inset-x-0 bottom-0 bg-(--su-companion-plate)/70 text-center text-[7px] leading-tight text-(--su-companion-key-fg)">
               imported
             </span>
           </span>,
