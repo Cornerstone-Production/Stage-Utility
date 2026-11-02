@@ -2059,12 +2059,15 @@ button.score-capsule:focus-visible {
 
 /* ── Companion's own look ─────────────────────────────────────────────────────
    The Browse buttons grid on the Companion settings draws Companion's pages as
-   Companion does: black canvas, dark keys, white text, whatever the app's theme.
-   Strictly neutral (R=G=B) in both themes; a key's own colours come from
-   Companion's export and are set on the key itself. */
+   Companion does: dark keys and white text, whatever the app's theme. The canvas
+   behind them is mid grey rather than Companion's black, so a key Companion
+   paints black still reads as a key. Strictly neutral (R=G=B) in both themes; a
+   key's own colours come from Companion's export and are set on the key itself. */
 :root {
-  --su-companion-canvas: #000;
-  --su-companion-line: #333;
+  --su-companion-canvas: #3a3a3a;
+  --su-companion-line: #4a4a4a;
   --su-companion-key: #1c1c1c;
   --su-companion-key-fg: #fff;
+  /* The dark plate under a key's small labels (ref, imported). */
+  --su-companion-plate: #000;
 }
