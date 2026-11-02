@@ -177,7 +177,7 @@ export function WidgetShelf({
       </div>
 
       <div className="flex h-[206px] min-w-0">
-        <nav aria-label="Widget groups" className="flex w-42.5 shrink-0 flex-col gap-px overflow-y-auto border-r border-line p-1 quiet-scroll @max-[560px]/shelf:w-30">
+        <nav aria-label="Widget groups" className="flex w-42.5 shrink-0 flex-col gap-px overflow-y-auto border-r border-line p-1 quiet-scroll @max-[640px]/shelf:w-30">
           {sections.map(({ group, items }) => (
             <button
               key={group}
