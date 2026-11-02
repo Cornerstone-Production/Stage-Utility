@@ -1166,7 +1166,10 @@ export function widgetMatchesQuery(t: LayoutObjectType, query: string): boolean 
   return (
     spec.label.toLowerCase().includes(needle) ||
     t.toLowerCase().includes(needle) ||
-    spec.blurb.toLowerCase().includes(needle)
+    spec.blurb.toLowerCase().includes(needle) ||
+    // The group, so "obs" or "mics" brings in everything under that heading --
+    // the shelf's headings are words an operator reads and will type back.
+    (spec.group ?? "").toLowerCase().includes(needle)
   );
 }
 
