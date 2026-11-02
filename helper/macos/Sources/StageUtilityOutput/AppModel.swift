@@ -40,6 +40,8 @@ final class AppModel: ObservableObject {
   private let paths: HelperPaths
   private let identity: MacIdentity
   private let store: OutputStateStore
+  /// The window's and the server's writes of an output's switch (`OutputSwitchFlow`).
+  private lazy var switchFlow = OutputSwitchFlow(store: store, saveFailed: { [unowned self] in self.noteSaveFailure($0) })
   private let macs: [String]
   private let hostname: String
 
@@ -68,10 +70,6 @@ final class AppModel: ObservableObject {
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
-    /// Counts the changes made to this output's switch in the window. A health post
-    /// remembers the count it went out under, and its answer is dropped when the
-    /// count has moved: it describes the value from before the change.
-    var switchGeneration = 0
     /// A card output's render-to-air latency over the last health window.
     var latencyMs: Double?
     /// Times the page's renderer has ended since launch, for the window.
@@ -313,8 +311,7 @@ final class AppModel: ObservableObject {
   /// has taken it (`OutputSwitch`), so Screens shows it and does not undo it.
   func setEnabled(_ key: String, _ on: Bool) {
     guard let rt = runtimes[key] else { return }
-    rt.switchGeneration += 1
-    save { try store.setEnabledLocally(on, changeId: OutputSwitch.newChangeId(), key: key) }
+    switchFlow.changeInWindow(key, on)
     Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") in the window")
     switchOutput(key, on)
     // Done from the window itself, which is up: nothing to pop.
@@ -323,13 +320,10 @@ final class AppModel: ObservableObject {
     if !on { postOff(key, rt) }
   }
 
-  /// The server's answer to a health post says this output should be `on`.
-  private func applyFromServer(_ key: String, _ on: Bool) {
+  /// The server's answer to a health post said this output should be `on`, and the
+  /// flow has stored it.
+  private func appliedFromServer(_ key: String, _ on: Bool) {
     guard let rt = runtimes[key] else { return }
-    // A post still on its way was sent under the value from before this: its answer
-    // must not turn the output back.
-    rt.switchGeneration += 1
-    save { try store.setEnabled(on, key: key) }
     Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") by the server")
     switchOutput(key, on)
     // Nobody is at the window: if this covered the menu bar, the icon is under the
@@ -623,8 +617,8 @@ final class AppModel: ObservableObject {
       rt.fps = sample.fps
       rt.latencyMs = sample.latencyMs
       guard rt.showingBound else { continue }
-      let change = store.record(for: key)?.pendingChange
-      send(key, rt, body: HealthPost.body(sample, at: now, changeId: change), change: change, at: now)
+      let ticket = switchFlow.ticket(for: key)
+      send(key, rt, body: HealthPost.body(sample, at: now, changeId: ticket.change), ticket: ticket, at: now)
     }
     refresh()
   }
@@ -634,31 +628,28 @@ final class AppModel: ObservableObject {
   /// has nobody to tell.
   private func postOff(_ key: String, _ rt: Runtime) {
     guard rt.sink == nil, let record = store.record(for: key), !record.enabled, record.boundTo != nil else { return }
-    send(key, rt, body: HealthPost.offBody(changeId: record.pendingChange), change: record.pendingChange, at: Date())
+    let ticket = switchFlow.ticket(for: key)
+    send(key, rt, body: HealthPost.offBody(changeId: ticket.change), ticket: ticket, at: Date())
   }
 
   /// Post one health body, if this output is due and its server is known, and act on
   /// the answer.
-  private func send(_ key: String, _ rt: Runtime, body: Data, change: String?, at now: Date) {
+  private func send(_ key: String, _ rt: Runtime, body: Data, ticket: OutputSwitchFlow.Ticket, at now: Date) {
     guard healthBoard.isDue(key, at: now), let server = rt.serverURL, let token = store.record(for: key)?.token,
       let request = HealthPost.request(server: server, deviceId: deviceId(rt), token: token, body: body)
     else { return }
-    let generation = rt.switchGeneration
     Task { @MainActor in
       let reply = await HealthReporter.post(request)
       self.healthResult(key, rt, reply.outcome)
-      self.switchAnswered(key, rt, reply, sentChange: change, generation: generation)
+      self.switchAnswered(key, rt, reply, ticket: ticket)
     }
   }
 
   /// What the answer to an accepted post says about the switch.
-  private func switchAnswered(_ key: String, _ rt: Runtime, _ reply: HealthReply, sentChange: String?, generation: Int) {
+  private func switchAnswered(_ key: String, _ rt: Runtime, _ reply: HealthReply, ticket: OutputSwitchFlow.Ticket) {
     // The output this post was for, not one made since with the same key.
-    guard case .accepted = reply.outcome, runtimes[key] === rt, let record = store.record(for: key) else { return }
-    let decision = OutputSwitch.decide(
-      held: record.enabled, answer: reply.enabled, sentChange: sentChange, stale: generation != rt.switchGeneration)
-    if let id = decision.acknowledged { save { try store.acknowledgeChange(id, key: key) } }
-    if let on = decision.apply { applyFromServer(key, on) }
+    guard case .accepted = reply.outcome, runtimes[key] === rt else { return }
+    if let on = switchFlow.answered(ticket, answer: reply.enabled) { appliedFromServer(key, on) }
   }
 
   private func healthResult(_ key: String, _ rt: Runtime, _ outcome: HealthOutcome) {
