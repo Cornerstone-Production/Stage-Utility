@@ -409,6 +409,40 @@ describe("the readout under the grid", () => {
   });
 });
 
+describe("the readout, tick mode and page changes", () => {
+  const readout = () => document.querySelector("[data-key-readout]")!.textContent ?? "";
+  const tickPick = {
+    onPick: () => {},
+    isPicked: () => false,
+    tick: { isOffered: () => true, isLocked: (at: { row: number; col: number }) => at.row === 0 && at.col === 1 },
+  };
+
+  test("an imported key can take focus, is disabled and not a button, and the readout names it as imported", async () => {
+    render(<CompanionPageGrid view={VIEW} pick={tickPick} />);
+    const locked = keyAt("p17 r0 c1")!;
+    assert.equal(locked.tagName === "BUTTON", false);
+    assert.equal(locked.getAttribute("tabindex"), "0", "a keyboard user cannot reach an imported key");
+    assert.equal(locked.getAttribute("aria-disabled"), "true");
+    await act(async () => {
+      fireEvent.focus(locked);
+    });
+    assert.equal(readout(), "Lamp offp17 r0 c1 · imported");
+  });
+
+  test("the readout's key is forgotten when the page changes", async () => {
+    const { rerender } = render(<CompanionPageGrid view={VIEW} />);
+    await act(async () => {
+      fireEvent.mouseEnter(keyAt("p17 r0 c0")!);
+    });
+    assert.equal(readout(), "Lamp onp17 r0 c0");
+    rerender(<CompanionPageGrid view={{ ...VIEW, page: 18, keys: [key(0, 0, { label: "Other page" })] }} />);
+    assert.match(readout(), /Hover a key/, "the readout still names a key of the old page");
+    // Back on the first page the pointer never left, but the old page's hover is not revived.
+    rerender(<CompanionPageGrid view={VIEW} />);
+    assert.match(readout(), /Hover a key/);
+  });
+});
+
 describe("the grid, picking", () => {
   function mountPicking(over: { disabled?: boolean; picked?: { page: number; row: number; col: number } } = {}) {
     const picks: { page: number; row: number; col: number }[] = [];

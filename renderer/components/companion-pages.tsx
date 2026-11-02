@@ -356,14 +356,18 @@ const sizeClass = (large: boolean): string => (large ? AUTO_SIZE_LARGE : AUTO_SI
 export function CompanionPageGrid({ view, pick, size }: { view: CompanionPageView; pick?: CompanionPick; size?: "large" }) {
   const large = size === "large";
   const byPlace = useMemo(() => new Map<string, CompanionPageKey>(view.keys.map((k) => [`${k.row},${k.col}`, k])), [view]);
-  // The key the pointer is over or focus is on: the readout names it in full.
-  const [active, setActive] = useState<string | null>(null);
+  // The key the pointer is over or focus is on: the readout names it in full. It carries its
+  // page, so the page changing under a still pointer or a held focus does not name a key of the old one.
+  const [active, setActive] = useState<{ page: number; id: string } | null>(null);
   const hover = (id: string) => ({
-    onMouseEnter: () => setActive(id),
-    onFocus: () => setActive(id),
-    onMouseLeave: () => setActive((a) => (a === id ? null : a)),
-    onBlur: () => setActive((a) => (a === id ? null : a)),
+    onMouseEnter: () => setActive({ page: view.page, id }),
+    onFocus: () => setActive({ page: view.page, id }),
+    onMouseLeave: () => setActive((a) => (a?.id === id ? null : a)),
+    onBlur: () => setActive((a) => (a?.id === id ? null : a)),
   });
+  // Dropped as soon as the page differs, so coming back to the old page does not revive it.
+  if (active !== null && active.page !== view.page) setActive(null);
+  const importedIds = new Set<string>();
   const cells: ReactNode[] = [];
   let pickedKey: CompanionPageKey | null = null;
   for (let r = 0; r < view.rows; r++) {
@@ -395,11 +399,15 @@ export function CompanionPageGrid({ view, pick, size }: { view: CompanionPageVie
         continue;
       }
       if (pick.tick?.isLocked(at)) {
-        // Already imported: marked, and not a control.
+        // Already imported: marked, and not something to pick, but reachable by keyboard so
+        // the readout can name it (a span that cannot take focus is invisible to a keyboard user).
+        importedIds.add(id);
         cells.push(
           <span
             key={id}
-            role="img"
+            role="gridcell"
+            tabIndex={0}
+            aria-disabled="true"
             data-companion-key={where}
             data-imported=""
             aria-label={`${keyTitle(k, view.page)} · already imported`}
@@ -454,9 +462,13 @@ export function CompanionPageGrid({ view, pick, size }: { view: CompanionPageVie
   }
 
   // What the line under the grid says: the key being looked at, else the picked one.
-  const looked = active !== null ? byPlace.get(active) : undefined;
+  const lookedId = active?.page === view.page ? active.id : null;
+  const looked = lookedId !== null ? byPlace.get(lookedId) : undefined;
   const shown = looked
-    ? { text: keyText(looked), where: `p${view.page} r${looked.row} c${looked.col}${looked.kind === "reference" ? " · ref" : ""}` }
+    ? {
+        text: keyText(looked),
+        where: `p${view.page} r${looked.row} c${looked.col}${looked.kind === "reference" ? " · ref" : ""}${importedIds.has(lookedId!) ? " · imported" : ""}`,
+      }
     : pick?.tick
       ? null // many keys are ticked, so there is no one key to name at rest
       : pickedKey
