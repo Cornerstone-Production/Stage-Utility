@@ -639,6 +639,152 @@ function PickByPage({
   );
 }
 
+/** A state variable the State or toggle select offers: Companion's own, or the button's inferred one. */
+interface StateOption {
+  value: string;
+  text: string;
+}
+
+/** One pair in the import dialog. Both views draw it; the dialog owns what is ticked and chosen. */
+function PairRow({
+  pair: p,
+  checked,
+  onCheckedChange,
+  hasCustomVariables,
+  stateVariable,
+  options,
+  onStateVariable,
+}: {
+  pair: Pair;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  hasCustomVariables: boolean;
+  stateVariable: string;
+  options: readonly StateOption[];
+  onStateVariable: (v: string) => void;
+}) {
+  return (
+    // A DIV with the label around the checkbox and the words only.
+    // With the whole row as one <label>, every click on the State
+    // select also toggled the checkbox — choosing a variable
+    // unticked the pair it was for.
+    <div className="flex items-center gap-2 border-b border-line py-1.5">
+      <label className="flex min-w-0 flex-1 items-center gap-2">
+        <Checkbox
+          checked={checked}
+          disabled={p.exists}
+          aria-label={`${p.base} · ${p.pageName}`}
+          onCheckedChange={(v) => onCheckedChange(!!v)}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-footnote text-fg">{p.base}</span>
+          <span className="block truncate text-caption2 text-fg-subtle">
+            {p.pageName} · {p.slug}_on / {p.slug}_off
+            {p.exists ? " · already imported" : ""}
+          </span>
+        </span>
+      </label>
+      {/* Offered only when Companion HAS custom variables, and never
+          for a pair that is already imported — its cues exist, and
+          the binding is an edit to the rule from here on. */}
+      {/* Nothing to offer and nothing to build: this pair's state
+          source is learned from a press. Said here rather than left
+          blank, because a blank State column reads as "this pair
+          cannot report its state" — which is the opposite of what is
+          about to happen. See companion-state-learn.ts. */}
+      {p.learnable && !p.exists && !hasCustomVariables && (
+        <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
+      )}
+      {(hasCustomVariables || p.stateSource) && !p.exists && (
+        <Select value={stateVariable} onValueChange={onStateVariable}>
+          {/* The PAGE is in the accessible name, exactly as the
+              checkbox's is: the fixture Companion has "Projectors" on
+              two pages, and two selects called "State variable for
+              Projectors" are indistinguishable to a screen reader and
+              to anything driving the page. */}
+          <SelectTrigger className="w-40 shrink-0" aria-label={`State variable for ${p.base} · ${p.pageName}`}>
+            <SelectValue placeholder="No state" />
+          </SelectTrigger>
+          <SelectContent>
+            {/* "will learn" is the EMPTY option's own text for a
+                learnable pair, not a placeholder beside it: Select
+                drops a placeholder whenever the caller supplies an
+                empty item, and an operator who leaves this alone
+                gets learning — "No state" would say the opposite. */}
+            <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <KindTag kind="switch" />
+    </div>
+  );
+}
+
+/** One single button in the import dialog, drawn as PairRow is. `slug` is the toggle's name, or null for a plain script. */
+function SingleRow({
+  button: b,
+  checked,
+  onCheckedChange,
+  hasCustomVariables,
+  toggleVariable,
+  slug,
+  options,
+  onToggleVariable,
+}: {
+  button: Single;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  hasCustomVariables: boolean;
+  toggleVariable: string;
+  slug: string | null;
+  options: readonly StateOption[];
+  onToggleVariable: (v: string) => void;
+}) {
+  return (
+    // A DIV with the label around the checkbox and the words only,
+    // exactly as the pairs rows are: with the whole row as one
+    // <label>, every click on the select also toggled the
+    // checkbox, so choosing a variable unticked the button it was
+    // for.
+    <div className="flex items-center gap-2 border-b border-line py-1.5">
+      <label className="flex min-w-0 flex-1 items-center gap-2">
+        <Checkbox
+          checked={checked}
+          disabled={b.exists}
+          aria-label={`${b.label} · ${b.pageName}`}
+          onCheckedChange={(v) => onCheckedChange(!!v)}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-footnote text-fg">{b.label}</span>
+          <span className="block truncate text-caption2 text-fg-subtle">
+            {b.pageName} · {slug ? `${slug}_on / ${slug}_off` : b.slug}
+            {b.exists ? " · already imported" : ""}
+          </span>
+        </span>
+      </label>
+      {/* Offered only when Companion HAS custom variables, and
+          never for a button that is already imported. */}
+      {(hasCustomVariables || b.stateSource) && !b.exists && (
+        <Select value={toggleVariable} onValueChange={onToggleVariable}>
+          <SelectTrigger className="w-40 shrink-0" aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}>
+            <SelectValue placeholder="Not a toggle" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Not a toggle</SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <KindTag kind={toggleVariable ? "switch" : "script"} />
+    </div>
+  );
+}
+
 export function ImportPairsDialog({
   open,
   onOpenChange,
@@ -808,135 +954,53 @@ export function ImportPairsDialog({
   // One row per offer, drawn by both views: the list shows every row, Pick by page shows the
   // ticked ones, and the State and toggle choices are made in the same control in each.
   const pairRow = (p: Pair) => (
-      // A DIV with the label around the checkbox and the words only.
-      // With the whole row as one <label>, every click on the State
-      // select also toggled the checkbox — choosing a variable
-      // unticked the pair it was for.
-      <div key={key(p)} className="flex items-center gap-2 border-b border-line py-1.5">
-        <label className="flex min-w-0 flex-1 items-center gap-2">
-          <Checkbox
-            checked={chosen.has(key(p))}
-            disabled={p.exists}
-            aria-label={`${p.base} · ${p.pageName}`}
-            onCheckedChange={(v) => {
-              const next = new Set(chosen);
-              if (v) next.add(key(p));
-              else next.delete(key(p));
-              setPicked(next);
-            }}
-          />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-footnote text-fg">{p.base}</span>
-            <span className="block truncate text-caption2 text-fg-subtle">
-              {p.pageName} · {p.slug}_on / {p.slug}_off
-              {p.exists ? " · already imported" : ""}
-            </span>
-          </span>
-        </label>
-        {/* Offered only when Companion HAS custom variables, and never
-            for a pair that is already imported — its cues exist, and
-            the binding is an edit to the rule from here on. */}
-        {/* Nothing to offer and nothing to build: this pair's state
-            source is learned from a press. Said here rather than left
-            blank, because a blank State column reads as "this pair
-            cannot report its state" — which is the opposite of what is
-            about to happen. See companion-state-learn.ts. */}
-        {p.learnable && !p.exists && customVariables.length === 0 && (
-          <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
-        )}
-        {(customVariables.length > 0 || p.stateSource) && !p.exists && (
-          <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
-            {/* The PAGE is in the accessible name, exactly as the
-                checkbox's is: the fixture Companion has "Projectors" on
-                two pages, and two selects called "State variable for
-                Projectors" are indistinguishable to a screen reader and
-                to anything driving the page. */}
-            <SelectTrigger
-              className="w-40 shrink-0"
-              aria-label={`State variable for ${p.base} · ${p.pageName}`}
-            >
-              <SelectValue placeholder="No state" />
-            </SelectTrigger>
-            <SelectContent>
-              {/* "will learn" is the EMPTY option's own text for a
-                  learnable pair, not a placeholder beside it: Select
-                  drops a placeholder whenever the caller supplies an
-                  empty item, and an operator who leaves this alone
-                  gets learning — "No state" would say the opposite. */}
-              <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
-              {optionsFor(p.stateSource).map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        <KindTag kind="switch" />
-      </div>
+    <PairRow
+      key={key(p)}
+      pair={p}
+      checked={chosen.has(key(p))}
+      onCheckedChange={(v) => {
+        const next = new Set(chosen);
+        if (v) next.add(key(p));
+        else next.delete(key(p));
+        setPicked(next);
+      }}
+      hasCustomVariables={customVariables.length > 0}
+      stateVariable={stateVarFor(p)}
+      options={optionsFor(p.stateSource)}
+      onStateVariable={(v) => setStateVars({ ...stateVars, [key(p)]: v })}
+    />
   );
 
   const singleRow = (b: Single) => {
-      const chosenVar = toggleVarFor(b);
-      return (
-        // A DIV with the label around the checkbox and the words only,
-        // exactly as the pairs rows are: with the whole row as one
-        // <label>, every click on the select also toggled the
-        // checkbox, so choosing a variable unticked the button it was
-        // for.
-        <div key={buttonKey(b)} className="flex items-center gap-2 border-b border-line py-1.5">
-          <label className="flex min-w-0 flex-1 items-center gap-2">
-            <Checkbox
-              checked={pickedButtons.has(buttonKey(b))}
-              disabled={b.exists}
-              aria-label={`${b.label} · ${b.pageName}`}
-              onCheckedChange={(v) => {
-                const next = new Set(pickedButtons);
-                if (v) next.add(buttonKey(b));
-                else next.delete(buttonKey(b));
-                setPickedButtons(next);
-              }}
-            />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-footnote text-fg">{b.label}</span>
-              <span className="block truncate text-caption2 text-fg-subtle">
-                {b.pageName} · {chosenVar ? `${toggleSlug(b)}_on / ${toggleSlug(b)}_off` : b.slug}
-                {b.exists ? " · already imported" : ""}
-              </span>
-            </span>
-          </label>
-          {/* Offered only when Companion HAS custom variables, and
-              never for a button that is already imported. */}
-          {(customVariables.length > 0 || b.stateSource) && !b.exists && (
-            <Select
-              value={chosenVar}
-              onValueChange={(v) => {
-                setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
-                // Choosing a variable TICKS the row. Nothing here is
-                // ticked for you, but picking a variable for one
-                // button is the operator saying they want that button
-                // — and in a browser the choice otherwise sat there
-                // with the footer still reading "Import 3 pairs" and
-                // the button imported as nothing at all. Clearing it
-                // does not untick: unticking is the checkbox's job.
-                if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
-              }}
-            >
-              <SelectTrigger
-                className="w-40 shrink-0"
-                aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}
-              >
-                <SelectValue placeholder="Not a toggle" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Not a toggle</SelectItem>
-                {optionsFor(b.stateSource).map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <KindTag kind={chosenVar ? "switch" : "script"} />
-        </div>
-      );
+    const chosenVar = toggleVarFor(b);
+    return (
+      <SingleRow
+        key={buttonKey(b)}
+        button={b}
+        checked={pickedButtons.has(buttonKey(b))}
+        onCheckedChange={(v) => {
+          const next = new Set(pickedButtons);
+          if (v) next.add(buttonKey(b));
+          else next.delete(buttonKey(b));
+          setPickedButtons(next);
+        }}
+        hasCustomVariables={customVariables.length > 0}
+        toggleVariable={chosenVar}
+        slug={chosenVar ? toggleSlug(b) : null}
+        options={optionsFor(b.stateSource)}
+        onToggleVariable={(v) => {
+          setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
+          // Choosing a variable TICKS the row. Nothing here is
+          // ticked for you, but picking a variable for one
+          // button is the operator saying they want that button
+          // — and in a browser the choice otherwise sat there
+          // with the footer still reading "Import 3 pairs" and
+          // the button imported as nothing at all. Clearing it
+          // does not untick: unticking is the checkbox's job.
+          if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
+        }}
+      />
+    );
   };
 
   async function run() {
