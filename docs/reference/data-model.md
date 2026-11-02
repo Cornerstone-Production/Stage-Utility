@@ -268,6 +268,10 @@ along in every backup.
 A slot is one channel strip. It carries a channel label and a link deciding who it
 shows: a Planning Center position, a specific person, a static label, or empty.
 
+A slot filled by a person also carries `prep`, their capsule and own-in-ears
+facts from Planning Center [prep tags](../integrations/planning-center.md#prep-tags).
+The resolver sets it on each resolve; it is never stored in `slots.json`.
+
 A slot can bind to a wireless channel so the screen shows that pack's RF and
 battery beside the person, and slots can stack into a shared column — mirroring two
 people on a dual-bay charger.
@@ -362,7 +366,8 @@ object box fitted to its aspect ratio.
 ## Presets and templates
 
 **Layout templates** are named custom layouts saved to a reusable library. **Slot
-presets** snapshot a slot arrangement by name. Both are global and can be recalled
+presets** (**Saved layouts** on the Mic slots page) snapshot one board's slots by
+name, and remember the board they came from. Both are global and can be recalled
 onto any view or service type.
 
 ## Stage messages
@@ -407,6 +412,9 @@ class means for backups.
 | `bar-config.json` | config | The [context bar](../features/context-bar.md)'s items and order |
 | `checklist-ticks.json` | runtime | Which checklist rows are ticked, per plan |
 | `history-milestones.json` | config | The dated marks on the Trends chart |
+| `home-snoozes.json` | runtime | What is snoozed on Home's [Needs attention](../features/operator-app.md#needs-attention); cleared when a service starts |
+| `host-names-seen.json` | runtime | Every host name the server has been reached by |
+| `host-names.json` | config | The host names Settings > Advanced > Host names accepts or has dismissed |
 | `kiosk-devices.json` | config | Which device drives which screen |
 | `layout-groups.json` | config | Reusable object groups for the layout editor |
 | `layout-templates.json` | config | Saved custom layouts |

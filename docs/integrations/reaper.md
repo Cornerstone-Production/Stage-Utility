@@ -29,7 +29,7 @@ tick *Run web server on port* (e.g. `8080`) → leave *Username:password* blank 
 **In Stage:** Settings → Integrations → **REAPER** → enter the
 **Host** (that IP) and **Port**, enable it, and **Test connection**.
 
-**On a layout:** add object → **REAPER → REAPER status**. Options: recording/idle/
+**On a layout:** the layout editor's widget shelf → **REAPER** group → **REAPER status**. Options: recording/idle/
 offline text overrides, fill-red-when-recording, show-position, hide-when-idle.
 
 ## Driving the transport

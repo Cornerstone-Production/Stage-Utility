@@ -399,8 +399,9 @@ base: a Button on either half counts. Pairs come first, then single commands,
 each alphabetical. Every rule with a trigger other than Called by name is on the
 **Rules** tab.
 
-A row is a summary: the enable switch, the name and the command name, any former
-names, the badges, the one-line *when … then*, **Used on**, and a **Run** button
+A row is a summary: the enable switch, the name and the command name, an **Off** pill
+while it is disabled (it can still be run by hand), **Confirm first** when it is set to
+ask twice, any former names, the badges, the one-line *when … then*, **Used on**, and a **Run** button
 (see [Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable
 switch or Run — opens the editor in a dialog over the list, so the list and the
 tabs stay where they are. **Test** and **Delete** are in its footer beside
