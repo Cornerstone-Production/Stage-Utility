@@ -67,6 +67,7 @@ export function WidgetShelf({
   const [hover, setHover] = useState<LayoutObjectType | null>(null);
   const [current, setCurrent] = useState<PaletteGroup>(PALETTE_GROUP_ORDER[0]);
   const paneRef = useRef<HTMLDivElement | null>(null);
+  const shelfRef = useRef<HTMLElement | null>(null);
   // A click on a group scrolls the pane, and every frame of that scroll would
   // otherwise move `current` through the groups on the way. Held until it settles.
   const jumping = useRef(false);
@@ -75,7 +76,11 @@ export function WidgetShelf({
   const { tileProps, ghostEl } = usePaletteDrag({ onDragStart, onDragEnd, onDropAt });
 
   useEffect(() => {
-    if (focusSignal > 0) searchRef.current?.focus();
+    if (focusSignal === 0) return;
+    // The whole shelf, not just the box: focus alone scrolls only the search into
+    // view, and on a short window the widgets would stay below the fold.
+    shelfRef.current?.scrollIntoView?.({ block: "nearest" });
+    searchRef.current?.focus({ preventScroll: true });
   }, [focusSignal, searchRef]);
 
   const needle = q.trim();
@@ -129,7 +134,7 @@ export function WidgetShelf({
   }
 
   return (
-    <section aria-label="Widgets" className="@container/shelf flex min-w-0 flex-col rounded-lg border border-line bg-surface">
+    <section ref={shelfRef} aria-label="Widgets" className="@container/shelf flex min-w-0 flex-col rounded-lg border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-2 py-1.5">
         <div className="relative min-w-36 max-w-65 flex-[0_1_260px]">
           <input

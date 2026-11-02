@@ -159,6 +159,26 @@ test("Cmd+F and Ctrl+F focus the shelf's search and stop the browser's find", as
   }
 });
 
+test("Cmd+F brings the whole shelf into view, not just its search box", async () => {
+  // On a short window the shelf sits below the fold; focus alone would scroll only
+  // the box into view and leave the widgets under it off screen.
+  const scrolled: Element[] = [];
+  const proto = Element.prototype as unknown as { scrollIntoView?: () => void };
+  const saved = proto.scrollIntoView;
+  proto.scrollIntoView = function (this: Element) { scrolled.push(this); };
+  const f = await mount();
+  try {
+    keydown(document.body, { key: "f", metaKey: true });
+    await settleAct();
+    const shelf = screen.getByRole("region", { name: "Widgets" });
+    assert.ok(scrolled.includes(shelf), "the shelf was not scrolled into view");
+  } finally {
+    cleanup();
+    f.restore();
+    proto.scrollIntoView = saved;
+  }
+});
+
 test("Cmd+F does not steal find from another text field", async () => {
   const f = await mount();
   try {
