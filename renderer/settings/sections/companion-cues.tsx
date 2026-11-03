@@ -1003,6 +1003,20 @@ export function ImportPairsDialog({
     );
   };
 
+  /** Cleared on close rather than in an effect, so re-opening starts from the
+   *  suggestion again instead of last time's half-made choice. Every way out of
+   *  the dialog comes through here, the import's own close included. */
+  function close() {
+    setPicked(null);
+    setPickedButtons(new Set());
+    setStateVars({});
+    setToggleVars({});
+    setSearch("");
+    setView("page");
+    setByPage(null);
+    onOpenChange(false);
+  }
+
   async function run() {
     setBusy(true);
     try {
@@ -1028,7 +1042,7 @@ export function ImportPairsDialog({
       if (r.skipped.length) toast.error(`Skipped ${r.skipped.length}: ${r.skipped.map((s) => s.name).join(", ")}`);
       if (!r.created.length && !r.skipped.length) toast.error("Nothing was selected");
       onImported();
-      onOpenChange(false);
+      close();
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -1041,20 +1055,7 @@ export function ImportPairsDialog({
   return (
     <DialogRoot
       open={open}
-      onOpenChange={(v) => {
-        // Cleared on close rather than in an effect, so re-opening starts from
-        // the suggestion again instead of last time's half-made choice.
-        if (!v) {
-          setPicked(null);
-          setPickedButtons(new Set());
-          setStateVars({});
-          setToggleVars({});
-          setSearch("");
-          setView("page");
-          setByPage(null);
-        }
-        onOpenChange(v);
-      }}
+      onOpenChange={(v) => (v ? onOpenChange(true) : close())}
     >
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
@@ -1215,7 +1216,7 @@ export function ImportPairsDialog({
           >
             {busy ? "Importing…" : importFooterLabel(chosen.size, pickedButtons.size)}
           </Button>
-          <Button variant="transparent" size="small" onClick={() => onOpenChange(false)}>
+          <Button variant="transparent" size="small" onClick={() => close()}>
             Cancel
           </Button>
         </div>
