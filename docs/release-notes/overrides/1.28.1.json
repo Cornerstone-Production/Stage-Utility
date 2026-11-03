@@ -1,0 +1,17 @@
+[
+  {
+    "commit": "8db6220b",
+    "betaOnly": true,
+    "reason": "Polishes the photo-aware ears badge, which is new in this cycle (bedf73af); v1.28.0 has no sampled ink to go stale."
+  },
+  {
+    "commit": "52b7fe8c",
+    "betaOnly": true,
+    "reason": "The wrong 'no tag' came from the vocal-only capsule rule, new in this cycle (ee45eebe); v1.28.0 showed the capsule on every slot."
+  },
+  {
+    "commit": "4038e8cd",
+    "betaOnly": true,
+    "reason": "The phone sheet lingering on close came from the Screens panel slide, new in this cycle (bd2bccff); v1.28.0 unmounted it at once."
+  }
+]
