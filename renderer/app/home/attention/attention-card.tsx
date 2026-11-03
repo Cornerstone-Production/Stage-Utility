@@ -17,8 +17,9 @@ import { pressCommand } from "../../../lib/command-answer";
 import { errorMessage } from "@main/services/errors";
 import type { HomeSnooze } from "@main/types/home-snoozes";
 import { homeMode } from "../home-mode";
+import { useTransientNote } from "../card-actions";
 import { collectAttention } from "./collect";
-import { healthyLine } from "./healthy";
+import { anySourceKnown, healthyLine } from "./healthy";
 import { partitionSnoozed } from "./snooze";
 import type { AttentionFix, AttentionInput, AttentionItem } from "./types";
 import { useAttentionInput } from "./use-attention";
@@ -150,12 +151,16 @@ function SnoozedToggle({ count, open, onToggle }: { count: number; open: boolean
 export function AttentionView({
   input,
   snoozes,
+  snoozesKnown = true,
   interactive,
   onSnooze,
   onUnsnooze,
 }: {
   input: AttentionInput;
   snoozes: readonly HomeSnooze[];
+  /** Whether Home's snooze list has answered. Until it has, nothing is shown as a
+   *  problem: a snoozed item would flash (red edge and all) before it is hidden. */
+  snoozesKnown?: boolean;
   /** Home's own page, where controls fire. On a wall or console the card is
    *  wrapped in pointer-events-none, so a button there would only be a lie:
    *  rows draw without Snooze, a fix, a "+N more" toggle or Show snoozed. */
@@ -167,9 +172,12 @@ export function AttentionView({
   const [expanded, setExpanded] = useState(false);
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // A failed fix clears itself, as a failed Start does on the recording tile.
+  const [fixNote, showFixNote] = useTransientNote();
 
   const items = collectAttention(input);
-  const { shown, snoozed } = partitionSnoozed(items, snoozes);
+  const { shown, snoozed } = snoozesKnown ? partitionSnoozed(items, snoozes) : { shown: [], snoozed: [] };
+  const checking = !snoozesKnown || !anySourceKnown(input);
   const healthy = healthyLine(input, items);
 
   const visible = expanded && interactive ? shown : shown.slice(0, limit);
@@ -209,7 +217,7 @@ export function AttentionView({
                 item={item}
                 interactive={interactive}
                 onSnooze={() => void run(onSnooze(item), "snooze that")}
-                onFailed={(why) => setFailure(`${item.fix.label} failed: ${why}`)}
+                onFailed={(why) => showFixNote(`${item.fix.label} failed: ${why}`)}
               />
             ))}
           </ul>
@@ -237,9 +245,9 @@ export function AttentionView({
         </>
       )}
 
-      {failure && (
+      {(failure ?? fixNote) && (
         <p role="alert" className="border-t border-line px-4 py-2 text-caption1 text-danger-11">
-          {failure}
+          {failure ?? fixNote}
         </p>
       )}
 
@@ -249,8 +257,8 @@ export function AttentionView({
         <div className="flex min-h-full flex-col justify-center px-4 py-3">
           <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Needs attention</h2>
           <p className="mt-0.5 flex items-center gap-2 text-title2 font-medium text-fg">
-            {healthy.length > 0 && <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full bg-live-9" />}
-            {healthy.length > 0 ? "All clear" : "Checking…"}
+            {!checking && <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full bg-live-9" />}
+            {checking ? "Checking…" : "All clear"}
           </p>
           <HealthyDots healthy={healthy} className="mt-1.5" />
           {interactive && snoozed.length > 0 && (
@@ -306,6 +314,7 @@ function AttentionBody({
     <AttentionView
       input={input}
       snoozes={snoozes.value?.snoozes ?? []}
+      snoozesKnown={snoozes.known}
       interactive={interactive}
       onSnooze={(item) => thenRefresh(snoozeItem(item.key, item.severity), snoozes.refresh)}
       onUnsnooze={(key) => thenRefresh(unsnoozeItem(key), snoozes.refresh)}

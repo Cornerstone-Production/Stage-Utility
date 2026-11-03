@@ -14,6 +14,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { AttentionView } = await import("./attention-card.js");
+const { ACTION_NOTE_MS } = await import("../card-actions.js");
 const { RouterContextProvider, createRootRoute, createRouter, createMemoryHistory } = await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -60,11 +61,47 @@ test("nothing wrong: a captioned tile that says All clear, with the healthy entr
 });
 
 test("nothing heard yet is Checking, not All clear", async () => {
-  const { container } = view({ state: stateOf([OUTPUTS[0]]), onlineKnown: false, wirelessKnown: false, integrationsKnown: false });
+  const { container } = view({
+    state: stateOf([OUTPUTS[0]]),
+    onlineKnown: false, wirelessKnown: false, integrationsKnown: false,
+    reaperKnown: false, obsKnown: false, resiKnown: false, youtubeKnown: false,
+  });
   await settle();
   assert.ok(/Checking/.test(text(container)) && !/All clear/.test(text(container)));
 });
 
+test("every problem snoozed and nothing healthy is All clear, not Checking forever", async () => {
+  const { container } = view(
+    { mood: "live", minutesLeft: 52, state: stateOf([]), assigned: new Map([["rx::3", "Lead"]]),
+      wireless: [mic("rx::3", { battery: 5, batteryMinutes: 3 })] },
+    [
+      { key: "wireless-battery:rx::3", severity: "critical", at: 0, expiresAt: null },
+      { key: "readiness:assigned", severity: "warn", at: 0, expiresAt: null },
+    ],
+  );
+  await settle();
+  assert.ok(/All clear/.test(text(container)) && !/Checking/.test(text(container)), text(container));
+});
+
+test("the snooze list not having answered yet shows no problem, so a snoozed one cannot flash", async () => {
+  const over = {
+    mood: "live" as const, minutesLeft: 52, state: stateOf([]), assigned: new Map([["rx::3", "Lead"]]),
+    wireless: [mic("rx::3", { battery: 5, batteryMinutes: 3 })],
+  };
+  const { container } = render(
+    React.createElement(
+      RouterContextProvider as never,
+      { router },
+      React.createElement(AttentionView, {
+        input: attentionInput(over), snoozes: [], snoozesKnown: false, interactive: true,
+        onSnooze: async () => {}, onUnsnooze: async () => {},
+      }),
+    ),
+  );
+  await settle();
+  assert.equal(container.querySelectorAll("li").length, 0, text(container));
+  assert.notEqual(mark(container), "critical", "no red edge before the snoozes are read");
+});
 test("off Home (a wall or console) the rows draw with no button of any kind", async () => {
   const { container } = view(
     {
@@ -215,5 +252,30 @@ test("a Start recording that Simulate stops says so on the card", async () => {
   } finally {
     globalThis.fetch = orig;
     answer = { ok: true, detail: "record" };
+  }
+});
+
+test("a failed fix's note clears itself", async () => {
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ ok: true, detail: "x", simulated: true }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const { mock } = await import("node:test");
+  try {
+    view({
+      mood: "live", state: stateOf([OUTPUTS[0]]), onlineOutputIds: ["o0"],
+      integrations: [integration("reaper")], integrationLabels: { reaper: "REAPER" },
+      reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
+    });
+    mock.timers.enable({ apis: ["setTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    // Mocked setTimeout would stall settle(); flush the promise chain by hand.
+    const { act } = await import("@testing-library/react");
+    await act(async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); });
+    assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed/);
+    act(() => mock.timers.tick(ACTION_NOTE_MS));
+    assert.equal(screen.queryByRole("alert"), null, "the note must not outlive its moment");
+  } finally {
+    mock.timers.reset();
+    globalThis.fetch = orig;
   }
 });
