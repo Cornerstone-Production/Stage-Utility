@@ -1032,7 +1032,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           interactive={!!live}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
           actionable={live}
-          linked={ctx.interactive && !ctx.home}
         />
       </div>
     );
