@@ -2798,6 +2798,9 @@ export class StageController {
       if (!preset) throw new SlotsNotFoundError(`There is no saved layout ${from.presetId}.`);
       const into = target ?? (this.state.serviceTypeId ? { kind: "default" as const, serviceTypeId: this.state.serviceTypeId } : null);
       if (!into) throw new SlotsNotFoundError("No service type is selected, so there is nowhere to put the saved layout.", 400);
+      // The same check a slot save makes: an override under another type's plan
+      // is one resolve never shows and pruning never dates.
+      await this.assertTargetPlanBelongs(into);
       const slots = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
       const dated = this.datedTarget(into);
       const layouts =

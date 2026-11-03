@@ -500,7 +500,9 @@ export const slotsStore = {
   /**
    * Add a board. `layouts` is its starting content — a copy of another board,
    * or a saved layout placed under one target — and absent for a blank board.
-   * Refuses an id already in use rather than overwrite a board.
+   * Refuses an id already in use rather than overwrite a board, and every
+   * layout key the way a save refuses it: a `__proto__` stored here makes every
+   * later backup of this file one checkRestoredSlots will not restore.
    */
   async createBoard(
     boardId: string,
@@ -508,6 +510,8 @@ export const slotsStore = {
     layouts?: { defaults?: Map<string, Slot[]> | null; overrides?: Map<string, SlotsOverride> | null },
   ): Promise<void> {
     assertSafeKey(boardId, "boardId");
+    for (const serviceTypeId of layouts?.defaults?.keys() ?? []) assertTargetKeys({ kind: "default", serviceTypeId });
+    for (const [planId, o] of layouts?.overrides ?? []) assertTargetKeys({ kind: "plan", planId, serviceTypeId: o.serviceTypeId });
     await mutate((file) => {
       if (file.boards.has(boardId) || file.defaults.has(boardId) || file.overrides.has(boardId)) {
         throw new Error(`slot board ${boardId} already exists`);

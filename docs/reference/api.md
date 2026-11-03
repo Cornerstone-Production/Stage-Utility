@@ -155,7 +155,7 @@ above are aliases onto the board their view or object shows. See
 | Method | Path | Does |
 |---|---|---|
 | GET | `/api/boards` | Every board, by name: `[{id, name, columnWidthIn, createdAt, shownOn}]`. `shownOn` is `[{kind: "view" \| "object", id, name, viewId}]` — each slots view, and each slots-grid object with the view holding it |
-| POST | `/api/boards` | Create one: `{name, from?, target?}`. `from` is `{boardId}` (a copy of every layout on that board, fresh slot ids) or `{presetId}` (a saved layout, placed under `target`, else the current service type's default). `201 {id, boards}`. A blank name is `400`; an unknown board or preset `404` |
+| POST | `/api/boards` | Create one: `{name, from?, target?}`. `from` is `{boardId}` (a copy of every layout on that board, fresh slot ids) or `{presetId}` (a saved layout, placed under `target`, else the current service type's default). `201 {id, boards}`. A blank name is `400`; an unknown board or preset `404`; a plan `target` is checked as a slot save checks it (`400` for a plan of another service type), and a refused body makes no board |
 | PATCH | `/api/boards/:id` | `{name?, columnWidthIn?}` — rename, and set the charger column width in inches (`null`: not aligned). Answers the list. A blank name or a width that is not a positive number is `400` |
 | POST | `/api/boards/:id/duplicate` | A copy of every layout, fresh slot ids, named `{name}` or `<name> copy`. `201 {id, boards}` |
 | DELETE | `/api/boards/:id` | Body `{replacement}`, a board id or `null`, required. Every slots view and slots-grid object showing the board is pointed at `replacement` (or at nothing), then the board and all its layouts are deleted. `400` without `replacement`, or when it is the board itself; `404` for an unknown one |

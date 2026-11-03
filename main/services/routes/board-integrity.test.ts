@@ -15,6 +15,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-board-integrity-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
+const { boardRoutes } = await import("./board-routes.js");
 const { viewRoutes } = await import("./view-routes.js");
 const { presetRoutes } = await import("./preset-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -132,5 +133,50 @@ describe("PATCH /api/presets/:id refuses before it renames", () => {
     assert.equal(saved.name, "Renamed");
     assert.equal(saved.boardId, "b-right");
     assert.equal(saved.slots.length, 1);
+  });
+});
+
+describe("POST /api/boards holding a saved layout checks where it lands", () => {
+  const boardCount = async () => (await slotsStore.listBoards()).size;
+
+  it("refuses a service type key that could not be stored, writing no board", async () => {
+    const before = await boardCount();
+    const r = await call(boardRoutes, "/api/boards", "POST", {
+      name: "Bad", from: { presetId: "p-1" }, target: { kind: "default", serviceTypeId: "__proto__" },
+    }).catch((err: unknown) => ({ status: 500, json: String(err) }));
+    assert.notEqual(r.status, 201, JSON.stringify(r.json));
+    assert.equal(await boardCount(), before, "a board was stored under a key every later backup restore refuses");
+  });
+
+  it("refuses a plan override naming a service type the plan is not in, writing no board", async () => {
+    const before = await boardCount();
+    const r = await call(boardRoutes, "/api/boards", "POST", {
+      name: "Wrong type", from: { presetId: "p-1" }, target: { kind: "plan", planId: PLAN, serviceTypeId: "st-other" },
+    });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.equal(await boardCount(), before, "a board was stored with an override no screen can show");
+  });
+});
+
+describe("slotsStore.createBoard", () => {
+  it("refuses a layout under a key that could not be stored, and writes nothing", async () => {
+    const before = [...(await slotsStore.listBoards()).keys()];
+    await assert.rejects(
+      slotsStore.createBoard("b-new", { name: "New", columnWidthIn: null, createdAt: NOW }, { defaults: new Map([["__proto__", [slot("x")]]]) }),
+      /serviceTypeId/,
+    );
+    await assert.rejects(
+      slotsStore.createBoard("b-new", { name: "New", columnWidthIn: null, createdAt: NOW }, {
+        overrides: new Map([["constructor", { serviceTypeId: TYPE, sortDate: null, slots: [slot("x")] }]]),
+      }),
+      /planId/,
+    );
+    await assert.rejects(
+      slotsStore.createBoard("b-new", { name: "New", columnWidthIn: null, createdAt: NOW }, {
+        overrides: new Map([[PLAN, { serviceTypeId: "__proto__", sortDate: null, slots: [slot("x")] }]]),
+      }),
+      /serviceTypeId/,
+    );
+    assert.deepEqual([...(await slotsStore.listBoards()).keys()], before);
   });
 });
