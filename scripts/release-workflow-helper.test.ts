@@ -31,6 +31,8 @@ interface Step {
   env?: Record<string, string>;
 }
 interface Job {
+  name?: string;
+  strategy?: { matrix?: Record<string, unknown> };
   needs?: string | string[];
   if?: string;
   "runs-on"?: string;
@@ -122,12 +124,27 @@ describe("the helper job is gated on the build script being in the tree", () => 
     }
   });
 
-  it("builds both architectures through build-app.sh --arch and zips each", () => {
+  it("builds both architectures, one runner each, through build-app.sh --arch and zips each", () => {
+    assert.deepEqual(helper.strategy?.matrix?.["arch"], ["arm64", "x86_64"]);
     const build = helper.steps?.find((s) => s.run?.includes("build-app.sh"));
     assert.ok(build?.run);
-    assert.match(build.run, /for arch in arm64 x86_64/);
+    assert.equal(build.env?.["ARCH"], "${{ matrix.arch }}");
+    assert.match(build.run, /arch="\$ARCH"/);
     assert.match(build.run, /helper\/macos\/build-app\.sh --arch "\$arch"/);
     assert.match(build.run, /StageUtilityOutput-\$arch\.zip"/);
+  });
+
+  it("caches only the compiled CEF wrapper and the build tools, per architecture, keyed on what builds them", () => {
+    const cache = helper.steps?.find((s) => s.uses?.startsWith("actions/cache@"));
+    assert.ok(cache, "no cache step");
+    assert.match(cache.uses!, /^actions\/cache@[0-9a-f]{40}$/, "pinned to a commit");
+    const paths = String(cache.with?.["path"]).trim().split("\n").map((l) => l.trim()).sort();
+    // Not helper/macos/.cef: CEF itself is downloaded and checksum-checked every run.
+    assert.deepEqual(paths, ["helper/macos/.cef-build/${{ matrix.arch }}", "helper/macos/.tools"]);
+    const key = String(cache.with?.["key"]);
+    for (const part of ["${{ matrix.arch }}", "helper/macos/cef.json", "helper/macos/build-tools.txt", "helper/macos/CEFHost/**"]) assert.ok(key.includes(part), `the key does not depend on ${part}`);
+    const steps = helper.steps ?? [];
+    assert.ok(steps.indexOf(cache) < steps.findIndex((s) => s.run?.includes("build-app.sh")), "restored before the build");
   });
 });
 
@@ -148,7 +165,7 @@ describe("the release itself is unchanged by the helper", () => {
 
   it("the release job does not wait on the macOS build, and keeps its own gates", () => {
     const release = jobs["release"];
-    assert.deepEqual(needsOf(release).sort(), ["verify-checks", "verify-tests"]);
+    assert.deepEqual(needsOf(release).sort(), ["already-verified", "verify-checks", "verify-tests"]);
     const push = release.steps?.find((s) => s.id === "push");
     assert.ok(push?.run?.includes('git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}"'), "the bump is still pushed fast-forward only");
     assert.ok(!push?.run?.includes("--force"));
@@ -165,12 +182,19 @@ describe("the release itself is unchanged by the helper", () => {
     assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   });
 
-  it("downloads the helper's artifact only from a helper that succeeded, under the name it was uploaded as", () => {
+  it("downloads every architecture's artifact only from a helper that succeeded, by a pattern that matches each name", () => {
     const upload = jobs["helper"].steps?.find((s) => s.uses?.startsWith("actions/upload-artifact@"));
-    const download = artifacts.steps?.find((s) => s.uses?.startsWith("actions/download-artifact@"));
-    assert.ok(upload && download, "upload or download step missing");
-    assert.equal(download.with?.["name"], upload.with?.["name"]);
-    assert.equal(download.if, "${{ needs.helper.result == 'success' }}");
+    assert.ok(upload, "upload step missing");
+    const names = (jobs["helper"].strategy?.matrix?.["arch"] as string[]).map((a) => String(upload.with?.["name"]).replace("${{ matrix.arch }}", a));
+    assert.deepEqual(names, ["output-helper-arm64", "output-helper-x86_64"]);
+    for (const job of ["sign", "artifacts"]) {
+      const download = jobs[job].steps?.find((s) => s.name === "Fetch the Mac output helper");
+      assert.ok(download, `${job} does not fetch the helper`);
+      const glob = new RegExp(`^${String(download.with?.["pattern"]).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
+      for (const n of names) assert.match(n, glob, `${job}'s pattern misses ${n}`);
+      assert.equal(download.with?.["merge-multiple"], true, `${job} would put each zip in a folder of its own`);
+      assert.equal(download.if, "${{ needs.helper.result == 'success' }}");
+    }
   });
 
   it("attaches the helper's files to the one release-create call", () => {
@@ -185,7 +209,7 @@ describe("the release itself is unchanged by the helper", () => {
 
 describe("the helper's download reaches the release", () => {
   const artifacts = jobs["artifacts"];
-  const download = artifacts.steps?.find((st) => st.uses?.startsWith("actions/download-artifact@"));
+  const download = artifacts.steps?.find((st) => st.name === "Fetch the Mac output helper");
   const create = artifacts.steps?.find((st) => st.run?.includes("gh release create"));
 
   /** The create step's own shell, run for real on a temp tree with `gh` and `node` stood in for. */
@@ -274,3 +298,66 @@ describe("the helper's signature is verified the way its build script verifies i
   });
 });
 
+
+describe("the archives are built beside the helper, not after it", () => {
+  const archives = jobs["archives"];
+  const artifacts = jobs["artifacts"];
+
+  it("waits only for the tag, and runs whatever happens to the release job after it", () => {
+    assert.deepEqual(needsOf(archives), ["release"]);
+    assert.equal(evaluate(archives.if as string, { published: "true", present: "false" }), true);
+    assert.equal(evaluate(archives.if as string, { published: "false", present: "false" }), false, "a stand-down builds nothing");
+    assert.ok((archives.if as string).includes("always()"));
+  });
+
+  it("builds, assembles and smoke-tests the tagged tree, and hands dist/ on", () => {
+    const steps = archives.steps ?? [];
+    assert.equal(steps.find((st) => st.uses?.startsWith("actions/checkout@"))?.with?.["ref"], "v${{ needs.release.outputs.version }}");
+    const at = (pred: (st: Step) => boolean) => steps.findIndex(pred);
+    const build = at((st) => /npm run build/.test(st.run ?? ""));
+    const assemble = at((st) => /scripts\/build-artifacts\.sh/.test(st.run ?? ""));
+    const smoke = at((st) => st.name === "Smoke-test the Linux archive");
+    const upload = at((st) => st.uses?.startsWith("actions/upload-artifact@") === true);
+    assert.ok(build >= 0 && build < assemble && assemble < smoke && smoke < upload, "build, assemble, smoke-test, upload, in that order");
+    assert.equal(steps[upload]?.with?.["name"], "archives");
+    assert.equal(steps[upload]?.with?.["path"], "dist/");
+  });
+
+  it("is what the publish job releases: fetched into dist before the create, and nothing built there", () => {
+    assert.ok(needsOf(artifacts).includes("archives"));
+    const steps = artifacts.steps ?? [];
+    const fetch = steps.find((st) => st.name === "Fetch the archives");
+    assert.equal(fetch?.with?.["name"], "archives");
+    assert.equal(fetch?.with?.["path"], "dist");
+    assert.equal(fetch?.if, undefined, "without the archives there is nothing to release");
+    assert.ok(steps.indexOf(fetch!) < steps.findIndex((st) => st.run?.includes("gh release create")));
+    assert.deepEqual(steps.filter((st) => /npm (ci|install|run build)/.test(st.run ?? "")).map((st) => st.name), [], "the publish job builds again");
+  });
+});
+
+describe("the gate is not run twice for one tree", () => {
+  const already = jobs["already-verified"];
+
+  it("asks only on main, with read access to the runs and nothing else", () => {
+    assert.equal(already.if, "${{ github.ref == 'refs/heads/main' }}");
+    assert.deepEqual(already.permissions, { contents: "read", actions: "read" });
+    const check = already.steps?.find((st) => st.id === "check");
+    assert.equal(check?.run, "node scripts/verified-tree.mjs");
+    assert.equal(check?.env?.["GH_TOKEN"], "${{ github.token }}");
+    assert.equal(already.steps?.find((st) => st.uses?.startsWith("actions/checkout@"))?.with?.["fetch-depth"], 0, "the beta commit must be in the clone to compare with");
+  });
+
+  it("skips the gate only on a yes, and still runs it when the question was skipped or failed", () => {
+    for (const name of ["verify-checks", "verify-tests"]) {
+      assert.deepEqual(needsOf(jobs[name]), ["already-verified"]);
+      assert.equal(jobs[name].if, "${{ !cancelled() && needs.already-verified.outputs.verified != 'true' }}", `${name} would be skipped with a skipped need`);
+    }
+  });
+
+  it("releases on a passed gate or a yes, and on nothing else", () => {
+    assert.equal(
+      jobs["release"].if,
+      "${{ !cancelled() && (needs.already-verified.outputs.verified == 'true' || (needs.verify-checks.result == 'success' && needs.verify-tests.result == 'success')) }}",
+    );
+  });
+});

@@ -68,8 +68,8 @@ stage-utility-<version>-<os>-<arch>.tar.gz
 Targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `win-x64`.
 
 When the release's tree has the [Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper)
-(`helper/macos/build-app.sh`), a macOS job also builds it, once per architecture, and
-the same release carries two more assets:
+(`helper/macos/build-app.sh`), it is built too, on two macOS runners side by side, one
+per architecture, and the same release carries two more assets:
 
 ```
 StageUtilityOutput-arm64.zip
@@ -83,11 +83,18 @@ the releases API lists for the asset; no checksum file is published beside them.
 release made before GitHub began serving asset digests (2025) has none, and its zips
 cannot be verified, so a server running one refuses them. A tree without the
 build script skips the job and releases as before, and a macOS build that fails or is
-cancelled releases without the zips rather than stopping the release (the archives do
-wait for that job, up to its 60-minute timeout); the run then carries an
+cancelled releases without the zips rather than stopping the release (the archives are
+built beside it, but publishing waits for it, up to its 60-minute timeout); the run then carries an
 error annotation, and Macs whose server runs that version cannot install the helper
 until the server updates. The assets are made before
 the release is created, because a published release cannot be added to.
+
+The app is compiled fresh for every release, since the version is stamped into it and
+the helper's updater compares that. What is cached between release runs is the
+compiled CEF wrapper and the cmake and ninja tools, per architecture, keyed on
+`helper/macos/cef.json`, `build-tools.txt` and `CEFHost/`; CEF itself is downloaded and
+its checksums checked every time. Only release runs on `beta` and `main` write that
+cache.
 
 Every release also carries a signature of each payload a machine
 [updates itself from](../kiosk-devices.md#signed-updates):
