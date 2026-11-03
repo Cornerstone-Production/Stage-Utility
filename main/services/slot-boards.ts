@@ -13,6 +13,7 @@
 
 import type { LayoutObject, LayoutObjectConfig, Slot, SlotBoardMeta, SlotsLayout, View } from "../types/stage.js";
 import type { SlotsFile, SlotsOverride } from "./slots-store.js";
+import { walkLayoutObjects } from "./view-refs.js";
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
@@ -22,14 +23,6 @@ const LEGACY_GRID_KEYS = ["source", "sourceViewId", "slotsLayout"] as const;
 
 export function hasLegacyGridFields(c: GridConfig): boolean {
   return LEGACY_GRID_KEYS.some((k) => k in c);
-}
-
-/** Walk an object tree, parent before children. */
-function walk(objects: readonly LayoutObject[], visit: (o: LayoutObject) => void): void {
-  for (const o of objects) {
-    visit(o);
-    if (o.children?.length) walk(o.children, visit);
-  }
 }
 
 /**
@@ -43,18 +36,22 @@ export function forEachSlotsGrid(
 ): void {
   for (const v of views) {
     if (v.kind !== "custom" || !v.layout) continue;
-    walk(v.layout.objects, (o) => {
+    walkLayoutObjects(v.layout.objects, (o) => {
       if (o.config.type === "slots-grid") cb(o.id, o.config, v);
     });
   }
 }
 
-/** The board a slots-kind view shows. A view saved before boards shows the
- *  board its own id names — the v3 key its slots were stored under. */
+/** The board a slots-kind view shows, or null for none. A view saved before
+ *  boards shows the board its own id names — the v3 key its slots were stored
+ *  under. A view of any other kind shows no board: a pointer it kept from an
+ *  earlier life as a slots screen is dormant, and only the code that keeps that
+ *  pointer up to date (deleting a board, copying a view) reads `boardId` itself. */
 export function viewBoardId(view: View): string | null {
+  if (view.kind !== "slots") return null;
   if (view.boardId === null) return null;
   if (typeof view.boardId === "string" && view.boardId) return view.boardId;
-  return view.kind === "slots" ? view.id : null;
+  return view.id;
 }
 
 /** The board a slots widget shows, or null for none. Reads a config from before
@@ -89,6 +86,47 @@ export function positiveOrNull(v: unknown): number | null {
 /** Alignment as a screen draws it: both halves, or none. */
 export function effectiveSlotsLayout(displayWidthIn: number | null, columnWidthIn: number | null): SlotsLayout | null {
   return displayWidthIn !== null && columnWidthIn !== null ? { displayWidthIn, columnWidthIn } : null;
+}
+
+/**
+ * Every view with the boards it and its slots widgets point at moved by `to`:
+ * given a board something points at and a description of where, the board it
+ * should point at now (null: none), or undefined to leave it. A view keeps its
+ * own object where nothing moved, so a caller can tell what changed by identity.
+ *
+ * A view's own pointer is read on every kind: one kept from an earlier life as
+ * a slots screen is dormant, and kept current so switching back finds a board
+ * that exists. Every layout is walked, a dormant one too, for the same reason.
+ *
+ * `legacy` also reads the pointers a view or widget from before boards implies
+ * (a slots view's own id, an inline grid's object id, an embed's source view)
+ * and stores a moved widget in the current shape. Without it those are left
+ * for the migration to point.
+ */
+export function repointBoards(
+  views: readonly View[],
+  to: (boardId: string, where: string) => string | null | undefined,
+  opts: { legacy?: boolean } = {},
+): View[] {
+  return views.map((v): View => {
+    let next = v;
+    const own = typeof v.boardId === "string" && v.boardId ? v.boardId : opts.legacy ? viewBoardId(v) : null;
+    const ownTo = own !== null ? to(own, `"${v.name}" (${v.id})`) : undefined;
+    if (ownTo !== undefined) next = { ...next, boardId: ownTo };
+    if (!next.layout) return next;
+    const objects = structuredClone(next.layout.objects);
+    let touched = false;
+    walkLayoutObjects(objects, (o) => {
+      if (o.config.type !== "slots-grid") return;
+      if (!opts.legacy && hasLegacyGridFields(o.config)) return;
+      const b = gridBoardId(o.config, o.id);
+      const moved = b !== null ? to(b, `a slots widget (${o.id}) on "${v.name}"`) : undefined;
+      if (moved === undefined) return;
+      o.config = pointedGrid(o.config, moved);
+      touched = true;
+    });
+    return touched ? { ...next, layout: { ...next.layout, objects } } : next;
+  });
 }
 
 // ── v3 → v4 ────────────────────────────────────────────────────────────────
@@ -175,24 +213,10 @@ function cloneObjects(objects: readonly LayoutObject[]): LayoutObject[] {
  */
 function clearDangling(views: readonly View[], file: SlotsFile, log: string[]): View[] {
   const exists = (id: string): boolean => file.boards.has(id) || file.defaults.has(id) || file.overrides.has(id);
-  return views.map((v): View => {
-    let next = v;
-    if (typeof v.boardId === "string" && v.boardId && !exists(v.boardId)) {
-      log.push(`"${v.name}" (${v.id}) pointed at board ${v.boardId}, which does not exist; it now shows none`);
-      next = { ...next, boardId: null };
-    }
-    if (!next.layout) return next;
-    const objects = cloneObjects(next.layout.objects);
-    let touched = false;
-    walk(objects, (o) => {
-      if (o.config.type !== "slots-grid" || hasLegacyGridFields(o.config)) return;
-      const b = o.config.boardId;
-      if (typeof b !== "string" || !b || exists(b)) return;
-      log.push(`a slots widget (${o.id}) on "${v.name}" pointed at board ${b}, which does not exist; it now shows none`);
-      o.config = { ...o.config, boardId: null };
-      touched = true;
-    });
-    return touched ? { ...next, layout: { ...next.layout, objects } } : next;
+  return repointBoards(views, (b, where) => {
+    if (exists(b)) return undefined;
+    log.push(`${where} pointed at board ${b}, which does not exist; it now shows none`);
+    return null;
   });
 }
 
@@ -260,7 +284,7 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
     if (!v.layout) return v;
     const objects = cloneObjects(v.layout.objects);
     let touched = false;
-    walk(objects, (o) => {
+    walkLayoutObjects(objects, (o) => {
       if (o.config.type !== "slots-grid") return;
       const c = o.config;
       const legacy = hasLegacyGridFields(c);
@@ -377,27 +401,7 @@ export function migrateBoards(views: readonly View[], input: SlotsFile, now: str
   const merged = mergedInto.size;
   const repoint = (id: string | null): string | null => (id !== null ? (mergedInto.get(id) ?? id) : null);
   for (const p of pointers) p.boardId = repoint(p.boardId);
-  const finalViews =
-    mergedInto.size === 0
-      ? out
-      : out.map((v): View => {
-          let next = v;
-          if (v.boardId && mergedInto.has(v.boardId)) next = { ...next, boardId: repoint(v.boardId) as string };
-          if (next.layout) {
-            const objects = cloneObjects(next.layout.objects);
-            let touched = false;
-            walk(objects, (o) => {
-              if (o.config.type !== "slots-grid") return;
-              const b = o.config.boardId;
-              if (typeof b === "string" && mergedInto.has(b)) {
-                o.config = { ...o.config, boardId: repoint(b) };
-                touched = true;
-              }
-            });
-            if (touched) next = { ...next, layout: { ...next.layout, objects } };
-          }
-          return next;
-        });
+  const finalViews = mergedInto.size === 0 ? out : repointBoards(out, (b) => mergedInto.get(b));
 
   // Unused: made in this run and shown nowhere.
   const pointed = new Set(pointers.map((p) => p.boardId).filter((id): id is string => !!id));

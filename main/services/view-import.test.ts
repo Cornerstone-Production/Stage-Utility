@@ -387,6 +387,103 @@ describe("a bundle's slot boards", () => {
   });
 });
 
+describe("the order an import writes in", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+  const twoScreens = () => bundle({
+    views: [slotsView("view-1", "Mic Board"), slotsView("view-2", "Second Board")],
+    sideData: { slots: { "view-1": { "st-src": [slotRow("r1")] } }, notes: {}, serviceCueLayouts: [] },
+  });
+
+  test("boards that cannot be made refuse the import before any view lands", async () => {
+    // The views used to be saved first and their boards made one write each
+    // after: a failure left screens pointing at boards that did not exist, and
+    // the retry the operator then made imported every view a second time.
+    const store = slotsStore as unknown as { createBoards: unknown };
+    const real = store.createBoards;
+    store.createBoards = async () => { throw new Error("disk full"); };
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      store.createBoards = real;
+    }
+    assert.deepEqual(await viewsStore.load(), [], "views landed pointing at boards that were never made");
+  });
+
+  test("every board lands in one write", async () => {
+    // One write is what makes the boards land whole or not at all.
+    let writes = 0;
+    const before = (await slotsStore.listBoards()).size;
+    const { DataStore } = await import("./data-store.js");
+    const proto = DataStore.prototype as unknown as { update: (...a: unknown[]) => Promise<unknown> };
+    const realUpdate = proto.update;
+    proto.update = function (this: { filename: string }, ...a: unknown[]) {
+      if (this.filename === "slots.json") writes++;
+      return realUpdate.apply(this, a);
+    };
+    try {
+      await applyViewBundle(twoScreens());
+    } finally {
+      proto.update = realUpdate;
+    }
+    assert.equal((await slotsStore.listBoards()).size, before + 2);
+    assert.equal(writes, 1, `the boards took ${writes} slots.json writes`);
+  });
+
+  test("a views save that fails after the boards were made says they are left unused", async (t) => {
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => { throw new Error("disk full"); }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.ok(
+      lines.some((l) => l.startsWith("[view-import] import refused after its boards were made") && l.includes("2 board(s)")),
+      JSON.stringify(lines),
+    );
+  });
+});
+
+describe("a board pointer only a slots screen uses", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+
+  test("a custom view's leftover pointer at a board not in the file is dropped without a warning", async () => {
+    // Export ships only the boards a slots screen or a widget shows, so a
+    // custom view's dormant pointer never has its board in the file. Warning
+    // about it told the operator a screen lost its board when none was shown.
+    const report = await applyViewBundle(
+      bundle({
+        views: [
+          { id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-src" },
+          { id: "view-2", name: "Stage Layout", kind: "custom", createdAt: 0, boardId: "b-elsewhere",
+            layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] } },
+        ],
+        sideData: { slots: {}, boards: { "b-src": { name: "Mic Board" } }, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, [], "a dormant pointer was reported as a lost board");
+    const stored = await viewsStore.load();
+    assert.equal(stored.find((v) => v.id === report.views[1]!.id)!.boardId, undefined, "the leftover pointer kept the source's board id");
+    assert.ok(stored.find((v) => v.id === report.views[0]!.id)!.boardId, "the slots screen lost its board");
+  });
+
+  test("a slots screen pointing at a board not in the file is still named", async () => {
+    const report = await applyViewBundle(
+      bundle({
+        views: [{ id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-gone" }],
+        sideData: { slots: {}, boards: {}, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, ['"Mic Board" pointed at a slot board that is not in the file; it now shows none']);
+  });
+});
+
 describe("the rebind list walks every root", () => {
   beforeEach(async () => { await viewsStore.save([] as never); });
 
@@ -621,6 +718,23 @@ describe("presets", () => {
     assert.equal(stored.photoUrl, null);
     assert.equal("prep" in stored, false);
     assert.equal("shownPositions" in stored, false);
+  });
+
+  test("the board each one is recalled into is this install's copy of it, or none", async () => {
+    // A board id from the source names nothing here, or somebody else's board:
+    // "display-1" is the id a fresh install gives its first screen's board.
+    await presetsStore.save([] as never);
+    const report = await applyViewBundle(planBundle({}, {
+      presets: [
+        { ...p("p1", "Travelled"), boardId: "view-1" },
+        { ...p("p2", "Stayed behind"), boardId: "display-1" },
+      ],
+    }));
+    const stored = await presetsStore.load();
+    const board = await boardOf(report.views[0]!.id);
+    assert.ok(board);
+    assert.equal(stored.find((x) => x.id === "p1")!.boardId, board, "the preset kept the source's board id");
+    assert.equal("boardId" in stored.find((x) => x.id === "p2")!, false, "a board not in the file was kept as a pointer");
   });
 
   test("Keep leaves the local one of the same id alone", async () => {

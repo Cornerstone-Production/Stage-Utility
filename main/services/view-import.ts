@@ -13,7 +13,7 @@ import { collectRefsFrom } from "./view-refs.js";
 import { runActionButtonMigration } from "./action-button-migration.js";
 import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
-import { slotsStore } from "./slots-store.js";
+import { slotsStore, type NewBoard } from "./slots-store.js";
 import { stripResolvedFields } from "./slot-resolver.js";
 import { patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
@@ -305,7 +305,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     takenNames.add(name);
     reportViews.push(name === v.name ? { id: v.id, name } : { id: v.id, name, renamedFrom: v.name });
     let next: View = { ...v, name };
-    if (v.boardId !== undefined) next = { ...next, boardId: pointAt(v.boardId, `"${name}"`) };
+    if (v.kind === "slots") {
+      if (v.boardId !== undefined) next = { ...next, boardId: pointAt(v.boardId, `"${name}"`) };
+    } else if (v.boardId !== undefined) {
+      // A pointer kept from an earlier life as a slots screen. Nothing shows it,
+      // and export ships no board for it, so missing from the file is the usual
+      // case and no loss: kept when its board did travel, dropped quietly when not.
+      const { boardId: dormant, ...rest } = next;
+      const mapped = typeof dormant === "string" ? boardIdMap.get(dormant) : undefined;
+      next = mapped ? { ...rest, boardId: mapped } : rest;
+    }
     if (next.layout) {
       const objects = structuredClone(next.layout.objects);
       walkLayoutObjects(objects, (o) => {
@@ -316,31 +325,6 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     return next;
   });
 
-  // A Run an action Button in the file ignores Simulate and Disarm, so it is made a
-  // cue Button with a rule of its own, as the start-up pass does. The rules are
-  // written first and the views after, so a crash between them leaves rules whose
-  // Buttons never landed (kept, and listed as such) and never Buttons bound to nothing.
-  const actions = await runActionButtonMigration(named, { onImport: true });
-  if (actions.failure) {
-    console.error(scrub(actions.failure));
-    skipped.push("Run an action buttons were imported unconverted: their commands could not be made, so they show Needs converting and do nothing (see the log)");
-  }
-  try {
-    await viewsStore.save([...existing, ...actions.views]);
-  } catch (err) {
-    // The rules are already on disk and their Buttons will not land: the import is
-    // refused (rethrown, the save's reason intact) and the operator is told which
-    // cues are left behind, since the Automation page shows them as ownerless.
-    if (actions.cuesWritten.length > 0) {
-      console.error(
-        `[automation] import refused after its cues were written; kept ${scrub(actions.cuesWritten.join(", "))} with no Button, delete them from Automation`,
-      );
-    }
-    throw err;
-  }
-  // After the save: a conversion whose import was refused is not one to announce.
-  if (actions.line) console.log(scrub(actions.line));
-
   // Keyed by the board that ends up on disk — (board, service type) — and
   // holding the row count of whatever wrote it LAST. Counting writes instead
   // double counted the retyped "all"-scope case, where the file's own board for
@@ -349,6 +333,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   const landedBoards = new Map<string, number>();
   const boardNames = new Set([...(await slotsStore.listBoards()).values()].map((b) => b.name));
   const createdAt = new Date().toISOString();
+  const newBoards: NewBoard[] = [];
   for (const [oldId, newId] of boardIdMap) {
     const defaults = new Map<string, Slot[]>();
     // The source type LAST, so that on a retyped "all"-scope plan its board is
@@ -362,10 +347,9 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       // type's board (scope "all") belongs to that type on both machines.
       const landing = retypedFrom && serviceTypeId === retypedFrom ? targetType! : serviceTypeId;
       // A service type id is a KEY in the file, so it is whatever the file says.
-      // slotsStore refuses a prototype-reaching key by throwing, which mid-import
-      // would abort having already written the views — the operator would be told
-      // it failed when it half-succeeded. Dropped and named instead, which is
-      // what safe-key.ts prescribes for a bundle.
+      // slotsStore refuses a prototype-reaching key by throwing, which would
+      // refuse the whole import over one row list. Dropped and named instead,
+      // which is what safe-key.ts prescribes for a bundle.
       if (!isSafeKey(landing)) {
         skipped.push(`slot rows for service type "${landing}"`);
         continue;
@@ -384,9 +368,47 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     // board written here is one nothing on this machine has ever used. There is
     // nothing of the operator's to overwrite, and the Keep/Replace choice on the
     // import screen says as much.
-    await slotsStore.createBoard(newId, { name, columnWidthIn: meta?.columnWidthIn ?? null, createdAt }, { defaults });
+    newBoards.push({ boardId: newId, meta: { name, columnWidthIn: meta?.columnWidthIn ?? null, createdAt }, layouts: { defaults } });
     for (const [type, rows] of defaults) landedBoards.set(`${newId}\u0000${type}`, rows.length);
   }
+  // The boards BEFORE the views that show them, in one write, the order
+  // createViewRecord keeps: a failure here refuses the import with nothing
+  // written, where views saved first were left pointing at boards that never
+  // landed, and the operator's retry imported every view a second time. A
+  // failure after this leaves boards nothing shows, listed as unused.
+  await slotsStore.createBoards(newBoards);
+
+  // A Run an action Button in the file ignores Simulate and Disarm, so it is made a
+  // cue Button with a rule of its own, as the start-up pass does. The rules are
+  // written first and the views after, so a crash between them leaves rules whose
+  // Buttons never landed (kept, and listed as such) and never Buttons bound to nothing.
+  const actions = await runActionButtonMigration(named, { onImport: true });
+  if (actions.failure) {
+    console.error(scrub(actions.failure));
+    skipped.push("Run an action buttons were imported unconverted: their commands could not be made, so they show Needs converting and do nothing (see the log)");
+  }
+  try {
+    await viewsStore.save([...existing, ...actions.views]);
+  } catch (err) {
+    // The boards and rules are already on disk and the views will not land: the
+    // import is refused (rethrown, the save's reason intact) and the operator is
+    // told what is left behind — boards the Mic slots page lists as unused, and
+    // cues the Automation page shows as ownerless.
+    if (newBoards.length > 0) {
+      console.error(
+        `[view-import] import refused after its boards were made; ${scrub(newBoards.length)} board(s) are left unused, delete them from Mic slots: ${scrub(newBoards.map((b) => b.meta.name).join(", "))}`,
+      );
+    }
+    if (actions.cuesWritten.length > 0) {
+      console.error(
+        `[automation] import refused after its cues were written; kept ${scrub(actions.cuesWritten.join(", "))} with no Button, delete them from Automation`,
+      );
+    }
+    throw err;
+  }
+  // After the save: a conversion whose import was refused is not one to announce.
+  if (actions.line) console.log(scrub(actions.line));
+
   // Every board this import made, rows or none: a screen the file carried with
   // an empty board is still a board the operator now has.
   const slotBoards = boardIdMap.size;
@@ -606,7 +628,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     const byId = new Map(current.map((p) => [p.id, p]));
     for (const incoming of incomingPresets) {
       // A bundle from an older build can carry resolved names and readings.
-      const p = Array.isArray(incoming.slots) ? { ...incoming, slots: stripResolvedFields(incoming.slots) } : incoming;
+      // The board it is recalled into is the source's id, which names nothing
+      // here or somebody else's board: this install's copy when that board
+      // travelled, none when it did not.
+      const { boardId: srcBoard, ...rest } = incoming;
+      const boardId = typeof srcBoard === "string" ? boardIdMap.get(srcBoard) : undefined;
+      const p = {
+        ...rest,
+        ...(Array.isArray(incoming.slots) ? { slots: stripResolvedFields(incoming.slots) } : {}),
+        ...(boardId ? { boardId } : {}),
+      };
       if (!byId.has(p.id)) {
         byId.set(p.id, p);
         presets.added++;

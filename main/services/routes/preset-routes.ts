@@ -129,24 +129,28 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
       const id = presetPatchMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
       let presets = await stageController.listPresets();
-      if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
-      // `slots` (explicit) overwrites with those directly (inline mic-slots objects);
-      // otherwise overwrite from the given view/display's current slots.
       if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
         error(res, "body.boardId must be a board id");
         return;
       }
-      if (Array.isArray(body.slots)) {
-        try {
+      // The overwrite BEFORE the rename: every refusal (an unknown board, no
+      // slots) is decided inside it ahead of its write, so a refused body writes
+      // nothing, a name beside it included. A rename cannot be refused.
+      //
+      // `slots` (explicit) overwrites with those directly (inline mic-slots objects);
+      // otherwise overwrite from the given view/display's current slots.
+      try {
+        if (Array.isArray(body.slots)) {
           presets = await stageController.overwritePreset(id, "", body.slots as Slot[], body.boardId as string | undefined);
-        } catch (err) {
-          if (!(err instanceof SlotsNotFoundError)) throw err;
-          error(res, err.message, err.status);
-          return;
+        } else if (typeof body.overwriteFromDisplayId === "string") {
+          presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
         }
-      } else if (typeof body.overwriteFromDisplayId === "string") {
-        presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
+      } catch (err) {
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+        return;
       }
+      if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
       json(res, presets);
       return;
     }

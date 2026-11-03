@@ -155,7 +155,7 @@ above are aliases onto the board their view or object shows. See
 | Method | Path | Does |
 |---|---|---|
 | GET | `/api/boards` | Every board, by name: `[{id, name, columnWidthIn, createdAt, shownOn}]`. `shownOn` is `[{kind: "view" \| "object", id, name, viewId}]` — each slots view, and each slots-grid object with the view holding it |
-| POST | `/api/boards` | Create one: `{name, from?, target?}`. `from` is `{boardId}` (a copy of every layout on that board, fresh slot ids) or `{presetId}` (a saved layout, placed under `target`, else the current service type's default). `201 {id, boards}`. A blank name is `400`; an unknown board or preset `404` |
+| POST | `/api/boards` | Create one: `{name, from?, target?}`. `from` is `{boardId}` (a copy of every layout on that board, fresh slot ids) or `{presetId}` (a saved layout, placed under `target`, else the current service type's default). `201 {id, boards}`. A blank name is `400`; an unknown board or preset `404`; a plan `target` is checked as a slot save checks it (`400` for a plan of another service type), and a refused body makes no board |
 | PATCH | `/api/boards/:id` | `{name?, columnWidthIn?}` — rename, and set the charger column width in inches (`null`: not aligned). Answers the list. A blank name or a width that is not a positive number is `400` |
 | POST | `/api/boards/:id/duplicate` | A copy of every layout, fresh slot ids, named `{name}` or `<name> copy`. `201 {id, boards}` |
 | DELETE | `/api/boards/:id` | Body `{replacement}`, a board id or `null`, required. Every slots view and slots-grid object showing the board is pointed at `replacement` (or at nothing), then the board and all its layouts are deleted. `400` without `replacement`, or when it is the board itself; `404` for an unknown one |
@@ -212,7 +212,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | POST | `/api/presets/import` | Add one from data: `{name, slots, boardId?}`. `boardId` records the board the layout came from, which is where recalling it defaults; an unknown board is `404`, a blank one `400` |
 | POST | `/api/presets/reorder` | `{ids: string[]}` |
 | POST | `/api/presets/:id/apply` | Write it onto the board a view shows: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
-| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots, boardId?}` replaces its slots (never with none: `400`) and records the board they came from, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
+| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots, boardId?}` replaces its slots (never with none: `400`) and records the board they came from, or `{overwriteFromDisplayId}` overwrites it from that view's current slots: the board a slots view shows, or the one a custom view's single slots widget shows (`400` when that is none, or no slots). A refused body writes nothing, a `name` beside it included |
 | DELETE | `/api/presets/:id` | Delete |
 
 **Integrations & wireless**

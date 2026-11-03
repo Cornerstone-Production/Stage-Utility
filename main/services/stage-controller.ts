@@ -12,6 +12,7 @@ import {
   pointedGrid,
   positiveOrNull,
   viewBoardId,
+  repointBoards,
 } from "./slot-boards.js";
 import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import { walkLayoutObjects } from "./view-refs.js";
@@ -581,6 +582,9 @@ export class StageController {
    * commitOutputPatch, they do not nest.
    */
   private outputWrites = new WriteQueue();
+
+  /** Layout saves, one at a time — see setViewLayout. */
+  private layoutWrites = new WriteQueue();
 
   // ── Init ─────────────────────────────────────────────────────────────
 
@@ -2798,6 +2802,9 @@ export class StageController {
       if (!preset) throw new SlotsNotFoundError(`There is no saved layout ${from.presetId}.`);
       const into = target ?? (this.state.serviceTypeId ? { kind: "default" as const, serviceTypeId: this.state.serviceTypeId } : null);
       if (!into) throw new SlotsNotFoundError("No service type is selected, so there is nowhere to put the saved layout.", 400);
+      // The same check a slot save makes: an override under another type's plan
+      // is one resolve never shows and pruning never dates.
+      await this.assertTargetPlanBelongs(into);
       const slots = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
       const dated = this.datedTarget(into);
       const layouts =
@@ -2860,25 +2867,10 @@ export class StageController {
       if (replacement === boardId) throw new SlotsNotFoundError("A board cannot be replaced by itself.", 400);
     }
     const shownOn = this.boardShownOn(boardId);
-    // Every layout, a dormant one too (a view switched to another kind keeps
-    // its layout): switched back to custom, it must not point at a board that
-    // is gone.
-    const views = this.state.views.map((v): View => {
-      let next = v;
-      if (v.boardId === boardId || (v.kind === "slots" && viewBoardId(v) === boardId)) next = { ...next, boardId: replacement };
-      if (next.layout) {
-        const objects = structuredClone(next.layout.objects);
-        let touched = false;
-        walkLayoutObjects(objects, (o) => {
-          if (o.config.type === "slots-grid" && gridBoardId(o.config, o.id) === boardId) {
-            o.config = pointedGrid(o.config, replacement);
-            touched = true;
-          }
-        });
-        if (touched) next = { ...next, layout: { ...next.layout, objects } };
-      }
-      return next;
-    });
+    // Every pointer, a dormant one too (a view switched to another kind keeps
+    // its board pointer and its layout): switched back, it must not point at a
+    // board that is gone. A pointer from before boards is read as well.
+    const views = repointBoards(this.state.views, (b) => (b === boardId ? replacement : undefined), { legacy: true });
     if (views.some((v, i) => v !== this.state.views[i])) {
       this.state = { ...this.state, views };
       await viewsStore.save(views);
@@ -3668,18 +3660,23 @@ export class StageController {
   //
   // `boardId` records the board the layout now comes from, so recalling it defaults
   // there; an unknown board is refused, and so is overwriting with no slots (that
-  // would empty a saved layout the operator meant to keep).
+  // would empty a saved layout the operator meant to keep) — whether they were
+  // sent empty or read from a view that shows none. A view's slots are read the
+  // way savePreset reads them, so a custom view's one widget counts.
   async overwritePreset(id: string, target: string, explicitSlots?: Slot[], newBoardId?: string): Promise<SlotPreset[]> {
     if (newBoardId !== undefined) this.boardFor("board", newBoardId);
-    if (explicitSlots !== undefined && explicitSlots.length === 0) {
-      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
-    }
-    const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
-    const view = this.state.views.find((v) => v.id === viewId);
-    const boardId = view ? viewBoardId(view) : null;
-    const rawSlots = explicitSlots ?? (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
+    let rawSlots: Slot[];
+    if (explicitSlots !== undefined) {
+      rawSlots = explicitSlots;
+    } else {
+      const boardId = this.boardForPresetTarget(this.viewIdForTarget(target));
+      rawSlots = boardId ? (this.rawSlotsByBoard.get(boardId) ?? (await this.rawFor(boardId))) : [];
+    }
+    if (rawSlots.length === 0) {
+      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
+    }
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
       p.id === id
@@ -3974,10 +3971,22 @@ export class StageController {
    * someone else has saved this view in the meantime and this save would erase
    * their work, so it is REFUSED and the caller decides. Omitting it forces the
    * save through — that is the deliberate "overwrite anyway" path.
+   *
+   * A refused save writes nothing. Pointing an old editor's widgets can make or
+   * copy a board and change a column width, and converting a Run an action
+   * Button adds a cue; all of that awaits, so two saves opened at the same
+   * revision used to both pass the check, and the one refused after its writes
+   * left them behind. Saves now queue, and the revision is checked first thing
+   * in the queue, before any write: only a layout save moves `layoutRev`, so
+   * nothing can change it between that check and this save's own write.
    */
   async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    return this.layoutWrites.enqueue(() => this.setViewLayoutNow(id, layout, expectedRev));
+  }
+
+  private async setViewLayoutNow(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
     const current = this.requireView(id, "views:setLayout");
-    let rev = current.layoutRev ?? 0;
+    const rev = current.layoutRev ?? 0;
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
@@ -3987,21 +3996,26 @@ export class StageController {
     // start may be weeks away. A failure is logged and the layout saves as sent.
     const converted = await runActionButtonMigration([{ ...current, layout: pointedGrids }], { onSave: true, deps: await liveRulesDeps() });
     if (converted.failure) console.error(scrub(converted.failure));
-    else if (converted.line) console.log(scrub(converted.line));
     const pointed = converted.views[0]!.layout!;
-    // Checked again after the await: another save of this view, made at the
-    // same revision, may have landed while the widgets were being pointed, and
-    // both passing the check above is how one erases the other.
-    const now = this.requireView(id, "views:setLayout").layoutRev ?? 0;
-    if (now !== rev) {
-      if (expectedRev !== undefined) throw new LayoutConflictError(id, expectedRev, now);
-      rev = now;
-    }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout: pointed, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
     console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);
     this.state = { ...this.state, views };
-    await viewsStore.save(views);
+    try {
+      await viewsStore.save(views);
+    } catch (err) {
+      // The cues are on disk and their Buttons are not: named, as an import names
+      // them, since the Automation page shows them as ownerless. Rethrown with the
+      // save's own reason.
+      if (converted.cuesWritten.length > 0) {
+        console.error(
+          `[automation] layout save failed after its cues were written; kept ${scrub(converted.cuesWritten.join(", "))} with no Button, delete them from Automation`,
+        );
+      }
+      throw err;
+    }
+    // After the save: a conversion whose layout did not land is not one to announce.
+    if (converted.line) console.log(scrub(converted.line));
     // Rows for any board a new or repointed widget shows, and none kept for a
     // board nothing shows any more.
     await this.loadShownBoards();
@@ -4094,7 +4108,7 @@ export class StageController {
    * second screen over the same charger.
    */
   async duplicateView(id: string, name?: string, opts: { copyBoards?: boolean } = {}): Promise<{ state: StageState; view: View }> {
-    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? true);
+    const view = await this.copyViewRecord(id, name, opts.copyBoards ?? true);
     return { state: this.state, view };
   }
 
@@ -4176,14 +4190,8 @@ export class StageController {
     return next;
   }
 
-  /** duplicateView, returning the copy — see createViewRecord for why, and for
-   *  `onAssigned`. */
-  private async copyViewRecord(
-    id: string,
-    name?: string,
-    onAssigned?: (view: View) => void,
-    copyBoards = false,
-  ): Promise<View> {
+  /** duplicateView, returning the copy — see createViewRecord for why. */
+  private async copyViewRecord(id: string, name: string | undefined, copyBoards: boolean): Promise<View> {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
@@ -4193,7 +4201,6 @@ export class StageController {
     );
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
-    onAssigned?.(copy);
     await viewsStore.save(views);
     await this.loadShownBoards();
     this.recomputeResolved();
