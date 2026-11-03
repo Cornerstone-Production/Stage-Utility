@@ -1291,6 +1291,78 @@ describe("the inspector folds away with nothing selected", () => {
     assert.equal(isOpen(), true, "and pressing it once more opens it again");
   });
 
+  /** A real drag: down (focus lands on the card), carry, up, and the click a
+   *  browser fires when the pointer comes up over the card it went down on. */
+  const pressAndCarry = async (source: HTMLElement, target: Element) => {
+    install();
+    const openBefore = isOpen();
+    let openWhileCarried: boolean | undefined;
+    try {
+      placeRects();
+      const s = centre(source);
+      const t = centre(target);
+      await act(async () => {
+        fireEvent.pointerDown(source, { button: 0, clientX: s.x, clientY: s.y });
+        fireEvent.mouseDown(source, { button: 0, clientX: s.x, clientY: s.y });
+        source.focus();
+        fireEvent.mouseMove(document, { clientX: s.x + 8, clientY: s.y + 8 });
+      });
+      await settle();
+      openWhileCarried = isOpen();
+      await act(async () => {
+        fireEvent.mouseMove(document, { clientX: t.x, clientY: t.y });
+      });
+      await settle();
+      await act(async () => {
+        fireEvent.mouseUp(document, { clientX: t.x, clientY: t.y });
+        // The card as it is now, as the browser would click it; the drag sensor must swallow it.
+        fireEvent.click(document.querySelector(`[data-mic-slot="${source.getAttribute("data-mic-slot")}"]`)!, { clientX: t.x, clientY: t.y });
+      });
+      await settle();
+    } finally {
+      uninstall();
+    }
+    // The drag sensor blocks clicks until 50ms after a drag ends (which is what
+    // keeps the click that ends a drag off the card); wait it out, or it eats the
+    // first click of the next test.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    assert.equal(openWhileCarried, openBefore, "the inspector must not open or close while a card is carried");
+  };
+
+  test("dragging a card leaves a closed inspector closed", async () => {
+    await mountWithChrome();
+    await pressAndCarry(card("d"), gap("b-left", 1));
+    assert.equal(shape("b-left"), "a | d | b+c | ~s", "the drop still lands");
+    assert.equal(isOpen(), false, "a drag must not open the inspector");
+    assert.equal(card("d").getAttribute("aria-pressed"), "false");
+  });
+
+  test("a card carried off and brought back to where it was pressed does not open it either", async () => {
+    await mountWithChrome();
+    await pressAndCarry(card("d"), card("d"));
+    assert.equal(isOpen(), false, "the click that ends a drag is not a click on the card");
+  });
+
+  test("with the inspector open, the dragged card becomes the selected one", async () => {
+    await mountWithChrome();
+    await press(card("a"));
+    await pressAndCarry(card("d"), gap("b-left", 1));
+    assert.equal(isOpen(), true);
+    assert.equal(card("d").getAttribute("aria-pressed"), "true");
+  });
+
+  test("keyboard focus still selects, and opens the inspector", async () => {
+    await mountWithChrome();
+    await act(async () => {
+      card("b").focus();
+    });
+    await settle();
+    assert.equal(isOpen(), true);
+    assert.equal(card("b").getAttribute("aria-pressed"), "true");
+  });
+
   test("the button opens it on the drag help, and closes it with a slot selected", async () => {
     await mountWithChrome();
     await click(toggle());

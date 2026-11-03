@@ -146,22 +146,34 @@ export function EmptyBoardDrop({ boardId, children }: { boardId: string; childre
 }
 
 /**
- * Click, and focus, select a card; a click on the card already selected clears it.
+ * A click selects a card, and so does keyboard focus; a click on the card already
+ * selected clears it.
  *
- * Focus lands on mousedown, before the click, and selects; so whether the card
- * was ALREADY selected has to be read before that, on the way down, or every
- * first click would select and then immediately clear.
+ * Focus from a press does NOT select. A press is how a drag begins, and selecting
+ * opens the inspector, which slides in and moves the boards under the card being
+ * carried. A press that stays a click selects on the click; one that becomes a
+ * drag never clicks, because the drag sensor swallows that click. Focus lands
+ * during the press itself, so a flag set on the way down and cleared on the next
+ * turn tells the two kinds of focus apart. Whether the card was ALREADY selected
+ * is read on the way down too, before anything this press does.
  */
 function useSelectToggle(id: string, selected: boolean, actions: BoardPreviewActions) {
   const wasSelected = useRef(false);
+  const pressing = useRef(false);
   const before = () => {
     wasSelected.current = selected;
+    pressing.current = true;
+    setTimeout(() => {
+      pressing.current = false;
+    }, 0);
   };
   return {
     onPointerDownCapture: before,
     onMouseDownCapture: before,
     onClick: () => (wasSelected.current ? actions.deselect() : actions.select(id)),
-    onFocus: () => actions.select(id),
+    onFocus: () => {
+      if (!pressing.current) actions.select(id);
+    },
   };
 }
 
