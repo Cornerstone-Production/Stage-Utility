@@ -489,6 +489,7 @@ describe("the overrides in docs/release-notes/overrides", () => {
     "1.18.0",
     "1.19.0",
     "1.27.0",
+    "1.28.1",
   ];
 
   interface Override { commit: string; betaOnly: boolean; reason: string }
