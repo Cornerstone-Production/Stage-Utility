@@ -12,9 +12,10 @@ final class GlobalHotKey {
 
   init(action: @escaping () -> Void) { self.action = action }
 
-  /// `noErr` when the key is ours. Another app that already holds the same
-  /// combination makes this fail (`eventHotKeyExistsErr`), and then nothing is
-  /// registered.
+  /// `noErr` when the key is ours. Registered non-exclusively, so another app
+  /// holding the same combination does not make this fail, and which of the two
+  /// gets the press is not defined. `eventHotKeyExistsErr` means THIS process
+  /// already registered it.
   func register() -> OSStatus {
     guard hotKey == nil else { return noErr }
     var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
