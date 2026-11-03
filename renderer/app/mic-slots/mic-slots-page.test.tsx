@@ -1420,3 +1420,24 @@ describe("Save all while the operator keeps editing", () => {
     assert.equal(sentBoards(1)[0]!.rev, "r1", "the edit made in flight is over what that save wrote");
   });
 });
+
+describe("two widgets in one view", () => {
+  test("charger widths for both land: the second uses the revision the first produced", async () => {
+    withWidgets = true;
+    boards = BOARDS().map((b) =>
+      b.id === "b-left"
+        ? { ...b, shownOn: [...b.shownOn, { kind: "object", id: "g-1", name: "Stage Pad", viewId: "v-pad" }, { kind: "object", id: "g-2", name: "Stage Pad", viewId: "v-pad" }] }
+        : b,
+    ) as SlotBoardDTO[];
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Charger layout…" }));
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    await settle();
+    const pads = requests.filter((r) => r.method === "PATCH" && r.url.endsWith("/api/views/v-pad"));
+    assert.deepEqual(pads.map((r) => (JSON.parse(r.body!) as { layoutRev: number }).layoutRev), [0, 1]);
+    assert.equal(padRev, 2, "the second widget's width was refused");
+    assert.ok(!document.body.textContent!.includes("Couldn't set the display width"));
+  });
+});

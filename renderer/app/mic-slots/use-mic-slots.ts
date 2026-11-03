@@ -101,6 +101,11 @@ export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | 
   return found;
 }
 
+/** The newer of two copies of a view: a higher layoutRev, else the later one. */
+function newerView(a: View | undefined, b: View): View {
+  return a && (a.layoutRev ?? 0) > (b.layoutRev ?? 0) ? a : b;
+}
+
 /** What the screens draw from the boards, without who fills them or live telemetry:
  *  a change here is a layout saved somewhere, which the page re-reads. */
 function savedLayoutSignature(state: StageState | null): string {
@@ -287,8 +292,22 @@ export function useMicSlots() {
       qc.invalidateQueries({ queryKey: ["boards:check"] }),
     ]);
   }
+  /**
+   * Every view at its newest: the state frame, or a write's own answer when that
+   * is newer. `state` is the frame from the render that started an action, so a
+   * second widget rewritten in the same view (applying charger widths to two, or
+   * showing a new board on two) would otherwise send the revision the first write
+   * already used, and be refused.
+   */
+  const latestViews = useRef(new Map<string, View>());
+  const seenState = useRef<StageState | null>(null);
+  if (state && state !== seenState.current) {
+    seenState.current = state;
+    for (const v of state.views) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
+  }
   function takeState(next: StageState): void {
     qc.setQueryData(["stage:getState"], next);
+    for (const v of next.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
   }
 
   // ── leaving with unsaved work ────────────────────────────────────────
@@ -642,7 +661,7 @@ export function useMicSlots() {
     what: string,
     change: (c: Extract<LayoutObjectConfig, { type: "slots-grid" }>) => LayoutObjectConfig,
   ): Promise<boolean> {
-    const view = (state?.views ?? []).find((v) => v.id === t.viewId);
+    const view = latestViews.current.get(t.viewId);
     if (!view?.layout) {
       toast.error(`Couldn't ${what}: its layout is not available.`);
       return false;
