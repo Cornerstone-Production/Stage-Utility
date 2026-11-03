@@ -214,30 +214,31 @@ export function ScreensRoute() {
         aria-hidden={!open}
         className={cn(
           "lg:sticky lg:top-3 lg:shrink-0 lg:overflow-hidden lg:transition-[width,margin-left] lg:duration-(--motion-settled) lg:ease-(--motion-ease) motion-reduce:transition-none",
-          open ? "lg:ml-4 lg:w-[400px]" : "lg:ml-0 lg:w-0",
+          // Below lg there is no slide to wait for: a closed sheet goes at once.
+          open ? "lg:ml-4 lg:w-[400px]" : "max-lg:hidden lg:ml-0 lg:w-0",
         )}
       >
-      {(open || closing) && (
-        <ScreenPanelHost
-          stageState={state}
-          handlers={s.handlers}
-          target={panel}
-          onClose={close}
-          onSelect={select}
-          onAddScreen={addScreen}
-          onRequestNewView={requestNewView}
-          onCreated={(outputId, viewMade) => {
-            // The panel stays open, on the screen that now exists, and its card is
-            // scrolled to and outlined so the operator sees where it went.
-            setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
-            if (outputId) flashTarget(screenFlashId(outputId));
-          }}
-          onEditLayout={editLayout}
-          onRemoveScreen={requestRemoveScreen}
-          onDeleteView={requestDeleteView}
-          onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
-        />
-      )}
+        {(open || closing) && (
+          <ScreenPanelHost
+            stageState={state}
+            handlers={s.handlers}
+            target={panel}
+            onClose={close}
+            onSelect={select}
+            onAddScreen={addScreen}
+            onRequestNewView={requestNewView}
+            onCreated={(outputId, viewMade) => {
+              // The panel stays open, on the screen that now exists, and its card is
+              // scrolled to and outlined so the operator sees where it went.
+              setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
+              if (outputId) flashTarget(screenFlashId(outputId));
+            }}
+            onEditLayout={editLayout}
+            onRemoveScreen={requestRemoveScreen}
+            onDeleteView={requestDeleteView}
+            onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
+          />
+        )}
       </div>
     </div>
   );
