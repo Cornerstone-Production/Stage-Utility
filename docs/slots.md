@@ -144,15 +144,18 @@ closes it, clearing the selection.
 
 | Row | What it says |
 |---|---|
-| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag*. Shown for vocal positions only |
+| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag*. On a position that is not vocal it says *Not a vocal position* |
 | **In-ears** | *Brings their own* when their `IEMs:` tag says `Own`; *House buds* when the slot has an in-ear pack and they do not bring their own; otherwise *No pack on this slot* |
 
 Tags named `Capsule:` or `IEMs:` on a person's Planning Center profile are picked up
 automatically, with no setting. The same two facts are drawn on the card, as the
 capsule plate and the ears badge ([What the card shows](#what-the-card-shows)). A
 slot nobody fills, or whose person has no such tag, shows *no tag*. The capsule
-applies to vocal positions only: on any other position it is not shown, even when the
-person has a `Capsule:` tag.
+applies to vocal positions only, a position whose Planning Center name contains
+"Vocal" (*Vocals*, *Vocals (BGVs)*, *Vocals / AG*); on any other position it is not
+shown, even when the person has a `Capsule:` tag. A slot filled by person rather than
+position counts as vocal when any of that person's positions on the plan is. Name a
+singing position without "Vocal" (*Worship Leader*) and its capsule is not shown.
 
 **Placement**
 
