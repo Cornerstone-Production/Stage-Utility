@@ -12,6 +12,15 @@
 // column width, which screens show it, and copying one board's layout over
 // another. Those are not layouts-in-progress, and each asks first when it would
 // replace a board that has unsaved work.
+//
+// THE BUFFER KNOWS WHERE IT WAS MADE. The first edit records the target (type,
+// plan, side) and, per board, the revision of what was saved there. When the
+// target moves without asking (an unpinned editor following the live plan
+// forward over SSE, or the live plan clearing), the editor is pinned back to the
+// recorded target and the operator is told: a Save all never lands on a target
+// the edits were not made against. Save all sends each board's revision, and a
+// board saved elsewhere since is a 409 the operator decides about, never a
+// silent overwrite.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,10 +28,11 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
-import { useEditingTarget, registerTargetGuard } from "../../settings/sections/editing-target";
+import { useEditingTarget, registerTargetGuard, requestEditingTarget } from "../../settings/sections/editing-target";
 import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
 import { errorMessage } from "@main/services/errors";
-import { gridBoardId, forEachSlotsGrid, viewBoardId } from "@main/services/slot-boards";
+import { gridBoardId, gridDisplayWidthIn, forEachSlotsGrid, pointedGrid, positiveOrNull, viewBoardId } from "@main/services/slot-boards";
+import { stripResolvedFields } from "@main/services/slot-resolver";
 import { plural } from "@main/services/plural";
 import {
   append,
@@ -83,12 +93,35 @@ export interface CopyFrom {
 export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | null {
   const v = views.find((x) => x.id === t.viewId);
   if (!v) return null;
-  if (t.kind === "view") return v.slotsLayout?.displayWidthIn ?? null;
+  if (t.kind === "view") return positiveOrNull(v.slotsLayout?.displayWidthIn);
   let found: number | null = null;
   forEachSlotsGrid([v], (oid, config) => {
-    if (oid === t.id) found = config.displayWidthIn ?? config.slotsLayout?.displayWidthIn ?? null;
+    if (oid === t.id) found = gridDisplayWidthIn(config);
   });
   return found;
+}
+
+/** The newer of two copies of a view: a higher layoutRev, else the later one. */
+function newerView(a: View | undefined, b: View): View {
+  return a && (a.layoutRev ?? 0) > (b.layoutRev ?? 0) ? a : b;
+}
+
+/** What the screens draw from the boards, without who fills them or live telemetry:
+ *  a change here is a layout saved somewhere, which the page re-reads. */
+function savedLayoutSignature(state: StageState | null): string {
+  if (!state) return "";
+  const strip = (rec: Record<string, Slot[]> | undefined) =>
+    Object.entries(rec ?? {}).map(([k, rows]) => [k, stripResolvedFields(rows)]);
+  return JSON.stringify([strip(state.slotsByView), strip(state.slotsByLayoutObject)]);
+}
+
+/** Where the unsaved buffer was made: a Save all writes here, wherever the page has moved. */
+interface BufferTarget {
+  serviceTypeId: string | null;
+  planId: string | null;
+  side: SlotsTargetSide;
+  /** What to call it when telling the operator the editor stayed on it. */
+  label: string;
 }
 
 export interface Selection {
@@ -128,16 +161,80 @@ export function useMicSlots() {
       queryKey: boardTargetsKey(b.id, serviceTypeId, planId),
       queryFn: () => ipc<SlotTargetsDTO>("boards:targets", { id: b.id, serviceTypeId, planId }),
       enabled: !!serviceTypeId,
+      // A board saved from another browser is read again when this tab is looked
+      // at again; the save's revision check is what makes that safe to miss.
+      refetchOnWindowFocus: true,
     })),
   });
-  const targetsById = new Map<string, SlotTargetsDTO | undefined>(boards.map((b, i) => [b.id, targetQs[i]?.data]));
-  const dataVersion = targetQs.map((q) => q.dataUpdatedAt).join(",");
+  /** A board's layouts, only while the last read of them succeeded. A board with
+   *  none is not editable: what it shows is not what is saved. */
+  const targetsById = new Map<string, SlotTargetsDTO | undefined>(
+    boards.map((b, i) => [b.id, targetQs[i]?.isError ? undefined : targetQs[i]?.data]),
+  );
+  /** Why a board's layouts could not be read, by board. */
+  const targetsErrorById = new Map<string, unknown>(
+    boards.flatMap((b, i) => (targetQs[i]?.isError ? [[b.id, targetQs[i]!.error] as [string, unknown]] : [])),
+  );
+  const dataVersion = targetQs.map((q) => `${q.dataUpdatedAt}:${q.isError ? 1 : 0}`).join(",");
   const targetsFailed = targetQs.find((q) => q.isError)?.error ?? null;
+  const isReady = (boardId: string) => !!targetsById.get(boardId);
+
+  // A layout saved from another browser reaches this one as a stage-state frame
+  // (the screens showing the board change). Re-read the layouts when what the
+  // screens draw changes, not on every frame: telemetry arrives many times a second.
+  const savedSig = useMemo(() => savedLayoutSignature(state), [state]);
+  const firstSig = useRef(true);
+  useEffect(() => {
+    if (firstSig.current) {
+      firstSig.current = false;
+      return;
+    }
+    void qc.invalidateQueries({ queryKey: TARGETS_PREFIX });
+  }, [savedSig, qc]);
 
   // ── unsaved work ─────────────────────────────────────────────────────
   const [edits, setEdits] = useState<Record<string, Slot[]>>({});
+  /** `edits` as of now, for code that runs between renders (an await, a guard). */
+  const editsRef = useRef(edits);
+  /** Per board, the revision of what was saved at the target when its first edit
+   *  was made. Save all sends it; the server refuses it once the board moves on. */
+  const bases = useRef(new Map<string, string | undefined>());
+  /** Where the buffer was made, or null while it is empty. */
+  const bufferAt = useRef<BufferTarget | null>(null);
   const dirtyIds = Object.keys(edits).filter((id) => boards.some((b) => b.id === id));
   const dirty = dirtyIds.length > 0;
+
+  /** The revision of what is saved at the target being edited, for one board. */
+  function savedRev(boardId: string): string | undefined {
+    const t = qc.getQueryData<SlotTargetsDTO>(boardTargetsKey(boardId, serviceTypeId, planId));
+    if (!t) return undefined;
+    return effectiveSide === "plan" ? t.overrideRev : t.defaultRev;
+  }
+
+  /** Every write into the buffer goes through here, so the first edit to a board
+   *  records its revision, and the first edit at all records the target. */
+  function putEdits(changed: Record<string, Slot[]>): void {
+    const ids = Object.keys(changed);
+    if (ids.length === 0) return;
+    for (const id of ids) if (!(id in editsRef.current)) bases.current.set(id, savedRev(id));
+    bufferAt.current ??= { serviceTypeId, planId, side: effectiveSide, label: effectiveSide === "plan" ? label : `${namedType(typeName)} default` };
+    editsRef.current = { ...editsRef.current, ...changed };
+    setEdits(editsRef.current);
+  }
+
+  /** Drop these boards' edits (all of them with null). With `onlyIf`, a board's
+   *  edits go only while they are still the list given: an edit made since stays. */
+  function removeEdits(ids: readonly string[] | null, onlyIf?: Readonly<Record<string, Slot[]>>): void {
+    const next = { ...editsRef.current };
+    for (const id of ids ?? Object.keys(next)) {
+      if (onlyIf && onlyIf[id] !== next[id]) continue;
+      delete next[id];
+      bases.current.delete(id);
+    }
+    editsRef.current = next;
+    if (Object.keys(next).length === 0) bufferAt.current = null;
+    setEdits(next);
+  }
 
   /** What each board shows now: its unsaved edit, else the saved rows for the
    *  side being edited. Stable between renders, because the previews resolve on
@@ -156,18 +253,29 @@ export function useMicSlots() {
   const latest = useRef(boardsMap);
   latest.current = boardsMap;
 
-  const loaded = boards.length === 0 || boards.every((b) => !!targetsById.get(b.id));
   const hasOverride = boards.some((b) => targetsById.get(b.id)?.overrideSlots != null);
 
-  /** Apply a move to every board at once; boards it did not change stay clean. */
+  /** Say a board cannot be edited because its layouts are not in hand. */
+  function refuseUnread(boardId: string): void {
+    const name = boards.find((b) => b.id === boardId)?.name ?? boardId;
+    toast.error(`${name}'s saved layout has not been read, so it cannot be edited yet.`);
+  }
+
+  /** Apply a move to every board at once; boards it did not change stay clean.
+   *  Refused whole when it would change a board whose layouts are not read. */
   function mutate(fn: (b: Boards) => Boards): void {
     const base = latest.current;
     const next = fn(base);
     if (next === base) return;
     const changed: Record<string, Slot[]> = {};
     for (const id of Object.keys(next)) if (next[id] !== base[id]) changed[id] = next[id]!;
+    const unread = Object.keys(changed).find((id) => !isReady(id));
+    if (unread) {
+      refuseUnread(unread);
+      return;
+    }
     latest.current = { ...base, ...changed };
-    setEdits((prev) => ({ ...prev, ...changed }));
+    putEdits(changed);
   }
 
   // ── selection ────────────────────────────────────────────────────────
@@ -184,22 +292,60 @@ export function useMicSlots() {
       qc.invalidateQueries({ queryKey: ["boards:check"] }),
     ]);
   }
+  /**
+   * Every view at its newest: the state frame, or a write's own answer when that
+   * is newer. `state` is the frame from the render that started an action, so a
+   * second widget rewritten in the same view (applying charger widths to two, or
+   * showing a new board on two) would otherwise send the revision the first write
+   * already used, and be refused.
+   */
+  const latestViews = useRef(new Map<string, View>());
+  const seenState = useRef<StageState | null>(null);
+  if (state && state !== seenState.current) {
+    seenState.current = state;
+    for (const v of state.views) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
+  }
   function takeState(next: StageState): void {
     qc.setQueryData(["stage:getState"], next);
+    for (const v of next.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
   }
 
   // ── leaving with unsaved work ────────────────────────────────────────
   // The plan switcher asks this question from its own header, so the page
   // registers while dirty and withdraws when clean.
+  /** True while the page itself is pinning the editor back to the buffer's target. */
+  const holdingBack = useRef(false);
   useEffect(() => {
     if (!dirty) return;
     registerTargetGuard("mic-slots", async () => {
+      if (holdingBack.current) return true;
       if (!(await confirmDiscardSlotEdits())) return false;
-      setEdits({});
+      removeEdits(null);
       return true;
     });
     return () => registerTargetGuard("mic-slots", null);
   }, [dirty]);
+
+  // The target moved under unsaved work without asking: the live plan advanced
+  // (an editor that has not touched the switcher follows it) or cleared. Stay on
+  // the target the edits were made against, and say so. Saving them to whatever
+  // the page moved to would write one week's edits onto another.
+  useEffect(() => {
+    const at = bufferAt.current;
+    if (!at || Object.keys(editsRef.current).length === 0) return;
+    const moved = at.serviceTypeId !== serviceTypeId || at.planId !== planId;
+    if (moved) {
+      holdingBack.current = true;
+      void requestEditingTarget({ serviceTypeId: at.serviceTypeId, planId: at.planId }).finally(() => {
+        holdingBack.current = false;
+      });
+      console.info(`[mic-slots] target moved under unsaved edits; editor held on ${at.label}`);
+      toast.info(`The plan moved on. The editor stays on ${at.label} until your unsaved changes are saved or discarded; Now follows the live plan again.`);
+    }
+    if (at.side !== effectiveSide) setOwnSide(at.side);
+    // setOwnSide is a state setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceTypeId, planId, effectiveSide, dirty]);
 
   /** Move to the other side. False when it did not move (already there, or the
    *  operator kept their unsaved work). */
@@ -207,7 +353,7 @@ export function useMicSlots() {
     if (next === effectiveSide) return false;
     if (dirty) {
       if (!(await confirmDiscardSlotEdits())) return false;
-      setEdits({});
+      removeEdits(null);
     }
     setOwnSide(next);
     return true;
@@ -234,26 +380,36 @@ export function useMicSlots() {
     if (ids.length === 0) return true;
     setSaving(true);
     setSaveError(null);
+    // What is sent, by board: an edit made while this is in flight is a different
+    // list, and stays in the buffer when this lands.
+    const sent: Record<string, Slot[]> = {};
+    for (const id of ids) sent[id] = editsRef.current[id]!;
     try {
       const target = wireTarget();
       const next = await ipc<StageState>("boards:saveAll", {
-        boards: ids.map((id) => ({
-          boardId: id,
-          slots: edits[id]!.map((s, i) => ({ ...s, order: i })),
-          ...(target ? { target } : {}),
-        })),
+        boards: ids.map((id) => {
+          const rev = bases.current.get(id);
+          return {
+            boardId: id,
+            slots: sent[id]!.map((s, i) => ({ ...s, order: i })),
+            ...(target ? { target } : {}),
+            ...(rev !== undefined ? { rev } : {}),
+          };
+        }),
       });
       takeState(next);
-      setEdits((prev) => {
-        const rest = { ...prev };
-        for (const id of ids) delete rest[id];
-        return rest;
-      });
+      // The saved layouts are read BEFORE the edits go, so the board never draws
+      // the old layout in between.
       await refresh();
+      removeEdits(ids, sent);
+      // A board edited again while saving keeps those edits, made on top of what
+      // just saved: its revision is the new one.
+      for (const id of ids) if (id in editsRef.current) bases.current.set(id, savedRev(id));
       pageTarget.announceSaved(plural(ids.length, "board"));
       return true;
     } catch (err) {
       const message = errorMessage(err);
+      if ((err as { status?: number }).status === 409 && !retried) return resolveConflict(ids, message);
       if (!retried) {
         const fresh = await qc.fetchQuery({ queryKey: BOARDS_KEY, queryFn: () => ipc<SlotBoardDTO[]>("boards:list"), staleTime: 0 }).catch(() => null);
         const gone = fresh ? ids.filter((id) => !fresh.some((b) => b.id === id)) : [];
@@ -274,12 +430,34 @@ export function useMicSlots() {
     }
   }
 
-  function dropEditsOf(boardIds: readonly string[]): void {
-    setEdits((prev) => {
-      const rest = { ...prev };
-      for (const id of boardIds) delete rest[id];
-      return rest;
+  /**
+   * A board was saved elsewhere since this page read it. Nothing was written.
+   * Say which, show what is saved now underneath the edits, and let the operator
+   * choose: save over it, or keep the edits unsaved (Discard then shows theirs).
+   */
+  async function resolveConflict(ids: string[], message: string): Promise<boolean> {
+    const named = boards.find((b) => message.startsWith(`Board "${b.name}"`));
+    console.warn(`[mic-slots] save-all refused, a board changed elsewhere: ${message}`);
+    await refresh();
+    const name = named?.name ?? "A board";
+    const ok = await confirm({
+      title: `${name} was changed elsewhere`,
+      message: `Someone saved ${name} after you started editing it, so nothing was saved. Save yours over theirs, or keep your changes unsaved and look first (Discard shows what they saved).`,
+      confirmLabel: "Save over it",
+      destructive: true,
     });
+    if (!ok) {
+      setSaveError({ message, boardId: named?.id ?? null });
+      toast.error(`Nothing was saved. ${message}`);
+      return false;
+    }
+    // Over what is saved NOW, for every board in the save: the read above has it.
+    for (const id of ids) bases.current.set(id, savedRev(id));
+    return submitSave(ids, true);
+  }
+
+  function dropEditsOf(boardIds: readonly string[]): void {
+    removeEdits(boardIds);
   }
 
   // A board deleted elsewhere while it has unsaved work: its edits go, and the
@@ -293,10 +471,12 @@ export function useMicSlots() {
     dropEditsOf(gone);
     const names = gone.map((id) => knownNames.current.get(id) ?? id);
     toast.error(`${names.join(", ")} ${names.length === 1 ? "was" : "were"} deleted elsewhere, so ${names.length === 1 ? "its" : "their"} unsaved changes were dropped.`);
+    // dropEditsOf works on refs and a state setter; it is a new function each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boards, boardsQ.isSuccess, edits]);
 
   function discardAll(): void {
-    setEdits({});
+    removeEdits(null);
     setSaveError(null);
   }
 
@@ -330,10 +510,11 @@ export function useMicSlots() {
   function updateSlot(slotId: string, fn: (s: Slot) => Slot): void {
     const where = locate(latest.current, slotId);
     if (!where) return;
+    if (!isReady(where.boardId)) return refuseUnread(where.boardId);
     const list = latest.current[where.boardId]!;
     const next = list.map((s) => (s.id === slotId ? fn(s) : s));
     latest.current = { ...latest.current, [where.boardId]: next };
-    setEdits((prev) => ({ ...prev, [where.boardId]: next }));
+    putEdits({ [where.boardId]: next });
   }
 
   /** A new slot at the end of a board. `init` fills it in (the check's "Add to"
@@ -380,22 +561,24 @@ export function useMicSlots() {
   }
   /** A saved layout recalled into a board: the editor only, nothing saved. */
   function replaceBoard(boardId: string, slots: Slot[]): void {
+    if (!isReady(boardId)) return refuseUnread(boardId);
     const next = slots.map((s, i) => ({ ...s, order: i }));
     latest.current = { ...latest.current, [boardId]: next };
-    setEdits((prev) => ({ ...prev, [boardId]: next }));
+    putEdits({ [boardId]: next });
     setPicked(null);
   }
   function dropEdits(boardId: string): void {
-    setEdits((prev) => {
-      const { [boardId]: _gone, ...rest } = prev;
-      return rest;
-    });
+    removeEdits([boardId]);
   }
 
   /** Ask before a write that would replace a board's rows, when it has unsaved
    *  work. True to go ahead, with that work dropped. */
   async function confirmReplace(boardId: string, what: string): Promise<boolean> {
-    if (!(boardId in edits)) return true;
+    if (!isReady(boardId)) {
+      refuseUnread(boardId);
+      return false;
+    }
+    if (!(boardId in editsRef.current)) return true;
     const name = boards.find((b) => b.id === boardId)?.name ?? "This board";
     const ok = await confirm({
       title: `Replace the unsaved changes to ${name}?`,
@@ -441,6 +624,16 @@ export function useMicSlots() {
   }
 
   async function duplicateBoard(boardId: string): Promise<string | null> {
+    // The copy is made on the server, from what is SAVED: unsaved edits are not in it.
+    if (boardId in editsRef.current) {
+      const name = nameOf(boardId);
+      const ok = await confirm({
+        title: `Duplicate ${name} without its unsaved changes?`,
+        message: `The copy is made from ${name}'s saved layout. Its unsaved changes stay on ${name} and are not in the copy; Save all first to include them.`,
+        confirmLabel: "Duplicate saved layout",
+      });
+      if (!ok) return null;
+    }
     const made = await attempt("duplicate the board", () =>
       ipc<{ id: string; boards: SlotBoardDTO[] }>("boards:duplicate", { id: boardId }),
     );
@@ -464,9 +657,10 @@ export function useMicSlots() {
     return true;
   }
 
-  async function setColumnWidth(boardId: string, columnWidthIn: number | null): Promise<void> {
+  async function setColumnWidth(boardId: string, columnWidthIn: number | null): Promise<boolean> {
     const list = await attempt("set the charger layout", () => ipc<SlotBoardDTO[]>("boards:update", { id: boardId, columnWidthIn }));
     if (list) qc.setQueryData(BOARDS_KEY, list);
+    return !!list;
   }
 
   /**
@@ -478,7 +672,7 @@ export function useMicSlots() {
     what: string,
     change: (c: Extract<LayoutObjectConfig, { type: "slots-grid" }>) => LayoutObjectConfig,
   ): Promise<boolean> {
-    const view = (state?.views ?? []).find((v) => v.id === t.viewId);
+    const view = latestViews.current.get(t.viewId);
     if (!view?.layout) {
       toast.error(`Couldn't ${what}: its layout is not available.`);
       return false;
@@ -503,11 +697,7 @@ export function useMicSlots() {
       if (next) takeState(next);
       return !!next;
     }
-    return rewriteGrid(t, `show the board on ${t.name}`, (c) => {
-      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
-      const displayWidthIn = c.displayWidthIn ?? c.slotsLayout?.displayWidthIn;
-      return { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
-    });
+    return rewriteGrid(t, `show the board on ${t.name}`, (c) => pointedGrid(c, boardId));
   }
 
   /** A screen's or a widget's own display width, the other half of charger alignment. */
@@ -519,10 +709,7 @@ export function useMicSlots() {
       if (next) takeState(next);
       return !!next;
     }
-    return rewriteGrid(t, `set the display width of ${t.name}`, (c) => {
-      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
-      return { ...rest, displayWidthIn };
-    });
+    return rewriteGrid(t, `set the display width of ${t.name}`, (c) => pointedGrid(c, gridBoardId(c, t.id), displayWidthIn));
   }
 
   /**
@@ -641,7 +828,9 @@ export function useMicSlots() {
    *  plan's layout, but only once the request has landed: a refused revert loses
    *  nothing. */
   async function revertBoards(ids: string[], what: string): Promise<boolean> {
-    if (!planId || ids.length === 0) return false;
+    // Only from the plan side: from Default, "unsaved changes" are the default's,
+    // and a revert would throw them away with a plan layout they are not part of.
+    if (!planId || effectiveSide !== "plan" || ids.length === 0) return false;
     const unsaved = ids.filter((id) => id in edits);
     const ok = await confirm({
       title: `Revert ${what} to the default?`,
@@ -655,7 +844,8 @@ export function useMicSlots() {
     const r = await eachBoard(ids, (id) => ipc<StageState>("boards:clearOverride", { id, planId }));
     dropEditsOf(r.landed);
     reportPartial("Revert", { done: r.landed.length, failed: r.failed });
-    if (r.landed.length > 0 && ids.length > 1) setOwnSide("default");
+    // Other boards' unsaved plan edits keep the page on the plan side.
+    if (r.landed.length > 0 && ids.length > 1 && Object.keys(editsRef.current).length === 0) setOwnSide("default");
     await refresh();
     if (r.failed.length === 0) toast.success(`Reverted ${label} to the default.`);
     return r.failed.length === 0;
@@ -675,8 +865,10 @@ export function useMicSlots() {
    * promoted if that save is refused.
    */
   async function promoteBoards(ids: string[], what: string): Promise<boolean> {
-    if (!planId) return false;
-    const unsaved = effectiveSide === "plan" ? ids.filter((id) => id in edits) : [];
+    // Only from the plan side: from Default, unsaved DEFAULT edits would be saved
+    // on the next Save all over the promotion they predate.
+    if (!planId || effectiveSide !== "plan") return false;
+    const unsaved = ids.filter((id) => id in edits);
     const targets = [...new Set([...ids.filter((id) => overridden.some((b) => b.id === id)), ...unsaved])];
     if (targets.length === 0) return false;
     const ok = await confirm({
@@ -691,7 +883,7 @@ export function useMicSlots() {
     if (unsaved.length > 0 && !(await submitSave(unsaved, false))) return false;
     const r = await eachBoard(targets, (id) => ipc<StageState>("boards:promote", { id, planId }));
     reportPartial("Set as default", { done: r.landed.length, failed: r.failed });
-    if (r.landed.length > 0) setOwnSide("default");
+    if (r.landed.length > 0 && Object.keys(editsRef.current).length === 0) setOwnSide("default");
     await refresh();
     if (r.failed.length === 0) toast.success(`${label} is now ${namedType(typeName)} default.`);
     return r.failed.length === 0;
@@ -711,7 +903,8 @@ export function useMicSlots() {
     boardsLoading: boardsQ.isLoading,
     boardsError: boardsQ.error ?? null,
     targetsFailed,
-    loaded,
+    targetsErrorById,
+    isReady,
     views,
     boardsMap,
     targetsById,

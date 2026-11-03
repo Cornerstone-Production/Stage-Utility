@@ -26,6 +26,29 @@ import { installRenderDom, isPlumbing } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
+// A stage-state frame delivered the way the server sends one: api.ts subscribes
+// with addEventListener(channel, handler), so this stub keeps the handlers.
+const sseHandlers = new Map<string, Set<(e: { data: string }) => void>>();
+(globalThis as unknown as { EventSource: unknown }).EventSource = class {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  readyState = 1;
+  onopen: unknown = null;
+  onerror: unknown = null;
+  onmessage: unknown = null;
+  addEventListener(channel: string, handler: (e: { data: string }) => void): void {
+    sseHandlers.set(channel, (sseHandlers.get(channel) ?? new Set()).add(handler));
+  }
+  removeEventListener(channel: string, handler: (e: { data: string }) => void): void {
+    sseHandlers.get(channel)?.delete(handler);
+  }
+  close(): void {}
+};
+function emit(channel: string, payload: unknown): void {
+  for (const h of [...(sseHandlers.get(channel) ?? [])]) h({ data: JSON.stringify(payload) });
+}
+
 const BOARDS = () =>
   [
     { id: "b-left", name: "Left wall", columnWidthIn: null, createdAt: "", shownOn: [{ kind: "view", id: "v-left", name: "Left Display", viewId: "v-left" }] },
@@ -83,6 +106,23 @@ let failing = new Set<string>();
 let leftDisplayWidth: number | null = null;
 /** Boards deleted from another tab: the list drops them and saving one is a 404. */
 let goneBoards = new Set<string>();
+/** Each board's saved revision, "board|default" or "board|plan"; a save carrying an older one is a 409. */
+let revs: Record<string, number> = {};
+const revOf = (boardId: string, side: "default" | "plan") => `r${revs[`${boardId}|${side}`] ?? 0}`;
+/** While set, Save all answers only once it resolves. */
+let holdSave: Promise<void> | null = null;
+/** A custom view with two slots widgets on Left wall, and its layout revision. */
+let withWidgets = false;
+let padRev = 0;
+let padLayout: unknown = null;
+const PAD_LAYOUT = () => ({
+  version: 1,
+  canvas: { width: 1920, height: 1080 },
+  objects: [
+    { id: "g-1", x: 0, y: 0, w: 0.5, h: 1, z: 0, config: { type: "slots-grid", boardId: "b-left" } },
+    { id: "g-2", x: 0.5, y: 0, w: 0.5, h: 1, z: 1, config: { type: "slots-grid", boardId: "b-left" } },
+  ],
+});
 
 const STATE = () =>
   ({
@@ -98,6 +138,7 @@ const STATE = () =>
     views: [
       { id: "v-left", name: "Left Display", kind: "slots", boardId: "b-left", createdAt: "", ...(leftDisplayWidth ? { slotsLayout: { displayWidthIn: leftDisplayWidth } } : {}) },
       { id: "v-right", name: "Right Display", kind: "slots", boardId: "b-right", createdAt: "" },
+      ...(withWidgets ? [{ id: "v-pad", name: "Stage Pad", kind: "custom", createdAt: "", layoutRev: padRev, layout: padLayout ?? PAD_LAYOUT() }] : []),
     ],
   }) as unknown as StageState;
 
@@ -129,6 +170,8 @@ const STATE = () =>
       planSortDate: new URL(url, "http://x").searchParams.get("planId") ? "2026-09-13T14:00:00Z" : null,
       defaultSlots: (new URL(url, "http://x").searchParams.get("serviceTypeId") === "st-1" ? layouts[targets[1]!] : typeLayouts[`${targets[1]}|${new URL(url, "http://x").searchParams.get("serviceTypeId")}`]) ?? [],
       overrideSlots: new URL(url, "http://x").searchParams.get("planId") ? (overrides[targets[1]!] ?? null) : null,
+      defaultRev: revOf(targets[1]!, "default"),
+      overrideRev: revOf(targets[1]!, "plan"),
     };
   } else if (path === "/api/plans/upcoming") out = { plans: upcomingPlans, cacheAgeMs: 0 };
   else if (path === "/api/presets" && method === "GET") out = presets;
@@ -140,18 +183,38 @@ const STATE = () =>
   } else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
   else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule };
   else if (path === "/api/boards/slots" && method === "POST") {
-    const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string }[];
+    if (holdSave) await holdSave;
+    const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string; rev?: string; target?: { kind: string } }[];
     const dead = asked.find((b) => goneBoards.has(b.boardId));
-    if (dead) {
+    const side = (b: { target?: { kind: string } }) => (b.target?.kind === "plan" ? "plan" : "default");
+    const stale = asked.find((b) => b.rev !== undefined && b.rev !== revOf(b.boardId, side(b)));
+    if (stale) {
+      status = 409;
+      out = { error: `Board "${boards.find((x) => x.id === stale.boardId)?.name}": It was changed elsewhere since this page read it. Nothing was saved.` };
+    } else if (dead) {
       status = 404;
       out = { error: `Board "${dead.boardId}": There is no board ${dead.boardId}.` };
     } else if (failSave) {
       status = 400;
       out = { error: failSave };
-    } else out = STATE();
+    } else {
+      for (const b of asked) revs[`${b.boardId}|${side(b)}`] = (revs[`${b.boardId}|${side(b)}`] ?? 0) + 1;
+      out = STATE();
+    }
   } else if (/^\/api\/boards\/[^/]+$/.test(path) && method === "DELETE") out = STATE();
   else if (/\/copy-from$|\/promote$|\/override\/[^/]+$/.test(path)) out = STATE();
   else if (/^\/api\/boards\/[^/]+$/.test(path) && method === "PATCH") out = boards;
+  else if (path === "/api/views/v-pad" && method === "PATCH") {
+    const sent = JSON.parse(body ?? "{}") as { layout: unknown; layoutRev?: number };
+    if (sent.layoutRev !== undefined && sent.layoutRev !== padRev) {
+      status = 409;
+      out = { error: "The layout was changed elsewhere." };
+    } else {
+      padRev++;
+      padLayout = sent.layout;
+      out = STATE();
+    }
+  }
   return {
     ok: status < 400,
     status,
@@ -202,6 +265,11 @@ beforeEach(() => {
   failing = new Set();
   leftDisplayWidth = null;
   goneBoards = new Set();
+  revs = {};
+  holdSave = null;
+  withWidgets = false;
+  padRev = 0;
+  padLayout = null;
   presets = [];
   resolvedExtras = {};
   checkNoCapsule = [];
@@ -537,6 +605,21 @@ describe("Save all", () => {
     assert.equal(sent.boards.find((b) => b.boardId === "b-left")!.slots.length, 6, "five slots and a spacer, plus the new one");
     assert.deepEqual(sent.boards[0]!.target, { kind: "default", serviceTypeId: "st-1" });
     assert.ok(!unsaved(), "saved");
+  });
+
+  test("+ Slot and + Spacer work with no crypto.randomUUID, as over plain HTTP", async () => {
+    const real = Object.getOwnPropertyDescriptor(globalThis.crypto, "randomUUID");
+    Object.defineProperty(globalThis.crypto, "randomUUID", { value: undefined, configurable: true, writable: true });
+    try {
+      await mount();
+      await click(within(section("b-right")).getByRole("button", { name: "Slot" }));
+      await click(within(section("b-right")).getByRole("button", { name: "Spacer" }));
+      assert.equal(section("b-right").querySelectorAll("[data-mic-slot]").length, 3, "a third slot");
+      assert.equal(section("b-right").querySelectorAll("[data-mic-spacer]").length, 1, "and a spacer");
+    } finally {
+      if (real) Object.defineProperty(globalThis.crypto, "randomUUID", real);
+      else delete (globalThis.crypto as { randomUUID?: unknown }).randomUUID;
+    }
   });
 
   test("a board nobody touched is not in it", async () => {
@@ -1202,5 +1285,242 @@ describe("the inspector folds away with nothing selected", () => {
     await click(toggle());
     assert.equal(isOpen(), false, "closing by the button clears the selection");
     assert.equal(card("a").getAttribute("aria-pressed"), "false");
+  });
+
+  test("Column width on a stacked card sets its column's width, which the lead carries", async () => {
+    boards = BOARDS().map((b) => (b.id === "b-left" ? { ...b, columnWidthIn: 3.49 } : b));
+    await mountWithChrome();
+    await press(card("c"));
+    const input = within(inspector()).getByLabelText("Column width (inches)") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "5" } });
+    });
+    await settle();
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const sent = (JSON.parse(posts("/api/boards/slots")[0]!.body!) as { boards: { boardId: string; slots: Slot[] }[] }).boards[0]!.slots;
+    assert.deepEqual(sent.filter((x) => x.id === "b" || x.id === "c").map((x) => [x.id, x.widthIn ?? null]), [["b", 5], ["c", null]], "the width landed on a card no screen reads it from");
+  });
+});
+
+// ── where the unsaved work is saved, and over what ──────────────────────────
+
+const sentBoards = (i = 0) =>
+  (JSON.parse(posts("/api/boards/slots")[i]!.body!) as { boards: { boardId: string; slots: Slot[]; target: { kind: string; planId?: string }; rev?: string }[] }).boards;
+const leftSlot = () => within(section("b-left")).getByRole("button", { name: "Slot" });
+const rightSlot = () => within(section("b-right")).getByRole("button", { name: "Slot" });
+const frame = async () => {
+  await act(async () => emit("stage:state-changed", STATE()));
+  await settle();
+};
+
+describe("the target moving under unsaved work", () => {
+  test("the live plan advancing keeps the edits on the plan they were made for", async () => {
+    planId = "p1";
+    await mount();
+    await click(leftSlot());
+    planId = "p2";
+    await frame();
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.equal(sentBoards()[0]!.target.planId, "p1", "one week's edits were saved onto the next");
+    assert.ok(document.body.textContent!.includes("The plan moved on"), "the operator is told");
+  });
+
+  test("the live plan clearing does not drop the edits onto the default", async () => {
+    planId = "p1";
+    await mount();
+    await click(leftSlot());
+    planId = null;
+    await frame();
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.deepEqual(sentBoards()[0]!.target.kind, "plan", "a plan's edits were saved as the type's default");
+    assert.equal(sentBoards()[0]!.target.planId, "p1");
+  });
+
+  test("with nothing unsaved, the editor follows the plan forward", async () => {
+    planId = "p1";
+    await mount();
+    planId = "p2";
+    await frame();
+    await click(leftSlot());
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.equal(sentBoards()[0]!.target.planId, "p2");
+  });
+});
+
+describe("a board saved from another browser", () => {
+  test("Save all carries the revision each board's edits were made over", async () => {
+    revs = { "b-left|default": 4 };
+    await mount();
+    await click(leftSlot());
+    await click(rightSlot());
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.deepEqual(sentBoards().map((b) => [b.boardId, b.rev]).sort(), [["b-left", "r4"], ["b-right", "r0"]]);
+  });
+
+  test("a stale revision asks before saving over it, and Cancel keeps the work and names the board", async () => {
+    await mount();
+    await click(leftSlot());
+    revs = { "b-left|default": 1 }; // saved elsewhere
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.ok((alertDialog().textContent ?? "").includes("Left wall"), "the question names the board");
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.ok(unsaved(), "the work is kept");
+    assert.ok(within(section("b-left")).getByRole("alert").textContent!.includes("changed elsewhere"));
+    assert.equal(posts("/api/boards/slots").length, 1, "nothing was sent again");
+  });
+
+  test("Save over it sends the edits again over what is saved now", async () => {
+    await mount();
+    await click(leftSlot());
+    revs = { "b-left|default": 1 };
+    await click(screen.getByRole("button", { name: "Save all" }));
+    await click(within(alertDialog()).getByRole("button", { name: "Save over it" }));
+    await settle();
+    assert.equal(posts("/api/boards/slots").length, 2);
+    assert.equal(sentBoards(1)[0]!.rev, "r1");
+    assert.ok(!unsaved(), "saved");
+  });
+
+  test("a stage-state frame whose screens changed re-reads the layouts; a telemetry-only one does not", async () => {
+    await mount();
+    const reads = () => requests.filter((r) => r.method === "GET" && r.url.includes("/targets")).length;
+    const before = reads();
+    await act(async () =>
+      emit("stage:state-changed", { ...STATE(), slotsByView: { "v-left": [slot("a", { device: { status: "ok", rf: 3, battery: 50, freq: null, audioLevel: 0.4, charge: null, iemCharge: null, label: null, iemLabel: null } })] } }),
+    );
+    await settle();
+    const afterFirst = reads();
+    assert.ok(afterFirst > before, "the layouts were not read again");
+    await act(async () =>
+      emit("stage:state-changed", { ...STATE(), slotsByView: { "v-left": [slot("a", { device: { status: "ok", rf: 1, battery: 20, freq: null, audioLevel: 0.9, charge: null, iemCharge: null, label: null, iemLabel: null } })] } }),
+    );
+    await settle();
+    assert.equal(reads(), afterFirst, "telemetry alone re-read them");
+  });
+});
+
+describe("a board whose layouts could not be read", () => {
+  test("cannot be edited, says why, and does not hide the other board's empty state", async () => {
+    layouts["b-left"] = [];
+    failing = new Set(["GET /api/boards/b-right/targets"]);
+    await mount();
+    assert.equal((rightSlot() as HTMLButtonElement).disabled, true, "+ Slot on a board that was not read");
+    assert.equal((within(section("b-right")).getByRole("button", { name: "Spacer" }) as HTMLButtonElement).disabled, true);
+    assert.ok(section("b-right").querySelector("[data-mic-unread]")?.textContent?.includes("Couldn't read"), "it says why");
+    assert.equal(section("b-right").querySelector("[data-mic-gap]"), null, "no drop zone on it");
+    assert.ok(document.querySelector('[data-mic-empty="b-left"]'), "the other board's empty state is hidden");
+    assert.equal((leftSlot() as HTMLButtonElement).disabled, false);
+  });
+
+});
+
+describe("Save all while the operator keeps editing", () => {
+  test("an edit made while the save is in flight stays unsaved", async () => {
+    let release!: () => void;
+    holdSave = new Promise<void>((r) => (release = r));
+    await mount();
+    await click(leftSlot());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    });
+    await settle();
+    await click(leftSlot());
+    await act(async () => release());
+    await settle();
+    assert.ok(unsaved(), "the second card was thrown away with the first");
+    assert.equal(section("b-left").querySelectorAll("[data-mic-slot]").length, 6, "four slots, plus both new ones");
+    holdSave = null;
+    await click(screen.getByRole("button", { name: "Save all" }));
+    assert.equal(sentBoards(1)[0]!.rev, "r1", "the edit made in flight is over what that save wrote");
+  });
+});
+
+describe("two widgets in one view", () => {
+  test("charger widths for both land: the second uses the revision the first produced", async () => {
+    withWidgets = true;
+    boards = BOARDS().map((b) =>
+      b.id === "b-left"
+        ? { ...b, shownOn: [...b.shownOn, { kind: "object", id: "g-1", name: "Stage Pad", viewId: "v-pad" }, { kind: "object", id: "g-2", name: "Stage Pad", viewId: "v-pad" }] }
+        : b,
+    ) as SlotBoardDTO[];
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Charger layout…" }));
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    await settle();
+    const pads = requests.filter((r) => r.method === "PATCH" && r.url.endsWith("/api/views/v-pad"));
+    assert.deepEqual(pads.map((r) => (JSON.parse(r.body!) as { layoutRev: number }).layoutRev), [0, 1]);
+    assert.equal(padRev, 2, "the second widget's width was refused");
+    assert.ok(!document.body.textContent!.includes("Couldn't set the display width"));
+  });
+});
+
+describe("plan-wide Revert and Set as default from the Default side", () => {
+  test("are off, even with a plan layout to act on", async () => {
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+    await mount();
+    await click(screen.getByRole("button", { name: /Weekend default/ }));
+    await openMenu(screen.getByRole("button", { name: "Plan board actions" }));
+    assert.equal(screen.getByRole("menuitem", { name: /^Revert/ }).getAttribute("aria-disabled"), "true");
+    assert.equal(screen.getByRole("menuitem", { name: /^Set .* as/ }).getAttribute("aria-disabled"), "true");
+  });
+});
+
+describe("a dialog whose write failed", () => {
+  const dialogOpen = () => !!screen.queryByRole("dialog");
+
+  test("New board stays open when the board could not be made", async () => {
+    failing = new Set(["POST /api/boards"]);
+    await mount();
+    await click(screen.getByRole("button", { name: "New board" }));
+    await act(async () => {
+      fireEvent.change(document.getElementById("new-board-name")!, { target: { value: "Choir" } });
+    });
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create board" }));
+    assert.ok(dialogOpen(), "the dialog closed on a board that was never made");
+  });
+
+  test("Delete stays open when the delete was refused", async () => {
+    failing = new Set(["DELETE /api/boards/b-right"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Right wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Delete board…" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete board" }));
+    assert.ok(dialogOpen(), "the dialog closed on a board that is still there");
+  });
+
+  test("Copy stays open when the copy was refused", async () => {
+    failing = new Set(["POST /api/boards/b-left/copy-from"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: /Copy this board from/ }));
+    await pickOption("Copy from", "b-right");
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Copy" }));
+    await click(within(alertDialog()).getByRole("button", { name: "Copy" }));
+    assert.ok(dialogOpen(), "the dialog closed on a copy that never landed");
+  });
+
+  test("Charger layout stays open when the column width was refused", async () => {
+    failing = new Set(["PATCH /api/boards/b-left"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Charger layout…" }));
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    assert.ok(dialogOpen(), "the dialog closed on a width that was never set");
+  });
+});
+
+describe("duplicating a board with unsaved changes", () => {
+  test("says the copy is of the saved layout, and Cancel duplicates nothing", async () => {
+    await mount();
+    await click(leftSlot());
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Duplicate board" }));
+    assert.ok((alertDialog().textContent ?? "").includes("unsaved"), "it says the unsaved changes are not in the copy");
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.equal(requests.filter((r) => r.method === "POST" && r.url.endsWith("/duplicate")).length, 0);
   });
 });

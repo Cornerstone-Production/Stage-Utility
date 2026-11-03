@@ -112,6 +112,10 @@ export interface SlotInspectorProps {
   where: string;
   /** The board's charger column width, or null when it is not aligned. */
   columnWidthIn: number | null;
+  /** The card leading this slot's column (the slot itself when it leads): a
+   *  column's width is read off its lead, so Column width edits that card. */
+  columnLead: Slot;
+  onLeadChange: (fn: (s: Slot) => Slot) => void;
   stack: { stacked: boolean; canStack: boolean };
   /** How many OTHER slots on the board share this slot's exact positions. */
   sharesWith: number;
@@ -133,6 +137,8 @@ export function SlotInspector(props: SlotInspectorProps) {
     return b == null ? ch.label : `${ch.label} · ${b}%`;
   };
   const set = (patch: Partial<Slot>) => onChange((s) => ({ ...s, ...patch }));
+  const lead = props.columnLead;
+  const setLead = (patch: Partial<Slot>) => props.onLeadChange((s) => ({ ...s, ...patch }));
 
   const mode = modeOf(slot);
   const link = slot.link;
@@ -367,19 +373,19 @@ export function SlotInspector(props: SlotInspectorProps) {
           <Switch aria-label="Stacked" checked={stack.stacked} disabled={!stack.stacked && !stack.canStack} onCheckedChange={() => props.onToggleStack()} />
         </Row>
         {columnWidthIn != null && (
-          <Row label="Column width" hint={slot.widthIn == null ? "Auto: the board's charger width" : undefined}>
+          <Row label="Column width" hint={lead.widthIn == null ? "Auto: the board's charger width" : undefined}>
             <div className="flex items-center gap-1">
               <NumberInput
-                value={slot.widthIn ?? columnWidthIn}
+                value={lead.widthIn ?? columnWidthIn}
                 step={0.1}
                 min={0.1}
                 suffix="in"
                 className="w-28"
                 aria-label="Column width (inches)"
-                onChange={(n) => set({ widthIn: n })}
+                onChange={(n) => setLead({ widthIn: n })}
               />
-              {slot.widthIn != null && (
-                <Button variant="transparent" size="small" onClick={() => set({ widthIn: undefined })}>
+              {lead.widthIn != null && (
+                <Button variant="transparent" size="small" onClick={() => setLead({ widthIn: undefined })}>
                   Auto
                 </Button>
               )}

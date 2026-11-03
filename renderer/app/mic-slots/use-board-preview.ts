@@ -1,10 +1,15 @@
-// A board's slots as a screen would draw them: names, photos and live telemetry
+// A board's slots as a screen would draw them: names, photos and device readings
 // filled in for the layout being edited.
 //
 // The structure (which card is where, in which column) is always the DRAFT's, so
 // a move shows at once. The people and devices come from the server's resolver,
 // debounced, and are laid over the draft by slot id; a card the resolver has not
 // answered for yet (one just added) draws as the draft is.
+//
+// The device readings (battery, RF, level) are as of that resolve, which runs on
+// an edit or a target change and not on telemetry: this is an editor, and asking
+// the server again for every board on every meter twitch is not worth it. The
+// screens themselves are live; this preview is not.
 
 import { useEffect, useMemo, useState } from "react";
 

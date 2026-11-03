@@ -14,6 +14,7 @@ import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 import { createSubscribeReporter } from "./subscribe-reporter";
+import { uid } from "./uid";
 
 type Params = Record<string, unknown> | undefined;
 
@@ -1142,13 +1143,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "boards:delete":
       return delWithBody<T>(`/api/boards/${encodeURIComponent(p.id as string)}`, { replacement: p.replacement ?? null });
 
-    case "boards:targets": {
-      const q = new URLSearchParams();
-      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
-      if (p.planId) q.set("planId", String(p.planId));
-      const tail = q.size > 0 ? `?${q}` : "";
-      return apiFetch<T>(`/api/boards/${encodeURIComponent(p.id as string)}/targets${tail}`);
-    }
+    case "boards:targets":
+      return apiFetch<T>(`/api/boards/${encodeURIComponent(p.id as string)}/targets${boardTargetQuery(p)}`);
 
     // Save all: every dirty board in one request, all or nothing.
     case "boards:saveAll":
@@ -1168,13 +1164,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
         target: p.target,
       });
 
-    case "boards:check": {
-      const q = new URLSearchParams();
-      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
-      if (p.planId) q.set("planId", String(p.planId));
-      const tail = q.size > 0 ? `?${q}` : "";
-      return apiFetch<T>(`/api/boards/check${tail}`);
-    }
+    case "boards:check":
+      return apiFetch<T>(`/api/boards/check${boardTargetQuery(p)}`);
 
     case "views:setBoard":
       return put<T>(`/api/views/${encodeURIComponent(p.id as string)}/board`, { boardId: p.boardId ?? null });
@@ -1876,18 +1867,17 @@ export function __resetReplayCacheForTests(): void {
   contentAt.clear();
 }
 
-// Stable per-context client id, sent on the SSE URL so the server can scope this
-// stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
-// context (prod is plain HTTP), so guard it and fall back.
-function genClientId(): string {
-  try {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  } catch {
-    /* insecure context — fall through */
-  }
-  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+/** "?serviceTypeId=…&planId=…" for the boards reads that take a target, or "". */
+function boardTargetQuery(p: Record<string, unknown>): string {
+  const q = new URLSearchParams();
+  if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+  if (p.planId) q.set("planId", String(p.planId));
+  return q.size > 0 ? `?${q}` : "";
 }
-const CLIENT_ID = genClientId();
+
+// Stable per-context client id, sent on the SSE URL so the server can scope this
+// stream's channel filter to us. uid() carries the plain-HTTP fallback.
+const CLIENT_ID = uid("c");
 
 // Tell the server exactly which channels this client renders so it can skip the
 // rest (e.g. a mic display never gets the 4 Hz spl:metrics firehose). Debounced to

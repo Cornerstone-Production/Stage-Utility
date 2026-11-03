@@ -452,6 +452,11 @@ export interface SlotTargetsDTO {
   planSortDate: string | null;
   defaultSlots: Slot[];
   overrideSlots: Slot[] | null;
+  /** The revision of `defaultSlots` and of `overrideSlots` (absent counts). A
+   *  save-all entry carries the one for its target as `rev`, and the server
+   *  refuses it with a 409 when the board was saved elsewhere since. */
+  defaultRev: string;
+  overrideRev: string;
 }
 
 /**
