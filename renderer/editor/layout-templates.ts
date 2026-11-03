@@ -7,15 +7,11 @@
 import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
 import type { LayoutDTO } from "@main/types/stage";
 import { CARD_PRESETS, HAIRLINE_COLOR, PILL } from "../main/layout-objects";
+import { uid } from "../lib/uid";
 
-export function uid(): string {
-  const c = globalThis.crypto;
-  if (c?.randomUUID) return c.randomUUID();
-  if (c?.getRandomValues) {
-    return Array.from(c.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
+// Re-exported so the editor's existing imports keep working; the one id helper
+// (and its plain-HTTP fallback) lives in lib/uid.ts.
+export { uid };
 
 // Build the built-in "Dashboard" starter layout as editable nested objects: a
 // 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and

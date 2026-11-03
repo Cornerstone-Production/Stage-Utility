@@ -104,12 +104,16 @@ export class HomeSnoozes {
   async snooze(key: unknown, severity: unknown, pcoConfigured: boolean): Promise<HomeSnooze> {
     if (typeof key !== "string" || !SNOOZE_KEY.test(key)) throw new SnoozeRefused("key must look like source:subject");
     if (!isSeverity(severity)) throw new SnoozeRefused('severity must be "critical" or "warn"');
-    if (!this.snoozes.has(key) && this.snoozes.size >= SNOOZE_MAX) {
-      throw new SnoozeRefused(`${SNOOZE_MAX} snoozes are already held; unsnooze some first`);
-    }
     const now = Date.now();
     const entry: HomeSnooze = { key, severity, at: now, expiresAt: now + (pcoConfigured ? SNOOZE_BACKSTOP_MS : SNOOZE_NO_PCO_MS) };
-    await this.commit(() => new Map(this.snoozes).set(key, entry));
+    // The cap is checked here, inside the queue, against what is held by the time
+    // this turn comes: checked before queueing, two posts at 499 both passed.
+    await this.commit(() => {
+      if (!this.snoozes.has(key) && this.snoozes.size >= SNOOZE_MAX) {
+        throw new SnoozeRefused(`${SNOOZE_MAX} snoozes are already held; unsnooze some first`);
+      }
+      return new Map(this.snoozes).set(key, entry);
+    });
     console.log(`[home] snoozed ${scrub(key)} (${scrub(severity)}) until ${scrub(pcoConfigured ? "next service (7 days at most)" : "12 hours from now")}`);
     return entry;
   }

@@ -89,7 +89,7 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
 // binding. Any slot may carry an IEM (vocalist, musician, etc.); independent of
 // the primary mic; only shows while that device is online. (Offline IEM labels
 // are separate — see slot.iemLabel.)
-function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>): number | null {
+function resolveIem(slot: Slot, deviceStatuses: ReadonlyMap<string, DeviceStatus>): number | null {
   if (!slot.iemBinding) return null;
   const ds = deviceStatuses.get(slot.iemBinding.channelId);
   return ds && ds.online ? ds.battery : null;
@@ -101,7 +101,7 @@ function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>): numb
 function resolveCharge(
   slot: Slot,
   device: SlotDevice,
-  deviceStatuses: Map<string, DeviceStatus>,
+  deviceStatuses: ReadonlyMap<string, DeviceStatus>,
 ): number | null {
   const src = slot.chargeSource ?? "mic";
   if (src === "off") return null;
@@ -111,6 +111,28 @@ function resolveCharge(
     return bay && bay.online ? bay.battery : null;
   }
   return device.battery; // "mic"
+}
+
+/**
+ * A slot's device readings from its bindings: the mic's battery, RF and level,
+ * its IEM pack, its charge bar, and its offline labels. The one mapping from
+ * telemetry to a card, used by the resolver here and by the Mic slots page's
+ * previews, which lay live telemetry over a resolve without asking for another.
+ */
+export function slotDevice(slot: Slot, deviceStatuses: ReadonlyMap<string, DeviceStatus>): SlotDevice {
+  let device = EMPTY_DEVICE;
+  if (slot.deviceBinding) {
+    const ds = deviceStatuses.get(slot.deviceBinding.channelId);
+    if (ds) device = deviceStatusToSlotDevice(ds);
+  }
+  return {
+    ...device,
+    charge: resolveCharge(slot, device, deviceStatuses),
+    iemCharge: resolveIem(slot, deviceStatuses),
+    // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
+    label: slot.deviceLabel ?? null,
+    iemLabel: slot.iemLabel ?? null,
+  };
 }
 
 // Normalize a PCO team-position name so sub-variants group with their base:
@@ -465,20 +487,7 @@ export function resolveSlots(
 
     // Static slots keep their label and color; no PCO lookup.
     if (slot.link.kind === "static") {
-      let device = EMPTY_DEVICE;
-      if (slot.deviceBinding) {
-        const ds = deviceStatuses.get(slot.deviceBinding.channelId);
-        if (ds) device = deviceStatusToSlotDevice(ds);
-      }
-      device = {
-        ...device,
-        charge: resolveCharge(slot, device, deviceStatuses),
-        iemCharge: resolveIem(slot, deviceStatuses),
-        // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
-        label: slot.deviceLabel ?? null,
-        iemLabel: slot.iemLabel ?? null,
-      };
-      return { ...slot, device };
+      return { ...slot, device: slotDevice(slot, deviceStatuses) };
     }
 
     // PCO-linked slots.
@@ -491,19 +500,7 @@ export function resolveSlots(
         ? heldPositions(link.positions, member, members)
         : undefined;
 
-    let device = EMPTY_DEVICE;
-    if (slot.deviceBinding) {
-      const ds = deviceStatuses.get(slot.deviceBinding.channelId);
-      if (ds) device = deviceStatusToSlotDevice(ds);
-    }
-    device = {
-      ...device,
-      charge: resolveCharge(slot, device, deviceStatuses),
-      iemCharge: resolveIem(slot, deviceStatuses),
-      // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
-      label: slot.deviceLabel ?? null,
-      iemLabel: slot.iemLabel ?? null,
-    };
+    const device = slotDevice(slot, deviceStatuses);
 
     const memberPrep = member?.personId ? prep.get(member.personId) : undefined;
     return {

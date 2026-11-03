@@ -516,11 +516,14 @@ export function CompanionPageBody({
   reading,
   pick,
   size,
+  footer,
 }: {
   page: number | null;
   reading: boolean;
   pick?: CompanionPick;
   size?: "large";
+  /** Drawn under the grid, from the page that was read (Browse buttons' extent line). */
+  footer?: (view: CompanionPageView) => ReactNode;
 }) {
   const query = useQuery({
     queryKey: ["companion:page", page],
@@ -537,5 +540,12 @@ export function CompanionPageBody({
   const view = query.data;
   if (!view) return <p className={quiet}>Companion has no page with buttons on it.</p>;
   if (!view.ok) return <ErrorNote>Could not read page {page}: {view.reason}</ErrorNote>;
-  return <CompanionPageGrid view={view} pick={pick} size={size} />;
+  const grid = <CompanionPageGrid view={view} pick={pick} size={size} />;
+  if (!footer) return grid;
+  return (
+    <>
+      {grid}
+      {footer(view)}
+    </>
+  );
 }

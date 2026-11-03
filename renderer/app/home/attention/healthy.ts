@@ -7,6 +7,21 @@ import { splitByPresence } from "../readiness";
 import { integrationHealth } from "../../context-bar";
 import { attentionKey, type AttentionInput, type AttentionItem } from "./types";
 
+/** Whether any source this tile reads has answered. "Checking" versus "All
+ *  clear" turns on this, not on whether the healthy line happens to be empty: a
+ *  tile whose every problem is snoozed has nothing healthy and is still clear. */
+export function anySourceKnown(input: AttentionInput): boolean {
+  return (
+    input.onlineKnown ||
+    input.wirelessKnown ||
+    input.integrationsKnown ||
+    input.reaperKnown ||
+    input.obsKnown ||
+    input.resiKnown ||
+    input.youtubeKnown
+  );
+}
+
 export function healthyLine(input: AttentionInput, items: readonly AttentionItem[]): string[] {
   const bad = new Set(items.map((i) => i.key));
   const out: string[] = [];
@@ -32,7 +47,7 @@ export function healthyLine(input: AttentionInput, items: readonly AttentionItem
 
   if (input.integrationsKnown) {
     for (const i of integrationHealth(input.integrations).setUp) {
-      if (i.connection !== "connected" || bad.has(`integration-down:${i.id}`)) continue;
+      if (i.connection !== "connected" || bad.has(attentionKey("integration-down", i.id))) continue;
       const label = input.integrationLabels[i.id] ?? i.id;
       // A streaming platform says what it is doing, as the mockup does: "Resi
       // streaming" or "Resi idle". Until its status answers it says nothing.

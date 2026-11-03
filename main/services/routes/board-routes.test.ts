@@ -145,6 +145,104 @@ describe("POST /api/boards/slots — save all", () => {
     assert.deepEqual(ids(await slotsStore.getDefault("b-left", TYPE)), ["before"]);
   });
 
+  it("refuses a board saved elsewhere since its rev was read (409), and writes nothing", async () => {
+    await slotsStore.setDefault("b-left", TYPE, [slot("ours")]);
+    const read = async (id: string) =>
+      (await call(boardRoutes, `/api/boards/${id}/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string; overrideRev: string };
+    const left = await read("b-left");
+    const right = await read("b-right");
+    // Another browser saves Left in between.
+    await call(boardRoutes, "/api/boards/slots", "POST", { boards: [{ boardId: "b-left", slots: [slot("theirs")], target: { kind: "default", serviceTypeId: TYPE } }] });
+    const r = await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [
+        { boardId: "b-left", slots: [slot("mine")], target: { kind: "default", serviceTypeId: TYPE }, rev: left.defaultRev },
+        { boardId: "b-right", slots: [slot("r")], target: { kind: "default", serviceTypeId: TYPE }, rev: right.defaultRev },
+      ],
+    });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /^Board "Left": .*changed/);
+    assert.deepEqual(ids(await slotsStore.getDefault("b-left", TYPE)), ["theirs"]);
+    assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), [], "the other board landed though the save was refused");
+    // The rev read now is the current one, and saves.
+    const again = await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [{ boardId: "b-left", slots: [slot("mine")], target: { kind: "default", serviceTypeId: TYPE }, rev: (await read("b-left")).defaultRev }],
+    });
+    assert.equal(again.status, 200, JSON.stringify(again.json));
+  });
+
+  it("names EVERY board saved elsewhere, not the first, so Save over it cannot overwrite one unseen", async () => {
+    const read = async (id: string) =>
+      (await call(boardRoutes, `/api/boards/${id}/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string };
+    const left = await read("b-left");
+    const right = await read("b-right");
+    // Another browser saves both.
+    await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [
+        { boardId: "b-left", slots: [slot("theirs-l")], target: { kind: "default", serviceTypeId: TYPE } },
+        { boardId: "b-right", slots: [slot("theirs-r")], target: { kind: "default", serviceTypeId: TYPE } },
+      ],
+    });
+    const r = await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [
+        { boardId: "b-left", slots: [slot("mine-l")], target: { kind: "default", serviceTypeId: TYPE }, rev: left.defaultRev },
+        { boardId: "b-right", slots: [slot("mine-r")], target: { kind: "default", serviceTypeId: TYPE }, rev: right.defaultRev },
+      ],
+    });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const body = r.json as { error: string; code: string; boards: { boardId: string; name: string; target: string }[] };
+    assert.equal(body.code, "boards-changed");
+    assert.deepEqual(body.boards, [
+      { boardId: "b-left", name: "Left", target: `default:${TYPE}` },
+      { boardId: "b-right", name: "Right", target: `default:${TYPE}` },
+    ], "the refusal named only some of the boards changed elsewhere");
+    assert.match(body.error, /^Boards "Left", "Right": /);
+    assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), ["theirs-r"]);
+  });
+
+  it("two saves sent at the same rev at once: one lands, the other is refused (409)", async () => {
+    await slotsStore.setDefault("b-left", TYPE, [slot("ours")]);
+    const { defaultRev } = (await call(boardRoutes, `/api/boards/b-left/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string };
+    const save = (name: string) =>
+      call(boardRoutes, "/api/boards/slots", "POST", {
+        boards: [{ boardId: "b-left", slots: [slot(name)], target: { kind: "default", serviceTypeId: TYPE }, rev: defaultRev }],
+      });
+    const [a, b] = await Promise.all([save("a"), save("b")]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409], "both saves made at one rev landed; the first was overwritten unseen");
+  });
+
+  it("checks a plan save against the plan's own layout, which a default save does not change", async () => {
+    ctl.state = { ...ctl.state, planId: PLAN };
+    const read = async () =>
+      (await call(boardRoutes, `/api/boards/b-left/targets?serviceTypeId=${TYPE}&planId=${PLAN}`)).json as { defaultRev: string; overrideRev: string };
+    const before = await read();
+    await call(boardRoutes, "/api/boards/slots", "POST", { boards: [{ boardId: "b-left", slots: [slot("d")], target: { kind: "default", serviceTypeId: TYPE } }] });
+    const plan = { kind: "plan", planId: PLAN, serviceTypeId: TYPE };
+    const ok = await call(boardRoutes, "/api/boards/slots", "POST", { boards: [{ boardId: "b-left", slots: [slot("p1")], target: plan, rev: before.overrideRev }] });
+    assert.equal(ok.status, 200, "a default save is not a change to the plan's own layout");
+    const stale = await call(boardRoutes, "/api/boards/slots", "POST", { boards: [{ boardId: "b-left", slots: [slot("p2")], target: plan, rev: before.overrideRev }] });
+    assert.equal(stale.status, 409);
+    assert.deepEqual(ids((await slotsStore.getOverride("b-left", PLAN))?.slots), ["p1"]);
+  });
+
+  it("writes nothing for a board deleted while the save was checking its target", async () => {
+    const c = stageController as unknown as { assertTargetPlanBelongs: (t: unknown) => Promise<void> };
+    const real = c.assertTargetPlanBelongs;
+    c.assertTargetPlanBelongs = async function (this: unknown, t: unknown) {
+      await real.call(this, t);
+      // A DELETE /api/boards/b-right lands during this await.
+      if (ctl.boards.has("b-right")) await call(boardRoutes, "/api/boards/b-right", "DELETE", { replacement: null });
+    };
+    try {
+      const r = await call(boardRoutes, "/api/boards/slots", "POST", {
+        boards: [{ boardId: "b-right", slots: [slot("ghost")], target: { kind: "default", serviceTypeId: TYPE } }],
+      });
+      assert.equal(r.status, 404, JSON.stringify(r.json));
+      assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), [], "rows were written for a deleted board");
+    } finally {
+      c.assertTargetPlanBelongs = real;
+    }
+  });
+
   it("refuses one board named twice for one target", async () => {
     const r = await call(boardRoutes, "/api/boards/slots", "POST", {
       boards: [{ boardId: "b-left", slots: [] }, { boardId: "b-left", slots: [slot("x")] }],

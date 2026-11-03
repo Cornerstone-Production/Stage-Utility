@@ -13,21 +13,13 @@ import { useRouterHandle } from "../lib/use-search-param";
 import { Button, Input, toast } from "../components/ui";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { gridBoardId } from "@main/services/slot-boards";
+import { gridBoardId, pointedGrid } from "@main/services/slot-boards";
 import { Row, RowNumber, RowSelect } from "./inspector-rows";
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
 const NONE = "__none__";
 const NEW = "__new__";
-
-/** The config as a board-pointing widget stores it: the legacy fields dropped, and
- *  the display width they may have carried kept. */
-export function pointedAt(c: GridConfig, boardId: string | null): GridConfig {
-  const { source: _s, sourceViewId: _v, slotsLayout, ...rest } = c;
-  const displayWidthIn = c.displayWidthIn ?? slotsLayout?.displayWidthIn ?? null;
-  return { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
-}
 
 /** Which other screens and widgets show the board: editing it changes them too. */
 function AlsoOn({ board, objectId }: { board: SlotBoardDTO | undefined; objectId: string }) {
@@ -66,7 +58,7 @@ export function SlotsGridBoard({
     try {
       const made = await invoke<{ id: string; boards: SlotBoardDTO[] }>("boards:create", { name: trimmed });
       qc.setQueryData(["boards:list"], made.boards);
-      onConfig(pointedAt(config, made.id));
+      onConfig(pointedGrid(config, made.id));
       setNaming(false);
       setName("");
     } catch (err) {
@@ -93,7 +85,7 @@ export function SlotsGridBoard({
           if (v === NEW) setNaming(true);
           else {
             setNaming(false);
-            onConfig(pointedAt(config, v === NONE ? null : v));
+            onConfig(pointedGrid(config, v === NONE ? null : v));
           }
         }}
       />
@@ -128,8 +120,8 @@ export function SlotsGridBoard({
         min={1}
         suffix="in"
         placeholder="Not set"
-        onChange={(n) => onConfig({ ...pointedAt(config, current), displayWidthIn: n })}
-        onUnset={() => onConfig({ ...pointedAt(config, current), displayWidthIn: null })}
+        onChange={(n) => onConfig(pointedGrid(config, current, n))}
+        onUnset={() => onConfig(pointedGrid(config, current, null))}
       />
       {current && (
         router ? (

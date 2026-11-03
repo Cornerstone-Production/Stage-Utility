@@ -23,6 +23,8 @@ page first loads.
 | `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
 | `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses |
+| `wireless:chargers` | ~0.3 KB per bay | when a bay's reading changes (a charging pack moves about a percent a minute), only to a page drawing bays: a Charger battery widget, the Mic slots page |
+| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page; screens do not name it |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
 
@@ -60,6 +62,20 @@ the channels it renders and left this one out is not sent the changes. Every kio
 screen names this channel, whatever it shows, so that an alert can draw over it;
 a Screens-card preview does not. In a layout it is otherwise named only by one
 that holds a Messages or Message composer widget.
+
+### Slot boards
+
+`boards:changed` tells an open [Mic slots page](../slots.md#the-mic-slots-page)
+which boards a write changed, from wherever it was made: `{ epoch, seq, boards:
+[{ id, meta, targets }] }`, where `meta` says the board was created, deleted,
+renamed or resized and `targets` lists its changed layouts as
+`default:<serviceTypeId>` or `plan:<planId>`. No slot contents travel on it: the
+page re-reads only the layouts named, which is one `GET /api/boards/:id/targets`
+per board it has open. `seq` counts every write since the server started, so a
+page that sees a gap (it reconnected, or the server restarted) re-reads every
+board instead. One frame per save, per board created, renamed or deleted, per
+copy, revert or promote, and per nightly prune that removed something; silent
+otherwise. The connect-time snapshot is the last frame.
 
 ## What keeps it small
 

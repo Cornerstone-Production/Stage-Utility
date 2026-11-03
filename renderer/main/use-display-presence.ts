@@ -50,6 +50,9 @@ export interface DisplayPresenceResult {
   /** When each output last reported in, epoch ms. Exact for one that is not
    *  connected; an output with no entry has never connected. */
   lastSeen: ReadonlyMap<string, number>;
+  /** The hydrate read failed and nothing has answered since: `known` is true
+   *  but the empty set is not "none online". */
+  failed: boolean;
 }
 
 const NO_SEEN: ReadonlyMap<string, number> = new Map();
@@ -77,7 +80,7 @@ const NO_SEEN: ReadonlyMap<string, number> = new Map();
  */
 export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult {
   const read = useCallback(() => invoke<PresenceDTO>("displays:getPresence"), []);
-  const { value: presence, known } = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
+  const { value: presence, known, failed } = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
     clearOnReadFailure: true,
   });
   // Rebuilt only when the frame is: a new Map per render would hand every
@@ -90,5 +93,6 @@ export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult 
     onlineOutputIds: presence?.connected ?? EMPTY,
     known,
     lastSeen,
+    failed,
   };
 }

@@ -53,6 +53,8 @@ export const HYDRATED_CHANNELS = [
   // "broadcast on change" leaves a late subscriber blank indefinitely — exactly
   // the case this list exists for.
   "wireless:channels",
+  // Charger bays: the same reasoning, for a pack sitting in a charger.
+  "wireless:chargers",
   // Feeds are STATE, and rarely change mid-service — a display or the Video
   // feeds page opened after the burst would show nothing until an operator
   // happened to edit a feed.
@@ -67,6 +69,10 @@ export const HYDRATED_CHANNELS = [
   // Snoozes are a decision about this week, made once and standing until a
   // service starts: a Home opened Thursday must show Tuesday's snooze as one.
   "home:snoozes",
+  // The slot boards' write sequence. The Mic slots page reads it as a position,
+  // not an instruction: a frame that is not the next one says a change was
+  // missed, and the page re-reads every board.
+  "boards:changed",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

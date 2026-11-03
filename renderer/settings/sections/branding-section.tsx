@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type ChangeEvent } from "react";
+import { useState, useRef, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { FieldLabel, Button, Input, Switch, toast } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -6,12 +6,13 @@ import type { SectionProps } from "../types";
 import { cn } from "../../lib/cn";
 import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useTrailingCommit } from "../../lib/use-trailing-commit";
 import { errorMessage } from "@main/services/errors";
 import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
 import { ART_MAX, renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
-import { AvatarDialog, EmptySlotDialog, IconDialog, LogoDialog, type EditorSlot } from "./branding-dialogs";
+import { AvatarDialog, EmptySlotDialog, IconDialog, LogoDialog, type EditorSlot, type PickOptions } from "./branding-dialogs";
 import { LogoCropper } from "./logo-cropper";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
@@ -69,39 +70,19 @@ export function BrandingSection({
   // stage:setBranding POSTs, each persisting to disk, recomputing and
   // SSE-broadcasting the whole StageState to every display, and raising a toast.
   //
-  // Trailing edge only, so the value that lands is where the pointer stopped.
-  // Flushed on unmount, or closing the panel mid-drag would drop the last write.
-  const accentSave = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const accentPending = useRef<string | null>(null);
+  // Trailing edge only (useTrailingCommit), so the value that lands is where the pointer
+  // stopped, and it is flushed on unmount.
   // The latest handlers, read when the save fires. The save and the unmount flush
   // depend on `handlers` through this ref, not through their dependency lists: a
-  // page that hands down a new `handlers` on a render would otherwise run the
-  // effect's cleanup, flushing the pending save early and defeating the debounce.
+  // page that hands down a new `handlers` on a render would otherwise flush the
+  // pending save early and defeat the debounce.
   const handlersRef = useRef(handlers);
   useEffect(() => {
     handlersRef.current = handlers;
   }, [handlers]);
-  const commitAccent = useCallback((v: string) => {
-    accentPending.current = v;
-    if (accentSave.current) clearTimeout(accentSave.current);
-    accentSave.current = setTimeout(() => {
-      accentSave.current = null;
-      const next = accentPending.current;
-      accentPending.current = null;
-      if (next != null) handlersRef.current.handleSetBranding({ accentColor: next });
-    }, 250);
-  }, []);
-  useEffect(
-    () => () => {
-      if (!accentSave.current) return;
-      clearTimeout(accentSave.current);
-      accentSave.current = null;
-      const next = accentPending.current;
-      accentPending.current = null;
-      if (next != null) handlersRef.current.handleSetBranding({ accentColor: next });
-    },
-    [],
-  );
+  const commitAccent = useTrailingCommit<string>((next) => {
+    handlersRef.current.handleSetBranding({ accentColor: next });
+  }, 250);
 
   // A file dropped anywhere else on this page — between the cards, or on the dim
   // around an open dialog — would make the browser leave the app and open the file
@@ -318,15 +299,32 @@ export function BrandingSection({
     });
   }
 
+  /** The last custom colour handed over while an icon was being made, run once it is done. */
+  const queuedPick = useRef<(() => Promise<void>) | null>(null);
+  useEffect(() => {
+    if (iconBusy || !queuedPick.current) return;
+    const run = queuedPick.current;
+    queuedPick.current = null;
+    void run();
+  }, [iconBusy]);
+
   /** A home-screen swatch. */
-  async function pickBackground(hex: string) {
+  async function pickBackground(hex: string, options?: PickOptions) {
+    if (options?.whenFree && iconRunning.current) {
+      queuedPick.current = () => pickBackground(hex);
+      return;
+    }
     if (!stageState.appIcon192) return setDraftBackground(hex);
     if (hex === stageState.appIconBackground) return;
     await redrawIcon({ background: hex });
   }
 
   /** A tab swatch: a colour, or "none" for the logo alone. */
-  async function pickTabBackground(value: string) {
+  async function pickTabBackground(value: string, options?: PickOptions) {
+    if (options?.whenFree && iconRunning.current) {
+      queuedPick.current = () => pickTabBackground(value);
+      return;
+    }
     if (!stageState.appIcon192) return setDraftTabBackground(value);
     if (value === stageState.appIconTabBackground) return;
     await redrawIcon({ tabBackground: value });
@@ -566,8 +564,8 @@ export function BrandingSection({
         recolor={stageState.appLogoMonochrome}
         busy={iconBusy}
         editor={editorFor("icon")}
-        onHomeBackground={(hex) => void pickBackground(hex)}
-        onTabBackground={(v) => void pickTabBackground(v)}
+        onHomeBackground={(hex, o) => void pickBackground(hex, o)}
+        onTabBackground={(v, o) => void pickTabBackground(v, o)}
         onRecolor={(on) => void setRecolor(on)}
         onUseLogo={() => void buildIconFromLogo()}
         onClose={closeDialog}

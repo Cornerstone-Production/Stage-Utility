@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       model.hotKeyRegistered(nil)
     } else {
       let taken = status == OSStatus(eventHotKeyExistsErr)
-      let why = taken ? "another app has it" : "macOS refused it (error \(status))"
+      let why = taken ? "this app had already registered it" : "macOS refused it (error \(status))"
       Log.error(.app, "could not register \(HelperHotKey.label) to open the window: \(why)")
       model.hotKeyRegistered(
         "\(HelperHotKey.label) cannot open this window: \(why). The menu bar icon still does, unless an output covers it.")

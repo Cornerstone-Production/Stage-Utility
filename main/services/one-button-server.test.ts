@@ -451,6 +451,9 @@ describe("migrating when something goes wrong", () => {
 async function startEngine(): Promise<void> {
   await automationStore.saveRules([]);
   await viewsStore.save(fixtureViews());
+  // A restart inside one process: the engine reads the emptied store first, so the pass that
+  // follows (which writes through a running engine) is not working from the last suite's rules.
+  await automationEngine.init();
   await runLoadPass(await viewsStore.load(), []);
   await automationEngine.init();
 }

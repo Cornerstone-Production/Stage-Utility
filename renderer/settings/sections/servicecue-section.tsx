@@ -14,13 +14,8 @@ import { plural } from "@main/services/plural";
 import { PublicLinkCard } from "./servicecue-public-link";
 import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
+import { uid } from "@renderer/lib/uid";
 
-// crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
-// is served over — fall back so layout creation never throws there.
-function uid(): string {
-  try { return crypto.randomUUID(); } catch { /* insecure context */ }
-  return `svl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 /** ServiceCue layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
@@ -180,7 +175,7 @@ export function ServiceCueSection() {
     if (!settingsRead) return;
     const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ServiceCueLayout = {
-      id: uid(), name: `Layout ${sortedLayouts.length + 1}`, order,
+      id: uid("svl"), name: `Layout ${sortedLayouts.length + 1}`, order,
       columnRoles: roles.map((r) => r.id), // all element toggles default on
     };
     setExpandedId(layout.id);

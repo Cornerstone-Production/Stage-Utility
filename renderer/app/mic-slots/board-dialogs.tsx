@@ -60,7 +60,8 @@ export function NewBoardDialog({
   presets: SlotPreset[];
   targets: ShowTarget[];
   defaultFromBoardId: string | null;
-  onCreate: (input: { name: string; from?: { boardId: string } | { presetId: string }; showOn: ShowTarget[] }) => Promise<void>;
+  /** Resolves true once the board exists; the dialog stays open on false (the failure is already toasted). */
+  onCreate: (input: { name: string; from?: { boardId: string } | { presetId: string }; showOn: ShowTarget[] }) => Promise<boolean>;
 }) {
   const [name, setName] = useState("");
   const [start, setStart] = useState<Start>("blank");
@@ -78,7 +79,7 @@ export function NewBoardDialog({
   async function create() {
     setBusy(true);
     try {
-      await onCreate({ name: name.trim(), from, showOn: targets.filter((t) => shown.has(t.id)) });
+      if (!(await onCreate({ name: name.trim(), from, showOn: targets.filter((t) => shown.has(t.id)) }))) return;
       onOpenChange(false);
       setName("");
       setShown(new Set());
@@ -224,7 +225,8 @@ export function DeleteBoardDialog({
   board: SlotBoardDTO | null;
   others: SlotBoardDTO[];
   onClose: () => void;
-  onDelete: (boardId: string, replacement: string | null) => Promise<void>;
+  /** Resolves true once the board is deleted; the dialog stays open on false. */
+  onDelete: (boardId: string, replacement: string | null) => Promise<boolean>;
 }) {
   const [replacement, setReplacement] = useState<string>(NOBODY);
   const [busy, setBusy] = useState(false);
@@ -239,8 +241,7 @@ export function DeleteBoardDialog({
   async function go() {
     setBusy(true);
     try {
-      await onDelete(board!.id, choice === NOBODY ? null : choice);
-      onClose();
+      if (await onDelete(board!.id, choice === NOBODY ? null : choice)) onClose();
     } finally {
       setBusy(false);
     }
@@ -324,7 +325,8 @@ export function ChargerLayoutDialog({
   board: SlotBoardDTO | null;
   screens: ChargerScreen[];
   onClose: () => void;
-  onApply: (boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) => Promise<void>;
+  /** Resolves true once every write landed; the dialog stays open on false. */
+  onApply: (boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) => Promise<boolean>;
 }) {
   const [width, setWidth] = useState<number | null | undefined>(undefined);
   const [screenWidths, setScreenWidths] = useState<Record<string, number>>({});
@@ -340,8 +342,7 @@ export function ChargerLayoutDialog({
   async function apply() {
     setBusy(true);
     try {
-      await onApply(board!.id, current, displayWrites.map((s) => ({ target: s.target, widthIn: widthFor(s) })));
-      onClose();
+      if (await onApply(board!.id, current, displayWrites.map((s) => ({ target: s.target, widthIn: widthFor(s) })))) onClose();
     } finally {
       setBusy(false);
     }
@@ -441,7 +442,8 @@ export function CopyFromDialog({
   boards: SlotBoardDTO[];
   onClose: () => void;
   /** `sourceName` is how the source reads in a sentence: a board, "Weekend default", a plan. */
-  onCopy: (from: CopySource, sourceName: string) => Promise<void>;
+  /** Resolves true once the copy landed; the dialog stays open on false. */
+  onCopy: (from: CopySource, sourceName: string) => Promise<boolean>;
 }) {
   const { plans } = useUpcomingPlans();
   const { state } = useStageState();
@@ -472,8 +474,7 @@ export function CopyFromDialog({
     const sourceName = options.find((o) => o.value === chosen)?.label ?? "that layout";
     setBusy(true);
     try {
-      await onCopy(from, sourceName);
-      onClose();
+      if (await onCopy(from, sourceName)) onClose();
     } finally {
       setBusy(false);
     }

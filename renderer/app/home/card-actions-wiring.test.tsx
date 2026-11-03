@@ -102,7 +102,7 @@ describe("the service Timer", () => {
   });
 });
 
-describe("Screens keeps its link where it does not expand", () => {
+describe("Screens is a plain tile wherever it draws", () => {
   const screens = { type: "home-screens" };
   async function mountScreens(home: boolean) {
     const { RouterContextProvider } = await import("@tanstack/react-router");
@@ -116,9 +116,11 @@ describe("Screens keeps its link where it does not expand", () => {
     await settle();
   }
 
-  test("on a console it links to /screens", async () => {
+  // A console wraps the card in pointer-events-none, so a link there could never
+  // be pressed; the card does not draw one.
+  test("on a console it draws no link", async () => {
     await mountScreens(false);
-    assert.equal(screen.getByRole("link").getAttribute("href"), "/screens");
+    assert.ok(screen.queryByRole("link") === null);
   });
 
   test("on Home it does not: the tile expands and the panel carries Open Screens", async () => {

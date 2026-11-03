@@ -222,6 +222,12 @@ export function takeChange(deviceId: string, changeId: string): boolean {
   return true;
 }
 
+/** Give a change back, so a retry of it is taken: the caller took it, then could
+ *  not write it. Only the change still held is given back. */
+export function forgetChange(deviceId: string, changeId: string): void {
+  if (lastChange.get(deviceId) === changeId) lastChange.delete(deviceId);
+}
+
 /** How many posts may pass before a switch is called unanswered: two, at the
  *  helper's ten seconds. */
 export const SWITCH_POSTS_BEFORE_WARNING = 2;

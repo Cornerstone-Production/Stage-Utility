@@ -277,6 +277,17 @@ describe("arrow keys", () => {
     const stack = one("a+b");
     assert.ok(nudge(stack, "a", "up") === stack, "the top card cannot go up");
   });
+  test("the column's width stays with whichever card leads it", () => {
+    const b: Boards = { L: board("a+b") };
+    b.L = b.L!.map((x) => (x.id === "a" ? { ...x, widthIn: 4 } : x));
+    const down = nudge(b, "a", "down").L!;
+    assert.equal(spec(down), "b+a");
+    assert.deepEqual(down.map((x) => [x.id, x.widthIn ?? null]), [["b", 4], ["a", null]], "the width went with the card, off the column");
+    const up = nudge({ L: down }, "a", "up").L!;
+    assert.deepEqual(up.map((x) => [x.id, x.widthIn ?? null]), [["a", 4], ["b", null]]);
+    const lower = nudge({ L: board("a+b+c") }, "b", "down").L!;
+    assert.deepEqual(lower.map((x) => x.widthIn ?? null), [null, null, null], "a swap below the lead touches no width");
+  });
 });
 
 describe("applyDrop", () => {

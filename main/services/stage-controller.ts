@@ -12,6 +12,7 @@ import {
   pointedGrid,
   positiveOrNull,
   viewBoardId,
+  repointBoards,
 } from "./slot-boards.js";
 import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import { walkLayoutObjects } from "./view-refs.js";
@@ -52,7 +53,7 @@ import {
   normalizeCaptionColor,
 } from "./settings-rules.js";
 import { plural } from "./plural.js";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
@@ -80,7 +81,7 @@ import type {
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
-import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
+import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
@@ -209,17 +210,34 @@ export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
  * write failing mid-way — a full disk, a TypeError — read to the operator as
  * "there was nothing to revert" and the real fault never reached the log.
  */
+/** A short content hash of a board's saved rows at one target (null: none). */
+function slotsRev(rows: Slot[] | null): string {
+  return createHash("sha1").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
+}
+
 export class SlotsNotFoundError extends Error {
   readonly code = "slots-target";
   constructor(
     message: string,
     /** 404 for "no such view / object / override", 400 for a target that cannot
-     *  be true (a plan target naming another service type). */
-    readonly status: 404 | 400 = 404,
+     *  be true (a plan target naming another service type), 409 for a layout
+     *  saved elsewhere since the caller read it. */
+    readonly status: 404 | 400 | 409 = 404,
+    /** More for the answer than its message: a save-all refused for boards
+     *  changed elsewhere lists every one of them. */
+    readonly body?: { code: string; [k: string]: unknown },
   ) {
     super(message);
     this.name = "SlotsNotFoundError";
   }
+}
+
+/** One board a save-all was refused for: saved elsewhere since the page read it. */
+export interface StaleBoard {
+  boardId: string;
+  name: string;
+  /** `default:<serviceTypeId>` or `plan:<planId>`. */
+  target: string;
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
@@ -581,6 +599,12 @@ export class StageController {
    * commitOutputPatch, they do not nest.
    */
   private outputWrites = new WriteQueue();
+
+  /** Layout saves, one at a time — see setViewLayout. */
+  private layoutWrites = new WriteQueue();
+
+  /** Save-all, one at a time, so a rev checked is still the rev written over. */
+  private boardWrites = new WriteQueue();
 
   // ── Init ─────────────────────────────────────────────────────────────
 
@@ -2680,6 +2704,11 @@ export class StageController {
     const isCurrent = planId !== null && planId === this.state.planId;
     const row = isCurrent ? null : this.cachedUpcoming(planId);
     const override = serviceTypeId && planId ? await slotsStore.getOverride(boardId, planId) : null;
+    const defaultSlots = serviceTypeId ? await slotsStore.getDefault(boardId, serviceTypeId) : [];
+    // A record saved against a DIFFERENT service type is not this type's
+    // override, and offering it as one would let a revert discard a board the
+    // operator cannot see.
+    const overrideSlots = override && override.serviceTypeId === serviceTypeId ? override.slots : null;
     return {
       scope,
       key,
@@ -2695,12 +2724,18 @@ export class StageController {
       planId,
       planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
       planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),
-      defaultSlots: serviceTypeId ? await slotsStore.getDefault(boardId, serviceTypeId) : [],
-      // A record saved against a DIFFERENT service type is not this type's
-      // override, and offering it as one would let a revert discard a board the
-      // operator cannot see.
-      overrideSlots: override && override.serviceTypeId === serviceTypeId ? override.slots : null,
+      defaultSlots,
+      overrideSlots,
+      defaultRev: slotsRev(defaultSlots),
+      overrideRev: slotsRev(overrideSlots),
     };
+  }
+
+  /** The revision of what is saved at one target, as getSlotTargets reports it. */
+  private async slotsRevAt(boardId: string, target: SlotsTarget): Promise<string> {
+    if (target.kind === "default") return slotsRev(await slotsStore.getDefault(boardId, target.serviceTypeId));
+    const override = await slotsStore.getOverride(boardId, target.planId);
+    return slotsRev(override && override.serviceTypeId === target.serviceTypeId ? override.slots : null);
   }
 
   // ── Slot boards ──────────────────────────────────────────────────────
@@ -2798,6 +2833,9 @@ export class StageController {
       if (!preset) throw new SlotsNotFoundError(`There is no saved layout ${from.presetId}.`);
       const into = target ?? (this.state.serviceTypeId ? { kind: "default" as const, serviceTypeId: this.state.serviceTypeId } : null);
       if (!into) throw new SlotsNotFoundError("No service type is selected, so there is nowhere to put the saved layout.", 400);
+      // The same check a slot save makes: an override under another type's plan
+      // is one resolve never shows and pruning never dates.
+      await this.assertTargetPlanBelongs(into);
       const slots = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
       const dated = this.datedTarget(into);
       const layouts =
@@ -2860,25 +2898,10 @@ export class StageController {
       if (replacement === boardId) throw new SlotsNotFoundError("A board cannot be replaced by itself.", 400);
     }
     const shownOn = this.boardShownOn(boardId);
-    // Every layout, a dormant one too (a view switched to another kind keeps
-    // its layout): switched back to custom, it must not point at a board that
-    // is gone.
-    const views = this.state.views.map((v): View => {
-      let next = v;
-      if (v.boardId === boardId || (v.kind === "slots" && viewBoardId(v) === boardId)) next = { ...next, boardId: replacement };
-      if (next.layout) {
-        const objects = structuredClone(next.layout.objects);
-        let touched = false;
-        walkLayoutObjects(objects, (o) => {
-          if (o.config.type === "slots-grid" && gridBoardId(o.config, o.id) === boardId) {
-            o.config = pointedGrid(o.config, replacement);
-            touched = true;
-          }
-        });
-        if (touched) next = { ...next, layout: { ...next.layout, objects } };
-      }
-      return next;
-    });
+    // Every pointer, a dormant one too (a view switched to another kind keeps
+    // its board pointer and its layout): switched back, it must not point at a
+    // board that is gone. A pointer from before boards is read as well.
+    const views = repointBoards(this.state.views, (b) => (b === boardId ? replacement : undefined), { legacy: true });
     if (views.some((v, i) => v !== this.state.views[i])) {
       this.state = { ...this.state, views };
       await viewsStore.save(views);
@@ -2923,7 +2946,11 @@ export class StageController {
    * and then every entry lands in ONE write of slots.json. A refusal names the
    * board it is about, so the page can point at it.
    */
-  async saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget }[]): Promise<StageState> {
+  saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
+    return this.boardWrites.enqueue(() => this.saveBoardsNow(entries));
+  }
+
+  private async saveBoardsNow(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
     const writes: SlotsWrite[] = [];
     const seen = new Set<string>();
     const refuse = (boardId: string, err: unknown): never => {
@@ -2945,6 +2972,38 @@ export class StageController {
         writes.push({ boardId: e.boardId, target, slots: e.slots });
       } catch (err) {
         refuse(e.boardId, err);
+      }
+    }
+    // A `rev` is what the caller read (getSlotTargets): a layout saved elsewhere
+    // since then is a refusal, not a silent overwrite. Read after every await
+    // above, so a save that landed while a plan was being checked is caught.
+    // EVERY stale board is named, not the first: a page that is told about one
+    // and answers "save over it" would otherwise overwrite a second it never saw.
+    const stale: StaleBoard[] = [];
+    for (const [i, w] of writes.entries()) {
+      const rev = entries[i]!.rev;
+      if (rev === undefined) continue;
+      if ((await this.slotsRevAt(w.boardId, w.target)) !== rev) {
+        stale.push({ boardId: w.boardId, name: this.describeBoard(w.boardId), target: describeSlotsTarget(w.target) });
+      }
+    }
+    if (stale.length > 0) {
+      const names = stale.map((b) => `"${b.name}"`).join(", ");
+      const msg =
+        stale.length === 1
+          ? `Board ${names}: It was changed elsewhere since this page read it (${stale[0]!.target}). Nothing was saved.`
+          : `Boards ${names}: They were changed elsewhere since this page read them. Nothing was saved.`;
+      const which = stale.map((b) => [`"${b.name}"`, `(${b.boardId})`, b.target].join(" ")).join(", ");
+      console.warn(`[boards] save-all refused, nothing written: ${scrub(stale.length)} board(s) changed elsewhere: ${scrub(which)}`);
+      throw new SlotsNotFoundError(msg, 409, { code: "boards-changed", boards: stale });
+    }
+    // And every board again, with no await before the write: a board deleted
+    // while the checks above awaited would otherwise get rows written for it.
+    for (const w of writes) {
+      try {
+        this.boardFor("board", w.boardId);
+      } catch (err) {
+        refuse(w.boardId, err);
       }
     }
     // Dated only once every entry has passed: datedTarget logs an undated
@@ -3668,18 +3727,23 @@ export class StageController {
   //
   // `boardId` records the board the layout now comes from, so recalling it defaults
   // there; an unknown board is refused, and so is overwriting with no slots (that
-  // would empty a saved layout the operator meant to keep).
+  // would empty a saved layout the operator meant to keep) — whether they were
+  // sent empty or read from a view that shows none. A view's slots are read the
+  // way savePreset reads them, so a custom view's one widget counts.
   async overwritePreset(id: string, target: string, explicitSlots?: Slot[], newBoardId?: string): Promise<SlotPreset[]> {
     if (newBoardId !== undefined) this.boardFor("board", newBoardId);
-    if (explicitSlots !== undefined && explicitSlots.length === 0) {
-      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
-    }
-    const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
-    const view = this.state.views.find((v) => v.id === viewId);
-    const boardId = view ? viewBoardId(view) : null;
-    const rawSlots = explicitSlots ?? (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
+    let rawSlots: Slot[];
+    if (explicitSlots !== undefined) {
+      rawSlots = explicitSlots;
+    } else {
+      const boardId = this.boardForPresetTarget(this.viewIdForTarget(target));
+      rawSlots = boardId ? (this.rawSlotsByBoard.get(boardId) ?? (await this.rawFor(boardId))) : [];
+    }
+    if (rawSlots.length === 0) {
+      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
+    }
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
       p.id === id
@@ -3974,10 +4038,22 @@ export class StageController {
    * someone else has saved this view in the meantime and this save would erase
    * their work, so it is REFUSED and the caller decides. Omitting it forces the
    * save through — that is the deliberate "overwrite anyway" path.
+   *
+   * A refused save writes nothing. Pointing an old editor's widgets can make or
+   * copy a board and change a column width, and converting a Run an action
+   * Button adds a cue; all of that awaits, so two saves opened at the same
+   * revision used to both pass the check, and the one refused after its writes
+   * left them behind. Saves now queue, and the revision is checked first thing
+   * in the queue, before any write: only a layout save moves `layoutRev`, so
+   * nothing can change it between that check and this save's own write.
    */
   async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    return this.layoutWrites.enqueue(() => this.setViewLayoutNow(id, layout, expectedRev));
+  }
+
+  private async setViewLayoutNow(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
     const current = this.requireView(id, "views:setLayout");
-    let rev = current.layoutRev ?? 0;
+    const rev = current.layoutRev ?? 0;
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
@@ -3987,21 +4063,26 @@ export class StageController {
     // start may be weeks away. A failure is logged and the layout saves as sent.
     const converted = await runActionButtonMigration([{ ...current, layout: pointedGrids }], { onSave: true, deps: await liveRulesDeps() });
     if (converted.failure) console.error(scrub(converted.failure));
-    else if (converted.line) console.log(scrub(converted.line));
     const pointed = converted.views[0]!.layout!;
-    // Checked again after the await: another save of this view, made at the
-    // same revision, may have landed while the widgets were being pointed, and
-    // both passing the check above is how one erases the other.
-    const now = this.requireView(id, "views:setLayout").layoutRev ?? 0;
-    if (now !== rev) {
-      if (expectedRev !== undefined) throw new LayoutConflictError(id, expectedRev, now);
-      rev = now;
-    }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout: pointed, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
     console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);
     this.state = { ...this.state, views };
-    await viewsStore.save(views);
+    try {
+      await viewsStore.save(views);
+    } catch (err) {
+      // The cues are on disk and their Buttons are not: named, as an import names
+      // them, since the Automation page shows them as ownerless. Rethrown with the
+      // save's own reason.
+      if (converted.cuesWritten.length > 0) {
+        console.error(
+          `[automation] layout save failed after its cues were written; kept ${scrub(converted.cuesWritten.join(", "))} with no Button, delete them from Automation`,
+        );
+      }
+      throw err;
+    }
+    // After the save: a conversion whose layout did not land is not one to announce.
+    if (converted.line) console.log(scrub(converted.line));
     // Rows for any board a new or repointed widget shows, and none kept for a
     // board nothing shows any more.
     await this.loadShownBoards();
@@ -4094,7 +4175,7 @@ export class StageController {
    * second screen over the same charger.
    */
   async duplicateView(id: string, name?: string, opts: { copyBoards?: boolean } = {}): Promise<{ state: StageState; view: View }> {
-    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? true);
+    const view = await this.copyViewRecord(id, name, opts.copyBoards ?? true);
     return { state: this.state, view };
   }
 
@@ -4176,14 +4257,8 @@ export class StageController {
     return next;
   }
 
-  /** duplicateView, returning the copy — see createViewRecord for why, and for
-   *  `onAssigned`. */
-  private async copyViewRecord(
-    id: string,
-    name?: string,
-    onAssigned?: (view: View) => void,
-    copyBoards = false,
-  ): Promise<View> {
+  /** duplicateView, returning the copy — see createViewRecord for why. */
+  private async copyViewRecord(id: string, name: string | undefined, copyBoards: boolean): Promise<View> {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
@@ -4193,7 +4268,6 @@ export class StageController {
     );
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
-    onAssigned?.(copy);
     await viewsStore.save(views);
     await this.loadShownBoards();
     this.recomputeResolved();
@@ -5410,6 +5484,7 @@ export class StageController {
     this.connectionNames = names;
     this.recomputeResolved();
     this.broadcast();
+    this.broadcastChargerBays();
   }
 
   applyDeviceStatus(channelId: string, status: DeviceStatus): void {
@@ -5437,11 +5512,13 @@ export class StageController {
       if (
         channelInDemand("stage:state-changed") ||
         channelInDemand("slots:devices") ||
-        channelInDemand(WIRELESS_STATUS_CHANNEL)
+        channelInDemand(WIRELESS_STATUS_CHANNEL) ||
+        channelInDemand(CHARGER_BAYS_CHANNEL)
       ) {
         this.recomputeResolved();
         this.broadcastDevices();
         this.broadcastWirelessChannels();
+        this.broadcastChargerBays();
       } else {
         this.deviceStatusDirty = true;
       }
@@ -5500,6 +5577,30 @@ export class StageController {
   }
 
   private lastWirelessSig: string | null = null;
+
+  /** Every charger bay, as the charger widget and the Mic slots previews draw them. */
+  chargerBayStatuses(): ChargerBayDTO[] {
+    return this.computeChargerBays();
+  }
+
+  /**
+   * Push the charger bays, on change and only while a browser is watching.
+   *
+   * Bays are in stage state too, but the device-status path above re-resolves
+   * without re-sending that state, so a bay's level changing used to reach no
+   * screen until something structural did. The channel is the bays alone: a
+   * charge creeping up does not re-send the whole state.
+   */
+  private broadcastChargerBays(): void {
+    if (!channelHasSubscribers(CHARGER_BAYS_CHANNEL)) return;
+    const bays = this.computeChargerBays();
+    const sig = JSON.stringify(bays);
+    if (sig === this.lastChargerSig) return;
+    this.lastChargerSig = sig;
+    broadcast(CHARGER_BAYS_CHANNEL, bays, sig);
+  }
+
+  private lastChargerSig: string | null = null;
 
   /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
   stopDeviceStatusUpdates(): void {

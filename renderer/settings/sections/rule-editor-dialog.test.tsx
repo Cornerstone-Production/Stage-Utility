@@ -132,6 +132,8 @@ const cue = (name: string, params: Record<string, string | number> = {}): StubRu
 
 let RULES: StubRule[] = [];
 let requests: { method: string; url: string; body: string | null }[] = [];
+/** What GET /api/cues/usage answers: the Buttons that name each command. */
+let USAGE: Record<string, unknown[]> = {};
 /** A rule id the server refuses to update, as it refuses a duplicate cue name. */
 let REFUSE: { id: string; error: string } | null = null;
 /** Answer POST .../run the way the server does for a confirm rule: 428 until the
@@ -191,6 +193,7 @@ let RUN_NEEDS_CONFIRM = false;
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
   else if (url.includes("/api/rosstalk/commands")) body = [];
+  else if (url.includes("/api/cues/usage")) body = USAGE;
   else if (url.includes("/api/cues/tokens")) body = { tokens: [] };
   else if (url.includes("/api/cues/states")) body = { ok: true, checkedAt: "x", states: {} };
   else if (url.includes("/api/companion/pairs")) {
@@ -303,6 +306,9 @@ const planRule = (over: Partial<StubRule> = {}): StubRule => ({
 const button = (text: string): HTMLButtonElement | null =>
   [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) ?? null;
 
+/** The text of the topmost dialog: the confirm, when one is asking, since it opens over the editor. */
+const topDialogText = () => [...document.querySelectorAll('[role="alertdialog"], [role="dialog"]')].at(-1)?.textContent ?? "";
+
 const tab = (starts: string): HTMLElement | null =>
   ([...document.querySelectorAll('[role="tab"]')].find((el) =>
     (el.textContent ?? "").startsWith(starts),
@@ -326,6 +332,7 @@ const writes = () => requests.filter((r) => r.url.includes("/api/automation/rule
 
 beforeEach(() => {
   RULES = [];
+  USAGE = {};
   REFUSE = null;
   RUN_NEEDS_CONFIRM = false;
   requests = [];
@@ -367,6 +374,24 @@ describe("one rule", () => {
 
     await press(button("Run it"), "Run it");
     assert.deepEqual(sent(), [{ confirmed: false }, { confirmed: true }]);
+  });
+
+  test("Delete of a command a Button presses names that Button's screen, and one nobody presses does not", async () => {
+    USAGE = { take_screens: [{ viewId: "home", viewName: "Home", objectId: "a", label: "Screens", home: true }] };
+    await mount();
+    await openRow("Rule take_screens");
+    await press(button("Delete"), "Delete");
+    assert.match(topDialogText(), /Buttons on Home/, "the confirm did not list where the command is pressed");
+    await press([...document.querySelectorAll("button")].filter((b) => (b.textContent ?? "").trim() === "Cancel").at(-1), "Cancel");
+
+    USAGE = {};
+    client?.clear();
+    cleanup();
+    await mount();
+    await openRow("Rule take_screens");
+    await press(button("Delete"), "Delete");
+    assert.match(topDialogText(), /Delete/, "found no confirm");
+    assert.equal(/Buttons on/.test(topDialogText()), false, "a command no Button presses mentioned Buttons");
   });
 
   test("declining the confirm sends no second call", async () => {
@@ -775,6 +800,21 @@ describe("a pair", () => {
       ["DELETE rule-projectors_on", "DELETE rule-projectors_off"],
     );
     assert.equal(editors(), 0, "the editor stayed open over a rule that is gone");
+  });
+
+  test("Delete lists the screens whose Buttons press the pair, in the confirm", async () => {
+    USAGE = {
+      projectors_off: [{ viewId: "home", viewName: "Home", objectId: "a", label: "Lights", home: true }],
+      projectors_on: [{ viewId: "booth", viewName: "Booth console", objectId: "b", label: "", home: false }],
+    };
+    await mount();
+    await openPair("the projectors");
+    await press(button("Delete"), "Delete");
+    // The confirm alone: the editor behind it already draws Used on chips with these names.
+    const text = topDialogText();
+    assert.match(text, /Delete both/, "found no confirm");
+    assert.match(text, /Home/, "the confirm did not say Home's Button presses it");
+    assert.match(text, /Booth console/, "the confirm did not say the Booth console's Button presses it");
   });
 
   test("Test fires the half that is selected, and says which", async () => {

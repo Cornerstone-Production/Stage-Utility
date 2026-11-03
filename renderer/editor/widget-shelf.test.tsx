@@ -104,6 +104,18 @@ describe("the widget shelf", () => {
     assert.equal(LAYOUT_OBJECTS[spy.added[0] as LayoutObjectType]?.label, "Timer");
   });
 
+  test("Enter in an empty search adds nothing", () => {
+    // With no query every widget "matches", and the first drawn is a Container: an Enter
+    // pressed to leave the box must not drop one on the canvas.
+    const spy = spyOf();
+    const { getByLabelText } = render(React.createElement(Harness, { spy }));
+    const box = getByLabelText("Search widgets");
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.change(box, { target: { value: "   " } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    assert.deepEqual(spy.added, []);
+  });
+
   test("Enter that ends an IME composition adds nothing", () => {
     const spy = spyOf();
     const { getByLabelText } = render(React.createElement(Harness, { spy }));

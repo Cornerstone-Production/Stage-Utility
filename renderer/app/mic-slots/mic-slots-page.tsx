@@ -33,7 +33,7 @@ import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 import { useSlotPresets, useWirelessChannels } from "../queries";
-import { applyDrop, itemsOf, isSpacer, stackState } from "./board-model";
+import { applyDrop, columnLead, itemsOf, isSpacer, stackState } from "./board-model";
 import { ChargerLayoutDialog, CopyFromDialog, DeleteBoardDialog, NewBoardDialog } from "./board-dialogs";
 import { BoardSection, type BoardDialogs } from "./board-section";
 import type { DragData, DropData } from "./board-preview";
@@ -108,7 +108,7 @@ export function MicSlotsPage() {
   const activeBoardId = mic.selection?.boardId ?? linkedBoard;
   const seeded = useRef<string | null>(null);
   useEffect(() => {
-    if (!linkedBoard || seeded.current === linkedBoard || !mic.loaded) return;
+    if (!linkedBoard || seeded.current === linkedBoard || !mic.isReady(linkedBoard)) return;
     seeded.current = linkedBoard;
     const first = (mic.boardsMap[linkedBoard] ?? []).find((s) => !isSpacer(s));
     if (first) mic.select(first.id);
@@ -180,10 +180,12 @@ export function MicSlotsPage() {
   );
   const selBoard = sel ? mic.boards.find((b) => b.id === sel.boardId) : undefined;
 
-  async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) {
-    await mic.setColumnWidth(boardId, columnWidthIn);
+  /** True when every write landed. Each failure is its own toast. */
+  async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]): Promise<boolean> {
+    let ok = await mic.setColumnWidth(boardId, columnWidthIn);
     // Only what the operator applied: each screen and widget has its own display width.
-    for (const w of displayWidths) await mic.setDisplayWidth(w.target, w.widthIn);
+    for (const w of displayWidths) ok = (await mic.setDisplayWidth(w.target, w.widthIn)) && ok;
+    return ok;
   }
 
   const where = (() => {
@@ -212,7 +214,7 @@ export function MicSlotsPage() {
       {router && <LeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
       <TopBar mic={mic} savedOpen={savedOpen} onSavedOpen={setSavedOpen} savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null} />
       {mic.targetsFailed != null && (
-        <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. Boards that failed show as empty; do not save over them.</ErrorNote>
+        <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>
       )}
       <div className="lg:flex lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
@@ -296,6 +298,8 @@ export function MicSlotsPage() {
                   boardName={selBoard.name}
                   where={where}
                   columnWidthIn={selBoard.columnWidthIn}
+                  columnLead={columnLead(mic.boardsMap, sel.slotId) ?? mic.selectedSlot}
+                  onLeadChange={(fn) => mic.updateSlot(columnLead(mic.boardsMap, sel.slotId)?.id ?? sel.slotId, fn)}
                   stack={stackState(mic.boardsMap, sel.slotId)}
                   sharesWith={makeSharesWith(mic.boardsMap[sel.boardId] ?? [])(mic.selectedSlot)}
                   planLabel={mic.side === "plan" ? mic.label : null}
@@ -332,6 +336,7 @@ export function MicSlotsPage() {
             setJustMade(id);
             void setLinked(id, { replace: true });
           }
+          return id !== null;
         }}
       />
       <DeleteBoardDialog
@@ -339,9 +344,7 @@ export function MicSlotsPage() {
         board={deleting}
         others={mic.boards.filter((b) => b.id !== deleting?.id)}
         onClose={() => setDeleting(null)}
-        onDelete={async (id, replacement) => {
-          await mic.deleteBoard(id, replacement);
-        }}
+        onDelete={(id, replacement) => mic.deleteBoard(id, replacement)}
       />
       <ChargerLayoutDialog
         key={chargers?.id ?? "none"}
@@ -358,9 +361,7 @@ export function MicSlotsPage() {
           description={`Replaces ${copying.name}'s layout for ${mic.side === "plan" ? mic.label : `${mic.typeName ?? "the service type"} default`}. A service type means its default; a plan means that plan's own layout.`}
           boards={mic.boards.filter((b) => b.id !== copying.id)}
           onClose={() => setCopying(null)}
-          onCopy={async (from, sourceName) => {
-            await mic.copyInto(copying.id, from, sourceName);
-          }}
+          onCopy={(from, sourceName) => mic.copyInto(copying.id, from, sourceName)}
         />
       )}
     </div>
