@@ -1899,9 +1899,10 @@ export function LayoutEditor({
   useEffect(() => {
     if (!isEditing) return;
     const onKey = (e: KeyboardEvent) => {
+      // A dialog, or an open list or menu, over the editor owns the keyboard: Backspace in
+      // the Companion pane's large grid must not delete the Button selected behind it.
+      if (document.querySelector('[role="dialog"], [role="listbox"], [role="menu"]')) return;
       if (opensShelfSearch(e, shelfSearchRef.current)) {
-        // A dialog over the editor owns the keyboard.
-        if (document.querySelector('[role="dialog"]')) return;
         e.preventDefault();
         openShelfSearch();
         return;

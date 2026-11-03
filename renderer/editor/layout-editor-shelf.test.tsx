@@ -271,3 +271,33 @@ test("a folded shelf stays folded when the editor is opened again", async () => 
     f.restore();
   }
 });
+
+test("Delete and Backspace leave the canvas alone while a dialog or a list is open over it", async () => {
+  // The Companion pane's Open large dialog takes keys for its own grid: a Backspace there
+  // deleted the selected Button behind it.
+  const f = await mount();
+  try {
+    const layers = () => layerNames().length;
+    const before = layers();
+    const layer = screen.getAllByRole("button").find((b) => b.getAttribute("draggable") === "true" && !b.getAttribute("aria-label"))!;
+    fireEvent.click(layer);
+    await settleAct();
+    for (const role of ["dialog", "listbox", "menu"]) {
+      const over = document.createElement("div");
+      over.setAttribute("role", role);
+      document.body.appendChild(over);
+      const e = keydown(over, { key: "Backspace" });
+      await settleAct();
+      assert.equal(layers(), before, `a Backspace inside a ${role} deleted the layer behind it`);
+      assert.equal(e.defaultPrevented, false, `the editor took a key from a ${role}`);
+      over.remove();
+    }
+    // Control: with nothing over the canvas the same key deletes the selection.
+    keydown(document.body, { key: "Backspace" });
+    await settleAct();
+    assert.equal(layers(), before - 1, "Backspace on the canvas no longer deletes the selection");
+  } finally {
+    cleanup();
+    f.restore();
+  }
+});
