@@ -2993,10 +2993,8 @@ export class StageController {
         stale.length === 1
           ? `Board ${names}: It was changed elsewhere since this page read it (${stale[0]!.target}). Nothing was saved.`
           : `Boards ${names}: They were changed elsewhere since this page read them. Nothing was saved.`;
-      console.warn(
-        `[boards] save-all refused, nothing written: ${scrub(stale.length)} board(s) changed elsewhere: ` +
-          scrub(stale.map((b) => `"${b.name}" (${b.boardId}) ${b.target}`).join(", ")),
-      );
+      const which = stale.map((b) => [`"${b.name}"`, `(${b.boardId})`, b.target].join(" ")).join(", ");
+      console.warn(`[boards] save-all refused, nothing written: ${scrub(stale.length)} board(s) changed elsewhere: ${scrub(which)}`);
       throw new SlotsNotFoundError(msg, 409, { code: "boards-changed", boards: stale });
     }
     // And every board again, with no await before the write: a board deleted
