@@ -1,5 +1,6 @@
 // New slots and spacers for the Mic slots page.
 
+import { uid } from "../../lib/uid";
 import { isSpacer } from "./board-model";
 
 const EMPTY_DEVICE: SlotDevice = {
@@ -14,8 +15,11 @@ const EMPTY_DEVICE: SlotDevice = {
   iemLabel: null,
 };
 
+/** A new slot id, always "slot-…". Through uid(): crypto.randomUUID is
+ *  undefined over plain HTTP, and calling it directly threw there. */
 export function freshSlotId(): string {
-  return `slot-${crypto.randomUUID().slice(0, 12)}`;
+  const id = uid("slot");
+  return id.startsWith("slot-") ? id : `slot-${id}`;
 }
 
 /** The next channel number on a board: one past the highest numeric one, so

@@ -539,6 +539,21 @@ describe("Save all", () => {
     assert.ok(!unsaved(), "saved");
   });
 
+  test("+ Slot and + Spacer work with no crypto.randomUUID, as over plain HTTP", async () => {
+    const real = Object.getOwnPropertyDescriptor(globalThis.crypto, "randomUUID");
+    Object.defineProperty(globalThis.crypto, "randomUUID", { value: undefined, configurable: true, writable: true });
+    try {
+      await mount();
+      await click(within(section("b-right")).getByRole("button", { name: "Slot" }));
+      await click(within(section("b-right")).getByRole("button", { name: "Spacer" }));
+      assert.equal(section("b-right").querySelectorAll("[data-mic-slot]").length, 3, "a third slot");
+      assert.equal(section("b-right").querySelectorAll("[data-mic-spacer]").length, 1, "and a spacer");
+    } finally {
+      if (real) Object.defineProperty(globalThis.crypto, "randomUUID", real);
+      else delete (globalThis.crypto as { randomUUID?: unknown }).randomUUID;
+    }
+  });
+
   test("a board nobody touched is not in it", async () => {
     await mount();
     await click(screen.getAllByRole("button", { name: "Slot" })[0]!);

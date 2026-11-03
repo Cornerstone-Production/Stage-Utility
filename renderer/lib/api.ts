@@ -14,6 +14,7 @@ import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 import { createSubscribeReporter } from "./subscribe-reporter";
+import { uid } from "./uid";
 
 type Params = Record<string, unknown> | undefined;
 
@@ -1877,17 +1878,8 @@ export function __resetReplayCacheForTests(): void {
 }
 
 // Stable per-context client id, sent on the SSE URL so the server can scope this
-// stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
-// context (prod is plain HTTP), so guard it and fall back.
-function genClientId(): string {
-  try {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  } catch {
-    /* insecure context — fall through */
-  }
-  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-const CLIENT_ID = genClientId();
+// stream's channel filter to us. uid() carries the plain-HTTP fallback.
+const CLIENT_ID = uid("c");
 
 // Tell the server exactly which channels this client renders so it can skip the
 // rest (e.g. a mic display never gets the 4 Hz spl:metrics firehose). Debounced to
