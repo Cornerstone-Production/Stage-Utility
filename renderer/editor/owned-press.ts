@@ -22,7 +22,10 @@ import { errorMessage } from "@main/services/errors";
 import type { OwnedBy, Rule } from "@main/types/automation";
 import type { LayoutObject } from "@main/types/views";
 
+import type { QueryClient } from "@tanstack/react-query";
+
 import { invoke } from "../lib/api";
+import { fetchCueUsage, usesOf } from "../settings/sections/cue-usage";
 
 /** What a Button presses: a Companion button, an app action, or an existing command. */
 export type PressKind = "companion" | "action" | "command";
@@ -72,11 +75,8 @@ export interface PressTarget {
 /** `warning`: written, but a follow-up step failed and the operator should be told. */
 type Wrote = { ok: true; cue: string; rule: Rule; warning?: string } | { ok: false; error: string };
 
-/** One Button that names a command, as `GET /api/cues/usage` lists it. */
-interface UsageUse {
-  viewId: string;
-  objectId: string;
-}
+/** One Button that names a command: a view and an object id, which is all a handover needs. */
+type UsageUse = Pick<PressOwner, "viewId" | "objectId">;
 
 /**
  * The Buttons in a layout's objects, nested ones included, that name this command: what an
@@ -103,12 +103,10 @@ export function draftUsers(objects: readonly LayoutObject[], viewId: string, cue
  * its command still pressing the original's has the same cue, so the rule is not the
  * one Button's alone any more, whoever it says it belongs to.
  */
-async function otherUsers(cue: string, owner: PressOwner, inDraft: readonly PressOwner[]): Promise<UsageUse[]> {
-  const usage = await invoke<Record<string, UsageUse[]>>("cues:usage");
-  const key = cue.trim().toLowerCase();
+async function otherUsers(qc: QueryClient, cue: string, owner: PressOwner, inDraft: readonly PressOwner[]): Promise<UsageUse[]> {
   // The saved views and the editor's draft, which may hold a copy that was never saved.
   const seen = new Set<string>();
-  return [...(Object.hasOwn(usage, key) ? usage[key]! : []), ...inDraft].filter((u) => {
+  return [...usesOf(await fetchCueUsage(qc), [cue]), ...inDraft].filter((u) => {
     const id = `${u.viewId}\n${u.objectId}`;
     if (sameOwner(u, owner) || seen.has(id)) return false;
     seen.add(id);
@@ -131,6 +129,8 @@ async function otherUsers(cue: string, owner: PressOwner, inDraft: readonly Pres
  * Button gets a new command.
  */
 export async function writeOwnedRule(opts: {
+  /** Where the usage read is cached, so the Used on chips see what this write saw. */
+  qc: QueryClient;
   owner: PressOwner;
   /** The command the Button is bound to now ("" for none), to pick between rules when several name it. */
   cue: string;
@@ -153,7 +153,7 @@ export async function writeOwnedRule(opts: {
     let handOverTo: { rule: Rule; to: UsageUse } | null = null;
     if (existing) {
       const cue = calledCueName(existing.trigger);
-      const sharers = await otherUsers(cue, opts.owner, opts.draftUsersOf?.(cue) ?? []);
+      const sharers = await otherUsers(opts.qc, cue, opts.owner, opts.draftUsersOf?.(cue) ?? []);
       if (sharers.length > 0) {
         handOverTo = { rule: existing, to: sharers[0]! };
         existing = null;

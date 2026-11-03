@@ -63,6 +63,7 @@ import {
 } from "@main/services/companion-state-learn";
 import { hasServiceGuard, SERVICE_GUARD_CONDITION_ID, withServiceGuard } from "@main/services/service-guard";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { HandIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
@@ -70,7 +71,7 @@ import { logToServer } from "../../lib/client-log";
 import { repointCueButtons, repointLogLines, type RepointResult } from "../../lib/console-cue-buttons";
 import { UsedOn } from "./automation-chips";
 import { CueRenameNotice, RepointRefusals } from "./cue-rename-notice";
-import { namesFor, screenNames, usesOf, type CueUse, type CueUsageReply } from "./cue-usage";
+import { fetchCueUsage, namesFor, screenNames, usesOf, type CueUsage } from "./cue-usage";
 import {
   Button,
   confirm,
@@ -1622,9 +1623,10 @@ export function RuleEditorDialog({
    *  manual must not derive a name equal to. */
   cueNamesTaken?: ReadonlySet<string>;
   /** Where each command is used (GET /api/cues/usage), by command name. Undefined until read; a rename then has nothing to follow. */
-  usage?: ReadonlyMap<string, readonly CueUse[]>;
+  usage?: CueUsage;
   onChanged: () => void;
 }) {
+  const qc = useQueryClient();
   const isPair = target.kind === "pair";
   const [onDraft, setOnDraft] = useState<Rule>(isPair ? target.pair.on : target.rule);
   const [offDraft, setOffDraft] = useState<Rule | null>(isPair ? target.pair.off : null);
@@ -1887,7 +1889,7 @@ export function RuleEditorDialog({
         // former name.
         let fresh: ReturnType<typeof usesOf> | null = null;
         try {
-          fresh = usesOf(new Map(Object.entries(await invoke<CueUsageReply>("cues:usage"))), fromNames);
+          fresh = usesOf(await fetchCueUsage(qc), fromNames);
         } catch (e) {
           logToServer(
             "automation",

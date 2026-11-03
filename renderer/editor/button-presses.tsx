@@ -30,6 +30,7 @@ import type { CuesLive } from "../main/use-cue-live";
 import { ActionPane, type PendingWrite } from "./action-pane";
 import { CommandPane } from "./command-pane";
 import { CompanionPane, type PickedCompanion } from "./companion-pane";
+import { CUE_USAGE_KEY } from "../settings/sections/cue-usage";
 import { RowToggle } from "./inspector-rows";
 import {
   COMPANION_PRESS,
@@ -102,7 +103,7 @@ export function ButtonPresses({
   /** What a write changed: the rules, and where each command is used. */
   const refreshRules = () => {
     void qc.invalidateQueries({ queryKey: RULES_KEY });
-    void qc.invalidateQueries({ queryKey: ["cues:usage"] });
+    void qc.invalidateQueries({ queryKey: CUE_USAGE_KEY });
   };
   const own = ownedRuleFor(rules, owner, c.cue);
   const kind = pressKindOf(rules, owner, c.cue);
@@ -167,6 +168,7 @@ export function ButtonPresses({
     const started = epoch.current;
     return enqueue(async () => {
       const made = await writeOwnedRule({
+        qc,
         owner,
         cue: latest.current.cue,
         label: latest.current.label,
