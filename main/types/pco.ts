@@ -340,7 +340,8 @@ export interface SlotPreset {
   slots: Slot[];
   createdAt: string;
   /** The board the layout was saved from, and where it is recalled by default.
-   *  Absent on a layout saved before boards existed, or imported from a file. */
+   *  Absent on a layout saved before boards existed, or imported from a file
+   *  that did not carry its board (one that did is pointed at its new id). */
   boardId?: string;
 }
 

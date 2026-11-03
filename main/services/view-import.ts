@@ -615,7 +615,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     const byId = new Map(current.map((p) => [p.id, p]));
     for (const incoming of incomingPresets) {
       // A bundle from an older build can carry resolved names and readings.
-      const p = Array.isArray(incoming.slots) ? { ...incoming, slots: stripResolvedFields(incoming.slots) } : incoming;
+      // The board it is recalled into is the source's id, which names nothing
+      // here or somebody else's board: this install's copy when that board
+      // travelled, none when it did not.
+      const { boardId: srcBoard, ...rest } = incoming;
+      const boardId = typeof srcBoard === "string" ? boardIdMap.get(srcBoard) : undefined;
+      const p = {
+        ...rest,
+        ...(Array.isArray(incoming.slots) ? { slots: stripResolvedFields(incoming.slots) } : {}),
+        ...(boardId ? { boardId } : {}),
+      };
       if (!byId.has(p.id)) {
         byId.set(p.id, p);
         presets.added++;

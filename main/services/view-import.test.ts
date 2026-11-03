@@ -659,6 +659,23 @@ describe("presets", () => {
     assert.equal("shownPositions" in stored, false);
   });
 
+  test("the board each one is recalled into is this install's copy of it, or none", async () => {
+    // A board id from the source names nothing here, or somebody else's board:
+    // "display-1" is the id a fresh install gives its first screen's board.
+    await presetsStore.save([] as never);
+    const report = await applyViewBundle(planBundle({}, {
+      presets: [
+        { ...p("p1", "Travelled"), boardId: "view-1" },
+        { ...p("p2", "Stayed behind"), boardId: "display-1" },
+      ],
+    }));
+    const stored = await presetsStore.load();
+    const board = await boardOf(report.views[0]!.id);
+    assert.ok(board);
+    assert.equal(stored.find((x) => x.id === "p1")!.boardId, board, "the preset kept the source's board id");
+    assert.equal("boardId" in stored.find((x) => x.id === "p2")!, false, "a board not in the file was kept as a pointer");
+  });
+
   test("Keep leaves the local one of the same id alone", async () => {
     await presetsStore.save([p("p1", "Mine")] as never);
     const report = await applyViewBundle(withPresets());

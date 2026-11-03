@@ -54,7 +54,9 @@ service type on it, and the review adds two decisions:
 
 **Only the patch assignment and the presets can clash.** Imported views always
 arrive as new views with new ids, and the boards they show arrive as new boards
-with new ids — they never land on top of anything you have.
+with new ids — they never land on top of anything you have. A preset remembers
+the board it came from as that board's new id when the board is in the file, and
+no board when it is not.
 
 ### What the patch section does and does not carry
 
