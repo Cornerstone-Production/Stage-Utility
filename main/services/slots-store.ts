@@ -119,6 +119,15 @@ export interface SerialisedSlotsFile {
   pendingMerges?: Record<string, string>;
 }
 
+/** A board to add — see `slotsStore.createBoards`. `layouts` is its starting
+ *  content (a copy of another board, or a saved layout under one target), and
+ *  absent for a blank board. */
+export interface NewBoard {
+  boardId: string;
+  meta: SlotBoardMeta;
+  layouts?: { defaults?: Map<string, Slot[]> | null; overrides?: Map<string, SlotsOverride> | null };
+}
+
 /** One entry of a save across several boards — see `slotsStore.saveMany`. */
 export interface SlotsWrite {
   boardId: string;
@@ -504,22 +513,37 @@ export const slotsStore = {
    * layout key the way a save refuses it: a `__proto__` stored here makes every
    * later backup of this file one checkRestoredSlots will not restore.
    */
-  async createBoard(
-    boardId: string,
-    meta: SlotBoardMeta,
-    layouts?: { defaults?: Map<string, Slot[]> | null; overrides?: Map<string, SlotsOverride> | null },
-  ): Promise<void> {
-    assertSafeKey(boardId, "boardId");
-    for (const serviceTypeId of layouts?.defaults?.keys() ?? []) assertTargetKeys({ kind: "default", serviceTypeId });
-    for (const [planId, o] of layouts?.overrides ?? []) assertTargetKeys({ kind: "plan", planId, serviceTypeId: o.serviceTypeId });
+  async createBoard(boardId: string, meta: SlotBoardMeta, layouts?: NewBoard["layouts"]): Promise<void> {
+    await this.createBoards([{ boardId, meta, layouts }]);
+  },
+
+  /**
+   * Add several boards in ONE write, each refused as createBoard refuses it:
+   * every id and key is checked before anything changes, so they land whole or
+   * not at all. What an import makes before it saves the views that show them.
+   */
+  async createBoards(boards: readonly NewBoard[]): Promise<void> {
+    const ids = new Set<string>();
+    for (const { boardId, layouts } of boards) {
+      assertSafeKey(boardId, "boardId");
+      if (ids.has(boardId)) throw new Error(`slot board ${boardId} is named twice`);
+      ids.add(boardId);
+      for (const serviceTypeId of layouts?.defaults?.keys() ?? []) assertTargetKeys({ kind: "default", serviceTypeId });
+      for (const [planId, o] of layouts?.overrides ?? []) assertTargetKeys({ kind: "plan", planId, serviceTypeId: o.serviceTypeId });
+    }
+    if (boards.length === 0) return;
     await mutate((file) => {
-      if (file.boards.has(boardId) || file.defaults.has(boardId) || file.overrides.has(boardId)) {
-        throw new Error(`slot board ${boardId} already exists`);
+      for (const { boardId } of boards) {
+        if (file.boards.has(boardId) || file.defaults.has(boardId) || file.overrides.has(boardId)) {
+          throw new Error(`slot board ${boardId} already exists`);
+        }
       }
       file.version = 4;
-      file.boards.set(boardId, { ...meta });
-      if (layouts?.defaults?.size) file.defaults.set(boardId, layouts.defaults);
-      if (layouts?.overrides?.size) file.overrides.set(boardId, layouts.overrides);
+      for (const { boardId, meta, layouts } of boards) {
+        file.boards.set(boardId, { ...meta });
+        if (layouts?.defaults?.size) file.defaults.set(boardId, layouts.defaults);
+        if (layouts?.overrides?.size) file.overrides.set(boardId, layouts.overrides);
+      }
       return file;
     });
   },

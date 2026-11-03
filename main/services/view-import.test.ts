@@ -387,6 +387,67 @@ describe("a bundle's slot boards", () => {
   });
 });
 
+describe("the order an import writes in", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+  const twoScreens = () => bundle({
+    views: [slotsView("view-1", "Mic Board"), slotsView("view-2", "Second Board")],
+    sideData: { slots: { "view-1": { "st-src": [slotRow("r1")] } }, notes: {}, serviceCueLayouts: [] },
+  });
+
+  test("boards that cannot be made refuse the import before any view lands", async () => {
+    // The views used to be saved first and their boards made one write each
+    // after: a failure left screens pointing at boards that did not exist, and
+    // the retry the operator then made imported every view a second time.
+    const store = slotsStore as unknown as { createBoards: unknown };
+    const real = store.createBoards;
+    store.createBoards = async () => { throw new Error("disk full"); };
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      store.createBoards = real;
+    }
+    assert.deepEqual(await viewsStore.load(), [], "views landed pointing at boards that were never made");
+  });
+
+  test("every board lands in one write", async () => {
+    // One write is what makes the boards land whole or not at all.
+    let writes = 0;
+    const before = (await slotsStore.listBoards()).size;
+    const { DataStore } = await import("./data-store.js");
+    const proto = DataStore.prototype as unknown as { update: (...a: unknown[]) => Promise<unknown> };
+    const realUpdate = proto.update;
+    proto.update = function (this: { filename: string }, ...a: unknown[]) {
+      if (this.filename === "slots.json") writes++;
+      return realUpdate.apply(this, a);
+    };
+    try {
+      await applyViewBundle(twoScreens());
+    } finally {
+      proto.update = realUpdate;
+    }
+    assert.equal((await slotsStore.listBoards()).size, before + 2);
+    assert.equal(writes, 1, `the boards took ${writes} slots.json writes`);
+  });
+
+  test("a views save that fails after the boards were made says they are left unused", async (t) => {
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => { throw new Error("disk full"); }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.ok(
+      lines.some((l) => l.startsWith("[view-import] import refused after its boards were made") && l.includes("2 board(s)")),
+      JSON.stringify(lines),
+    );
+  });
+});
+
 describe("a board pointer only a slots screen uses", () => {
   beforeEach(async () => {
     await viewsStore.save([] as never);
