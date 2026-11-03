@@ -36,6 +36,33 @@ which findings get fixed, and in which PR, is the maintainer's call. This file
 and that rule used to contradict each other, and the contradiction produced
 both behaviors at the wrong times.
 
+### Every review toward main checks the ServiceCue public side
+
+ServiceCue publishes out of the LAN to a public Worker (`publish/servicecue/`)
+that anyone with the link can read. Any review of a change bound for `main` — a
+release PR, or a pre-release review of beta — includes a pass for that
+boundary, **whatever the diff touches**. A new field on a shared type, a whole
+object passed where a few fields were picked, or a renderer import pulled into
+the published bundle can widen what leaves the building without a single
+ServiceCue file in the diff.
+
+The pass answers two questions, with `file:line` evidence either way:
+
+- **Does anything leak?** Trace the payload from its builder to the wire and
+  name its allowlist. Only the operator's chosen rundowns, chosen columns and
+  the live item may leave. Nothing else: no credentials or tokens, no LAN
+  addresses, hostnames or device ids, no people's contact details or photos, no
+  log or error text, no internal ids the public side does not need — in the
+  payload, in an error reply, or in the deployed bundle.
+- **Does the service keep its integrity?** The push stays one-way, authenticated
+  and bounded (no inbound path to the LAN, no redirects followed, timeouts).
+  Operator- and Planning Center-controlled strings cannot inject into the public
+  page. The Worker accepts only what it should, cannot be driven past its plan's
+  limits, and still builds and tests against the server's types.
+
+Say what was checked even when nothing is found, so the absence is evidence. A
+finding here blocks the merge to `main` until it is fixed.
+
 ## Verify before you claim
 
 Run the checks in [Before you open a PR](docs/contributing.md#before-you-open-a-pr)
