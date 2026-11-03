@@ -355,7 +355,7 @@ export function SlotInspector(props: SlotInspectorProps) {
           </span>
         </Row>
         <p className="px-4 py-2.5 text-caption2 text-fg-subtle">
-          Tags named Capsule: or IEMs: on their Planning Center profile are picked up automatically.
+          Tags named Capsule: or IEMs: on their Planning Center profile are picked up automatically. The capsule applies to vocal positions only.
         </p>
       </Card>
 

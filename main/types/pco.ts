@@ -318,6 +318,10 @@ export interface Slot {
   /** Set by the resolver, only for a slot filled by a person who carries a prep
    *  tag in Planning Center. Never stored. */
   prep?: PrepTags;
+  /** Set by the resolver for a filled Planning Center slot: whether the person is on
+   *  a vocal position, the only place a capsule applies. `prep.capsule` is already
+   *  null when this is false. Never stored. */
+  takesCapsule?: boolean;
   /** Which of a position range's names the resolved person is actually scheduled
    *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
    *  this person is really doing. Absent on non-position slots. */

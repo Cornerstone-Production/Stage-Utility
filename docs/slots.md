@@ -144,13 +144,15 @@ closes it, clearing the selection.
 
 | Row | What it says |
 |---|---|
-| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag* |
+| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag*. Shown for vocal positions only |
 | **In-ears** | *Brings their own* when their `IEMs:` tag says `Own`; *House buds* when the slot has an in-ear pack and they do not bring their own; otherwise *No pack on this slot* |
 
 Tags named `Capsule:` or `IEMs:` on a person's Planning Center profile are picked up
 automatically, with no setting. The same two facts are drawn on the card, as the
 capsule plate and the ears badge ([What the card shows](#what-the-card-shows)). A
-slot nobody fills, or whose person has no such tag, shows *no tag*.
+slot nobody fills, or whose person has no such tag, shows *no tag*. The capsule
+applies to vocal positions only: on any other position it is not shown, even when the
+person has a `Capsule:` tag.
 
 **Placement**
 
@@ -175,7 +177,7 @@ being edited:
 - **Slots that accept no position**: a position slot with nothing in it, with
   **Show it**.
 - **N people on slots with a mic have no Capsule tag yet**: filled slots with a bound
-  receiver or an offline mic label whose person has no `Capsule:` tag, with **Show
+  receiver or an offline mic label on a vocal position whose person has no `Capsule:` tag, with **Show
   them**, which selects the first and rings every one until the next selection. It is
   silent until some tag has been read, and for a default, which has no people.
 
