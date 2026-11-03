@@ -5,7 +5,9 @@
 // Reached from a view's card, from "View settings" on a screen, and from a chip
 // in another view's "Shown on".
 
-import { Button } from "../../components/ui";
+import { Button, NumberInput, toast } from "../../components/ui";
+import { invoke } from "../../lib/api";
+import { errorMessage } from "@main/services/errors";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { screensShowing, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type ViewSurface } from "@main/types/views";
 import { SURFACE_COPY } from "../screen-role-confirm";
@@ -17,6 +19,15 @@ export type ViewPanelActions = Pick<
   ScreenPanelActions,
   "onRenameView" | "onSetViewSurface" | "onSetShowInSidebar" | "onSelect" | "onEditLayout" | "onDuplicateView" | "onDeleteView"
 >;
+
+/** This screen's own half of charger alignment; the other half is its board's. */
+async function setDisplayWidth(viewId: string, displayWidthIn: number | null): Promise<void> {
+  try {
+    await invoke("views:setSlotsLayout", { id: viewId, slotsLayout: displayWidthIn === null ? null : { displayWidthIn } });
+  } catch (err) {
+    toast.error(`Couldn't set the display width: ${errorMessage(err)}`);
+  }
+}
 
 export function ViewBody({ view, outputs, actions }: { view: View; outputs: Output[]; actions: ViewPanelActions }) {
   const surface = viewSurface(view);
@@ -92,6 +103,35 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
             </p>
           )}
         </Section>
+
+        {view.kind === "slots" && (
+          <Section title="Mic slots">
+            <div className="flex items-center gap-2">
+              <span className="flex-1 text-footnote text-fg">Display width</span>
+              <NumberInput
+                value={view.slotsLayout?.displayWidthIn ?? null}
+                step={0.25}
+                min={1}
+                suffix="in"
+                placeholder="Not set"
+                className="w-32"
+                aria-label="Display active width (inches)"
+                onChange={() => {}}
+                onCommit={(n) => void setDisplayWidth(view.id, n)}
+                onUnset={() => view.slotsLayout?.displayWidthIn != null && void setDisplayWidth(view.id, null)}
+              />
+            </div>
+            <p className="mt-1.5 text-caption1 text-fg-subtle">
+              This screen's active width, about 32.25 in for a 37 inch 16:9 panel. A board aligned to chargers lines up on a screen
+              only when it has one. The slots themselves are edited on the Mic slots page.
+            </p>
+            <div className="mt-2">
+              <Button type="button" variant="accent" size="medium" onClick={() => actions.onEditLayout(view.id)}>
+                Edit slots
+              </Button>
+            </div>
+          </Section>
+        )}
 
         <Section title="Layout">
           <div className="flex flex-wrap gap-2">

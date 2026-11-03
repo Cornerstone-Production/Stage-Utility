@@ -74,6 +74,9 @@ after(async () => {
 test("the backup of a fresh install, plus saves through the real setters, restores unchanged", async () => {
   await stageController.init();
   await stageController.createView("Wall", "custom", "display");
+  // A slots screen gets a board of its own, so slots.json's boards half is in the
+  // backup and goes through its restore check too.
+  await stageController.createView("Mics", "slots", "display");
   await stageController.setPublicUrl("stage.example.org/");
   await stageController.setIconColor("tools/clock", "#FF8800");
   await stageController.setTaperWindow({ preMin: 30.4 });
@@ -105,8 +108,8 @@ test("the backup of a fresh install, plus saves through the real setters, restor
     cooldownSec: 0,
     oncePerService: false,
   } as unknown as Parameters<typeof automationEngine.addRule>[0]);
-  const wall = stageController.getState().views.find((v) => v.name === "Wall")!;
-  await stageController.setViewSlots(wall.id, [
+  const mics = stageController.getState().views.find((v) => v.name === "Mics")!;
+  await stageController.setViewSlots(mics.id, [
     { id: "s1", channel: "07", order: 0, link: { kind: "pco", matchBy: "position", positions: [{ name: "Vocals" }] }, deviceBinding: null, displayName: null, photoUrl: null } as never,
   ], { kind: "default", serviceTypeId: "123" });
 

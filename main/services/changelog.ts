@@ -31,7 +31,9 @@ const BREAKING = /^[a-z]+(?:\([^)]*\))?!:/i;
 /** Types whose name tells an operator nothing the dialog has not already said. */
 const DROPPABLE = new Set<string>([...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch]);
 
-const MERGE = /^Merge (pull request|branch|remote-tracking)\b/i;
+// `git log --no-merges` is the first line of defence; this catches a merge subject
+// that still arrives, including the `Merge origin/beta into x` form git writes.
+const MERGE = /^Merge (?:(?:pull request|branch|remote-tracking)\b|\S+ into \S+)/i;
 
 /** Trailing CI directives — noise in a list meant for a person. */
 const CI_DIRECTIVE = /\s*\[(skip ci|ci skip|no ci)\]\s*$/i;

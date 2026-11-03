@@ -78,6 +78,12 @@ export interface BoundDevice {
    *  the stored record, as the hardware facts above are, so a bound output still
    *  says which port it is after the probe that carried it has gone quiet. */
   output?: DeviceOutput;
+  /** Whether this output is drawing. Set from Screens, and only ever `false`
+   *  here: absent means on, so every binding made before the switch existed, and
+   *  every device that cannot be switched, is on. The output helper hears it in
+   *  the answer to its health post. Belongs to the output (the port), so it
+   *  stays when another screen is bound to it. */
+  enabled?: false;
   /** Epoch ms. Persisted so Devices can say "last seen Tuesday" after a server
    *  restart rather than "never". */
   lastSeen?: number;

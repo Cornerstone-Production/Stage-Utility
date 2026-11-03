@@ -29,7 +29,6 @@ const { Inspector } = await import("./inspector.js");
 const { RowSwitch, RowText, RowNumber, RowSelect, RowToggle, choiceLayout, PixelField, TypeSizeRows, NumberField, NumberInput } =
   await import("./inspector-rows.js");
 const { CuePicker } = await import("./cue-picker.js");
-const { ActionPicker } = await import("./action-picker.js");
 const { PlanAttachmentConfig } = await import("./inspector.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -164,17 +163,11 @@ describe("the Row helpers name their control after their label", () => {
 });
 
 describe("the pickers the inspector hosts name themselves", () => {
-  test("CuePicker and ActionPicker", () => {
+  test("CuePicker", () => {
     const { getByRole } = render(
-      React.createElement(
-        "div",
-        null,
-        React.createElement(CuePicker as never, { cues: null, value: "", onChange: () => {} }),
-        React.createElement(ActionPicker as never, { actions: null, value: "", onChange: () => {} }),
-      ),
+      React.createElement(CuePicker as never, { cues: null, value: "", onChange: () => {} }),
     );
-    getByRole("combobox", { name: "Cue" });
-    getByRole("combobox", { name: "Action" });
+    getByRole("combobox", { name: "Command" });
   });
 });
 
@@ -226,12 +219,14 @@ async function mountInspector(type: LayoutObjectType, configOver?: Partial<Layou
         null,
         React.createElement(Inspector, {
           o,
+          viewId: "v1",
+          viewName: "Test",
+          draftObjects: [],
           canvas: { width: 1920, height: 1080 },
           parentW: 1920,
           parentH: 1080,
           nested: false,
           locked: false,
-          slotsViews: [],
           onGeom: noop,
           onStyle: noop,
           onResetLook: noop,
@@ -289,9 +284,10 @@ describe("the whole Inspector, for every object type", () => {
     assert.deepEqual(unnamed(container), []);
   });
 
-  test("slots-grid, embedding a view", async () => {
-    const { container } = await mountInspector("slots-grid", { source: "view" });
-    assert.ok(within(container).getByRole("combobox", { name: "View" }));
+  test("slots-grid, showing a board", async () => {
+    const { container } = await mountInspector("slots-grid", { boardId: "b-1", displayWidthIn: 30 } as Partial<LayoutObjectConfig>);
+    assert.ok(within(container).getByRole("combobox", { name: "Board" }));
+    assert.ok(within(container).getByRole("link", { name: "Edit in Mic slots" }));
     assert.deepEqual(unnamed(container), []);
   });
 

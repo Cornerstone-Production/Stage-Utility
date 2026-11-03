@@ -181,8 +181,8 @@ export const OPTION_SOURCE_KEYS = Object.keys(buildOptionSources({})) as OptionS
  * stop the editor opening. The macro read is cached server-side for 30s, which
  * is what keeps re-opening the editor off the LAN — each query below that is
  * not an app-wide one takes that same 30s as its own client-side staleTime
- * (react-query's default is 0), for the same reason: the layout editor's action-button
- * Inspector remounts per selection, so a bare `useQuery` re-fetched every one on
+ * (react-query's default is 0), for the same reason: the layout editor's Button
+ * inspector remounts per selection, so a bare `useQuery` re-fetched every one on
  * every click between buttons, whatever those buttons' actions actually used —
  * even buttons whose actions take no params at all.
  * 30s trades a little staleness (a target added in Carbonite, an item added to

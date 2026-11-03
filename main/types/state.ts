@@ -40,9 +40,14 @@ export interface StageState {
   /** Content of notes/checklist objects, keyed by layout object id. The layout
    *  holds the design; this holds what the operator typed into it. */
   notesByObject: Record<string, { text?: string; items?: { id: string; text: string; done: boolean }[] }>;
-  /** Resolved slots for inline mic-slots objects, keyed by the layout object's id
-   *  (a custom-layout `slots-grid` with `source: "inline"`). */
+  /** Resolved slots for every slots widget, keyed by the layout object's id: the
+   *  board the widget points at. */
   slotsByLayoutObject: Record<string, Slot[]>;
+  /** Charger alignment per slots View: its display width with its board's column
+   *  width. Null (or absent) when either half is unset — columns share width. */
+  slotsLayoutByView: Record<string, SlotsLayout | null>;
+  /** The same per slots widget, keyed by layout object id. */
+  slotsLayoutByLayoutObject: Record<string, SlotsLayout | null>;
   /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
   resolvedByOutput: Record<string, ResolvedOutput>;
 
@@ -89,8 +94,13 @@ export interface StageState {
   appIcon192: string | null;
   /** The same icon drawn for Android's adaptive masks, with its art inside the safe zone. */
   appIconMaskable: string | null;
-  /** `#rrggbb` behind the icon's transparent areas. */
+  /** `#rrggbb` behind the home-screen icon's art: phones fill transparency with black. */
   appIconBackground: string;
+  /** The browser tab's background: `#rrggbb`, or "none" for the logo alone on the tab strip. */
+  appIconTabBackground: string;
+  /** The icon's square art, transparent where the upload was: the stored image the
+   *  tab icon is drawn from (in the browser, in the ink the tab needs). Null with no custom icon. */
+  appIconArt: string | null;
   /** Show NDI-related controls in settings (off by default; native client only). */
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */

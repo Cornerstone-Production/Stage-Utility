@@ -28,5 +28,5 @@ extensions:
       - ["file:main/services/scrub.ts", "Member[scrub].ReturnValue", "log-injection"]
       - ["file:main/services/scrub.ts", "Member[scrubError].ReturnValue", "log-injection"]
       - ["file:main/services/export-filename.ts", "Member[filenameSlug].ReturnValue", "log-injection"]
-      - ["file:main/services/companion-export.ts", "Member[slugForCue].ReturnValue", "log-injection"]
+      - ["file:main/services/cue-slug.ts", "Member[slugForCue].ReturnValue", "log-injection"]
       - ["file:main/services/builtin-cues.ts", "Member[layerSlug].ReturnValue", "log-injection"]

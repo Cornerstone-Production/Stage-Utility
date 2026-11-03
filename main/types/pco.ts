@@ -270,11 +270,11 @@ export interface SlotDevice {
    *  scales (Shure against its own dB range, Sennheiser raw), so it is coerced to
    *  one unit in slot-resolver.ts — never assume it is dB. */
   audioLevel: number | null;
-  /** Resolved level for the charge bar, from the slot's chargeSource: the bound
+  /** Resolved level for the mic row's battery, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
   charge: number | null;
   /** Resolved battery for a second device (e.g. a vocalist's IEM/PSM pack),
-   *  shown as a second bar beneath the primary. Null when no IEM is bound. */
+   *  shown on the IEM row beneath the mic's. Null when no IEM is bound. */
   iemCharge: number | null;
   /** Static label for the primary device when it has no live telemetry — i.e. an
    *  OFFLINE/manual device (a networkless PSM/mic) or a per-slot label override.
@@ -285,21 +285,28 @@ export interface SlotDevice {
   iemLabel: string | null;
 }
 
+/** What Planning Center says a person brings to a mic slot, from their person tags
+ *  ("Capsule: KSM9", "IEMs: Own"). See pco-prep-tags.ts. */
+export interface PrepTags {
+  capsule: string | null;
+  ownIems: boolean;
+}
+
 export interface Slot {
   id: string;
   channel: string;
   order: number;
   link: SlotLink;
   deviceBinding?: { providerId: string; channelId: string } | null;
-  /** Where the charge bar reads its level: "mic" = the bound device's battery
-   *  (default), "charger" = the SBC bay in `chargeBayId`, "off" = no charge bar. */
+  /** Where the mic row's battery reads its level: "mic" = the bound device's battery
+   *  (default), "charger" = the SBC bay in `chargeBayId`, "off" = no battery shown. */
   chargeSource?: "mic" | "charger" | "off";
   /** ChargerBay id (connectionId::bay) when chargeSource === "charger". */
   chargeBayId?: string | null;
-  /** Hide the RF bars on this slot and show only the charge bar. */
+  /** Hide the RF bars on this slot and show only the battery. */
   hideRf?: boolean;
-  /** Optional second device whose battery shows as a second bar beneath the
-   *  primary charge bar — e.g. a vocalist who also wears an IEM/PSM pack. */
+  /** Optional second device whose battery shows on its own row beneath the
+   *  mic's — e.g. a vocalist who also wears an IEM/PSM pack. */
   iemBinding?: { providerId: string; channelId: string } | null;
   /** Optional custom label override for the primary (mic) device, shown when it's
    *  an offline/manual device with no telemetry. Defaults to the device's name. */
@@ -308,6 +315,9 @@ export interface Slot {
    *  to the device's name. */
   iemLabel?: string | null;
   displayName?: string | null;
+  /** Set by the resolver, only for a slot filled by a person who carries a prep
+   *  tag in Planning Center. Never stored. */
+  prep?: PrepTags;
   /** Which of a position range's names the resolved person is actually scheduled
    *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
    *  this person is really doing. Absent on non-position slots. */
@@ -318,9 +328,9 @@ export interface Slot {
    *  slot (in order), forming a multi-row column. Used to mirror dual-bay
    *  chargers where two people share one charger footprint. */
   stackWithPrevious?: boolean;
-  /** Width in inches for this column, used only when the View has a `slotsLayout`
-   *  (physical alignment). Required for a "spacer" slot; an optional per-column
-   *  override on a column's lead slot (defaults to slotsLayout.columnWidthIn). */
+  /** Width in inches for this column, used only when the board is aligned to
+   *  chargers. Required for a "spacer" slot; an optional per-column override on a
+   *  column's lead slot (defaults to the board's columnWidthIn). */
   widthIn?: number;
 }
 
@@ -329,15 +339,96 @@ export interface SlotPreset {
   name: string;
   slots: Slot[];
   createdAt: string;
+  /** The board the layout was saved from, and where it is recalled by default.
+   *  Absent on a layout saved before boards existed, or imported from a file
+   *  that did not carry its board (one that did is pointed at its new id). */
+  boardId?: string;
 }
 
 /**
- * What a slot board is keyed by: a slots-kind VIEW's id, or the id of an inline
- * `slots-grid` layout OBJECT on a custom layout. The two are stored in the same
- * file and behave identically, so every operation on a board takes the scope
- * beside the key rather than existing twice.
+ * A named slot board: what one or more screens and slots widgets show. Its
+ * layouts (a default per service type, and per-plan overrides) live beside it in
+ * slots.json under the same id.
  */
-export type SlotsScope = "view" | "object";
+export interface SlotBoardMeta {
+  name: string;
+  /** Width of one charger column in inches, or null when the board is not
+   *  aligned to chargers. Each screen keeps its own active display width. */
+  columnWidthIn: number | null;
+  /** ISO timestamp. Empty on a board whose creation time was never recorded. */
+  createdAt: string;
+}
+
+/** Where a board is shown: a slots screen, or a slots widget on a custom layout. */
+export interface SlotBoardShownOn {
+  kind: "view" | "object";
+  /** The view id, or the layout object id. */
+  id: string;
+  /** The view's name; for a widget, the name of the view whose layout holds it. */
+  name: string;
+  /** The view that holds it — the view itself for kind "view". */
+  viewId: string;
+}
+
+/** One entry of `GET /api/boards`. */
+export interface SlotBoardDTO {
+  id: string;
+  name: string;
+  columnWidthIn: number | null;
+  createdAt: string;
+  shownOn: SlotBoardShownOn[];
+}
+
+/** One person `GET /api/boards/check` found on the plan and on no slot. */
+export interface BoardCheckUnplaced {
+  personId: string | null;
+  name: string;
+  position: string | null;
+  /** Every board with a slot naming this person's position. */
+  boards: { id: string; name: string }[];
+}
+
+/** One slot `GET /api/boards/check` found that accepts no position. */
+export interface BoardCheckNoPosition {
+  boardId: string;
+  boardName: string;
+  slotId: string;
+  channel: string;
+  /** 1-based place in the board's order. */
+  index: number;
+}
+
+/** One filled slot with a mic whose person has no Capsule tag in Planning Center. */
+export interface BoardCheckNoCapsule {
+  boardId: string;
+  boardName: string;
+  slotId: string;
+  /** Who fills it. */
+  name: string;
+}
+
+/** What `GET /api/boards/check` answers: this plan's check, for one target. */
+export interface BoardCheckDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  /** Whose roster the people half was read against. "none" for a type's default,
+   *  which has no week and so no people. */
+  roster: SlotsPreviewRoster;
+  /** One sentence, only when `roster` is "unavailable". */
+  reason?: string;
+  unplaced: BoardCheckUnplaced[];
+  noPosition: BoardCheckNoPosition[];
+  /** Filled slots with a mic whose person has no Capsule tag. Empty while no tag has
+   *  been read at all, and for a plan with no roster: nothing is known to be missing. */
+  noCapsule: BoardCheckNoCapsule[];
+}
+
+/**
+ * What a slot write names. `"board"` names the board directly. `"view"` and
+ * `"object"` are the older aliases: a slots screen's id or a slots widget's
+ * layout object id, each meaning the board that screen or widget shows.
+ */
+export type SlotsScope = "view" | "object" | "board";
 
 /**
  * The two boards one key can have right now — the service type's default, and
@@ -349,6 +440,8 @@ export type SlotsScope = "view" | "object";
 export interface SlotTargetsDTO {
   scope: SlotsScope;
   key: string;
+  /** The board `scope`/`key` resolved to — `key` itself for scope "board". */
+  boardId: string;
   serviceTypeId: string | null;
   serviceTypeName: string | null;
   planId: string | null;
@@ -359,6 +452,11 @@ export interface SlotTargetsDTO {
   planSortDate: string | null;
   defaultSlots: Slot[];
   overrideSlots: Slot[] | null;
+  /** The revision of `defaultSlots` and of `overrideSlots` (absent counts). A
+   *  save-all entry carries the one for its target as `rev`, and the server
+   *  refuses it with a 409 when the board was saved elsewhere since. */
+  defaultRev: string;
+  overrideRev: string;
 }
 
 /**

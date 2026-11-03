@@ -27,6 +27,7 @@ that a callback stopped being passed.
 ### Keyboard
 - `Delete` / `Backspace` — remove the selection
 - `Cmd/Ctrl-C` — copy, `Cmd/Ctrl-V` — paste with fresh ids, `Cmd/Ctrl-D` — duplicate
+- `Cmd/Ctrl-F` — unfold the widget shelf and focus its search (not from another text field)
 - paste and duplicate deep-clone children, giving every nested object a new id
 
 There is **no arrow-key nudge**. The first draft of this list claimed one, from
@@ -67,5 +68,6 @@ waved through.
 | `editor-canvas.tsx` | canvas, drag/resize/marquee, drop targets |
 | `inspector.tsx` | the right-hand panel and per-type config |
 | `inspector-rows.tsx` | shared form primitives |
-| `palette.tsx` | the object palette |
+| `palette.tsx` | the widget tile (icon, accent, drag) and the list palette used by the draw-a-box picker |
+| `widget-shelf.tsx` | the shelf under the canvas: group list, widgets, search, readout, fold |
 | `layout-templates.ts` | starting layouts and canvas presets |

@@ -11,14 +11,14 @@
 // palette PRESENTS a type, not part of what the type is. The spec carries the
 // label, group and blurb, which every surface needs.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   BoxIcon, SquareIcon, ImageIcon, SparklesIcon, TypeIcon, ClockIcon, TimerIcon,
   TagIcon, ListIcon, ListOrderedIcon, GaugeIcon, PaperclipIcon, MonitorIcon,
   CaptionsIcon, FileTextIcon, ImagePlayIcon, PercentIcon, LayoutGridIcon,
   RadioIcon, SignalIcon, BatteryChargingIcon, AudioLinesIcon, MicIcon,
   UsersIcon, TrendingUpIcon, LayoutPanelTopIcon, DropletIcon, VideoIcon,
-  DiscIcon, CircleDotIcon, PlugIcon, SendIcon, TvIcon, ZapIcon, LayersIcon, TrophyIcon,
+  DiscIcon, CircleDotIcon, PlugIcon, SendIcon, TvIcon, LayersIcon, TrophyIcon,
   SkipForwardIcon, StickyNoteIcon, CheckSquareIcon, FrameIcon, CastIcon,
   MonitorPlayIcon,
   MessageSquareTextIcon,
@@ -27,6 +27,7 @@ import {
   ToggleRightIcon,
   type LucideIcon,
   RadioTowerIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
@@ -35,7 +36,7 @@ import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-g
 import { Checkbox } from "../components/ui/checkbox";
 
 /** Icon per type. A full Record so a new object cannot appear as a blank tile. */
-const ICONS: Record<LayoutObjectType, LucideIcon> = {
+export const ICONS: Record<LayoutObjectType, LucideIcon> = {
   container: BoxIcon,
   shape: SquareIcon,
   image: ImageIcon,
@@ -80,7 +81,6 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "integration-status": PlugIcon,
   "osc-button": SendIcon,
   "rosstalk-button": TvIcon,
-  "action-button": ZapIcon,
   "cue-button": ToggleRightIcon,
   messages: MessageSquareTextIcon,
   "message-composer": MessageSquarePlusIcon,
@@ -90,6 +90,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "view-embed": FrameIcon,
   "screen-embed": MonitorPlayIcon,
   "ndi-video": CastIcon,
+  "home-attention": TriangleAlertIcon,
   "home-readiness": CheckSquareIcon,
   "home-next-service": ListIcon,
   "home-live-status": GaugeIcon,
@@ -113,7 +114,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
  * a type can be found in a long list. It never reaches a display, where the cull
  * left widgets with a plain outline and no colour at all.
  */
-const GROUP_ACCENT: Record<PaletteGroup, string> = {
+export const GROUP_ACCENT: Record<PaletteGroup, string> = {
   Layout: "var(--gray-9)",
   "Text & time": "var(--amber-9)",
   "PCO / service": "var(--green-9)",
@@ -161,13 +162,16 @@ export interface PaletteProps {
   onToggleHideUnconfigured?: () => void;
 }
 
-export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
-  // The palette is a browse, and browsing every group is the wrong job when you
-  // already know the widget's name — which is most of the time, after the first
-  // week. Home's add-widget sheet already had this box; the predicate behind it
-  // is shared (widgetMatchesQuery), so the same words find the same widgets on
-  // both surfaces rather than two filters drifting apart.
-  const [q, setQ] = useState("");
+/** The drag half of a palette tile: HTML5 drag for a mouse, pointer events for a
+ *  finger, and the click that a finger drag must not also fire. Shared by the
+ *  list Palette and the editor's widget shelf so a tile behaves the same on both. */
+export interface PaletteDragHandlers {
+  onDragStart: (t: LayoutObjectType) => void;
+  onDragEnd: () => void;
+  onDropAt?: (t: LayoutObjectType, clientX: number, clientY: number) => void;
+}
+
+export function usePaletteDrag({ onDragStart, onDragEnd, onDropAt }: PaletteDragHandlers) {
   // What is under the finger right now, so a touch drag is visible. A mouse drag
   // gets the browser's own drag image from HTML5 DnD; a pointer drag gets nothing
   // unless it is drawn, and a widget that travels invisibly is a gesture the
@@ -228,6 +232,73 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed
     });
   }
 
+  /** Everything a tile button needs to be clicked, dragged and touch-dragged. */
+  function tileProps(t: LayoutObjectType, onAdd: (t: LayoutObjectType) => void) {
+    return {
+      draggable: true as const,
+      // Click adds, drag places. Both reach the same code, so a
+      // keyboard user is not stuck with a gesture they cannot make.
+      onClick: () => {
+        // The click that trails a finger drag. See `dragged`.
+        if (dragged.current) { dragged.current = false; return; }
+        onAdd(t);
+      },
+      onPointerDown: (e: ReactPointerEvent<HTMLElement>) => startTouchDrag(e, t),
+      onDragStart: (e: DragEvent<HTMLElement>) => {
+        // Firefox refuses to start a drag without data on the transfer.
+        e.dataTransfer.setData("text/plain", t);
+        e.dataTransfer.effectAllowed = "copy";
+        onDragStart(t);
+      },
+      onDragEnd,
+      // pan-y, not none: the list must still scroll under a finger. A drag onto
+      // the canvas travels sideways out of a side list, which this leaves to us.
+      // Where the list sits ABOVE or BELOW the canvas the drag is vertical and
+      // the browser scrolls instead; tapping to add is the way in.
+      style: { touchAction: onDropAt ? ("pan-y" as const) : undefined },
+    };
+  }
+
+  /** What the finger is carrying. Fixed to the viewport and pointer-events
+   *  none, so it never becomes the drop target for its own gesture. */
+  const ghostEl = ghost ? (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed z-50 rounded-md border border-line-strong bg-popover px-2 py-1 text-caption2 text-fg shadow-lg"
+      style={{ left: ghost.x, top: ghost.y, transform: "translate(-50%, -140%)" }}
+    >
+      {ghost.label}
+    </div>
+  ) : null;
+
+  return { tileProps, ghostEl };
+}
+
+/** The tinted icon tile, in the colour of the widget's group. */
+export function WidgetIcon({ type, className, iconClassName }: { type: LayoutObjectType; className?: string; iconClassName?: string }) {
+  const spec = LAYOUT_OBJECTS[type];
+  const Icon = ICONS[type];
+  const accent = GROUP_ACCENT[spec.group ?? "Layout"];
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("flex shrink-0 items-center justify-center rounded-md", className)}
+      style={{ background: `color-mix(in srgb, ${accent} 18%, transparent)`, color: accent }}
+    >
+      <Icon className={iconClassName ?? "size-4"} />
+    </span>
+  );
+}
+
+export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
+  // The palette is a browse, and browsing every group is the wrong job when you
+  // already know the widget's name — which is most of the time, after the first
+  // week. Home's add-widget sheet already had this box; the predicate behind it
+  // is shared (widgetMatchesQuery), so the same words find the same widgets on
+  // both surfaces rather than two filters drifting apart.
+  const [q, setQ] = useState("");
+  const { tileProps, ghostEl } = usePaletteDrag({ onDragStart, onDragEnd, onDropAt });
+
   const byGroup = PALETTE_GROUP_ORDER.map((g) => ({
     group: g,
     items: types.filter((t) => LAYOUT_OBJECTS[t]?.group === g && widgetMatchesQuery(t, q)),
@@ -272,27 +343,11 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed
           </p>
           {items.map((t) => {
             const spec = LAYOUT_OBJECTS[t];
-            const Icon = ICONS[t];
             return (
               <button
                 key={t}
                 type="button"
-                draggable
-                // Click adds, drag places. Both reach the same code, so a
-                // keyboard user is not stuck with a gesture they cannot make.
-                onClick={() => {
-                  // The click that trails a finger drag. See `dragged`.
-                  if (dragged.current) { dragged.current = false; return; }
-                  onAdd(t);
-                }}
-                onPointerDown={(e) => startTouchDrag(e, t)}
-                onDragStart={(e) => {
-                  // Firefox refuses to start a drag without data on the transfer.
-                  e.dataTransfer.setData("text/plain", t);
-                  e.dataTransfer.effectAllowed = "copy";
-                  onDragStart(t);
-                }}
-                onDragEnd={onDragEnd}
+                {...tileProps(t, onAdd)}
                 title={spec.blurb}
                 className={cn(
                   "flex w-full cursor-grab items-start gap-2.5 rounded-md px-2 py-1.5 text-left",
@@ -300,24 +355,8 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   dimmed?.has(t) && "opacity-50",
                 )}
-                // pan-y, not none: the palette is a long scrolling list and must
-                // still scroll under a finger. A drag onto the canvas travels
-                // sideways out of the list, which this leaves to us. The one case
-                // it costs is the stacked narrow layout, where the palette sits
-                // ABOVE the canvas and the drag is vertical — there the browser
-                // scrolls instead, and tapping to add is the way in.
-                style={{ touchAction: onDropAt ? "pan-y" : undefined }}
               >
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md"
-                  style={{
-                    background: `color-mix(in srgb, ${GROUP_ACCENT[spec.group ?? "Layout"]} 18%, transparent)`,
-                    color: GROUP_ACCENT[spec.group ?? "Layout"],
-                  }}
-                >
-                  <Icon className="size-4" />
-                </span>
+                <WidgetIcon type={t} className="mt-0.5 size-7" />
                 <span className="min-w-0">
                   <span className="block text-footnote font-medium leading-tight text-fg">
                     {spec.label}
@@ -331,17 +370,7 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed
           })}
         </div>
       ))}
-      {/* What the finger is carrying. Fixed to the viewport and pointer-events
-          none, so it never becomes the drop target for its own gesture. */}
-      {ghost && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed z-50 rounded-md border border-line-strong bg-popover px-2 py-1 text-caption2 text-fg shadow-lg"
-          style={{ left: ghost.x, top: ghost.y, transform: "translate(-50%, -140%)" }}
-        >
-          {ghost.label}
-        </div>
-      )}
+      {ghostEl}
     </div>
   );
 }

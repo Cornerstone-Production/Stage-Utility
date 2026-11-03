@@ -685,6 +685,19 @@ describe("the device of a Mac output helper", () => {
     assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it is on screen");
   });
 
+  test("an output the Mac holds off shows dashes, not the zeros it sends, and says so", async () => {
+    await open(SDI, { health: [{ ...HEALTH, fps: 0, repeated: 0, dropped: 0, enabled: false }] });
+    const stats = within(screen.getByRole("group", { name: "Output health" }));
+    assert.equal(stats.getAllByText("—").length, 3, "an off output's zeros were shown as a measurement");
+    assert.ok(screen.getByText("Off. Nothing is being drawn on this port."));
+  });
+
+  test("has a switch named for the port, on when Screens has it on", async () => {
+    await open(SDI, { health: [HEALTH] });
+    const sw = screen.getByRole("switch", { name: "Output on SDI 1" });
+    assert.equal(sw.getAttribute("aria-checked"), "true");
+  });
+
   test("shows a DeckLink output's latency, to the millisecond, with what it measures", async () => {
     await open(SDI, { health: [{ ...HEALTH, latencyMs: 20.4 }] });
     assert.ok(screen.getByText("Latency 20 ms (render to air)"));
@@ -946,6 +959,30 @@ describe("view settings", () => {
     assert.ok(screen.getByText("Only a layout or a calendar can be a control surface: this view has nothing to press."));
     await click(role("Control surface"));
     assert.deepEqual(calls, []);
+  });
+
+  test("a slots screen's display width is set here, and Edit slots goes to the Mic slots page", async () => {
+    const slots: View = { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW, slotsLayout: { displayWidthIn: 32.25 } };
+    const { calls } = mount({ target: { kind: "view", viewId: "mics" }, views: [slots], outputs: [MINE] });
+    const width = screen.getByLabelText("Display active width (inches)") as HTMLInputElement;
+    assert.equal(width.value, "32.25");
+    fetchCalls.length = 0;
+    await act(async () => {
+      fireEvent.change(width, { target: { value: "40" } });
+      fireEvent.blur(width);
+      await settle();
+    });
+    const write = fetchCalls.find((c) => c.method === "PATCH" && c.url.endsWith("/api/views/mics"));
+    assert.ok(write, "the display width reaches the server as a view write");
+    assert.deepEqual(JSON.parse(write!.body), { slotsLayout: { displayWidthIn: 40 } });
+    await click(screen.getByRole("button", { name: "Edit slots" }));
+    assert.deepEqual(calls.at(-1), ["editLayout", "mics"]);
+  });
+
+  test("a view that is not a slots screen has no display width", () => {
+    onView(CTL_A);
+    assert.equal(screen.queryByLabelText("Display active width (inches)") !== null, false);
+    assert.equal(screen.queryByRole("button", { name: "Edit slots" }) !== null, false);
   });
 
   test("a calendar CAN be a control surface: its month chevrons are something to operate", async () => {

@@ -42,13 +42,13 @@ const textObject: LayoutObject = {
   config: { type: "text", text: VIEW_MARKER }, style: { fontSize: 0.1 },
 };
 
-/** A control INSIDE the tile, the thing an outer button would have eaten. Bound
- *  to a real action so pressing it is observable as a request rather than as an
- *  absence of one. */
-const INNER_ACTION = "inner-action";
+/** A control INSIDE the tile, the thing an outer button would have eaten. An OSC
+ *  button with a target, so pressing it is observable as a request rather than as
+ *  an absence of one. */
+const INNER_ADDRESS = "/inner/press";
 const innerButtonObject: LayoutObject = {
   id: "t2", x: 0, y: 0, w: 1, h: 1, z: 0,
-  config: { type: "action-button", actionId: INNER_ACTION, label: "INNER CONTROL" }, style: {},
+  config: { type: "osc-button", targetId: "t", address: INNER_ADDRESS, args: [], feedback: null, label: "INNER CONTROL" }, style: {},
 };
 
 const view = (objects: LayoutObject[]): View => ({
@@ -134,9 +134,8 @@ const objectFor = (kind: Kind) => ({
  *  entry, the switch case and the component are all on the path. Takes the
  *  OBJECT rather than a kind, because the nested tests build their own.
  *
- *  Wrapped in its own QueryClientProvider for the one nested object type that
- *  needs one (action-button, see innerButtonObject below) — a fresh client
- *  per call, since most call sites never touch it. */
+ *  Wrapped in its own QueryClientProvider for the nested object types that need
+ *  one — a fresh client per call, since most call sites never touch it. */
 const tree = (o: LayoutObject, ctx: LayoutRenderCtx) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return React.createElement(
@@ -514,7 +513,7 @@ describe("the expand affordance is a sibling of the tile's content, not its ance
   test("a control inside the tile still gets its own press", async () => {
     // The nested-<button> bug, which this repository has shipped twice: an outer
     // control wrapped around the content swallows the inner one's click. Tiles
-    // hold checklists, live controls and action buttons, so a full-bleed hit
+    // hold checklists, live controls and buttons, so a full-bleed hit
     // area over the body is the same defect with a different tag name.
     const { container } = await renderTile({ interactive: true, objects: [innerButtonObject] });
     const inner = container.querySelector<HTMLButtonElement>(`[aria-label="INNER CONTROL"]`);
@@ -523,7 +522,7 @@ describe("the expand affordance is a sibling of the tile's content, not its ance
     await act(async () => { fireEvent.click(inner); await settle(); });
 
     assert.ok(
-      requests.some((r) => r.includes("/api/action/invoke") && r.includes(INNER_ACTION)),
+      requests.some((r) => r.includes("/api/osc/send") && r.includes(INNER_ADDRESS)),
       `the tile ate the embedded control's click (requests: ${requests.join(" | ")})`,
     );
     assert.equal(overlays(), 0, "pressing a control inside the tile expanded the tile instead");

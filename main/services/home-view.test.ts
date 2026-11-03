@@ -34,13 +34,14 @@ describe("seeding", () => {
 
   test("Home starts with the cards the fixed panels showed", () => {
     assert.deepEqual(typesOf(seedHomeView([])), [
+      "home-attention",
       "timer",
       "home-recording",
       "home-spl",
       "home-screens",
       "home-next-service",
-      "home-readiness",
       "home-recent-services",
+      "message-composer",
     ]);
   });
 
@@ -48,7 +49,7 @@ describe("seeding", () => {
     // The card the retired `home-live-status` was: it reads as this Timer, so a
     // new Home and an old one draw the same thing, and the tile it arrives in is
     // stated on the card because a Timer's own default is not an xl live tile.
-    const timer = seedHomeView([]).find((v) => v.id === HOME_VIEW_ID)!.layout!.objects[0];
+    const timer = seedHomeView([]).find((v) => v.id === HOME_VIEW_ID)!.layout!.objects.find((o) => o.config.type === "timer")!;
     assert.deepEqual(timer.config, { type: "timer", source: "service", nextItem: true });
     assert.deepEqual(timer.home, { size: "xl", when: "live" });
   });
@@ -79,13 +80,25 @@ describe("idempotence", () => {
     const once = seedHomeView([]);
     const objects = once
       .find((v) => v.id === HOME_VIEW_ID)!
-      .layout!.objects.filter((o) => o.config.type !== "home-readiness");
+      .layout!.objects.filter((o) => o.config.type !== "home-attention");
     const after = seedHomeView(edited(once, objects));
     assert.deepEqual(
       typesOf(after),
-      ["timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services"],
+      ["timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services", "message-composer"],
       "the deleted card came back",
     );
+  });
+
+  test("an EDITED Home that holds Readiness is left alone: Needs attention is not swapped in", () => {
+    // Needs attention replaces Readiness only on a Home nobody has saved. Someone
+    // who arranged their own keeps the card they chose.
+    const once = seedHomeView([]);
+    const objects = once
+      .find((v) => v.id === HOME_VIEW_ID)!
+      .layout!.objects.map((o) => (o.config.type === "home-attention" ? { ...o, config: { type: "home-readiness" } } : o));
+    assert.deepEqual(typesOf(seedHomeView(edited(once, objects))), [
+      "home-readiness", "timer", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services", "message-composer",
+    ]);
   });
 
   test("an EMPTY Home the operator saved stays empty", () => {
@@ -112,14 +125,33 @@ describe("idempotence", () => {
         : v,
     );
     assert.deepEqual(typesOf(seedHomeView(stale)), [
+      "home-attention",
       "timer",
       "home-recording",
       "home-spl",
       "home-screens",
       "home-next-service",
-      "home-readiness",
       "home-recent-services",
+      "message-composer",
     ]);
+  });
+
+  test("the message composer arrives on an unedited Home, as an extra large always-on tile", () => {
+    const composer = seedHomeView([])
+      .find((v) => v.id === HOME_VIEW_ID)!
+      .layout!.objects.find((o) => o.config.type === "message-composer");
+    assert.deepEqual(composer?.home, { size: "xl", when: "always" });
+  });
+
+  test("an edited Home that lacks the composer is left without it", () => {
+    const once = seedHomeView([]);
+    const objects = once
+      .find((v) => v.id === HOME_VIEW_ID)!
+      .layout!.objects.filter((o) => o.config.type !== "message-composer");
+    assert.ok(
+      !typesOf(seedHomeView(edited(once, objects))).includes("message-composer"),
+      "an operator's saved Home is theirs; the seed must not add a card to it",
+    );
   });
 
   test("a renamed Home is not duplicated", () => {

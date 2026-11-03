@@ -31,6 +31,7 @@ import {
   inferStateSource,
   learnableConnections,
 } from "./companion-state-source.js";
+import { collapse, slugForCue } from "./cue-slug.js";
 
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
@@ -83,6 +84,66 @@ export interface CompanionButton {
    * Companion's value API at all. See companion-state-learn.ts.
    */
   learnConnections: string[];
+  /** The button's own background as CSS hex, or null (no box layer, or an expression). */
+  bg: string | null;
+  /** The button's own text colour as CSS hex, or null (no text layer, or an expression). */
+  fg: string | null;
+}
+
+/** One page in the picker's page list. */
+export interface CompanionPageSummary {
+  page: number;
+  name: string;
+  /** Buttons on the page that carry a label. 0 is an empty page. */
+  labelled: number;
+}
+
+/** What one key on a page is. */
+export type TextAlign = "left" | "center" | "right";
+export type TextVAlign = "top" | "center" | "bottom";
+
+export type CompanionKeyKind = "button" | "reference" | "page-control";
+
+/** One key as the picker draws it. Icons travel here and never on CompanionButton. */
+export interface CompanionPageKey {
+  row: number;
+  col: number;
+  kind: CompanionKeyKind;
+  /** The text with whitespace collapsed: identity, search and naming. Never what the key shows. */
+  label: string;
+  /**
+   * The text as Companion draws it: line breaks kept (a literal newline or a typed `\n`),
+   * whitespace within a line collapsed. `$(...)` variables are still raw here; the page
+   * route fills them from Companion (see `vars`). An expression layer shows as `label` does.
+   */
+  text: string;
+  /** Companion's own text size, as a percentage of the key's height, or null for auto-fit. */
+  size: number | null;
+  halign: TextAlign | null;
+  valign: TextVAlign | null;
+  /** The variables `text` names that Companion can answer for, as `label:name`, distinct. */
+  vars: string[];
+  bg: string | null;
+  fg: string | null;
+  /** A `data:image/` URI, or null. Companion's built-in `$(image:...)` names are not images here. */
+  icon: string | null;
+  /**
+   * Whether picking it presses something. A page control, an empty key and a
+   * reference that resolves to nothing cannot be picked.
+   */
+  pickable: boolean;
+  /** A reference's own target: a press goes there, as Companion's does. */
+  target?: { page: number; row: number; col: number };
+}
+
+/** One page as the picker draws it: the extent in use, and its keys. */
+export interface CompanionPageView {
+  page: number;
+  name: string;
+  /** Columns and rows to draw: what the page uses, never fewer than 8 by 4. */
+  cols: number;
+  rows: number;
+  keys: CompanionPageKey[];
 }
 
 /** Two buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP. */
@@ -102,39 +163,127 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
-/**
- * Whitespace collapsed, INCLUDING the literal two-character `\n` Companion
- * stores for a line break.
- *
- * Not a nicety: a button reads `PVP:\nLyrics ON` in the export, with a real
- * backslash and a real `n`. Collapsing only real whitespace leaves that
- * backslash in the middle of the label, which then becomes part of a cue name
- * and part of the ON/OFF comparison — so the ON and OFF halves of a two-line
- * button still pair up, but under a name nobody could say out loud.
- */
-export function collapse(text: string): string {
-  return text.replace(/\\[rn]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 /** The Companion build string from an export, or null. */
 export function exportBuild(raw: unknown): string | null {
   const build = str(rec(raw).companionBuild).trim();
   return build || null;
 }
 
-/** Every text a button draws, joined — 5.x text layers first, 3.x flat style too. */
-function labelOf(control: Record<string, unknown>): string {
+/** One text a button draws. An expression is Companion's to evaluate, so it is shown as written. */
+interface TextPart {
+  text: string;
+  expression: boolean;
+}
+
+/** Every text a button draws, in order — the 3.x flat style first, then each 5.x text layer. */
+function textPartsOf(control: Record<string, unknown>): TextPart[] {
   const style = rec(control.style);
-  const parts: string[] = [];
-  if (typeof style.text === "string") parts.push(style.text);
+  const parts: TextPart[] = [];
+  if (typeof style.text === "string") parts.push({ text: style.text, expression: false });
   for (const layer of arr(style.layers)) {
     const l = rec(layer);
     if (l.type !== "text") continue;
     const t = l.text;
-    if (typeof t === "string") parts.push(t);
-    else if (typeof rec(t).value === "string") parts.push(rec(t).value as string);
+    if (typeof t === "string") parts.push({ text: t, expression: false });
+    else if (typeof rec(t).value === "string") parts.push({ text: rec(t).value as string, expression: rec(t).isExpression === true });
   }
-  return collapse(parts.join(" "));
+  return parts;
+}
+
+/** Every text a button draws, joined — 5.x text layers first, 3.x flat style too. */
+function labelOf(control: Record<string, unknown>): string {
+  return collapse(textPartsOf(control).map((p) => p.text).join(" "));
+}
+
+/** A line's inner whitespace collapsed, its ends trimmed. */
+const tidyLine = (line: string): string => line.replace(/[ \t\u00a0]+/g, " ").trim();
+
+/**
+ * Text as Companion draws it: a newline, or the two characters `\n` typed into the field,
+ * breaks the line; nothing else about the whitespace survives. An expression keeps the
+ * collapsed form `label` has, because it is not text until Companion evaluates it.
+ */
+function displayTextOf(control: Record<string, unknown>): { text: string; vars: string[] } {
+  const lines: string[] = [];
+  const vars = new Set<string>();
+  for (const part of textPartsOf(control)) {
+    if (part.expression) {
+      const flat = collapse(part.text);
+      if (flat) lines.push(flat);
+      continue;
+    }
+    for (const line of part.text.replace(/\\n/g, "\n").split(/\r\n|\r|\n/)) lines.push(tidyLine(line));
+    for (const ref of variableRefsIn(part.text)) vars.add(ref);
+  }
+  // Blank lines at either end are padding; one inside is a deliberate gap.
+  while (lines.length && lines[0] === "") lines.shift();
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return { text: lines.join("\n"), vars: [...vars] };
+}
+
+/** Variables Companion does not hold on its API: they are about the button being drawn. */
+const LOCAL_LABELS = new Set(["this", "local", "image"]);
+
+/** `$(label:name)`: the whole reference, for a global replace. */
+const VARIABLE_TOKEN = /\$\(([^()\s]+)\)/g;
+
+/**
+ * The distinct variables a text names that Companion can be asked for, as written
+ * (`Stage_Utility:people_occupancy`, `custom:x`, `internal:time_hms`). A button's own
+ * `$(this:...)` and `$(local:...)` are not readable through the API, so they stay raw.
+ */
+export function variableRefsIn(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(VARIABLE_TOKEN)) {
+    const ref = m[1]!;
+    const parsed = parseVariableRef(ref);
+    if (!parsed || !ref.includes(":")) continue;
+    if (parsed.kind === "module" && LOCAL_LABELS.has(parsed.label.toLowerCase())) continue;
+    out.add(ref);
+  }
+  return [...out];
+}
+
+/** `text` with each `$(ref)` whose value is known replaced by it. An unknown one is left as written. */
+export function substituteVariables(text: string, values: ReadonlyMap<string, string>): string {
+  return text.replace(VARIABLE_TOKEN, (whole, ref: string) => values.get(ref) ?? whole);
+}
+
+const H_ALIGNS: readonly string[] = ["left", "center", "right"];
+const V_ALIGNS: readonly string[] = ["top", "center", "bottom"];
+
+/** Companion's legacy `size` option is points on a 60 point key; a 5.x `fontsize` is a percentage of the key. */
+const PT_TO_PERCENT = 100 / 60;
+
+/**
+ * How the first text layer that says something is laid out: the size, as a percentage of
+ * the key (null for auto-fit, which a 5.x layer says with shrink-to-fit on or an expression),
+ * and where in the key it sits. A 3.x button keeps the same three flat as `size` and `alignment`.
+ */
+function textLayoutOf(control: Record<string, unknown>): { size: number | null; halign: TextAlign | null; valign: TextVAlign | null } {
+  const style = rec(control.style);
+  for (const layer of arr(style.layers)) {
+    const l = rec(layer);
+    if (l.type !== "text" || rec(l.enabled).value === false) continue;
+    const t = rec(l.text);
+    if (typeof l.text !== "string" && !(typeof t.value === "string" && t.value.trim() !== "")) continue;
+    const fs = rec(l.fontsize);
+    const shrink = rec(l.fontsizeAllowShrink).value === true;
+    const ha = rec(l.halign);
+    const va = rec(l.valign);
+    return {
+      size: !shrink && fs.isExpression !== true && typeof fs.value === "number" && fs.value > 0 && Number.isFinite(fs.value) ? fs.value : null,
+      halign: ha.isExpression !== true && H_ALIGNS.includes(String(ha.value)) ? (ha.value as TextAlign) : null,
+      valign: va.isExpression !== true && V_ALIGNS.includes(String(va.value)) ? (va.value as TextVAlign) : null,
+    };
+  }
+  const pt = typeof style.size === "string" || typeof style.size === "number" ? Number(style.size) : NaN;
+  const [h, v] = (typeof style.alignment === "string" ? style.alignment : "").split(":");
+  return {
+    size: Number.isFinite(pt) && pt > 0 ? Math.round(pt * PT_TO_PERCENT * 10) / 10 : null,
+    halign: H_ALIGNS.includes(h ?? "") ? (h as TextAlign) : null,
+    valign: V_ALIGNS.includes(v ?? "") ? (v as TextVAlign) : null,
+  };
 }
 
 /**
@@ -165,6 +314,16 @@ function actionsOf(control: Record<string, unknown>): Record<string, unknown>[] 
     for (const set of Object.values(rec(rec(step).action_sets))) visit(arr(set));
   }
   return out;
+}
+
+/**
+ * Is a pressable control worth offering: it says something, or it drives a connection.
+ * One predicate for the button list and for a page's keys, because a key the page draws
+ * as pickable is looked up in the list when it is picked, and a key that is not there
+ * cannot be pressed.
+ */
+function isListed(control: Record<string, unknown>, label: string): boolean {
+  return label !== "" || connectionsOf(control).length > 0;
 }
 
 /** Connection ids referenced by any action of a control. */
@@ -241,6 +400,91 @@ export function actionIdsOf(control: unknown): string[] {
 }
 
 /**
+ * Every page in an export as [number, page], whatever shape the document keeps
+ * them in: an object keyed by page number in every export seen, an array in an
+ * older or hand-built one so it does not read as empty. A key that is not a
+ * number is dropped.
+ */
+function pagesOf(doc: Record<string, unknown>): [number, Record<string, unknown>][] {
+  const pages: [string, unknown][] = Array.isArray(doc.pages)
+    ? doc.pages.map((p, i) => [String(i + 1), p] as [string, unknown])
+    : Object.entries(rec(doc.pages));
+  const out: [number, Record<string, unknown>][] = [];
+  for (const [key, raw] of pages) {
+    const n = Number(key);
+    if (Number.isFinite(n)) out.push([n, rec(raw)]);
+  }
+  return out;
+}
+
+/** A page's controls as [row, col, control], skipping a key that is not a number. */
+function controlsOf(page: Record<string, unknown>): [number, number, Record<string, unknown>][] {
+  const out: [number, number, Record<string, unknown>][] = [];
+  for (const [rowKey, rowRaw] of Object.entries(rec(page.controls))) {
+    const row = Number(rowKey);
+    if (!Number.isFinite(row)) continue;
+    for (const [colKey, controlRaw] of Object.entries(rec(rowRaw))) {
+      const col = Number(colKey);
+      if (!Number.isFinite(col)) continue;
+      out.push([row, col, rec(controlRaw)]);
+    }
+  }
+  return out;
+}
+
+/** A 24-bit RGB integer as CSS hex. Anything else (an expression's string, a missing value) is null. */
+function hexOf(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 0xffffff) return null;
+  return `#${value.toString(16).padStart(6, "0")}`;
+}
+
+/**
+ * The colour of a button's first ENABLED layer of this type, as CSS hex.
+ *
+ * 5.x keeps it at `style.layers[].color.value` (the box layer is the
+ * background, the text layer the text). 3.x kept `style.bgcolor` and
+ * `style.color` flat, read as the fallback. An expression is not a colour:
+ * null, and the picker shows the default.
+ */
+function layerColor(control: Record<string, unknown>, layerType: "box" | "text"): string | null {
+  const style = rec(control.style);
+  for (const layer of arr(style.layers)) {
+    const l = rec(layer);
+    if (l.type !== layerType) continue;
+    if (rec(l.enabled).value === false) continue;
+    const c = rec(l.color);
+    if (c.isExpression === true) return null;
+    return hexOf(c.value);
+  }
+  return hexOf(layerType === "box" ? style.bgcolor : style.color);
+}
+
+/**
+ * The icon on a button's image layer, when it is an actual image.
+ *
+ * `base64Image.value` is a `data:image/...` URI for an uploaded icon, but also
+ * Companion's own `$(image:yellow-border)` for one of its built-ins, which is a
+ * name this server cannot draw. Only the first is returned.
+ */
+function iconOf(control: Record<string, unknown>): string | null {
+  for (const layer of arr(rec(control.style).layers)) {
+    const l = rec(layer);
+    if (l.type !== "image") continue;
+    const v = rec(l.base64Image).value;
+    if (typeof v === "string" && v.startsWith("data:image/")) return v;
+  }
+  return null;
+}
+
+/** "6/3/1" as page, row, column. Null for an expression or anything else. */
+function parseLocation(v: unknown): { page: number; row: number; col: number } | null {
+  const loc = rec(v);
+  if (loc.isExpression === true || typeof loc.value !== "string") return null;
+  const m = /^(\d+)\/(\d+)\/(\d+)$/.exec(loc.value.trim());
+  return m ? { page: Number(m[1]), row: Number(m[2]), col: Number(m[3]) } : null;
+}
+
+/**
  * Every button in an export that a rule could sensibly press.
  *
  * A control is included when its `type` starts with `button` AND it either
@@ -252,62 +496,206 @@ export function parseButtons(raw: unknown): CompanionButton[] {
   const doc = rec(raw);
   const connections = parseConnections(raw);
   const out: CompanionButton[] = [];
+  const pages = pagesOf(doc);
+  const index = indexControls(pages);
 
-  // `pages` is an object keyed by page number in every export seen; an array is
-  // accepted too so an older or hand-built document does not read as empty.
-  const pages: [string, unknown][] = Array.isArray(doc.pages)
-    ? doc.pages.map((p, i) => [String(i + 1), p] as [string, unknown])
-    : Object.entries(rec(doc.pages));
-
-  for (const [pageKey, pageRaw] of pages) {
-    const page = rec(pageRaw);
-    const pageNum = Number(pageKey);
-    if (!Number.isFinite(pageNum)) continue;
+  for (const [pageNum, page] of pages) {
     const pageName = collapse(str(page.name)) || `Page ${pageNum}`;
     const pageId = str(page.id);
 
-    for (const [rowKey, rowRaw] of Object.entries(rec(page.controls))) {
-      const row = Number(rowKey);
-      if (!Number.isFinite(row)) continue;
-      for (const [colKey, controlRaw] of Object.entries(rec(rowRaw))) {
-        const col = Number(colKey);
-        if (!Number.isFinite(col)) continue;
-        const control = rec(controlRaw);
-        if (!str(control.type).startsWith("button")) continue;
+    for (const [row, col, control] of controlsOf(page)) {
+      if (!isPressable(control)) continue;
 
-        const label = labelOf(control);
-        const driven = connectionsOf(control);
-        if (!label && driven.length === 0) continue;
+      // The label the key DISPLAYS, so a button drawn with another's style is listed and
+      // found by that name. The press target stays this control's own location.
+      const { label, bg, fg } = lookOf(control, index);
+      const driven = connectionsOf(control);
+      if (!isListed(control, label)) continue;
 
-        const drives = [...new Set(driven)]
-          .map((id) => connections[id]?.moduleId ?? "")
-          .filter((m) => m !== "");
+      const drives = [...new Set(driven)]
+        .map((id) => connections[id]?.moduleId ?? "")
+        .filter((m) => m !== "");
 
-        // The same two lists feed the inference and the learnable-connection
-        // walk, built ONCE: they are the button's whole evidence and reading
-        // the control twice for them would be two walks over every action set.
-        const entries = {
-          feedbacks: feedbackEntriesOf(control),
-          actions: actionEntriesOf(control),
-        };
+      // The same two lists feed the inference and the learnable-connection
+      // walk, built ONCE: they are the button's whole evidence and reading
+      // the control twice for them would be two walks over every action set.
+      const entries = {
+        feedbacks: feedbackEntriesOf(control),
+        actions: actionEntriesOf(control),
+      };
 
-        out.push({
-          page: pageNum,
-          pageId,
-          pageName,
-          row,
-          col,
-          label,
-          drives,
-          actionIds: actionIdsOf(control),
-          stateSource: inferStateSource(entries, connections),
-          learnConnections: learnableConnections(entries, connections),
-        });
-      }
+      out.push({
+        page: pageNum,
+        pageId,
+        pageName,
+        row,
+        col,
+        label,
+        drives,
+        actionIds: actionIdsOf(control),
+        stateSource: inferStateSource(entries, connections),
+        learnConnections: learnableConnections(entries, connections),
+        bg,
+        fg,
+      });
     }
   }
 
   return out;
+}
+
+/**
+ * A control a rule could press: a button, not Companion's page furniture and
+ * not a `button-reference`, which has no look or actions of its own and only
+ * points at another key (see parsePages).
+ */
+function isPressable(control: Record<string, unknown>): boolean {
+  const type = str(control.type);
+  return type.startsWith("button") && type !== "button-reference";
+}
+
+/** A control's own look: what its own layers draw. */
+function ownLookOf(control: Record<string, unknown>) {
+  return { label: labelOf(control), ...displayTextOf(control), ...textLayoutOf(control), ...colorsOf(control), icon: iconOf(control) };
+}
+
+/** Every pressable-or-not control in an export by "page/row/col", so a location can be followed. */
+type ControlIndex = Map<string, Record<string, unknown>>;
+
+/** The deepest chain of "use another button's style" followed. A real install has chains of one or two. */
+const MAX_STYLE_DEPTH = 8;
+
+/**
+ * Where a control borrows its look from: the static location of its first enabled
+ * internal `bank_style` feedback ("use another button's style"), or null.
+ * An expression location, a disabled feedback and a malformed location borrow nothing.
+ */
+function styleSourceOf(control: Record<string, unknown>): string | null {
+  for (const entry of arr(control.feedbacks)) {
+    const f = rec(entry);
+    if (f.disabled === true) continue;
+    if (str(f.connectionId) !== "internal" || str(f.definitionId) !== "bank_style") continue;
+    const at = parseLocation(rec(f.options).location);
+    return at ? `${at.page}/${at.row}/${at.col}` : null;
+  }
+  return null;
+}
+
+/**
+ * A control's look as Companion draws it. A button using another button's style
+ * (feedback `bank_style`) is drawn with the look of the button at that location, and
+ * its own layers are blank, so the key and its label are those of the source,
+ * followed through a chain. A missing target, a target that is not a button, and a chain
+ * deeper than MAX_STYLE_DEPTH (which is what a cycle is) leave the control's own look.
+ */
+function lookOf(control: Record<string, unknown>, index: ControlIndex) {
+  let current = control;
+  for (let depth = 0; depth < MAX_STYLE_DEPTH; depth++) {
+    const at = styleSourceOf(current);
+    if (at === null) return ownLookOf(current);
+    const next = index.get(at);
+    if (!next || !isPressable(next)) return ownLookOf(control);
+    current = next;
+  }
+  return ownLookOf(control);
+}
+
+function indexControls(pages: ReturnType<typeof pagesOf>): ControlIndex {
+  const index: ControlIndex = new Map();
+  for (const [n, page] of pages) {
+    for (const [row, col, control] of controlsOf(page)) {
+      if (Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < MAX_ROWS && col < MAX_COLS) index.set(`${n}/${row}/${col}`, control);
+    }
+  }
+  return index;
+}
+
+/** A button's own background and text colour: the part of its look a rule's button list needs too. */
+function colorsOf(control: Record<string, unknown>): { bg: string | null; fg: string | null } {
+  return { bg: layerColor(control, "box"), fg: layerColor(control, "text") };
+}
+
+/** What a key with nothing to draw looks like: a reference that points nowhere, a page control. */
+const noLook = (): Pick<CompanionPageKey, "label" | "text" | "size" | "halign" | "valign" | "vars" | "bg" | "fg" | "icon"> => ({
+  label: "",
+  text: "",
+  size: null,
+  halign: null,
+  valign: null,
+  vars: [],
+  bg: null,
+  fg: null,
+  icon: null,
+});
+
+const MIN_COLS = 8;
+const MIN_ROWS = 4;
+/** The most columns and rows a page is drawn with. A real surface is a few dozen keys; the
+ *  keys of a document that names more are not drawn, so a pasted export cannot ask for a
+ *  grid a million cells wide. */
+const MAX_COLS = 64;
+const MAX_ROWS = 64;
+
+/**
+ * Every page in an export as the picker draws it: the extent the page USES
+ * (never fewer than 8 by 4, and not the declared `gridSize`, which a real
+ * install sets to 18 by 8 on every page), and each key with its own look.
+ *
+ * A `button-reference` is drawn as the key it points at and marked, and a press
+ * on it goes to that key's own location, as Companion's does; one whose location
+ * is an expression or names nothing is a blank key that cannot be picked. The
+ * page furniture (`pagenum`, `pageup`, `pagedown`) is blank and cannot be
+ * picked either. References are followed one step: a reference to a reference
+ * names nothing.
+ */
+export function parsePages(raw: unknown): { summaries: CompanionPageSummary[]; views: CompanionPageView[] } {
+  const pages = pagesOf(rec(raw));
+  const inGrid = ([row, col]: [number, number, unknown]) => Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0 && row < MAX_ROWS && col < MAX_COLS;
+  const controlAt = indexControls(pages);
+
+  const summaries: CompanionPageSummary[] = [];
+  const views: CompanionPageView[] = [];
+  for (const [n, page] of pages) {
+    const name = collapse(str(page.name)) || `Page ${n}`;
+    const keys: CompanionPageKey[] = [];
+    let labelled = 0;
+    let maxRow = -1;
+    let maxCol = -1;
+    for (const [row, col, control] of controlsOf(page).filter(inGrid)) {
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+      const type = str(control.type);
+      if (type === "button-reference") {
+        const target = parseLocation(rec(control.options).location);
+        const pointed = target ? controlAt.get(`${target.page}/${target.row}/${target.col}`) : undefined;
+        const resolved = pointed && isPressable(pointed) ? pointed : null;
+        const look = resolved ? lookOf(resolved, controlAt) : noLook();
+        keys.push({
+          row,
+          col,
+          kind: "reference",
+          ...look,
+          pickable: !!resolved && isListed(resolved, look.label),
+          ...(target ? { target } : {}),
+        });
+      } else if (isPressable(control)) {
+        const look = lookOf(control, controlAt);
+        if (look.label) labelled++;
+        keys.push({
+          row,
+          col,
+          kind: "button",
+          ...look,
+          pickable: isListed(control, look.label),
+        });
+      } else {
+        keys.push({ row, col, kind: "page-control", ...noLook(), pickable: false });
+      }
+    }
+    summaries.push({ page: n, name, labelled });
+    views.push({ page: n, name, cols: Math.max(MIN_COLS, maxCol + 1), rows: Math.max(MIN_ROWS, maxRow + 1), keys });
+  }
+  return { summaries, views };
 }
 
 /**
@@ -692,21 +1080,6 @@ export function importedCueNames(label: string, pageName: string): string[] {
     add(`${slugForCue(split.base)}_${half}`);
   }
   return [...out];
-}
-
-/**
- * A cue name from a button label: lower snake_case, letters/digits/underscore.
- *
- * The name is said out loud to a voice assistant and typed into a Home Assistant
- * config, so it has to survive both. Anything else collapses to a single
- * underscore, and a name that reduces to nothing returns "" for the caller to
- * reject rather than a cue called `_`.
- */
-export function slugForCue(text: string): string {
-  return collapse(text)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
 }
 
 /**

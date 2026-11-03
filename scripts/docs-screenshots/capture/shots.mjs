@@ -51,9 +51,9 @@ export const SHOTS = [
   {
     name: "automation-rules",
     phase: "week",
-    shows: "Automation: the rules list with simulate mode, the Home Assistant group and everything else.",
+    shows: "Automation, Commands tab: Simulate and Disarm above the tabs, each command with its badges and the screens it is used on.",
     async run({ session, page }) {
-      await session.goto(page, "/automation");
+      await session.goto(page, "/automation/commands");
       await session.shoot(page, "automation-rules");
     },
   },
@@ -132,9 +132,9 @@ export const SHOTS = [
   {
     name: "slots-editor",
     phase: "week",
-    shows: "The mic board editor: slots linked to Planning Center positions and bound to wireless channels.",
+    shows: "The Mic slots page: a board's preview, the inspector for the selected slot, and the plan switcher.",
     async run({ session, page, world }) {
-      await session.goto(page, `/screens/${world.micBoardId}/edit`);
+      await session.goto(page, `/mic-slots?board=${world.micBoardId}`);
       await session.shoot(page, "slots-editor");
     },
   },
@@ -155,7 +155,7 @@ export const SHOTS = [
   {
     name: "home-dashboard",
     phase: "live",
-    shows: "Home during a service: the live item, screens online, readiness and recent services.",
+    shows: "Home during a service: Needs attention with nothing wrong, the live item, screens online and recent services.",
     async run({ session, page }) {
       await session.goto(page, "/", { settle: 3500 });
       await session.shoot(page, "home-dashboard");

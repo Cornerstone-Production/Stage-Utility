@@ -1,16 +1,14 @@
 // The widget palette, rendered — not asserted over PALETTE_GROUPS alone.
 //
-// layout-objects.test.ts pins the registry (cue-button's group and placement, and
-// that action-button is folded into it); what that test cannot see is whether the
-// PALETTE COMPONENT draws exactly one tile for the two button types and what
-// adding it makes. A spec with a group is not the same guarantee as a tile an
+// layout-objects.test.ts pins the registry (cue-button's group and placement); what
+// that test cannot see is whether the PALETTE COMPONENT draws exactly one tile for
+// the Button and what adding it makes. A spec with a group is not the same guarantee as a tile an
 // operator can click or drag — that gap is how "custom layouts with buttons to
 // advance and go back through the baptisms" once had nowhere in the UI to add one.
 //
-// The palette offers ONE Button. It adds a cue-button: that is the stored type the
-// inspector's Does control starts from ("Fire a cue"), and an unbound cue-button
-// is the one that tells the operator what to do next. An action-button is reached
-// by switching Does, never by a second tile.
+// The palette offers ONE Button. It adds a cue-button, which starts with nothing
+// chosen: an unbound cue-button is the one that tells the operator what to do next,
+// and the inspector's Presses control is where it is chosen.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";

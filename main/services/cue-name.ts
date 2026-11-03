@@ -9,7 +9,7 @@
 // and not one of the built-ins. The operator types a display name ("Projectors
 // on"); this makes the name from it.
 
-import { slugForCue } from "./companion-export.js";
+import { slugForCue } from "./cue-slug.js";
 import { isPairHalfName } from "./cue-pairs.js";
 
 /** Long enough for any sentence somebody types, short enough for a URL. */

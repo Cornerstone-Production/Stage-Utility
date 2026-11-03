@@ -14,6 +14,8 @@ import { Loader2Icon } from "lucide-react";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
 import { advancedTabPath, DEFAULT_ADVANCED_TAB } from "../settings/sections/advanced-settings";
+import { AutomationSection } from "../settings/sections/automation-section";
+import { automationTabPath, DEFAULT_AUTOMATION_TAB } from "../settings/sections/automation-tabs";
 import { PlanSection } from "../settings/sections/plan-section";
 import { MESSAGING_CONFIG_KEY } from "../lib/messaging-config";
 import { MessagesSection } from "../settings/sections/messages-section";
@@ -85,6 +87,37 @@ export function AdvancedTabRoute() {
       handlers={s.handlers}
       justUpdated={justUpdated}
       onDismissJustUpdated={() => setJustUpdated(null)}
+    />
+  );
+}
+
+/**
+ * Bare `/automation`, which is the Commands tab. It replaces itself with that
+ * tab's own URL, as Advanced's bare path does, and for the same reason: the
+ * page draws its own heading, and the shell titles only an exact destination
+ * path. The query string goes with it, because `/automation?new=manual` is a
+ * link other pages hold and it opens the New command dialog on arrival.
+ */
+export function AutomationRoute() {
+  const router = useRouter();
+  useEffect(() => {
+    router.navigate({
+      to: automationTabPath(DEFAULT_AUTOMATION_TAB),
+      search: router.state.location.search as never,
+      replace: true,
+    } as never);
+  }, [router]);
+  return <Loading />;
+}
+
+/** `/automation/<tab>`: one page, whose tab is the last segment of the URL. */
+export function AutomationTabRoute() {
+  const router = useRouter();
+  const { tab } = useParams({ strict: false }) as { tab?: string };
+  return (
+    <AutomationSection
+      tab={tab}
+      onTabChange={(next) => void router.navigate({ to: automationTabPath(next) })}
     />
   );
 }

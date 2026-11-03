@@ -169,7 +169,7 @@ in date order and stop at the ends; the menu lists them with their dates and
 times, the one on screen selected and the followed one marked when that is known
 (always on the plan being followed; otherwise only for the service type the app is
 on). It is the same
-list, and the same stepping, as the plan switcher in the slots editor, so it
+list, and the same stepping, as the plan switcher on the Mic slots page, so it
 covers the next two months and the last week.
 
 It moves **this page only**. The Plan page, and so every display, stays on the
@@ -243,7 +243,8 @@ view object inside a layout takes neither; it keeps its own font size.
 ServiceCue can be put on a public address for volunteers who are not on the building's
 network: the same pages and links, no login, on a free Cloudflare Workers address you
 [deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
-everything it shows, plan notes included.** The page is ServiceCue with nothing to edit
+everything it shows, plan notes included,** and running it is
+[at your own risk](../ops/servicecue-on-the-web.md#at-your-own-risk). The page is ServiceCue with nothing to edit
 (no **Edit column presets** link), a bar saying **Not updating** when the church has sent
 nothing for two minutes, and a reload, once, of a page left open when the public page is
 updated. Its link is the page's address with `/servicecue` on the end, and
@@ -512,7 +513,7 @@ the moment of submersion by itself. There is nothing to pause while armed, so
 that button is hidden until the first press.
 
 Every route that steps the timer forward while armed — the panel, a Companion
-action, an automation cue — starts "First person in" the same way; none of
+action, an automation command — starts "First person in" the same way; none of
 them skips person 1. Finish while armed still ends the session with nobody
 baptized, which is what it is for.
 

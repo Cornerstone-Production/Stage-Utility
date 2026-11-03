@@ -87,7 +87,7 @@ export const stateProbeDeps: {
     // runs eight seconds after the press and an operator may have saved the
     // rule in between. Every other field of the trigger goes back as it is now.
     const rule = automationEngine.listRules().find((r) => r.id === ruleId);
-    if (!rule) throw new Error("the cue was deleted while its state source was being learned");
+    if (!rule) throw new Error("the command was deleted while its state source was being learned");
     await automationEngine.updateRule(rule.id, {
       trigger: {
         ...rule.trigger,

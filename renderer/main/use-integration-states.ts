@@ -44,6 +44,9 @@ export interface IntegrationsSnapshot {
    *  "integration-health" item must not read the first of those as "no
    *  integrations" before this is true. */
   known: boolean;
+  /** The hydrate read failed and nothing has answered since: `states` is empty
+   *  because the read failed, not because nothing is configured. */
+  failed: boolean;
 }
 
 /**
@@ -75,6 +78,6 @@ export function useIntegrations(enabled = true): IntegrationsSnapshot {
       }),
     [],
   );
-  const { value: states, known } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed", enabled);
-  return useMemo(() => ({ states: states ?? NO_STATES, labels, known }), [states, labels, known]);
+  const { value: states, known, failed } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed", enabled);
+  return useMemo(() => ({ states: states ?? NO_STATES, labels, known, failed }), [states, labels, known, failed]);
 }

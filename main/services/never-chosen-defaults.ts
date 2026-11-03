@@ -98,17 +98,20 @@ function cleanObject(o: LayoutObject): LayoutObject {
 /**
  * Run an object-level migration over every view.
  *
- * Shared by both passes below. Returns the views array BY REFERENCE when
+ * Shared by both passes below and by the Run an action Button migration. Returns the views array BY REFERENCE when
  * nothing changed, so a load that has already been migrated skips the write
  * entirely — a fresh array every launch is a file rewrite for nothing, and
  * this runs beside another migration that shares the same file.
  */
-function migrateViews(views: readonly View[], transformObject: (o: LayoutObject) => LayoutObject): View[] {
+export function migrateViews(
+  views: readonly View[],
+  transformObject: (o: LayoutObject, view: View) => LayoutObject,
+): View[] {
   let changed = false;
   const out = views.map((v) => {
     const objects = v.layout?.objects;
     if (!objects?.length) return v;
-    const transformed = objects.map(transformObject);
+    const transformed = objects.map((o) => transformObject(o, v));
     if (!transformed.some((o, i) => o !== objects[i])) return v;
     changed = true;
     return { ...v, layout: { ...v.layout!, objects: transformed } };

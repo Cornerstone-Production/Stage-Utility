@@ -48,6 +48,31 @@ export function outputModeLine(
   return output.kind === "decklink" ? (videoMode ?? DEFAULT_VIDEO_MODE) : displayMode(screen);
 }
 
+/** What Screens says about the switch on one output of a Mac helper. */
+export interface OutputSwitchState {
+  /** What Screens asked for: the switch's position. */
+  on: boolean;
+  /** Asked for, and the Mac has not said it holds it yet. */
+  pending: boolean;
+  /** One phrase, the same on the card and in Screen settings. */
+  label: string;
+}
+
+/**
+ * The switch's position and what to say beside it. `health.enabled` is what the
+ * Mac last said it holds; it is absent from a helper older than the switch and
+ * when the Mac is not reporting, and then the switch is shown as asked and not
+ * called pending, since nothing is on its way.
+ */
+export function outputSwitchState(device: { enabled?: false }, health: Pick<OutputHealth, "enabled"> | undefined): OutputSwitchState {
+  const on = device.enabled !== false;
+  const held = health?.enabled;
+  const pending = held !== undefined && held !== on;
+  if (pending) return { on, pending, label: on ? "Turning on…" : "Turning off…" };
+  if (on) return { on, pending, label: "On" };
+  return { on, pending, label: held === false ? "Off on this Mac" : "Off. The Mac has not confirmed it." };
+}
+
 /** What a struggling output says about itself on its screen's card. */
 export interface OutputStruggle {
   port: string;

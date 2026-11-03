@@ -26,7 +26,7 @@ import { EventPollHub, serializePollResponse, type PollFrame } from "./event-pol
 import { ChannelReports, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, usableCid } from "./channel-reports.js";
 
 import { APP_ROOT } from "./app-root.js";
-import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import { displayHeartbeat, displayLeaving, presenceSnapshot, setKnownOutputIds } from "./display-presence.js";
 import type { VideoPlaybackReport } from "../types/video.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { serverPort } from "./server-port.js";
@@ -67,7 +67,7 @@ import { baptismTimerService } from "./baptism-timer-service.js";
 import { videoService } from "./video/video-service.js";
 import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
-import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
+import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
@@ -95,12 +95,18 @@ import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
+import { boardRoutes } from "./routes/board-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { messagesRoutes } from "./routes/messages-routes.js";
+import { homeRoutes } from "./routes/home-routes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
+import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
+import { BOARDS_CHANGED_CHANNEL } from "../types/boards-changed.js";
+import { boardsChangedState } from "./boards-changed.js";
+import { homeSnoozes } from "./home-snoozes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
 
@@ -135,9 +141,11 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   systemRoutes,
   brandingRoutes,
   presetRoutes,
+  boardRoutes,
   calendarRoutes,
   videoRoutes,
   messagesRoutes,
+  homeRoutes,
   hostNameRoutes,
 ] as const;
 
@@ -227,6 +235,10 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * alternative is a test that restates the mapping and then agrees with itself.
  */
 export function handlerErrorStatus(err: unknown): number {
+  // decodeURIComponent on a path segment is the one thing that throws a
+  // URIError, and it means the request's own % escape is malformed. Routes
+  // decode ids in some twenty places; answered here once rather than in each.
+  if (err instanceof URIError) return 400;
   const declared = (err as { status?: number } | null)?.status;
   return declared === 413 || declared === 409 || declared === 400 || declared === 503 ? declared : 500;
 }
@@ -292,6 +304,9 @@ export function handlePresenceHeartbeat(
   const reports = parseVideoReports(body.video);
   if (reports && reports.length > 0) deps.recordVideo(outputId, reports);
 }
+
+// Presence publishes last-seen times only for screens that exist.
+setKnownOutputIds(() => new Set((stageController.getState().outputs ?? []).map((o) => o.id)));
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
@@ -494,6 +509,9 @@ export function writeHelloBurst(res: EventSink): void {
   // so once made the scan find a channel named by prose, which is the same
   // trap from the other side.
   sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+  // Charger bays, for the same reason: a pack left charging moves a percent a
+  // minute and then nothing for days. The LITERAL with `satisfies`, as above.
+  sseWrite(res, "wireless:chargers" satisfies typeof CHARGER_BAYS_CHANNEL, stageController.chargerBayStatuses());
   // A calendar is STATE, not an event: a display opened in the middle of a
   // month must show it at once, not sit blank until somebody moves a booking
   // — which on this channel can be days.
@@ -520,6 +538,17 @@ export function writeHelloBurst(res: EventSink): void {
   // scan can only see a quoted name, and renaming MESSAGES_CHANNEL must stop
   // compiling here rather than leave this burst writing to a dead channel.
   sseWrite(res, "messages:state" satisfies typeof MESSAGES_CHANNEL, messagesService.state());
+  // The snoozes on Home's Needs attention. They change when an operator presses
+  // Snooze or a service starts, so a Home opened after the last change would
+  // show a handled problem as new until the next one.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "home:snoozes" satisfies typeof HOME_SNOOZES_CHANNEL, homeSnoozes.state());
+  // The last write to the slot boards and its place in this process's sequence.
+  // Not a change to act on: a Mic slots page compares the sequence with the
+  // last it saw, and re-reads every board when it missed one (a reconnect, or
+  // a restart, which a restore always is).
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "boards:changed" satisfies typeof BOARDS_CHANGED_CHANNEL, boardsChangedState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

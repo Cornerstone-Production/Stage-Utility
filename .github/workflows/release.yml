@@ -469,7 +469,7 @@ jobs:
   helper:
     needs: [release, helper-gate]
     if: ${{ always() && needs.release.outputs.published == 'true' && needs.helper-gate.outputs.present == 'true' }}
-    runs-on: macos-14
+    runs-on: macos-15
     # Chromium's framework is most of the app and the build is long; a hung build
     # must not hold the release for ever, since the artifacts job waits on this.
     timeout-minutes: 60

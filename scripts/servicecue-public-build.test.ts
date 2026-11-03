@@ -147,6 +147,65 @@ describe("what is in the bundle", () => {
     ]);
   });
 
+  test("of renderer/lib, exactly these: a shared helper joins the public page only on purpose", () => {
+    assert.deepEqual(within("renderer/lib"), [
+      "renderer/lib/api.ts",
+      "renderer/lib/apply-accent.ts",
+      "renderer/lib/apply-device-telemetry.ts",
+      "renderer/lib/apply-favicon.ts",
+      "renderer/lib/back-target.ts",
+      "renderer/lib/client-log.ts",
+      "renderer/lib/clock-format.ts",
+      "renderer/lib/cn.ts",
+      "renderer/lib/drawer-drag.ts",
+      "renderer/lib/icon-ink.ts",
+      "renderer/lib/live-refresh.ts",
+      "renderer/lib/public-build.ts",
+      "renderer/lib/public-live.ts",
+      "renderer/lib/public-mode.ts",
+      "renderer/lib/safe-storage.ts",
+      "renderer/lib/server-clock.ts",
+      "renderer/lib/sse-channels.ts",
+      "renderer/lib/subscribe-reporter.ts",
+      "renderer/lib/uid.ts",
+      "renderer/lib/use-failed-reads.ts",
+      "renderer/lib/use-media-query.ts",
+      "renderer/lib/use-resync-on.ts",
+      "renderer/lib/use-search-param.ts",
+      "renderer/lib/use-theme.ts",
+    ]);
+  });
+
+  test("of renderer/main, exactly the ServiceCue pages and the state they read", () => {
+    assert.deepEqual(within("renderer/main"), [
+      "renderer/main/category-color.ts",
+      "renderer/main/item-color.ts",
+      "renderer/main/pco-timer.ts",
+      "renderer/main/preview-url.ts",
+      "renderer/main/role-resolve.ts",
+      "renderer/main/rundown-table.tsx",
+      "renderer/main/servicecue-body.tsx",
+      "renderer/main/servicecue-columns.tsx",
+      "renderer/main/servicecue-index-view.tsx",
+      "renderer/main/servicecue-plan-choice.ts",
+      "renderer/main/servicecue-plan-nav.tsx",
+      "renderer/main/servicecue-plan-view.tsx",
+      "renderer/main/servicecue-text-size-control.tsx",
+      "renderer/main/servicecue-text-size.ts",
+      "renderer/main/use-dashboard-state.ts",
+      "renderer/main/use-servicecue-text-size.ts",
+      "renderer/main/use-spl-state.ts",
+      "renderer/main/use-stage-state.ts",
+      "renderer/main/use-status-channel.ts",
+    ]);
+  });
+
+  test("of renderer/components outside the ui kit, only the logo", () => {
+    assert.deepEqual(within("renderer/components").filter((m) => !m.startsWith("renderer/components/ui/")), [
+      "renderer/components/brand-logo.tsx",
+    ]);
+  });
+
   test("of main, only what the renderer already shares with it", () => {
     assert.deepEqual(within("main"), [
       "main/services/clamp.ts",

@@ -77,13 +77,15 @@ const cueRule = (params: Record<string, string | number> = {}, over: Partial<Omi
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+/** The page is tabs now: open the one holding the rules the test seeded (Commands when any is called by name). */
+async function mount(opens?: "commands" | "rules") {
+  const tab = opens ?? (rules().some((r) => r.trigger.id === "call.by-name") || rules().length === 0 ? "commands" : "rules");
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const view = render(
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {}), React.createElement(ConfirmHost, {})),
+      React.createElement(TooltipProvider, null, React.createElement(AutomationSection, { tab }), React.createElement(ConfirmHost, {})),
     ),
   );
   for (let i = 0; i < 3; i++) await settle();
@@ -172,7 +174,7 @@ describe("the two faces", () => {
     await mount();
     await openRow("Stage reset");
     assert.equal(manualBox(), true, "no manual box");
-    assert.equal(document.querySelector("[data-rule-editor] [data-manual-kind]")?.textContent, "Manual cue", "the title does not say what kind it is");
+    assert.equal(document.querySelector("[data-rule-editor] [data-manual-kind]")?.textContent, "Manual command", "the title does not say what kind it is");
     assert.ok(document.body.textContent?.includes("Runs only when called"));
     assert.ok(button("Make it automatic"), "no Make it automatic");
     assert.equal(button("Make it manual") === null, true, "a manual cue offered Make it manual");
@@ -187,7 +189,7 @@ describe("the two faces", () => {
     assert.ok(switchOf("Shown in Home Assistant"), "no Home Assistant switch");
     assert.ok(switchOf("Allowed during a service"), "no Allowed during a service switch");
     assert.ok(labelled("Cooldown"), "no Cooldown");
-    assert.ok(labelled("Cue name"), "the cue name can no longer be seen or edited");
+    assert.ok(labelled("Command name"), "the cue name can no longer be seen or edited");
   });
 
   test("an automatic rule's editor has Make it manual and When and If", async () => {
@@ -408,7 +410,7 @@ describe("a conversion never renames a cue", () => {
     await press(button("Make it automatic"), "Make it automatic");
     await press(button("Make it manual"), "Make it manual");
     assert.equal(manualBox(), true);
-    assert.equal(labelled("Cue name")?.value, "stage_reset", "the cue was renamed by going there and back");
+    assert.equal(labelled("Command name")?.value, "stage_reset", "the cue was renamed by going there and back");
     await save();
     // Nothing changed, so what is sent (if anything) carries no trigger.
     const sentTriggers = patches().filter((p) => p.body && "trigger" in (JSON.parse(p.body) as object));
@@ -421,20 +423,20 @@ describe("a conversion never renames a cue", () => {
     await automationEngine.addRule(cueRule());
     await mount();
     await openRow("Stage reset");
-    const name = labelled("Cue name");
-    assert.ok(name, "no Cue name field");
+    const name = labelled("Command name");
+    assert.ok(name, "no Command name field");
     await act(async () => {
       fireEvent.change(name, { target: { value: "stage_reset_two" } });
     });
     await press(button("Make it automatic"), "Make it automatic");
     await press(button("Make it manual"), "Make it manual");
-    assert.equal(labelled("Cue name")?.value, "stage_reset_two", "converting back restored the opened cue, not the edited one");
+    assert.equal(labelled("Command name")?.value, "stage_reset_two", "converting back restored the opened cue, not the edited one");
   });
 
   test("a rule made manual is never given a name another cue or former name holds", async () => {
     await automationEngine.addRule(cueRule({ aliases: "stage_reset_2" }, { name: "Existing" }));
     await automationEngine.addRule(base({ name: "Stage reset" }));
-    await mount();
+    await mount("rules");
     await openRow("Stage reset");
     await press(button("Make it manual"), "Make it manual");
     await save();

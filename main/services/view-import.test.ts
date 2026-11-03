@@ -284,6 +284,11 @@ async function blankPatch(over: Record<string, unknown> = {}): Promise<void> {
   await patchStore.save({ sheets: [sheet(over)], updatedAt: "" } as never);
 }
 
+/** The board an imported view shows: a fresh id, not the view's. */
+async function boardOf(viewId: string): Promise<string | null | undefined> {
+  return (await viewsStore.load()).find((v) => v.id === viewId)?.boardId;
+}
+
 describe("landing a plan under a different service type", () => {
   beforeEach(async () => {
     await viewsStore.save([] as never);
@@ -293,7 +298,7 @@ describe("landing a plan under a different service type", () => {
 
   test("the boards move to the chosen type, and the report says where from", async () => {
     const report = await applyViewBundle(planBundle(), { serviceTypeId: "st-dst" });
-    const key = report.views[0]!.id;
+    const key = (await boardOf(report.views[0]!.id))!;
     const landed = (await slotsStore.allDefaults())[key]!;
     assert.deepEqual(Object.keys(landed), ["st-dst"], "the board stayed under the file's own type id");
     assert.equal(landed["st-dst"]!.length, 2);
@@ -315,7 +320,7 @@ describe("landing a plan under a different service type", () => {
       { slots: { "view-1": { "st-src": [slotRow("a")], "st-other": [slotRow("b"), slotRow("c")] } } },
     );
     const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.deepEqual(Object.keys(landed).sort(), ["st-dst", "st-other"]);
     assert.equal(landed["st-dst"]!.length, 1, "st-dst got the wrong type's board");
     assert.equal(landed["st-other"]!.length, 2);
@@ -330,7 +335,7 @@ describe("landing a plan under a different service type", () => {
       { slots: { "view-1": { "st-src": [slotRow("a")], "st-dst": [slotRow("b"), slotRow("c")] } } },
     );
     const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.equal(landed["st-dst"]!.length, 1, "the file's own st-dst board overwrote the exported one");
     // And the report counts what is ON DISK, not what was written. Counting
     // writes reported two boards and three rows for one board of one row —
@@ -343,12 +348,139 @@ describe("landing a plan under a different service type", () => {
     // A view export carries every type's boards and names no plan. Re-keying one
     // of them would be picking which, and the file does not say.
     const report = await applyViewBundle(
-      bundle({ sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, serviceCueLayouts: [] } }),
+      bundle({ views: [slotsView("view-1", "Mic Board")], sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, serviceCueLayouts: [] } }),
       { serviceTypeId: "st-dst" },
     );
-    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    const landed = (await slotsStore.allDefaults())[(await boardOf(report.views[0]!.id))!]!;
     assert.deepEqual(Object.keys(landed), ["st-src"]);
     assert.equal(report.plan, undefined);
+  });
+});
+
+describe("a bundle's slot boards", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+
+  test("views from before boards are migrated even when the file carries an empty boards record", async () => {
+    // Decided by the views: an empty `boards` beside a slots view with no
+    // pointer used to be read as "already migrated", and the screen came in
+    // blank while the import reported success.
+    const report = await applyViewBundle(
+      bundle({ views: [slotsView("view-1", "Mic Board")], sideData: { slots: { "view-1": { "st-src": [slotRow("r1"), slotRow("r2")] } }, boards: {}, notes: {}, serviceCueLayouts: [] } }),
+    );
+    const board = await boardOf(report.views[0]!.id);
+    assert.ok(board, "the imported screen points at no board");
+    assert.equal((await slotsStore.allDefaults())[board]?.["st-src"]?.length, 2, "the imported screen's rows did not land on its board");
+  });
+
+  test("the report counts every board made, rows or none", async () => {
+    const report = await applyViewBundle(
+      bundle({
+        views: [slotsView("view-1", "Mic Board"), slotsView("view-2", "Empty Board")],
+        sideData: { slots: { "view-1": { "st-src": [slotRow("r1")] } }, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.ok(await boardOf(report.views[1]!.id), "the empty screen got no board");
+    assert.equal(report.slotBoards, 2, "a board with no rows was not counted");
+    assert.equal(report.slotRows, 1);
+  });
+});
+
+describe("the order an import writes in", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+  const twoScreens = () => bundle({
+    views: [slotsView("view-1", "Mic Board"), slotsView("view-2", "Second Board")],
+    sideData: { slots: { "view-1": { "st-src": [slotRow("r1")] } }, notes: {}, serviceCueLayouts: [] },
+  });
+
+  test("boards that cannot be made refuse the import before any view lands", async () => {
+    // The views used to be saved first and their boards made one write each
+    // after: a failure left screens pointing at boards that did not exist, and
+    // the retry the operator then made imported every view a second time.
+    const store = slotsStore as unknown as { createBoards: unknown };
+    const real = store.createBoards;
+    store.createBoards = async () => { throw new Error("disk full"); };
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      store.createBoards = real;
+    }
+    assert.deepEqual(await viewsStore.load(), [], "views landed pointing at boards that were never made");
+  });
+
+  test("every board lands in one write", async () => {
+    // One write is what makes the boards land whole or not at all.
+    let writes = 0;
+    const before = (await slotsStore.listBoards()).size;
+    const { DataStore } = await import("./data-store.js");
+    const proto = DataStore.prototype as unknown as { update: (...a: unknown[]) => Promise<unknown> };
+    const realUpdate = proto.update;
+    proto.update = function (this: { filename: string }, ...a: unknown[]) {
+      if (this.filename === "slots.json") writes++;
+      return realUpdate.apply(this, a);
+    };
+    try {
+      await applyViewBundle(twoScreens());
+    } finally {
+      proto.update = realUpdate;
+    }
+    assert.equal((await slotsStore.listBoards()).size, before + 2);
+    assert.equal(writes, 1, `the boards took ${writes} slots.json writes`);
+  });
+
+  test("a views save that fails after the boards were made says they are left unused", async (t) => {
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => { throw new Error("disk full"); }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(twoScreens()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.ok(
+      lines.some((l) => l.startsWith("[view-import] import refused after its boards were made") && l.includes("2 board(s)")),
+      JSON.stringify(lines),
+    );
+  });
+});
+
+describe("a board pointer only a slots screen uses", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+
+  test("a custom view's leftover pointer at a board not in the file is dropped without a warning", async () => {
+    // Export ships only the boards a slots screen or a widget shows, so a
+    // custom view's dormant pointer never has its board in the file. Warning
+    // about it told the operator a screen lost its board when none was shown.
+    const report = await applyViewBundle(
+      bundle({
+        views: [
+          { id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-src" },
+          { id: "view-2", name: "Stage Layout", kind: "custom", createdAt: 0, boardId: "b-elsewhere",
+            layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] } },
+        ],
+        sideData: { slots: {}, boards: { "b-src": { name: "Mic Board" } }, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, [], "a dormant pointer was reported as a lost board");
+    const stored = await viewsStore.load();
+    assert.equal(stored.find((v) => v.id === report.views[1]!.id)!.boardId, undefined, "the leftover pointer kept the source's board id");
+    assert.ok(stored.find((v) => v.id === report.views[0]!.id)!.boardId, "the slots screen lost its board");
+  });
+
+  test("a slots screen pointing at a board not in the file is still named", async () => {
+    const report = await applyViewBundle(
+      bundle({
+        views: [{ id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-gone" }],
+        sideData: { slots: {}, boards: {}, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, ['"Mic Board" pointed at a slot board that is not in the file; it now shows none']);
   });
 });
 
@@ -577,6 +709,34 @@ describe("presets", () => {
     assert.equal((await presetsStore.load())[0]!.name, "From the file");
   });
 
+  test("resolved names and readings in a bundled arrangement are not stored", async () => {
+    await presetsStore.save([] as never);
+    const resolved = { ...slotRow("s"), displayName: "Jordan Lee", photoUrl: "/api/photo/100000007", shownPositions: ["Vocals"], prep: { capsule: "KSM9", ownIems: true } };
+    await applyViewBundle(planBundle({}, { slots: {}, presets: [{ id: "p9", name: "Old build", slots: [resolved], createdAt: "" }] }));
+    const stored = (await presetsStore.load())[0]!.slots[0] as unknown as Record<string, unknown>;
+    assert.equal(stored.displayName, null);
+    assert.equal(stored.photoUrl, null);
+    assert.equal("prep" in stored, false);
+    assert.equal("shownPositions" in stored, false);
+  });
+
+  test("the board each one is recalled into is this install's copy of it, or none", async () => {
+    // A board id from the source names nothing here, or somebody else's board:
+    // "display-1" is the id a fresh install gives its first screen's board.
+    await presetsStore.save([] as never);
+    const report = await applyViewBundle(planBundle({}, {
+      presets: [
+        { ...p("p1", "Travelled"), boardId: "view-1" },
+        { ...p("p2", "Stayed behind"), boardId: "display-1" },
+      ],
+    }));
+    const stored = await presetsStore.load();
+    const board = await boardOf(report.views[0]!.id);
+    assert.ok(board);
+    assert.equal(stored.find((x) => x.id === "p1")!.boardId, board, "the preset kept the source's board id");
+    assert.equal("boardId" in stored.find((x) => x.id === "p2")!, false, "a board not in the file was kept as a pointer");
+  });
+
   test("Keep leaves the local one of the same id alone", async () => {
     await presetsStore.save([p("p1", "Mine")] as never);
     const report = await applyViewBundle(withPresets());
@@ -624,6 +784,94 @@ describe("presets", () => {
     );
     assert.deepEqual(await viewsStore.load(), []);
     assert.deepEqual(await presetsStore.load(), []);
+  });
+});
+
+describe("a Run an action Button in an imported view", () => {
+  const withActionButton = () =>
+    bundle({
+      views: [{
+        id: "view-1", name: "Booth", kind: "custom", createdAt: 0,
+        layout: {
+          version: 1, canvas: { width: 1920, height: 1080 },
+          objects: [{
+            id: "o-rec", x: 0.1, y: 0.1, w: 0.2, h: 0.1, z: 1,
+            config: { type: "action-button", actionId: "obs.record", params: { mode: "toggle" }, label: "Record" },
+          }],
+        },
+      }],
+    });
+
+  test("becomes a cue Button bound to a rule of its own, under the ids the import gave, and says so", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const lines = captureConsole(t, "log");
+    const report = await applyViewBundle(withActionButton());
+    const [stored] = await viewsStore.load();
+    assert.equal(stored!.id, report.views[0]!.id);
+    const button = stored!.layout!.objects[0]!;
+    assert.equal(button.config.type, "cue-button", "the Button still runs its action directly, ignoring Simulate and Disarm");
+    assert.equal((button.config as { cue: string }).cue, "btn_record");
+    const rules = await automationStore.loadRules();
+    assert.equal(rules.length, 1);
+    assert.deepEqual(rules[0]!.ownedBy, { viewId: stored!.id, objectId: button.id });
+    assert.equal(rules[0]!.trigger.params.name, "btn_record");
+    assert.deepEqual(rules[0]!.action, { id: "obs.record", params: { mode: "toggle" } });
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[automation]")),
+      ["[automation] converted 1 Run an action button to its own command on import (Booth 1)"],
+    );
+  });
+
+  test("rules that cannot be saved import the Button as it was, and the report and the log say so", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const real = automationStore.saveRules.bind(automationStore);
+    automationStore.saveRules = async () => {
+      throw new Error("read-only file system");
+    };
+    const lines = captureConsole(t, "log", "error");
+    let report;
+    try {
+      report = await applyViewBundle(withActionButton());
+    } finally {
+      automationStore.saveRules = real;
+    }
+    assert.equal((await viewsStore.load())[0]!.layout!.objects[0]!.config.type, "action-button");
+    assert.ok(report.skipped.some((x) => x.includes("Run an action buttons were imported unconverted")), JSON.stringify(report.skipped));
+    assert.ok(lines.some((l) => l.includes("[automation]") && l.includes("read-only file system")), JSON.stringify(lines));
+  });
+
+  test("a views save that fails after the rules were written refuses the import with its reason and names the cues kept", async (t) => {
+    const { automationStore } = await import("./automation-store.js");
+    const { captureConsole } = await import("./fixtures/capture-console.js");
+    await automationStore.saveRules([]);
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => {
+      throw new Error("disk full");
+    }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(applyViewBundle(withActionButton()), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.deepEqual((await automationStore.loadRules()).map((r) => r.trigger.params.name), ["btn_record"]);
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[automation]")),
+      ["[automation] import refused after its cues were written; kept btn_record with no Button, delete them from Automation"],
+    );
+  });
+
+  test("a second import of the same file gets its own cue and its own rule", async () => {
+    const { automationStore } = await import("./automation-store.js");
+    await automationStore.saveRules([]);
+    await applyViewBundle(withActionButton());
+    await applyViewBundle(withActionButton());
+    const cues = (await automationStore.loadRules()).map((r) => r.trigger.params.name).sort();
+    assert.deepEqual(cues, ["btn_record", "btn_record_2"]);
   });
 });
 

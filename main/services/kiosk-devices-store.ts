@@ -39,9 +39,11 @@ const restoreCheck = checked((raw) =>
     if (!isSafeKey(d.id)) refuse(`bound device ${i + 1}'s device id is not allowed`);
     // The claim route refuses a claim that names no screen.
     if (typeof d.outputId !== "string" || d.outputId === "") refuse(`bound device ${i + 1} names no screen`);
-    const { label, ...rest } = d;
+    const { label, enabled, ...rest } = d;
     return {
       ...rest,
+      // Only false is ever stored; anything else restores as the default, on.
+      ...(enabled === false ? { enabled: false as const } : {}),
       // The claim route keeps a label only when it is text.
       ...(typeof label === "string" ? { label } : {}),
       // matchByMac and touch() read this list on every probe; a binding without
@@ -170,6 +172,20 @@ export function claim(
   };
   const kept = devices.filter((d) => d.id !== id && d.id !== displaced?.id);
   return { devices: [...kept, device], token, displaced };
+}
+
+/**
+ * Switch a device's output on or off. Only a Mac helper's output can be switched:
+ * nothing else reads the answer, so a switch on it would do nothing. Returns the
+ * SAME array when the value is already that, and when no such output is bound.
+ */
+export function setEnabled(devices: readonly BoundDevice[], id: string, enabled: boolean): BoundDevice[] {
+  const i = devices.findIndex((d) => d.id === id);
+  if (i === -1 || !devices[i].output || (devices[i].enabled !== false) === enabled) return devices as BoundDevice[];
+  const next = [...devices];
+  const { enabled: _was, ...rest } = next[i];
+  next[i] = enabled ? rest : { ...rest, enabled: false };
+  return next;
 }
 
 /** Unbind a device. The output is untouched — it keeps its view and its slug and

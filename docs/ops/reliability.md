@@ -46,6 +46,20 @@ switch into and out of that mode is logged on the `[reconnect]` tag.
 Tunable under **Settings → Advanced → Schedule**, where switching **Wake around service
 times** off gives every integration a fixed 2-minute retry instead.
 
+## Reads that fail soft
+
+Some reads decorate the screen rather than drive it, so a failure keeps what was
+last good and says so once on `/log`:
+
+- **Planning Center prep tags** (capsule and in-ears on a slot). A failed read
+  keeps the last good tags, no slot goes blank, and the next attempt waits at
+  least 5 minutes. One `[pco-tags] read failed: …` line per outage, and one when it
+  reads again.
+- **Companion variables in a key's text** (the Companion page picker). A variable
+  Companion does not answer for within 3 seconds is drawn as written. One
+  `[companion] page variable … not read` line per outage, with a reminder if it
+  keeps failing, and one when it reads again.
+
 ## Where your data lives
 
 `$STAGE_UTILITY_DATA` if set. Otherwise it depends on how the app was installed —
@@ -79,6 +93,7 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `history-milestones.json` | the dates you marked on the History trend chart |
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
+| `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
 
 **What it observed** — deliberately not restored, because it describes this
@@ -89,6 +104,8 @@ machine's history rather than how you set it up:
 | `spl-history/`, `attendance-history/`, `service-timeline/` | recorded services, one file each |
 | `archive/` | the raw samples behind them — see [data archive](../data-archive.md) |
 | `baptism.json` | baptism sessions |
+| `host-names-seen.json` | the host names requests have used, waiting to be accepted or dismissed |
+| `home-snoozes.json` | the problems snoozed on Home's Needs attention; they lapse or clear when a service starts, so a restore would only bring back old ones |
 | `messages.json` | the day's stage messages: a message describes one day, and last winter's would only reappear on this Sunday's screens |
 | `checklist-ticks.json` | which checklist rows are ticked, per plan |
 | `automation-log.json` | the Activity log |
@@ -175,11 +192,14 @@ card, a directory where the file should be — is never treated as empty:
 - **Nothing is decided from the defaults.** Start-up migrations of views and
   screens are skipped, layout images are not pruned, kiosk discovery answers no
   probe while `kiosk-devices.json` cannot be read (a screen that hears no answer
-  keeps its server and probes again), and the device routes fail rather than
-  answer from an empty list. With `automation-rules.json` unreadable the cue
-  manifest, states and YAML fail rather than list no cues, so Home Assistant
-  marks the cue entities unavailable instead of removing them, the app's own
-  cue buttons are gone, and rule edits are refused.
+  keeps its server and probes again), the device routes fail rather than
+  answer from an empty list, `/enroll` answers a screen with a holding page that
+  reloads itself until the list reads (`[kiosk]` on `/log`), and with `views.json`
+  unreadable `GET /api/cues/usage` answers `503` rather than say no Button uses a
+  command. With `automation-rules.json` unreadable the command
+  manifest, states and YAML fail rather than list no commands, so Home Assistant
+  marks the command entities unavailable instead of removing them, the app's own
+  Buttons are gone, and rule edits are refused.
 - **A backup** fails rather than leaving the file out, and the same goes for an
   uploaded image it cannot read.
 
@@ -320,7 +340,7 @@ Two backups exist in the app, and they cover different things:
 ### Restoring a config snapshot
 
 A restore is checked the way a save is. Every file in the snapshot goes through
-the rules its settings page applies — a video feed's address, a cue's name, a
+the rules its settings page applies — a video feed's address, a command's name, a
 screen's address, a port range, a color. Where a save trims, lowercases, clamps
 or leaves out a value rather than refusing it, the restore does the same to that
 value; where a save refuses, the restore refuses. A value of a type no settings
@@ -338,7 +358,7 @@ cleared, and nothing that runs in the background is paused.
   rather than stored, and a screen binding's token is restored empty, so the
   screen pins a new one when it next connects.
 - An automation rule with fields that need attention restores as it was saved,
-  showing Needs setup, as it does after an upgrade; a cue name that would clash
+  showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.
 - A `settings.json` key no part of the app reads is dropped and logged. A field
   inside a setting that its page does not send (in the backup schedule, the

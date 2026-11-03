@@ -138,6 +138,8 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  // Which Needs attention problems were snoozed this week.
+  "home-snoozes.json",
   "host-names-seen.json",
   // The day's stage messages: an observation, cleared nightly.
   "messages.json",

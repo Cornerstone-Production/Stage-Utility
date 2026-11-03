@@ -144,7 +144,7 @@ describe("one namespace, both directions", () => {
 
   test("a malformed former name is refused like a malformed name", async () => {
     const why = await refusal(automationEngine.addRule(cue("screens_on", ["Projectors ON!"])));
-    assert.match(why, /former cue name — use lower_snake_case/);
+    assert.match(why, /former command name — use lower_snake_case/);
   });
 
   test("removing a former name frees it for another rule", async () => {

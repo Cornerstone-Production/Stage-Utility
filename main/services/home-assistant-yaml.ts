@@ -280,7 +280,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
   const visible = [...cues.values()].filter((c) => !hiddenCues.has(c.name));
   const bound = pairs.filter((p) => p.binding !== null);
   const lines: string[] = [
-    "# Stage Utility cues — generated. Paste into configuration.yaml.",
+    "# Stage Utility commands — generated. Paste into configuration.yaml.",
     "#",
     "# Put the token you were shown when you minted it into secrets.yaml, WITH",
     "# the scheme, because this is the whole Authorization header:",
@@ -291,7 +291,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       ? [
           "# A pair with a state source reports what its device is actually doing,",
           "# read through the rest sensor below — from a Companion variable, or from",
-          "# Stage Utility itself for a cue it drives directly.",
+          "# Stage Utility itself for a command it drives directly.",
           "# Every other switch is optimistic: Stage Utility reports that it",
           "# dispatched the press, never that the device did anything.",
         ]
@@ -304,14 +304,14 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
   ];
 
   if (cues.size === 0) {
-    lines.push("# No cues yet. Make one with New cue on the Automation page and reload this.");
+    lines.push("# No commands yet. Make one with New command on the Automation page and reload this.");
     return lines.join("\n") + "\n";
   }
   // Returned rather than emitted empty: `rest_command:` with nothing under it
   // is a null value, and Home Assistant refuses the whole file over it.
   if (visible.length === 0) {
     lines.push(
-      "# Every cue here is hidden from Home Assistant. Turn a cue's Home Assistant",
+      "# Every command here is hidden from Home Assistant. Turn a command's Home Assistant",
       "# switch back on in Stage Utility and reload this.",
     );
     return lines.join("\n") + "\n";
@@ -410,7 +410,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       "# Template switches, under the template integration's own key. Home",
       "# Assistant refuses `platform: template` under `switch:` — the spelling",
       "# these used to be generated in — so re-paste this over an older copy.",
-      "# Each entity id now follows the switch's name rather than the cue's, so an",
+      "# Each entity id now follows the switch's name rather than the command's, so an",
       "# automation of your own naming an old `switch.…` may need its id updating.",
       "template:",
       "  - switch:",

@@ -525,3 +525,43 @@ describe("which path each caller takes", () => {
     assert.doesNotMatch(call[1], /"whole"/, "a display should keep its byte saving");
   });
 });
+
+describe("prep tags", () => {
+  const byPerson = (personId: string): SlotLink => ({ kind: "pco", matchBy: "person", personId });
+  const prep = new Map([
+    ["p1", { capsule: "KSM9", ownIems: true }],
+    ["p3", { capsule: null, ownIems: true }],
+  ]);
+  const team = [member("p1", "Sarah", "Vocals"), member("p2", "Dana", "Vocals"), member("p3", "Ali", "Acoustic")];
+
+  test("sets prep only for a slot filled by a tagged person", () => {
+    const out = resolveSlots(
+      [slot("a", pos({ name: "Vocals" })), slot("b", pos({ name: "Vocals" })), slot("c", pos({ name: "Acoustic" }))],
+      team, NO_DEVICES, "column", undefined, prep,
+    );
+    assert.deepEqual(out.map((s) => s.prep), [{ capsule: "KSM9", ownIems: true }, undefined, { capsule: null, ownIems: true }]);
+    assert.equal("prep" in out[1], false);
+  });
+
+  test("a by-person slot reads the same person's tags", () => {
+    const [s] = resolveSlots([slot("a", byPerson("p1"))], team, NO_DEVICES, "column", undefined, prep);
+    assert.deepEqual(s.prep, { capsule: "KSM9", ownIems: true });
+  });
+
+  test("an unfilled, empty, static or spacer slot never gets prep, even if the input carried one", () => {
+    const stale = { capsule: "OLD", ownIems: true };
+    const input = [
+      { ...slot("a", pos({ name: "Nobody" })), prep: stale },
+      { ...slot("b", { kind: "empty" }), prep: stale },
+      { ...slot("c", { kind: "static", label: "Pastor", color: "#fff" }), prep: stale },
+      { ...slot("d", { kind: "spacer" }), prep: stale },
+    ];
+    const out = resolveSlots(input, team, NO_DEVICES, "column", undefined, prep);
+    assert.deepEqual(out.map((s) => s.prep), [undefined, undefined, undefined, undefined]);
+  });
+
+  test("no tags map means no prep", () => {
+    const [s] = resolveSlots([slot("a", pos({ name: "Vocals" }))], team, NO_DEVICES);
+    assert.equal(s.prep, undefined);
+  });
+});

@@ -24,11 +24,13 @@ const dev = (over: Record<string, unknown>) => ({
   id: "mac1.out-1", outputId: "display-1", macs: ["02:aa:00:bb:11:cc"], hostname: "booth-mini", ...over,
 });
 
-async function strip(bound: unknown[], videoMode?: string) {
+async function strip(bound: unknown[], videoMode?: string, health: unknown[] = []) {
   const calls: string[] = [];
+  const bodies: string[] = [];
   const f = stubFetchWithLog((url, init) => {
     calls.push(`${init?.method ?? "GET"} ${url}`);
-    return ok({ scanning: false, seen: [], matches: {}, bound, health: [] });
+    if (init?.body) bodies.push(String(init.body));
+    return ok({ scanning: false, seen: [], matches: {}, bound, health });
   });
   render(
     React.createElement(
@@ -38,7 +40,7 @@ async function strip(bound: unknown[], videoMode?: string) {
     ),
   );
   await act(async () => { await settle(); await settle(); });
-  return { f, calls };
+  return { f, calls, bodies };
 }
 
 test("a DeckLink output reads Mac, port, and the mode it is set to", async () => {
@@ -84,6 +86,45 @@ test("Release from the strip unbinds the device", async () => {
   try {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Release" })); await settle(); });
     assert.ok(calls.includes("POST /api/devices/release"), `no release was sent: ${calls.join(", ")}`);
+  } finally {
+    f.restore();
+  }
+});
+
+test("an output's switch is named for its port, and flipping it asks the server", async () => {
+  const { f, calls, bodies } = await strip([dev({ output: SDI })]);
+  try {
+    const sw = screen.getByRole("switch", { name: "Output on SDI 1" });
+    assert.equal(sw.getAttribute("aria-checked"), "true");
+    await act(async () => { fireEvent.click(sw); await settle(); });
+    assert.ok(calls.includes("POST /api/devices/enabled"), `no switch was sent: ${calls.join(", ")}`);
+    assert.deepEqual(JSON.parse(bodies[0]), { deviceId: "mac1.out-1", enabled: false });
+  } finally {
+    f.restore();
+  }
+});
+
+test("an output that is off reads off, and turning off until the Mac says so", async () => {
+  const off = await strip([dev({ output: SDI, enabled: false })], undefined, [{ deviceId: "mac1.out-1", enabled: false }]);
+  try {
+    assert.equal(screen.getByRole("switch", { name: "Output on SDI 1" }).getAttribute("aria-checked"), "false");
+    assert.ok(screen.getByText("Off on this Mac"));
+  } finally {
+    off.f.restore();
+  }
+  cleanup();
+  const pending = await strip([dev({ output: SDI, enabled: false })], undefined, [{ deviceId: "mac1.out-1", enabled: true }]);
+  try {
+    assert.ok(screen.getByText("Turning off…"));
+  } finally {
+    pending.f.restore();
+  }
+});
+
+test("a device that is not an output has no switch", async () => {
+  const { f } = await strip([dev({ output: undefined, label: "Lobby box" })]);
+  try {
+    assert.equal(screen.queryByRole("switch"), null, "a Pi kiosk was given a switch that does nothing");
   } finally {
     f.restore();
   }

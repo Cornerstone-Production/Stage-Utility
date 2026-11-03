@@ -22,6 +22,9 @@ page first loads.
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
 | `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
+| `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses |
+| `wireless:chargers` | ~0.3 KB per bay | when a bay's reading changes (a charging pack moves about a percent a minute), only to a page drawing bays: a Charger battery widget, the Mic slots page |
+| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page; screens do not name it |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
 
@@ -60,6 +63,20 @@ screen names this channel, whatever it shows, so that an alert can draw over it;
 a Screens-card preview does not. In a layout it is otherwise named only by one
 that holds a Messages or Message composer widget.
 
+### Slot boards
+
+`boards:changed` tells an open [Mic slots page](../slots.md#the-mic-slots-page)
+which boards a write changed, from wherever it was made: `{ epoch, seq, boards:
+[{ id, meta, targets }] }`, where `meta` says the board was created, deleted,
+renamed or resized and `targets` lists its changed layouts as
+`default:<serviceTypeId>` or `plan:<planId>`. No slot contents travel on it: the
+page re-reads only the layouts named, which is one `GET /api/boards/:id/targets`
+per board it has open. `seq` counts every write since the server started, so a
+page that sees a gap (it reconnected, or the server restarted) re-reads every
+board instead. One frame per save, per board created, renamed or deleted, per
+copy, revert or promote, and per nightly prune that removed something; silent
+otherwise. The connect-time snapshot is the last frame.
+
 ## What keeps it small
 
 - **Volatile and static data are on separate channels**, both deduplicated against
@@ -78,7 +95,7 @@ that holds a Messages or Message composer widget.
   which changes when the photo does; all are cached for a year, except a
   full-size photo standing in for a smaller copy Planning Center has not sent. A slots DISPLAY
   has its photos cropped to the column shape they are drawn at, which is a tall
-  sliver — that is the saving. An inline mic-slots object on a custom layout is
+  sliver — that is the saving. A mic-slots object on a custom layout is
   whatever size it was dragged to, so nothing server-side knows its shape: it
   receives the whole image and the browser crops it.
 - **Photos come at the size they are drawn.** Each slot asks for the device
@@ -126,13 +143,26 @@ them.
   (`406`) is asked up to two more times a moment apart, so up to three asks
   per check.
 
+## Companion
+
+Companion is read on the LAN, and only for a person looking at it:
+
+- **Button export.** The Companion page picker and the command-to-button pairing
+  read Companion's export, cached for five minutes. A failed read is not cached.
+- **Variables in a key's text.** Opening a page in the picker reads the
+  `$(connection:name)`, `$(custom:name)` and `$(internal:name)` variables that
+  page's keys name, nothing else: at most 100 distinct variables, no more than four
+  reads out at Companion at once however many pages are open, each answer reused
+  for 5 seconds and abandoned after 3. With the picker closed, Companion is asked
+  for no variables.
+
 ## Leaving your network
 
 What reaches the internet, and when:
 
 | To | Why |
 |---|---|
-| Planning Center | The plan, people, photos, attachments and the live countdown. The one required connection |
+| Planning Center | The plan, people, prep tags, photos, attachments and the live countdown. The one required connection |
 | GitHub | The update check (release metadata and notes), and an update's download. The first time a Mac asks for the output helper, its zip from the release matching this server |
 | SenSource Vea, and SafeSpace | People counts, only while those integrations are on |
 | ESPN | Live scores for followed teams, only while any are followed |

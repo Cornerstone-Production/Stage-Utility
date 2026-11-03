@@ -36,6 +36,37 @@ which findings get fixed, and in which PR, is the maintainer's call. This file
 and that rule used to contradict each other, and the contradiction produced
 both behaviors at the wrong times.
 
+### Every review toward main checks the ServiceCue public side
+
+ServiceCue publishes out of the LAN to a public Worker (`publish/servicecue/`)
+that anyone with the link can read. Any review of a change bound for `main` — a
+release PR, or a pre-release review of beta — includes a pass for that
+boundary, **whatever the diff touches**. A new field on a shared type, a whole
+object passed where a few fields were picked, or a renderer import pulled into
+the published bundle can widen what leaves the building without a single
+ServiceCue file in the diff.
+
+The pass answers two questions, with `file:line` evidence either way:
+
+- **Does anything leak?** Trace the payload from its builder to the wire and
+  name its allowlist. Only what
+  [ServiceCue on the web](docs/ops/servicecue-on-the-web.md#who-can-see-it)
+  says is public may leave: the offered service types, layouts and plans, their
+  whole rundowns, the live item, and the six state fields. Anything new on that
+  list is a change to that page, decided on purpose. Nothing else: no
+  credentials or tokens, no LAN
+  addresses, hostnames or device ids, no people's contact details or photos, no
+  log or error text, no internal ids the public side does not need — in the
+  payload, in an error reply, or in the deployed bundle.
+- **Does the service keep its integrity?** The push stays one-way, authenticated
+  and bounded (no inbound path to the LAN, no redirects followed, timeouts).
+  Operator- and Planning Center-controlled strings cannot inject into the public
+  page. The Worker accepts only what it should, cannot be driven past its plan's
+  limits, and still builds and tests against the server's types.
+
+Say what was checked even when nothing is found, so the absence is evidence. A
+finding here blocks the merge to `main` until it is fixed.
+
 ## Verify before you claim
 
 Run the checks in [Before you open a PR](docs/contributing.md#before-you-open-a-pr)
@@ -53,6 +84,35 @@ restore that the next append deleted, both had green tests over the pieces and a
 broken path through them. Kill a test server by **port**, never `pkill -f` on an
 env-var prefix — the prefix is not in the process command line, so the old server
 survives and the next run tests stale code.
+
+Start a test server on an **empty** data dir, never a copy of a real one (see
+[Running it locally](docs/contributing.md#running-it-locally)): a copied config
+dials the real devices and can log a production install out of a service it
+shares a session with. Before any `POST`, `PATCH` or `DELETE`, `GET
+/api/version` on the port you are about to write to and check it is the build you
+started. 8788 is the default port, so a forgotten port flag lands on whatever
+instance already runs there; an agent once created views in a live install that
+way.
+
+Open the page at the machine's LAN address, not `localhost`. Production is plain
+HTTP, and `localhost` is a secure context that hides the difference (see
+[Plain HTTP in production](docs/contributing.md#plain-http-in-production)).
+
+## UI work starts from an approved mockup
+
+A change to what an operator sees gets an interactive mockup in the app's real
+tokens and type ([STYLE_GUIDE.md](STYLE_GUIDE.md)) before it gets code, and the
+approved mockup is the spec: match its layout, hierarchy, copy and spacing. Where
+the mockup and the written spec disagree, the mockup wins and the spec is updated.
+A page that keeps old sections the mockup removed, or trims what it added, is not
+done.
+
+A rewrite of an existing surface ships a feature parity table before any tasks:
+every behaviour the old surface has, built by reading its code (hooks, keyboard
+handlers, persisted keys, responsive branches), each marked carried, replaced
+(naming the replacement) or dropped (with the reason). A settings-shell rewrite
+once lost nine controls nobody listed because they were shell behaviour, not
+settings.
 
 ## Fixing a repeated pattern
 
@@ -152,6 +212,32 @@ how a failed save read as saved until the next restart lost the work.
 
 A function that can partially fail returns what failed; the caller decides what to
 tell the operator.
+
+## Working beside other agents
+
+Several agents often work this repo at once, each in its own worktree. Worktrees
+share more than they look like they do:
+
+- **No `git stash`.** The stash stack is repository-wide, so a `pop` in one
+  worktree takes another agent's work. For a red/green proof, copy the file aside
+  and copy it back, or reverse-apply a commit's diff (`git show <sha> -- <path> |
+  git apply -R`).
+- **No plain `git config` in a worktree.** A worktree has no config of its own;
+  the write lands in the shared `.git/config` and re-authors every agent's
+  commits. A trial merge needs no identity (`git merge --no-commit`), or pass
+  `-c user.email=…` on the one command.
+- **A reviewer is read-only or isolated.** An agent with no edit tool still has a
+  shell, and proving a guard red is exactly the job that makes it `sed` or `cp`
+  over a file. Commit or copy your own edits first, and give a reviewer that
+  mutates code its own worktree.
+- **Remove only the worktrees you made**, as soon as their work is done, after
+  checking `git status`. A leftover worktree holds its branch, and removing one an
+  agent is still in drops that agent into the shared checkout.
+
+Before pushing more commits to a branch, check its PR is not already merged; new
+work after a merge gets a fresh branch off `beta`. Work that depends on an
+unmerged PR opens with `--base <that-branch>`, never by merging sibling branches
+into a new one, which reads as a conflict once the siblings land.
 
 ## When something breaks in production
 

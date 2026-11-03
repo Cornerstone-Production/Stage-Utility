@@ -35,6 +35,7 @@ const CASES: Record<string, Case> = {
   appIconCrop: { in: { scale: "big", x: 0, y: 0 }, out: null },
   appIconMaskable: { bad: {}, says: "PNG data URL" },
   appIconOriginal: { bad: "/etc/passwd", says: "image" },
+  appIconTabBackground: { bad: "transparent", says: "#rrggbb hex or \"none\"" },
   appLogo: { bad: "javascript:alert(1)", says: "image" },
   appLogoCrop: { in: { scale: 1, x: 2, y: 3, extra: true }, out: { scale: 1, x: 2, y: 3 } },
   appLogoMonochrome: { bad: "yes", says: "true or false" },
@@ -191,6 +192,12 @@ describe("settings.json restore check", () => {
   test("a key no code reads is dropped", async () => {
     const result = await settingsRestoreCheck({ showQr: true, somethingElse: { x: 1 } });
     assert.ok(result.ok);
+    assert.deepEqual(result.value, { showQr: true });
+  });
+
+  test("the retired actionButtonsMigrated flag in an older backup is dropped, not refused", async () => {
+    const result = await settingsRestoreCheck({ showQr: true, actionButtonsMigrated: true });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
     assert.deepEqual(result.value, { showQr: true });
   });
 });

@@ -3,11 +3,10 @@
 // What is under test is which board the preview is a picture of. Three ways it
 // can lie, and every one of them is silent:
 //
-//  1. Resolving only while there are unsaved edits, so a clean editor stepped to
-//     next Sunday keeps showing THIS Sunday's board. That is the bug this file
-//     exists for.
-//  2. Sending no target with the request, so the server answers for the plan the
+//  1. Sending no target with the request, so the server answers for the plan the
 //     screens follow and the rows are the wrong week's.
+//  2. Resolving for the plan when the editor is on the type's DEFAULT, so the
+//     preview shows people the default layout is not about.
 //  3. Stepping twice faster than one round trip and painting the first target's
 //     answer over the second's.
 //
@@ -106,7 +105,9 @@ const { render, cleanup, act, fireEvent, screen } = await import("@testing-libra
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { PlanSwitcher } = await import("./plan-switcher.js");
-const { useSlotsPreview, SlotsPreviewNote, previewNote, positionsFilled } = await import("./slots-preview-target.js");
+const { SlotsPreviewNote, previewNote, positionsFilled } = await import("./slots-preview-target.js");
+const { useBoardPreview } = await import("../../app/mic-slots/use-board-preview.js");
+const { useEditingTarget } = await import("./editing-target.js");
 const { __setEditingTargetForTests } = await import("./editing-target.js");
 const { __resetForTests } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
@@ -137,24 +138,27 @@ const settle = async () => {
   }
 };
 
-let dirty = false;
+/** Which side of the plan the page is on: false asks for the type's default. */
+let planSide = true;
 
 /** Prints what the hook resolved to, beside a real switcher to step it with. */
 function Probe(): React.ReactElement {
-  const preview = useSlotsPreview(BOARD, dirty);
+  const editing = useEditingTarget();
+  const { serviceTypeId, planId } = editing.target;
+  const preview = useBoardPreview(BOARD, serviceTypeId ? { serviceTypeId, planId: planSide ? planId : null } : null);
   return React.createElement(
     "div",
     null,
     React.createElement(PlanSwitcher, null),
     // Strings, never objects — see the note at the top of the file.
-    React.createElement("span", { "data-testid": "roster" }, preview?.roster ?? "none-at-all"),
+    React.createElement("span", { "data-testid": "roster" }, preview.resolution?.roster ?? "none-at-all"),
     React.createElement(
       "span",
       { "data-testid": "names" },
-      (preview?.slots ?? []).map((s) => s.displayName ?? "-").join(","),
+      preview.slots.map((s) => s.displayName ?? "-").join(","),
     ),
     React.createElement(SlotsPreviewNote, {
-      resolution: preview,
+      resolution: preview.resolution,
       planLabel: "Sun, Sep 20",
       serviceTypeName: "Sunday",
     }),
@@ -202,7 +206,7 @@ beforeEach(() => {
   resolveBodies = [];
   pending = [];
   hold = false;
-  dirty = false;
+  planSide = true;
   nextAnswer = () => ({ slots: [], roster: "live" });
 });
 afterEach(async () => {
@@ -220,24 +224,15 @@ after(async () => {
   teardown();
 });
 
-describe("when the preview asks the server at all", () => {
-  test("live and clean: it does not — the iframe is the kiosk", async () => {
+describe("which target the preview asks for", () => {
+  test("on the live plan it asks for the live plan", async () => {
     mount();
     await settle();
-    assert.deepEqual(resolveBodies, [], "a clean editor on the live plan has nothing the kiosk is not already showing");
-    assert.equal(roster(), "none-at-all", "and the hook hands the preview no rows to override it with");
-    assert.equal(note(), "", "nor a caption — the preview IS what the screens are showing");
-  });
-
-  test("live and dirty: it does, for the live plan", async () => {
-    dirty = true;
-    mount();
-    await settle();
-    assert.equal(resolveBodies.length >= 1, true, "unsaved edits still have to be resolved to be previewed");
+    assert.equal(resolveBodies.length >= 1, true, "the page always resolves; a clean board on the live plan still needs its people");
     assert.deepEqual(targets().slice(0, 1), [JSON.stringify({ serviceTypeId: SUN, planId: LIVE_PLAN })]);
   });
 
-  test("clean but on another plan: it does, carrying that target", async () => {
+  test("on another plan it carries that target", async () => {
     nextAnswer = () => ({
       slots: [slot("s1", "Vocals", "Next Person"), slot("s2", "Guitar", null)],
       roster: "plan",
@@ -251,21 +246,18 @@ describe("when the preview asks the server at all", () => {
     assert.deepEqual(
       targets(),
       [JSON.stringify({ serviceTypeId: SUN, planId: NEXT_PLAN })],
-      "gating the resolve on dirtiness is what left the preview showing this Sunday under next Sunday's switcher",
+      "an answer for the wrong plan is the wrong week's people under next Sunday's switcher",
     );
     assert.equal(roster(), "plan");
     assert.equal(names(), "Next Person,-", "with that plan's people in it");
   });
 
-  test("clean but on the Default side: it does, with planId null", async () => {
+  test("on the Default side it asks with planId null, whatever plan the switcher is on", async () => {
     nextAnswer = () => ({ slots: BOARD, roster: "none" });
+    planSide = false;
     mount();
     await settle();
-    resolveBodies = [];
-
-    await pick(encodeTarget({ serviceTypeId: SUN, planId: null }));
-
-    assert.deepEqual(targets(), [JSON.stringify({ serviceTypeId: SUN, planId: null })]);
+    assert.deepEqual(targets().slice(0, 1), [JSON.stringify({ serviceTypeId: SUN, planId: null })]);
     assert.equal(roster(), "none");
   });
 });
@@ -286,7 +278,7 @@ describe("stepping twice faster than one round trip", () => {
     hold = false;
     nextAnswer = () => ({ slots: [slot("s1", "Vocals", "CURRENT")], roster: "none" });
     await pick(encodeTarget({ serviceTypeId: SUN, planId: null }));
-    assert.equal(names(), "CURRENT", "the second target's answer is the one showing");
+    assert.equal(names(), "CURRENT,-", "the second target's answer is the one showing");
 
     // Now let the first one land.
     for (const r of pending) r();
@@ -295,7 +287,7 @@ describe("stepping twice faster than one round trip", () => {
 
     assert.equal(
       names(),
-      "CURRENT",
+      "CURRENT,-",
       "a late answer for a target the operator has already left must never reach the preview",
     );
     assert.equal(roster(), "none");
@@ -370,21 +362,9 @@ describe("the caption", () => {
 describe("a target with no service type", () => {
   // The switcher's native select carries a "Plan…" placeholder, and picking it
   // decodes to `{ serviceTypeId: null, planId: null }` — off the live plan, so the
-  // badge reads `editing`, but naming no board at all. Driving this in a browser
-  // is where it turned up: the request went out, the server could only answer for
-  // the live plan, and the round trip bought nothing.
-  test("asks for nothing while clean — there is no board to preview", async () => {
-    mount();
-    await settle();
-    resolveBodies = [];
-    await pick("");
-    assert.deepEqual(resolveBodies, [], "no service type is no board, and no board is nothing to resolve");
-    assert.equal(roster(), "none-at-all");
-    assert.equal(note(), "");
-  });
-
-  test("but unsaved edits are still resolved, so they can still be previewed", async () => {
-    dirty = true;
+  // badge reads `editing`, but naming no board at all. The request goes out with no
+  // target and the server answers for the live plan.
+  test("asks with no target rather than a made-up one", async () => {
     mount();
     await settle();
     resolveBodies = [];

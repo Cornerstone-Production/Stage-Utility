@@ -766,9 +766,10 @@ function renderView(
     : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
-  // Physical alignment: when the View has a slotsLayout, columns are sized in
-  // inches (against the monitor's active width) so they line up with the chargers.
-  const slotsLayout = activeView?.slotsLayout ?? null;
+  // Physical alignment: when the screen has a display width and its board a
+  // column width, columns are sized in inches (against the monitor's active
+  // width) so they line up with the chargers. The server joins the two halves.
+  const slotsLayout = activeView ? (state.slotsLayoutByView?.[activeView.id] ?? null) : null;
 
   if (sortedSlots.length === 0) {
     return <KioskEmpty state={state} screen={screen} />;

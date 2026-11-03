@@ -28,7 +28,7 @@ done. Dismiss it and it stays dismissed.
 |---|---|
 | — | **Home** |
 | Content | **ServiceCue**, **Patch** |
-| Screens | **Screens**, **Video feeds** |
+| Screens | **Screens**, **Mic slots**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
@@ -92,11 +92,12 @@ Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
 
-![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
+![Home during a service: Needs attention reporting nothing wrong, the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
 
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
-**Add widget** offers the whole registry. The tick finishes.
+**Add widget** offers the whole registry, searchable by a widget's name, description or
+group (the same search as the layout editor's widget shelf). The tick finishes.
 
 **Right-click a tile** — or tap and hold it — for its size, when it shows,
 remove, and the few settings that widget supports — seconds and the hour cycle
@@ -106,6 +107,13 @@ mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.
 
+**A Button tile** presses a command when it is tapped. Home has no inspector, so its
+right-click menu leads with **Presses…**, which names what it presses (or **Not
+set**) and opens a sheet with a **Label** and the same **Presses** choices as the
+layout editor: a Companion button, an app action or a command. A Button with
+nothing chosen reads **Choose what it presses**, and tapping it opens the sheet.
+See [Control](../reference/widgets.md#control).
+
 **The Sound level tile's menu** leads with two choices, **Meter** and **Metric**,
 above Size and Show. **Metric** has **Automatic** first, with the metric it is
 reading beside it, then every metric the chosen meter reports, each with its
@@ -113,6 +121,96 @@ live value. Pick one and the tile shows that metric, captioned
 `<metric> · <meter>`. With **Loudest meter**, the list is the loudest meter's, and
 once a metric is picked, "loudest" is judged on that metric. A picked metric the
 meter stops reporting reads `—` and names it, never another metric's number.
+
+### Needs attention
+
+**Needs attention** lists what is wrong right now, one row per problem: a dot,
+what it is, the reason, **Snooze**, and the fix as a button. Everything healthy
+folds into one line beneath it ("5 of 6 screens · 7 of 8 mics · ProPresenter ·
+Planning Center · Resi streaming"; a streaming platform says "streaming" or
+"idle"). With nothing wrong the tile is captioned **Needs attention**, says
+**All clear** with a green dot, and puts that line beneath it. It is on a new
+Home by default, in place of Readiness, and **Add widget** offers both; a Home
+somebody has edited is left as it is. Placed on a wall or console, it draws the
+same rows with no buttons.
+
+A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
+takes the colour of the worst problem showing. At the medium size the list is
+three rows and **+N more**, which opens the rest inside the tile.
+
+| Problem | When it appears | Severity | The fix |
+|---|---|---|---|
+| Readiness | Each readiness check that fails, in the order to fix them (Planning Center, a plan, a view of your own, every screen has a view). "Screens online" is not repeated here: the next row says it per screen | Warn | The page and control the check names |
+| Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
+| Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
+| Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
+| Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which presses the built-in recording command in place, so Simulate and Disarm apply as they do to the Recording tile |
+| Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
+
+A source that has not answered yet adds nothing: the page does not tell you to
+fix something it has not heard about, and a half-loaded Home draws no severity
+until it knows whether a service is live.
+
+**Snooze** hides one problem until the next service starts, for everyone: the
+booth and the iPad agree on what is handled. Outside Planning Center it lasts
+12 hours, and with it a snooze still lapses after 7 days if no service starts
+in that time. At most 500 can be held at once. A problem that clears and comes back stays snoozed, but one that gets
+worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
+lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
+configuration backup and restoring one does not bring any back.
+
+### Expanding a tile
+
+Some tiles open over Home instead of sending you to another page. Press the
+corner control on a tile — or, on a tile with no controls of its own, the tile
+itself — and it fills the window. The panel's header carries the tile's name,
+an **Open** link to the page the tile belongs to (**Open Screens**, for one), and **Close**; Escape closes it
+too. Nothing navigates, so Home is exactly where you left it.
+
+| Tile | Collapsed | Expanded | Open link goes to |
+|---|---|---|---|
+| **Wireless summary** | online count, lowest battery | every channel: name, battery, time left, RF bars, muted, offline | Mic slots |
+| **Screens** | connected of total | every screen: name, the view it shows, online or offline | Screens |
+| **Timer** (service) and **Current item** | the live item and its countdown | the whole rundown, the live item marked, planned against actual so far | Plan |
+| **Recent services** | the figures | the attendance trend with its readout | History |
+
+A tile with no expanded body does what it always did. Only the tiles with no
+controls of their own — Wireless summary, Screens and Recent services — expand on
+a press of the tile; on the others only the corner control does, so a button on a
+tile is never swallowed. While you are editing Home nothing expands.
+
+### Actions on a tile
+
+A tile may carry **one** action, drawn on the tile itself.
+
+| Tile | Action | Does |
+|---|---|---|
+| **Timer** (service source, showing the next item), while an item is live | **Next** — and **Prev** beside it from Medium up | moves Planning Center Live on or back, one press each |
+| **Recording** | **Start** when stopped, **Stop** while recording | starts or stops REAPER and OBS, whichever are connected |
+| **Streaming**, **Wireless summary**, **Screens** | none | |
+
+Streaming has none on purpose: starting a broadcast from a tile is too easy to do
+by accident and too public to get wrong.
+
+**Stop takes two presses.** The first turns the button into **Stop recording?**
+for three seconds; a second press inside that stops, and one after it lapses is
+a first press again. **Start** shows a spinner until the recorder itself reports
+that it is recording, and says so on the tile if it has not within ten seconds.
+A failed action names the problem on the tile for five seconds.
+
+Start and Stop press the built-in commands **REAPER recording** and **OBS
+recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
+ones a Button, a Companion key or Home Assistant presses. So the press is in the
+Automation page's activity, **Simulate** and **Disarm** apply (the tile says
+"Reaper: Simulated: nothing was sent", or why it was refused).
+
+The action is dropped from a tile too narrow to hold it beside its reading, such
+as a Small tile on a narrow tablet; make the tile Medium to get it back. On a
+touch screen every control on a tile is at least 44 px square.
+
+A fresh Home includes the **Message composer** across the page, so a stage
+message can be sent without leaving it. A Home you have edited is left as you
+made it; **Add widget** offers the composer at any time.
 
 ### Sizes
 
@@ -185,8 +283,13 @@ control surface carries a **panel** pill.
 A view that no screen shows has its own card under **Views not on a screen**, with
 a pill for what it is (*wall* or *control surface*) and, for a console, whether it
 is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
-*Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
+*Make it a control surface*, *Duplicate view* (which, for a view that shows Mic Slots boards, asks whether the copy gets boards of its own or shares them), *Delete view…* and, for a console,
 **Show in the sidebar**.
+
+A Mic Slots screen has no layout to place. Its card's **Edit** opens **Mic slots**
+in the sidebar, where every board is edited together and the screen's own board is
+selected (see [Mic slots](../slots.md#the-mic-slots-page)); the screen's **View
+settings…** carries its **Display width**.
 
 Under the cards: **New view** (pick what the view shows: Mic Slots, Dashboard,
 Stage, Transcription, ServiceCue, SPL Rundown, Calendar or a Custom Layout, and for
@@ -337,8 +440,8 @@ control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
-has nothing to operate. A **Button** on one, set to Fire a cue, fires a cue and shows what its
-device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+has nothing to operate. A **Button** on one presses a Companion button, an app action or a command, and shows what
+its device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
@@ -452,9 +555,9 @@ image.
 |---|---|
 | **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
-| **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
+| **Recolor to match theme** | shown once a logo is set; the tab and home-screen icon dialog has the same switch, because the icon follows it. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
 | **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set) and **Remove**, and the square crop edited in the dialog. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
-| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
+| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon. The tab and the home screen have their own background |
 | **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Remove** and crop editor |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
@@ -466,19 +569,40 @@ The connect QR toggle is the last card on this page — see
 Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP (512 x 512 or larger looks sharpest),
 or press **Use my logo** to build it from the logo already set. Smaller art is never refused: the editor, and the dialog for **Use my logo**, say when it is smaller than 512 x 512 and may look soft. Stage Utility draws
 every size from that one square in your browser: 180 px for the iPhone and iPad
-home screen, 192 and 512 px for Android and the tab, and a second 512 px version
-for Android's round and rounded-square masks with the art kept inside the center
-80%. The dialog previews it at tab, iPhone and Android sizes.
+home screen, 192 and 512 px for Android, and a second 512 px version for Android's
+round and rounded-square masks with the art kept inside the center 80%. The browser
+tab is drawn separately (below). The dialog previews it as a tab on a light and on a
+dark tab strip, and as an iPhone and an Android icon, each in its own shape. The
+editor shows the art over a transparency checker, in the ink the icon will be drawn in.
 
-**Background** fills the transparent areas of your art (black, two blues or white);
-phones would otherwise fill them with black. Changing it redraws every size at once.
+**Recolor to match theme** is the logo's setting, repeated in the dialog because the
+icon follows it. On, the art is drawn in one ink: dark where it sits on a light
+background, light where it sits on a dark one, so a white logo stays visible. Off, the
+art is drawn as uploaded. Changing it redraws the icon.
+
+**Tab background** and **Home-screen background** are set apart. Each offers black,
+white, the accent and a custom color; the tab also offers **Transparent**, which is its
+default. **Accent** is stored as the color the accent is when you pick it, not as a
+promise to follow it, because the home-screen images are PNGs the server keeps. Phones
+fill transparency with black, so the home screen always has a color. Changing either
+redraws the icon at once. Installs from before the two were separate keep their one
+background on the home screen and get a transparent tab.
+
+With Recolor on, the home-screen art is drawn in whichever ink reads against its
+background (white art on a white background turns dark). The tab follows the same rule
+once it has a background color. On a transparent tab there is no background to read
+against, so the tab shows just the art, dark on a light browser and light on a dark
+one, and changes with the browser's setting.
+
 Once set, the dialog opens with the icon's square in the crop editor, and offers
 **Replace** and **Remove**. Removing it puts
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
-A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.
-The tab loads it from `/icon-192.png`, which answers with the built-in icon if the
-stored file is ever missing, so the tab is never blank. The home-screen label is the
+A custom icon wins over the logo for the tab. The browser draws the tab icon itself,
+in the operator app and on every display, from the icon's art (the public Service Cue
+page keeps the built-in icon); if that file is ever missing (a restore
+that carried the settings and not the images) the tab shows the built-in icon and the
+log says so. The home-screen label is the
 app name, read by iOS when the app is added, so renaming the app does not rename an
 icon already on a home screen; adding it again does. The manifest and icon files
 behind this are listed in the [API](../reference/api.md).

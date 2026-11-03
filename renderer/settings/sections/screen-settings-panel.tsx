@@ -26,7 +26,7 @@
 import { useState, type FormEvent } from "react";
 import { CopyIcon, PanelRightIcon, XIcon } from "lucide-react";
 
-import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, toast } from "../../components/ui";
+import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
@@ -35,9 +35,9 @@ import { useNameDraft } from "../../lib/use-name-draft";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
-import { releaseDevice } from "../../app/screens/screen-device";
+import { releaseDevice, setOutputEnabled } from "../../app/screens/screen-device";
 import { readUpdate, TONE_CLASS, UpdateButton, type UpdateReading } from "../../app/screens/machine-update";
-import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
+import { cardOf, outputModeLine, outputSwitchState } from "../../app/screens/output-helpers";
 import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
 import type { DeviceOutput } from "@main/types/kiosk";
 import type { OutputHealth } from "@main/types/output-health";
@@ -248,7 +248,7 @@ function noHealthNote(online: boolean, reported: boolean): string {
  */
 function OutputDeviceSection({ output, device, online, health, reported, update, actions }: {
   output: Output;
-  device: { id: string; hostname?: string; ip?: string; label?: string; output: DeviceOutput };
+  device: { id: string; hostname?: string; ip?: string; label?: string; enabled?: false; output: DeviceOutput };
   online: boolean;
   health: OutputHealth | undefined;
   /** Whether it has reported at any time since the page loaded. */
@@ -262,6 +262,10 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
   const sideways = rotation === 90 || rotation === 270;
   const mode = outputModeLine(device.output, output.videoMode, undefined);
   const who = [device.hostname || device.label || "Set up on a device", device.output.port].join(" · ");
+  const sw = outputSwitchState(device, health);
+  // An output the Mac holds off is drawing nothing and sends no figures: its
+  // zeros are not a measurement, and are not shown as one.
+  const held = health?.enabled === false ? undefined : health;
   const via = [cardOf(device.output), device.ip ? `via the output helper on ${device.ip}` : "via the output helper"].join(" · ");
 
   return (
@@ -275,6 +279,21 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
       </div>
 
       {update && <MachineUpdateRow label="Helper" update={update} />}
+
+      <SettingRow
+        label={`Output on ${device.output.port}`}
+        help={
+          <span className={sw.pending ? "text-warn-11" : undefined}>
+            {`Sending ${output.name} · ${sw.label}. Off stops this port drawing; the screen keeps its view and URL, and the switch stays with the port.`}
+          </span>
+        }
+      >
+        <Switch
+          checked={sw.on}
+          aria-label={`Output on ${device.output.port}`}
+          onCheckedChange={(v: boolean) => void setOutputEnabled(device.id, v)}
+        />
+      </SettingRow>
 
       {device.output.kind === "decklink" && (
         <SettingRow label="Format" help="What the port sends. The house standard is the default.">
@@ -327,11 +346,11 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
             while the display sleeps or the screen is locked: 0 there is a
             sleeping display, not a measurement. */}
         <Stat
-          value={health && !(device.output.kind === "display" && health.fps === 0) ? health.fps.toFixed(2) : "—"}
+          value={held && !(device.output.kind === "display" && held.fps === 0) ? held.fps.toFixed(2) : "—"}
           label="frames / s"
         />
-        <Stat value={health ? `${health.repeated.toFixed(1)}%` : "—"} label="repeated" />
-        <Stat value={health ? String(health.dropped) : "—"} label="dropped by the card" />
+        <Stat value={held ? `${held.repeated.toFixed(1)}%` : "—"} label="repeated" />
+        <Stat value={held ? String(held.dropped) : "—"} label="dropped by the card" />
       </div>
       {device.output.kind === "decklink" && health?.latencyMs !== undefined && (
         <p className="mt-2 text-caption1 text-fg-muted">Latency {Math.round(health.latencyMs)} ms (render to air)</p>
@@ -342,6 +361,7 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
         </p>
       )}
       {!health && <p className="mt-2 text-caption1 text-fg-subtle">{noHealthNote(online, reported)}</p>}
+      {health?.enabled === false && <p className="mt-2 text-caption1 text-fg-subtle">Off. Nothing is being drawn on this port.</p>}
 
       <div className="mt-1.5 flex items-start justify-between gap-3 py-1.5">
         <p className="min-w-0 text-caption1 text-fg-subtle">

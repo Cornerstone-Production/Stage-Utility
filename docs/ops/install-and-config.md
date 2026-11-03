@@ -354,14 +354,15 @@ state. See [integrations](../integrations/README.md).
 **Plan** — Auto follows the next upcoming service and rolls forward after it ends;
 Manual pins one, and its picker also lists the last 30 days so you can point the
 screens at a service that has already happened. Active Service Types limits which
-types Auto considers, and the plan switcher setting beside it chooses how the slot
-editors' switcher steps — within one type, or across every active type by date.
+types Auto considers, and the plan switcher setting beside it chooses how the Mic slots
+page's and layout editor's switcher steps — within one type, or across every active type by date.
 See [Switching plans in the editor](../slots.md#switching-plans-in-the-editor).
 
 **Screens** — build the content and route it to your physical screens. A view is a
-slot grid, dashboard, stage screen, captions, script rundown, SPL rundown, or a
+mic slots view, dashboard, stage screen, captions, script rundown, SPL rundown, or a
 custom layout you design on a canvas; build once and route it to any number of
-screens, each with its own URL.
+screens, each with its own URL. **Mic slots**, in the same sidebar group, edits the
+[slot boards](../slots.md#the-mic-slots-page) those views show.
 
 **Branding, Automation, History, Baptisms, Patch** — appearance, event-driven
 rules, recorded services, the baptism timer and the stage patch sheet.

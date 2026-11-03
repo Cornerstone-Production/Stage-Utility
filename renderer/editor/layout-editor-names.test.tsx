@@ -74,7 +74,6 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
           null,
           React.createElement(LayoutEditor, {
             view: VIEW,
-            slotsViews: [],
             templates: [],
             startEditing: true,
             onSave: async () => {},

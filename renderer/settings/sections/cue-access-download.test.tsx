@@ -1,4 +1,5 @@
-// The Download YAML button on the Calling cues card.
+// The Access tab's two cards: Calling commands (tokens) and Home Assistant, and the
+// Download YAML button on the second.
 //
 // Copy YAML writes to the clipboard, which is a secure-context browser API and
 // fails on the plain-HTTP LAN address every real install answers on (see
@@ -30,7 +31,7 @@ const teardown = installRenderDom();
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-const { render, cleanup, act, fireEvent, screen } = await import("@testing-library/react");
+const { render, cleanup, act, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { CueAccessCard } = await import("./companion-cues.js");
@@ -65,15 +66,19 @@ after(async () => {
   teardown();
 });
 
+describe("the Access cards", () => {
+  test("are open, with no disclosure to press: the tab is the disclosure", async () => {
+    await mount();
+    assert.ok(screen.getByRole("heading", { name: "Calling commands" }));
+    assert.ok(screen.getByRole("heading", { name: "Home Assistant" }));
+    assert.ok(screen.getByRole("button", { name: /Mint/ }), "the Mint control is not on screen without opening anything");
+    assert.equal(document.querySelectorAll("[aria-expanded]").length, 0, "something here still collapses");
+  });
+});
+
 describe("the Download YAML control", () => {
   test("is a plain anchor to the Home Assistant route, with download set", async () => {
     await mount();
-    // The card is a Collapsible, closed by default — open it the way an
-    // operator would, by clicking the header.
-    await act(async () => {
-      fireEvent.click(screen.getByText("Calling cues"));
-    });
-    await settle();
     const anchor = [...document.querySelectorAll("a")].find(
       (a) => a.getAttribute("href") === "/api/cues/home-assistant.yaml",
     );

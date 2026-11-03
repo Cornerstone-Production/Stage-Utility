@@ -363,7 +363,7 @@ describe("homeAssistantYaml", () => {
 
   test("no cues yields a comment, not a half-written document", () => {
     const yaml = homeAssistantYaml([], BASE);
-    assert.match(yaml, /No cues yet/);
+    assert.match(yaml, /No commands yet/);
     assert.deepEqual(commandKeys(yaml), []);
   });
 
@@ -742,7 +742,7 @@ describe("the document for an install with no bindings", () => {
   ];
 
   const UNBOUND_YAML = [
-  "# Stage Utility cues \u2014 generated. Paste into configuration.yaml.",
+  "# Stage Utility commands \u2014 generated. Paste into configuration.yaml.",
   "#",
   "# Put the token you were shown when you minted it into secrets.yaml, WITH",
   "# the scheme, because this is the whole Authorization header:",
@@ -787,7 +787,7 @@ describe("the document for an install with no bindings", () => {
   "# Template switches, under the template integration's own key. Home",
   "# Assistant refuses `platform: template` under `switch:` \u2014 the spelling",
   "# these used to be generated in \u2014 so re-paste this over an older copy.",
-  "# Each entity id now follows the switch's name rather than the cue's, so an",
+  "# Each entity id now follows the switch's name rather than the command's, so an",
   "# automation of your own naming an old `switch.\u2026` may need its id updating.",
   "template:",
   "  - switch:",

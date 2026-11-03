@@ -5,9 +5,9 @@
 // you are looking at: `live` while the editor is on the plan the machine is
 // following, `editing` while it is anywhere else.
 //
-// One component, used in the slots-View editor's header, the inline grid's, and
-// the layout editor's toolbar. The target it reads and writes lives in
-// editing-target.ts, so all three agree without any of them owning it.
+// One component, in the Mic slots page's top bar. The target it reads and writes
+// lives in editing-target.ts, so anything else that needs the plan being edited
+// agrees with it without owning it.
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

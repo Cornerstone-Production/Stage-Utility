@@ -16,7 +16,6 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  collapse,
   cueSlugs,
   customVariableNames,
   exportBuild,
@@ -30,9 +29,9 @@ import {
   parseButtons,
   parseVariableRef,
   singleButtons,
-  slugForCue,
   UTILITY_MODULES,
 } from "./companion-export.js";
+import { collapse, slugForCue } from "./cue-slug.js";
 import {
   FIXTURE_PAGES,
   FIXTURE_PAGE_IDS,

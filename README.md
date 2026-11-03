@@ -33,7 +33,7 @@ the operator app and a phone remote from one port.
 | [Stage messages](docs/features/stage-messages.md) | groups of screens, and messages sent to them |
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Video feeds](docs/integrations/video-feeds.md) | cameras and program video on screens, through the built-in relay |
-| [Companion and Home Assistant](docs/integrations/companion.md) | stream-deck control, cues called by name, home automation |
+| [Companion and Home Assistant](docs/integrations/companion.md) | stream-deck control, commands called by name, home automation |
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
 | [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) | two operator surfaces on the plan |
@@ -105,8 +105,8 @@ enabled independently.
 | **ServiceCue and Baptisms** | The plan as a rundown with the note columns each department needs and a live countdown, and a timer for testimonies and baptisms. [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) |
 | **History and trends** | Every service is recorded: attendance, sound levels and item timing, with trends across weeks, a calendar, dated milestones and a spreadsheet export. The raw samples can be exported and imported. [History](docs/features/attendance-and-history.md), [Data archive](docs/data-archive.md) |
 | **Patch sheet** | A weekly stage patch with variants, read by volunteers at `/patch` and exported as CSV or Excel. [Patch sheet](docs/patch-sheet/README.md) |
-| **Automation** | Rules of the form "when something happens in Stage, do something to a device", and cues that Companion, Home Assistant or a console button call by name. Simulate mode is on by default. [Automation](docs/automation.md) |
-| **Companion and Home Assistant** | A Bitfocus Companion module drives and reads Stage; cues reach Home Assistant, and through it Apple Home, as switches that report what the gear is doing. [Companion](docs/integrations/companion.md) |
+| **Automation** | Rules of the form "when something happens in Stage, do something to a device", and commands that Companion, Home Assistant or a console button call by name. Simulate mode is on by default. [Automation](docs/automation.md) |
+| **Companion and Home Assistant** | A Bitfocus Companion module drives and reads Stage; commands reach Home Assistant, and through it Apple Home, as switches that report what the gear is doing. [Companion](docs/integrations/companion.md) |
 | **Running it** | Install with one line, update from inside the app, take config snapshots and automatic backups, and read the server's log at `/log`. [Install and config](docs/ops/install-and-config.md), [Updates and logs](docs/ops/updates-and-logs.md) |
 
 ![A stage wall display: mic slots with wireless telemetry, countdown, clock, stage messages with replies and the service order](docs/images/wall-stage-wall.png)

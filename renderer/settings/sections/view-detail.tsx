@@ -20,20 +20,19 @@ import {
   SelectItem,
   SelectValue,
   Separator,
-  UnsavedBanner,
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import type { SectionProps } from "../types";
-import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
-import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./view-kinds";
 import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 import { deleteView } from "./screen-confirms";
+import { AppLink } from "../../app/app-link";
+import { viewBoardId } from "@main/services/slot-boards";
 
 const PREVIEW_ASPECTS = [
   { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
@@ -52,23 +51,12 @@ export function ViewDetail({
   view,
   startEditing,
   stageState,
-  wirelessChannels,
-  localSlots,
-  slotsDirty,
-  isSavingSlots,
-  slotsPreview,
-  slotsTargetTypeName,
-  slotPresets,
   layoutTemplates,
-  slotsTargetSide,
-  slotsTargetLabel,
-  slotsTargetHasPlan,
-  slotsTargetHasOverride,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
+  "stageState" | "layoutTemplates" | "handlers"
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -114,23 +102,12 @@ export function ViewDetail({
     else setEditName(view.name);
   }
 
-  const slotViews = (stageState.views ?? []).filter((v) => v.kind === "slots" && v.id !== view.id);
+  const board = view.kind === "slots" ? viewBoardId(view) : null;
 
   return (
     // Custom views fill the available height so the editor fits without page scroll;
     // other kinds keep their natural height and let the page scroll (long slot lists).
     <div className={cn("flex flex-col gap-5", view.kind === "custom" && "flex-1 min-h-0")}>
-      {/* Unsaved-slots banner — the preview below shows the draft live; this makes
-          clear it isn't saved yet and offers Save / Discard. (Custom views get
-          their own banner inside the layout editor.) */}
-      {view.kind === "slots" && slotsDirty && (
-        <UnsavedBanner
-          saving={isSavingSlots}
-          onSave={() => void handlers.saveSlots()}
-          onDiscard={handlers.discardSlots}
-        />
-      )}
-
       {/* Header: name + kind dropdown + actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -244,7 +221,6 @@ export function ViewDetail({
             key={`${view.id}:${editorEpoch}`}
             view={view}
             startEditing={startEditing}
-            slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
             onSave={async (layout) => {
               const r = await handlers.handleSetViewLayout(view.id, layout, sessionRev);
@@ -272,66 +248,31 @@ export function ViewDetail({
           <ViewPreview
             viewId={view.id}
             aspect={previewAspect}
-            // Whenever there ARE resolved rows, not only while dirty. A clean
-            // editor pointed at another week has rows of its own, and gating on
-            // dirtiness is what left the preview showing this Sunday's board
-            // under next Sunday's switcher.
-            draftSlots={view.kind === "slots" ? (slotsPreview?.slots ?? null) : null}
           />
-          {/* Says which board this is a picture of, and why it may have no names
-              in it. Silent while the editor is live, where the preview IS the
-              kiosk. */}
-          {view.kind === "slots" && (
-            <SlotsPreviewNote
-              resolution={slotsPreview}
-              planLabel={slotsTargetLabel}
-              serviceTypeName={slotsTargetTypeName}
-            />
-          )}
         </div>
       )}
 
-      {/* Slots-kind content editor */}
+      {/* A slots screen shows a board, and boards are edited together on the Mic
+          slots page. */}
       {view.kind === "slots" ? (
         <>
           <Separator />
-          {slotViews.length > 0 && (
-            <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-fg-muted shrink-0">Copy slots from:</span>
-              <Select
-                value=""
-                onValueChange={(fromId: string) => {
-                  if (fromId) handlers.handleCopySlots(view.id, fromId);
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Another view…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {slotViews.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <SlotEditor
-            view={view}
-            wirelessChannels={wirelessChannels}
-            localSlots={localSlots}
-            slotsDirty={slotsDirty}
-            isSavingSlots={isSavingSlots}
-            slotPresets={slotPresets}
-            slotsTargetSide={slotsTargetSide}
-            slotsTargetLabel={slotsTargetLabel}
-            slotsTargetHasPlan={slotsTargetHasPlan}
-            slotsTargetHasOverride={slotsTargetHasOverride}
-            handlers={handlers}
-          />
+          <div className="flex flex-col items-start gap-2">
+            <p className="text-footnote text-fg-muted">
+              {board
+                ? "This screen's slots are edited on the Mic slots page, with every other board."
+                : "This screen shows no board yet. Pick one on the Mic slots page, where slots are edited."}
+            </p>
+            <AppLink
+              to="/mic-slots"
+              search={(board ? { board } : undefined) as never}
+              className="inline-flex h-8 items-center rounded-md bg-accent px-3 text-footnote font-medium text-white hover:bg-accent-hover"
+            >
+              Edit slots
+            </AppLink>
+          </div>
         </>
-      ) : view.kind === "custom" ? null : view.kind === "script" ? (
+) : view.kind === "custom" ? null : view.kind === "script" ? (
         <>
           <Separator />
           <div className="flex flex-col gap-2">

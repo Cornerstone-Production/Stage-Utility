@@ -92,12 +92,13 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly four dynamic routes", () => {
+  test("there are exactly five dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
     const dynamic = REGISTERED.filter((p) => p.includes("$") && !REDIRECTS.has(p)).sort();
     assert.deepEqual(dynamic, [
+      "/automation/$tab",
       "/consoles/$viewId",
       "/screens/$viewId/edit",
       "/servicecue/$serviceType/$layout",
@@ -128,17 +129,20 @@ describe("every registered route resolves a title", () => {
     // also merges cleanly when two branches each add a different route.
     // 24 since /servicecue split into the tablet's page and /servicecue/manage,
     // plus /video-feeds, the Screens-adjacent page for camera and program feeds,
+    // plus /mic-slots, where every slot board is edited,
     // plus the two routes that redirect the old /scriptview prefix.
     assert.deepEqual(
       [...REGISTERED].sort(),
       [
         "/",
         "/automation",
+        "/automation/$tab",
         "/baptism",
         "/consoles/$viewId",
         "/displays",
         "/history",
         "/history/manage",
+        "/mic-slots",
         "/patch",
         "/patch/edit",
         "/plan",
@@ -172,10 +176,12 @@ describe("every registered route resolves a title", () => {
       [
         "/",
         "/automation",
+        "/automation/$tab",
         "/baptism",
         "/consoles/$viewId",
         "/history",
         "/history/manage",
+        "/mic-slots",
         "/patch",
         "/patch/edit",
         "/plan",
@@ -232,6 +238,7 @@ describe("exact versus prefix", () => {
       ["/servicecue/$serviceType/$layout", "ServiceCue"],
       ["/patch/edit", "Patch"],
       ["/settings/advanced/$tab", "Advanced"],
+      ["/automation/$tab", "Automation"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
       assert.equal(active?.page.label, section, `${pattern} lost its section name`);

@@ -210,7 +210,13 @@ export function useExpand(enabled: boolean) {
    *   instead would mean handing it straight back in, and a hook whose output is
    *   also its input is a loop somebody has to trace.
    */
-  function overlay(render: (panelH: number) => ReactNode, title: string): ReactNode {
+  function overlay(
+    render: (panelH: number) => ReactNode,
+    title: string,
+    // A control that sits beside Close in the header: Home's "Open <page>". Absent
+    // for an embed tile, whose header is the name and Close, as it has always been.
+    headerAction?: ReactNode,
+  ): ReactNode {
     if (!expanded) return null;
     return createPortal(
       <div
@@ -240,15 +246,18 @@ export function useExpand(enabled: boolean) {
             <span className="truncate text-caption1 font-semibold uppercase tracking-wider text-fg-subtle">
               {title}
             </span>
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={close}
-              aria-label={`Close ${title}`}
-              className="touch-target ml-auto rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <XIcon className="size-4" />
-            </button>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {headerAction}
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={close}
+                aria-label={`Close ${title}`}
+                className="touch-target rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <XIcon className="size-4" />
+              </button>
+            </div>
           </div>
           <div ref={bodyRef} className="min-h-0 flex-1">
             {render(bodyHeight)}
@@ -259,9 +268,10 @@ export function useExpand(enabled: boolean) {
     );
   }
 
-  // Only what the tiles use. `open`, `close` and the panel's height are all
-  // reachable from inside — through `control`, the overlay's own header and the
-  // render callback — and a hook that hands back more surface than anyone calls
-  // is surface that drifts.
-  return { tileRef, control, overlay };
+  // Only what the tiles use. `close` and the panel's height are reachable from
+  // inside — through the overlay's own header and the render callback — and a
+  // hook that hands back more surface than anyone calls is surface that drifts.
+  // `open` is returned for Home's cards with no controls of their own, which
+  // open on a press of the card as well as on the corner control.
+  return { tileRef, control, overlay, open };
 }

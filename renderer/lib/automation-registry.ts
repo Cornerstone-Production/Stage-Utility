@@ -1,15 +1,13 @@
 // automation-registry.ts — the one react-query definition of the automation
 // registry (GET /api/automation/registry).
 //
-// Three surfaces read it: the Automation section, the layout editor's
-// action-button inspector, and every action-button on screen through
-// useAutomationActions. A query key they share has to mean one shape. Each used
-// to spell its own queryFn, and the button's cached the bare `actions` list
-// under the same key the other two cached the whole registry under, so
-// whichever fetch landed first handed the rest the wrong shape: the inspector
-// sat on "Loading actions…" for good, or a layout opened with a button already
-// on it crashed calling `.find` on an object. A consumer that wants part of the
-// registry takes it with `select`, never a queryFn of its own.
+// Two surfaces read it: the Automation section and the layout editor's Button
+// inspector (its App action choice). A query key they share has to mean one
+// shape. Each used to spell its own queryFn, and one cached the bare `actions`
+// list under the same key the other cached the whole registry under, so whichever
+// fetch landed first handed the rest the wrong shape: the inspector sat on
+// "Loading actions…" for good. A consumer that wants part of the registry takes
+// it with `select`, never a queryFn of its own.
 
 import { errorMessage } from "@main/services/errors";
 

@@ -34,11 +34,11 @@ import Testing
 
   @Test func bodyIsExactBytes() {
     let body = HealthPost.body(HealthSample(fps: 59.9401, repeated: 1.6694, dropped: 1), at: at)
-    #expect(String(decoding: body, as: UTF8.self) == #"{"at":1760000000123,"dropped":1,"fps":59.94,"repeated":1.67}"#)
+    #expect(String(decoding: body, as: UTF8.self) == #"{"at":1760000000123,"dropped":1,"enabled":true,"fps":59.94,"repeated":1.67}"#)
     let card = HealthPost.body(HealthSample(fps: 59.94, repeated: 0, dropped: 0, latencyMs: 20.0441), at: at)
     #expect(
       String(decoding: card, as: UTF8.self)
-        == #"{"at":1760000000123,"dropped":0,"fps":59.94,"latencyMs":20.04,"repeated":0}"#)
+        == #"{"at":1760000000123,"dropped":0,"enabled":true,"fps":59.94,"latencyMs":20.04,"repeated":0}"#)
   }
 
   func keys(_ body: Data) throws -> [String] {
@@ -54,6 +54,7 @@ import Testing
       try keys(HealthPost.body(HealthSample(fps: 60, latencyMs: 20), at: at)) == [
         "at",
         "dropped",
+        "enabled",
         "fps",
         "latencyMs",
         "repeated",
@@ -63,6 +64,7 @@ import Testing
         try keys(HealthPost.body(HealthSample(fps: 60, latencyMs: latency), at: at)) == [
           "at",
           "dropped",
+          "enabled",
           "fps",
           "repeated",
         ], "\(String(describing: latency))")

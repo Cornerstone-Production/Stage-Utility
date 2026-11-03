@@ -1,6 +1,6 @@
 // seed/automation.mjs — rules, and the OSC target they point at.
 
-export async function seedAutomation(api, { groups } = {}) {
+export async function seedAutomation(api, { groups, consoleId, panelId } = {}) {
   const targets = await api.post("/api/osc/targets", { name: "Lighting Console" });
   const target = targets.find((t) => t.name === "Lighting Console") ?? targets[targets.length - 1];
   await api.patch(`/api/osc/targets/${target.id}`, { host: "192.168.1.80", port: 8000 });
@@ -48,6 +48,16 @@ export async function seedAutomation(api, { groups } = {}) {
       action: { id: "osc.send", params: { targetId: target.id, address: "/lights/lobby/off" } },
     },
     {
+      name: "Walk-in look",
+      trigger: { id: "call.by-name", params: { name: "walk_in_look", says: "start the walk-in look", room: "Auditorium" } },
+      action: { id: "osc.send", params: { targetId: target.id, address: "/lights/preset/1" } },
+    },
+    {
+      name: "Stage wash",
+      trigger: { id: "call.by-name", params: { name: "stage_wash", homeAssistant: "hidden" } },
+      action: { id: "osc.send", params: { targetId: target.id, address: "/lights/preset/6" } },
+    },
+    {
       name: "Log when Planning Center drops",
       trigger: { id: "planning-center.disconnected", params: {} },
       action: { id: "log.message", params: { message: "Planning Center disconnected" } },
@@ -65,5 +75,32 @@ export async function seedAutomation(api, { groups } = {}) {
       }),
     );
   }
+
+  // Buttons on two screens name the commands, so the Commands tab has screens to put on its
+  // "Used on" lines. A pair's Buttons store its base, `lobby_lights`.
+  const button = (id, cue, label, x, y) => ({
+    id,
+    x,
+    y,
+    w: 0.3,
+    h: 0.14,
+    z: 50,
+    config: { type: "cue-button", cue, label },
+  });
+  const onScreen = async (viewId, buttons) => {
+    if (!viewId) return;
+    const state = await api.get("/api/state");
+    const view = state.views.find((v) => v.id === viewId);
+    if (!view?.layout) return;
+    await api.patch(`/api/views/${viewId}`, {
+      layout: { ...view.layout, objects: [...view.layout.objects, ...buttons] },
+      layoutRev: view.layoutRev ?? 0,
+    });
+  };
+  await onScreen(consoleId, [
+    button("lobby-lights-button", "lobby_lights", "Lobby lights", 0.64, 0.04),
+    button("walk-in-button", "walk_in_look", "Walk-in look", 0.64, 0.2),
+  ]);
+  await onScreen(panelId, [button("panel-walk-in-button", "walk_in_look", "Walk-in", 0.64, 0.04)]);
   return { rules: created, groups };
 }

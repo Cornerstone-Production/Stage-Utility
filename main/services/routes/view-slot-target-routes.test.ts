@@ -431,7 +431,7 @@ describe("a view or object id that does not exist", () => {
       body: { slots: [slot("s1")] },
     });
     assert.equal(r.status, 404);
-    assert.match(String((r.json as { error?: string }).error), /no inline mic-slots object/);
+    assert.match(String((r.json as { error?: string }).error), /no mic-slots object/);
   });
 });
 

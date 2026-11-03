@@ -8,7 +8,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-invoke-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { invokeAction, invocableActions } = await import("./action-invoke.js");
+const { invokeAction } = await import("./action-invoke.js");
 const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 
 // A control on a console invokes an ActionDef that already exists. The thing
@@ -84,7 +84,7 @@ describe("invokeAction — a refusal leaves a line on /log", () => {
     };
   }
 
-  it("logs an unknown id, generically — not a baptism action, on purpose: this must cover every action-button, not one", async () => {
+  it("logs an unknown id, generically — not a baptism action, on purpose: this must cover every action, not one", async () => {
     const { lines, restore } = captureActionWarnings();
     try {
       await invokeAction("nope.not.an.action");
@@ -154,21 +154,6 @@ describe("invokeAction — a refusal leaves a line on /log", () => {
     }
     assert.equal(lines.length, 1, "one press must still produce exactly one log line, not two");
     assert.doesNotMatch(lines[0]!, /\n/, "a raw newline would let the rest of the string masquerade as its own log line");
-  });
-});
-
-describe("invocableActions", () => {
-  it("offers the registered actions, sorted for a picker", async () => {
-    const list = invocableActions();
-    assert.ok(list.length >= 5, `expected the real registry, got ${list.length}`);
-    const labels = list.map((a) => a.label);
-    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)));
-  });
-
-  it("includes advancing PCO Live", async () => {
-    // The design doc's point: advancing the plan is an ordinary control, not a
-    // restricted one. Capability gating is what keeps it off a wall display.
-    assert.ok(invocableActions().some((a) => a.id === "pco.live.advance"));
   });
 });
 

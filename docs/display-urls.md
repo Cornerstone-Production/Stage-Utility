@@ -7,11 +7,11 @@ must not collide with. What those operator pages do is
 ## Permanent addresses
 
 A display is reached at `/<id>` — `/display-1`, `/display-2`. That id is assigned
-once and never changes. Slot configuration is keyed by it, and Raspberry Pis,
-bookmarks and printed QR codes point at it, so it stays stable.
+once and never changes. Raspberry Pis, bookmarks and printed QR codes point at it,
+so it stays stable.
 
 Nor is an id ever handed out twice: deleting a display retires its id for good, so
-a new one created afterwards cannot inherit the old one's slots or answer a
+a new one created afterwards cannot inherit the old one's settings or answer a
 bookmark meant for it. View ids work the same way.
 
 The root address also answers the legacy `/?display=<id>` query form. It still
@@ -38,7 +38,7 @@ outside `a-z`, `0-9` and `-`.
 
 Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
 operator page below — `history`, `baptism`, `patch`, `servicecue`, `scriptview`, `automation`,
-`plan`, `screens`, `video-feeds`, `consoles`, `views`, `displays` — plus the
+`plan`, `screens`, `mic-slots`, `video-feeds`, `consoles`, `views`, `displays` — plus the
 `preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
 History page rather than the display.
@@ -98,6 +98,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | --- | --- |
 | `/` | Home |
 | `/screens` | Screens and the views they show |
+| `/mic-slots` | Mic slots: every [slot board](slots.md#the-mic-slots-page) and its inspector; `?board=<id>` opens it on that board |
 | `/video-feeds` | Video feeds: every feed, and the editor for each |
 | `/servicecue/manage` | Rundown launcher |
 | `/patch` | This week's stage patch, for volunteers |

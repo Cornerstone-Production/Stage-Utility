@@ -25,7 +25,18 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (non-empty string) required");
         return;
       }
-      // Optional displayId — defaults to primary display if omitted.
+      // `boardId` saves the layout a board shows now, recalled into that board
+      // by default. Otherwise the view's (or legacy display's) board — the
+      // primary display's when neither is given.
+      if (typeof body.boardId === "string" && body.boardId) {
+        try {
+          json(res, await stageController.savePresetFromBoard(body.boardId, (body.name as string).trim()));
+        } catch (err) {
+          if (!(err instanceof SlotsNotFoundError)) throw err;
+          error(res, err.message, err.status);
+        }
+        return;
+      }
       const displayIdForPreset =
         typeof body.viewId === "string" && body.viewId
           ? body.viewId
@@ -48,8 +59,18 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const presets = await stageController.importPreset((body.name as string).trim(), body.slots as never[]);
-      json(res, presets);
+      // `boardId` (optional) records which board the layout was saved from.
+      if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
+        error(res, "body.boardId must be a board id");
+        return;
+      }
+      try {
+        const presets = await stageController.importPreset((body.name as string).trim(), body.slots as never[], body.boardId as string | undefined);
+        json(res, presets);
+      } catch (err) {
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 
@@ -108,14 +129,28 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
       const id = presetPatchMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
       let presets = await stageController.listPresets();
-      if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
+      if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
+        error(res, "body.boardId must be a board id");
+        return;
+      }
+      // The overwrite BEFORE the rename: every refusal (an unknown board, no
+      // slots) is decided inside it ahead of its write, so a refused body writes
+      // nothing, a name beside it included. A rename cannot be refused.
+      //
       // `slots` (explicit) overwrites with those directly (inline mic-slots objects);
       // otherwise overwrite from the given view/display's current slots.
-      if (Array.isArray(body.slots)) {
-        presets = await stageController.overwritePreset(id, "", body.slots as Slot[]);
-      } else if (typeof body.overwriteFromDisplayId === "string") {
-        presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
+      try {
+        if (Array.isArray(body.slots)) {
+          presets = await stageController.overwritePreset(id, "", body.slots as Slot[], body.boardId as string | undefined);
+        } else if (typeof body.overwriteFromDisplayId === "string") {
+          presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
+        }
+      } catch (err) {
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+        return;
       }
+      if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
       json(res, presets);
       return;
     }

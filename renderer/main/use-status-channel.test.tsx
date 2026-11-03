@@ -70,16 +70,38 @@ function deferred<T>() {
 
 /** Render the hook and expose what it currently reports. */
 function mount(read: () => Promise<Dto | null>, channel: string) {
-  const seen: { value: Dto | null; known: boolean } = { value: null, known: false };
+  const seen: { value: Dto | null; known: boolean; failed: boolean } = { value: null, known: false, failed: false };
   function Probe(): React.ReactElement {
-    const { value: v, known } = useStatusChannel<Dto>(read, channel);
+    const { value: v, known, failed } = useStatusChannel<Dto>(read, channel);
     seen.value = v;
     seen.known = known;
+    seen.failed = failed;
     return React.createElement("output", null, v ? String(v.recording) : "none");
   }
   render(React.createElement(Probe));
   return seen;
 }
+
+describe("useStatusChannel failed", () => {
+  test("a failed read settles known but reports failed; a later push clears it", async () => {
+    // known=true on a failed read is deliberate (the window settled), so a caller
+    // that must not claim "none" from an empty value reads `failed` as well.
+    const seen = mount(() => Promise.reject(new Error("timeout")), "obs:status");
+    await settle();
+    assert.equal(seen.known, true);
+    assert.equal(seen.failed, true, "a failed read must be reported, not looked like an empty answer");
+
+    await act(async () => FakeEventSource.last!.push("obs:status", { connected: true, recording: false, rev: 1 }));
+    await settle();
+    assert.equal(seen.failed, false, "a live push is an answer");
+  });
+
+  test("a read that succeeds is not failed", async () => {
+    const seen = mount(async () => ({ connected: true, recording: false, rev: 1 }), "obs:status");
+    await settle();
+    assert.equal(seen.failed, false);
+  });
+});
 
 describe("useStatusChannel publish ordering", () => {
   test("a push that lands before the read resolves is not overwritten by it", async () => {

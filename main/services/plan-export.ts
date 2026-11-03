@@ -14,8 +14,8 @@
 // devices, endpoints and the default patch are the building's, and a variant is
 // an overlay of overrides on top of whatever the destination's own patch says.
 
-import { collectBundleParts, pickSlots, bundleEnvelope } from "./view-export.js";
-import { walkLayoutObjects } from "./view-refs.js";
+import { collectBundleParts, pickBoards, pickSlots, bundleEnvelope } from "./view-export.js";
+import { forEachSlotsGrid, gridBoardId, viewBoardId } from "./slot-boards.js";
 import { viewsStore } from "./views-store.js";
 import { slotsStore } from "./slots-store.js";
 import { patchStore } from "./patch-store.js";
@@ -76,30 +76,26 @@ async function buildPlan(
   const all = await viewsStore.load();
   const defaults = await slotsStore.allDefaults();
 
-  // A key is a view id or a layout OBJECT id, and only the object case needs the
-  // layouts walked. One walk over every view builds the object -> view map; the
-  // alternative was a walk per key.
-  const ownerOfObject = new Map<string, string>();
-  for (const v of all) {
-    if (!v.layout) continue;
-    walkLayoutObjects(v.layout.objects, (o) => ownerOfObject.set(o.id, v.id));
-  }
+  // The boards with a layout for this type. One that exists but is empty still
+  // counts: an operator who cleared a board meant to clear it, and the screens
+  // showing it are still part of this type's setup.
+  const typeBoards = new Set(
+    Object.entries(defaults)
+      .filter(([, byType]) => Object.hasOwn(byType, opts.serviceTypeId))
+      .map(([key]) => key),
+  );
 
-  // A board that exists but is empty still counts: an operator who cleared a
-  // board meant to clear it, and the view it lives on is still part of this
-  // type's setup.
-  const boardKeys = Object.entries(defaults)
-    .filter(([, byType]) => Object.hasOwn(byType, opts.serviceTypeId))
-    .map(([key]) => key);
-
-  const byId = new Set(all.map((v) => v.id));
+  // The roots are the views that SHOW one of those boards, in view order: a
+  // slots screen pointing at it, or a custom view with a slots widget that does.
+  // A board nothing shows is not part of anything the destination can draw, so
+  // it is not a reason to export a view.
   const roots: string[] = [];
-  for (const key of boardKeys) {
-    const viewId = byId.has(key) ? key : ownerOfObject.get(key);
-    // A key whose view is gone is stale slots data, not a root. Skipped rather
-    // than fatal: it would refuse an export over rows nothing renders.
-    if (viewId && !roots.includes(viewId)) roots.push(viewId);
+  for (const v of all) {
+    if (v.kind === "slots" && typeBoards.has(viewBoardId(v) ?? "")) roots.push(v.id);
   }
+  forEachSlotsGrid(all, (oid, config, v) => {
+    if (typeBoards.has(gridBoardId(config, oid) ?? "") && !roots.includes(v.id)) roots.push(v.id);
+  });
 
   if (roots.length === 0) {
     throw new Error(`plan export — nothing to export for ${type.name}: no view has a slot board for it`);
@@ -107,6 +103,7 @@ async function buildPlan(
 
   const parts = await collectBundleParts(all, roots);
   const slots = pickSlots(defaults, parts, opts.slots === "type" ? opts.serviceTypeId : null);
+  const boardMeta = pickBoards(await slotsStore.listBoards(), parts);
 
   let boards = 0;
   let rows = 0;
@@ -138,6 +135,7 @@ async function buildPlan(
     views: parts.views,
     sideData: {
       slots,
+      boards: boardMeta,
       notes: parts.notes,
       serviceCueLayouts: parts.serviceCueLayouts,
       ...(patchVariants.length ? { patchVariants } : {}),

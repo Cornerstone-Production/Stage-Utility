@@ -19,6 +19,14 @@
 // such assertion and was killed with no line number. Every assertion here is on
 // a string, a number or a boolean.
 //
+// PICK BY PAGE is the dialog's first view, beside the All buttons list, over the SAME selection:
+//
+//  - clicking half of an ON/OFF pair ticks both keys, because it imports as one switch;
+//  - what is ticked in the grid is what the list shows ticked, and the other way round, and
+//    switching view keeps it;
+//  - an imported button is marked and cannot be ticked, and a key that is not offered is dim;
+//  - the Picked list under the grid is the list's own rows, and Import sends what was ticked.
+//
 // NOT unit-tested here, and driven in a browser against the real server instead:
 // the sticky section headings, that the list scrolls at all, and the `switch` /
 // `script` tags reading as chips rather than as stray words. jsdom loads no
@@ -84,6 +92,33 @@ const PAIRS = [
 ];
 
 let SINGLES: StubButton[] = [];
+
+/** The pages the grid draws: page 1 holds the pair and two singles, page 3 one single. */
+const PAGE_LIST = [
+  { page: 1, name: "Room A: Screens", labelled: 5 },
+  { page: 3, name: "Room A: Cameras", labelled: 1 },
+];
+const pkey = (row: number, col: number, label: string) => ({
+  row, col, kind: "button", label, text: label, size: null, halign: null, valign: null, vars: [], bg: null, fg: null, icon: null, pickable: true,
+});
+const pageView = (page: number) => ({
+  ok: true,
+  page,
+  name: PAGE_LIST.find((p) => p.page === page)?.name ?? "",
+  cols: 8,
+  rows: 4,
+  keys:
+    page === 1
+      ? [
+          pkey(0, 1, "Projectors ON"),
+          pkey(0, 2, "Projectors OFF"),
+          pkey(2, 3, "Take Screens"),
+          pkey(2, 1, "House Lights ON"),
+          // Pressable in Companion, but not something this import offers.
+          pkey(1, 1, "Not offered"),
+        ]
+      : [pkey(0, 0, "Cam 1")],
+});
 /** What Companion has, for the per-pair State select. */
 let CUSTOM_VARIABLES: string[] = [];
 let ok = true;
@@ -106,6 +141,10 @@ let requests: { url: string; method: string; body: string | null }[] = [];
     body = ok
       ? { ok: true, pairs: PAIRS, buttons: SINGLES, customVariables: CUSTOM_VARIABLES }
       : { ok: false, reason: "EHOSTUNREACH", pairs: [], buttons: [] };
+  } else if (url.includes("/api/companion/buttons")) {
+    body = { ok: true, buttons: [], pages: PAGE_LIST };
+  } else if (url.includes("/api/companion/pages/")) {
+    body = pageView(Number(/pages\/(\d+)/.exec(url)![1]));
   } else if (url.includes("import-pairs")) {
     body = { created: ["x"], skipped: [] };
   }
@@ -126,11 +165,21 @@ const settle = async () => {
   }
 };
 
+/** Switch the dialog to a view by the name on its segmented control. */
+async function showView(name: "Pick by page" | "All buttons") {
+  const seg = [...document.querySelectorAll('[aria-label="Import view"] button')].find((b) => b.textContent === name);
+  assert.ok(seg, `no "${name}" view`);
+  await act(async () => {
+    fireEvent.click(seg as HTMLElement);
+  });
+  await settle();
+}
+
 let client: InstanceType<typeof QueryClient> | null = null;
 
-async function mount() {
+async function mount(view: "page" | "list" = "list") {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  const view = render(
+  const rendered = render(
     React.createElement(
       QueryClientProvider,
       { client },
@@ -142,7 +191,10 @@ async function mount() {
     ),
   );
   await settle();
-  return view;
+  // The dialog opens on Pick by page. Most of what is tested here is the list, so it is the default.
+  // (An unreadable Companion shows the reason in its place, with no views to choose between.)
+  if (view === "list" && document.querySelector('[aria-label="Import view"]')) await showView("All buttons");
+  return rendered;
 }
 
 beforeEach(() => {
@@ -194,6 +246,42 @@ const footer = (): string =>
   [...document.querySelectorAll("button")]
     .map((b) => b.textContent ?? "")
     .find((t) => t.startsWith("Import")) ?? "";
+
+describe("re-opening the dialog", () => {
+  /** A parent that owns `open`, as the real one does: closing and re-opening is its doing. */
+  function Parent() {
+    const [open, setOpen] = React.useState(true);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement("button", { "data-reopen": "", onClick: () => setOpen(true) }, "reopen"),
+      React.createElement(ImportPairsDialog, { open, onOpenChange: setOpen, onImported: () => {} }),
+    );
+  }
+
+  test("after an import, the next opening starts from the suggestion, not the pairs just sent", async () => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(Parent)));
+    await settle();
+    await showView("All buttons");
+    await act(async () => {
+      screen.getByLabelText("Cam 1 · Room A: Cameras").click();
+    });
+    assert.equal(footer(), "Import 1 pair and 1 button");
+    await act(async () => {
+      [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").startsWith("Import"))!.click();
+    });
+    await settle();
+    assert.equal(document.querySelector('[role="dialog"]') === null, true, "the import left the dialog open");
+    await act(async () => {
+      (document.querySelector("[data-reopen]") as HTMLElement).click();
+    });
+    await settle();
+    assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
+    // Reset: back on Pick by page, and the one-button choice is gone.
+    assert.equal(footer(), "Import 1 pair");
+  });
+});
 
 describe("importFooterLabel", () => {
   test("says what will happen, and omits a side that is zero", () => {
@@ -1003,5 +1091,124 @@ describe("a button's own inferred state source", () => {
       body.buttons.map((b) => `${b.slug}=${b.stateVariable}/${b.stateOnValue}/${b.stateOffValue}`),
       ["booth_light_on=Booth-Overhead-Light:power_state/On/Off"],
     );
+  });
+});
+
+describe("Pick by page", () => {
+  const keyAt = (where: string) => document.querySelector<HTMLElement>(`[data-companion-key="${where}"]`);
+  const tickedKeys = () =>
+    [...document.querySelectorAll("[data-companion-key]")]
+      .filter((el) => el.querySelector("[data-ticked]") !== null)
+      .map((el) => el.getAttribute("data-companion-key"));
+  const click = async (el: Element | null | undefined) => {
+    assert.ok(el, "nothing to click");
+    await act(async () => {
+      fireEvent.click(el as HTMLElement);
+    });
+    await settle();
+  };
+  const pressed = (name: string) =>
+    [...document.querySelectorAll('[aria-label="Import view"] button')].find((b) => b.textContent === name)?.getAttribute("aria-pressed");
+  const pickedCount = () => document.querySelector("[data-picked-count]")?.textContent;
+  const importNow = async () => {
+    await click([...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").startsWith("Import")));
+    return JSON.parse(requests.find((r) => r.url.includes("import-pairs"))!.body ?? "{}") as {
+      pairs: { slug: string }[];
+      buttons: { slug: string }[];
+    };
+  };
+
+  test("opens on Pick by page, beside All buttons, and draws the first page", async () => {
+    await mount("page");
+    assert.deepEqual([pressed("Pick by page"), pressed("All buttons")], ["true", "false"]);
+    assert.ok(document.querySelector('[data-page-grid="1"]'), "the first page was not drawn");
+    assert.equal(document.querySelectorAll("[data-cue-kind]").length > 0 && document.querySelector('[aria-label="Search buttons"]') !== null, false, "the list is showing too");
+  });
+
+  test("a key that is half of a pair ticks and unticks the whole pair", async () => {
+    await mount("page");
+    // The suggested pair starts ticked, so the first click unticks it, from either half.
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2"]);
+    await click(keyAt("p1 r0 c2"));
+    assert.deepEqual(tickedKeys(), [], "unticking OFF left ON ticked");
+    assert.equal(footer(), "Import");
+    await click(keyAt("p1 r0 c1"));
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2"], "ticking ON did not tick OFF");
+    assert.equal(footer(), "Import 1 pair");
+  });
+
+  test("a single button ticks on its own and is a button in the footer's count", async () => {
+    await mount("page");
+    await click(keyAt("p1 r2 c3"));
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2", "p1 r2 c3"]);
+    assert.equal(footer(), "Import 1 pair and 1 button");
+  });
+
+  test("ticks survive switching view, and Select all in the list shows in the grid", async () => {
+    await mount("page");
+    await click(keyAt("p1 r2 c3"));
+    await showView("All buttons");
+    const state = Object.fromEntries(boxes().map((b) => [b.name, b.checked]));
+    assert.equal(state["Take Screens · Room A: Screens"], "true", "a tick in the grid is not ticked in the list");
+    assert.equal(state["Cam 1 · Room A: Cameras"], "false");
+    await click(screen.getByLabelText("Select all 3 shown buttons"));
+    await showView("Pick by page");
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2", "p1 r2 c1", "p1 r2 c3"], "Select all in the list is not ticked in the grid");
+    assert.equal(footer(), "Import 1 pair and 3 buttons");
+  });
+
+  test("an imported button is marked and cannot be ticked, and a key that is not offered is dim", async () => {
+    SINGLES = [button({ row: 2, col: 3, label: "Take Screens", slug: "take_screens", exists: true })];
+    await mount("page");
+    const imported = keyAt("p1 r2 c3")!;
+    assert.equal(imported.getAttribute("data-imported"), "");
+    assert.equal(imported.tagName === "BUTTON", false, "an imported key is a control");
+    await click(imported);
+    assert.equal(footer(), "Import 1 pair", "clicking an imported key changed the selection");
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2"]);
+    const dim = keyAt("p1 r1 c1")!;
+    assert.equal(dim.tagName === "BUTTON", false, "a key that is not offered is a control");
+    assert.match(dim.getAttribute("class") ?? "", /opacity-50/);
+  });
+
+  test("Picked lists what is ticked, with the list's own State select", async () => {
+    CUSTOM_VARIABLES = ["projectors_state"];
+    await mount("page");
+    assert.equal(pickedCount(), "1");
+    assert.ok(screen.queryByLabelText("State variable for Projectors · Room A: Screens"), "the pair has no State select under Picked");
+    await click(keyAt("p1 r2 c3"));
+    assert.equal(pickedCount(), "2");
+    assert.ok(screen.queryByRole("checkbox", { name: "Take Screens · Room A: Screens" }));
+    // Unticking from Picked unticks the key.
+    await click(screen.getByRole("checkbox", { name: "Take Screens · Room A: Screens" }));
+    assert.equal(pickedCount(), "1");
+    assert.deepEqual(tickedKeys(), ["p1 r0 c1", "p1 r0 c2"]);
+  });
+
+  test("a State chosen under Picked is the one imported", async () => {
+    CUSTOM_VARIABLES = ["projectors_state"];
+    await mount("page");
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="State variable for Projectors · Room A: Screens"]')!;
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "projectors_state" } });
+    });
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => `${p.slug}=${(p as { stateVariable?: string }).stateVariable}`),
+      ["projectors=projectors_state"],
+    );
+  });
+
+  test("Import sends what was ticked in the grid, across pages", async () => {
+    await mount("page");
+    await click(keyAt("p1 r2 c3"));
+    await click(document.querySelector('[aria-label="Next page"]'));
+    assert.ok(document.querySelector('[data-page-grid="3"]'), "the next page was not drawn");
+    await click(keyAt("p3 r0 c0"));
+    assert.equal(pickedCount(), "3");
+    assert.equal(footer(), "Import 1 pair and 2 buttons");
+    const body = await importNow();
+    assert.deepEqual(body.pairs.map((p) => p.slug), ["projectors"]);
+    assert.deepEqual(body.buttons.map((b) => b.slug).sort(), ["cam_1", "take_screens"]);
   });
 });

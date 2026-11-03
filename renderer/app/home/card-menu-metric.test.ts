@@ -32,6 +32,8 @@ function splMetricMenu(
     scoresFavourites: [],
     spl,
     splSummary: undefined,
+    choosePress: () => {},
+    cues: null,
     save: (update) => onPick((update([card])[0].config as { metricKey: string }).metricKey),
     close: () => {},
   });

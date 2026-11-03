@@ -90,6 +90,9 @@ declare global {
   type ServiceTimelineItem = Stage.ServiceTimelineItem;
   type ServiceTypeDTO = Stage.ServiceTypeDTO;
   type Slot = Stage.Slot;
+  type SlotBoardDTO = Stage.SlotBoardDTO;
+  type SlotBoardShownOn = Stage.SlotBoardShownOn;
+  type BoardCheckDTO = Stage.BoardCheckDTO;
   type SlotDevice = Stage.SlotDevice;
   type SlotLink = Stage.SlotLink;
   type SlotPositionMatch = Stage.SlotPositionMatch;

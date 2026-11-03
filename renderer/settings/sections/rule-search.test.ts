@@ -82,6 +82,13 @@ describe("ruleMatchesSearch", () => {
     assert.equal(ruleMatchesSearch(rule, "press a companion", undefined, "Press a Companion button"), true);
   });
 
+  test("matches the screens a command is used on, and only when they are passed in", () => {
+    const rule = cue();
+    assert.equal(ruleMatchesSearch(rule, "booth console", undefined, undefined, ["Booth console"]), true);
+    assert.equal(ruleMatchesSearch(rule, "booth console", undefined, undefined), false);
+    assert.equal(ruleMatchesSearch(rule, "booth console", undefined, undefined, ["FOH iPad"]), false);
+  });
+
   test("an empty or blank query matches everything", () => {
     const rule = cue();
     assert.equal(ruleMatchesSearch(rule, "", undefined, undefined), true);

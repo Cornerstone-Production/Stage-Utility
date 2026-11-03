@@ -48,7 +48,7 @@ function stageWall(micBoardViewId, rundownViewId) {
     obj({ type: "text", text: "Main Room · Stage" }, [0.02, 0.03, 0.3, 0.08], { style: title }),
     obj({ type: "timer", source: "service", hideWhenIdle: false, caption: "Time left" }, [0.34, 0.015, 0.3, 0.115], { style: { ...CARD, ...big, textAlign: "center", fontSize: 0.07 } }),
     obj({ type: "clock", showSeconds: false, format: "12h", showMeridiem: true }, [0.78, 0.015, 0.2, 0.115], { style: { ...CARD, ...big, textAlign: "center" } }),
-    obj({ type: "slots-grid", source: "view", sourceViewId: micBoardViewId }, [0.02, 0.15, 0.62, 0.62], {}),
+    obj({ type: "slots-grid", boardId: micBoardViewId }, [0.02, 0.15, 0.62, 0.62], {}),
     obj({ type: "messages" }, [0.66, 0.15, 0.32, 0.3], { id: "wall-messages", style: { ...CARD, fontSize: 0.026 } }),
     obj(
       { type: "view-embed", viewId: rundownViewId, showHeader: false, autoScroll: true },
@@ -61,13 +61,20 @@ function stageWall(micBoardViewId, rundownViewId) {
   ]);
 }
 
+/** The two Buttons on the producer console and what each one's own command does. A Button
+ *  stores only its command's name; the rule that does the work belongs to it. */
+const CONSOLE_BUTTONS = [
+  { id: "docs-console-next-item", cue: "btn_next_item", label: "Next item", action: "pco.live.advance" },
+  { id: "docs-console-refresh", cue: "btn_refresh_screens", label: "Refresh screens", action: "display.refresh" },
+];
+
 function producerConsole(wallOutputId) {
   const button = { ...CARD, fontSize: 0.03, fontWeight: 600, textAlign: "center", vAlign: "middle" };
   return layout(
     [
       obj({ type: "message-composer" }, [0.02, 0.03, 0.6, 0.94], { id: "console-composer", style: { ...CARD, fontSize: 0.022 } }),
-      obj({ type: "action-button", actionId: "pco.live.advance", label: "Next item" }, [0.64, 0.03, 0.17, 0.13], { style: { ...button, background: "#1d4ed8", color: "#ffffff" } }),
-      obj({ type: "action-button", actionId: "display.refresh", label: "Refresh screens" }, [0.83, 0.03, 0.15, 0.13], { style: button }),
+      obj({ type: "cue-button", cue: CONSOLE_BUTTONS[0].cue, label: CONSOLE_BUTTONS[0].label, showDevice: false }, [0.64, 0.03, 0.17, 0.13], { id: CONSOLE_BUTTONS[0].id, style: { ...button, background: "#1d4ed8", color: "#ffffff" } }),
+      obj({ type: "cue-button", cue: CONSOLE_BUTTONS[1].cue, label: CONSOLE_BUTTONS[1].label, showDevice: false }, [0.83, 0.03, 0.15, 0.13], { id: CONSOLE_BUTTONS[1].id, style: button }),
       obj({ type: "screen-embed", outputId: wallOutputId, showLabel: true, showStatus: true }, [0.64, 0.19, 0.34, 0.78], { style: { ...CARD, fontSize: 0.02 } }),
     ],
     { background: "#101114", fit: "fill" },
@@ -119,13 +126,15 @@ async function seedServiceCue(api) {
 export async function seedLayouts(api, { wirelessIds }) {
   // The first display ships with the app: make it the mic board.
   const { views, outputs } = await api.get("/api/state");
-  const micBoardId = views.find((v) => v.kind === "slots").id;
+  const micView = views.find((v) => v.kind === "slots");
+  // The board a slots screen shows; the screen's own id until it is pointed elsewhere.
+  const micBoardId = micView.boardId ?? micView.id;
   const firstOutputId = outputs[0].id;
-  await api.patch(`/api/views/${micBoardId}`, { name: "Mic Board" });
+  await api.patch(`/api/views/${micView.id}`, { name: "Mic Board" });
+  await api.patch(`/api/boards/${micBoardId}`, { name: "Mic Board" });
   await api.patch(`/api/outputs/${firstOutputId}`, { name: "Stage Monitors" });
-  await api.post(`/api/views/${micBoardId}/slots`, {
-    slots: micBoard(wirelessIds),
-    target: { kind: "default", serviceTypeId: SERVICE_TYPES[0].id },
+  await api.post("/api/boards/slots", {
+    boards: [{ boardId: micBoardId, slots: micBoard(wirelessIds), target: { kind: "default", serviceTypeId: SERVICE_TYPES[0].id } }],
   });
 
   const rundownId = await createView(api, { name: "Audio Rundown", kind: "script" });
@@ -150,6 +159,19 @@ export async function seedLayouts(api, { wirelessIds }) {
   const greenPanel = await api.post("/api/outputs", { name: "Green Room Panel", viewId: panelId });
   // The producer console shows the wall as it is, which needs the screen to exist.
   await api.patch(`/api/views/${consoleId}`, { layout: producerConsole(wall.outputId) });
+  // The Buttons' own commands: Called by name, hidden from Home Assistant, belonging to their Button.
+  for (const b of CONSOLE_BUTTONS) {
+    await api.post("/api/automation/rules", {
+      name: b.label,
+      enabled: true,
+      trigger: { id: "call.by-name", params: { name: b.cue, says: b.label, homeAssistant: "hidden" } },
+      conditions: [],
+      action: { id: b.action, params: {} },
+      cooldownSec: 0,
+      oncePerService: false,
+      ownedBy: { viewId: consoleId, objectId: b.id },
+    });
+  }
 
   return {
     micBoardId,

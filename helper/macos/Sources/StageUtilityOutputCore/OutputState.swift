@@ -21,15 +21,21 @@ public struct OutputRecord: Codable, Equatable {
   /// next start, rather than in the default and again in this once the screen has
   /// been read.
   public var videoMode: String?
+  /// The id of a change made to this output's switch in the window that the server
+  /// has not taken yet. Kept in the file, so a helper quit before the next post
+  /// still sends it at the next start, and is not told its own change back.
+  public var pendingChange: String?
 
   public init(
-    enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil, videoMode: String? = nil
+    enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil, videoMode: String? = nil,
+    pendingChange: String? = nil
   ) {
     self.enabled = enabled
     self.token = token
     self.boundTo = boundTo
     self.kioskIdentity = kioskIdentity
     self.videoMode = videoMode
+    self.pendingChange = pendingChange
   }
 
   /// The id this output announces itself and enrols under.
@@ -71,6 +77,9 @@ public enum KioskMigration {
 public final class OutputStateStore {
   private struct File: Codable {
     var outputs: [String: OutputRecord]
+    /// Written true by every helper that knows the switch changes the server takes
+    /// (`pendingChange`). A file without it was written by one that did not.
+    var switchAware: Bool?
   }
 
   public let file: URL
@@ -96,6 +105,19 @@ public final class OutputStateStore {
     load()
   }
 
+  /// An output switched off on a helper that predates `pendingChange` is off, bound,
+  /// and holds no change to tell the server: the server it is now bound to has no
+  /// stored switch, takes the output as on, and the first post would be answered
+  /// "on". Give each such output a change id, once, so that post says "off". Held in
+  /// memory until the next save writes `switchAware`, which is what stops it being
+  /// done again: acknowledging the change is that save.
+  private func announceSwitchesMadeBeforeTheServerKnew() {
+    for (key, var record) in records where !record.enabled && record.boundTo != nil && record.pendingChange == nil {
+      record.pendingChange = OutputSwitch.newChangeId()
+      records[key] = record
+    }
+  }
+
   /// 24 random bytes as hex, the length and alphabet of the shell agent's.
   public static func randomToken() -> String {
     var generator = SystemRandomNumberGenerator()
@@ -116,7 +138,9 @@ public final class OutputStateStore {
       readProblem = "outputs.json could not be read (\(why))"
     case .data(let data):
       do {
-        records = try JSONDecoder().decode(File.self, from: data).outputs
+        let file = try JSONDecoder().decode(File.self, from: data)
+        records = file.outputs
+        if file.switchAware != true { announceSwitchesMadeBeforeTheServerKnew() }
       } catch {
         readProblem = "outputs.json is not what the helper wrote (\(error.localizedDescription))"
       }
@@ -163,6 +187,24 @@ public final class OutputStateStore {
     try update(key, \.enabled, to: enabled)
   }
 
+  /// A change made in the window: the value and the id the server will be sent it
+  /// under, saved together so one cannot outlive the other. Nothing is done for a
+  /// key with no record.
+  public func setEnabledLocally(_ enabled: Bool, changeId: String, key: String) throws {
+    guard var record = records[key] else { return }
+    record.enabled = enabled
+    record.pendingChange = changeId
+    records[key] = record
+    try save()
+  }
+
+  /// The server has taken the change with this id. A different id is left alone: a
+  /// newer change is still on its way.
+  public func acknowledgeChange(_ changeId: String, key: String) throws {
+    guard records[key]?.pendingChange == changeId else { return }
+    try update(key, \.pendingChange, to: nil)
+  }
+
   /// The format a card output's screen set, normalised; nil for the default.
   public func setVideoMode(_ mode: String?, key: String) throws {
     try update(key, \.videoMode, to: VideoModes.normalised(mode))
@@ -188,7 +230,11 @@ public final class OutputStateStore {
     switch change {
     case .keep: return
     case .bind(let server): try setBoundTo(server, key: key)
-    case .forget: try setBoundTo(nil, key: key)
+    case .forget:
+      try setBoundTo(nil, key: key)
+      // Nobody is waiting to be told about a change any more, and a later set-up
+      // elsewhere must not be sent the id of one made before it.
+      try update(key, \.pendingChange, to: nil)
     }
   }
 
@@ -208,7 +254,7 @@ public final class OutputStateStore {
     if let readProblem { throw Unreadable(why: readProblem) }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-    let data = try encoder.encode(File(outputs: records))
+    let data = try encoder.encode(File(outputs: records, switchAware: true))
     try PrivateFiles.makeDirectory(file.deletingLastPathComponent())
     try PrivateFiles.write(data, to: file)
   }

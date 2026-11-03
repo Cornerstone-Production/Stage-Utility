@@ -60,3 +60,90 @@ describe("drawIcon", () => {
     assert.ok(51 + 410 <= 512 * 0.9 + 1);
   });
 });
+
+describe("renderIconSizes ink", () => {
+  // The canvas itself is not here: a fake one records what each size is drawn
+  // with. What it settles is the decision this file owns: with Recolor on the
+  // art is filled with the ink that reads against the background, with it off
+  // it is not filled at all.
+  interface Fake {
+    fills: string[];
+    tinted: boolean;
+  }
+  const real = { document: globalThis.document, Image: globalThis.Image };
+
+  function install(): Fake[] {
+    const canvases: Fake[] = [];
+    class FakeImage {
+      naturalWidth = 512;
+      naturalHeight = 512;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    (globalThis as { Image: unknown }).Image = FakeImage;
+    (globalThis as { document: unknown }).document = {
+      createElement: () => {
+        const rec: Fake = { fills: [], tinted: false };
+        canvases.push(rec);
+        const ctx = {
+          imageSmoothingEnabled: false,
+          imageSmoothingQuality: "low",
+          globalCompositeOperation: "source-over",
+          set fillStyle(v: string) {
+            rec.fills.push(v);
+          },
+          fillRect: () => {
+            if (ctx.globalCompositeOperation === "source-in") rec.tinted = true;
+          },
+          drawImage: () => {},
+        };
+        return { width: 0, height: 0, getContext: () => ctx, toDataURL: () => "data:image/png;base64,AAAA" };
+      },
+    };
+    return canvases;
+  }
+
+  const restore = () => {
+    (globalThis as { document: unknown }).document = real.document;
+    (globalThis as { Image: unknown }).Image = real.Image;
+  };
+
+  test("Recolor on, white background: the art is tinted dark, and the background is filled white", async () => {
+    const canvases = install();
+    try {
+      const { renderIconSizes } = await import("./app-icon-render");
+      await renderIconSizes("art", "#ffffff", true);
+      const tinted = canvases.filter((c) => c.tinted);
+      assert.equal(tinted.length, 1, "the art is tinted once, then drawn at every size");
+      assert.deepEqual(tinted[0]!.fills, ["#161b22"]);
+      assert.equal(canvases.filter((c) => c.fills.includes("#ffffff")).length, 4, "every size is filled with the background");
+    } finally {
+      restore();
+    }
+  });
+
+  test("Recolor on, black background: the art is tinted light", async () => {
+    const canvases = install();
+    try {
+      const { renderIconSizes } = await import("./app-icon-render");
+      await renderIconSizes("art", "#000000", true);
+      assert.deepEqual(canvases.find((c) => c.tinted)!.fills, ["#ededf0"]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("Recolor off: nothing is tinted", async () => {
+    const canvases = install();
+    try {
+      const { renderIconSizes } = await import("./app-icon-render");
+      await renderIconSizes("art", "#ffffff", false);
+      assert.equal(canvases.filter((c) => c.tinted).length, 0);
+    } finally {
+      restore();
+    }
+  });
+});

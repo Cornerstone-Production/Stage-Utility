@@ -345,6 +345,9 @@ describe("?transport=poll", () => {
     // reportChannels fires only when a subscription changes, and none has.
     const off = onNotification("pco:live", () => {});
     fireReport(); // drain the report this subscribe armed
+    // Reports go one at a time, so let it settle (and any trailing one it was
+    // holding back go out) before counting.
+    await flush();
     const before = requests.filter((r) => r.startsWith("/api/events/subscribe")).length;
 
     serves({ seq: 300, resync: true, frames: [] });

@@ -62,6 +62,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * lines are scrubbed.
  */
 const REQUEST_FACING = [
+  // Converts Run an action Buttons on start, on a layout save and on
+  // POST /api/views/import; a Button's label and action arrive in that body.
+  "action-button-migration.ts",
   // Its refusal line names the actionId, which arrives verbatim in the body of
   // POST /api/action/invoke, and the detail can carry whatever a provider or an
   // action's own guard said back. It logged nothing at all until a refused
@@ -81,6 +84,7 @@ const REQUEST_FACING = [
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
   "builtin-cues.ts",
+  "button-ownership.ts",
   // Fed by POST /api/events/subscribe with any cid; its one line is a count.
   "channel-reports.ts",
   "checklist-ticks-store.ts",
@@ -109,6 +113,9 @@ const REQUEST_FACING = [
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
+  // Its snooze and unsnooze lines name the key, typed into POST /api/home/snoozes
+  // (and the DELETE path); scrubbed, and the key must also match a fixed shape.
+  "home-snoozes.ts",
   // Every line names a Host header: whatever name the sender chose, verbatim.
   "host-names.ts",
   "integration-manager.ts",
@@ -131,6 +138,9 @@ const REQUEST_FACING = [
   // Every line names a file it serves (an allowlisted name) and what the release
   // host or the disk said back, which is text from outside.
   "output-helper-download.ts",
+  // Names a tag value and a tag-group error typed into Planning Center and read
+  // back over HTTP, and a person id off a response body; scrubbed at the logger.
+  "pco-prep-tags.ts",
   "pco-service.ts",
   "person-directory.ts",
   // GET /photos?u= hands the caller's string to every one of its log lines: the
@@ -155,6 +165,8 @@ const REQUEST_FACING = [
   "routes/app-icon-routes.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
+  // Its save-all refusal names the board, whose id and name arrive in the body.
+  "routes/board-routes.ts",
   "routes/branding-routes.ts",
   "routes/calendar-routes.ts",
   // Its two lines carry a tag and a message posted by a BROWSER — the most
@@ -166,6 +178,9 @@ const REQUEST_FACING = [
   "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
+  // Logs nothing itself; the lines for a snooze are home-snoozes.ts's, above.
+  // Listed because every routes/ file is.
+  "routes/home-routes.ts",
   "routes/host-name-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
@@ -408,6 +423,9 @@ function requestFacingFiles(): string[] {
   // directly above the file it explains, so two branches adding different
   // files touch different lines and merge cleanly.
   const files = [
+    // Converts Run an action Buttons on start, on a layout save and on
+    // POST /api/views/import; a Button's label and action arrive in that body.
+    path.join(HERE, "action-button-migration.ts"),
     // Its refusal line names the actionId, which arrives verbatim in the body
     // of POST /api/action/invoke, and the detail can carry whatever a provider
     // or an action's own guard said back — both scrubbed at the logger. It
@@ -426,6 +444,9 @@ function requestFacingFiles(): string[] {
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
     path.join(HERE, "builtin-cues.ts"),
+    // The rule it says was kept and the view it names are typed into an HTTP body
+    // (a rule name, a view name), and the line is scrubbed at the logger.
+    path.join(HERE, "button-ownership.ts"),
     // Fed by POST /api/events/subscribe, which anyone on the LAN can call with
     // any cid. Its one line carries only a count, scrubbed like everything else.
     path.join(HERE, "channel-reports.ts"),
@@ -478,6 +499,8 @@ function requestFacingFiles(): string[] {
     // a `/log` entry. It is scrubbed at the logger.
     path.join(HERE, "history-milestones-store.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
+    // Its snooze lines name a key typed into POST /api/home/snoozes.
+    path.join(HERE, "home-snoozes.ts"),
     // Its lines name a request's Host header, which the sender writes freely: a
     // newline in one would forge a `/log` entry. Scrubbed at each line.
     path.join(HERE, "host-names.ts"),
@@ -506,6 +529,8 @@ function requestFacingFiles(): string[] {
     // Every line names a file it serves (an allowlisted name) and what the release
     // host or the disk said back, which is text from outside.
     path.join(HERE, "output-helper-download.ts"),
+    // Names a tag value, an error and a person id read from Planning Center.
+    path.join(HERE, "pco-prep-tags.ts"),
     path.join(HERE, "pco-service.ts"),
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.

@@ -21,6 +21,10 @@ export interface OutputHealthReport {
    *  output's only. Not part of the struggle rule: a long latency is a fact about
    *  the card and its mode, not a fault. */
   latencyMs?: number;
+  /** Whether the Mac holds this output on or off, as the helper last said. Absent
+   *  from a helper older than the switch. An output that is off sends no figures,
+   *  so the four above are then all 0. */
+  enabled?: boolean;
 }
 
 /** What Screens is shown for one output. */

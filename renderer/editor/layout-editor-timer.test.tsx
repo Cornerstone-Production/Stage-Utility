@@ -71,7 +71,7 @@ async function open(viewId: string, config: Record<string, unknown>, extra: Reco
       React.createElement(QueryClientProvider, { client },
         React.createElement(TooltipProvider, null,
           React.createElement(LayoutEditor as never, {
-            view, slotsViews: [], templates: [], startEditing: true,
+            view, templates: [], startEditing: true,
             onSave: async (l: LayoutDTO) => { saved.push(l); },
             onSaveTemplate: async () => {}, onUpdateTemplate: async () => {}, onDeleteTemplate: async () => {},
           })))),

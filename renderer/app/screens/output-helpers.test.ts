@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { cardOf, outputModeLine, outputStruggleSentences, refreshRate, struggleByScreen } from "./output-helpers.js";
+import { cardOf, outputModeLine, outputStruggleSentences, outputSwitchState, refreshRate, struggleByScreen } from "./output-helpers.js";
 import type { OutputHealth } from "@main/types/output-health";
 
 describe("the card in an output's name", () => {
@@ -96,5 +96,27 @@ describe("which screens have a struggling output", () => {
 
   it("is nothing for an output that has not reported", () => {
     assert.deepEqual([...struggleByScreen([sdi("sdi-1", "display-1")], [])], []);
+  });
+});
+
+describe("what the switch on an output says", () => {
+  it("on, and the Mac agrees or has not said", () => {
+    assert.deepEqual(outputSwitchState({}, undefined), { on: true, pending: false, label: "On" });
+    assert.deepEqual(outputSwitchState({}, { enabled: true }), { on: true, pending: false, label: "On" });
+    // A helper older than the switch says nothing: not pending, nothing is on its way.
+    assert.equal(outputSwitchState({}, {}).pending, false);
+  });
+
+  it("asked off while the Mac still holds it on is turning off", () => {
+    assert.deepEqual(outputSwitchState({ enabled: false }, { enabled: true }), { on: false, pending: true, label: "Turning off…" });
+  });
+
+  it("asked on while the Mac holds it off is turning on", () => {
+    assert.deepEqual(outputSwitchState({}, { enabled: false }), { on: true, pending: true, label: "Turning on…" });
+  });
+
+  it("off and confirmed is off on this Mac, and off with nobody to confirm says so", () => {
+    assert.equal(outputSwitchState({ enabled: false }, { enabled: false }).label, "Off on this Mac");
+    assert.equal(outputSwitchState({ enabled: false }, undefined).label, "Off. The Mac has not confirmed it.");
   });
 });

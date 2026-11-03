@@ -19,6 +19,8 @@ describe("summarizeChangelog", () => {
       summarizeChangelog([
         "Merge pull request #151 from Cornerstone-Production/fix/tooltips",
         "Merge branch 'beta' into main",
+        "Merge origin/beta into refactor/shared-inspector-rows",
+        "Merge main into beta",
       ]),
       [],
     );

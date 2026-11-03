@@ -152,6 +152,23 @@ export interface Rule {
    * refuse to run".
    */
   confirmRequired?: boolean;
+  /**
+   * Set when the rule was made from a Button and exists for it alone: the view the
+   * Button is on (`"home"` for Home) and the Button's object id.
+   *
+   * Only ever on a Called-by-name rule, because a Button is bound to a cue: any
+   * other trigger would read Not set on the Button. The rules routes refuse it.
+   * When the Button goes the rule is KEPT, never deleted (see button-ownership.ts),
+   * and the rules list says so with a computed `ownerMissing` that is not stored.
+   * Absent on a rule somebody wrote by hand, which is nearly all of them.
+   */
+  ownedBy?: OwnedBy;
+}
+
+/** The Button a rule belongs to. */
+export interface OwnedBy {
+  viewId: string;
+  objectId: string;
 }
 
 /**

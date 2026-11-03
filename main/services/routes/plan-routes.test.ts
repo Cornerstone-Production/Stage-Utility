@@ -68,7 +68,7 @@ describe("GET /api/plans/export/preview", () => {
     // The board is removed again afterwards: slots.json outlives a test, and a
     // stray st-2 board left here makes the "nothing to export for Youth" test
     // below pass a 200. beforeEach puts view-1's st-1 board back.
-    t.after(() => slotsStore.removeDisplay("view-1"));
+    t.after(() => slotsStore.deleteBoard("view-1"));
     await slotsStore.setDefault("view-1", "st-2", [row("c")] as never);
     const type = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1&slots=type");
     const all = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1&slots=all");

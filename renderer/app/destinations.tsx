@@ -18,6 +18,7 @@ import {
   DropletIcon,
   ListChecksIcon,
   MessageSquareIcon,
+  MicIcon,
   MonitorIcon,
   PaletteIcon,
   PlugIcon,
@@ -30,7 +31,6 @@ import { PatchView } from "../main/patch-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
-import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
@@ -38,6 +38,7 @@ import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
+import { MicSlotsPage } from "./mic-slots/mic-slots-page";
 import { ServiceCueSection } from "../settings/sections/servicecue-section";
 import {
   SERVICECUE_LANDING_PATH,
@@ -48,6 +49,8 @@ import {
 import {
   AdvancedRoute,
   AdvancedTabRoute,
+  AutomationRoute,
+  AutomationTabRoute,
   BrandingRoute,
   MessagesRoute,
   PlanRoute,
@@ -82,6 +85,15 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: ScreensRoute,
   },
   {
+    // Every mic slot board, edited together: the screens and widgets that show
+    // them are listed on each board, and a slots screen's Edit comes here.
+    path: "/mic-slots",
+    label: "Mic slots",
+    description: "The boards your screens show, who fills each slot and what mic it carries.",
+    icon: <MicIcon className="size-4" />,
+    Component: MicSlotsPage,
+  },
+  {
     path: "/video-feeds",
     label: "Video feeds",
     description: "Camera and program feeds for layouts and Home.",
@@ -112,7 +124,7 @@ export const DESTINATIONS: readonly Destination[] = [
     label: "Automation",
     description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
-    Component: AutomationSection,
+    Component: AutomationRoute,
   },
   {
     path: "/plan",
@@ -206,7 +218,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // "output" in its description is XLR, not a display.
   { label: "Content", paths: ["/servicecue/manage", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens", "/video-feeds"] },
+  { label: "Screens", paths: ["/screens", "/mic-slots", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
@@ -302,6 +314,8 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.
   { path: "/settings/advanced/$tab", Component: AdvancedTabRoute },
+  // One tab of Automation, nested and untitled for the same reason.
+  { path: "/automation/$tab", Component: AutomationTabRoute },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
   // A console, in the shell. Phase 3 gave a View a surface but gave a console

@@ -16,12 +16,12 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 
 | Image | Shows |
 |---|---|
-| `automation-rules.png` | Automation: the rules list with simulate mode, the Home Assistant group and everything else. |
+| `automation-rules.png` | Automation: the Commands tab, with Simulate and Disarm above the tabs and Used on chips on each command. |
 | `baptisms-sessions.png` | Baptisms: the saved sessions from past services, and their trends. |
 | `history-overview.png` | History: the Trends chart across three service types, the month calendar and the recorded services list. |
 | `history-service.png` | A recorded service: its rundown with each item's actual time against the plan. |
 | `history-trends.png` | The History Trends card on its own: attendance per service type over 16 weeks, with milestones. |
-| `home-dashboard.png` | Home during a service: the live item, screens online, wireless, the clock and recent services. |
+| `home-dashboard.png` | Home during a service: Needs attention with nothing wrong, the live item, screens online, wireless, the clock and recent services. |
 | `integrations-overview.png` | Settings → Integrations: connected integrations above, the ones not set up below. |
 | `integrations-wireless.png` | The Wireless Gear dialog: two receivers, each connected. |
 | `layout-editor.png` | The layout editor on a wall layout: canvas, layers, and the inspector for the selected object. |
@@ -34,7 +34,7 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 | `screens-overview.png` | Screens: a card per screen with a live preview and its message groups, the found-devices banner and the sidebar's count of screens not set up. |
 | `servicecue-picker.png` | The ServiceCue landing page: a service type and a column preset to open its rundown. |
 | `servicecue-rundown.png` | The ServiceCue page in the app for the Weekend plan with the Audio preset, the live item highlighted. |
-| `slots-editor.png` | The mic board editor: slots linked to Planning Center positions and bound to wireless channels. |
+| `slots-editor.png` | The Mic slots page: a board's preview, the inspector for the selected slot, and the plan switcher. |
 | `video-feeds.png` | Video feeds: pulled cameras and pushed encoders, with the editor for one feed. |
 | `wall-lobby.png` | A lobby screen built in the layout editor: clock and countdown. |
 | `wall-servicecue.png` | A ServiceCue rundown on a screen, with the live item highlighted and the Audio and Band note columns. |

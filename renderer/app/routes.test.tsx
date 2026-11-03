@@ -75,6 +75,17 @@ describe("operator destinations", () => {
     );
   });
 
+  test("Mic slots is a Screens destination the server routes, so a deep link to a board loads the app", () => {
+    // A slots screen's Edit goes to /mic-slots?board=<id>. A path the server does not
+    // claim serves the kiosk bundle on a reload or a pasted link, which only shows up
+    // off the rail.
+    assert.ok(DESTINATIONS.some((d) => d.path === "/mic-slots"), "no /mic-slots destination");
+    assert.ok(isOperatorPath("/mic-slots"));
+    assert.ok(isOperatorPath("/mic-slots?board=b-1"));
+    const screens = NAV_GROUPS.find((g) => g.label === "Screens");
+    assert.ok(screens?.paths.includes("/mic-slots"), "Mic slots is not in the Screens group");
+  });
+
   test("paths and labels are unique", () => {
     assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.path)).size, ALL_DESTINATIONS.length);
     assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.label)).size, ALL_DESTINATIONS.length);

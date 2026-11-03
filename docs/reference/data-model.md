@@ -268,16 +268,72 @@ along in every backup.
 A slot is one channel strip. It carries a channel label and a link deciding who it
 shows: a Planning Center position, a specific person, a static label, or empty.
 
+A slot filled by a person also carries `prep`, their capsule and own-in-ears
+facts from Planning Center [prep tags](../integrations/planning-center.md#prep-tags).
+The resolver sets it on each resolve; it is never stored in `slots.json`.
+
 A slot can bind to a wireless channel so the screen shows that pack's RF and
 battery beside the person, and slots can stack into a shared column — mirroring two
 people on a dual-bay charger.
 
-Slots are stored in two halves, keyed by the slots view's id or the inline
-slots-grid object's id. A **default** per service type is what that type comes
-back to. An **override** is a board saved against one Planning Center plan, used
-only while that plan is the current one and deleted 30 days after it. For a
-screen: the current plan's override if it has one, else the service type's
-default, else nothing.
+Slots live on named **boards**. A slots view points at one board (its
+`boardId`), and so does each slots-grid object on a custom layout
+(`config.boardId`). Any number of screens and widgets can point at the same
+board, so two screens over the same charger show one set of slots, not two
+copies. A board with nothing pointing at it is kept until it is deleted on
+purpose; deleting a view never deletes its board.
+
+A board's layouts come in two halves. A **default** per service type is what
+that type comes back to. An **override** is a layout saved against one Planning
+Center plan, used only while that plan is the current one and deleted 30 days
+after it. For a screen: its board's override for the current plan if it has
+one, else the board's default for the service type, else nothing — and nothing
+at all for a screen pointing at no board.
+
+Charger alignment has two halves as well. The board holds the charger column
+width (`columnWidthIn`, null when the board is not aligned); each screen keeps
+its own active display width (`slotsLayout.displayWidthIn` on a view,
+`displayWidthIn` on a slots-grid). A screen draws aligned when both are set. The
+server joins the two for every screen and widget into the state's
+`slotsLayoutByView` and `slotsLayoutByLayoutObject`.
+
+`slots.json` (version 4):
+
+```
+{ version: 4,
+  boards:    { <boardId>: { name, columnWidthIn, createdAt } },
+  defaults:  { <boardId>: { <serviceTypeId>: Slot[] } },
+  overrides: { <boardId>: { <planId>: { serviceTypeId, sortDate, slots } } } }
+```
+
+A board made by the app has an id of `b-<uuid>`. A file from before boards
+(version 3) was keyed by the slots view's id or the inline slots-grid object's
+id; the first start that reads one makes a board of each key under that same id,
+so no slot data moves:
+
+- each board is named after its view, or `<view name> · widget` for a grid;
+- each slots view and grid is pointed at it, and a grid that showed another
+  slots view's slots now shares that view's board; a grid that embedded a
+  deleted view, or a view of another kind, shows none, as it did before;
+- the column width moves from the view or grid onto its board;
+- boards made this way that are identical in every service type's default,
+  every override and their column width (slot ids aside) become one: a
+  screen's board survives over a widget's, then the lowest id;
+- a key with no view or widget to name it, and nothing showing it, is kept as
+  "Unused board N"; a dormant view's board keeps the view's name.
+
+A pointer at a board that does not exist (a deleted board, a restored backup) is
+set to none on start, with a `[slots-store]` line, rather than given a new empty
+board.
+
+The files are written in an order where a crash after any write loses nothing:
+`slots.json` first with every board and its column width, keeping the boards a
+merge will remove (listed under `pendingMerges`); then `views.json` with the
+pointers; then `slots.json` without the merged boards. The next start finishes
+whatever a crash left, and a merge recorded in `pendingMerges` is finished only
+if the two boards are still identical. A failed write is logged on a
+`[slots-store]` line and the server runs on what it read. The step runs on every
+start and does nothing once done.
 
 Details in [slots](../slots.md).
 
@@ -310,7 +366,8 @@ object box fitted to its aspect ratio.
 ## Presets and templates
 
 **Layout templates** are named custom layouts saved to a reusable library. **Slot
-presets** snapshot a slot arrangement by name. Both are global and can be recalled
+presets** (**Saved layouts** on the Mic slots page) snapshot one board's slots by
+name, and remember the board they came from. Both are global and can be recalled
 onto any view or service type.
 
 ## Stage messages
@@ -348,13 +405,16 @@ class means for backups.
 |---|---|---|
 | `attendance-history.json` | runtime | Attendance recordings, one file per service in a folder of the same name |
 | `automation-log.json` | runtime | The Activity log |
-| `automation-rules.json` | config | [Automation](../automation.md) rules and cues |
+| `automation-rules.json` | config | [Automation](../automation.md) rules and commands |
 | `automation-settings.json` | config | Simulate and disarm |
 | `baptism-triggers.json` | config | Which plan items start the baptism timer's phases, per plan |
 | `baptism.json` | runtime | The baptism timer's live state and its saved sessions |
 | `bar-config.json` | config | The [context bar](../features/context-bar.md)'s items and order |
 | `checklist-ticks.json` | runtime | Which checklist rows are ticked, per plan |
 | `history-milestones.json` | config | The dated marks on the Trends chart |
+| `home-snoozes.json` | runtime | What is snoozed on Home's [Needs attention](../features/operator-app.md#needs-attention); cleared when a service starts |
+| `host-names-seen.json` | runtime | Every host name the server has been reached by |
+| `host-names.json` | config | The host names Settings > Advanced > Host names accepts or has dismissed |
 | `kiosk-devices.json` | config | Which device drives which screen |
 | `layout-groups.json` | config | Reusable object groups for the layout editor |
 | `layout-templates.json` | config | Saved custom layouts |
@@ -375,7 +435,7 @@ class means for backups.
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
 | `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
 | `signals.json` | runtime | The values the Companion module reads |
-| `slots.json` | config | [Slot](#slots) sets, by view or object id |
+| `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `update-notices.json` | runtime | Which release has been announced |
@@ -391,16 +451,19 @@ folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
 Uploaded logos and layout images are files in `branding-images/` and
 `layout-images/`, named by content hash and carried by a config snapshot.
 
-The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
+The custom tab and home-screen icon is nine `settings.json` fields: `appIcon`
 (the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`
-(the upload and its crop, which the crop editor reopens on), `appIconBackground` (`#rrggbb`, `#000000`
-by default) and the four sizes served to browsers and phones, `appIconApple`
+(the upload and its crop, which the crop editor reopens on), `appIconBackground`
+(the home-screen background, `#rrggbb`, `#000000` by default), `appIconTabBackground`
+(the tab's background: `#rrggbb`, or `none` for the logo alone, which is the default and
+what a file without the field reads as) and the four sizes served to browsers and phones, `appIconApple`
 (180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
 safe zone). The image fields are references into `branding-images/`. The icon is
 set or removed as a whole, so the seven image and crop fields are null until one is set; only
 `appIconOriginal` and `appIconCrop` may stay null in a set icon (one made through
-the API has no upload to adjust). The state carries `appIcon192`,
-`appIconMaskable` and `appIconBackground`, and nothing else of it.
+the API has no upload to adjust). The state carries `appIcon192`, `appIconMaskable`,
+`appIconBackground`, `appIconTabBackground` and `appIconArt` (the stored art, which the
+browser tab is drawn from), and nothing else of it.
 
 ## How state reaches a screen
 

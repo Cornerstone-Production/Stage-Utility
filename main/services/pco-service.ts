@@ -8,6 +8,7 @@ import { errorMessage } from "./errors.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { PcoRateLimit, describeRate, readRateHeaders, type RateStatus } from "./pco-rate-limit.js";
+import { parsePrepTagName, type TaggedPeople } from "./pco-prep-tags.js";
 import { pickServiceTime } from "./pick-service-time.js";
 import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
@@ -1588,6 +1589,66 @@ class PcoService {
       throw err;
     }
     return (Array.isArray(json.data) ? json.data[0] : json.data) ?? null;
+  }
+
+  /**
+   * Every person carrying a prep tag ("Capsule: ...", "IEMs: ..."), read tag-first.
+   *
+   * 1 request for the tag groups, plus one per PERSON group for its tags, plus one
+   * per tag whose name matches the prep pattern for its people (each paginated) --
+   * a cost that does not grow with the plan. Reading the other way round is not
+   * possible: `include=person.tags` on team members and `where[]` filters on
+   * /people are both silently ignored by Planning Center (checked live).
+   *
+   * Cached on the LONG tier. A failure throws and is NOT cached; PrepTagBook owns
+   * the retry floor and the log line.
+   */
+  async listPersonPrepTags(appId: string, secret: string): Promise<TaggedPeople[]> {
+    const cacheKey = `prep-tags:${appId}`;
+    const cached = this.cacheGet<TaggedPeople[]>(cacheKey);
+    if (cached) return cached;
+
+    const read = (url: PcoUrl) => this.request(url, appId, secret);
+    const rows = (page: PcoPage): PcoNode[] => (Array.isArray(page.data) ? page.data : [page.data]);
+
+    const groupIds: string[] = [];
+    await readPcoPages(pcoUrl`/tag_groups?per_page=100`, MAX_PAGES, "pco-tags", read, (page) => {
+      for (const g of rows(page)) if (g.attributes?.tags_for === "person") groupIds.push(g.id);
+    });
+
+    const prepTags: { id: string; groupId: string; name: string }[] = [];
+    for (const groupId of groupIds) {
+      await readPcoPages(
+        pcoUrl`/tag_groups/${pcoId("tagGroupId", groupId)}/tags?per_page=100`,
+        MAX_PAGES,
+        "pco-tags",
+        read,
+        (page) => {
+          for (const t of rows(page)) {
+            const name = String(t.attributes?.name ?? "");
+            if (parsePrepTagName(name)) prepTags.push({ id: t.id, groupId, name });
+          }
+        },
+      );
+    }
+
+    const out: TaggedPeople[] = [];
+    for (const tag of prepTags) {
+      const personIds: string[] = [];
+      await readPcoPages(
+        pcoUrl`/tag_groups/${pcoId("tagGroupId", tag.groupId)}/tags/${pcoId("tagId", tag.id)}/people?per_page=100`,
+        MAX_PAGES,
+        "pco-tags",
+        read,
+        (page) => {
+          for (const p of rows(page)) personIds.push(p.id);
+        },
+      );
+      out.push({ tagName: tag.name, personIds });
+    }
+
+    this.cacheSet(cacheKey, out, TTL_LONG_MS);
+    return out;
   }
 
   async listTeamMembers(

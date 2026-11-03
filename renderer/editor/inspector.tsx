@@ -4,7 +4,7 @@
 // type is added. It has nothing to do with the canvas beside it: it reads the
 // selection and writes config and style back.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type MutableRefObject } from "react";
 import {
   Trash2Icon,
   CopyIcon,
@@ -58,6 +58,7 @@ import { useReaperStatus } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { useChargerBays } from "../main/use-charger-bays";
 import { toast } from "../components/ui/toast";
 import { useProdcomChannels } from "../main/use-prodcom-channels";
 import { useTranscript } from "../main/use-transcript";
@@ -87,12 +88,14 @@ import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, setsOwnType, sizesTypeFromItsBox,
 } from "./inspector-rows";
+import { SlotsGridBoard } from "./slots-grid-board";
 import { TimerInspector } from "./timer-inspector";
 import { LyricsInspector } from "./lyrics-inspector";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ButtonInspector } from "./button-inspector";
+import type { PressSettle } from "./button-presses";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -815,9 +818,16 @@ export function ReaperLiveLabel() {
 }
 
 export function Inspector({
-  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, viewId, viewName, draftObjects, pressSettleRef, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
+  /** The view being edited (`"home"` for Home) and its name: which Buttons' own commands are this one's. */
+  viewId: string;
+  viewName: string;
+  /** Every object of the layout being edited, as drafted, nested ones inside their parents. */
+  draftObjects: readonly LayoutObject[];
+  /** Filled by a Button's Presses control with the wait the editor's Save does first. */
+  pressSettleRef?: MutableRefObject<PressSettle | null>;
   canvas: LayoutCanvas;
   /** Design-px size of this object's parent box (the canvas for top-level). */
   parentW: number;
@@ -826,7 +836,6 @@ export function Inspector({
   nested: boolean;
   /** True when this object — or an ancestor container — is locked. */
   locked: boolean;
-  slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h" | "anchor" | "keepAspect" | "minPx" | "maxPx">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
   /** Replace the style with the type's default. Not a patch: a merge cannot clear
@@ -847,7 +856,7 @@ export function Inspector({
   // An object saved as one of the four widgets the Timer replaced is edited as the
   // Timer, and the first edit writes it as one.
   const c = readConfig(o.config);
-  const chargerBays = useStageState().state?.chargerBays ?? [];
+  const chargerBays = useChargerBays().bays;
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const pvp = usePvpState();
@@ -1255,31 +1264,7 @@ export function Inspector({
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
-      {c.type === "slots-grid" && (() => {
-        const isInline = (c.source ?? "view") === "inline";
-        return (
-          <>
-            <RowSelect
-              label="Source"
-              value={isInline ? "inline" : "view"}
-              options={[{ value: "inline", label: "Define here" }, { value: "view", label: "Embed a view" }]}
-              onChange={(v) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}
-            />
-            {isInline ? (
-              <p className="text-caption2 text-fg-muted leading-snug">Edit this grid's slots below the canvas.</p>
-            ) : (
-              <Row label="View">
-                <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
-                  <SelectTrigger aria-label="View"><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
-                  <SelectContent>
-                    {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Row>
-            )}
-          </>
-        );
-      })()}
+      {c.type === "slots-grid" && <SlotsGridBoard objectId={o.id} config={c} onConfig={onConfig} />}
       {c.type === "charger-battery" && (
         <>
           <RowSwitch label="Battery %" checked={c.show.battery ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
@@ -1589,7 +1574,9 @@ export function Inspector({
           </>
         );
       })()}
-      {(c.type === "action-button" || c.type === "cue-button") && <ButtonInspector c={c} cues={cues} onConfig={onConfig} />}
+      {c.type === "cue-button" && (
+        <ButtonInspector c={c} cues={cues} viewId={viewId} viewName={viewName} objectId={o.id} draftObjects={draftObjects} settleRef={pressSettleRef} onConfig={onConfig} />
+      )}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];
         const metric = c.metric ?? "attendance";

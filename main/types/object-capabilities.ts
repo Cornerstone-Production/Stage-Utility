@@ -38,8 +38,6 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "osc-button": ["control"],
   "rosstalk-button": ["control"],
   "live-controls": ["control"],
-  // The general form of the two above: bound to any action in the registry.
-  "action-button": ["control"],
   // A cue with its state on it. A control on a panel; a readout on a wall.
   "cue-button": ["control"],
   // The stage messages for a screen's groups: a readout on a wall, and on a panel
@@ -115,6 +113,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   // the page that fixes what they are reporting.
   // Readout only: the card's own rows already link to the page that fixes each
   // check, so the OBJECT has nowhere separate to drill to.
+  "home-attention": ["readout"],
   "home-readiness": ["readout"],
   "home-next-service": ["readout"],
   "home-live-status": ["readout"],

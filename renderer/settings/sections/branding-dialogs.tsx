@@ -7,7 +7,7 @@
 // talks to the server: each action is a callback into branding-section.tsx, which
 // owns the file picker, the cropper's state and the writes.
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ImageIcon, TrashIcon, UploadIcon } from "lucide-react";
 import {
   Button,
@@ -16,15 +16,138 @@ import {
   DialogRoot,
   DialogTitle,
   FieldLabel,
+  Switch,
 } from "../../components/ui";
+import { ColorField } from "../../components/ui/color-field";
 import { cn } from "../../lib/cn";
-import { AndroidIcon, Describe, DropVeil, IosIcon, TabIcon, useImageSize, type Brand } from "./branding-cards";
+import { AndroidIcon, CHECKER, Describe, DropVeil, IosIcon, TabStrip, useImageSize, type Brand } from "./branding-cards";
 import { useFileDrop } from "../../lib/use-file-drop";
+import { useResyncOn } from "../../lib/use-resync-on";
+import { useTrailingCommit } from "../../lib/use-trailing-commit";
 import { ART_MAX } from "../../lib/app-icon-render";
+import { resolveAccent } from "../../lib/icon-ink";
+import { NO_TAB_BACKGROUND } from "@main/services/install-metadata";
 
-/** Behind-the-icon colours offered for transparent areas: black, two of the app's
- *  own blues, and white. The server accepts any #rrggbb; these are the choices. */
-const ICON_BACKGROUNDS = ["#000000", "#15425c", "#2e6691", "#ffffff"] as const;
+const BLACK = "#000000";
+const WHITE = "#ffffff";
+/** Where Custom starts, before the operator has picked anything. */
+const CUSTOM_START = "#c2410c";
+
+function currentAccent(accentColor: string | null): string {
+  const css = typeof document === "undefined" ? "" : getComputedStyle(document.documentElement).getPropertyValue("--brand-accent");
+  return resolveAccent(accentColor, css);
+}
+
+/** The shape every swatch shares. */
+const SWATCH = cn(
+  "relative size-[26px] rounded-[7px] border border-line-strong transition-transform",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+  "disabled:opacity-50",
+);
+const SELECTED = "outline outline-2 outline-offset-2 outline-fg";
+/**
+ * A background colour: Transparent (where `allowNone`), Black, White, Accent and
+ * Custom. The server takes any `#rrggbb`; these are the choices, and what is
+ * stored is the colour itself.
+ */
+/** `whenFree`: a pick made as the dialog closes. If an icon is being made, it runs after that one. */
+export interface PickOptions {
+  whenFree?: boolean;
+}
+
+function BackgroundField({
+  label,
+  description,
+  value,
+  allowNone,
+  accentColor,
+  busy,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  /** `#rrggbb`, or "none" where `allowNone`. */
+  value: string;
+  allowNone: boolean;
+  accentColor: string | null;
+  busy: boolean;
+  onChange: (value: string, options?: PickOptions) => void;
+}) {
+  const accent = currentAccent(accentColor);
+  const current = value.toLowerCase();
+  const isNone = current === NO_TAB_BACKGROUND;
+  const isCustom = !isNone && current !== BLACK && current !== WHITE && current !== accent;
+  const [custom, setCustom] = useState(isCustom ? current : CUSTOM_START);
+  // A colour saved from another browser moves the swatch with it. Only a custom value does:
+  // picking black must not forget the custom colour the wheel last held.
+  useResyncOn([value], () => {
+    if (isCustom) setCustom(current);
+  });
+
+  // The wheel commits as the pointer moves, and each commit redraws every size and
+  // saves them: only where the pointer stops is sent (useTrailingCommit). A commit that
+  // lands while a save is running waits for it, or the last colour would be dropped. Closing
+  // the dialog flushes what is pending; if a save is still running then, `whenFree` asks
+  // the section to run it once that one is done.
+  const schedule = useTrailingCommit<string>(
+    (next, { unmounting }) => onChange(next, unmounting ? { whenFree: true } : undefined),
+    350,
+    { waitWhile: () => busy },
+  );
+
+  const choices: { id: string; name: string; hex: string | null }[] = [
+    ...(allowNone ? [{ id: NO_TAB_BACKGROUND, name: "Transparent", hex: null }] : []),
+    { id: BLACK, name: "Black", hex: BLACK },
+    { id: WHITE, name: "White", hex: WHITE },
+    { id: accent, name: "Accent", hex: accent },
+  ];
+  const picked = (id: string) => id === current;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 flex-1 basis-[200px] flex-col">
+        <FieldLabel>{label}</FieldLabel>
+        <Describe>{description}</Describe>
+      </div>
+      <div className="flex items-center gap-2" role="group" aria-label={label}>
+        {choices.map((c) => (
+          <button
+            key={c.name}
+            type="button"
+            disabled={busy}
+            onClick={() => onChange(c.id)}
+            aria-pressed={picked(c.id)}
+            aria-label={`${label} ${c.name.toLowerCase()}`}
+            title={c.name}
+            style={c.hex ? { backgroundColor: c.hex } : undefined}
+            className={cn(SWATCH, c.hex === null && CHECKER, picked(c.id) && SELECTED)}
+          />
+        ))}
+        <span
+          title="Custom colour"
+          aria-pressed={isCustom}
+          className={cn(
+            SWATCH,
+            "bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]",
+            isCustom && SELECTED,
+            busy && "pointer-events-none opacity-50",
+          )}
+        >
+          <ColorField
+            label={`${label}, custom colour`}
+            allowAlpha={false}
+            value={custom}
+            onChange={(v: string) => {
+              setCustom(v);
+              schedule(v.toLowerCase());
+            }}
+            className="absolute inset-0 [&>button]:size-full [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
+          />
+        </span>
+      </div>
+    </div>
+  );
+}
 
 /** The dialog frame: header with the title, a body, and a footer rule above the
  *  actions. An image file dropped anywhere on it goes to `onFile`. */
@@ -210,16 +333,13 @@ export function AvatarDialog({ open, isSet, editor, ...actions }: { open: boolea
 
 // ── Tab and home-screen icon ──────────────────────────────────────────────────
 
-/** One size of the icon, in the frame it appears in, with its name under it. */
-function Size({ label, size, round, children }: { label: string; size: number; round?: boolean; children: ReactNode }) {
+/** One preview with its name under it. No frame of its own: each preview is the
+ *  shape it has where it is used, and a backing square behind a rounded one shows
+ *  at its corners. */
+function Preview({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-1.5 text-[11px] text-fg-muted">
-      <div
-        className="grid place-items-center overflow-hidden bg-black"
-        style={{ width: size, height: size, borderRadius: round ? "50%" : 4 }}
-      >
-        {children}
-      </div>
+      {children}
       {label}
     </div>
   );
@@ -228,20 +348,33 @@ function Size({ label, size, round, children }: { label: string; size: number; r
 export function IconDialog({
   open,
   brand,
-  background,
+  accentColor,
+  homeBackground,
+  tabBackground,
+  recolor,
   busy,
-  onBackground,
+  onHomeBackground,
+  onTabBackground,
+  onRecolor,
   onUseLogo,
   editor,
   ...actions
 }: {
   open: boolean;
   brand: Brand;
-  /** The colour behind transparent areas: the saved one, or the pick to use on creation. */
-  background: string;
+  /** The accent the Accent swatch resolves to (null: the theme's own). */
+  accentColor: string | null;
+  /** The home-screen icon's background: the saved one, or the pick to use on creation. */
+  homeBackground: string;
+  /** The tab's: `#rrggbb` or "none". The saved one, or the pick to use on creation. */
+  tabBackground: string;
+  /** Recolor to match theme, which the logo card also holds: the icon follows it. */
+  recolor: boolean;
   /** An icon is being drawn and saved; the controls wait for it. */
   busy: boolean;
-  onBackground: (hex: string) => void;
+  onHomeBackground: (hex: string, options?: PickOptions) => void;
+  onTabBackground: (value: string, options?: PickOptions) => void;
+  onRecolor: (on: boolean) => void;
   /** Build the icon from the logo already set. */
   onUseLogo: () => void;
 } & ImageActions) {
@@ -277,44 +410,52 @@ export function IconDialog({
         it: the browser tab, the iPhone and iPad home screen, and Android&apos;s round and rounded-square masks.
       </Lead>
       <Editor slot={editor} onUpload={actions.onUpload} />
-      <div className="flex flex-wrap items-end gap-[18px]">
-        <Size label="Tab 16" size={16}>
-          <TabIcon brand={brand} size={16} />
-        </Size>
-        <Size label="Tab 32" size={32}>
-          <TabIcon brand={brand} size={32} />
-        </Size>
-        <Size label="iPhone 180" size={60}>
-          <IosIcon brand={brand} size={60} />
-        </Size>
-        <Size label="Android 192" size={64} round>
-          <AndroidIcon brand={brand} size={64} />
-        </Size>
-      </div>
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 flex-col">
-          <FieldLabel>Background</FieldLabel>
-          <Describe>Fills transparent areas. Phones would otherwise fill them with black.</Describe>
+          <FieldLabel>Recolor to match theme</FieldLabel>
+          <Describe>
+            The same setting as the logo&apos;s. The art is drawn in the ink that reads against what is behind it.
+            Off draws it as uploaded.
+          </Describe>
         </div>
-        <div className="flex items-center gap-2" role="group" aria-label="Icon background">
-          {ICON_BACKGROUNDS.map((hex) => (
-            <button
-              key={hex}
-              type="button"
-              disabled={busy}
-              onClick={() => onBackground(hex)}
-              aria-pressed={background.toLowerCase() === hex}
-              aria-label={`Background ${hex}`}
-              style={{ backgroundColor: hex }}
-              className={cn(
-                "size-[26px] rounded-[7px] border border-line-strong transition-transform",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                "disabled:opacity-50",
-                background.toLowerCase() === hex && "outline outline-2 outline-offset-2 outline-fg",
-              )}
-            />
-          ))}
-        </div>
+        <Switch
+          checked={recolor}
+          disabled={busy}
+          onCheckedChange={onRecolor}
+          aria-label="Recolor icon to match theme"
+        />
+      </div>
+      <BackgroundField
+        label="Tab background"
+        description="Transparent shows just the logo in the tab, in the ink that suits the browser."
+        value={tabBackground}
+        allowNone
+        accentColor={accentColor}
+        busy={busy}
+        onChange={onTabBackground}
+      />
+      <BackgroundField
+        label="Home-screen background"
+        description="Fills transparent areas. Phones would otherwise fill them with black."
+        value={homeBackground}
+        allowNone={false}
+        accentColor={accentColor}
+        busy={busy}
+        onChange={onHomeBackground}
+      />
+      <div className="flex flex-wrap items-end gap-[18px]">
+        <Preview label="Tab, light browser">
+          <TabStrip brand={brand} scheme="light" />
+        </Preview>
+        <Preview label="Tab, dark browser">
+          <TabStrip brand={brand} scheme="dark" />
+        </Preview>
+        <Preview label="iPhone 180">
+          <IosIcon brand={brand} size={60} />
+        </Preview>
+        <Preview label="Android 192">
+          <AndroidIcon brand={brand} size={64} />
+        </Preview>
       </div>
       {logoSoft && (
         <Describe className="mt-0 text-warn-11">

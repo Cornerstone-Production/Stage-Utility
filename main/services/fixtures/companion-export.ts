@@ -14,7 +14,7 @@
 // part of the evidence, not a nicety.
 
 /** A `text` layer as 5.x writes one. */
-function textLayer(value: string): Record<string, unknown> {
+function textLayer(value: string, color = 16777215): Record<string, unknown> {
   return {
     id: "text0",
     name: "Text",
@@ -22,7 +22,7 @@ function textLayer(value: string): Record<string, unknown> {
     type: "text",
     enabled: { value: true, isExpression: false },
     text: { isExpression: false, value },
-    color: { value: 16777215, isExpression: false },
+    color: { value: color, isExpression: false },
     fontsize: { value: 11.7, isExpression: false },
   };
 }
@@ -34,10 +34,49 @@ const CHROME_LAYERS: Record<string, unknown>[] = [
   { id: "image0", name: "Image", usage: "auto", type: "image" },
 ];
 
+/** A 1x1 PNG, as a real uploaded icon is a `data:` URI in `base64Image.value`. */
+export const FIXTURE_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/** The background the fixture's coloured button carries: 24-bit RGB, 0x2e6691. */
+export const FIXTURE_BG_INT = 0x2e6691;
+/** The text colour of that same button: 0xf4f0ec. */
+export const FIXTURE_FG_INT = 0xf4f0ec;
+
+/** The chrome layers wearing a button's own look. */
+function layersFor(look: ButtonSpecLook | undefined): Record<string, unknown>[] {
+  return CHROME_LAYERS.map((layer) => {
+    if (layer.type === "box" && look?.bg !== undefined) {
+      const color =
+        look.bg === "expression"
+          ? { value: "$(internal:time_h) > 12 ? 255 : 0", isExpression: true }
+          : { value: look.bg, isExpression: false };
+      return { ...layer, color };
+    }
+    if (layer.type === "image" && look?.icon !== undefined) {
+      return { ...layer, base64Image: { value: look.icon, isExpression: false } };
+    }
+    return layer;
+  });
+}
+
+interface ButtonSpecLook {
+  bg?: number | "expression";
+  fg?: number;
+  icon?: string;
+}
+
 interface ButtonSpec {
   row: number;
   col: number;
   text: string;
+  /**
+   * The look, as the real export keeps it: the box layer's `color` and the text
+   * layer's `color` are 24-bit RGB integers (0 is black), the image layer's
+   * `base64Image.value` is a `data:` URI for an uploaded icon or
+   * `$(image:name)` for one of Companion's own, and a colour may be an
+   * expression instead, which the picker cannot draw.
+   */
+  look?: ButtonSpecLook;
   /** Connection ids the button's down-action drives. */
   connections?: string[];
   /**
@@ -135,7 +174,7 @@ function button(spec: ButtonSpec, pageNum: number): Record<string, unknown> {
     : actions;
   return {
     type: "button-layered",
-    style: { layers: [...CHROME_LAYERS, textLayer(spec.text)] },
+    style: { layers: [...layersFor(spec.look), textLayer(spec.text, spec.look?.fg)] },
     feedbacks: (spec.feedbacks ?? []).map((f, i) => ({
       type: "feedback",
       id: opaqueId(`control-feedback:${pageNum}:${spec.row}:${spec.col}:${i}`),
@@ -167,8 +206,21 @@ function nav(pageName: string): Record<string, Record<string, unknown>> {
   };
 }
 
-function page(pageNum: number, name: string, buttons: ButtonSpec[]): Record<string, unknown> {
+/** A `button-reference`, as 5.x writes one: no style, no steps, only where it points. */
+function reference(location: string): Record<string, unknown> {
+  return { type: "button-reference", options: { location: { isExpression: false, value: location } } };
+}
+
+function page(
+  pageNum: number,
+  name: string,
+  buttons: ButtonSpec[],
+  references: { row: number; col: number; location: string }[] = [],
+): Record<string, unknown> {
   const controls: Record<string, Record<string, unknown>> = { "7": nav(name) };
+  for (const r of references) {
+    controls[String(r.row)] = { ...(controls[String(r.row)] ?? {}), [String(r.col)]: reference(r.location) };
+  }
   for (const b of buttons) {
     controls[String(b.row)] = { ...(controls[String(b.row)] ?? {}), [String(b.col)]: button(b, pageNum) };
   }
@@ -337,6 +389,8 @@ export function companionExportFixture(): Record<string, unknown> {
           text: "Projectors ON",
           connections: ["conn-pjlink"],
           feedbacks: [{ definitionId: "powerState", connectionId: "conn-pjlink" }],
+          // The one button carrying every part of a look: a colour pair and an icon.
+          look: { bg: FIXTURE_BG_INT, fg: FIXTURE_FG_INT, icon: FIXTURE_ICON },
         },
         {
           row: 0,
@@ -350,9 +404,10 @@ export function companionExportFixture(): Record<string, unknown> {
         { row: 1, col: 1, text: "Lobby:\\nTVs ON", connections: ["conn-legacy"] },
         { row: 1, col: 2, text: "Lobby:\\nTVs OFF", connections: ["conn-legacy"] },
         // An ON with no OFF. Must not become a pair.
-        { row: 2, col: 1, text: "House Lights ON", connections: ["conn-lights"] },
-        // No suffix at all.
-        { row: 2, col: 3, text: "Take Screens", connections: ["conn-pjlink"] },
+        // A background that is an expression, which no picker can draw.
+        { row: 2, col: 1, text: "House Lights ON", connections: ["conn-lights"], look: { bg: "expression" } },
+        // No suffix at all. Its icon is one of Companion's built-ins, a name and not an image.
+        { row: 2, col: 3, text: "Take Screens", connections: ["conn-pjlink"], look: { icon: "$(image:yellow-border)" } },
         // A button with actions and NO label — pressable, unpickable by name.
         { row: 3, col: 0, text: "", connections: ["conn-pjlink"] },
       ]),
@@ -432,6 +487,11 @@ export function companionExportFixture(): Record<string, unknown> {
           actionDef: "StartStopStreaming",
           feedbacks: [{ definitionId: "recording", connectionId: "conn-obs" }],
         },
+      ], [
+        // A reference to a key on page 1, far to the right: it widens the page, and
+        // it draws as the key it points at. And one pointing at nothing.
+        { row: 5, col: 11, location: "1/0/1" },
+        { row: 5, col: 12, location: "99/0/0" },
       ]),
       // A page with nothing but navigation, as most of a real install's are.
       "4": page(4, "PAGE", []),

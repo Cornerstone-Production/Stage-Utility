@@ -70,6 +70,8 @@ export class DataStore<T> {
   // that one did not, which is how two concurrent saves there could splice a
   // secrets blob that no longer decrypted.
   private writes = new WriteQueue();
+  // Told after every write that landed. See onSaved().
+  private savedListeners: ((previous: T | null, next: T) => void)[] = [];
 
   /**
    * @param classification Whether a config snapshot carries this store. Required
@@ -102,6 +104,19 @@ export class DataStore<T> {
       renamedFrom: options.renamedFrom,
       restoreCheck: options.restoreCheck,
     });
+  }
+
+  /**
+   * Call `listener` after every write that landed, with what the store held
+   * before it (null when nothing had read it yet) and what it holds now.
+   *
+   * For a reader that must notice a change however it was made: views.json is
+   * saved from sixteen places, and a check at each would be the one that is
+   * missing. The listener runs synchronously after the file is written and must
+   * not do I/O of its own; see writeRaw for what a throw does.
+   */
+  onSaved(listener: (previous: T | null, next: T) => void): void {
+    this.savedListeners.push(listener);
   }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
@@ -142,6 +157,16 @@ export class DataStore<T> {
       // land must not be undone by an earlier one failing.
       if (this.cache === data) this.cache = previous;
       throw err;
+    }
+    for (const listener of this.savedListeners) {
+      // The write LANDED. A listener that throws must not turn it into a failed
+      // save: the operator would retry, or read their work as lost, with the file
+      // already correct. So it is said, once, here, on the store's own tag.
+      try {
+        listener(previous, data);
+      } catch (err) {
+        console.error("[data-store] a listener to a store's saves threw; the save itself landed:", this.filename, errorMessage(err));
+      }
     }
   }
 

@@ -6,6 +6,7 @@ import { screenName, screensShowing, viewIsConsole } from "@main/types/views";
 import { confirm, confirmWith, toast } from "../../components/ui";
 import type { SectionHandlers } from "../types";
 import { listNames } from "../screen-role-confirm";
+import { forEachSlotsGrid } from "@main/services/slot-boards";
 
 /** "A shows it" / "A and B show it", for a note naming screens. */
 const showVerb = (screens: readonly unknown[]): string => (screens.length > 1 ? "show" : "shows");
@@ -95,4 +96,38 @@ export async function removeScreen({ output, state, handlers }: {
       : `Removed "${output.name}", but its view "${view.name}" was not deleted. It is under Views not on a screen.`,
   );
   return true;
+}
+
+/** Does this view show any mic slot board: a slots screen, or a custom layout with
+ *  a slots widget? */
+export function showsBoards(view: View): boolean {
+  if (view.kind === "slots") return true;
+  let found = false;
+  forEachSlotsGrid([view], () => {
+    found = true;
+  });
+  return found;
+}
+
+/**
+ * Ask how a duplicate of a view treats its mic slot boards. Null when the operator
+ * backs out; otherwise whether the copy gets boards of its own.
+ *
+ * A view that shows no board has nothing to ask and sends nothing: its copy gets no
+ * board either way.
+ * The default is a copy with its own boards, so editing the copy cannot change the
+ * original's slots; sharing is the choice to make, with the box.
+ */
+export async function askDuplicateView(view: View): Promise<{ copyBoards?: boolean } | null> {
+  if (!showsBoards(view)) return {};
+  const { ok, checked } = await confirmWith({
+    title: `Duplicate "${view.name}"?`,
+    message: "The copy gets its own copy of each mic slot board this view shows, so changing one does not change the other.",
+    confirmLabel: "Duplicate",
+    checkbox: {
+      label: "Share the same boards instead",
+      detail: "The copy and the original then show, and edit, the same boards.",
+    },
+  });
+  return ok ? { copyBoards: !checked } : null;
 }

@@ -36,7 +36,9 @@ station in its WebUI or LinkDesk first, because its API stays disabled until one
 exists. The username is fixed and not asked for.
 
 State broadcasts on the `wireless:connections-changed` SSE channel (connection
-list + runtime status). Charger bays flow through the shared stage state.
+list + runtime status). Charger bays are pushed on `wireless:chargers` whenever a
+bay's reading changes (see [Network traffic](../ops/network-traffic.md)), and are
+also in the shared stage state.
 
 Where a driver needs a password — Spectera's base-station API password — it is
 kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
@@ -71,6 +73,11 @@ meter rate is set once and applies to all wireless gear.
 Charger bays are deliberately absent from the first two. A bay is not a mic: an
 empty one would drag "lowest battery" to zero, and a shelf of docked spares would
 pad the online count.
+
+**On a mic slot:** a [slot](../slots.md#the-inspector) binds to a mic channel, an
+in-ear pack (**In-ear pack**), or a charger bay (**Battery from → Charger bay**), and
+the card shows its RF bars and battery. A device with no network can be entered as
+**Offline (manual label)**.
 
 ### What a charger bay reports
 

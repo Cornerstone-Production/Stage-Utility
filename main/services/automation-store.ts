@@ -35,7 +35,7 @@ const rulesRestoreCheck = checked(async (raw) => {
       const s = asObject(rule[step], `${what}'s ${step}`);
       required(s.id, "string", `${what}'s ${step} id`);
       if (s.params !== undefined) asObject(s.params, `${label}'s ${step} params`);
-      else if (step === "trigger" && s.id === CALL_TRIGGER_ID) refuse(`${label} is a called cue with no trigger params`);
+      else if (step === "trigger" && s.id === CALL_TRIGGER_ID) refuse(`${label} is a called command with no trigger params`);
     }
     optional(rule.enabled, "boolean", `${what}'s enabled`);
     if (rule.conditions !== undefined) asArray(rule.conditions, `${what}'s conditions`);
@@ -74,6 +74,10 @@ export const automationStore = {
   /** Why automation-rules.json could not be read, while it cannot: see DataStore.unreadable(). */
   rulesUnreadable() {
     return rules.unreadable();
+  },
+  /** Why saves to the rules are refused, or null: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return rules.refusingSaves();
   },
   async loadRules(): Promise<Rule[]> {
     return rules.load();

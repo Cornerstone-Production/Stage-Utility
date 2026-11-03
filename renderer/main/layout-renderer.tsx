@@ -1,6 +1,8 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
+import { ActionTile, StepAction } from "../app/home/card-actions";
+import { sizeOf } from "../app/home/home-cards";
 import { readConfig, timerSource } from "./timer-config";
 import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
@@ -37,11 +39,12 @@ import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiv
 import { useBaptismStatus } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
+import { useChargerBays } from "./use-charger-bays";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
-import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
+import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -256,6 +259,13 @@ export interface LayoutRenderCtx {
    * anywhere else never receives one.
    */
   activeCardMenuId?: string | null;
+  /**
+   * Open the sheet that chooses what a Button presses, for the Button with this
+   * object id. Set by Home alone, which has no inspector: a Button with nothing
+   * chosen reads "Choose what it presses" there, and tapping it calls this.
+   * Absent everywhere else, where an unset Button reads Unbound and does nothing.
+   */
+  choosePress?: (objectId: string) => void;
 }
 
 /**
@@ -319,6 +329,11 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
     overflow: "hidden",
     // Border draws inside the box so it never changes the object's footprint.
     boxSizing: "border-box",
+    // Layer order is the order the boxes are drawn in, which only holds if no
+    // box lets a z-index inside it compete with its siblings. A mic slot's name
+    // band is z-10, and without this it drew over every object in front of the
+    // grid, however far back the grid was sent.
+    isolation: "isolate",
   };
   if (s.background) css.background = s.background;
   // The object's own text colour, published for the readout idiom to pick up.
@@ -556,7 +571,7 @@ function fmtSignedDuration(sec: number): string {
 }
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
-function rfBarsGlyph(bars: number): string {
+export function rfBarsGlyph(bars: number): string {
   const n = clamp(Math.round(bars), 0, 5);
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
@@ -1013,7 +1028,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           onlineOutputIds={ctx.onlineOutputIds}
           onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
+          pcoLive={ctx.pcoLive}
+          pcoLiveKnown={ctx.pcoLiveKnown}
+          interactive={!!live}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
+          actionable={live}
         />
       </div>
     );
@@ -1276,29 +1295,34 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "video":
       return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} listen={ctx.home && ctx.interactive} />;
     case "slots-grid": {
-      // Resolved BY OBJECT wherever the server could do it -- inline grids, and
-      // grids embedding a view. Both are free-dragged boxes on a custom layout,
-      // so both get photos cropped for an unknown shape (see AvatarFit); keying
-      // on the object is what lets them differ from the source view's own
-      // display, which keeps the column crop it is correctly modelled on.
+      // Resolved BY OBJECT, from the board the widget points at. A widget is a
+      // free-dragged box on a custom layout, so its photos are cropped for an
+      // unknown shape (see AvatarFit); keying on the object is what lets it
+      // differ from a slots screen showing the same board, which keeps the
+      // column crop it is correctly modelled on.
       //
-      // slotsByView is the fallback, and it still matters: a state broadcast from
-      // a server that has not resolved this object yet, or an object whose id is
-      // not in the layout the server holds, would otherwise draw an empty grid.
-      const inline = c.source === "inline";
+      // The fallback is for an object the server has not resolved — a widget the
+      // layout editor added and has not saved yet. Only the shape from before
+      // boards can name a view's rows here (a board's rows are not in the state
+      // by board), so a new widget pointed at a board shows its placeholder
+      // until the layout is saved.
       const byObject = ctx.state.slotsByLayoutObject?.[o.id];
-      const slots = inline
-        ? (byObject ?? [])
-        : (byObject ?? (c.sourceViewId ? (ctx.state.slotsByView?.[c.sourceViewId] ?? []) : []));
+      const embeds = c.source !== "inline" && c.sourceViewId ? c.sourceViewId : null;
+      const slots = byObject ?? (embeds ? (ctx.state.slotsByView?.[embeds] ?? []) : []);
       if (slots.length === 0) {
         return <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Mic slots</span>;
       }
       // Render via the same component the standalone slots view uses, honoring the
-      // physical-inch alignment (the object's own when inline, else the source
-      // View's), over the kiosk backdrop so it looks identical.
-      const slotsLayout = inline
-        ? (c.slotsLayout ?? null)
-        : (c.sourceViewId ? (ctx.state.views?.find((v) => v.id === c.sourceViewId)?.slotsLayout ?? null) : null);
+      // physical-inch alignment the server resolved for this widget (its display
+      // width with its board's column width), over the kiosk backdrop so it looks
+      // identical.
+      const resolvedLayout = ctx.state.slotsLayoutByLayoutObject?.[o.id];
+      const slotsLayout =
+        resolvedLayout !== undefined
+          ? resolvedLayout
+          : embeds
+            ? (ctx.state.slotsLayoutByView?.[embeds] ?? null)
+            : (c.slotsLayout ?? null);
       return (
         <SlotsColumns
           slots={slots}
@@ -1310,7 +1334,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "charger-battery":
-      return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
+      return <ChargerBattery config={c} fallback={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     case "spl-meter":
       return <SplMeterValue config={c} spl={ctx.spl} align={o.style?.textAlign} />;
     case "people-counter": {
@@ -1362,7 +1386,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // A stored `home-live-status` is that Stat on a wall too: it drew Home's card
       // wherever it was placed, and keeps its look off Home.
       if ((ctx.home || o.config?.type === "home-live-status") && timerSource(c) === "service" && (c.nextItem ?? false)) {
-        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        const stat = <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
+        // Prev / Next on the tile, for an operator on Home with a service live.
+        // Never on a wall: the same Timer is drawn there and has no press.
+        return ctx.home && ctx.interactive && ctx.pcoLive?.mode === "item" ? (
+          <ActionTile reserveCorner action={<StepAction showPrev={sizeOf(o) !== "s"} />}>{stat}</ActionTile>
+        ) : (
+          stat
+        );
       }
       // The baptism readout never sized itself to Home's uniform tile, and still
       // does not: its value fills the box as it did.
@@ -1501,10 +1532,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           ts={ts}
         />
       );
-    case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
+      return (
+        <CueButton
+          config={c}
+          cues={ctx.cues}
+          known={ctx.cuesKnown}
+          interactive={ctx.interactive}
+          onChoose={ctx.choosePress ? () => ctx.choosePress?.(o.id) : undefined}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton
@@ -1706,7 +1744,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // type this build has since dropped.)
       const _never: never = c;
       void _never;
-      return null;
+      // The one type this build has dropped on purpose: see unconverted-button.tsx.
+      return isUnconvertedButton(o.config) ? <UnconvertedButton ts={ts} /> : null;
     }
   }
 }
@@ -2278,15 +2317,18 @@ export function runtimeColor(minutes: number | null): string | null {
 // only the metrics toggled on; an empty/undocked bay reads "empty".
 function ChargerBattery({
   config,
-  all,
+  fallback,
   H,
   baseStyle,
 }: {
   config: Extract<LayoutObjectConfig, { type: "charger-battery" }>;
-  all: ChargerBayDTO[];
+  /** The render context's bays, until `wireless:chargers` answers. */
+  fallback: ChargerBayDTO[];
   H: number;
   baseStyle: CSSProperties;
 }) {
+  // Live: the state's copy is re-sent only on structural changes.
+  const all = useChargerBays(fallback).bays;
   const show = config.show ?? {};
   const anyShown = show.battery || show.charging || show.cycles || show.health || show.temp;
   const showBattery = show.battery || !anyShown; // never render a fully-empty row

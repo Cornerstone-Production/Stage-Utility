@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import type { LayoutObjectType } from "../../main/types/stage.js";
-import { LAYOUT_OBJECTS, widgetMatchesQuery } from "./layout-objects.js";
+import { LAYOUT_OBJECTS, PALETTE_GROUPS, widgetMatchesQuery } from "./layout-objects.js";
 
 const TYPES = Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[];
 
@@ -73,6 +73,19 @@ describe("searching the widget registry", () => {
     for (const t of withBlurbOnlyWords) {
       const word = blurbOnlyWords(t)[0];
       assert.ok(widgetMatchesQuery(t, word), `${t} is not found by "${word}", which is only in its blurb`);
+    }
+  });
+
+  test("a type is found by its group's name, so a heading can be typed back", () => {
+    // Asserted per type rather than over a sample: dropping the group clause is
+    // invisible against label and blurb matches for most groups, so each type is
+    // searched by its own group name. Over the palette's groups, because the
+    // types with no group are the ones the palette never lists.
+    for (const { label: group, types } of PALETTE_GROUPS) {
+      for (const t of types) {
+        assert.ok(widgetMatchesQuery(t, group), `${t} is not found by its group "${group}"`);
+        assert.ok(widgetMatchesQuery(t, group.toUpperCase()), `${t} is not found by "${group.toUpperCase()}"`);
+      }
     }
   });
 

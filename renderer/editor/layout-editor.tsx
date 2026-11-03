@@ -95,7 +95,10 @@ import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
+import { adoptSavedGridPointers } from "./slots-grid-source";
 import { Palette } from "./palette";
+import { WidgetShelf, opensShelfSearch } from "./widget-shelf";
+import { readShelfFolded, writeShelfFolded } from "./shelf-folded";
 import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
@@ -106,16 +109,13 @@ import { AlignmentGuides } from "./alignment-guides";
 const ALIGN_TOLERANCE_PX = 8;
 
 import { uid, dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
+import type { PressSettle } from "./button-presses";
 import { Inspector } from "./inspector";
 import { SavedGroupsLibrary, useSavedGroups } from "./saved-groups";
 import {
   NumberField, 
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel };
-import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
-import { PlanSwitcher } from "../settings/sections/plan-switcher";
-import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
-import { canvasRowFlexClass } from "./canvas-row-fit";
 import { readHideUnconfigured, writeHideUnconfigured } from "./hide-unconfigured";
 
 // ── object metadata ──────────────────────────────────────────────────────────
@@ -132,6 +132,9 @@ const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
  * `defaultSize` arrives centred at it; a container a card-sized box; everything
  * else the old default, to the digit.
  */
+/** A Button's command write failed, so the layout was not saved: its reason is the message. */
+class PressWriteFailed extends Error {}
+
 function startingRect(type: LayoutObjectType): FracRect {
   const own = LAYOUT_OBJECTS[type].defaultSize;
   if (own) return { x: (1 - own.w) / 2, y: (1 - own.h) / 2, ...own };
@@ -1238,7 +1241,6 @@ export function EditorCanvas({
 
 export function LayoutEditor({
   view,
-  slotsViews,
   templates,
   onSave,
   onSaveTemplate,
@@ -1248,7 +1250,6 @@ export function LayoutEditor({
   onExit,
 }: {
   view: View;
-  slotsViews: View[];
   templates: LayoutTemplate[];
   onSave: (layout: LayoutDTO) => Promise<void>;
   onSaveTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
@@ -1273,6 +1274,8 @@ export function LayoutEditor({
   const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: null }, objects: [] };
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
+  // Filled by the selected Button's Presses control: what Save waits on before it reads the layout.
+  const pressSettle = useRef<PressSettle | null>(null);
   // Multi-selection is the source of truth; `selectedId` is the single primary
   // (for the inspector + resize handles) and is null unless exactly one is picked.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
@@ -1317,16 +1320,16 @@ export function LayoutEditor({
   const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
-  /**
-   * Unsaved work held by something INSIDE the editor that the layout comparison
-   * cannot see — today the inline mic-slots editor, whose slots live on the
-   * server per service type rather than in the layout. Arranging mics and
-   * pressing the editor's Save saved the layout and left the arrangement behind.
-   *
-   * Same registry the integration dialog's sub-panels report into, rather than a
-   * second mechanism for the same job.
-   */
-  const panels = useUnsavedWork();
+  // Once this editor's save is back in the view (its revision past the one the
+  // save started from), a slots widget sent as "Define here" or "Embed a view"
+  // takes the board the server pointed it at (see slots-grid-source.ts). Keyed
+  // on the revision so the layout from BEFORE the save is never adopted.
+  const [adoptAfterRev, setAdoptAfterRev] = useState<number | null>(null);
+  if (adoptAfterRev !== null && !dirty && view.layout && (view.layoutRev ?? 0) > adoptAfterRev) {
+    setAdoptAfterRev(null);
+    const adopted = adoptSavedGridPointers(objects, view.layout.objects);
+    if (adopted !== objects) setObjects(adopted);
+  }
   // The effective fit, not just the stored one: a console with nothing set is
   // responsive, and a toolbar showing "Letterbox" selected would tell the
   // operator the opposite of what they see.
@@ -1352,12 +1355,22 @@ export function LayoutEditor({
   // and dismissing the picker clears it WITHOUT creating anything, so a
   // cancelled draw costs neither an object nor an undo step.
   const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
-  // Closed until asked for. The palette replaced the toolbar's Add-object
-  // dropdown -- the "Add object" button now toggles this -- and behaves the way
-  // the dropdown did: nothing on screen until you go looking for it, and the
-  // canvas gets the width in the meantime. The right-click menu offers the same
-  // set as a second route in.
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  // The widget shelf under the canvas. Open by default and remembered per
+  // browser once folded. "Add object" and Cmd/Ctrl+F both unfold it and put the
+  // cursor in its search: the signal is a counter because the SAME request
+  // twice in a row must still focus the box.
+  const [shelfFolded, setShelfFolded] = useState(() => readShelfFolded());
+  const [shelfFocusSignal, setShelfFocusSignal] = useState(0);
+  const shelfSearchRef = useRef<HTMLInputElement | null>(null);
+  const changeShelfFolded = useCallback((folded: boolean) => {
+    setShelfFolded(folded);
+    writeShelfFolded(folded);
+  }, []);
+  const openShelfSearch = useCallback(() => {
+    setShelfFolded(false);
+    writeShelfFolded(false);
+    setShelfFocusSignal((n) => n + 1);
+  }, []);
   // The type mid-drag from the palette. A ref as well as state: the drop
   // handler runs from a DOM event and would otherwise read a stale closure.
   const paletteDragType = useRef<LayoutObjectType | null>(null);
@@ -1388,8 +1401,8 @@ export function LayoutEditor({
   // enableBeforeUnload covers closing the tab as well, which no in-app dialog
   // can: the browser's own prompt is the only thing that fires there.
   const leaveBlocker = useBlocker({
-    shouldBlockFn: () => dirty || panels.dirty,
-    enableBeforeUnload: () => dirty || panels.dirty,
+    shouldBlockFn: () => dirty,
+    enableBeforeUnload: () => dirty,
     withResolver: true,
   });
   // Reusable object/container groups (loaded from the global library).
@@ -1496,16 +1509,7 @@ export function LayoutEditor({
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-    // selectedIds is in here because SELECTING an inline slots-grid changes this
-    // row's layout -- it drops `flex-1` so the row stays preview-tall and the
-    // editor below stays reachable. A layout change with no re-measure leaves
-    // canvasH describing the previous arrangement, and the canvas then paints to
-    // a height the row is not reserving.
-    //
-    // The selection rather than `inlineGrid` itself, which is derived further
-    // down the component. Re-measuring on any selection is cheap: it reads two
-    // layout properties, and setState with an unchanged number does not render.
-  }, [isEditing, selectedIds, canvas.width, canvas.height, canvas.fit]);
+  }, [isEditing, canvas.width, canvas.height, canvas.fit]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
@@ -1527,7 +1531,7 @@ export function LayoutEditor({
 
   // Leaving edit mode: confirm if there are unsaved changes, else just exit.
   function leaveEditMode() {
-    if (dirty || panels.dirty) setConfirmLeave(true);
+    if (dirty) setConfirmLeave(true);
     else exitEditing();
   }
   function loadTemplate(t: LayoutTemplate) {
@@ -1635,12 +1639,6 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
-  // The selected object iff it's an inline mic-slots grid (config narrowed so the
-  // inline slot editor below the canvas gets its id + alignment).
-  const inlineGrid =
-    selected && selected.config.type === "slots-grid" && (selected.config.source ?? "view") === "inline"
-      ? { id: selected.id, config: selected.config }
-      : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
 
@@ -1655,7 +1653,7 @@ export function LayoutEditor({
   }
 
   // The snapshot is read when pushHistory is CALLED, not when the callback was made: an
-  // async caller (Make it a cue, an image upload, Fit box to file) holds the pushHistory
+  // async caller (a Button pick, an image upload, Fit box to file) holds the pushHistory
   // of the click and would otherwise push the layout as it was then, over edits made since.
   const objectsNow = useLatestRef(objects);
   const pushHistory = useCallback(() => {
@@ -1898,9 +1896,23 @@ export function LayoutEditor({
 
   // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
   // -C copies, -V pastes. Ignored while typing in a form field.
+  //
+  // Cmd/Ctrl-F is the exception to "ignored in a field": it opens the widget
+  // shelf's search from anywhere in the editor, and stands aside only for a text
+  // field that is not that search (opensShelfSearch), so finding a word in a
+  // textarea keeps the browser's find. Cmd/Ctrl-A is not bound: Select all stays
+  // the browser's.
   useEffect(() => {
     if (!isEditing) return;
     const onKey = (e: KeyboardEvent) => {
+      // A dialog, or an open list or menu, over the editor owns the keyboard: Backspace in
+      // the Companion pane's large grid must not delete the Button selected behind it.
+      if (document.querySelector('[role="dialog"], [role="listbox"], [role="menu"]')) return;
+      if (opensShelfSearch(e, shelfSearchRef.current)) {
+        e.preventDefault();
+        openShelfSearch();
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       const mod = e.metaKey || e.ctrlKey;
@@ -1913,7 +1925,7 @@ export function LayoutEditor({
     return () => window.removeEventListener("keydown", onKey);
     // Handlers close over selectedIds/objects; re-bind when those change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, selectedIds, objects]);
+  }, [isEditing, selectedIds, objects, openShelfSearch]);
   // Move a nested object out to the top level, keeping its on-screen position by
   // converting its parent-local rect to an absolute canvas rect.
   function reparentToRoot(id: string) {
@@ -1995,15 +2007,18 @@ export function LayoutEditor({
   async function save() {
     setSaving(true);
     try {
-      // The panels FIRST. A layout save that succeeded while a panel's save
-      // failed would clear the pill and leave that work stranded with nothing
-      // left on screen to say so — and saveThen closes the editor on a resolved
-      // save, so the throw has to reach it.
-      const panelsOk = await panels.saveAll();
-      await onSave({ version: 1, canvas, objects });
+      // A Button pick, or an action field still waiting out its typing delay, is written and
+      // bound first: a Save that raced it stored the Button unbound, and the command's own
+      // onConfig then landed on an editor that had left edit mode.
+      const failed = await pressSettle.current?.();
+      if (failed) throw new PressWriteFailed(failed);
+      // That bind is a state update that has not rendered yet, so `objects` here is the layout
+      // from before it. An updater reads the state after every update queued ahead of it.
+      const latest = await new Promise<LayoutObject[]>((resolve) => setObjects((prev) => { resolve(prev); return prev; }));
+      setAdoptAfterRev(view.layoutRev ?? 0);
+      await onSave({ version: 1, canvas, objects: latest });
       setDirty(false);
       setHistory([]);
-      if (!panelsOk) throw new Error("Some changes could not be saved");
     } finally {
       setSaving(false);
     }
@@ -2038,13 +2053,19 @@ export function LayoutEditor({
           STICKY anchor: it stays pinned to the top as the editor scrolls (always
           visible) yet reserves no layout space, so it never shifts content down.
           pointer-events pass through the empty anchor; only the pill is clickable. */}
-      {(dirty || panels.dirty) && (
+      {dirty && (
         <div className="sticky top-1 z-30 h-0 flex justify-end pr-1 pointer-events-none">
           <div className="pointer-events-auto">
             <UnsavedBanner
               compact
               saving={saving}
-              onSave={() => void save()}
+              onSave={() =>
+                void save().catch((err: unknown) => {
+                  // The save itself has told the operator when it failed; a refused press write has not.
+                  if (!(err instanceof PressWriteFailed)) throw err;
+                  toast.error(err.message);
+                })
+              }
               onDiscard={discardChanges}
             />
           </div>
@@ -2075,62 +2096,21 @@ export function LayoutEditor({
           // it; 1920 hid "Done" itself). Reserving this row's own right edge
           // while dirty keeps every row's wrap point clear of that column,
           // for whichever buttons land there.
-          (dirty || panels.dirty) && "pr-64",
+          dirty && "pr-64",
         )}
       >
-        {/* One button for one job. It replaces a dropdown, a Widgets toggle and
-            a filter icon: three controls that all answered "what can I add?".
-            The palette it opens carries the same set the dropdown listed, and
-            the hide-unconfigured filter now lives in the palette's own header,
-            beside the list it filters. */}
-        {/* The palette floats from this button rather than sitting in the
-            canvas row. In the row it was capped at the canvas's own height,
-            which on a 1366x203 Ultritouch strip left a 160px list with a
-            search box and one visible widget. Non-modal and kept open across
-            clicks on the canvas so a drag, or three clicks to add three
-            widgets, does not keep reopening it; a click anywhere else closes
-            it, and so does the button. */}
-        <Popover.Root open={isEditing && paletteOpen} onOpenChange={setPaletteOpen} modal={false}>
-          <Popover.Trigger asChild>
-            <Button
-              variant={paletteOpen ? "accent" : "filled"}
-              size="small"
-              onClick={() => setPaletteOpen((v) => !v)}
-              aria-label="Add an object"
-              aria-pressed={paletteOpen}
-              tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
-            >
-              <PlusIcon className="size-3.5" /> Add object
-            </Button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              align="start"
-              sideOffset={6}
-              // A click on the CANVAS keeps it open: that is where a widget is
-              // dropped or placed, and three widgets in a row should not mean
-              // three reopenings. A click anywhere else, or Escape, closes it,
-              // so it does not sit over the layers list once you are done.
-              onInteractOutside={(e) => {
-                const t = e.target as Node | null;
-                if (t && canvasCellRef.current?.contains(t)) e.preventDefault();
-              }}
-              onOpenAutoFocus={(e) => e.preventDefault()}
-              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto quiet-scroll rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
-            >
-              <Palette
-                types={paletteTypes}
-                dimmed={dimmedTypes}
-                hideUnconfigured={hideUnconfigured}
-                onToggleHideUnconfigured={toggleHideUnconfigured}
-                onAdd={addObject}
-                onDragStart={(t) => { paletteDragType.current = t; }}
-                onDragEnd={() => { paletteDragType.current = null; }}
-                onDropAt={dropObjectAtClient}
-              />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+        {/* One button for one job: the same as Cmd/Ctrl-F. The widgets themselves
+            sit in the shelf under the canvas; this unfolds it and puts the
+            cursor in its search. */}
+        <Button
+          variant="filled"
+          size="small"
+          onClick={openShelfSearch}
+          aria-label="Add an object"
+          tooltip="Search every widget in the shelf under the canvas. Drag one onto the canvas, or click to add it."
+        >
+          <PlusIcon className="size-3.5" /> Add object
+        </Button>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
@@ -2347,13 +2327,6 @@ export function LayoutEditor({
           />
         </Dialog>
 
-        {/* Which plan's mic board the inline grid below the canvas is editing.
-            Here as well as in that grid's own header because the grid is a full
-            canvas-height scroll away, and an operator comparing two weeks on the
-            canvas should not have to leave it to change week. Only while a grid
-            is selected — nothing else in this editor is plan-dependent. */}
-        {inlineGrid && <PlanSwitcher />}
-
         <div className="flex-1" />
         {/* Save/Discard live in the floating unsaved pill when dirty — no separate
             toolbar Save button (it duplicated the pill's Save). "Done" exits (and
@@ -2364,16 +2337,16 @@ export function LayoutEditor({
       </div>
       )}
 
-      {/* Fill the editor height so the side panel can use the full window height —
-          except while editing an inline slots-grid, where the row stays preview-tall
-          so the InlineSlotsEditor below it stays reachable without a huge gap, and
-          must be told not to shrink. See canvas-row-fit.ts for what happens when
-          it is not. */}
-      <div className={`flex gap-3 @max-4xl/editor:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
+      {/* Fill the editor height so the side panel can use the full window height. */}
+      <div className="flex flex-1 gap-3 @max-4xl/editor:flex-col min-h-0">
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl/editor:flex-none" style={{ height: canvasH ?? undefined }}>
+        {/* The centre column: the canvas, and under it the widget shelf. The canvas
+            cell keeps its measured height; the page scrolls before either is
+            squashed. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3 @max-4xl/editor:flex-none">
+        <div ref={canvasCellRef} className="min-w-0 shrink-0" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the
             // change you just made against another shape before saving it.
@@ -2423,6 +2396,23 @@ export function LayoutEditor({
               Loading…
             </div>
           )}
+        </div>
+        {isEditing && (
+          <WidgetShelf
+            types={paletteTypes}
+            dimmed={dimmedTypes}
+            hideUnconfigured={hideUnconfigured}
+            onToggleHideUnconfigured={toggleHideUnconfigured}
+            onAdd={addObject}
+            onDragStart={(t) => { paletteDragType.current = t; }}
+            onDragEnd={() => { paletteDragType.current = null; }}
+            onDropAt={dropObjectAtClient}
+            folded={shelfFolded}
+            onFoldedChange={changeShelfFolded}
+            focusSignal={shelfFocusSignal}
+            searchRef={shelfSearchRef}
+          />
+        )}
         </div>
 
         {/* Right-click menu. Positioned fixed to the viewport, so it lives outside
@@ -2501,7 +2491,7 @@ export function LayoutEditor({
               inspectorDragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
             )}
           />
-        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto overflow-x-hidden quiet-scroll pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
+        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto overflow-x-hidden quiet-scroll pl-2" style={{ maxHeight: availH ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
@@ -2607,12 +2597,15 @@ export function LayoutEditor({
               <Inspector
                 key={selected.id}
                 o={selected}
+                viewId={view.id}
+                viewName={view.name}
+                draftObjects={objects}
+                pressSettleRef={pressSettle}
                 canvas={canvas}
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}
                 nested={selDepth > 0}
                 locked={isLockedInTree(objects, selected.id)}
-                slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
                 onResetLook={withHistory(() => resetLook(selected.id))}
@@ -2659,25 +2652,6 @@ export function LayoutEditor({
         </div>
         )}
       </div>
-
-      {/* Inline mic-slots editor — full width below the canvas when an inline
-          slots-grid object is selected (scroll down to reach it). */}
-      {isEditing && inlineGrid && (
-        <div className="pb-[40vh]">
-          <Separator />
-          <div className="pt-3">
-            {/* The provider wraps only the panel that reports into it. */}
-            <UnsavedWorkProvider registry={panels.registry}>
-            <InlineSlotsEditor
-              key={inlineGrid.id}
-              objectId={inlineGrid.id}
-              slotsLayout={inlineGrid.config.slotsLayout ?? null}
-              onSetLayout={(next) => { pushHistory(); updateConfig(inlineGrid.id, { ...inlineGrid.config, slotsLayout: next }); }}
-            />
-            </UnsavedWorkProvider>
-          </div>
-        </div>
-      )}
 
       {/* Leaving edit mode with unsaved changes. */}
       <UnsavedChangesDialog

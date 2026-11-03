@@ -52,7 +52,7 @@ same on every widget, and a change to the set reaches all of them.
 A custom view can start blank or from a built-in layout. **Screens → New view →
 *Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*,
 *Confidence Monitor template*, and three Ultritouch strips, one per panel, each
-a row of unbound Buttons (set to Fire a cue) and a countdown on that panel's canvas. Every
+a row of unbound Buttons and a countdown on that panel's canvas. Every
 template is built as ordinary editable objects rather than a fixed rendering —
 so it is a starting point you take apart, not a mode.
 
@@ -65,24 +65,43 @@ and recallable onto any view.
 
 Replacing swaps the canvas outright, and **Undo** takes it back.
 
-## The object palette
+## The widget shelf
 
-**Add widget** opens the palette as a panel floating from that button, grouped
-by what a widget reads from, with a search box over it. It stays open while you
-drag or click widgets onto the canvas; a click anywhere else, Escape, or the
-same button closes it. Its height follows the window rather than the canvas, so
-a short Ultritouch strip does not shorten the list. **Hide widgets whose integration is not set up** removes the
-ones you have no gear for — from the palette and from the right-click (or tap
-and hold) Add menu alike. Left on, they stay listed but dimmed, which is the
-right default while you are still connecting things.
+Under the canvas, while you are editing, sits the shelf: every widget, with the
+groups (by what a widget reads from) listed down its left side and the widgets
+beside them. Click a group to jump to it; scrolling the widgets keeps the list
+in step. The shelf has a fixed height and scrolls inside itself, so the canvas
+keeps its shape and the page scrolls before either is squashed.
+
+- **Click** a widget to add it, **drag** it onto the canvas to place it where you
+  drop it. Nothing covers the canvas, so several in a row is several clicks.
+- **Search** over the shelf matches a widget's name, its description and its
+  group. **Enter** adds the best match, which is outlined while you type: a
+  match on the name beats one on the description or group, so "time" adds Timer;
+  **Esc** clears the search, and **Esc** again returns to the canvas. Groups with
+  nothing left are dimmed.
+- **⌘F** (**Ctrl F** on Windows and Linux) opens the shelf if it is folded and
+  puts the cursor in its search, anywhere in the editor except inside another
+  text field, where the browser's own find keeps working. The toolbar's **Add
+  object** does the same. ⌘A is not used: Select all is the browser's.
+- **Fold** collapses the shelf to one line showing the widget count and the
+  shortcut. The shelf stays folded or open the way you left it, per browser.
+- Pointing at or focusing a widget reads its description along the foot of the
+  shelf; a dimmed one adds that its integration is not set up.
+- **Hide what is not set up** removes the widgets whose integration you have no
+  gear for, from the shelf and from the right-click (or tap and hold) Add menu
+  alike. Left off, they stay listed but dimmed, which is the right default while
+  you are still connecting things.
+
+Drawing a box on the canvas asks **What goes here?** with the same widgets as a
+list.
 
 Right-clicking the canvas — or tap and hold on a touch screen — offers the same
 catalogue as a menu.
 
-The two kinds of button, one that fires a cue and one that runs an action, are
-one tile, **Button**, under Control. It arrives firing a cue; its **Does**
-setting switches it (see [Control](widgets.md#control)). The OSC and RossTalk
-buttons keep tiles of their own.
+One tile, **Button**, under Control, presses a Companion button, an app action or a
+command; its **Presses** setting chooses (see [Control](widgets.md#control)). The
+OSC and RossTalk buttons keep tiles of their own.
 
 ## Groups you reuse
 
@@ -110,6 +129,12 @@ container**, which is the only way back out once something is nested.
 restyled and reconfigured, but not dragged, resized, snapped or deleted. Locking
 a container locks everything inside it. The layer list beside the canvas carries
 an eye per object, which hides it while you work on what is underneath.
+
+**Keyboard.** **Delete** or **Backspace** removes the selection; **⌘C**, **⌘V** and
+**⌘D** copy, paste and duplicate it (**Ctrl** on Windows and Linux), pasting and
+duplicating with fresh ids all the way down a container; **⌘F** opens the
+[widget shelf](#the-widget-shelf)'s search. The first three do not act while the cursor
+is in a text field. There is no arrow-key nudge.
 
 ### Canvas shape
 
@@ -154,7 +179,7 @@ Resizing snaps only the edge being dragged; the opposite edge stays put.
 The editor works by touch. Tap an object to select it, tap bare canvas to clear
 the selection, drag to move, and drag a resize handle to change the size — the
 handles are drawn the same 9&nbsp;px but accept a finger anywhere within about
-28&nbsp;px on a touch screen. A widget can be dragged from the palette onto the
+28&nbsp;px on a touch screen. A widget can be dragged from the shelf onto the
 spot it should occupy, or tapped to drop it at the default position.
 A new widget arrives at one default size (0.3 by 0.16 of the canvas, a container 0.4 by
 0.32), except the [Message composer and Messages](widgets.md#control) widgets, which
@@ -186,8 +211,8 @@ The object toolbar above the inspector carries Duplicate and Delete, along with
 lock, layer order and snap-to-grid, and it appears only when exactly one object
 is selected.
 
-On a touch screen, dragging a widget out of the palette scrolls the list
-instead; tap to add there.
+On a touch screen, dragging a widget up out of the shelf scrolls the shelf
+instead; tap to add there. Tiles are at least 44&nbsp;px tall.
 
 ## Fit, and other window shapes
 

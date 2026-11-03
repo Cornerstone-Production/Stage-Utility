@@ -5,6 +5,8 @@
 // fields it has to cover — name, cue name, says, the words the ROW shows, former
 // names, a Companion button's label, and the trigger/action ids' human labels —
 // are one function this file's own tests can drive without mounting the section.
+// A command is also found by the screens it is used on, which the caller reads off
+// the usage and passes in.
 
 import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
 import { spokenCueName } from "@main/services/cue-pairs";
@@ -32,8 +34,10 @@ export function ruleSearchText(
   rule: RuleLike,
   triggerLabel: string | undefined,
   actionLabel: string | undefined,
+  /** The names of the screens (and Button labels) a command is used on. Only a command has any. */
+  usedOn: readonly string[] = [],
 ): string {
-  const parts: string[] = [rule.name];
+  const parts: string[] = [rule.name, ...usedOn];
   if (rule.trigger.id === CALL_TRIGGER_ID) {
     const cueName = String(rule.trigger.params.name ?? "");
     parts.push(cueName);
@@ -65,10 +69,11 @@ export function ruleMatchesSearch(
   query: string,
   triggerLabel: string | undefined,
   actionLabel: string | undefined,
+  usedOn: readonly string[] = [],
 ): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
-  return ruleSearchText(rule, triggerLabel, actionLabel).includes(needle);
+  return ruleSearchText(rule, triggerLabel, actionLabel, usedOn).includes(needle);
 }
 
 /** A spec list's label for one id, or undefined when the id is not (yet) known. */

@@ -44,6 +44,8 @@ const BASE = {
   appIcon192: null,
   appIconMaskable: null,
   appIconBackground: "#000000",
+  appIconTabBackground: "none",
+  appIconArt: null,
   showQr: true,
 };
 
@@ -348,10 +350,10 @@ describe("the dialogs", () => {
     const { writes } = mount();
     await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
     const d = within(await dialog("Tab and home-screen icon"));
-    await press(button(d, "Background #15425c"));
+    await press(button(d, "Home-screen background white"));
     assert.equal(writes.length, 0, "a background alone created an icon");
-    assert.equal(button(d, "Background #15425c").getAttribute("aria-pressed"), "true");
-    assert.equal(button(d, "Background #000000").getAttribute("aria-pressed"), "false");
+    assert.equal(button(d, "Home-screen background white").getAttribute("aria-pressed"), "true");
+    assert.equal(button(d, "Home-screen background black").getAttribute("aria-pressed"), "false");
   });
 
   test("a swatch on a saved icon whose source cannot be read writes nothing", async () => {
@@ -376,7 +378,7 @@ describe("the dialogs", () => {
       });
       await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
       const d = within(await dialog("Tab and home-screen icon"));
-      await press(button(d, "Background #ffffff"));
+      await press(button(d, "Home-screen background white"));
       await act(async () => settle());
       assert.ok(asked.some((u) => u.includes("/api/branding/source?target=icon")), `the source was never asked for: ${asked.join()}`);
       assert.deepEqual(writes, [], "an icon was saved from a stand-in after the source read failed");
@@ -402,7 +404,7 @@ describe("the dialogs", () => {
       await act(async () => settle());
       // Opening reads the source for the editor; the swatch must read nothing more.
       const opened = asked.length;
-      await press(button(d, "Background #2e6691"));
+      await press(button(d, "Home-screen background accent"));
       await act(async () => settle());
       assert.deepEqual([asked.length - opened, writes.length], [0, 0]);
     } finally {
@@ -429,13 +431,13 @@ describe("the dialogs", () => {
       await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
       const d = within(await dialog("Tab and home-screen icon"));
       await act(async () => {
-        fireEvent.click(button(d, "Background #15425c"));
-        fireEvent.click(button(d, "Background #ffffff"));
+        fireEvent.click(button(d, "Home-screen background black"));
+        fireEvent.click(button(d, "Home-screen background white"));
         await new Promise((r) => setTimeout(r, 50));
       });
       const icons = writes.filter((w) => w.icon);
       assert.equal(icons.length, 1, `expected one icon write, got ${icons.length}`);
-      assert.equal((icons[0]!.icon as { background: string }).background, "#15425c");
+      assert.equal((icons[0]!.icon as { background: string }).background, "#000000");
     } finally {
       restoreCanvas();
       globalThis.fetch = before;
@@ -475,9 +477,317 @@ describe("the dialogs", () => {
     assert.ok(button(d, "Replace"));
     absent(d.queryByRole("button", { name: "Adjust" }), "Adjust is still a separate step");
     absent(d.queryByRole("button", { name: "Use my logo" }), "Use my logo is offered once an icon exists");
-    assert.equal(button(d, "Background #2e6691").getAttribute("aria-pressed"), "true");
+    assert.equal(button(d, "Home-screen background accent").getAttribute("aria-pressed"), "true");
     await press(button(d, "Remove tab and home-screen icon"));
     assert.deepEqual(writes, [{ icon: null }]);
+  });
+});
+
+const SAVED_ICON = {
+  appIcon192: "/branding-images/aaaaaaaaaaaaaaaa.png",
+  appIconMaskable: "/branding-images/bbbbbbbbbbbbbbbb.png",
+  appIconArt: "/branding-images/cccccccccccccccc.png",
+  appIconBackground: "#000000",
+  appIconTabBackground: "none",
+};
+
+describe("the icon dialog: two backgrounds, Recolor, and the real shapes", () => {
+  /** fetch answering the icon source read, as a saved icon has one. */
+  function iconSource() {
+    const before = globalThis.fetch;
+    const beforeTimeout = AbortSignal.timeout;
+    AbortSignal.timeout = () => new AbortController().signal;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ original: null, crop: { scale: 1, x: 0, y: 0 }, art: "/branding-images/cccccccccccccccc.png" }),
+    })) as unknown as typeof fetch;
+    return () => {
+      globalThis.fetch = before;
+      AbortSignal.timeout = beforeTimeout;
+    };
+  }
+
+  test("the tab can be transparent and the home screen cannot", async () => {
+    mount({ ...SAVED_ICON });
+    await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+    const d = within(await dialog("Tab and home-screen icon"));
+    const tab = within(d.getByRole("group", { name: "Tab background" }));
+    const home = within(d.getByRole("group", { name: "Home-screen background" }));
+    assert.equal(tab.getByRole("button", { name: "Tab background transparent" }).getAttribute("aria-pressed"), "true");
+    absent(home.queryByRole("button", { name: /transparent/i }), "the home screen offers Transparent: iOS would fill it black");
+  });
+
+  test("the swatches are black, white, the accent and a custom colour, not fixed blues", async () => {
+    mount({ ...SAVED_ICON });
+    await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+    const d = within(await dialog("Tab and home-screen icon"));
+    const names = (group: string) =>
+      within(d.getByRole("group", { name: group }))
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label"));
+    assert.deepEqual(names("Tab background"), [
+      "Tab background transparent",
+      "Tab background black",
+      "Tab background white",
+      "Tab background accent",
+      "Tab background, custom colour",
+    ]);
+    assert.deepEqual(names("Home-screen background"), [
+      "Home-screen background black",
+      "Home-screen background white",
+      "Home-screen background accent",
+      "Home-screen background, custom colour",
+    ]);
+  });
+
+  describe("the custom background's debounced write", () => {
+    // Same stub the accent's group needs: the colour panel reads shared stage state.
+    const g = globalThis as unknown as Record<string, unknown>;
+    const realEventSource = g.EventSource;
+    before(() => {
+      g.EventSource = class {
+        static readonly CLOSED = 2;
+        readyState = 1;
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+      };
+    });
+    after(() => {
+      g.EventSource = realEventSource;
+    });
+    const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+
+    async function openCustom(state: Partial_, openPanel = true) {
+      const writes: Partial_[] = [];
+      const handlers = {
+        handleSetBranding: async (p: Partial_) => {
+          writes.push(p);
+          return true;
+        },
+        handleShowQrChange: () => {},
+      };
+      const client = new QueryClient();
+      const tree = (st: Partial_) =>
+        React.createElement(
+          QueryClientProvider,
+          { client },
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(BrandingSection, { stageState: { ...BASE, ...st }, handlers } as never),
+          ),
+        );
+      const view = render(tree(state));
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      if (openPanel) await press(button(d, "Home-screen background, custom colour"));
+      return { writes, view, tree, d };
+    }
+
+    test("closing the dialog within the debounce still writes the colour the wheel stopped on", async () => {
+      const restoreSource = iconSource();
+      const restoreCanvas = fakeCanvas();
+      try {
+        const { writes } = await openCustom({ ...SAVED_ICON });
+        await act(async () => {
+          fireEvent.change(screen.getByLabelText("Home-screen background, custom colour value"), { target: { value: "#123456" } });
+        });
+        assert.equal(writes.length, 0, "written before the debounce");
+        // Close inside the 350 ms window.
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
+        });
+        await wait(100);
+        await wait(500);
+        const icons = writes.filter((w) => w.icon).map((w) => (w.icon as { background: string }).background);
+        assert.deepEqual(icons, ["#123456"], "the last colour was dropped with the dialog");
+      } finally {
+        restoreCanvas();
+        restoreSource();
+      }
+    });
+
+    test("a colour still pending when the dialog closes mid-save is made once that save is done", async () => {
+      const before = globalThis.fetch;
+      const beforeTimeout = AbortSignal.timeout;
+      AbortSignal.timeout = () => new AbortController().signal;
+      // The icon source read is what makeIcon waits on: hold it, so the first redraw is still running.
+      let release: () => void = () => {};
+      const gate = new Promise<void>((r) => (release = r));
+      globalThis.fetch = (async () => {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ original: null, crop: { scale: 1, x: 0, y: 0 }, art: "/branding-images/cccccccccccccccc.png" }),
+        };
+      }) as unknown as typeof fetch;
+      const restoreCanvas = fakeCanvas();
+      try {
+        const { writes, d } = await openCustom({ ...SAVED_ICON }, false);
+        await press(button(d, "Home-screen background white"));
+        await press(button(d, "Home-screen background, custom colour"));
+        await act(async () => {
+          fireEvent.change(screen.getByLabelText("Home-screen background, custom colour value"), { target: { value: "#123456" } });
+        });
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
+        });
+        await wait(50);
+        assert.equal(writes.filter((w) => w.icon).length, 0, "nothing can have been written while the first redraw is held");
+        release();
+        await wait(100);
+        const icons = writes.filter((w) => w.icon).map((w) => (w.icon as { background: string }).background);
+        assert.deepEqual(icons, ["#ffffff", "#123456"], "the pending colour was dropped while the icon was busy");
+      } finally {
+        restoreCanvas();
+        globalThis.fetch = before;
+        AbortSignal.timeout = beforeTimeout;
+      }
+    });
+
+    test("the Custom swatch follows a colour saved from another browser", async () => {
+      // The panel's draft is taken from the swatch when it opens, so the swatch is what is read:
+      // change the saved value with the panel shut, then open it.
+      const { view, tree, d } = await openCustom({ ...SAVED_ICON, appIconBackground: "#112233" }, false);
+      view.rerender(tree({ ...SAVED_ICON, appIconBackground: "#445566" }));
+      await wait(0);
+      await press(button(d, "Home-screen background, custom colour"));
+      const box = screen.getByLabelText("Home-screen background, custom colour value") as HTMLInputElement;
+      assert.match(box.value.toLowerCase(), /445566/, "the swatch kept the colour it was first drawn with");
+    });
+  });
+
+  test("the tab and home screen are picked apart: a tab pick redraws with the home background untouched", async () => {
+    const restoreSource = iconSource();
+    const restoreCanvas = fakeCanvas();
+    try {
+      const { writes } = mount({ ...SAVED_ICON, appIconBackground: "#ffffff" });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      await press(button(d, "Tab background black"));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      const icon = writes.find((w) => w.icon)?.icon as { background: string; tabBackground: string } | undefined;
+      assert.ok(icon, "no icon was written");
+      assert.deepEqual([icon.tabBackground, icon.background], ["#000000", "#ffffff"]);
+    } finally {
+      restoreCanvas();
+      restoreSource();
+    }
+  });
+
+  test("a home-screen pick redraws with the tab background untouched", async () => {
+    const restoreSource = iconSource();
+    const restoreCanvas = fakeCanvas();
+    try {
+      const { writes } = mount({ ...SAVED_ICON, appIconTabBackground: "#2e6691" });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      await press(button(d, "Home-screen background white"));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      const icon = writes.find((w) => w.icon)?.icon as { background: string; tabBackground: string } | undefined;
+      assert.ok(icon, "no icon was written");
+      assert.deepEqual([icon.background, icon.tabBackground], ["#ffffff", "#2e6691"]);
+    } finally {
+      restoreCanvas();
+      restoreSource();
+    }
+  });
+
+  test("Recolor in the dialog is the logo's setting, and redraws the icon in the same save", async () => {
+    const restoreSource = iconSource();
+    const restoreCanvas = fakeCanvas();
+    try {
+      const { writes } = mount({ ...SAVED_ICON, appLogoMonochrome: true });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      await press(d.getByRole("switch", { name: "Recolor icon to match theme" }));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      assert.equal(writes.length, 1, `expected one write, got ${writes.length}`);
+      assert.equal(writes[0]!.monochrome, false);
+      assert.ok(writes[0]!.icon, "the icon was not redrawn with the new setting");
+    } finally {
+      restoreCanvas();
+      restoreSource();
+    }
+  });
+
+  test("Recolor on the logo card also redraws an existing icon, and only flips the setting when there is none", async () => {
+    const { writes } = mount({ appLogo: LOGO });
+    await press(screen.getByRole("switch", { name: "Recolor logo to match theme" }));
+    assert.deepEqual(writes, [{ monochrome: false }]);
+    cleanup();
+    await settle();
+    const restoreSource = iconSource();
+    const restoreCanvas = fakeCanvas();
+    try {
+      const again = mount({ appLogo: LOGO, ...SAVED_ICON });
+      await press(screen.getByRole("switch", { name: "Recolor logo to match theme" }));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      assert.equal(again.writes.length, 1);
+      assert.equal(again.writes[0]!.monochrome, false);
+      assert.ok(again.writes[0]!.icon, "the logo card's switch left the icon as it was drawn");
+    } finally {
+      restoreCanvas();
+      restoreSource();
+    }
+  });
+
+  test("the icon editor shows the art in the theme ink when Recolor is on, as uploaded when off", async () => {
+    // The editor is the recoloured preview (a CSS mask filled from currentColor)
+    // or the plain image: what the saved icon will be drawn as.
+    for (const [monochrome, expectMask] of [[true, true], [false, false]] as const) {
+      const restoreSource = iconSource();
+      const restoreCanvas = fakeCanvas();
+      try {
+        mount({ ...SAVED_ICON, appLogoMonochrome: monochrome });
+        await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+        const d = await dialog("Tab and home-screen icon");
+        await act(async () => new Promise((r) => setTimeout(r, 30)));
+        const zoom = within(d).getByRole("slider", { name: "Zoom" });
+        const viewport = zoom.closest("div.flex-col")?.parentElement?.querySelector("div.touch-none");
+        assert.ok(viewport, "the editor's viewport was not found");
+        const masked = [...viewport.querySelectorAll("span[aria-hidden]")].some((el) => (el as HTMLElement).style.backgroundColor.toLowerCase() === "currentcolor");
+        assert.equal(masked, expectMask, `Recolor ${monochrome ? "on" : "off"}: the editor ${masked ? "recoloured" : "did not recolour"} the art`);
+        assert.equal(viewport.className.includes("bg-[image:conic-gradient"), true, "the viewport is not a transparency checker");
+      } finally {
+        restoreCanvas();
+        restoreSource();
+        cleanup();
+        await settle();
+      }
+    }
+  });
+
+  test("the iPhone and Android previews are their own shape: no black backing shows at the corners", async () => {
+    // Size() used to wrap the rounded iPhone image in a black 4 px-radius square,
+    // so black showed at the corners. The check is on the real tree: nothing between
+    // a preview image and its label has a background or a clip of its own.
+    mount({ ...SAVED_ICON });
+    await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+    const d = await dialog("Tab and home-screen icon");
+    for (const label of ["iPhone 180", "Android 192"]) {
+      const caption = within(d).getByText(label);
+      const img = caption.querySelector("img");
+      assert.ok(img, `${label}: no image in the preview`);
+      for (let el: Element | null = img; el && el !== caption.parentElement; el = el.parentElement) {
+        const cls = el.getAttribute("class") ?? "";
+        const style: CSSStyleDeclaration = (el as HTMLElement).style;
+        assert.ok(!/\bbg-/.test(cls), `${label}: a ${el.tagName} behind the icon has ${cls}`);
+        if (el !== img) assert.ok(!/overflow-hidden|rounded/.test(cls) && style.borderRadius === "", `${label}: a frame clips the icon: ${cls}`);
+        assert.equal(style.backgroundColor, "", `${label}: a ${el.tagName} behind the icon is painted`);
+      }
+    }
+  });
+
+  test("the tab is previewed on a light strip and a dark strip", async () => {
+    mount({ ...SAVED_ICON });
+    await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+    const d = within(await dialog("Tab and home-screen icon"));
+    assert.ok(d.getByText("Tab, light browser"));
+    assert.ok(d.getByText("Tab, dark browser"));
   });
 });
 

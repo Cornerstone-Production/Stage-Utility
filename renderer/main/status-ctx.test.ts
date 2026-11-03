@@ -35,7 +35,7 @@ type Source = keyof typeof FLAG_FOR;
 
 /** Every source carrying a value that names it, and only `answered` known. */
 function input(answered: Source | null): Input {
-  const status = (s: Source) => ({ value: { from: s } as never, known: s === answered });
+  const status = (s: Source) => ({ value: { from: s } as never, known: s === answered, failed: false });
   return {
     obsStatus: status("obsStatus"),
     reaperStatus: status("reaperStatus"),
@@ -52,8 +52,9 @@ function input(answered: Source | null): Input {
       states: [{ from: "integrationsSnap" }] as never,
       labels: { from: "integrationsSnap" },
       known: answered === "integrationsSnap",
+      failed: false,
     },
-    onlinePresence: { onlineOutputIds: ["onlinePresence"], known: answered === "onlinePresence" },
+    onlinePresence: { onlineOutputIds: ["onlinePresence"], known: answered === "onlinePresence", lastSeen: new Map(), failed: false },
   };
 }
 

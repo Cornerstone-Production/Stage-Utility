@@ -188,7 +188,7 @@ export const CARD_RADIUS = 0.0148;
  * fail the build rather than silently never match.
  */
 export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
-  "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
+  "home-attention", "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
   "home-pvp",
@@ -467,6 +467,15 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     // whatever the screen is routed to should look like it does on that screen.
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
     homeSize: "l",
+  },
+  "home-attention": {
+    label: "Needs attention",
+    blurb: "What is wrong now, with its fix and a healthy line",
+    group: "PCO / service",
+    config: () => ({ type: "home-attention" }),
+    style: BARE,
+    homeSize: "xl",
+    homeWhen: "always",
   },
   "home-readiness": {
     label: "Readiness",
@@ -825,20 +834,6 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
-  // One "Button" in the palette covers this and the cue button: the inspector's
-  // Does control switches a button between the two stored types. This one stays
-  // a full registry entry (every saved layout holds them, and the renderer, the
-  // capability table and the type union all key on it) but is not offered on its
-  // own, and carries the same label so the layer list and the inspector header
-  // read "Button" whichever way a widget is set.
-  "action-button": {
-    label: "Button",
-    blurb: "Runs one of the app's own actions",
-    group: null,
-    config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
-    style: () => PILL({ fontSize: 0.045 }),
-  },
-
   notes: {
     label: "Notes",
     blurb: "A shared note anyone can type into",
@@ -855,11 +850,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
-  // The palette's Button: it arrives firing a cue, and the inspector's Does
-  // control turns it into an action button (and back). See action-button above.
+  // The palette's Button. It starts with nothing chosen; the inspector's Presses
+  // control makes it press a Companion button, an app action or a command.
   "cue-button": {
     label: "Button",
-    blurb: "Fires a cue, or runs an action, from a console",
+    blurb: "Presses a Companion button, an app action or a command",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
     // The size every other button starts at, small enough that the lamp, label and
@@ -1164,15 +1159,29 @@ export function isKnownObjectType(t: LayoutObjectType): boolean {
  * which is exactly the sort of thing nobody notices until a service.
  */
 export function widgetMatchesQuery(t: LayoutObjectType, query: string): boolean {
+  return widgetMatchRank(t, query) !== null;
+}
+
+/**
+ * How well a widget matches a search, lower is better, or null for no match:
+ * 0 its name starts with it, 1 its name contains it, 2 its type id does, 3 its
+ * description does, 4 only its group does. The group is matched so "obs" or "mics"
+ * brings in everything under that heading -- the shelf's headings are words an
+ * operator reads and will type back -- but ranked last, so typing "text" puts the
+ * Text widget ahead of the rest of "Text & time".
+ */
+export function widgetMatchRank(t: LayoutObjectType, query: string): number | null {
   const needle = query.trim().toLowerCase();
-  if (!needle) return true;
+  if (!needle) return 0;
   const spec = findLayoutObjectSpec(t);
-  if (!spec) return t.toLowerCase().includes(needle);
-  return (
-    spec.label.toLowerCase().includes(needle) ||
-    t.toLowerCase().includes(needle) ||
-    spec.blurb.toLowerCase().includes(needle)
-  );
+  if (!spec) return t.toLowerCase().includes(needle) ? 2 : null;
+  const label = spec.label.toLowerCase();
+  if (label.startsWith(needle)) return 0;
+  if (label.includes(needle)) return 1;
+  if (t.toLowerCase().includes(needle)) return 2;
+  if (spec.blurb.toLowerCase().includes(needle)) return 3;
+  if ((spec.group ?? "").toLowerCase().includes(needle)) return 4;
+  return null;
 }
 
 // Fallbacks are chosen so an unknown object is INERT rather than plausible: it

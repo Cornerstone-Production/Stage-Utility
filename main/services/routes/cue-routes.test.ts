@@ -448,7 +448,7 @@ describe("the token list will not parse", () => {
         () => call("projectors_on"),
         (err: unknown) => {
           thrown = err;
-          return /cue tokens are unreadable/.test(errorMessage(err));
+          return /command tokens are unreadable/.test(errorMessage(err));
         },
       );
       assert.equal(handlerErrorStatus(thrown), 500);
@@ -467,7 +467,7 @@ describe("the token list will not parse", () => {
     try {
       await assert.rejects(
         () => callRoute(cueRoutes, "/api/cues/tokens", { method: "GET" }),
-        /cue tokens are unreadable/,
+        /command tokens are unreadable/,
       );
     } finally {
       await secretsStore.setSecret("companion", "cueTokens", "[]");
@@ -1360,6 +1360,105 @@ describe("the button and pair endpoints", () => {
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
+  test("the button list carries the page list and colours, and no icon", async () => {
+    const r = await callRoute(cueRoutes, "/api/companion/buttons");
+    const body = r.json as {
+      buttons: (CompanionButton & { icon?: unknown })[];
+      pages: { page: number; name: string; labelled: number }[];
+    };
+    assert.deepEqual(
+      body.pages.map((p) => `${p.page}|${p.name}|${p.labelled}`),
+      [
+        `1|${FIXTURE_PAGES.screens}|6`,
+        `2|${FIXTURE_PAGES.lights}|6`,
+        `3|${FIXTURE_PAGES.cameras}|6`,
+        "4|PAGE|0",
+        `5|${FIXTURE_PAGES.recorders}|11`,
+      ],
+    );
+    const on = body.buttons.find((b) => b.page === 1 && b.row === 0 && b.col === 1)!;
+    assert.deepEqual([on.bg, on.fg], ["#2e6691", "#f4f0ec"]);
+    assert.equal(
+      body.buttons.some((b) => "icon" in b),
+      false,
+      "an icon rode along on the list every screen loads",
+    );
+  });
+
+  test("one page comes back with its extent, its keys and their icons", async () => {
+    const r = await callRoute(cueRoutes, "/api/companion/pages/3");
+    assert.equal(r.status, 200);
+    const body = r.json as {
+      ok: boolean;
+      page: number;
+      cols: number;
+      rows: number;
+      keys: { row: number; col: number; kind: string; label: string }[];
+    };
+    assert.deepEqual([body.ok, body.page, body.cols, body.rows], [true, 3, 13, 8]);
+    assert.deepEqual(
+      body.keys
+        .filter((k) => k.kind === "reference")
+        .map((k) => `${k.row}/${k.col}|${k.label}`),
+      ["5/11|Projectors ON", "5/12|"],
+    );
+    const icon = (await callRoute(cueRoutes, "/api/companion/pages/1")).json as { keys: { icon: string | null }[] };
+    assert.equal(icon.keys.filter((k) => k.icon?.startsWith("data:image/png")).length, 1);
+  });
+
+  test("a page's keys carry the live values of their variables, and only that page's are read", async () => {
+    const real = companionDeps.fetch;
+    const reads: string[] = [];
+    const key = (text: string) => ({ type: "button-layered", style: { layers: [{ type: "text", text: { value: text, isExpression: false } }] } });
+    const doc = {
+      pages: {
+        "1": { name: "One", controls: { "0": { "0": key("Seats $(Hall:free)"), "1": key("Plain") } } },
+        "2": { name: "Two", controls: { "0": { "0": key("Other $(Elsewhere:n)") } } },
+      },
+    };
+    companionDeps.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/api/variable/")) {
+        reads.push(url);
+        return new Response("42", { status: 200 });
+      }
+      return Response.json(doc);
+    };
+    companionApi.invalidate();
+    try {
+      const r = await callRoute(cueRoutes, "/api/companion/pages/1");
+      const keys = (r.json as { keys: { label: string; text: string }[] }).keys;
+      assert.deepEqual(
+        keys.map((k) => `${k.label}|${k.text}`),
+        ["Seats $(Hall:free)|Seats 42", "Plain|Plain"],
+        "the label is the identity string and stays raw; the text is what the key shows",
+      );
+      assert.equal(reads.length, 1, reads.join(" "));
+      assert.match(reads[0]!, /\/api\/variable\/Hall\/free\/value$/);
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+
+  test("a page Companion does not have is 404, and an unreachable Companion is 200 with the reason", async () => {
+    assert.equal((await callRoute(cueRoutes, "/api/companion/pages/99")).status, 404);
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async () => {
+      throw new Error("connect EHOSTUNREACH");
+    };
+    companionApi.invalidate();
+    try {
+      const r = await callRoute(cueRoutes, "/api/companion/pages/1");
+      assert.equal(r.status, 200);
+      assert.equal((r.json as { ok: boolean }).ok, false);
+      assert.match((r.json as { reason: string }).reason, /EHOSTUNREACH/);
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+
   test("every button carries its page id and its action ids, so the picker can fingerprint it", async () => {
     // Without these on the wire the picker would have to make a second request
     // per button, and a rule created from it would be pinned to coordinates
@@ -2047,7 +2146,7 @@ describe("reconciling a cue's Companion button", () => {
     try {
       companionApi.invalidate();
       const r = await integrationManager.test("companion");
-      assert.match(r.message ?? "", /1 cue status\(es\) could not be saved\./);
+      assert.match(r.message ?? "", /1 command status\(es\) could not be saved\./);
     } finally {
       automationEngine.updateRule = realUpdate;
       restore();

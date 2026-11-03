@@ -158,6 +158,8 @@ const button = (over: Partial<CompanionButton> = {}): CompanionButton => ({
   actionIds: ["a1"],
   stateSource: null,
   learnConnections: ["Rack"],
+  bg: null,
+  fg: null,
   ...over,
 });
 
