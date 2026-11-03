@@ -387,6 +387,42 @@ describe("a bundle's slot boards", () => {
   });
 });
 
+describe("a board pointer only a slots screen uses", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+  });
+
+  test("a custom view's leftover pointer at a board not in the file is dropped without a warning", async () => {
+    // Export ships only the boards a slots screen or a widget shows, so a
+    // custom view's dormant pointer never has its board in the file. Warning
+    // about it told the operator a screen lost its board when none was shown.
+    const report = await applyViewBundle(
+      bundle({
+        views: [
+          { id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-src" },
+          { id: "view-2", name: "Stage Layout", kind: "custom", createdAt: 0, boardId: "b-elsewhere",
+            layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] } },
+        ],
+        sideData: { slots: {}, boards: { "b-src": { name: "Mic Board" } }, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, [], "a dormant pointer was reported as a lost board");
+    const stored = await viewsStore.load();
+    assert.equal(stored.find((v) => v.id === report.views[1]!.id)!.boardId, undefined, "the leftover pointer kept the source's board id");
+    assert.ok(stored.find((v) => v.id === report.views[0]!.id)!.boardId, "the slots screen lost its board");
+  });
+
+  test("a slots screen pointing at a board not in the file is still named", async () => {
+    const report = await applyViewBundle(
+      bundle({
+        views: [{ id: "view-1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null, boardId: "b-gone" }],
+        sideData: { slots: {}, boards: {}, notes: {}, serviceCueLayouts: [] },
+      }),
+    );
+    assert.deepEqual(report.skipped, ['"Mic Board" pointed at a slot board that is not in the file; it now shows none']);
+  });
+});
+
 describe("the rebind list walks every root", () => {
   beforeEach(async () => { await viewsStore.save([] as never); });
 

@@ -305,7 +305,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     takenNames.add(name);
     reportViews.push(name === v.name ? { id: v.id, name } : { id: v.id, name, renamedFrom: v.name });
     let next: View = { ...v, name };
-    if (v.boardId !== undefined) next = { ...next, boardId: pointAt(v.boardId, `"${name}"`) };
+    if (v.kind === "slots") {
+      if (v.boardId !== undefined) next = { ...next, boardId: pointAt(v.boardId, `"${name}"`) };
+    } else if (v.boardId !== undefined) {
+      // A pointer kept from an earlier life as a slots screen. Nothing shows it,
+      // and export ships no board for it, so missing from the file is the usual
+      // case and no loss: kept when its board did travel, dropped quietly when not.
+      const { boardId: dormant, ...rest } = next;
+      const mapped = typeof dormant === "string" ? boardIdMap.get(dormant) : undefined;
+      next = mapped ? { ...rest, boardId: mapped } : rest;
+    }
     if (next.layout) {
       const objects = structuredClone(next.layout.objects);
       walkLayoutObjects(objects, (o) => {
