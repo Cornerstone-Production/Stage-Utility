@@ -123,19 +123,6 @@ export function MicSlotsPage() {
     useSensor(KeyboardSensor),
   );
 
-  function onDragStart(e: DragStartEvent) {
-    const data = e.active.data.current as DragData | undefined;
-    if (!data) return;
-    setDragging(data);
-    mic.select(data.drag.id);
-  }
-  function onDragEnd(e: DragEndEvent) {
-    setDragging(null);
-    const drag = (e.active.data.current as DragData | undefined)?.drag;
-    const drop = (e.over?.data.current as DropData | undefined)?.drop;
-    if (drag && drop) mic.mutate((b) => applyDrop(b, drag, drop));
-  }
-
   const dialogs: BoardDialogs = {
     copyFrom: setCopying,
     chargers: setChargers,
@@ -159,6 +146,21 @@ export function MicSlotsPage() {
     if (selId) setHelpOpen(false);
   }
   const inspectorOpen = !!sel || helpOpen;
+
+  function onDragStart(e: DragStartEvent) {
+    const data = e.active.data.current as DragData | undefined;
+    if (!data) return;
+    setDragging(data);
+    // Only an open inspector follows the drag: opening it now would slide it in
+    // and move every board under the card being carried.
+    if (inspectorOpen) mic.select(data.drag.id);
+  }
+  function onDragEnd(e: DragEndEvent) {
+    setDragging(null);
+    const drag = (e.active.data.current as DragData | undefined)?.drag;
+    const drop = (e.over?.data.current as DropData | undefined)?.drop;
+    if (drag && drop) mic.mutate((b) => applyDrop(b, drag, drop));
+  }
   usePageActions(
     <Button
       variant="filled"
