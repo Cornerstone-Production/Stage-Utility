@@ -77,6 +77,23 @@ describe("what is published is bounded", () => {
     assert.ok(seenAt(presenceSnapshot(), "x".repeat(128)) !== undefined);
   });
 
+  it("the sweep drops a stray id once it is past the TTL, and keeps a known output", () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000_000_000 });
+    setKnownOutputIds(() => new Set(["out-a"]));
+    try {
+      displayHeartbeat("out-a");
+      for (let i = 0; i < 300; i++) displayHeartbeat(`stray-${i}`);
+      mock.timers.tick(100_000);
+      sweepPresence();
+      setKnownOutputIds(null); // publishes everything held, so what is held shows
+      const ids = presenceSnapshot().lastSeen.map(([k]) => k).filter((k) => k.startsWith("stray-") || k === "out-a");
+      assert.deepEqual(ids, ["out-a"], "stray ids are still held after the TTL");
+    } finally {
+      setKnownOutputIds(null);
+      mock.timers.reset();
+    }
+  });
+
   it("the sweep forgets an output not heard from in 30 days", () => {
     mock.timers.enable({ apis: ["Date"], now: 1_000_000_000_000 });
     try {

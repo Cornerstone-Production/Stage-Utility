@@ -17,6 +17,9 @@ import { broadcast } from "./broadcaster.js";
 const TTL_MS = 90_000;
 const SWEEP_MS = 30_000;
 
+// Heartbeats carry any id a LAN client cares to send, so this map is bounded by
+// the sweep, not at insert: an id that is not a known output is dropped once it
+// is past the TTL, and a known one is kept for FORGET_AFTER_MS.
 const lastSeen = new Map<string, number>();
 // When an output last reported before it sent a "leaving" beacon. `lastSeen`
 // forgets an output the moment it leaves, which is right for "who is connected"
@@ -103,6 +106,13 @@ function maybeBroadcast(): void {
 export function sweepPresence(): void {
   const cutoff = Date.now() - FORGET_AFTER_MS;
   for (const m of [lastSeen, departed]) for (const [id, t] of m) if (t < cutoff) m.delete(id);
+  // An id nobody set up and nothing has said for a TTL is not an output going
+  // quiet, it is a stray heartbeat. Without this each one stayed for 30 days.
+  const known = knownOutputs?.();
+  if (known) {
+    const lapsed = Date.now() - TTL_MS;
+    for (const [id, t] of lastSeen) if (t < lapsed && !known.has(id)) lastSeen.delete(id);
+  }
   maybeBroadcast();
   if (lastSeen.size === 0) {
     if (sweepTimer) clearInterval(sweepTimer);

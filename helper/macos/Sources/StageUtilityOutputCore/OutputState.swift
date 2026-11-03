@@ -77,6 +77,9 @@ public enum KioskMigration {
 public final class OutputStateStore {
   private struct File: Codable {
     var outputs: [String: OutputRecord]
+    /// Written true by every helper that knows the switch changes the server takes
+    /// (`pendingChange`). A file without it was written by one that did not.
+    var switchAware: Bool?
   }
 
   public let file: URL
@@ -102,6 +105,19 @@ public final class OutputStateStore {
     load()
   }
 
+  /// An output switched off on a helper that predates `pendingChange` is off, bound,
+  /// and holds no change to tell the server: the server it is now bound to has no
+  /// stored switch, takes the output as on, and the first post would be answered
+  /// "on". Give each such output a change id, once, so that post says "off". Held in
+  /// memory until the next save writes `switchAware`, which is what stops it being
+  /// done again: acknowledging the change is that save.
+  private func announceSwitchesMadeBeforeTheServerKnew() {
+    for (key, var record) in records where !record.enabled && record.boundTo != nil && record.pendingChange == nil {
+      record.pendingChange = OutputSwitch.newChangeId()
+      records[key] = record
+    }
+  }
+
   /// 24 random bytes as hex, the length and alphabet of the shell agent's.
   public static func randomToken() -> String {
     var generator = SystemRandomNumberGenerator()
@@ -122,7 +138,9 @@ public final class OutputStateStore {
       readProblem = "outputs.json could not be read (\(why))"
     case .data(let data):
       do {
-        records = try JSONDecoder().decode(File.self, from: data).outputs
+        let file = try JSONDecoder().decode(File.self, from: data)
+        records = file.outputs
+        if file.switchAware != true { announceSwitchesMadeBeforeTheServerKnew() }
       } catch {
         readProblem = "outputs.json is not what the helper wrote (\(error.localizedDescription))"
       }
@@ -236,7 +254,7 @@ public final class OutputStateStore {
     if let readProblem { throw Unreadable(why: readProblem) }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-    let data = try encoder.encode(File(outputs: records))
+    let data = try encoder.encode(File(outputs: records, switchAware: true))
     try PrivateFiles.makeDirectory(file.deletingLastPathComponent())
     try PrivateFiles.write(data, to: file)
   }

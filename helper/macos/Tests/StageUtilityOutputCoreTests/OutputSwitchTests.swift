@@ -114,7 +114,7 @@ import Testing
       let store = OutputStateStore(directory: dir)
       #expect(store.readProblem == nil)
       #expect(store.record(for: "k")?.enabled == false)
-      #expect(store.record(for: "k")?.pendingChange == nil)
+      #expect(store.record(for: "k")?.pendingChange != nil, "an off output from before the switch must tell the server it is off")
     }
   }
 }
