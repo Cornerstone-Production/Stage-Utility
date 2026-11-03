@@ -52,7 +52,7 @@ import { calledCueName, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
-import { ownedByProblem, watchOwnedRules } from "./button-ownership.js";
+import { cueUsage, ownedByProblem, watchOwnedRules } from "./button-ownership.js";
 
 /**
  * What updateRule accepts. `ownedBy: null` clears it, which is how a rule is
@@ -156,13 +156,20 @@ class AutomationEngine {
    *  nobody watching turning into a cue that fires on a call made yesterday. */
   private pendingConfirm = new Map<string, { token: string; expiresAt: number }>();
   private subscribed = false;
+  /** Has init read the rules? Before that, a pass that wants to add rules writes the store and init loads them. */
+  private rulesLoaded = false;
   private watchingViews = false;
+
+  hasLoadedRules(): boolean {
+    return this.rulesLoaded;
+  }
 
   async init(): Promise<void> {
     await automationLog.init();
     // Populate the signal cache before any client can ask for the hello burst.
     await signalStore.init();
     this.rules = await automationStore.loadRules();
+    this.rulesLoaded = true;
     this.rulesUnread = automationStore.rulesUnreadable();
     this.settings = await automationStore.loadSettings();
     // The rules file is not always something this app wrote. A restored config
@@ -495,7 +502,13 @@ class AutomationEngine {
     const gone = this.rules.find((r) => r.id === id);
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
-    if (gone) console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})`);
+    if (gone) {
+      // A cue's name is a URL somebody else holds, and Buttons name it: say which went and how many are left pressing nothing.
+      const cue = calledCueName(gone.trigger);
+      const pressing = cue ? (cueUsage(stageController.getState().views)[cue.trim().toLowerCase()] ?? []).length : 0;
+      const orphaned = cue ? ` as cue "${scrub(cue)}", ${plural(pressing, "Button still names", "Buttons still name")} it` : "";
+      console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})${orphaned}`);
+    }
     this.rulesChanged();
     return this.listRules();
   }
