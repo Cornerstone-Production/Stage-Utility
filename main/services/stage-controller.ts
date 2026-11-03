@@ -4122,7 +4122,7 @@ export class StageController {
    * second screen over the same charger.
    */
   async duplicateView(id: string, name?: string, opts: { copyBoards?: boolean } = {}): Promise<{ state: StageState; view: View }> {
-    const view = await this.copyViewRecord(id, name, undefined, opts.copyBoards ?? true);
+    const view = await this.copyViewRecord(id, name, opts.copyBoards ?? true);
     return { state: this.state, view };
   }
 
@@ -4204,14 +4204,8 @@ export class StageController {
     return next;
   }
 
-  /** duplicateView, returning the copy — see createViewRecord for why, and for
-   *  `onAssigned`. */
-  private async copyViewRecord(
-    id: string,
-    name?: string,
-    onAssigned?: (view: View) => void,
-    copyBoards = false,
-  ): Promise<View> {
+  /** duplicateView, returning the copy — see createViewRecord for why. */
+  private async copyViewRecord(id: string, name: string | undefined, copyBoards: boolean): Promise<View> {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
@@ -4221,7 +4215,6 @@ export class StageController {
     );
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
-    onAssigned?.(copy);
     await viewsStore.save(views);
     await this.loadShownBoards();
     this.recomputeResolved();
