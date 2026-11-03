@@ -512,8 +512,10 @@ export function IntegrationDialog({
       // permanently unequal, so "Unsaved changes" stayed up after a successful
       // save — most visibly after changing a secret.
       setLocalConfig(initialConfig(descriptor, next));
-      // The saved settings are not the ones the last Test ran against.
+      // The saved settings are not the ones the last Test ran against, and a Test still
+      // running was started against the old ones.
       setTestResult(null);
+      edits.current++;
       // A password left unchanged that comes back empty was cleared by the
       // server because the address moved: see dropped-credentials.ts.
       const dropped = droppedCredentialNotice(`${descriptor.label} settings saved`, descriptor.configSchema, pristine, config, next.config);
@@ -849,10 +851,15 @@ export function IntegrationDialog({
           {!bespoke && (
             <DialogFooter className="mt-0 flex-wrap justify-start gap-2 border-t border-line px-5 py-3">
               {!testInBody && (
-                <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
-                  {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-                  Test connection
-                </Button>
+                <>
+                  {/* Test reads the SAVED settings, so over edited fields it would answer for a
+                      device the operator is not looking at. */}
+                  <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting || schemaDirty}>
+                    {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+                    Test connection
+                  </Button>
+                  {schemaDirty && <span className="text-caption1 text-fg-muted" data-test-needs-save="">Save first: Test reads the saved settings.</span>}
+                </>
               )}
               {descriptor.id === "prodcom" && (
                 <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>

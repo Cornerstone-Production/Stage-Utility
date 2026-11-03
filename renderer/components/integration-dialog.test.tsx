@@ -201,18 +201,18 @@ describe("the dialog footer", () => {
     const field = () => content.querySelector("[data-config-field] input") as HTMLInputElement;
     const btn = (t: string) => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
     const answers = () => content.querySelectorAll("[data-test-result]").length;
-    // A footer dialog's Test is live over edits: it answers for what was saved.
-    fireEvent.change(field(), { target: { value: "edited" } });
+    // Test is disabled over edits, so each answer is got from the saved settings.
     fireEvent.click(btn("Test connection"));
     await settleFor(60);
     assert.equal(answers(), 1);
+    fireEvent.change(field(), { target: { value: "edited" } });
     fireEvent.click(btn("Save"));
     await settleFor(60);
     assert.equal(answers(), 0, "an answer stayed after Save");
-    fireEvent.change(field(), { target: { value: "again" } });
     fireEvent.click(btn("Test connection"));
     await settleFor(60);
     assert.equal(answers(), 1);
+    fireEvent.change(field(), { target: { value: "again" } });
     fireEvent.click(btn("Discard"));
     await settleFor(20);
     assert.equal(answers(), 0, "an answer stayed after Discard");
@@ -221,6 +221,16 @@ describe("the dialog footer", () => {
     fireEvent.change(field(), { target: { value: "during" } });
     await settleFor(60);
     assert.equal(answers(), 0, "a Test that finished after an edit was shown");
+  });
+
+  test("a footer dialog's Test waits for Save while the fields hold edits, and says so", async () => {
+    const content = await open("obs");
+    const test = () => [...content.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Test connection") as HTMLButtonElement;
+    assert.equal(test().disabled, false);
+    fireEvent.change(content.querySelector("[data-config-field] input")!, { target: { value: "edited" } });
+    await settleFor(20);
+    assert.equal(test().disabled, true, "Test stayed live over unsaved fields");
+    assert.match(content.querySelector("[data-test-needs-save]")?.textContent ?? "", /Save first/);
   });
 
   test("the same in a footer dialog: an edit clears the answer beside Test connection", async () => {
