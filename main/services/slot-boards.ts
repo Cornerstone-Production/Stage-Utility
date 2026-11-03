@@ -49,12 +49,16 @@ export function forEachSlotsGrid(
   }
 }
 
-/** The board a slots-kind view shows. A view saved before boards shows the
- *  board its own id names — the v3 key its slots were stored under. */
+/** The board a slots-kind view shows, or null for none. A view saved before
+ *  boards shows the board its own id names — the v3 key its slots were stored
+ *  under. A view of any other kind shows no board: a pointer it kept from an
+ *  earlier life as a slots screen is dormant, and only the code that keeps that
+ *  pointer up to date (deleting a board, copying a view) reads `boardId` itself. */
 export function viewBoardId(view: View): string | null {
+  if (view.kind !== "slots") return null;
   if (view.boardId === null) return null;
   if (typeof view.boardId === "string" && view.boardId) return view.boardId;
-  return view.kind === "slots" ? view.id : null;
+  return view.id;
 }
 
 /** The board a slots widget shows, or null for none. Reads a config from before

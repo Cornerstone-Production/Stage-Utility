@@ -1,0 +1,88 @@
+// Board writes that must refuse before they write, and board pointers that
+// only a slots screen has. Driven through the real handlers against the real
+// controller and stores in a temp data directory, like board-routes.test.ts.
+// No Planning Center: the service type and plan are poked onto the state.
+//
+// Every id and name is invented.
+
+import assert from "node:assert/strict";
+import { describe, it, before, beforeEach, after } from "node:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-board-integrity-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
+
+const { viewRoutes } = await import("./view-routes.js");
+const { callRoute } = await import("./route-harness.js");
+const { stageController } = await import("../stage-controller.js");
+const { slotsStore } = await import("../slots-store.js");
+const { presetsStore } = await import("../presets-store.js");
+import type { Slot, SlotBoardMeta, StageState, View } from "../../types/stage.js";
+
+const TYPE = "st-i";
+const PLAN = "plan-i";
+
+type Mutable = {
+  state: StageState;
+  boards: Map<string, SlotBoardMeta>;
+  broadcast: () => void;
+  loadAllViewRawSlots: (serviceTypeId: string | null, planId: string | null) => Promise<void>;
+};
+const ctl = stageController as unknown as Mutable;
+
+const slot = (id: string): Slot =>
+  ({ id, channel: "01", order: 0, link: { kind: "pco", matchBy: "position", positions: [{ name: "Vocals" }] }, deviceBinding: null }) as unknown as Slot;
+const ids = (rows: Slot[] | undefined) => (rows ?? []).map((r) => r.id);
+const NOW = "2026-11-02T00:00:00.000Z";
+const grid = (id: string, boardId: string) => ({ id, x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", boardId } });
+const layoutOf = (objects: unknown[]) => ({ version: 1, canvas: { width: 1920, height: 1080 }, objects });
+
+async function call(route: Parameters<typeof callRoute>[0], p: string, method = "GET", body?: unknown) {
+  return callRoute(route, p, { method, ...(body !== undefined ? { body } : {}) });
+}
+
+/**
+ * A slots screen on LEFT; "pad", a custom view whose one widget shows LEFT and
+ * which still carries a board pointer at RIGHT from an earlier life as a slots
+ * screen; "blank", a custom view with no widget at all.
+ */
+async function seed(): Promise<void> {
+  for (const id of (await slotsStore.listBoards()).keys()) await slotsStore.deleteBoard(id);
+  await slotsStore.createBoard("b-left", { name: "Left", columnWidthIn: null, createdAt: NOW });
+  await slotsStore.createBoard("b-right", { name: "Right", columnWidthIn: null, createdAt: NOW });
+  await slotsStore.setDefault("b-left", TYPE, [slot("l1"), slot("l2")]);
+  await slotsStore.setDefault("b-right", TYPE, [slot("r1")]);
+  await presetsStore.save([{ id: "p-1", name: "Opening", slots: [slot("p")], createdAt: NOW, boardId: "b-left" }]);
+  ctl.boards = await slotsStore.listBoards();
+  ctl.state = {
+    ...ctl.state,
+    serviceTypeId: TYPE,
+    planId: PLAN,
+    views: [
+      { id: "wall-1", name: "Left Display", kind: "slots", createdAt: "", boardId: "b-left" },
+      { id: "pad", name: "Stage Layout", kind: "custom", createdAt: "", layoutRev: 0, boardId: "b-right", layout: layoutOf([grid("g-1", "b-left")]) },
+      { id: "blank", name: "Empty Layout", kind: "custom", createdAt: "", layoutRev: 0, layout: layoutOf([]) },
+    ] as unknown as View[],
+    outputs: [{ id: "display-1", name: "Left", viewId: "wall-1" }],
+  };
+  await ctl.loadAllViewRawSlots(TYPE, PLAN);
+}
+
+before(() => {
+  ctl.broadcast = () => {};
+});
+beforeEach(seed);
+after(() => {
+  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
+});
+
+describe("a custom view's leftover board pointer", () => {
+  it("is not a board the view's slot routes write to", async () => {
+    const r = await call(viewRoutes, "/api/views/pad/slots", "POST", { slots: [slot("x")] });
+    assert.equal(r.status, 404, JSON.stringify(r.json));
+    assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), ["r1"], "a write landed on a board the custom view does not show");
+  });
+});
