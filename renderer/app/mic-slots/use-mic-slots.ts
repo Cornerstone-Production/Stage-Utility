@@ -624,6 +624,16 @@ export function useMicSlots() {
   }
 
   async function duplicateBoard(boardId: string): Promise<string | null> {
+    // The copy is made on the server, from what is SAVED: unsaved edits are not in it.
+    if (boardId in editsRef.current) {
+      const name = nameOf(boardId);
+      const ok = await confirm({
+        title: `Duplicate ${name} without its unsaved changes?`,
+        message: `The copy is made from ${name}'s saved layout. Its unsaved changes stay on ${name} and are not in the copy; Save all first to include them.`,
+        confirmLabel: "Duplicate saved layout",
+      });
+      if (!ok) return null;
+    }
     const made = await attempt("duplicate the board", () =>
       ipc<{ id: string; boards: SlotBoardDTO[] }>("boards:duplicate", { id: boardId }),
     );
@@ -647,9 +657,10 @@ export function useMicSlots() {
     return true;
   }
 
-  async function setColumnWidth(boardId: string, columnWidthIn: number | null): Promise<void> {
+  async function setColumnWidth(boardId: string, columnWidthIn: number | null): Promise<boolean> {
     const list = await attempt("set the charger layout", () => ipc<SlotBoardDTO[]>("boards:update", { id: boardId, columnWidthIn }));
     if (list) qc.setQueryData(BOARDS_KEY, list);
+    return !!list;
   }
 
   /**

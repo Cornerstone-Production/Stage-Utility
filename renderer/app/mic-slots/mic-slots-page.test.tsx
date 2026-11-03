@@ -1467,3 +1467,60 @@ describe("plan-wide Revert and Set as default from the Default side", () => {
     assert.equal(screen.getByRole("menuitem", { name: /^Set .* as/ }).getAttribute("aria-disabled"), "true");
   });
 });
+
+describe("a dialog whose write failed", () => {
+  const dialogOpen = () => !!screen.queryByRole("dialog");
+
+  test("New board stays open when the board could not be made", async () => {
+    failing = new Set(["POST /api/boards"]);
+    await mount();
+    await click(screen.getByRole("button", { name: "New board" }));
+    await act(async () => {
+      fireEvent.change(document.getElementById("new-board-name")!, { target: { value: "Choir" } });
+    });
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create board" }));
+    assert.ok(dialogOpen(), "the dialog closed on a board that was never made");
+  });
+
+  test("Delete stays open when the delete was refused", async () => {
+    failing = new Set(["DELETE /api/boards/b-right"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Right wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Delete board…" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete board" }));
+    assert.ok(dialogOpen(), "the dialog closed on a board that is still there");
+  });
+
+  test("Copy stays open when the copy was refused", async () => {
+    failing = new Set(["POST /api/boards/b-left/copy-from"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: /Copy this board from/ }));
+    await pickOption("Copy from", "b-right");
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Copy" }));
+    await click(within(alertDialog()).getByRole("button", { name: "Copy" }));
+    assert.ok(dialogOpen(), "the dialog closed on a copy that never landed");
+  });
+
+  test("Charger layout stays open when the column width was refused", async () => {
+    failing = new Set(["PATCH /api/boards/b-left"]);
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Charger layout…" }));
+    await click(screen.getByRole("switch", { name: "Align to chargers" }));
+    await click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    assert.ok(dialogOpen(), "the dialog closed on a width that was never set");
+  });
+});
+
+describe("duplicating a board with unsaved changes", () => {
+  test("says the copy is of the saved layout, and Cancel duplicates nothing", async () => {
+    await mount();
+    await click(leftSlot());
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Duplicate board" }));
+    assert.ok((alertDialog().textContent ?? "").includes("unsaved"), "it says the unsaved changes are not in the copy");
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    assert.equal(requests.filter((r) => r.method === "POST" && r.url.endsWith("/duplicate")).length, 0);
+  });
+});

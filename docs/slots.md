@@ -61,7 +61,7 @@ The **⋯** menu:
 
 | Item | What it does |
 |---|---|
-| **Rename**, **Duplicate board** | Duplicating copies every service type's layouts and plan layouts, with new slot ids |
+| **Rename**, **Duplicate board** | Duplicating copies every service type's saved layouts and plan layouts, with new slot ids. A board with unsaved changes asks first: they are not in the copy |
 | **Shown on** | A checklist of every Mic Slots screen and every mic-slots widget. Checking one points it at this board. To move a screen off a board, check it on another |
 | **Copy this board from…** | Copies a layout over this board's layout for the plan being edited: from **another board**, from a **service type** (its default) or from a **plan** (its own layout, else its type's default). Written at once, after asking when it would replace a saved layout or unsaved edits. A source with no layout copies nothing and the board is left as it was |
 | **Revert this board to the default** | Deletes this board's layout for the plan being edited. Offered on the plan side when it has one. Unsaved edits to it go with it, once the revert has landed |

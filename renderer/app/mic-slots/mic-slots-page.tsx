@@ -180,10 +180,12 @@ export function MicSlotsPage() {
   );
   const selBoard = sel ? mic.boards.find((b) => b.id === sel.boardId) : undefined;
 
-  async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]) {
-    await mic.setColumnWidth(boardId, columnWidthIn);
+  /** True when every write landed. Each failure is its own toast. */
+  async function applyChargers(boardId: string, columnWidthIn: number | null, displayWidths: { target: ShowTarget; widthIn: number }[]): Promise<boolean> {
+    let ok = await mic.setColumnWidth(boardId, columnWidthIn);
     // Only what the operator applied: each screen and widget has its own display width.
-    for (const w of displayWidths) await mic.setDisplayWidth(w.target, w.widthIn);
+    for (const w of displayWidths) ok = (await mic.setDisplayWidth(w.target, w.widthIn)) && ok;
+    return ok;
   }
 
   const where = (() => {
@@ -334,6 +336,7 @@ export function MicSlotsPage() {
             setJustMade(id);
             void setLinked(id, { replace: true });
           }
+          return id !== null;
         }}
       />
       <DeleteBoardDialog
@@ -341,9 +344,7 @@ export function MicSlotsPage() {
         board={deleting}
         others={mic.boards.filter((b) => b.id !== deleting?.id)}
         onClose={() => setDeleting(null)}
-        onDelete={async (id, replacement) => {
-          await mic.deleteBoard(id, replacement);
-        }}
+        onDelete={(id, replacement) => mic.deleteBoard(id, replacement)}
       />
       <ChargerLayoutDialog
         key={chargers?.id ?? "none"}
@@ -360,9 +361,7 @@ export function MicSlotsPage() {
           description={`Replaces ${copying.name}'s layout for ${mic.side === "plan" ? mic.label : `${mic.typeName ?? "the service type"} default`}. A service type means its default; a plan means that plan's own layout.`}
           boards={mic.boards.filter((b) => b.id !== copying.id)}
           onClose={() => setCopying(null)}
-          onCopy={async (from, sourceName) => {
-            await mic.copyInto(copying.id, from, sourceName);
-          }}
+          onCopy={(from, sourceName) => mic.copyInto(copying.id, from, sourceName)}
         />
       )}
     </div>

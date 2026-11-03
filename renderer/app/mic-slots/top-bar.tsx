@@ -101,9 +101,7 @@ export function TopBar({
           description={`Copies a layout onto every board for ${mic.hasPlan && mic.side === "plan" ? mic.label : `${namedType(mic.typeName)} default`}. Each board keeps its own columns and charger width.`}
           boards={[]}
           onClose={() => setCopyAll(false)}
-          onCopy={async (from, sourceName) => {
-            await mic.copyIntoAll(from, sourceName);
-          }}
+          onCopy={(from, sourceName) => mic.copyIntoAll(from, sourceName)}
         />
       )}
     </div>
