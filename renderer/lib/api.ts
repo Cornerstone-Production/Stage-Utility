@@ -1143,13 +1143,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "boards:delete":
       return delWithBody<T>(`/api/boards/${encodeURIComponent(p.id as string)}`, { replacement: p.replacement ?? null });
 
-    case "boards:targets": {
-      const q = new URLSearchParams();
-      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
-      if (p.planId) q.set("planId", String(p.planId));
-      const tail = q.size > 0 ? `?${q}` : "";
-      return apiFetch<T>(`/api/boards/${encodeURIComponent(p.id as string)}/targets${tail}`);
-    }
+    case "boards:targets":
+      return apiFetch<T>(`/api/boards/${encodeURIComponent(p.id as string)}/targets${boardTargetQuery(p)}`);
 
     // Save all: every dirty board in one request, all or nothing.
     case "boards:saveAll":
@@ -1169,13 +1164,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
         target: p.target,
       });
 
-    case "boards:check": {
-      const q = new URLSearchParams();
-      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
-      if (p.planId) q.set("planId", String(p.planId));
-      const tail = q.size > 0 ? `?${q}` : "";
-      return apiFetch<T>(`/api/boards/check${tail}`);
-    }
+    case "boards:check":
+      return apiFetch<T>(`/api/boards/check${boardTargetQuery(p)}`);
 
     case "views:setBoard":
       return put<T>(`/api/views/${encodeURIComponent(p.id as string)}/board`, { boardId: p.boardId ?? null });
@@ -1875,6 +1865,14 @@ export function __resetReplayCacheForTests(): void {
   lastPayload.clear();
   readsInFlight.clear();
   contentAt.clear();
+}
+
+/** "?serviceTypeId=…&planId=…" for the boards reads that take a target, or "". */
+function boardTargetQuery(p: Record<string, unknown>): string {
+  const q = new URLSearchParams();
+  if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+  if (p.planId) q.set("planId", String(p.planId));
+  return q.size > 0 ? `?${q}` : "";
 }
 
 // Stable per-context client id, sent on the SSE URL so the server can scope this
