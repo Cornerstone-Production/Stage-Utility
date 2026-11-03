@@ -33,7 +33,7 @@ import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 import { useSlotPresets, useWirelessChannels } from "../queries";
-import { applyDrop, itemsOf, isSpacer, stackState } from "./board-model";
+import { applyDrop, columnLead, itemsOf, isSpacer, stackState } from "./board-model";
 import { ChargerLayoutDialog, CopyFromDialog, DeleteBoardDialog, NewBoardDialog } from "./board-dialogs";
 import { BoardSection, type BoardDialogs } from "./board-section";
 import type { DragData, DropData } from "./board-preview";
@@ -296,6 +296,8 @@ export function MicSlotsPage() {
                   boardName={selBoard.name}
                   where={where}
                   columnWidthIn={selBoard.columnWidthIn}
+                  columnLead={columnLead(mic.boardsMap, sel.slotId) ?? mic.selectedSlot}
+                  onLeadChange={(fn) => mic.updateSlot(columnLead(mic.boardsMap, sel.slotId)?.id ?? sel.slotId, fn)}
                   stack={stackState(mic.boardsMap, sel.slotId)}
                   sharesWith={makeSharesWith(mic.boardsMap[sel.boardId] ?? [])(mic.selectedSlot)}
                   planLabel={mic.side === "plan" ? mic.label : null}

@@ -1286,6 +1286,20 @@ describe("the inspector folds away with nothing selected", () => {
     assert.equal(isOpen(), false, "closing by the button clears the selection");
     assert.equal(card("a").getAttribute("aria-pressed"), "false");
   });
+
+  test("Column width on a stacked card sets its column's width, which the lead carries", async () => {
+    boards = BOARDS().map((b) => (b.id === "b-left" ? { ...b, columnWidthIn: 3.49 } : b));
+    await mountWithChrome();
+    await press(card("c"));
+    const input = within(inspector()).getByLabelText("Column width (inches)") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "5" } });
+    });
+    await settle();
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const sent = (JSON.parse(posts("/api/boards/slots")[0]!.body!) as { boards: { boardId: string; slots: Slot[] }[] }).boards[0]!.slots;
+    assert.deepEqual(sent.filter((x) => x.id === "b" || x.id === "c").map((x) => [x.id, x.widthIn ?? null]), [["b", 5], ["c", null]], "the width landed on a card no screen reads it from");
+  });
 });
 
 // ── where the unsaved work is saved, and over what ──────────────────────────
