@@ -211,6 +211,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           ownIems={slot.prep?.ownIems ?? false}
           capsule={slot.prep?.capsule ?? null}
           plate={!overlay}
+          photo={photoSrc ?? null}
         />
         </div>
 

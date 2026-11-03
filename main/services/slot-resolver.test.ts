@@ -560,6 +560,49 @@ describe("prep tags", () => {
     assert.deepEqual(out.map((s) => s.prep), [undefined, undefined, undefined, undefined]);
   });
 
+  describe("a capsule applies on a vocal position only", () => {
+    const tags = new Map([
+      ["g", { capsule: "KSM9", ownIems: true }],
+      ["v", { capsule: "KSM9", ownIems: true }],
+      ["b", { capsule: "KSM9", ownIems: false }],
+      ["a", { capsule: "KSM9", ownIems: false }],
+    ]);
+    const band = [
+      member("g", "Gus", "EG 1 (Lead)"),
+      member("v", "Val", "Vocals"),
+      member("b", "Bea", "Vocals (BGVs)"),
+      member("a", "Abe", "Vocals / AG"),
+    ];
+
+    test("keeps it on Vocals, Vocals (BGVs) and Vocals / AG, drops it on an instrument, keeps own in-ears on both", () => {
+      const out = resolveSlots(
+        [
+          slot("g", pos({ name: "EG 1 (Lead)" })),
+          slot("v", pos({ name: "Vocals" })),
+          slot("b", pos({ name: "Vocals (BGVs)" })),
+          slot("a", pos({ name: "Vocals / AG" })),
+        ],
+        band, NO_DEVICES, "column", undefined, tags,
+      );
+      assert.deepEqual(out.map((s) => s.prep?.capsule), [null, "KSM9", "KSM9", "KSM9"]);
+      assert.deepEqual(out.map((s) => s.prep?.ownIems), [true, true, false, false]);
+      assert.deepEqual(out.map((s) => s.takesCapsule), [false, true, true, true]);
+    });
+
+    test("a guitarist who also sings: the position that matched decides", () => {
+      const both = [member("g", "Gus", "EG 1 (Lead)"), member("g", "Gus", "Vocals")];
+      const out = resolveSlots([slot("e", pos({ name: "EG 1 (Lead)" })), slot("v", pos({ name: "Vocals" }))], both, NO_DEVICES, "column", undefined, tags);
+      assert.deepEqual(out.map((s) => s.prep?.capsule), [null, "KSM9"]);
+    });
+
+    test("a by-person slot keeps it when the person holds any vocal position, not otherwise", () => {
+      const byP = (id: string): SlotLink => ({ kind: "pco", matchBy: "person", personId: id });
+      const both = [member("g", "Gus", "EG 1 (Lead)"), member("g", "Gus", "Vocals"), member("v", "Val", "Keys")];
+      const out = resolveSlots([slot("a", byP("g")), slot("b", byP("v"))], both, NO_DEVICES, "column", undefined, tags);
+      assert.deepEqual(out.map((s) => s.prep?.capsule), ["KSM9", null]);
+    });
+  });
+
   test("no tags map means no prep", () => {
     const [s] = resolveSlots([slot("a", pos({ name: "Vocals" }))], team, NO_DEVICES);
     assert.equal(s.prep, undefined);

@@ -38,7 +38,7 @@ const EMPTY_DEVICE: SlotDevice = {
 export function stripResolvedFields(slots: Slot[]): Slot[] {
   return slots.map((slot) => {
     if (typeof slot !== "object" || slot === null) return slot;
-    const { prep: _prep, shownPositions: _shown, ...authored } = slot;
+    const { prep: _prep, shownPositions: _shown, takesCapsule: _takes, ...authored } = slot;
     return { ...authored, displayName: null, photoUrl: null, device: { ...EMPTY_DEVICE } };
   });
 }
@@ -219,6 +219,12 @@ function heldPositions(
   // does not list. Name what PCO actually says over a configured label the person
   // is not on — the whole point here is to stop the cell claiming the wrong job.
   return member.teamPositionName ? [member.teamPositionName] : [];
+}
+
+/** Whether a Planning Center position is a vocal one: "Vocals", "Vocals (BGVs)",
+ *  "Vocals / AG". The capsule prep tag only applies on these. */
+export function isVocalPosition(name: string | null | undefined): boolean {
+  return !!name && name.toLowerCase().includes("vocal");
 }
 
 function matchByPositions(
@@ -479,7 +485,7 @@ export function resolveSlots(
   return slots.map((stored, slotIndex): Slot => {
     // `prep` is derived here and never trusted from the input: a resolved slot
     // sent back by an editor must not carry last week's capsule onto this one.
-    const { prep: _stale, ...slot } = stored;
+    const { prep: _stale, takesCapsule: _takes, ...slot } = stored;
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
@@ -503,9 +509,18 @@ export function resolveSlots(
     const device = slotDevice(slot, deviceStatuses);
 
     const memberPrep = member?.personId ? prep.get(member.personId) : undefined;
+    // A capsule is a vocal mic's. Matched by position, the position that matched
+    // decides, so a guitarist who also sings keeps no plate on the guitar slot.
+    // Matched by person there is no position, so any vocal membership counts.
+    const vocal =
+      member !== null &&
+      (link.kind === "pco" && link.matchBy === "person"
+        ? members.some((m) => claimKey(m) === claimKey(member) && isVocalPosition(m.teamPositionName))
+        : isVocalPosition(member.teamPositionName));
     return {
       ...slot,
-      ...(memberPrep ? { prep: { ...memberPrep } } : {}),
+      ...(memberPrep ? { prep: { ...memberPrep, capsule: vocal ? memberPrep.capsule : null } } : {}),
+      ...(member ? { takesCapsule: vocal } : {}),
       displayName: member?.name ?? null,
       photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, avatarFit),
       shownPositions,

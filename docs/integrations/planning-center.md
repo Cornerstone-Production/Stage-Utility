@@ -232,9 +232,23 @@ The names are matched case-insensitively and ignore spaces around the colon;
 group that is not a person group is never read. Only a slot filled by a person
 shows them; a spacer, an empty slot or a static label never does.
 
+A capsule applies to a vocal mic, so it shows only when the person is on a vocal
+position: the Planning Center position that slot matched has "vocal" in its name
+(`Vocals`, `Vocals (BGVs)`, `Vocals / AG`). A guitarist who also sings shows no
+capsule on their guitar slot. A slot matched by person, with no position of its own,
+shows it when the person holds any vocal position. `IEMs: Own` is not affected and
+shows on any slot.
+
 Two cases are settled rather than guessed. A person with more than one capsule tag
 shows the first alphabetically. An `IEMs:` value other than `Own` is ignored. Each
 is logged once on the `[pco-tags]` tag.
+
+When Planning Center lists prep tags but returns nobody on any of them (what an
+account without Editor in Services gets, see [Setup](#setup)), Stage logs one
+`[pco-tags] Planning Center lists N prep tags but nobody on them` warning naming
+that cause, and says it again only if the tags have had people in between. The
+Mic slots page's **This plan's check** shows the same sentence for as long as the
+state lasts, since no capsule can be checked then.
 
 The read is tag-first, because Planning Center ignores `include=person.tags` on team
 members and `where[]` filters on people. It costs one request for the tag groups,
@@ -244,8 +258,9 @@ to a plan, so the result is cached for 15 minutes and read again by the next
 refresh after that, whichever plan is selected. The read runs beside the roster's,
 never ahead of it. If a read fails the last good tags stay and no slot goes
 blank; a failed read with no earlier result means no prep is shown. A failed read
-is not retried for five minutes. The token
-needs the same read access it already has for people.
+is not retried for five minutes. Reading who carries a tag needs **Editor** in
+Services (see [Setup](#setup)): with Viewer, Planning Center lists the tags but
+nobody on them, and `/log` shows `[pco-tags] read 0 tagged people from N tags`.
 
 ## Item times
 
@@ -377,6 +392,14 @@ never calls `toggle_control`, so it cannot take control from whoever is driving.
 
 **In Planning Center:** api.planningcenteronline.com → Developers → Personal
 Access Tokens → create a token. Note the **App ID** and **Secret** shown there.
+
+The token acts as the person who made it, with that person's permissions. Give
+that account **Editor** in Services. With Viewer, Stage still sees service types,
+plans and rosters, but the people carrying [prep tags](#prep-tags) come back
+empty, and plan reads used for [ServiceCue](../features/servicecue-and-baptisms.md)
+rundowns and Live state can answer 404 (`[publish] could not read the rundown`,
+`[pco] live service read failed`). A [slot](../slots.md) linked to a person not on
+any Services team also needs People read access.
 
 **In Stage:** Settings → Integrations → **Planning Center** → enter the **App ID**
 and **Secret**, pick a **Refresh interval** and **Pre-service countdown**, enable

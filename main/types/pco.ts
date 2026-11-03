@@ -318,6 +318,10 @@ export interface Slot {
   /** Set by the resolver, only for a slot filled by a person who carries a prep
    *  tag in Planning Center. Never stored. */
   prep?: PrepTags;
+  /** Set by the resolver for a filled Planning Center slot: whether the person is on
+   *  a vocal position, the only place a capsule applies. `prep.capsule` is already
+   *  null when this is false. Never stored. */
+  takesCapsule?: boolean;
   /** Which of a position range's names the resolved person is actually scheduled
    *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
    *  this person is really doing. Absent on non-position slots. */
@@ -421,6 +425,10 @@ export interface BoardCheckDTO {
   /** Filled slots with a mic whose person has no Capsule tag. Empty while no tag has
    *  been read at all, and for a plan with no roster: nothing is known to be missing. */
   noCapsule: BoardCheckNoCapsule[];
+  /** Present only while the last tag read found prep tags with nobody on any of
+   *  them, which is what Planning Center returns to an account without Editor in
+   *  Services. Then `noCapsule` is empty for want of data, not because all is well. */
+  prepTagsNobody?: { tagCount: number };
 }
 
 /**

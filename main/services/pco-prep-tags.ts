@@ -109,6 +109,9 @@ export class PrepTagBook {
   private readonly failures = new RepeatLog("[pco-tags] read failed:");
   private readonly loggedUnknown = new Set<string>();
   private readonly loggedDuplicates = new Set<string>();
+  /** Set while the last good read listed prep tags with nobody on any of them.
+   *  The warning is said when this turns on, so it is once per state. */
+  private nobody: { tagCount: number } | null = null;
   private generation = 0;
 
   constructor(
@@ -121,6 +124,15 @@ export class PrepTagBook {
   /** The last good map. Empty until a read succeeds. */
   get map(): ReadonlyMap<string, PrepTags> {
     return this.current;
+  }
+
+  /**
+   * Set while the last good read found prep tags but nobody on any of them. That
+   * is what Planning Center returns to an account without Editor in Services: the
+   * tags are listed, their people are not. Null otherwise, and after a reset.
+   */
+  get nobodyVisible(): { tagCount: number } | null {
+    return this.nobody;
   }
 
   /**
@@ -166,6 +178,14 @@ export class PrepTagBook {
       );
     }
 
+    const nobodyOnTags = result.tagCount > 0 && tagged.every((t) => !parsePrepTagName(t.tagName) || t.personIds.length === 0);
+    if (nobodyOnTags && !this.nobody) {
+      console.warn(
+        `[pco-tags] Planning Center lists ${scrub(result.tagCount)} prep tags but nobody on them; the Planning Center account likely needs Editor in Services`,
+      );
+    }
+    this.nobody = nobodyOnTags ? { tagCount: result.tagCount } : null;
+
     const signature = JSON.stringify([...result.map].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
     if (signature === this.lastSignature) return { changed: false, failed: false };
     this.lastSignature = signature;
@@ -180,5 +200,6 @@ export class PrepTagBook {
     this.current = new Map();
     this.lastSignature = null;
     this.failedAt = null;
+    this.nobody = null;
   }
 }

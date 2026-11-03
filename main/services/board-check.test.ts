@@ -81,6 +81,14 @@ describe("filled slots with a mic and no Capsule tag", () => {
     assert.deepEqual(out.map((o) => o.slotId), ["off", "noCap"]);
   });
 
+  test("a slot on a non-vocal position is not missing a capsule", () => {
+    const out = noCapsuleSlots(board([
+      filled("guitar", { deviceBinding: { providerId: "w", channelId: "6" }, takesCapsule: false }),
+      filled("vocal", { deviceBinding: { providerId: "w", channelId: "7" }, takesCapsule: true }),
+    ]));
+    assert.deepEqual(out.map((o) => o.slotId), ["vocal"]);
+  });
+
   test("a slot with no mic, nobody in it, or a typed label is left out", () => {
     const out = noCapsuleSlots(board([
       filled("nomic", {}),

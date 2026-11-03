@@ -119,7 +119,8 @@ The inspector's **Stacked** switch does the same as Shift+↑ and Shift+↓.
 Select a card, or a spacer, to edit it. A spacer has only a **Width**.
 
 The inspector opens beside the boards when something is selected and folds away when nothing is, so
-the previews take the full width. Click the selected card again to fold it away. The **Inspector**
+the previews take the full width. Click the selected card again to fold it away. Dragging a card
+leaves a folded inspector folded; with it open, the card being dragged becomes the selected one. The **Inspector**
 button at the top right opens it with nothing selected, to read the drag and keyboard help, and
 closes it, clearing the selection.
 
@@ -144,13 +145,18 @@ closes it, clearing the selection.
 
 | Row | What it says |
 |---|---|
-| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag* |
+| **Capsule** | The microphone capsule from the filled person's `Capsule:` [prep tag](integrations/planning-center.md#prep-tags), or *no tag*. On a position that is not vocal it says *Not a vocal position* |
 | **In-ears** | *Brings their own* when their `IEMs:` tag says `Own`; *House buds* when the slot has an in-ear pack and they do not bring their own; otherwise *No pack on this slot* |
 
 Tags named `Capsule:` or `IEMs:` on a person's Planning Center profile are picked up
 automatically, with no setting. The same two facts are drawn on the card, as the
 capsule plate and the ears badge ([What the card shows](#what-the-card-shows)). A
-slot nobody fills, or whose person has no such tag, shows *no tag*.
+slot nobody fills, or whose person has no such tag, shows *no tag*. The capsule
+applies to vocal positions only, a position whose Planning Center name contains
+"Vocal" (*Vocals*, *Vocals (BGVs)*, *Vocals / AG*); on any other position it is not
+shown, even when the person has a `Capsule:` tag. A slot filled by person rather than
+position counts as vocal when any of that person's positions on the plan is. Name a
+singing position without "Vocal" (*Worship Leader*) and its capsule is not shown.
 
 **Placement**
 
@@ -175,7 +181,7 @@ being edited:
 - **Slots that accept no position**: a position slot with nothing in it, with
   **Show it**.
 - **N people on slots with a mic have no Capsule tag yet**: filled slots with a bound
-  receiver or an offline mic label whose person has no `Capsule:` tag, with **Show
+  receiver or an offline mic label on a vocal position whose person has no `Capsule:` tag, with **Show
   them**, which selects the first and rings every one until the next selection. It is
   silent until some tag has been read, and for a default, which has no people.
 
@@ -408,7 +414,10 @@ things over the bottom of the photo.
   badge when the person brings their own in-ears. Bottom left, the capsule plate:
   their microphone capsule. The last two come from [prep tags](integrations/planning-center.md#prep-tags)
   in Planning Center and appear only for a slot filled by a tagged person. The badges
-  are neutral white on dark glass; the app's accent colour is never used on stage.
+  are neutral; the app's accent colour is never used on stage. The ears badge reads
+  the patch of photo behind it once when the photo loads and draws dark ink on a
+  light patch, light ink on a dark one; with no photo, or one the browser will not
+  let the page read, it keeps a near-opaque dark plate.
 - **The band.** The name, the position line, a hairline, then flat rows: the **mic
   row** (RF bars, the label or frequency, and the battery percentage) and, when an
   IEM is bound, the **IEM row** (headphones, its label, its percentage). Percentages

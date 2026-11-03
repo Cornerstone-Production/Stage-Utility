@@ -1,6 +1,8 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import { clamp } from "@main/services/clamp";
 import { cn } from "../lib/cn";
+import { boxRectToImageRect, inkForLuminance, sampleImagePatch, type BadgeInk } from "../lib/badge-ink";
 import { EarIcon, HeadphonesIcon, MicIcon } from "lucide-react";
 
 /**
@@ -172,27 +174,103 @@ export function CapsulePlate({ capsule, style }: { capsule: string; style?: CSSP
   );
 }
 
+
+/** Plate, ring and icon colour for the own-in-ears badge. `null` ink is the neutral
+ *  fallback: a near-opaque plate that reads on any photo, used until a sample says
+ *  better and whenever the photo cannot be read. */
+export const EARS_STYLE: Record<BadgeInk | "neutral", { background: string; boxShadow: string; color: string }> = {
+  light: { background: "rgba(0,0,0,0.55)", boxShadow: "0 0 0 2px rgba(255,255,255,0.35)", color: "#ffffff" },
+  dark: { background: "rgba(255,255,255,0.78)", boxShadow: "0 0 0 2px rgba(0,0,0,0.30)", color: "#111111" },
+  neutral: { background: "rgba(24,24,24,0.92)", boxShadow: "0 0 0 2px rgba(255,255,255,0.40)", color: "#ffffff" },
+};
+
+/**
+ * Ink for a badge laid over the photo beside it. Once per loaded image, samples the
+ * patch of photo the badge covers. The photo is a sibling this component does not
+ * own, so it listens for the load event in the capture phase on the shared parent
+ * (img load does not bubble) and also looks at an image that finished before the
+ * effect ran. `null` means "not known": no image yet, a failed or unreadable one,
+ * or no photo at all, which drops whatever an earlier photo picked. Falling back
+ * to the neutral plate is not a failure worth a log line: it still reads.
+ */
+function useBadgeInk(
+  layerRef: RefObject<HTMLElement | null>,
+  badgeRef: RefObject<HTMLElement | null>,
+  active: boolean,
+  photo: string | null,
+): BadgeInk | null {
+  const [ink, setInk] = useState<BadgeInk | null>(null);
+  useEffect(() => {
+    const layer = layerRef.current;
+    const host = layer?.parentElement;
+    if (!active || !photo || !layer || !host) {
+      setInk(null);
+      return;
+    }
+    const sample = (img: HTMLImageElement) => {
+      const badge = badgeRef.current;
+      if (!badge) return;
+      const box = img.getBoundingClientRect();
+      const b = badge.getBoundingClientRect();
+      const style = getComputedStyle(img);
+      const [px = "50%", py = "50%"] = style.objectPosition.split(" ");
+      const frac = (v: string) => (v.endsWith("%") ? parseFloat(v) / 100 : 0.5);
+      const source = boxRectToImageRect(
+        { left: b.left - box.left, top: b.top - box.top, width: b.width, height: b.height },
+        box,
+        { width: img.naturalWidth, height: img.naturalHeight },
+        { x: frac(px), y: frac(py) },
+      );
+      const result = source ? sampleImagePatch(img, source) : null;
+      setInk(result?.ok ? inkForLuminance(result.luminance) : null);
+    };
+    const onLoad = (e: Event) => {
+      if (e.target instanceof HTMLImageElement) sample(e.target);
+    };
+    const onError = (e: Event) => {
+      if (e.target instanceof HTMLImageElement) setInk(null);
+    };
+    host.addEventListener("load", onLoad, true);
+    host.addEventListener("error", onError, true);
+    const existing = host.querySelector("img");
+    if (existing?.complete && existing.naturalWidth > 0) sample(existing);
+    return () => {
+      host.removeEventListener("load", onLoad, true);
+      host.removeEventListener("error", onError, true);
+    };
+  }, [active, photo, layerRef, badgeRef]);
+  return ink;
+}
+
 /**
  * The badges on the photo: channel top-left, own-in-ears top-right and, unless the
- * card draws it in its scrim, the capsule plate bottom-left. Neutral white on dark
- * glass, deliberately: nothing on stage carries the brand accent.
+ * card draws it in its scrim, the capsule plate bottom-left. Neutral, deliberately:
+ * nothing on stage carries the brand accent. The own-in-ears badge picks its ink
+ * from the photo behind it (useBadgeInk).
  */
 export function PhotoBadges({
   channel,
   ownIems,
   capsule,
   plate,
+  photo = null,
 }: {
   channel: string;
   ownIems: boolean;
   capsule: string | null;
   /** Draw the plate here. False when the card puts it in its scrim instead. */
   plate: boolean;
+  /** The photo drawn under the badges, if any: the ears badge reads its ink from it. */
+  photo?: string | null;
 }) {
   // Nothing validates a channel on save, so a slot can arrive without one.
   const ch = (channel ?? "").trim();
+  const layerRef = useRef<HTMLDivElement>(null);
+  const earsRef = useRef<HTMLSpanElement>(null);
+  const ink = useBadgeInk(layerRef, earsRef, ownIems, photo);
+  const ears = EARS_STYLE[ink ?? "neutral"];
   return (
-    <div className="pointer-events-none absolute inset-0 z-[1]" style={PX_UNIT} data-slot-badges="">
+    <div ref={layerRef} className="pointer-events-none absolute inset-0 z-[1]" style={PX_UNIT} data-slot-badges="">
       {ch !== "" && (
         <span
           data-slot-badge="channel"
@@ -216,7 +294,9 @@ export function PhotoBadges({
       )}
       {ownIems && (
         <span
+          ref={earsRef}
           data-slot-badge="ears"
+          data-ears-ink={ink ?? "neutral"}
           role="img"
           aria-label="Brings own in-ears"
           className="absolute flex items-center justify-center"
@@ -226,11 +306,11 @@ export function PhotoBadges({
             width: px(34),
             height: px(34),
             borderRadius: 999,
-            background: "rgba(255,255,255,0.18)",
-            boxShadow: "0 0 0 2px rgba(0,0,0,0.45)",
+            background: ears.background,
+            boxShadow: ears.boxShadow,
           }}
         >
-          <EarIcon style={{ width: px(19), height: px(19), color: "#ffffff" }} strokeWidth={2.2} aria-hidden />
+          <EarIcon style={{ width: px(19), height: px(19), color: ears.color }} strokeWidth={2.2} aria-hidden />
         </span>
       )}
       {plate && capsule && <CapsulePlate capsule={capsule} style={{ position: "absolute", left: px(12), bottom: px(12), maxWidth: `calc(100% - ${px(24)})` }} />}

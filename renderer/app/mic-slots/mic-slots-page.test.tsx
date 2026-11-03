@@ -92,6 +92,7 @@ let boards: SlotBoardDTO[] = [];
 let presets: SlotPreset[] = [];
 /** What the resolver adds to a slot, by id: a person and their prep. */
 let resolvedExtras: Record<string, Partial<Slot>> = {};
+let checkPrepNobody: { tagCount: number } | null = null;
 let checkNoCapsule: { boardId: string; boardName: string; slotId: string; name: string }[] = [];
 let planId: string | null = null;
 let requests: { url: string; method: string; body: string | null }[] = [];
@@ -189,7 +190,7 @@ const STATE = () =>
     status = 500;
     out = { error: "the roster could not be read" };
   } else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
-  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule };
+  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule, ...(checkPrepNobody ? { prepTagsNobody: checkPrepNobody } : {}) };
   else if (path === "/api/boards/slots" && method === "POST") {
     if (holdSave) await holdSave;
     const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string; rev?: string; target?: { kind: string } }[];
@@ -291,6 +292,7 @@ beforeEach(() => {
   presets = [];
   resolvedExtras = {};
   checkNoCapsule = [];
+  checkPrepNobody = null;
   planId = null;
   requests = [];
   failSave = null;
@@ -857,6 +859,16 @@ describe("prep from Planning Center", () => {
     assert.equal(prep(), "KSM9 | Brings their own");
   });
 
+  test("a capsule on a position that is not vocal says so, rather than 'no tag'", async () => {
+    resolvedExtras = { a: { displayName: "Ana Rivera", takesCapsule: false, prep: { capsule: null, ownIems: true } } };
+    await mount();
+    await click(card("a"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    assert.equal(prep(), "Not a vocal position | Brings their own");
+  });
+
   test("no tag reads 'no tag', a bound IEM pack is house buds, and neither is no pack", async () => {
     layouts["b-left"] = [{ ...board("a")[0]!, iemBinding: { providerId: "wireless", channelId: "i1" } } as Slot, ...board("b | c").map((s, i) => ({ ...s, order: i + 1 }))];
     await mount();
@@ -881,6 +893,20 @@ describe("prep from Planning Center", () => {
     assert.equal(card("d").getAttribute("data-highlighted"), "true", "the rest are marked");
     await click(card("a"));
     assert.equal(card("d").getAttribute("data-highlighted"), null, "the next selection clears the marks");
+  });
+
+  test("the check says when Planning Center lists prep tags with nobody on them, and names the cause", async () => {
+    checkPrepNobody = { tagCount: 6 };
+    await mount();
+    const row = document.querySelector("[data-check-prep-tags-nobody]")!;
+    assert.ok(row, "no row");
+    assert.ok((row.textContent ?? "").includes("lists 6 prep tags but nobody on them"), row.textContent ?? "");
+    assert.ok((row.textContent ?? "").includes("Editor in Services"), row.textContent ?? "");
+  });
+
+  test("no prep-tag state, no such row", async () => {
+    await mount();
+    assert.ok(!document.querySelector("[data-check-prep-tags-nobody]"));
   });
 
   test("no such people, no row", async () => {
@@ -1289,6 +1315,78 @@ describe("the inspector folds away with nothing selected", () => {
     assert.equal(card("b").getAttribute("aria-pressed"), "false");
     await press(card("b"));
     assert.equal(isOpen(), true, "and pressing it once more opens it again");
+  });
+
+  /** A real drag: down (focus lands on the card), carry, up, and the click a
+   *  browser fires when the pointer comes up over the card it went down on. */
+  const pressAndCarry = async (source: HTMLElement, target: Element) => {
+    install();
+    const openBefore = isOpen();
+    let openWhileCarried: boolean | undefined;
+    try {
+      placeRects();
+      const s = centre(source);
+      const t = centre(target);
+      await act(async () => {
+        fireEvent.pointerDown(source, { button: 0, clientX: s.x, clientY: s.y });
+        fireEvent.mouseDown(source, { button: 0, clientX: s.x, clientY: s.y });
+        source.focus();
+        fireEvent.mouseMove(document, { clientX: s.x + 8, clientY: s.y + 8 });
+      });
+      await settle();
+      openWhileCarried = isOpen();
+      await act(async () => {
+        fireEvent.mouseMove(document, { clientX: t.x, clientY: t.y });
+      });
+      await settle();
+      await act(async () => {
+        fireEvent.mouseUp(document, { clientX: t.x, clientY: t.y });
+        // The card as it is now, as the browser would click it; the drag sensor must swallow it.
+        fireEvent.click(document.querySelector(`[data-mic-slot="${source.getAttribute("data-mic-slot")}"]`)!, { clientX: t.x, clientY: t.y });
+      });
+      await settle();
+    } finally {
+      uninstall();
+    }
+    // The drag sensor blocks clicks until 50ms after a drag ends (which is what
+    // keeps the click that ends a drag off the card); wait it out, or it eats the
+    // first click of the next test.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    assert.equal(openWhileCarried, openBefore, "the inspector must not open or close while a card is carried");
+  };
+
+  test("dragging a card leaves a closed inspector closed", async () => {
+    await mountWithChrome();
+    await pressAndCarry(card("d"), gap("b-left", 1));
+    assert.equal(shape("b-left"), "a | d | b+c | ~s", "the drop still lands");
+    assert.equal(isOpen(), false, "a drag must not open the inspector");
+    assert.equal(card("d").getAttribute("aria-pressed"), "false");
+  });
+
+  test("a card carried off and brought back to where it was pressed does not open it either", async () => {
+    await mountWithChrome();
+    await pressAndCarry(card("d"), card("d"));
+    assert.equal(isOpen(), false, "the click that ends a drag is not a click on the card");
+  });
+
+  test("with the inspector open, the dragged card becomes the selected one", async () => {
+    await mountWithChrome();
+    await press(card("a"));
+    await pressAndCarry(card("d"), gap("b-left", 1));
+    assert.equal(isOpen(), true);
+    assert.equal(card("d").getAttribute("aria-pressed"), "true");
+  });
+
+  test("keyboard focus still selects, and opens the inspector", async () => {
+    await mountWithChrome();
+    await act(async () => {
+      card("b").focus();
+    });
+    await settle();
+    assert.equal(isOpen(), true);
+    assert.equal(card("b").getAttribute("aria-pressed"), "true");
   });
 
   test("the button opens it on the drag help, and closes it with a slot selected", async () => {

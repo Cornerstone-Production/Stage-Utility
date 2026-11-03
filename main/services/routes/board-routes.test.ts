@@ -492,6 +492,18 @@ describe("GET /api/boards/check", () => {
     live.teamMembers = [];
   });
 
+  it("says so while Planning Center lists prep tags with nobody on them, and not otherwise", async () => {
+    const live = ctl as unknown as { prepTags: { nobody: { tagCount: number } | null } };
+    const url = `/api/boards/check?serviceTypeId=${TYPE}`;
+    assert.equal("prepTagsNobody" in ((await call(boardRoutes, url)).json as object), false, "present with nothing wrong");
+    live.prepTags.nobody = { tagCount: 6 };
+    try {
+      assert.deepEqual(((await call(boardRoutes, url)).json as { prepTagsNobody: unknown }).prepTagsNobody, { tagCount: 6 });
+    } finally {
+      live.prepTags.nobody = null;
+    }
+  });
+
   it("reads only the boards a screen or widget shows", async () => {
     // An unused board's old lineup says nothing about this week.
     await slotsStore.createBoard("b-unused", { name: "Unused board 1", columnWidthIn: null, createdAt: NOW }, {

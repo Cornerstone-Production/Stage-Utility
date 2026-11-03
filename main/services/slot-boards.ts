@@ -172,6 +172,7 @@ function layoutOf(slot: Slot): Record<string, unknown> {
     delete rest.displayName;
     delete rest.photoUrl;
     delete rest.shownPositions;
+    delete rest.takesCapsule;
   }
   return rest;
 }

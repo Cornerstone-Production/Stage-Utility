@@ -26,10 +26,13 @@ const dev = (over: Record<string, unknown>) => ({
 
 async function strip(bound: unknown[], videoMode?: string, health: unknown[] = []) {
   const calls: string[] = [];
-  const bodies: string[] = [];
+  // By call, not by order: the page's live-event subscribe also POSTs, and under
+  // load it can land before the request a test is about.
+  const bodies = new Map<string, string>();
   const f = stubFetchWithLog((url, init) => {
-    calls.push(`${init?.method ?? "GET"} ${url}`);
-    if (init?.body) bodies.push(String(init.body));
+    const call = `${init?.method ?? "GET"} ${url}`;
+    calls.push(call);
+    if (init?.body) bodies.set(call, String(init.body));
     return ok({ scanning: false, seen: [], matches: {}, bound, health });
   });
   render(
@@ -98,7 +101,7 @@ test("an output's switch is named for its port, and flipping it asks the server"
     assert.equal(sw.getAttribute("aria-checked"), "true");
     await act(async () => { fireEvent.click(sw); await settle(); });
     assert.ok(calls.includes("POST /api/devices/enabled"), `no switch was sent: ${calls.join(", ")}`);
-    assert.deepEqual(JSON.parse(bodies[0]), { deviceId: "mac1.out-1", enabled: false });
+    assert.deepEqual(JSON.parse(bodies.get("POST /api/devices/enabled")!), { deviceId: "mac1.out-1", enabled: false });
   } finally {
     f.restore();
   }

@@ -115,7 +115,7 @@ export function ScreenPanelHost({
   };
 
   return (
-    <div id={`${SCREEN_PANEL_ID}-host`} className="lg:sticky lg:top-3 lg:flex lg:max-h-[calc(100dvh-6.5rem)] lg:w-[400px] lg:shrink-0 lg:flex-col">
+    <div id={`${SCREEN_PANEL_ID}-host`} className="lg:flex lg:max-h-[calc(100dvh-6.5rem)] lg:w-[400px] lg:flex-col">
       <ScreenSettingsPanel
         target={target}
         outputs={outputs}
