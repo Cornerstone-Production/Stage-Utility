@@ -44,8 +44,14 @@ edit and marks that board.
 A board saved from another browser after you started editing it is not overwritten
 silently. Save all is refused, nothing is written, and the page asks, naming every
 board in the save that was changed elsewhere: **Save over it**, or Cancel to keep
-your edits unsaved and look first (**Discard** shows what was saved). The page re-reads a board's layouts when a screen showing it changes,
-and when the tab is looked at again. Edits made while a save is in flight stay
+your edits unsaved and look first (**Discard** shows what was saved).
+
+The page hears about a save from anywhere else (another browser, a screen's
+editor, a recalled saved layout, the nightly prune) as it happens, and re-reads only the
+boards it changed, including one no screen shows. A board you have unsaved edits
+to is not re-drawn under you: it is marked **changed elsewhere**, so you know
+before Save all, and the edits stay. The page also re-reads every board when the
+tab is looked at again. Edits made while a save is in flight stay
 unsaved.
 
 ### A board

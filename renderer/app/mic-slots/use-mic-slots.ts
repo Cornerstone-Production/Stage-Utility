@@ -26,13 +26,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { confirm, toast } from "../../components/ui";
-import { invoke as ipc } from "../../lib/api";
+import { invoke as ipc, onNotification } from "../../lib/api";
+import { BOARDS_CHANGED_CHANNEL, type BoardsChanged } from "@main/types/boards-changed";
 import { useStageState } from "../../main/use-stage-state";
 import { useEditingTarget, registerTargetGuard, requestEditingTarget } from "../../settings/sections/editing-target";
 import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
 import { errorMessage } from "@main/services/errors";
 import { gridBoardId, gridDisplayWidthIn, forEachSlotsGrid, pointedGrid, positiveOrNull, viewBoardId } from "@main/services/slot-boards";
-import { stripResolvedFields } from "@main/services/slot-resolver";
 import { plural } from "@main/services/plural";
 import {
   append,
@@ -47,6 +47,7 @@ import {
   type Boards,
 } from "./board-model";
 import { duplicateOf, newSlot, newSpacer } from "./slot-factory";
+import { boardsToReread, rereadBoards } from "./boards-changed";
 
 export const BOARDS_KEY = ["boards:list"] as const;
 const TARGETS_PREFIX = ["boards:targets"] as const;
@@ -104,15 +105,6 @@ export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | 
 /** The newer of two copies of a view: a higher layoutRev, else the later one. */
 function newerView(a: View | undefined, b: View): View {
   return a && (a.layoutRev ?? 0) > (b.layoutRev ?? 0) ? a : b;
-}
-
-/** What the screens draw from the boards, without who fills them or live telemetry:
- *  a change here is a layout saved somewhere, which the page re-reads. */
-function savedLayoutSignature(state: StageState | null): string {
-  if (!state) return "";
-  const strip = (rec: Record<string, Slot[]> | undefined) =>
-    Object.entries(rec ?? {}).map(([k, rows]) => [k, stripResolvedFields(rows)]);
-  return JSON.stringify([strip(state.slotsByView), strip(state.slotsByLayoutObject)]);
 }
 
 /** Where the unsaved buffer was made: a Save all writes here, wherever the page has moved. */
@@ -173,8 +165,9 @@ export function useMicSlots() {
       queryKey: boardTargetsKey(b.id, serviceTypeId, planId),
       queryFn: () => ipc<SlotTargetsDTO>("boards:targets", { id: b.id, serviceTypeId, planId }),
       enabled: !!serviceTypeId,
-      // A board saved from another browser is read again when this tab is looked
-      // at again; the save's revision check is what makes that safe to miss.
+      // A board saved from another browser is re-read when boards:changed says
+      // so, and again when this tab is looked at; the save's revision check is
+      // what makes a missed one safe.
       refetchOnWindowFocus: true,
     })),
   });
@@ -191,18 +184,21 @@ export function useMicSlots() {
   const targetsFailed = targetQs.find((q) => q.isError)?.error ?? null;
   const isReady = (boardId: string) => !!targetsById.get(boardId);
 
-  // A layout saved from another browser reaches this one as a stage-state frame
-  // (the screens showing the board change). Re-read the layouts when what the
-  // screens draw changes, not on every frame: telemetry arrives many times a second.
-  const savedSig = useMemo(() => savedLayoutSignature(state), [state]);
-  const firstSig = useRef(true);
+  // A board written from anywhere (another browser, a screen's own editor, a
+  // preset recall, the nightly prune) is named on boards:changed, and exactly
+  // its layouts are re-read: a board no screen shows, or a plan this page is not
+  // on, included. A stage-state frame is not a signal for this: it carries
+  // telemetry many times a second, and nothing at all for a board no screen shows.
   useEffect(() => {
-    if (firstSig.current) {
-      firstSig.current = false;
-      return;
-    }
-    void qc.invalidateQueries({ queryKey: TARGETS_PREFIX });
-  }, [savedSig, qc]);
+    let last: BoardsChanged | null = null;
+    return onNotification(BOARDS_CHANGED_CHANNEL, (payload, replayed) => {
+      const next = payload as BoardsChanged;
+      const what = boardsToReread(last, next, replayed);
+      last = next;
+      if (what === "all") console.info("[mic-slots] a boards:changed frame was missed; re-reading every board");
+      if (what && (what === "all" || what.length > 0)) void rereadBoards(qc, what, { boards: BOARDS_KEY });
+    });
+  }, [qc]);
 
   // ── unsaved work ─────────────────────────────────────────────────────
   const [edits, setEdits] = useState<Record<string, Slot[]>>({});
@@ -215,6 +211,21 @@ export function useMicSlots() {
   const bufferAt = useRef<BufferTarget | null>(null);
   const dirtyIds = Object.keys(edits).filter((id) => boards.some((b) => b.id === id));
   const dirty = dirtyIds.length > 0;
+  /** Boards this page is writing now: its own write changing their revision is
+   *  not somebody else's. */
+  const writing = useRef(new Set<string>());
+  const [writes, setWrites] = useState(0);
+  async function whileWriting<T>(ids: readonly string[], run: () => Promise<T>): Promise<T> {
+    const mine = ids.filter((id) => !writing.current.has(id));
+    for (const id of mine) writing.current.add(id);
+    setWrites((n) => n + 1);
+    try {
+      return await run();
+    } finally {
+      for (const id of mine) writing.current.delete(id);
+      setWrites((n) => n + 1);
+    }
+  }
 
   /** The revision of what is saved at the target being edited, for one board. */
   function savedRev(boardId: string): string | undefined {
@@ -262,6 +273,22 @@ export function useMicSlots() {
     // `targetsById` is rebuilt every render; `dataVersion` says when it changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boards, dataVersion, effectiveSide, edits]);
+  // Boards with unsaved edits whose saved layout moved on since the first edit:
+  // somebody saved over the work in progress. Marked now, before Save all is
+  // refused for it.
+  const [changedElsewhere, setChangedElsewhere] = useState<readonly string[]>([]);
+  useEffect(() => {
+    const now = Object.keys(edits).filter((id) => {
+      if (writing.current.has(id)) return false;
+      const base = bases.current.get(id);
+      const rev = savedRev(id);
+      return base !== undefined && rev !== undefined && rev !== base;
+    });
+    setChangedElsewhere((prev) => (prev.length === now.length && prev.every((id, i) => id === now[i]) ? prev : now));
+    // savedRev reads the query cache, which `dataVersion` says has moved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edits, dataVersion, writes, effectiveSide]);
+
   const latest = useRef(boardsMap);
   // After render, before any handler can run: a handler reads what was drawn.
   useLayoutEffect(() => {
@@ -391,6 +418,10 @@ export function useMicSlots() {
    */
   async function submitSave(ids: string[], retried: boolean): Promise<boolean> {
     if (ids.length === 0) return true;
+    return whileWriting(ids, () => submitSaveNow(ids, retried));
+  }
+
+  async function submitSaveNow(ids: string[], retried: boolean): Promise<boolean> {
     setSaving(true);
     setSaveError(null);
     // What is sent, by board: an edit made while this is in flight is a different
@@ -784,15 +815,17 @@ export function useMicSlots() {
     }
     const failed: { name: string; message: string }[] = [];
     const landed: string[] = [];
-    for (const b of copies) {
-      try {
-        takeState(await ipc<StageState>("boards:copyFrom", { id: b.id, ...from, target: wireTarget() }));
-        landed.push(b.id);
-      } catch (err) {
-        failed.push({ name: b.name, message: errorMessage(err) });
+    await whileWriting(copies.map((b) => b.id), async () => {
+      for (const b of copies) {
+        try {
+          takeState(await ipc<StageState>("boards:copyFrom", { id: b.id, ...from, target: wireTarget() }));
+          landed.push(b.id);
+        } catch (err) {
+          failed.push({ name: b.name, message: errorMessage(err) });
+        }
       }
-    }
-    dropEditsOf(landed);
+      dropEditsOf(landed);
+    });
     reportPartial("Copy", { done: landed.length, failed });
     await refresh();
     if (failed.length === 0) {
@@ -858,8 +891,11 @@ export function useMicSlots() {
       destructive: true,
     });
     if (!ok) return false;
-    const r = await eachBoard(ids, (id) => ipc<StageState>("boards:clearOverride", { id, planId }));
-    dropEditsOf(r.landed);
+    const r = await whileWriting(ids, async () => {
+      const done = await eachBoard(ids, (id) => ipc<StageState>("boards:clearOverride", { id, planId }));
+      dropEditsOf(done.landed);
+      return done;
+    });
     reportPartial("Revert", { done: r.landed.length, failed: r.failed });
     // Other boards' unsaved plan edits keep the page on the plan side.
     if (r.landed.length > 0 && ids.length > 1 && Object.keys(editsRef.current).length === 0) setOwnSide("default");
@@ -941,6 +977,7 @@ export function useMicSlots() {
     dirtyIds,
     saving,
     saveError,
+    changedElsewhere,
     saveAll,
     discard,
     discardAll,

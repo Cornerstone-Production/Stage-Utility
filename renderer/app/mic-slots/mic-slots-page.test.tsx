@@ -111,6 +111,9 @@ let revs: Record<string, number> = {};
 const revOf = (boardId: string, side: "default" | "plan") => `r${revs[`${boardId}|${side}`] ?? 0}`;
 /** While set, Save all answers only once it resolves. */
 let holdSave: Promise<void> | null = null;
+/** While set, Save all WRITES (the revisions move) and then answers only once it resolves:
+ *  the server's boards:changed frame can reach the page before the answer does. */
+let holdAfterWrite: Promise<void> | null = null;
 /** A custom view with two slots widgets on Left wall, and its layout revision. */
 let withWidgets = false;
 let padRev = 0;
@@ -205,6 +208,7 @@ const STATE = () =>
       out = { error: failSave };
     } else {
       for (const b of asked) revs[`${b.boardId}|${side(b)}`] = (revs[`${b.boardId}|${side(b)}`] ?? 0) + 1;
+      if (holdAfterWrite) await holdAfterWrite;
       out = STATE();
     }
   } else if (/^\/api\/boards\/[^/]+$/.test(path) && method === "DELETE") out = STATE();
@@ -273,6 +277,7 @@ beforeEach(() => {
   goneBoards = new Set();
   revs = {};
   holdSave = null;
+  holdAfterWrite = null;
   withWidgets = false;
   padRev = 0;
   padLayout = null;
@@ -1401,7 +1406,7 @@ describe("a board saved from another browser", () => {
     assert.ok(!unsaved(), "saved");
   });
 
-  test("a stage-state frame whose screens changed re-reads the layouts; a telemetry-only one does not", async () => {
+  test("a stage-state frame does not re-read the layouts: boards:changed does that", async () => {
     await mount();
     const reads = () => requests.filter((r) => r.method === "GET" && r.url.includes("/targets")).length;
     const before = reads();
@@ -1409,13 +1414,62 @@ describe("a board saved from another browser", () => {
       emit("stage:state-changed", { ...STATE(), slotsByView: { "v-left": [slot("a", { device: { status: "ok", rf: 3, battery: 50, freq: null, audioLevel: 0.4, charge: null, iemCharge: null, label: null, iemLabel: null } })] } }),
     );
     await settle();
-    const afterFirst = reads();
-    assert.ok(afterFirst > before, "the layouts were not read again");
-    await act(async () =>
-      emit("stage:state-changed", { ...STATE(), slotsByView: { "v-left": [slot("a", { device: { status: "ok", rf: 1, battery: 20, freq: null, audioLevel: 0.9, charge: null, iemCharge: null, label: null, iemLabel: null } })] } }),
-    );
+    assert.equal(reads(), before, "telemetry re-read the layouts");
+  });
+});
+
+describe("boards:changed", () => {
+  const targetReads = (boardId: string) => requests.filter((r) => r.method === "GET" && r.url.includes(`/api/boards/${boardId}/targets`)).length;
+  const changed = (seq: number, ...ids: string[]) => ({ epoch: "e1", seq, boards: ids.map((id) => ({ id, meta: false, targets: ["default:st-1"] })) });
+  const frame = async (payload: unknown) => {
+    await act(async () => emit("boards:changed", payload));
     await settle();
-    assert.equal(reads(), afterFirst, "telemetry alone re-read them");
+  };
+
+  test("re-reads exactly the board a frame names, one no screen shows included", async () => {
+    boards = [...BOARDS(), { id: "b-spare", name: "Spare", columnWidthIn: null, createdAt: "", shownOn: [] } as unknown as SlotBoardDTO];
+    layouts["b-spare"] = board("q");
+    await mount();
+    const [spare, left] = [targetReads("b-spare"), targetReads("b-left")];
+    layouts["b-spare"] = board("q | z");
+    await frame(changed(1, "b-spare"));
+    assert.equal(targetReads("b-spare"), spare + 1, "the board saved elsewhere was not read again");
+    assert.equal(targetReads("b-left"), left, "a board the frame did not name was read again");
+    assert.equal(shape("b-spare"), "q | z", "the page still shows the old layout");
+  });
+
+  test("a board with unsaved edits is marked, not overwritten, before Save all", async () => {
+    await mount();
+    await frame(changed(1, "b-right"));
+    await click(leftSlot());
+    revs = { "b-left|default": 1 }; // saved from another browser
+    await frame(changed(2, "b-left"));
+    assert.ok(unsaved(), "the edits were dropped");
+    assert.ok(within(section("b-left")).queryByRole("alert")?.textContent?.includes("changed elsewhere"), "the board is not marked");
+    assert.equal(!!within(section("b-right")).queryByRole("alert"), false, "a clean board was marked");
+  });
+
+  test("a frame that is not the next one re-reads every board", async () => {
+    await mount();
+    await frame(changed(1, "b-right"));
+    const left = targetReads("b-left");
+    await frame(changed(5, "b-right"));
+    assert.equal(targetReads("b-left"), left + 1, "a missed change went unread");
+  });
+
+  test("this page's own Save all is not marked as a change from elsewhere", async () => {
+    await mount();
+    await frame(changed(1, "b-right"));
+    await click(leftSlot());
+    let release!: () => void;
+    holdAfterWrite = new Promise<void>((r) => (release = r));
+    await click(screen.getByRole("button", { name: "Save all" }));
+    await frame(changed(2, "b-left")); // the write's own frame, ahead of the answer
+    assert.equal(!!within(section("b-left")).queryByRole("alert"), false, "its own save marked the board");
+    release();
+    await settle();
+    assert.ok(!unsaved(), "saved");
+    assert.equal(!!within(section("b-left")).queryByRole("alert"), false);
   });
 });
 
