@@ -243,7 +243,8 @@ view object inside a layout takes neither; it keeps its own font size.
 ServiceCue can be put on a public address for volunteers who are not on the building's
 network: the same pages and links, no login, on a free Cloudflare Workers address you
 [deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
-everything it shows, plan notes included.** The page is ServiceCue with nothing to edit
+everything it shows, plan notes included,** and running it is
+[at your own risk](../ops/servicecue-on-the-web.md#at-your-own-risk). The page is ServiceCue with nothing to edit
 (no **Edit column presets** link), a bar saying **Not updating** when the church has sent
 nothing for two minutes, and a reload, once, of a page left open when the public page is
 updated. Its link is the page's address with `/servicecue` on the end, and

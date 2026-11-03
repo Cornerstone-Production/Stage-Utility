@@ -27,6 +27,17 @@ How it works is in [ServiceCue publishing protocol](../reference/servicecue-publ
 
 To stop sharing, delete the Worker (see [Taking it down](#rotating-the-token-and-taking-it-down)).
 
+## At your own risk
+
+Publishing to the web puts what ServiceCue shows on the public internet, in a
+Cloudflare account and on a domain that you own and run. Stage Utility is provided
+under the [GPL-3.0](../../LICENSE) **with no warranty**, and its authors and
+contributors accept no responsibility for what you publish, for who reads it, or for
+any attack on, abuse of, or outage of your Worker, your Cloudflare account, your
+domain or your network. Keeping the token secret, choosing what to publish, and
+taking the Worker down are yours to do. If that is not acceptable, leave ServiceCue on
+the LAN.
+
 ## What you need
 
 - A free [Cloudflare account](https://dash.cloudflare.com/sign-up). No card.
