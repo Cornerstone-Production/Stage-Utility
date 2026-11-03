@@ -11,25 +11,33 @@
 import { useMemo } from "react";
 
 import { parseAliases } from "@main/services/cue-aliases";
-import { useQuery } from "@tanstack/react-query";
+import type { CueButtonUse } from "@main/services/button-ownership";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { invoke } from "../../lib/api";
 
-/** One Button that names a cue. */
-export interface CueUse {
-  viewId: string;
-  viewName: string;
-  objectId: string;
-  /** The Button's own label; empty when it draws the cue's name. */
-  label: string;
-  /** The Button is on Home. */
-  home: boolean;
-}
+/** One Button that names a cue: the server's own shape, so the two cannot drift. */
+export type CueUse = CueButtonUse;
 
 /** The wire answer: cue name to its Buttons. */
 export type CueUsageReply = Record<string, CueUse[]>;
 
 export const CUE_USAGE_KEY = ["cues:usage"] as const;
+
+/** Where each cue is used, by cue name. A Map: a cue name is the operator's, and an object keyed by it reads `constructor` off the prototype. */
+export type CueUsage = ReadonlyMap<string, readonly CueUse[]>;
+
+const usageQuery = { queryKey: CUE_USAGE_KEY, queryFn: () => invoke<CueUsageReply>("cues:usage") };
+const asUsage = (reply: CueUsageReply): CueUsage => new Map(Object.entries(reply));
+
+/**
+ * The usage, read now. Every caller that needs it outside a component (a write that has to
+ * know who else presses a command, a rename repointing Buttons) comes here, and the read
+ * lands in the cache the page's chips draw from.
+ */
+export async function fetchCueUsage(qc: QueryClient): Promise<CueUsage> {
+  return asUsage(await qc.fetchQuery({ ...usageQuery, staleTime: 0 }));
+}
 
 /**
  * The usage as a Map, which is what the page looks cues up in: a cue name comes
@@ -40,18 +48,15 @@ export const CUE_USAGE_KEY = ["cues:usage"] as const;
  * `error` is returned so a page can say the read failed instead of reading
  * every command as unused.
  */
-export function useCueUsage(): { usage: ReadonlyMap<string, readonly CueUse[]> | undefined; error: unknown } {
-  const { data, error } = useQuery({
-    queryKey: CUE_USAGE_KEY,
-    queryFn: () => invoke<CueUsageReply>("cues:usage"),
-  });
+export function useCueUsage(): { usage: CueUsage | undefined; error: unknown } {
+  const { data, error } = useQuery(usageQuery);
   // Memoised on the answer: a new Map each render would re-run everything keyed on it.
-  const usage = useMemo(() => (data ? new Map(Object.entries(data)) : undefined), [data]);
+  const usage = useMemo(() => (data ? asUsage(data) : undefined), [data]);
   return { usage, error };
 }
 
 /** The Buttons that name any of `names` (a cue's name and its former names), each once. */
-export function usesOf(usage: ReadonlyMap<string, readonly CueUse[]> | undefined, names: readonly string[]): CueUse[] {
+export function usesOf(usage: CueUsage | undefined, names: readonly string[]): CueUse[] {
   if (!usage) return [];
   const seen = new Set<string>();
   const out: CueUse[] = [];

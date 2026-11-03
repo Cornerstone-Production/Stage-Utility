@@ -30,6 +30,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { LayoutObjectConfig } from "@main/types/views.js";
 import { eventually, installDom } from "../test-dom.js";
+import { reply } from "../test-fixtures/fetch-log.js";
 import { OWNER, PRESS_17_2_0, owned, manifest, serve as serveButtons } from "../test-fixtures/button-server.js";
 
 const teardown = installDom();
@@ -164,7 +165,7 @@ describe("Companion", () => {
       {
         name: "Shutter",
         enabled: true,
-        trigger: { id: "call.by-name", params: { name: "btn_shutter", says: "Shutter", homeAssistant: "hidden" } },
+        trigger: { id: "call.by-name", params: { name: "btn_shutter", says: "Proj Shutter", homeAssistant: "hidden" } },
         conditions: [],
         action: undefined,
         cooldownSec: 0,
@@ -221,7 +222,10 @@ describe("Companion", () => {
     assert.deepEqual([patch.action.params.row, patch.action.params.col], [0, 0]);
     assert.equal(patch.enabled, true, "a rewrite switches the command back on");
     assert.equal(patch.trigger.params.name, cue, "the command's own name is never rewritten");
-    assert.equal(patch.trigger.params.says, "Totally different", "what a Button with no label draws follows the pick");
+    // The Label draws itself on the Button. `says` is what a Button with a BLANK label draws,
+    // so it is the pick's name and never the label: a label typed now and cleared later would
+    // leave the Button drawing it.
+    assert.equal(patch.trigger.params.says, "Projectors ON", "what a Button with no label draws follows the pick, not the label");
     assert.equal(configs.some((c) => (c as { cue?: string }).cue !== undefined && (c as { cue: string }).cue !== cue), false, "the Button keeps the same command name");
   });
 
@@ -610,6 +614,54 @@ describe("a Button that copies of it also press", () => {
     const made = (s.posts[0]!.trigger as { params: { name: string } }).params.name;
     assert.notEqual(made, "btn_shutter");
     assert.equal((configs[0] as { cue: string }).cue, made);
+  });
+});
+
+describe("a shared command, when the new one cannot be made", () => {
+  test("is not handed to the copy before this Button has its own: a refused addRule leaves both as they were", async () => {
+    const shared = owned("btn_shutter", PRESS_17_2_0);
+    const s = serve({
+      rules: [shared],
+      refuse: true,
+      usage: {
+        btn_shutter: [
+          { viewId: "booth", viewName: "Booth console", objectId: "o1", label: "", home: false },
+          { viewId: "foh", viewName: "FOH iPad", objectId: "copy", label: "", home: false },
+        ],
+      },
+    });
+    const { container, configs } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true });
+    await gridReady(container);
+    await eventually(() => assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true"));
+    fireEvent.click(keyAt(container, 0, 0)!);
+    await eventually(() => assert.ok(container.querySelector('[role="alert"]')));
+    assert.deepEqual(s.patches, [], "the shared command was handed to the copy before this Button's own was made");
+    assert.deepEqual(s.rules.find((r) => r.id === "own-1")!.ownedBy, OWNER);
+    assert.deepEqual(configs, []);
+  });
+});
+
+describe("a handover that fails after this Button's own command is made", () => {
+  test("binds the Button to its new command and says the copy was not given the old one", async () => {
+    const shared = owned("btn_shutter", PRESS_17_2_0);
+    const s = serve({
+      rules: [shared],
+      usage: {
+        btn_shutter: [
+          { viewId: "booth", viewName: "Booth console", objectId: "o1", label: "", home: false },
+          { viewId: "foh", viewName: "FOH iPad", objectId: "copy", label: "", home: false },
+        ],
+      },
+      extra: (url, init) =>
+        init?.method === "PATCH" && url.includes("/api/automation/rules/own-1") ? reply(500, { error: "disk full" }) : undefined,
+    });
+    const { container, configs } = mount({ type: "cue-button", cue: "btn_shutter", showDevice: true });
+    await gridReady(container);
+    await eventually(() => assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true"));
+    fireEvent.click(keyAt(container, 0, 0)!);
+    await eventually(() => assert.equal(configs.length, 1)); // bound to its new command
+    assert.equal(s.posts.length, 1);
+    await eventually(() => assert.ok(container.querySelector('[role="alert"]')?.textContent?.includes("disk full")));
   });
 });
 

@@ -142,12 +142,30 @@ describe("the Presses sheet", () => {
     assert.match((saved[0]!.config as { cue: string }).cue, /^btn_/);
   });
 
+  test("Save stays open and keeps the reason when the command could not be written", async () => {
+    // A write that failed leaves the tile unbound: storing it and closing the sheet would show
+    // the operator a saved tile and bury the error with the sheet.
+    const { server, saved, closes } = mount(card(), { refuse: true });
+    fireEvent.click(choice("App action"));
+    await eventually(() => assert.ok(document.querySelector('[role="option"]')));
+    fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
+    await eventually(() => assert.equal(server.posts.length, 1));
+    await eventually(() => assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes("already used")));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(saved, [], "the tile was stored although its command was never made");
+    assert.equal(closes(), 0);
+    assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes("already used"), "the reason went away");
+    assert.equal(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled"), false, "Save stays usable");
+  });
+
   test("a copy of the tile on Home that is not saved yet keeps pressing what it pressed", async () => {
     const mine = card({ type: "cue-button", cue: "btn_shared", showDevice: true });
     const copy = { ...card({ type: "cue-button", cue: "btn_shared", showDevice: true }), id: "home-copy" } as LayoutObject;
     const shared = owned("btn_shared", { id: "display.refresh", params: {} }, { ownedBy: { viewId: "home", objectId: mine.id } });
     const { server } = mount(mine, { rules: [shared], usage: {} }, [mine, copy]);
     await eventually(() => assert.equal(choice("App action").getAttribute("aria-pressed"), "true"));
+    await eventually(() => assert.ok([...document.querySelectorAll('[role="option"]')].some((o) => o.textContent === "Blank displays")));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Blank displays")!);
     await eventually(() => assert.equal(server.posts.length, 1));
     const sharedNow = server.rules.find((r) => r.id === "own-1")!;

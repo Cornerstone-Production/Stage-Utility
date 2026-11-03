@@ -11,7 +11,8 @@
 // already written: the tile then presses what it pressed before, and the command made
 // for the abandoned pick stays, owned by the tile, and is rewritten in place by the
 // next pick (it is looked up by its owner). Save waits for any write still running, so
-// the tile is never stored without the command it was just given.
+// the tile is never stored without the command it was just given, and when that write
+// failed Save stores nothing and the sheet stays open with the reason.
 
 import { useRef, useState } from "react";
 
@@ -19,7 +20,7 @@ import { HOME_VIEW_ID } from "@main/services/home-view";
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
 import { Button, DialogContent, DialogFooter, DialogHeader, DialogRoot, DialogTitle, Input } from "../../components/ui";
-import { ButtonPresses, type CueButtonConfig } from "../../editor/button-presses";
+import { ButtonPresses, type CueButtonConfig, type PressSettle } from "../../editor/button-presses";
 import { useCueLive } from "../../main/use-cue-live";
 
 /** The Button config of a card, or null when it is not a Button. */
@@ -49,7 +50,7 @@ export function ButtonPressSheet({
     draftNow.current = next;
     setDraftState(next);
   };
-  const settle = useRef<(() => Promise<void>) | null>(null);
+  const settle = useRef<PressSettle | null>(null);
   const [saving, setSaving] = useState(false);
   const cues = useCueLive(true);
   return (
@@ -87,7 +88,13 @@ export function ButtonPressSheet({
             disabled={saving}
             onClick={async () => {
               setSaving(true);
-              await settle.current?.();
+              // A write that failed has left the tile unbound, and its reason is on the sheet:
+              // stay open with it rather than store a tile the operator was told is not bound.
+              const failed = await settle.current?.();
+              if (failed) {
+                setSaving(false);
+                return;
+              }
               onSave({ ...card, config: draftNow.current });
             }}
           >

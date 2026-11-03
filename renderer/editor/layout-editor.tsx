@@ -109,6 +109,7 @@ import { AlignmentGuides } from "./alignment-guides";
 const ALIGN_TOLERANCE_PX = 8;
 
 import { uid, dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
+import type { PressSettle } from "./button-presses";
 import { Inspector } from "./inspector";
 import { SavedGroupsLibrary, useSavedGroups } from "./saved-groups";
 import {
@@ -131,6 +132,9 @@ const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
  * `defaultSize` arrives centred at it; a container a card-sized box; everything
  * else the old default, to the digit.
  */
+/** A Button's command write failed, so the layout was not saved: its reason is the message. */
+class PressWriteFailed extends Error {}
+
 function startingRect(type: LayoutObjectType): FracRect {
   const own = LAYOUT_OBJECTS[type].defaultSize;
   if (own) return { x: (1 - own.w) / 2, y: (1 - own.h) / 2, ...own };
@@ -1270,6 +1274,8 @@ export function LayoutEditor({
   const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: null }, objects: [] };
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
+  // Filled by the selected Button's Presses control: what Save waits on before it reads the layout.
+  const pressSettle = useRef<PressSettle | null>(null);
   // Multi-selection is the source of truth; `selectedId` is the single primary
   // (for the inspector + resize handles) and is null unless exactly one is picked.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
@@ -1899,9 +1905,10 @@ export function LayoutEditor({
   useEffect(() => {
     if (!isEditing) return;
     const onKey = (e: KeyboardEvent) => {
+      // A dialog, or an open list or menu, over the editor owns the keyboard: Backspace in
+      // the Companion pane's large grid must not delete the Button selected behind it.
+      if (document.querySelector('[role="dialog"], [role="listbox"], [role="menu"]')) return;
       if (opensShelfSearch(e, shelfSearchRef.current)) {
-        // A dialog over the editor owns the keyboard.
-        if (document.querySelector('[role="dialog"]')) return;
         e.preventDefault();
         openShelfSearch();
         return;
@@ -2000,8 +2007,16 @@ export function LayoutEditor({
   async function save() {
     setSaving(true);
     try {
+      // A Button pick, or an action field still waiting out its typing delay, is written and
+      // bound first: a Save that raced it stored the Button unbound, and the command's own
+      // onConfig then landed on an editor that had left edit mode.
+      const failed = await pressSettle.current?.();
+      if (failed) throw new PressWriteFailed(failed);
+      // That bind is a state update that has not rendered yet, so `objects` here is the layout
+      // from before it. An updater reads the state after every update queued ahead of it.
+      const latest = await new Promise<LayoutObject[]>((resolve) => setObjects((prev) => { resolve(prev); return prev; }));
       setAdoptAfterRev(view.layoutRev ?? 0);
-      await onSave({ version: 1, canvas, objects });
+      await onSave({ version: 1, canvas, objects: latest });
       setDirty(false);
       setHistory([]);
     } finally {
@@ -2044,7 +2059,13 @@ export function LayoutEditor({
             <UnsavedBanner
               compact
               saving={saving}
-              onSave={() => void save()}
+              onSave={() =>
+                void save().catch((err: unknown) => {
+                  // The save itself has told the operator when it failed; a refused press write has not.
+                  if (!(err instanceof PressWriteFailed)) throw err;
+                  toast.error(err.message);
+                })
+              }
               onDiscard={discardChanges}
             />
           </div>
@@ -2579,6 +2600,7 @@ export function LayoutEditor({
                 viewId={view.id}
                 viewName={view.name}
                 draftObjects={objects}
+                pressSettleRef={pressSettle}
                 canvas={canvas}
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}
