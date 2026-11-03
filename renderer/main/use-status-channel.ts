@@ -100,6 +100,11 @@ export interface StatusChannelResult<T> {
   /** Whether any answer — a read (success or failure) or a push (replayed or
    *  live) — has landed yet for this mount. See the header above. */
   known: boolean;
+  /** The window's hydrate read FAILED and no push has answered since. `known`
+   *  is still true (the window settled), so a caller that turns an empty
+   *  `value` into a claim ("no screens online", "nothing is down") reads this
+   *  too: a read that failed is not an answer of "none". */
+  failed: boolean;
 }
 
 export function useStatusChannel<T extends object>(
@@ -114,6 +119,7 @@ export function useStatusChannel<T extends object>(
   const clearOnReadFailure = options.clearOnReadFailure ?? false;
   const [value, setValue] = useState<T | null>(null);
   const [known, setKnown] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   // Highest rev applied from a push during THIS hydration window.
   const pushedRev = useRef<number | null>(null);
@@ -128,7 +134,10 @@ export function useStatusChannel<T extends object>(
   // claim made on a read that had not happened. The two refs below are reset in
   // the effect because only the effect reads them. Every caller memoises `read`,
   // so this does not resync on every render.
-  useResyncOn([enabled, pushChannel, read, clearOnReadFailure], () => setKnown(false));
+  useResyncOn([enabled, pushChannel, read, clearOnReadFailure], () => {
+    setKnown(false);
+    setFailed(false);
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -146,6 +155,7 @@ export function useStatusChannel<T extends object>(
       if (!replayed) pushedLive.current = true;
       setValue(frame);
       setKnown(true);
+      setFailed(false);
     });
 
     read()
@@ -156,6 +166,7 @@ export function useStatusChannel<T extends object>(
         // resolves `null` (nothing configured) stayed "unknown" forever.
         if (cancelled) return;
         setKnown(true);
+        setFailed(false);
         if (!s) return;
         const seen = pushedRev.current;
         const mine = revOf(s);
@@ -200,6 +211,7 @@ export function useStatusChannel<T extends object>(
         // available answer, which is whatever `value` already holds (or the
         // false-leaning null clearOnReadFailure asks for below).
         setKnown(true);
+        setFailed(true);
         if (clearOnReadFailure) setValue(null);
       });
 
@@ -216,6 +228,6 @@ export function useStatusChannel<T extends object>(
   // A disabled hook neither reads nor subscribes, so what it holds from an
   // earlier enabled window is a snapshot nothing is keeping current. Reporting
   // it would be a claim about the present: unknown is the honest answer.
-  if (!enabled) return { value: null, known: false };
-  return { value, known };
+  if (!enabled) return { value: null, known: false, failed: false };
+  return { value, known, failed };
 }
