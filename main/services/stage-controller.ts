@@ -582,6 +582,9 @@ export class StageController {
    */
   private outputWrites = new WriteQueue();
 
+  /** Layout saves, one at a time — see setViewLayout. */
+  private layoutWrites = new WriteQueue();
+
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
@@ -3982,10 +3985,22 @@ export class StageController {
    * someone else has saved this view in the meantime and this save would erase
    * their work, so it is REFUSED and the caller decides. Omitting it forces the
    * save through — that is the deliberate "overwrite anyway" path.
+   *
+   * A refused save writes nothing. Pointing an old editor's widgets can make or
+   * copy a board and change a column width, and converting a Run an action
+   * Button adds a cue; all of that awaits, so two saves opened at the same
+   * revision used to both pass the check, and the one refused after its writes
+   * left them behind. Saves now queue, and the revision is checked first thing
+   * in the queue, before any write: only a layout save moves `layoutRev`, so
+   * nothing can change it between that check and this save's own write.
    */
   async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    return this.layoutWrites.enqueue(() => this.setViewLayoutNow(id, layout, expectedRev));
+  }
+
+  private async setViewLayoutNow(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
     const current = this.requireView(id, "views:setLayout");
-    let rev = current.layoutRev ?? 0;
+    const rev = current.layoutRev ?? 0;
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
@@ -3995,21 +4010,26 @@ export class StageController {
     // start may be weeks away. A failure is logged and the layout saves as sent.
     const converted = await runActionButtonMigration([{ ...current, layout: pointedGrids }], { onSave: true, deps: await liveRulesDeps() });
     if (converted.failure) console.error(scrub(converted.failure));
-    else if (converted.line) console.log(scrub(converted.line));
     const pointed = converted.views[0]!.layout!;
-    // Checked again after the await: another save of this view, made at the
-    // same revision, may have landed while the widgets were being pointed, and
-    // both passing the check above is how one erases the other.
-    const now = this.requireView(id, "views:setLayout").layoutRev ?? 0;
-    if (now !== rev) {
-      if (expectedRev !== undefined) throw new LayoutConflictError(id, expectedRev, now);
-      rev = now;
-    }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout: pointed, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
     console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);
     this.state = { ...this.state, views };
-    await viewsStore.save(views);
+    try {
+      await viewsStore.save(views);
+    } catch (err) {
+      // The cues are on disk and their Buttons are not: named, as an import names
+      // them, since the Automation page shows them as ownerless. Rethrown with the
+      // save's own reason.
+      if (converted.cuesWritten.length > 0) {
+        console.error(
+          `[automation] layout save failed after its cues were written; kept ${scrub(converted.cuesWritten.join(", "))} with no Button, delete them from Automation`,
+        );
+      }
+      throw err;
+    }
+    // After the save: a conversion whose layout did not land is not one to announce.
+    if (converted.line) console.log(scrub(converted.line));
     // Rows for any board a new or repointed widget shows, and none kept for a
     // board nothing shows any more.
     await this.loadShownBoards();

@@ -180,3 +180,65 @@ describe("slotsStore.createBoard", () => {
     assert.deepEqual([...(await slotsStore.listBoards()).keys()], before);
   });
 });
+
+describe("a layout save refused for a stale revision", () => {
+  it("makes no board for a widget it would have pointed", async () => {
+    // A widget from an editor before boards ("inline") gets a board of its own
+    // when the layout is saved. Two saves opened at the same revision: the one
+    // refused must not leave that board behind.
+    const before = (await slotsStore.listBoards()).size;
+    const plain = layoutOf([grid("g-1", "b-left")]);
+    const legacy = layoutOf([{ id: "g-new", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "slots-grid", source: "inline" } }]);
+    const results = await Promise.allSettled([
+      stageController.setViewLayout("pad", plain as never, 0),
+      stageController.setViewLayout("pad", legacy as never, 0),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"], "both saves made at revision 0 landed");
+    const legacyLanded = results[1]!.status === "fulfilled";
+    assert.equal(
+      (await slotsStore.listBoards()).size,
+      before + (legacyLanded ? 1 : 0),
+      "the refused save left a board behind",
+    );
+  });
+
+  it("adds no cue for a Run an action Button it would have converted", async () => {
+    const { automationEngine } = await import("../automation-engine.js");
+    const before = automationEngine.listRules().length;
+    const plain = layoutOf([grid("g-1", "b-left")]);
+    const withButton = layoutOf([{
+      id: "o-rec", x: 0, y: 0, w: 1, h: 1, z: 1,
+      config: { type: "action-button", actionId: "obs.record", params: { mode: "toggle" }, label: "Record" },
+    }]);
+    const results = await Promise.allSettled([
+      stageController.setViewLayout("pad", plain as never, 0),
+      stageController.setViewLayout("pad", withButton as never, 0),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"], "both saves made at revision 0 landed");
+    const buttonLanded = results[1]!.status === "fulfilled";
+    assert.equal(automationEngine.listRules().length, before + (buttonLanded ? 1 : 0), "the refused save left a cue behind");
+  });
+
+  it("a views save that fails after the cues were written names them, and refuses", async (t) => {
+    const { viewsStore } = await import("../views-store.js");
+    const { captureConsole } = await import("../fixtures/capture-console.js");
+    const withButton = layoutOf([{
+      id: "o-stream", x: 0, y: 0, w: 1, h: 1, z: 1,
+      config: { type: "action-button", actionId: "obs.stream", params: { mode: "toggle" }, label: "Stream" },
+    }]);
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => { throw new Error("disk full"); }) as typeof viewsStore.save;
+    const lines = captureConsole(t, "log", "error");
+    try {
+      await assert.rejects(stageController.setViewLayout("pad", withButton as never, 0), /disk full/);
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.ok(
+      lines.some((l) => /^\[automation\] layout save failed after its cues were written; kept btn_stream\S* with no Button/.test(l)),
+      JSON.stringify(lines),
+    );
+    assert.ok(!lines.some((l) => l.includes("converted") && l.includes("on save")), "a conversion was announced for a layout that did not land");
+  });
+});
+
