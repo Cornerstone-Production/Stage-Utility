@@ -299,13 +299,8 @@ export function IconCard({ brand, onOpen, onFile }: { brand: Brand; onOpen: () =
       onOpen={onOpen}
       onFile={onFile}
     >
-      <div className="absolute left-4 right-4 top-[22px] flex h-[34px] items-end rounded-t-[9px] bg-[#202020] px-2">
-        <div className="flex h-7 w-[170px] items-center gap-[7px] rounded-t-[7px] bg-[#2e2e2e] px-2.5 text-[11.5px] text-[#ededf0]">
-          <span className="flex size-3.5 flex-none items-center justify-center">
-            <TabIcon brand={brand} size={14} scheme="dark" />
-          </span>
-          <span className="truncate">{brand.appName}</span>
-        </div>
+      <div className="absolute left-4 right-4 top-[22px]">
+        <TabStrip brand={brand} scheme="dark" />
       </div>
       <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-start gap-4">
         <div className="flex flex-col items-center gap-[5px] text-[10px] text-[#ededf0]">

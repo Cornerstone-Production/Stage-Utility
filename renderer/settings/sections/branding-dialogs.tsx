@@ -7,7 +7,7 @@
 // talks to the server: each action is a callback into branding-section.tsx, which
 // owns the file picker, the cropper's state and the writes.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ImageIcon, TrashIcon, UploadIcon } from "lucide-react";
 import {
   Button,
@@ -22,6 +22,8 @@ import { ColorField } from "../../components/ui/color-field";
 import { cn } from "../../lib/cn";
 import { AndroidIcon, CHECKER, Describe, DropVeil, IosIcon, TabStrip, useImageSize, type Brand } from "./branding-cards";
 import { useFileDrop } from "../../lib/use-file-drop";
+import { useResyncOn } from "../../lib/use-resync-on";
+import { useTrailingCommit } from "../../lib/use-trailing-commit";
 import { ART_MAX } from "../../lib/app-icon-render";
 import { resolveAccent } from "../../lib/icon-ink";
 import { NO_TAB_BACKGROUND } from "@main/services/install-metadata";
@@ -48,6 +50,11 @@ const SELECTED = "outline outline-2 outline-offset-2 outline-fg";
  * Custom. The server takes any `#rrggbb`; these are the choices, and what is
  * stored is the colour itself.
  */
+/** `whenFree`: a pick made as the dialog closes. If an icon is being made, it runs after that one. */
+export interface PickOptions {
+  whenFree?: boolean;
+}
+
 function BackgroundField({
   label,
   description,
@@ -64,39 +71,28 @@ function BackgroundField({
   allowNone: boolean;
   accentColor: string | null;
   busy: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: string, options?: PickOptions) => void;
 }) {
   const accent = currentAccent(accentColor);
   const current = value.toLowerCase();
   const isNone = current === NO_TAB_BACKGROUND;
   const isCustom = !isNone && current !== BLACK && current !== WHITE && current !== accent;
   const [custom, setCustom] = useState(isCustom ? current : CUSTOM_START);
+  // A colour saved from another browser moves the swatch with it. Only a custom value does:
+  // picking black must not forget the custom colour the wheel last held.
+  useResyncOn([value], () => {
+    if (isCustom) setCustom(current);
+  });
 
   // The wheel commits as the pointer moves, and each commit redraws every size and
-  // saves them: only where the pointer stops is sent. A commit that lands while a
-  // save is running waits for it, or the last colour would be dropped.
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const live = useRef({ busy, onChange });
-  useEffect(() => {
-    live.current = { busy, onChange };
-  });
-  const pending = useRef<string | null>(null);
-  const send = () => {
-    timer.current = null;
-    if (pending.current === null) return;
-    if (live.current.busy) {
-      timer.current = setTimeout(send, 250);
-      return;
-    }
-    const next = pending.current;
-    pending.current = null;
-    live.current.onChange(next);
-  };
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
+  // saves them: only where the pointer stops is sent (useTrailingCommit). A commit that
+  // lands while a save is running waits for it, or the last colour would be dropped. Closing
+  // the dialog flushes what is pending; if a save is still running then, `whenFree` asks
+  // the section to run it once that one is done.
+  const schedule = useTrailingCommit<string>(
+    (next, { unmounting }) => onChange(next, unmounting ? { whenFree: true } : undefined),
+    350,
+    { waitWhile: () => busy },
   );
 
   const choices: { id: string; name: string; hex: string | null }[] = [
@@ -143,9 +139,7 @@ function BackgroundField({
             value={custom}
             onChange={(v: string) => {
               setCustom(v);
-              pending.current = v.toLowerCase();
-              if (timer.current) clearTimeout(timer.current);
-              timer.current = setTimeout(send, 350);
+              schedule(v.toLowerCase());
             }}
             className="absolute inset-0 [&>button]:size-full [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
           />
@@ -378,8 +372,8 @@ export function IconDialog({
   recolor: boolean;
   /** An icon is being drawn and saved; the controls wait for it. */
   busy: boolean;
-  onHomeBackground: (hex: string) => void;
-  onTabBackground: (value: string) => void;
+  onHomeBackground: (hex: string, options?: PickOptions) => void;
+  onTabBackground: (value: string, options?: PickOptions) => void;
   onRecolor: (on: boolean) => void;
   /** Build the icon from the logo already set. */
   onUseLogo: () => void;
