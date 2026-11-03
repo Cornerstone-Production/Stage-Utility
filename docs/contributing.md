@@ -199,7 +199,10 @@ push to `beta` or `main`, releasable or not, and only then tags, so a red build
 cannot become a release. It is the one gate a push gets: the CI workflow runs on
 pull requests only, and the release PR from `beta` to `main` is skipped there
 because its head is a `beta` commit the release run has already verified and
-marked with a `build` status.
+marked with a `build` status. On `main` the gate is not run again when beta's release
+run passed it on the same tree, apart from the version its release bump changed in
+`package.json` and `package-lock.json` (`scripts/verified-tree.mjs`); any other
+difference, or any doubt, and it runs.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.

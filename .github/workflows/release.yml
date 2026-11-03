@@ -38,6 +38,39 @@ permissions:
   contents: read
 
 jobs:
+  # A stable release is beta merged into main, and beta's release run already put
+  # that tree through the gate below. When it did, and the tree main is handed
+  # differs from the verified one only in the version the beta release bumped,
+  # the gate is not run again (scripts/verified-tree.mjs says when, and why not).
+  # Main only: a push to beta is a merge nothing has tested together yet. This
+  # job never fails the run; any doubt is a "no", and the gate runs.
+  already-verified:
+    name: already verified on beta
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # the beta release runs and their jobs
+    outputs:
+      verified: ${{ steps.check.outputs.verified }}
+      sha: ${{ steps.check.outputs.sha }}
+      url: ${{ steps.check.outputs.url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Did beta verify this tree
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verified-tree.mjs
+
   # Every push, releasable or not. This is the only gate a push to beta or main
   # gets (ci.yml runs on pull requests only), and it is the merged tree that
   # matters: two PRs each green on their own branch have never been tested
@@ -49,6 +82,10 @@ jobs:
   # than the sum. The release job below waits for all of them.
   verify-checks:
     name: verify lint, type-check, build
+    needs: already-verified
+    # !cancelled(), not the default success(): on beta the job above is skipped,
+    # and a skipped need would otherwise skip the gate with it.
+    if: ${{ !cancelled() && needs.already-verified.outputs.verified != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,6 +103,8 @@ jobs:
 
   verify-tests:
     name: verify tests (${{ matrix.shard }}/4)
+    needs: already-verified
+    if: ${{ !cancelled() && needs.already-verified.outputs.verified != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -117,7 +156,9 @@ jobs:
           exit 1
 
   release:
-    needs: [verify-checks, verify-tests]
+    needs: [already-verified, verify-checks, verify-tests]
+    # The gate passed here, or it passed on beta for this tree and was not run.
+    if: ${{ !cancelled() && (needs.already-verified.outputs.verified == 'true' || (needs.verify-checks.result == 'success' && needs.verify-tests.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the version-bump commit and the tag
@@ -147,7 +188,9 @@ jobs:
           node-version: 24
 
       # The verify jobs above passed, or this job would not be running, and the
-      # commit they checked out is this run's own, so that is the SHA marked.
+      # commit they checked out is this run's own, so that is the SHA marked. When
+      # they were not run because beta's release run verified this tree, the mark
+      # says so and links that run.
       #
       # First, ahead of the version decision, so a failure in the release tooling
       # after it cannot leave a verified tree with no checkmark: the release PR
@@ -161,13 +204,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
+          VERIFIED_SHA: ${{ needs.already-verified.outputs.sha }}
+          VERIFIED_URL: ${{ needs.already-verified.outputs.url }}
         run: |
           set -euo pipefail
+          desc="lint, type-check, tests and build passed in the release run"
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$VERIFIED_URL" ]; then
+            desc="passed on beta at ${VERIFIED_SHA:0:8}; this tree differs only in its version"
+            url="$VERIFIED_URL"
+          fi
           for attempt in 1 2 3; do
             if gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
               -f state=success -f context=build \
-              -f description="lint, type-check, tests and build passed in the release run" \
-              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              -f description="$desc" \
+              -f target_url="$url" >/dev/null; then
               exit 0
             fi
             echo "status write failed (attempt $attempt of 3)"
@@ -470,6 +521,14 @@ jobs:
     needs: [release, helper-gate]
     if: ${{ always() && needs.release.outputs.published == 'true' && needs.helper-gate.outputs.present == 'true' }}
     runs-on: macos-15
+    # One runner per architecture, side by side: CEF ships a framework per
+    # architecture, so the two builds share nothing and need not wait for each
+    # other. Either failing fails the job, so `needs.helper.result` is still
+    # "success" only when both zips exist.
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     # Chromium's framework is most of the app and the build is long; a hung build
     # must not hold the release for ever, since the artifacts job waits on this.
     timeout-minutes: 60
@@ -489,39 +548,59 @@ jobs:
         with:
           node-version: 24
 
-      - name: Build and package both architectures
+      # The compiled CEF wrapper and the cmake/ninja venv, which are two of the
+      # three minutes a build takes and change only with the CEF pin, the build
+      # tools or our CEF host. CEF itself is not cached: it is downloaded and its
+      # checksums checked on every run (fetch-cef.sh), so what this restores is
+      # only ever objects compiled by an earlier release run on beta or main; no
+      # pull request run writes a cache these runs can read. The Swift app is
+      # always built fresh, since the release version is stamped into it and the
+      # helper's updater compares that, so a reused app would update forever.
+      - name: Restore the CEF wrapper build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            helper/macos/.cef-build/${{ matrix.arch }}
+            helper/macos/.tools
+          key: helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-${{ hashFiles('helper/macos/CEFHost/**') }}
+          # A change to our CEF host alone still reuses the wrapper: ninja rebuilds
+          # only what changed.
+          restore-keys: |
+            helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-
+
+      - name: Build and package the architecture
         env:
           V: ${{ needs.release.outputs.version }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p helper-dist
-          for arch in arm64 x86_64; do
-            out="$RUNNER_TEMP/helper-$arch"
-            OUT="$out" helper/macos/build-app.sh --arch "$arch"
-            app="$out/StageUtilityOutput.app"
+          arch="$ARCH"
+          out="$RUNNER_TEMP/helper-$arch"
+          OUT="$out" helper/macos/build-app.sh --arch "$arch"
+          app="$out/StageUtilityOutput.app"
 
-            # What was built is checked before it ships: the right architecture,
-            # this release's version, and a signature that holds.
-            test "$(lipo -archs "$app/Contents/MacOS/StageUtilityOutput")" = "$arch" \
-              || { echo "::error::$arch build is not $arch"; exit 1; }
-            got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
-            test "$got" = "$V" || { echo "::error::$arch helper reports version $got, not $V"; exit 1; }
-            # Not --deep: it reports the versioned Chromium framework as missing,
-            # although a plain --strict verifies every nested item including it.
-            # This is the same check helper/macos/build-app.sh ends with.
-            codesign --verify --strict "$app"
+          # What was built is checked before it ships: the right architecture,
+          # this release's version, and a signature that holds.
+          test "$(lipo -archs "$app/Contents/MacOS/StageUtilityOutput")" = "$arch" \
+            || { echo "::error::$arch build is not $arch"; exit 1; }
+          got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          test "$got" = "$V" || { echo "::error::$arch helper reports version $got, not $V"; exit 1; }
+          # Not --deep: it reports the versioned Chromium framework as missing,
+          # although a plain --strict verifies every nested item including it.
+          # This is the same check helper/macos/build-app.sh ends with.
+          codesign --verify --strict "$app"
 
-            # ditto keeps the framework's symlinks and the bundle layout, with the
-            # app at the top of the zip, which is where the installer looks.
-            zip="helper-dist/StageUtilityOutput-$arch.zip"
-            ditto -c -k --keepParent "$app" "$zip"
+          # ditto keeps the framework's symlinks and the bundle layout, with the
+          # app at the top of the zip, which is where the installer looks.
+          zip="helper-dist/StageUtilityOutput-$arch.zip"
+          ditto -c -k --keepParent "$app" "$zip"
 
-            # And the zip is checked the way a Mac will meet it: unpacked, signed.
-            check="$RUNNER_TEMP/check-$arch"
-            mkdir -p "$check"
-            ditto -x -k "$zip" "$check"
-            codesign --verify --strict "$check/StageUtilityOutput.app"
-          done
+          # And the zip is checked the way a Mac will meet it: unpacked, signed.
+          check="$RUNNER_TEMP/check-$arch"
+          mkdir -p "$check"
+          ditto -x -k "$zip" "$check"
+          codesign --verify --strict "$check/StageUtilityOutput.app"
           ls -l helper-dist
           # For people reading the log. Not uploaded: GitHub serves each release
           # asset's SHA-256 as its `digest`, and that is what the server and the
@@ -531,7 +610,8 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: output-helper
+          # One per architecture; the sign and artifacts jobs fetch both by pattern.
+          name: output-helper-${{ matrix.arch }}
           path: helper-dist/
           if-no-files-found: error
           retention-days: 1
@@ -565,7 +645,8 @@ jobs:
         if: ${{ needs.helper.result == 'success' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: output-helper
+          pattern: output-helper-*
+          merge-multiple: true
           path: helper-dist
 
       - name: Sign the update payloads
@@ -589,37 +670,23 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Downloadable installs, attached to the release the job above just published.
-  #
-  # Every platform is built on this one runner because there is nothing to
-  # cross-compile: the server's only third-party dependencies are pure JavaScript
-  # and there are no native modules, so the per-platform part is which Node binary
-  # gets copied in. Five archives take about twenty seconds.
-  artifacts:
-    # `helper` is a need so its zips can go into the release in the one create
-    # call. It cannot stop the release, since the `always()` below runs this job
-    # whether the helper was skipped, failed, cancelled or passed, but it can
-    # delay it: the archives wait for the helper job to finish, up to its 60
-    # minute timeout plus any wait for a macOS runner. A failed or cancelled
-    # helper is announced by the error step below.
-    needs: [release, helper, sign]
-    # `always()`, not the default success(): once the tag is pushed the
-    # archives must follow whatever happens to the release job afterwards — a
-    # failed status write, or a hand on the cancel button — because a tag with
-    # no archives is a deployment that cannot update. `published` is only true
-    # once the tag is on the remote, so this never builds for a stand-down.
+  # The web build and the per-platform archives, beside the helper rather than
+  # after it: they need nothing from it, and building them used to start only
+  # once the macOS build was done. The publish job below downloads them. The
+  # smoke test is here too, so a broken archive fails before anything waits on it.
+  archives:
+    needs: release
+    # As the artifacts job: once the tag is pushed the archives must follow.
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
-          # The release notes are a commit range from the previous tag, so the
-          # default shallow clone would have nothing to compute them over.
-          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -635,37 +702,6 @@ jobs:
         env:
           V: ${{ needs.release.outputs.version }}
         run: scripts/build-artifacts.sh "$V" dist
-
-      - name: Fetch the Mac output helper
-        # Only a helper that built and verified. A skipped or failed one leaves the
-        # release without it, and the installer does NOT recover from that: the
-        # release has no zips, so a Mac whose server runs this version cannot
-        # install the helper, from the server or from GitHub, until the server
-        # updates to a release that has them. The step below makes that loud.
-        if: ${{ needs.helper.result == 'success' }}
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: output-helper
-          path: helper-dist
-
-      - name: Say so when the Mac output helper failed
-        # The tag is already pushed, so the release is still created, without the
-        # helper. This only makes the gap visible in the run instead of leaving a
-        # green job that shipped a release Macs cannot install the helper from.
-        if: ${{ needs.helper.result == 'failure' || needs.helper.result == 'cancelled' }}
-        env:
-          V: ${{ needs.release.outputs.version }}
-        run: |
-          echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
-
-      - name: Fetch the release signatures
-        # Only from a sign job that succeeded. Without them the release is still
-        # created, and the create step says machines will hold the update.
-        if: ${{ needs.sign.result == 'success' }}
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-signatures
-          path: sig-dist
 
       - name: Smoke-test the Linux archive
         env:
@@ -693,6 +729,89 @@ jobs:
           echo "  reported version: $got"
           [ "$got" = "$V" ] \
             || { echo "::error::version reported as $got"; exit 1; }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archives
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # Downloadable installs, attached to the release the job above just published.
+  #
+  # Every platform is built on this one runner because there is nothing to
+  # cross-compile: the server's only third-party dependencies are pure JavaScript
+  # and there are no native modules, so the per-platform part is which Node binary
+  # gets copied in. Five archives take about twenty seconds.
+  artifacts:
+    # `helper` is a need so its zips can go into the release in the one create
+    # call. It cannot stop the release, since the `always()` below runs this job
+    # whether the helper was skipped, failed, cancelled or passed, but it can
+    # delay it: the archives wait for the helper job to finish, up to its 60
+    # minute timeout plus any wait for a macOS runner. A failed or cancelled
+    # helper is announced by the error step below.
+    needs: [release, archives, helper, sign]
+    # `always()`, not the default success(): once the tag is pushed the
+    # archives must follow whatever happens to the release job afterwards — a
+    # failed status write, or a hand on the cancel button — because a tag with
+    # no archives is a deployment that cannot update. `published` is only true
+    # once the tag is on the remote, so this never builds for a stand-down.
+    if: ${{ always() && needs.release.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
+          # The release notes are a commit range from the previous tag, so the
+          # default shallow clone would have nothing to compute them over.
+          fetch-depth: 0
+
+      # Node for the release notes and the tap formula, which install nothing.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # Built and smoke-tested beside the helper, by the archives job.
+      - name: Fetch the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archives
+          path: dist
+
+      - name: Fetch the Mac output helper
+        # Only a helper that built and verified. A skipped or failed one leaves the
+        # release without it, and the installer does NOT recover from that: the
+        # release has no zips, so a Mac whose server runs this version cannot
+        # install the helper, from the server or from GitHub, until the server
+        # updates to a release that has them. The step below makes that loud.
+        if: ${{ needs.helper.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: output-helper-*
+          merge-multiple: true
+          path: helper-dist
+
+      - name: Say so when the Mac output helper failed
+        # The tag is already pushed, so the release is still created, without the
+        # helper. This only makes the gap visible in the run instead of leaving a
+        # green job that shipped a release Macs cannot install the helper from.
+        if: ${{ needs.helper.result == 'failure' || needs.helper.result == 'cancelled' }}
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
+
+      - name: Fetch the release signatures
+        # Only from a sign job that succeeded. Without them the release is still
+        # created, and the create step says machines will hold the update.
+        if: ${{ needs.sign.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signatures
+          path: sig-dist
 
       # Created WITH its assets, in one call.
       #
