@@ -43,6 +43,13 @@ import {
   type PressTarget,
 } from "./owned-press";
 
+/**
+ * Resolves once every write this control has started has landed, to the reason the last one
+ * failed, or null when it succeeded. A host that stores the Button on its own Save waits on it
+ * and does not store the Button when it answers a reason.
+ */
+export type PressSettle = () => Promise<string | null>;
+
 export type CueButtonConfig = Extract<LayoutObjectConfig, { type: "cue-button" }>;
 
 const PRESSES: readonly { value: PressKind; label: string }[] = [
@@ -75,11 +82,13 @@ export function ButtonPresses({
   onConfig: (c: LayoutObjectConfig) => void;
   /**
    * Filled with a function that resolves once every write this control has started, or is
-   * about to start for a typed field, has landed and bound the Button. A host that stores
-   * the Button on its own Save (Home's sheet) waits on it first: a Save that raced a pick
-   * stored the Button without its command and left the command with no Button.
+   * about to start for a typed field, has landed and bound the Button, to why the last one
+   * failed (null when it did not). A host that stores the Button on its own Save (Home's
+   * sheet, the layout editor) waits on it first: a Save that raced a pick stored the Button
+   * without its command and left the command with no Button, and a Save after a failed write
+   * stored a Button the operator had been told was not bound.
    */
-  settleRef?: MutableRefObject<(() => Promise<void>) | null>;
+  settleRef?: MutableRefObject<PressSettle | null>;
   /**
    * The objects of the layout being edited, as drafted and not yet saved. A Button duplicated
    * here and not yet saved presses the same command and is in no stored view, so the write
@@ -105,7 +114,13 @@ export function ButtonPresses({
   const latest = useLatestRef(c);
   const drafted = useLatestRef(draftObjects);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  // What the shown error is, readable by settle() without waiting for a render.
+  const failure = useRef<string | null>(null);
+  const setError = (message: string | null) => {
+    failure.current = message;
+    setErrorState(message);
+  };
   // Writes go one after another: two picks in a row must not both mint `btn_x`. The chain
   // never rejects: a job that throws is shown, and the next one still runs.
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -143,6 +158,7 @@ export function ButtonPresses({
     settleRef.current = async () => {
       flushPending();
       await queue.current;
+      return failure.current;
     };
   });
 
@@ -162,8 +178,10 @@ export function ButtonPresses({
         setError(made.error);
         return;
       }
-      // Written, but a follow-up step failed: the Button is bound, and the reason stays shown.
-      setError(made.warning ?? null);
+      // Written, but a follow-up step failed: the Button is bound (so a Save is not refused), and the
+      // reason stays shown.
+      setError(null);
+      if (made.warning) setErrorState(made.warning);
       refreshRules();
       if (epoch.current === started && latest.current.cue !== made.cue) onConfig({ ...latest.current, cue: made.cue });
     });
