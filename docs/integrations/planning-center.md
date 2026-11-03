@@ -232,6 +232,13 @@ The names are matched case-insensitively and ignore spaces around the colon;
 group that is not a person group is never read. Only a slot filled by a person
 shows them; a spacer, an empty slot or a static label never does.
 
+A capsule applies to a vocal mic, so it shows only when the person is on a vocal
+position: the Planning Center position that slot matched has "vocal" in its name
+(`Vocals`, `Vocals (BGVs)`, `Vocals / AG`). A guitarist who also sings shows no
+capsule on their guitar slot. A slot matched by person, with no position of its own,
+shows it when the person holds any vocal position. `IEMs: Own` is not affected and
+shows on any slot.
+
 Two cases are settled rather than guessed. A person with more than one capsule tag
 shows the first alphabetically. An `IEMs:` value other than `Own` is ignored. Each
 is logged once on the `[pco-tags]` tag.

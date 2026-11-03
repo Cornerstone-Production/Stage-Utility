@@ -345,9 +345,16 @@ export function SlotInspector(props: SlotInspectorProps) {
 
       <Card title="Prep · from Planning Center">
         <Row label="Capsule">
-          <span className="font-mono text-footnote font-bold text-fg" data-prep-capsule>
-            {resolved?.prep?.capsule ?? "no tag"}
-          </span>
+          {resolved?.takesCapsule === false ? (
+            // A capsule tag the person may well carry, but not for this position.
+            <span className="text-footnote text-fg-muted" data-prep-capsule>
+              Not a vocal position
+            </span>
+          ) : (
+            <span className="font-mono text-footnote font-bold text-fg" data-prep-capsule>
+              {resolved?.prep?.capsule ?? "no tag"}
+            </span>
+          )}
         </Row>
         <Row label="In-ears">
           <span className="text-footnote text-fg" data-prep-ears>
@@ -355,7 +362,7 @@ export function SlotInspector(props: SlotInspectorProps) {
           </span>
         </Row>
         <p className="px-4 py-2.5 text-caption2 text-fg-subtle">
-          Tags named Capsule: or IEMs: on their Planning Center profile are picked up automatically.
+          Tags named Capsule: or IEMs: on their Planning Center profile are picked up automatically. A capsule applies only on a position whose name contains Vocal.
         </p>
       </Card>
 

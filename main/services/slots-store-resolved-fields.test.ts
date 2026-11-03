@@ -46,12 +46,13 @@ function resolvedSlot(id: string): Slot {
     photoUrl: "/api/photo/100000007",
     shownPositions: ["Vocals"],
     prep: { capsule: "KSM9", ownIems: true },
+    takesCapsule: true,
     device: { status: "online", rf: 4, battery: 80, freq: 584.1, audioLevel: -20, charge: 80, iemCharge: 55, label: "Handheld 3", iemLabel: null },
   } as unknown as Slot;
 }
 
 /** Every resolved-only value, as it would appear in the file's text. */
-const LEAKS = [/Jordan Lee/, /\/api\/photo\/100000007/, /KSM9/, /shownPositions/, /"prep"/, /584\.1/, /"audioLevel":\s*-20/, /"battery":\s*80/];
+const LEAKS = [/Jordan Lee/, /\/api\/photo\/100000007/, /KSM9/, /shownPositions/, /"prep"/, /takesCapsule/, /584\.1/, /"audioLevel":\s*-20/, /"battery":\s*80/];
 
 async function bytes(file: string): Promise<string> {
   return fs.readFile(path.join(TMP, file), "utf-8");

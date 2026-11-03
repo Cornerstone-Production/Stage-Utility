@@ -857,6 +857,16 @@ describe("prep from Planning Center", () => {
     assert.equal(prep(), "KSM9 | Brings their own");
   });
 
+  test("a capsule on a position that is not vocal says so, rather than 'no tag'", async () => {
+    resolvedExtras = { a: { displayName: "Ana Rivera", takesCapsule: false, prep: { capsule: null, ownIems: true } } };
+    await mount();
+    await click(card("a"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    assert.equal(prep(), "Not a vocal position | Brings their own");
+  });
+
   test("no tag reads 'no tag', a bound IEM pack is house buds, and neither is no pack", async () => {
     layouts["b-left"] = [{ ...board("a")[0]!, iemBinding: { providerId: "wireless", channelId: "i1" } } as Slot, ...board("b | c").map((s, i) => ({ ...s, order: i + 1 }))];
     await mount();

@@ -75,14 +75,15 @@ export function checkBoards(
  *
  * `resolved` is each board's slots after the resolver (names and `prep` set). A
  * mic is a bound receiver or an offline mic label; a static label or an unfilled
- * slot is nobody's capsule to forget.
+ * slot is nobody's capsule to forget, and neither is a slot on a non-vocal position
+ * (`takesCapsule` false), where a capsule does not apply.
  */
 export function noCapsuleSlots(resolved: readonly { id: string; name: string; slots: readonly Slot[] }[]): BoardCheckNoCapsule[] {
   const out: BoardCheckNoCapsule[] = [];
   for (const board of resolved) {
     for (const s of board.slots) {
       const hasMic = !!s.deviceBinding || (s.deviceLabel !== undefined && s.deviceLabel !== null);
-      if (s.link.kind !== "pco" || !s.displayName || !hasMic || s.prep?.capsule) continue;
+      if (s.link.kind !== "pco" || !s.displayName || !hasMic || s.takesCapsule === false || s.prep?.capsule) continue;
       out.push({ boardId: board.id, boardName: board.name, slotId: s.id, name: s.displayName });
     }
   }
