@@ -111,6 +111,8 @@ let revs: Record<string, number> = {};
 const revOf = (boardId: string, side: "default" | "plan") => `r${revs[`${boardId}|${side}`] ?? 0}`;
 /** What GET /api/integrations/wireless/statuses answers. */
 let wirelessStatuses: unknown[] = [];
+/** What GET /api/integrations/wireless/chargers answers. */
+let chargerBays: unknown[] = [];
 /** While set, Save all answers only once it resolves. */
 let holdSave: Promise<void> | null = null;
 /** While set, Save all WRITES (the revisions move) and then answers only once it resolves:
@@ -182,6 +184,7 @@ const STATE = () =>
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
   else if (path === "/api/integrations/wireless/statuses") out = wirelessStatuses;
+  else if (path === "/api/integrations/wireless/chargers") out = chargerBays;
   else if (path === "/api/views/resolve-slots" && failing.has("resolve")) {
     status = 500;
     out = { error: "the roster could not be read" };
@@ -281,6 +284,7 @@ beforeEach(() => {
   holdSave = null;
   holdAfterWrite = null;
   wirelessStatuses = [];
+  chargerBays = [];
   withWidgets = false;
   padRev = 0;
   padLayout = null;
@@ -1503,6 +1507,29 @@ describe("live readings on the previews", () => {
     await settle();
     assert.ok(text().includes("81%"), `the preview held the battery from its last resolve: ${text()}`);
     assert.equal(posts("/api/views/resolve-slots").length, resolves, "a telemetry push asked the server to resolve again");
+  });
+
+  test("a charge bar read from a charger bay follows the bay, with no new resolve", async () => {
+    const bay = (battery: number) => ({
+      id: "charger-1::2", connectionId: "charger-1", bay: 2, chargerIndex: 1, connectionName: "Rack charger", name: null,
+      online: true, battery, charging: true, cycles: null, health: null, tempC: null, timeToFullMinutes: null, fault: null, storageMode: null,
+    });
+    layouts["b-left"] = [
+      slot("spare", { link: { kind: "static", label: "Spare pack", color: "#888888" }, chargeSource: "charger", chargeBayId: "charger-1::2", hideRf: true } as Partial<Slot>),
+    ];
+    chargerBays = [bay(40)];
+    await mount();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle();
+    const text = () => section("b-left").textContent ?? "";
+    assert.ok(text().includes("40%"), `the preview did not draw the bay: ${text()}`);
+    const resolves = posts("/api/views/resolve-slots").length;
+    await act(async () => emit("wireless:chargers", [bay(77)]));
+    await settle();
+    assert.ok(text().includes("77%"), `the preview held the bay's charge from its last resolve: ${text()}`);
+    assert.equal(posts("/api/views/resolve-slots").length, resolves, "a charger push asked the server to resolve again");
   });
 });
 

@@ -6,12 +6,11 @@
 // and are laid over the draft by slot id; a card the resolver has not answered
 // for yet (one just added) draws as the draft is.
 //
-// The device readings (battery, RF, level, the IEM pack) are live: the page's one
-// `wireless:channels` subscription is laid over each card by its DRAFT's
-// bindings, through the same mapping the resolver uses (slotDevice). A meter
-// moving re-renders the cards and asks the server nothing. A charge bar read from
-// a charger bay is the exception: bays are not on that channel, so it is as of
-// the last resolve.
+// The device readings (battery, RF, level, the IEM pack, a charge bar read from
+// a charger bay) are live: the page's `wireless:channels` and `wireless:chargers`
+// subscriptions are laid over each card by its DRAFT's bindings, through the same
+// mapping the resolver uses (slotDevice). A meter moving re-renders the cards and
+// asks the server nothing.
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -89,7 +88,7 @@ export function useBoardPreview(
       const r = resolved.get(s.id);
       // The draft owns structure; the resolver owns who.
       const base = r ? { ...r, order: s.order, stackWithPrevious: s.stackWithPrevious, widthIn: s.widthIn, link: s.link, channel: s.channel } : s;
-      return live ? withLiveDevice(base, s, r, live) : base;
+      return live ? withLiveDevice(base, s, live) : base;
     });
     return { slots: merged, resolution, resolved, failure };
   }, [slots, resolution, failure, live]);
@@ -97,11 +96,8 @@ export function useBoardPreview(
 
 /** A card's device readings from live telemetry, by the draft's own bindings, so
  *  a binding changed a moment ago reads its new device before the next resolve. */
-function withLiveDevice(base: Slot, draft: Slot, resolved: Slot | undefined, live: ReadonlyMap<string, DeviceStatus>): Slot {
+function withLiveDevice(base: Slot, draft: Slot, live: ReadonlyMap<string, DeviceStatus>): Slot {
   // A spacer or an empty slot draws no device, whatever it is bound to.
   if (draft.link.kind === "spacer" || draft.link.kind === "empty") return base;
-  const device = slotDevice(draft, live);
-  // Charger bays are not on the telemetry channel: keep what the resolve read.
-  if ((draft.chargeSource ?? "mic") === "charger") device.charge = resolved?.device?.charge ?? null;
-  return { ...base, device };
+  return { ...base, device: slotDevice(draft, live) };
 }

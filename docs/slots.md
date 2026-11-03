@@ -62,8 +62,8 @@ screen-shaped preview drawn by the same components a screen uses, filled with th
 people the plan being edited puts on each slot, and a line saying so ("Previewing
 Sun, Sep 20 · 6 of 8 positions filled"; "positions only, no plan" on a default). The
 line is absent on the live plan. The cards' RF bars, battery and in-ear battery are
-live, as on a screen, whether or not any screen shows the board; a battery read from
-a charger bay is as of the last time the preview was filled.
+live, as on a screen, whether or not any screen shows the board, including a
+battery read from a charger bay.
 
 The **⋯** menu:
 

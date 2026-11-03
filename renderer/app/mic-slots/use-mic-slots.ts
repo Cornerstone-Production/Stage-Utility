@@ -30,6 +30,8 @@ import { invoke as ipc, onNotification } from "../../lib/api";
 import { BOARDS_CHANGED_CHANNEL, type BoardsChanged } from "@main/types/boards-changed";
 import { useStageState } from "../../main/use-stage-state";
 import { useWirelessTelemetryStatus } from "../../main/use-wireless-telemetry";
+import { useChargerBays } from "../../main/use-charger-bays";
+import type { ChargerBayDTO } from "@main/types/state";
 import type { DeviceStatus } from "@main/types/devices";
 import { useEditingTarget, registerTargetGuard, requestEditingTarget } from "../../settings/sections/editing-target";
 import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
@@ -104,6 +106,15 @@ export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | 
   return found;
 }
 
+/** A charger bay as the device status the resolver reads a charge bar from. */
+function bayAsDevice(b: ChargerBayDTO): DeviceStatus {
+  return {
+    channelId: b.id, name: b.name, deviceType: "charger", online: b.online, rfBars: null, rfLevelDbm: null,
+    battery: b.battery, batteryMinutes: null, charging: b.charging, frequencyLabel: null, audioLevel: null,
+    cycles: b.cycles, health: b.health, tempC: b.tempC, updatedAt: "",
+  };
+}
+
 /** The newer of two copies of a view: a higher layoutRev, else the later one. */
 function newerView(a: View | undefined, b: View): View {
   return a && (a.layoutRev ?? 0) > (b.layoutRev ?? 0) ? a : b;
@@ -156,15 +167,19 @@ export function useMicSlots() {
   }, [pointers, qc]);
 
   // ── live device readings, for every board's preview ──────────────────
-  // ONE subscription for the page, keyed by channel id: each preview lays it over
-  // its cards by binding, so a meter moving asks the server nothing.
+  // ONE subscription each for the page (mics and packs, charger bays), keyed by
+  // channel id: each preview lays them over its cards by binding, so a meter
+  // moving asks the server nothing.
   const telemetry = useWirelessTelemetryStatus();
-  const liveDevices = useMemo<ReadonlyMap<string, DeviceStatus> | null>(
+  const chargers = useChargerBays();
+  const liveDevices = useMemo<ReadonlyMap<string, DeviceStatus> | null>(() => {
     // A read that failed with nothing pushed yet is not "no devices": the
-    // resolve's readings stand until the channel speaks.
-    () => (telemetry.known && !(telemetry.failed && telemetry.channels.length === 0) ? new Map(telemetry.channels.map((d) => [d.channelId, d])) : null),
-    [telemetry.known, telemetry.failed, telemetry.channels],
-  );
+    // resolve's readings stand until both channels have spoken.
+    if (!telemetry.known || (telemetry.failed && telemetry.channels.length === 0) || !chargers.known) return null;
+    const map = new Map<string, DeviceStatus>(telemetry.channels.map((d) => [d.channelId, d]));
+    for (const b of chargers.bays) map.set(b.id, bayAsDevice(b));
+    return map;
+  }, [telemetry.known, telemetry.failed, telemetry.channels, chargers.known, chargers.bays]);
 
   // ── which plan, and which side of it ─────────────────────────────────
   // One target for the whole page, read off the first board: the plan's date and

@@ -32,7 +32,7 @@ import {
 import { ColorField } from "../../components/ui/color-field";
 import { cn } from "../../lib/cn";
 import { useWirelessTelemetry } from "../../main/use-wireless-telemetry";
-import { useStageState } from "../../main/use-stage-state";
+import { useChargerBays } from "../../main/use-charger-bays";
 import { PositionRangeEditor } from "../../settings/sections/position-picker";
 import type { WirelessChannel } from "../../settings/types";
 import { isPcoPersonId, normalizePcoPersonId } from "@main/services/pco-person-id";
@@ -129,7 +129,7 @@ export interface SlotInspectorProps {
 
 export function SlotInspector(props: SlotInspectorProps) {
   const { slot, resolved, boardName, where, columnWidthIn, stack, sharesWith, planLabel, wirelessChannels, onChange } = props;
-  const chargerBays = useStageState().state?.chargerBays ?? [];
+  const chargerBays = useChargerBays().bays;
   const telemetry = useWirelessTelemetry();
   const batteryOf = (channelId: string) => telemetry.find((t) => t.channelId === channelId)?.battery ?? null;
   const channelName = (ch: WirelessChannel) => {
