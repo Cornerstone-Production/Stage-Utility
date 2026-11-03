@@ -1441,3 +1441,15 @@ describe("two widgets in one view", () => {
     assert.ok(!document.body.textContent!.includes("Couldn't set the display width"));
   });
 });
+
+describe("plan-wide Revert and Set as default from the Default side", () => {
+  test("are off, even with a plan layout to act on", async () => {
+    planId = "p1";
+    overrides = { "b-left": board("o1 | o2") };
+    await mount();
+    await click(screen.getByRole("button", { name: /Weekend default/ }));
+    await openMenu(screen.getByRole("button", { name: "Plan board actions" }));
+    assert.equal(screen.getByRole("menuitem", { name: /^Revert/ }).getAttribute("aria-disabled"), "true");
+    assert.equal(screen.getByRole("menuitem", { name: /^Set .* as/ }).getAttribute("aria-disabled"), "true");
+  });
+});

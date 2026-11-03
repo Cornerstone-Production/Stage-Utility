@@ -33,7 +33,7 @@ until they are: what it would show is not what is saved.
 |---|---|
 | **Plan switcher** | `‹ name ▾ ›` and **Now**: which plan's layouts every board on the page shows and saves to. See [Switching plans](#switching-plans-in-the-editor) |
 | **Default** and **<plan> only** | Which side of the plan is being edited, for every board at once. **EDITED** marks a plan that has a layout of its own on some board. See [Defaults and this week](#defaults-and-this-week) |
-| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default**, and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan and says which boards it could not do. Copying names the boards and the target it replaces, and leaves alone, naming them, any board whose source has no layout |
+| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default** (both on the plan side only), and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan and says which boards it could not do. Copying names the boards and the target it replaces, and leaves alone, naming them, any board whose source has no layout |
 | **Saved layouts** | [Saved layouts](#saved-layouts) |
 | **Save all** | Writes every board with changes in one request |
 

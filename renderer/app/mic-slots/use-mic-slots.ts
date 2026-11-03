@@ -817,7 +817,9 @@ export function useMicSlots() {
    *  plan's layout, but only once the request has landed: a refused revert loses
    *  nothing. */
   async function revertBoards(ids: string[], what: string): Promise<boolean> {
-    if (!planId || ids.length === 0) return false;
+    // Only from the plan side: from Default, "unsaved changes" are the default's,
+    // and a revert would throw them away with a plan layout they are not part of.
+    if (!planId || effectiveSide !== "plan" || ids.length === 0) return false;
     const unsaved = ids.filter((id) => id in edits);
     const ok = await confirm({
       title: `Revert ${what} to the default?`,
@@ -852,8 +854,10 @@ export function useMicSlots() {
    * promoted if that save is refused.
    */
   async function promoteBoards(ids: string[], what: string): Promise<boolean> {
-    if (!planId) return false;
-    const unsaved = effectiveSide === "plan" ? ids.filter((id) => id in edits) : [];
+    // Only from the plan side: from Default, unsaved DEFAULT edits would be saved
+    // on the next Save all over the promotion they predate.
+    if (!planId || effectiveSide !== "plan") return false;
+    const unsaved = ids.filter((id) => id in edits);
     const targets = [...new Set([...ids.filter((id) => overridden.some((b) => b.id === id)), ...unsaved])];
     if (targets.length === 0) return false;
     const ok = await confirm({

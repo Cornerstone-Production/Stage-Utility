@@ -25,6 +25,7 @@ export function TopBar({
 }) {
   const [copyAll, setCopyAll] = useState(false);
   const noType = !mic.serviceTypeId;
+  const planActions = mic.hasPlan && mic.hasOverride && mic.side === "plan";
   const typeLabel = mic.typeName ? `${mic.typeName} default` : "Default";
   return (
     // The shell pads its scroller by 1rem from sm up, and a sticky bar holds at the
@@ -66,10 +67,12 @@ export function TopBar({
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="start" className={menuContent("min-w-52")}>
-            <DropdownMenu.Item className={MENU_ITEM} disabled={!mic.hasPlan || !mic.hasOverride} onSelect={() => void mic.revertPlan()}>
+            {/* Plan side only: from Default, unsaved edits are the default's, and
+                a revert or promote would discard them or be undone by them. */}
+            <DropdownMenu.Item className={MENU_ITEM} disabled={!planActions} onSelect={() => void mic.revertPlan()}>
               Revert {mic.label} to {namedType(mic.typeName)} default
             </DropdownMenu.Item>
-            <DropdownMenu.Item className={MENU_ITEM} disabled={!mic.hasPlan || !mic.hasOverride} onSelect={() => void mic.promotePlan()}>
+            <DropdownMenu.Item className={MENU_ITEM} disabled={!planActions} onSelect={() => void mic.promotePlan()}>
               Set {mic.label} as {namedType(mic.typeName)} default
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-line" />
