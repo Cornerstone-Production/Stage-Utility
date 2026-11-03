@@ -92,6 +92,7 @@ let boards: SlotBoardDTO[] = [];
 let presets: SlotPreset[] = [];
 /** What the resolver adds to a slot, by id: a person and their prep. */
 let resolvedExtras: Record<string, Partial<Slot>> = {};
+let checkPrepNobody: { tagCount: number } | null = null;
 let checkNoCapsule: { boardId: string; boardName: string; slotId: string; name: string }[] = [];
 let planId: string | null = null;
 let requests: { url: string; method: string; body: string | null }[] = [];
@@ -189,7 +190,7 @@ const STATE = () =>
     status = 500;
     out = { error: "the roster could not be read" };
   } else if (path === "/api/views/resolve-slots") out = { slots: (JSON.parse(body ?? "{}").slots as Slot[]).map((x) => ({ ...x, ...(resolvedExtras[x.id] ?? {}) })), roster: "none" };
-  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule };
+  else if (path === "/api/boards/check") out = { serviceTypeId: "st-1", planId, roster: "none", unplaced: [], noPosition: [], noCapsule: checkNoCapsule, ...(checkPrepNobody ? { prepTagsNobody: checkPrepNobody } : {}) };
   else if (path === "/api/boards/slots" && method === "POST") {
     if (holdSave) await holdSave;
     const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string; rev?: string; target?: { kind: string } }[];
@@ -291,6 +292,7 @@ beforeEach(() => {
   presets = [];
   resolvedExtras = {};
   checkNoCapsule = [];
+  checkPrepNobody = null;
   planId = null;
   requests = [];
   failSave = null;
@@ -891,6 +893,20 @@ describe("prep from Planning Center", () => {
     assert.equal(card("d").getAttribute("data-highlighted"), "true", "the rest are marked");
     await click(card("a"));
     assert.equal(card("d").getAttribute("data-highlighted"), null, "the next selection clears the marks");
+  });
+
+  test("the check says when Planning Center lists prep tags with nobody on them, and names the cause", async () => {
+    checkPrepNobody = { tagCount: 6 };
+    await mount();
+    const row = document.querySelector("[data-check-prep-tags-nobody]")!;
+    assert.ok(row, "no row");
+    assert.ok((row.textContent ?? "").includes("lists 6 prep tags but nobody on them"), row.textContent ?? "");
+    assert.ok((row.textContent ?? "").includes("Editor in Services"), row.textContent ?? "");
+  });
+
+  test("no prep-tag state, no such row", async () => {
+    await mount();
+    assert.ok(!document.querySelector("[data-check-prep-tags-nobody]"));
   });
 
   test("no such people, no row", async () => {

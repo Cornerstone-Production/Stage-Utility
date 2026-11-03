@@ -192,6 +192,33 @@ describe("PrepTagBook", () => {
     }
   });
 
+  it("warns once when Planning Center lists prep tags but nobody is on them, and again after it recovers and recurs", async () => {
+    const empty = [tagged("Capsule: KSM9"), tagged("IEMs: Own")];
+    const r = bookRig([empty, empty, [tagged("Capsule: KSM9", "1")], empty]);
+    const warned = (out: string[]) => out.filter((l) => l.includes("nobody on them"));
+    const first = await lines(async () => void (await r.book.refresh()));
+    assert.equal(warned(first).length, 1, first.join("\n"));
+    assert.match(warned(first)[0], /^\[pco-tags\] Planning Center lists 2 prep tags but nobody on them; .*Editor in Services/);
+    assert.deepEqual(r.book.nobodyVisible, { tagCount: 2 });
+    // Same state on the next read: no second warning (the result signature is unchanged too).
+    assert.equal(warned(await lines(async () => void (await r.book.refresh()))).length, 0, "warned again on an unchanged read");
+    // Somebody appears: no warning, and the state clears.
+    assert.equal(warned(await lines(async () => void (await r.book.refresh()))).length, 0, "warned with people on the tags");
+    assert.equal(r.book.nobodyVisible, null);
+    // It recurs: warn again.
+    assert.equal(warned(await lines(async () => void (await r.book.refresh()))).length, 1, "did not warn on recurrence");
+  });
+
+  it("does not warn when there are no prep tags at all", async () => {
+    const r = bookRig([[tagged("Band")], []]);
+    const out = await lines(async () => {
+      await r.book.refresh();
+      await r.book.refresh();
+    });
+    assert.equal(out.filter((l) => l.includes("nobody on them")).length, 0);
+    assert.equal(r.book.nobodyVisible, null);
+  });
+
   it("asks nothing without credentials", async () => {
     const book = new PrepTagBook(() => null);
     assert.deepEqual(await book.refresh(), { changed: false, failed: false });

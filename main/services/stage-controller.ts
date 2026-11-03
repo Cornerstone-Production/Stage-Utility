@@ -3061,7 +3061,17 @@ export class StageController {
       members.length > 0 && this.prepTags.map.size > 0
         ? noCapsuleSlots(boards.map((b) => ({ id: b.id, name: b.name, slots: this.resolve(b.slots, members) })))
         : [];
-    return { serviceTypeId, planId, roster, ...(reason ? { reason } : {}), unplaced, noPosition, noCapsule };
+    const prepTagsNobody = this.prepTags.nobodyVisible;
+    return {
+      serviceTypeId,
+      planId,
+      roster,
+      ...(reason ? { reason } : {}),
+      unplaced,
+      noPosition,
+      noCapsule,
+      ...(prepTagsNobody ? { prepTagsNobody } : {}),
+    };
   }
 
   /** How long an override outlives its plan before the daily sweep drops it. */
