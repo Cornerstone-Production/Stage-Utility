@@ -130,6 +130,12 @@ restyled and reconfigured, but not dragged, resized, snapped or deleted. Locking
 a container locks everything inside it. The layer list beside the canvas carries
 an eye per object, which hides it while you work on what is underneath.
 
+**Keyboard.** **Delete** or **Backspace** removes the selection; **⌘C**, **⌘V** and
+**⌘D** copy, paste and duplicate it (**Ctrl** on Windows and Linux), pasting and
+duplicating with fresh ids all the way down a container; **⌘F** opens the
+[widget shelf](#the-widget-shelf)'s search. The first three do not act while the cursor
+is in a text field. There is no arrow-key nudge.
+
 ### Canvas shape
 
 The **Canvas** popover sets the design canvas, either from a preset —

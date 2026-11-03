@@ -499,7 +499,7 @@ widgets and the Timer pick which instance they follow. See
 
 | Widget | What it shows | Source |
 |---|---|---|
-| **Mic slots** | Who is on which mic, as a grid of cards | Planning Center team + wireless gear |
+| **Mic slots** | Who is on which mic, as a grid of cards with channel number, capsule and in-ears badges | Planning Center team and prep tags + wireless gear |
 | **Wireless summary** | How many packs are online, and their batteries | Every wireless connection |
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
 | **Charger battery** | Battery levels in the charger bays, live as each bay reports | Shure SBC chargers |

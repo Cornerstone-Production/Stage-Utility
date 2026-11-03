@@ -243,7 +243,8 @@ it (each paginated), whatever the plan's size. The tags belong to the account, n
 to a plan, so the result is cached for 15 minutes and read again by the next
 refresh after that, whichever plan is selected. The read runs beside the roster's,
 never ahead of it. If a read fails the last good tags stay and no slot goes
-blank; a failed read with no earlier result means no prep is shown. The token
+blank; a failed read with no earlier result means no prep is shown. A failed read
+is not retried for five minutes. The token
 needs the same read access it already has for people.
 
 ## Item times

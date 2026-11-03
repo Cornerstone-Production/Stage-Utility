@@ -6,7 +6,8 @@ wireless mic and an IEM pack, and shows a name, photo and live telemetry.
 Slots live on named **boards**. A Mic Slots view, or a mic-slots object in a custom
 layout, shows one board, and several can show the same one: edit it once and every
 screen showing it changes. Boards are created, renamed, duplicated and deleted on
-the **Mic slots** page, with no limit on how many. Duplicating a view that shows
+the **Mic slots** page, with no limit on how many. A new Mic Slots screen starts
+with a board of its own, named after it. Duplicating a view that shows
 boards asks whether the copy gets boards of its own (the default) or shares the
 original's. See
 [Slots](reference/data-model.md#slots) and the [board routes](reference/api.md#slot-boards).

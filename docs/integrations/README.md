@@ -112,7 +112,7 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    `invoke` case and its `IpcChannel` member (skip either and `tsc` fails).
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
    layout object render case + inspector, with the object's `integration` field in
-   `layout-objects.ts` (it dims the palette entry until the integration is set up);
+   `layout-objects.ts` (it dims the widget on the shelf until the integration is set up);
    a place in `CATEGORY_ORDER` in `integrations-panel.tsx`.
 
 Settings → Integrations is a grid of cards, one per integration, showing its name,

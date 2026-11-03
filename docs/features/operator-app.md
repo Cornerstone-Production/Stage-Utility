@@ -107,6 +107,13 @@ mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.
 
+**A Button tile** presses a command when it is tapped. Home has no inspector, so its
+right-click menu leads with **Presses…**, which names what it presses (or **Not
+set**) and opens a sheet with a **Label** and the same **Presses** choices as the
+layout editor: a Companion button, an app action or a command. A Button with
+nothing chosen reads **Choose what it presses**, and tapping it opens the sheet.
+See [Control](../reference/widgets.md#control).
+
 **The Sound level tile's menu** leads with two choices, **Meter** and **Metric**,
 above Size and Show. **Metric** has **Automatic** first, with the metric it is
 reading beside it, then every metric the chosen meter reports, each with its

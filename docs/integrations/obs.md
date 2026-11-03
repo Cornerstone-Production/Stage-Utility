@@ -113,7 +113,7 @@ Password** (or turn authentication off and leave it blank).
 enter the **Host** (the machine running OBS), **WebSocket Port** and **Server
 Password**, enable it, and **Test connection**.
 
-**On a layout:** add object → **OBS → OBS status**. Options: **mode**
+**On a layout:** the layout editor's widget shelf → **OBS** group → **OBS status**. Options: **mode**
 (recording / streaming / virtualcam), recording/idle/offline text overrides,
 show-timecode (recording mode only), fill-red-when-recording, hide-when-idle
 (pure tally-light — nothing on screen unless the chosen output is active).

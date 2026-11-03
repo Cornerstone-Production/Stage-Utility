@@ -86,8 +86,8 @@ marked with a small **ref** chip, and a button set to use another button's style
 control is a dropdown with a filter that takes a number or any part of a name,
 and **‹** and **›** arrows beside it. Pages with no labelled button are left out of
 both, because a real install has about a hundred pages and more than half are
-empty. Nothing is read from Companion until Browse buttons is pressed, and
-nothing in the grid presses or changes anything. A line under the grid names the key under the pointer or focus in full, with its page, row and column.
+empty. Nothing is read from Companion until Browse buttons is pressed (it then reads
+**Hide buttons**), and nothing in the grid presses or changes anything. A line under the grid names the key under the pointer or focus in full, with its page, row and column.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has

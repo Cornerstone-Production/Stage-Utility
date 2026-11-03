@@ -74,6 +74,11 @@ Charger bays are deliberately absent from the first two. A bay is not a mic: an
 empty one would drag "lowest battery" to zero, and a shelf of docked spares would
 pad the online count.
 
+**On a mic slot:** a [slot](../slots.md#the-inspector) binds to a mic channel, an
+in-ear pack (**In-ear pack**), or a charger bay (**Battery from → Charger bay**), and
+the card shows its RF bars and battery. A device with no network can be entered as
+**Offline (manual label)**.
+
 ### What a charger bay reports
 
 | Reading | Shown |
