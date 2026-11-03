@@ -340,7 +340,8 @@ export interface SlotPreset {
   slots: Slot[];
   createdAt: string;
   /** The board the layout was saved from, and where it is recalled by default.
-   *  Absent on a layout saved before boards existed, or imported from a file. */
+   *  Absent on a layout saved before boards existed, or imported from a file
+   *  that did not carry its board (one that did is pointed at its new id). */
   boardId?: string;
 }
 
@@ -451,6 +452,11 @@ export interface SlotTargetsDTO {
   planSortDate: string | null;
   defaultSlots: Slot[];
   overrideSlots: Slot[] | null;
+  /** The revision of `defaultSlots` and of `overrideSlots` (absent counts). A
+   *  save-all entry carries the one for its target as `rev`, and the server
+   *  refuses it with a 409 when the board was saved elsewhere since. */
+  defaultRev: string;
+  overrideRev: string;
 }
 
 /**

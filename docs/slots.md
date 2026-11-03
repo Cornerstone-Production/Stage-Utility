@@ -23,7 +23,9 @@ A Mic Slots screen's **Edit** on the Screens page opens it on that screen's boar
 while any board has work in it, with **Discard** (after asking) to throw it away. A
 board deleted from another browser while you have edits to it is dropped from the
 page, and a message names whose edits went; Save all then saves the other boards. Leaving the page, or moving the plan switcher, with
-unsaved work asks first.
+unsaved work asks first. A board whose layouts could not be read says so in its
+frame, and cannot be edited (its **+ Slot**, **+ Spacer** and drop zones are off)
+until they are: what it would show is not what is saved.
 
 ### The top bar
 
@@ -31,13 +33,26 @@ unsaved work asks first.
 |---|---|
 | **Plan switcher** | `‹ name ▾ ›` and **Now**: which plan's layouts every board on the page shows and saves to. See [Switching plans](#switching-plans-in-the-editor) |
 | **Default** and **<plan> only** | Which side of the plan is being edited, for every board at once. **EDITED** marks a plan that has a layout of its own on some board. See [Defaults and this week](#defaults-and-this-week) |
-| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default**, and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan and says which boards it could not do. Copying names the boards and the target it replaces, and leaves alone, naming them, any board whose source has no layout |
+| **⋯** (plan actions) | **Revert** this plan to the default, **Set** this plan **as the default** (both on the plan side only), and **Copy every board from another plan or service type…**. Each acts on every board with a layout for the plan and says which boards it could not do. Copying names the boards and the target it replaces, and leaves alone, naming them, any board whose source has no layout |
 | **Saved layouts** | [Saved layouts](#saved-layouts) |
 | **Save all** | Writes every board with changes in one request |
 
 Save all is all or nothing. The server checks every board before it writes any, and
 a refusal names the board that failed (`Board "Left wall": …`): the page keeps every
 edit and marks that board.
+
+A board saved from another browser after you started editing it is not overwritten
+silently. Save all is refused, nothing is written, and the page asks, naming every
+board in the save that was changed elsewhere: **Save over it**, or Cancel to keep
+your edits unsaved and look first (**Discard** shows what was saved).
+
+The page hears about a save from anywhere else (another browser, a screen's
+editor, a recalled saved layout, the nightly prune) as it happens, and re-reads only the
+boards it changed, including one no screen shows. A board you have unsaved edits
+to is not re-drawn under you: it is marked **changed elsewhere**, so you know
+before Save all, and the edits stay. The page also re-reads every board when the
+tab is looked at again. Edits made while a save is in flight stay
+unsaved.
 
 ### A board
 
@@ -46,13 +61,15 @@ shows it), its slot count, **+ Slot**, **+ Spacer** and a **⋯** menu. Under th
 screen-shaped preview drawn by the same components a screen uses, filled with the
 people the plan being edited puts on each slot, and a line saying so ("Previewing
 Sun, Sep 20 · 6 of 8 positions filled"; "positions only, no plan" on a default). The
-line is absent on the live plan.
+line is absent on the live plan. The cards' RF bars, battery and in-ear battery are
+live, as on a screen, whether or not any screen shows the board, including a
+battery read from a charger bay.
 
 The **⋯** menu:
 
 | Item | What it does |
 |---|---|
-| **Rename**, **Duplicate board** | Duplicating copies every service type's layouts and plan layouts, with new slot ids |
+| **Rename**, **Duplicate board** | Duplicating copies every service type's saved layouts and plan layouts, with new slot ids. A board with unsaved changes asks first: they are not in the copy |
 | **Shown on** | A checklist of every Mic Slots screen and every mic-slots widget. Checking one points it at this board. To move a screen off a board, check it on another |
 | **Copy this board from…** | Copies a layout over this board's layout for the plan being edited: from **another board**, from a **service type** (its default) or from a **plan** (its own layout, else its type's default). Written at once, after asking when it would replace a saved layout or unsaved edits. A source with no layout copies nothing and the board is left as it was |
 | **Revert this board to the default** | Deletes this board's layout for the plan being edited. Offered on the plan side when it has one. Unsaved edits to it go with it, once the revert has landed |
@@ -326,7 +343,10 @@ service type, and a save there changes nothing on any screen until that plan com
 round. The save toast is the ordinary one while live and a quieter one while not.
 
 **Now** returns to the plan the screens are following, and the editor follows it
-forward from then on, including when auto mode advances it mid-session.
+forward from then on, including when auto mode advances it mid-session. With
+unsaved edits it does not: if the plan advances or clears under them, the editor
+stays on the plan (and side) they were made against and says so, so Save all
+never writes one week's edits onto another. Save or discard, then **Now**.
 
 The previews follow the switcher: step to next Sunday and every board draws next
 Sunday's people. On a **default** it reads "positions only, no plan": a default is

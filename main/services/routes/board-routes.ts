@@ -20,7 +20,8 @@ import type { Slot } from "../../types/stage.js";
  *  else goes up to the dispatcher, which answers 500 and logs. */
 function boardFailure(res: RouteCtx["res"], err: unknown): void {
   if (!(err instanceof SlotsNotFoundError)) throw err;
-  error(res, err.message, err.status);
+  if (err.body) json(res, { error: err.message, ...err.body }, err.status);
+  else error(res, err.message, err.status);
 }
 
 /** The body as an object; anything else (null, a list) reads as empty, which
@@ -73,7 +74,7 @@ export async function boardRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
-  // POST /api/boards/slots — save all: { boards: [{ boardId, slots, target? }] }.
+  // POST /api/boards/slots — save all: { boards: [{ boardId, slots, target?, rev? }] }.
   // Validated together and written together; one bad entry writes nothing.
   if (method === "POST" && pathname === "/api/boards/slots") {
     const body = await bodyOf(req);
@@ -81,7 +82,7 @@ export async function boardRoutes(c: RouteCtx): Promise<void> {
       error(res, "body.boards (array) required");
       return;
     }
-    const entries: { boardId: string; slots: Slot[]; target?: SlotsTarget }[] = [];
+    const entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[] = [];
     for (const [i, raw] of (body.boards as unknown[]).entries()) {
       const e = isRecord(raw) ? raw : {};
       const boardId = typeof e.boardId === "string" && e.boardId ? e.boardId : null;
@@ -100,7 +101,9 @@ export async function boardRoutes(c: RouteCtx): Promise<void> {
         error(res, `${label}: ${problem}`);
         return;
       }
-      entries.push({ boardId: boardId!, slots: slots!, ...(target ? { target: target as SlotsTarget } : {}) });
+      // `rev`, when given, is the revision the page read; a stale one is a 409.
+      const rev = typeof e.rev === "string" ? e.rev : undefined;
+      entries.push({ boardId: boardId!, slots: slots!, ...(target ? { target: target as SlotsTarget } : {}), ...(rev !== undefined ? { rev } : {}) });
     }
     try {
       json(res, await stageController.saveBoards(entries));

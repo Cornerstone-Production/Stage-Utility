@@ -6,7 +6,7 @@
 
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, forgetChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
 import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
@@ -361,9 +361,17 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     // override Screens. Any other only echoes what the Mac holds.
     const heard = parsed.report.enabled;
     if (parsed.changed !== undefined && heard !== undefined && takeChange(id, parsed.changed) && (known.enabled !== false) !== heard) {
-      await updateDevices((current) => setEnabled(current, id, heard));
       const now = heard ? "on" : "off";
-      console.log(`[output-helper] ${scrub(id)} was switched ${scrub(now)} on its Mac`);
+      let wrote: boolean;
+      try {
+        wrote = await updateDevices((current) => setEnabled(current, id, heard));
+      } catch (err) {
+        // Not spent: the Mac sends the same id again, and that retry must be taken.
+        forgetChange(id, parsed.changed);
+        throw err;
+      }
+      if (wrote) console.log(`[output-helper] ${scrub(id)} was switched ${scrub(now)} on its Mac`);
+      else console.warn(`[output-helper] ${scrub(id)} said it was switched ${scrub(now)} on its Mac, but this binding has no output to switch; ignored`);
     }
     // Read again: the line above may just have changed it.
     const wanted = findById(await kioskDevicesStore.loadStrict(), id)?.enabled !== false;

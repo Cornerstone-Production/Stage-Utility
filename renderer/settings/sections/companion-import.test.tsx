@@ -247,6 +247,42 @@ const footer = (): string =>
     .map((b) => b.textContent ?? "")
     .find((t) => t.startsWith("Import")) ?? "";
 
+describe("re-opening the dialog", () => {
+  /** A parent that owns `open`, as the real one does: closing and re-opening is its doing. */
+  function Parent() {
+    const [open, setOpen] = React.useState(true);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement("button", { "data-reopen": "", onClick: () => setOpen(true) }, "reopen"),
+      React.createElement(ImportPairsDialog, { open, onOpenChange: setOpen, onImported: () => {} }),
+    );
+  }
+
+  test("after an import, the next opening starts from the suggestion, not the pairs just sent", async () => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(Parent)));
+    await settle();
+    await showView("All buttons");
+    await act(async () => {
+      screen.getByLabelText("Cam 1 · Room A: Cameras").click();
+    });
+    assert.equal(footer(), "Import 1 pair and 1 button");
+    await act(async () => {
+      [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").startsWith("Import"))!.click();
+    });
+    await settle();
+    assert.equal(document.querySelector('[role="dialog"]') === null, true, "the import left the dialog open");
+    await act(async () => {
+      (document.querySelector("[data-reopen]") as HTMLElement).click();
+    });
+    await settle();
+    assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
+    // Reset: back on Pick by page, and the one-button choice is gone.
+    assert.equal(footer(), "Import 1 pair");
+  });
+});
+
 describe("importFooterLabel", () => {
   test("says what will happen, and omits a side that is zero", () => {
     // "Import 0 pairs and 1 button" is a sentence nobody would type, and this

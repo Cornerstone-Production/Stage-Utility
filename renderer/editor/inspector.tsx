@@ -4,7 +4,7 @@
 // type is added. It has nothing to do with the canvas beside it: it reads the
 // selection and writes config and style back.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type MutableRefObject } from "react";
 import {
   Trash2Icon,
   CopyIcon,
@@ -58,6 +58,7 @@ import { useReaperStatus } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { useChargerBays } from "../main/use-charger-bays";
 import { toast } from "../components/ui/toast";
 import { useProdcomChannels } from "../main/use-prodcom-channels";
 import { useTranscript } from "../main/use-transcript";
@@ -94,6 +95,7 @@ import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ButtonInspector } from "./button-inspector";
+import type { PressSettle } from "./button-presses";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -816,7 +818,7 @@ export function ReaperLiveLabel() {
 }
 
 export function Inspector({
-  o, viewId, viewName, draftObjects, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, viewId, viewName, draftObjects, pressSettleRef, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   /** The view being edited (`"home"` for Home) and its name: which Buttons' own commands are this one's. */
@@ -824,6 +826,8 @@ export function Inspector({
   viewName: string;
   /** Every object of the layout being edited, as drafted, nested ones inside their parents. */
   draftObjects: readonly LayoutObject[];
+  /** Filled by a Button's Presses control with the wait the editor's Save does first. */
+  pressSettleRef?: MutableRefObject<PressSettle | null>;
   canvas: LayoutCanvas;
   /** Design-px size of this object's parent box (the canvas for top-level). */
   parentW: number;
@@ -852,7 +856,7 @@ export function Inspector({
   // An object saved as one of the four widgets the Timer replaced is edited as the
   // Timer, and the first edit writes it as one.
   const c = readConfig(o.config);
-  const chargerBays = useStageState().state?.chargerBays ?? [];
+  const chargerBays = useChargerBays().bays;
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const pvp = usePvpState();
@@ -1571,7 +1575,7 @@ export function Inspector({
         );
       })()}
       {c.type === "cue-button" && (
-        <ButtonInspector c={c} cues={cues} viewId={viewId} viewName={viewName} objectId={o.id} draftObjects={draftObjects} onConfig={onConfig} />
+        <ButtonInspector c={c} cues={cues} viewId={viewId} viewName={viewName} objectId={o.id} draftObjects={draftObjects} settleRef={pressSettleRef} onConfig={onConfig} />
       )}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];

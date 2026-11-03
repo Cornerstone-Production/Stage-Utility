@@ -158,3 +158,42 @@ import Testing
     }
   }
 }
+
+/// An outputs.json written before the switch took changes: an output switched off
+/// and bound carries no `pendingChange`, because the field did not exist.
+@MainActor @Suite struct PreSwitchOutputsFileTests {
+  private let before = """
+    {"outputs": {
+      "off-bound": {"enabled": false, "token": "t1", "boundTo": "http://192.0.2.10:8788"},
+      "off-unbound": {"enabled": false, "token": "t2"},
+      "on-bound": {"enabled": true, "token": "t3", "boundTo": "http://192.0.2.10:8788"}
+    }}
+    """
+
+  @Test func anOutputSwitchedOffBeforeTheUpgradeTellsTheServerSoOnItsFirstPost() throws {
+    try withTempDir { dir in
+      try before.write(to: dir.appendingPathComponent("outputs.json"), atomically: true, encoding: .utf8)
+      let store = OutputStateStore(directory: dir)
+      var n = 0
+      let flow = OutputSwitchFlow(store: store, newChangeId: { n += 1; return "c\(n)" }, saveFailed: { _ in })
+      let ticket = flow.ticket(for: "off-bound")
+      #expect(ticket.change != nil, "the post would carry no change, and the server would answer on")
+      #expect(store.record(for: "off-unbound")?.pendingChange == nil)
+      #expect(store.record(for: "on-bound")?.pendingChange == nil)
+      // The server takes it, and the answer agrees: nothing to apply, and it stays off.
+      #expect(flow.answered(ticket, answer: false) == nil)
+      #expect(store.record(for: "off-bound")?.enabled == false)
+    }
+  }
+
+  @Test func itIsDoneOnceNotAtEveryLaunch() throws {
+    try withTempDir { dir in
+      try before.write(to: dir.appendingPathComponent("outputs.json"), atomically: true, encoding: .utf8)
+      let first = OutputStateStore(directory: dir)
+      let id = try #require(first.record(for: "off-bound")?.pendingChange)
+      try first.acknowledgeChange(id, key: "off-bound")
+      let second = OutputStateStore(directory: dir)
+      #expect(second.record(for: "off-bound")?.pendingChange == nil, "a settled switch was announced again")
+    }
+  }
+}

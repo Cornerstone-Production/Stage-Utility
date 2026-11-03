@@ -15,6 +15,13 @@ import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSo
 /** The percentage at or below which a pack is called low when runtime or the time left is unknown. */
 export const LOW_BATTERY_PERCENT = 20;
 
+/** Whether a charge is low by percentage alone. The one rule: the attention list
+ *  and the wireless panel's dot both ask it, so a pack at exactly 20% is never
+ *  listed as a problem and drawn green. */
+export function isLowBattery(percent: number | null | undefined): boolean {
+  return percent != null && percent <= LOW_BATTERY_PERCENT;
+}
+
 export const wirelessBattery: AttentionSource = {
   id: "wireless-battery",
   items(input: AttentionInput): AttentionItem[] {
@@ -30,7 +37,7 @@ export const wirelessBattery: AttentionSource = {
       const byRuntime = ch.batteryMinutes !== null && input.minutesLeft !== null && input.minutesLeft > 0;
       const low = byRuntime
         ? ch.batteryMinutes! < input.minutesLeft!
-        : ch.battery !== null && ch.battery <= LOW_BATTERY_PERCENT;
+        : isLowBattery(ch.battery);
       if (!low) continue;
 
       const name = ch.name ?? slot;

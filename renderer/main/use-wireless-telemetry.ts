@@ -41,7 +41,7 @@ export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
  * wireless gear (Home's Needs attention) must not say it on the strength of the
  * second.
  */
-export function useWirelessTelemetryStatus(enabled = true): { channels: DeviceStatus[]; known: boolean } {
+export function useWirelessTelemetryStatus(enabled = true): { channels: DeviceStatus[]; known: boolean; failed: boolean } {
   // Adding or removing a connection changes which channels exist at all, which
   // no telemetry broadcast will report — a removed receiver simply stops
   // sending. Bumping this re-identifies `read`, which is what useStatusChannel
@@ -57,6 +57,6 @@ export function useWirelessTelemetryStatus(enabled = true): { channels: DeviceSt
     return invoke<DeviceStatus[]>("wireless:channelStatuses");
   }, [connectionsRev]);
 
-  const { value: channels, known } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
-  return { channels: Array.isArray(channels) ? channels : NO_CHANNELS, known };
+  const { value: channels, known, failed } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
+  return { channels: Array.isArray(channels) ? channels : NO_CHANNELS, known, failed };
 }

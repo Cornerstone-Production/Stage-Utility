@@ -1,9 +1,7 @@
 // command-pane.tsx — the A command choice of a Button: an existing command from the
 // manifest, a way to make a manual one, and where the chosen one is used.
 
-import { useQuery } from "@tanstack/react-query";
-
-import { invoke } from "../lib/api";
+import { useCueUsage, usesOf } from "../settings/sections/cue-usage";
 import type { CuesLive } from "../main/use-cue-live";
 import { CuePicker } from "./cue-picker";
 import type { PressOwner } from "./owned-press";
@@ -11,14 +9,6 @@ import type { PressOwner } from "./owned-press";
 /** Where "+ New manual command…" goes: the Automation page, which opens its creation
  *  flow for `new=manual`. */
 export const NEW_MANUAL_COMMAND_HREF = "/automation?new=manual";
-
-interface UsageUse {
-  viewId: string;
-  viewName: string;
-  objectId: string;
-  label: string;
-  home: boolean;
-}
 
 export function CommandPane({
   cues,
@@ -53,13 +43,10 @@ export function CommandPane({
 
 /** The chips of every screen a command is used on. */
 function UsedOn({ cue, where, owner }: { cue: string; where: string; owner: PressOwner }) {
-  const { data, isError } = useQuery({
-    queryKey: ["cues:usage"],
-    queryFn: () => invoke<Record<string, UsageUse[]>>("cues:usage"),
-  });
-  if (isError) return <p className="text-caption2 text-fg-subtle">Could not read where it is used.</p>;
-  const uses = data ? ((Object.hasOwn(data, cue.trim().toLowerCase()) ? data[cue.trim().toLowerCase()] : null) ?? []) : null;
-  if (!uses) return null;
+  const { usage, error } = useCueUsage();
+  if (error) return <p className="text-caption2 text-fg-subtle">Could not read where it is used.</p>;
+  if (!usage) return null;
+  const uses = usesOf(usage, [cue]);
   // A Button that is not saved yet is not in the views: it is on this screen all the same.
   const places = new Map<string, string>(uses.map((u) => [u.viewId, u.home ? "Home" : u.viewName]));
   if (!places.has(owner.viewId)) places.set(owner.viewId, where);

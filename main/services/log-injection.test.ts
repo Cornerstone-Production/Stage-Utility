@@ -62,6 +62,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * lines are scrubbed.
  */
 const REQUEST_FACING = [
+  // Converts Run an action Buttons on start, on a layout save and on
+  // POST /api/views/import; a Button's label and action arrive in that body.
+  "action-button-migration.ts",
   // Its refusal line names the actionId, which arrives verbatim in the body of
   // POST /api/action/invoke, and the detail can carry whatever a provider or an
   // action's own guard said back. It logged nothing at all until a refused
@@ -420,6 +423,9 @@ function requestFacingFiles(): string[] {
   // directly above the file it explains, so two branches adding different
   // files touch different lines and merge cleanly.
   const files = [
+    // Converts Run an action Buttons on start, on a layout save and on
+    // POST /api/views/import; a Button's label and action arrive in that body.
+    path.join(HERE, "action-button-migration.ts"),
     // Its refusal line names the actionId, which arrives verbatim in the body
     // of POST /api/action/invoke, and the detail can carry whatever a provider
     // or an action's own guard said back — both scrubbed at the logger. It

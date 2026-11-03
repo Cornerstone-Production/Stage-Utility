@@ -257,6 +257,24 @@ describe("switching an output on and off", () => {
     assert.deepEqual(fresh.json, { ok: true, enabled: false });
   });
 
+  it("a change whose write fails is not spent: the retry with the same id is taken", async () => {
+    const real = kioskDevicesStore.update.bind(kioskDevicesStore);
+    let failed = false;
+    kioskDevicesStore.update = (async (...a: Parameters<typeof real>) => {
+      if (!failed) { failed = true; throw new Error("ENOSPC: no space left on device"); }
+      return real(...a);
+    }) as typeof real;
+    try {
+      // The route rethrows; the server's wrapper turns that into the 500.
+      await assert.rejects(post(ID, { enabled: false, changed: "c1" }, { token: SECRET }), /ENOSPC/);
+      const retry = await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+      assert.deepEqual(retry.json, { ok: true, enabled: false }, "the failed write spent the change id; the retry turned the Mac back on");
+      assert.equal((await stored())?.enabled, false);
+    } finally {
+      kioskDevicesStore.update = real;
+    }
+  });
+
   it("only the device's own secret may say it changed, and a refused post changes nothing", async () => {
     const r = await post(ID, { enabled: false, changed: "c1" }, { token: "not-the-secret" });
     assert.equal(r.status, 401);
@@ -319,6 +337,16 @@ describe("the log says what the switch did", () => {
     await setEnabled(false);
     await setEnabled(false);
     assert.deepEqual(switchLines().map((l) => l.replace(/^.*\[output-helper\] /, "")), [`${ID} (decklink "SDI 1") switched off from Screens`]);
+  });
+
+  it("a binding with no output cannot be switched, and the post says so rather than claiming it was", async () => {
+    await updateDevices(() => [{ id: ID, token: SECRET, outputId: "display-1", macs: ["02:aa:00:bb:11:cc"], hostname: "booth-mini" }]);
+    const r = await post(ID, { enabled: false, changed: "c1" }, { token: SECRET });
+    assert.deepEqual(r.json, { ok: true, enabled: true });
+    const said = switchLines().map((l) => l.replace(/^.*\[output-helper\] /, ""));
+    assert.equal(said.some((l) => l.startsWith(`${ID} was switched`)), false, "logged a switch that was never made");
+    assert.equal(said.length, 1, "the refusal left nothing to read");
+    assert.match(said[0], /no output to switch/);
   });
 
   it("says a switch made on the Mac", async () => {

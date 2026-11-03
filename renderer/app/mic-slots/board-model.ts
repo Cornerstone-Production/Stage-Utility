@@ -265,6 +265,12 @@ export function append(boards: Boards, boardId: string, slot: Slot): Boards {
   return fromItems(boards, items);
 }
 
+/** A slot with this column width, or none. */
+function withWidth(slot: Slot, widthIn: number | undefined): Slot {
+  const { widthIn: _w, ...rest } = slot;
+  return widthIn === undefined ? rest : { ...rest, widthIn };
+}
+
 export type Nudge = "left" | "right" | "up" | "down";
 
 /**
@@ -285,6 +291,13 @@ export function nudge(boards: Boards, slotId: string, dir: Nudge): Boards {
     if (to < 0 || to >= col.length) return boards;
     const next = [...col];
     [next[at.pos], next[to]] = [next[to]!, next[at.pos]!];
+    // A column's width is read off its lead (slots-columns), so it is the
+    // column's, not the card's: it stays with whichever card now leads.
+    if (at.pos === 0 || to === 0) {
+      const widthIn = col[0]!.widthIn;
+      next[0] = withWidth(next[0]!, widthIn);
+      next[at.pos === 0 ? to : at.pos] = withWidth(next[at.pos === 0 ? to : at.pos]!, undefined);
+    }
     cols[at.index] = next;
     return fromItems(boards, items);
   }
@@ -307,6 +320,13 @@ export function applyDrop(boards: Boards, drag: Drag, drop: Drop): Boards {
   return drop.kind === "gap"
     ? moveToGap(boards, drag, { boardId: drop.boardId, index: drop.index })
     : stackOnto(boards, drag, drop.targetId);
+}
+
+/** The card that leads a slot's column: the one whose widthIn is the column's. */
+export function columnLead(boards: Boards, slotId: string): Slot | null {
+  const at = locate(boards, slotId);
+  if (!at) return null;
+  return itemsOf(boards[at.boardId]!)[at.index]?.[0] ?? null;
 }
 
 /** How many people-slots a board has: spacers are not slots. */

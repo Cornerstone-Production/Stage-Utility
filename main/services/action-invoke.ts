@@ -54,10 +54,3 @@ export async function invokeAction(
   if (!result.ok) console.warn(`[action] ${scrub(id)} refused: ${scrub(result.detail)}`);
   return result;
 }
-
-/** Every action a control can be bound to, for the layout inspector's picker. */
-export function invocableActions(): { id: string; label: string }[] {
-  return Object.values(AUTOMATION_ACTIONS)
-    .map((a) => ({ id: a.id, label: a.label }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-}

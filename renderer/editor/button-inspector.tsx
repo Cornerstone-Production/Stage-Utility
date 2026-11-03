@@ -13,7 +13,9 @@
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import type { CuesLive } from "../main/use-cue-live";
 import { cueEntry } from "../main/use-cue-live";
-import { ButtonPresses, type CueButtonConfig } from "./button-presses";
+import type { MutableRefObject } from "react";
+
+import { ButtonPresses, type CueButtonConfig, type PressSettle } from "./button-presses";
 import { RowSwitch, RowText } from "./inspector-rows";
 
 export type ButtonConfig = CueButtonConfig;
@@ -34,6 +36,7 @@ export function ButtonInspector({
   viewName,
   objectId,
   draftObjects,
+  settleRef,
   onConfig,
 }: {
   c: ButtonConfig;
@@ -46,6 +49,8 @@ export function ButtonInspector({
   objectId: string;
   /** The layout being edited, as drafted: see ButtonPresses. */
   draftObjects: readonly LayoutObject[];
+  /** Filled with the wait a host's Save does first: see ButtonPresses. */
+  settleRef?: MutableRefObject<PressSettle | null>;
   onConfig: (c: LayoutObjectConfig) => void;
 }) {
   const name = cueEntry(cues, c.cue)?.row.name;
@@ -58,7 +63,7 @@ export function ButtonInspector({
         placeholder={name ?? "What it presses"}
         onChange={(v) => onConfig({ ...c, label: v })}
       />
-      <ButtonPresses owner={{ viewId, objectId }} where={viewName} c={c} cues={cues} onConfig={onConfig} draftObjects={draftObjects} />
+      <ButtonPresses owner={{ viewId, objectId }} where={viewName} c={c} cues={cues} onConfig={onConfig} settleRef={settleRef} draftObjects={draftObjects} />
       {hasDeviceLine(cues, c.cue) && (
         <RowSwitch
           label="Show device"

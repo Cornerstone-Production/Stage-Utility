@@ -502,7 +502,7 @@ widgets and the Timer pick which instance they follow. See
 | **Mic slots** | Who is on which mic, as a grid of cards | Planning Center team + wireless gear |
 | **Wireless summary** | How many packs are online, and their batteries | Every wireless connection |
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
-| **Charger battery** | Battery levels in the charger bays | Shure SBC chargers |
+| **Charger battery** | Battery levels in the charger bays, live as each bay reports | Shure SBC chargers |
 
 **Wireless summary** can be expanded on Home to list every channel with its battery, time left, RF bars and whether it is muted or offline; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
 
@@ -656,8 +656,8 @@ name made unique against every command name and former name; one ending `_on` or
 `_off` gets `_cue` added, because a lone one would read as half of an ON/OFF pair
 and never appear in the list. It is enabled, hidden from Home Assistant, allowed
 during a service, with no conditions and no cooldown, and it belongs to that
-Button. Its spoken name is the label, or the picked name when the label is blank,
-and it follows a re-pick: it is what a Button with no label draws. The panel says *Saved as this Button's own command* with the name.
+Button. Its spoken name is the picked button's or action's name, and it follows a re-pick:
+it is what a Button with no label draws, so clearing the label later draws that name. The panel says *Saved as this Button's own command* with the name.
 Picking again on the same Button rewrites that command's action in place: its name
 does not change when the label or the pick does. Pointing the Button at the command
 is an edit like any other, so the layout still needs saving. The command itself
@@ -665,7 +665,7 @@ is written at once and is not part of that edit: **Discard**, **Undo** and a Hom
 sheet's **Cancel** put the Button back to the command it named, but not the command's
 action, so a re-pick that is then discarded leaves the Button pressing the new thing. A Button duplicated with its command shares it until
 one of the two is picked again: that pick leaves the shared command as it is for the
-other and gives this Button a new one. If the server refuses
+other and gives this Button a new one, which is made first. If the server refuses
 the rule, the Button is left as it was and the reason is shown under the choice.
 
 **List it with the other commands** releases the command from its Button. Nothing

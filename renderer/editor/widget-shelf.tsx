@@ -157,7 +157,7 @@ export function WidgetShelf({
               // A key that ends an IME composition belongs to the composition.
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter") {
-                if (first) onAdd(first);
+                if (needle && first) onAdd(first);
               } else if (e.key === "Escape") {
                 e.preventDefault();
                 // Clear first; a second Escape hands the keyboard back.

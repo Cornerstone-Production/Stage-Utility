@@ -10,36 +10,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import type { CompanionPageView } from "@main/services/companion-export";
 import { errorMessage } from "@main/services/errors";
 
-import { invoke } from "../lib/api";
 import { companionButtonsQuery } from "../lib/companion-buttons";
-import { CompanionPageGrid, CompanionPageSelect, listedPages, pageName } from "./companion-pages";
-
-type PageReply = ({ ok: true } & CompanionPageView) | { ok: false; reason: string };
-
-function PageView({ page }: { page: number }) {
-  const { data, error, isLoading } = useQuery({
-    queryKey: ["companion:page", page],
-    queryFn: () => invoke<PageReply>("companion:page", { page }),
-  });
-  if (isLoading) return <p className="py-6 text-center text-caption1 text-fg-muted">Reading page {page}…</p>;
-  if (error) return <p className="text-caption1 text-danger-11">Could not read page {page}: {errorMessage(error)}</p>;
-  if (!data) return null;
-  if (!data.ok) return <p className="text-caption1 text-danger-11">Could not read page {page}: {data.reason}</p>;
-  return (
-    <>
-      <CompanionPageGrid view={data} />
-      <div className="flex flex-wrap items-baseline justify-between gap-2 text-caption1 text-fg-muted">
-        <span>Read from Companion's export</span>
-        <span className="font-mono tabular-nums" title={pageName(data)}>
-          page {page} · {data.cols} × {data.rows}
-        </span>
-      </div>
-    </>
-  );
-}
+import { CompanionPageBody, CompanionPageSelect, listedPages, pageName } from "./companion-pages";
 
 export function CompanionBrowser() {
   const { data, error, isLoading } = useQuery(companionButtonsQuery);
@@ -57,7 +31,18 @@ export function CompanionBrowser() {
   return (
     <div className="flex flex-col gap-2" data-companion-browser="">
       <CompanionPageSelect pages={pages} page={page} onPage={setPicked} />
-      <PageView page={page} />
+      <CompanionPageBody
+        page={page}
+        reading={false}
+        footer={(view) => (
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-caption1 text-fg-muted">
+            <span>Read from Companion's export</span>
+            <span className="font-mono tabular-nums" title={pageName(view)}>
+              page {page} · {view.cols} × {view.rows}
+            </span>
+          </div>
+        )}
+      />
     </div>
   );
 }

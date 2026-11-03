@@ -6,11 +6,6 @@
 // same `SectionHandlers` the sections already take, so no section's props
 // changed either.
 //
-// It carries the slot-editor state (localSlots, slotsDirty, ...) because the
-// contract does: SectionHandlers includes updateSlot/addSlot/saveSlots and the
-// dnd sensors, which cannot exist without it. That state is local to the Views
-// surface, and only that route calls this for its slot half.
-//
 // What deliberately did NOT come along:
 //   - the four SSE subscriptions and applyAccentVar, which must outlive any one
 //     route and now live in live-wiring.ts, mounted once by the Shell

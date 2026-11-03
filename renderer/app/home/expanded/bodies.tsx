@@ -22,6 +22,7 @@ import { ErrorNote } from "../../../components/ui/error-note";
 import { cn } from "../../../lib/cn";
 import { splitByPresence } from "../readiness";
 import { RecentServicesCard } from "../cards";
+import { isLowBattery } from "../attention/sources/wireless-battery";
 
 export interface BodyProps {
   ctx: LayoutRenderCtx;
@@ -82,9 +83,6 @@ function Empty({ children }: { children: ReactNode }) {
 
 // ── Wireless ────────────────────────────────────────────────────────────────
 
-/** Low enough that somebody has to move: the same line the tile's colour uses. */
-const LOW_BATTERY_PCT = 20;
-
 /** One channel, judged. Exported for the test: the rule is what an operator
  *  reads off the dot, and it must not live only inside markup. */
 export function wirelessRow(d: DeviceStatus): { tone: Tone; sub: string; trail: string } {
@@ -96,7 +94,7 @@ export function wirelessRow(d: DeviceStatus): { tone: Tone; sub: string; trail: 
     d.rfBars != null ? `RF ${rfBarsGlyph(d.rfBars)}` : null,
     d.interference ? "RF interference" : null,
   ].filter((p): p is string => !!p);
-  const low = d.battery != null && d.battery < LOW_BATTERY_PCT;
+  const low = isLowBattery(d.battery);
   return {
     tone: low ? "bad" : d.muted === true || d.interference ? "warn" : "ok",
     sub: parts.join("  "),

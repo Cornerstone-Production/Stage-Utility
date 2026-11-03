@@ -54,7 +54,7 @@ import { invoke, onNotification } from "../../lib/api";
 import { automationRegistryQuery } from "../../lib/automation-registry";
 import { Button, Switch, toast } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
-import { logReadFailure } from "../../lib/client-log";
+import { logReadFailure, logToServer } from "../../lib/client-log";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
 import { PageSearchBox, PageTabBar } from "../../components/page-tabs";
 import { usePageTabs } from "../../lib/use-page-tabs";
@@ -937,9 +937,18 @@ export function AutomationSection({
     refetchInterval: 10_000,
   });
 
+  /** Simulate and Disarm all. A refused or unreachable write says so, and the
+   *  switches are re-read either way so they show what the server holds. */
   async function setSettings(patch: Record<string, boolean>) {
-    await invoke("automation:setSettings", patch);
-    refresh();
+    try {
+      await invoke("automation:setSettings", patch);
+    } catch (e) {
+      const what = "simulate" in patch ? "change Simulate mode" : "change the disarm switch";
+      toast.error(`Could not ${what}: ${errorMessage(e)}`);
+      logToServer("automation", `could not write the ${Object.keys(patch).join(", ")} setting: ${errorMessage(e)}`);
+    } finally {
+      refresh();
+    }
   }
 
   /**

@@ -541,6 +541,125 @@ describe("the icon dialog: two backgrounds, Recolor, and the real shapes", () =>
     ]);
   });
 
+  describe("the custom background's debounced write", () => {
+    // Same stub the accent's group needs: the colour panel reads shared stage state.
+    const g = globalThis as unknown as Record<string, unknown>;
+    const realEventSource = g.EventSource;
+    before(() => {
+      g.EventSource = class {
+        static readonly CLOSED = 2;
+        readyState = 1;
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+      };
+    });
+    after(() => {
+      g.EventSource = realEventSource;
+    });
+    const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+
+    async function openCustom(state: Partial_, openPanel = true) {
+      const writes: Partial_[] = [];
+      const handlers = {
+        handleSetBranding: async (p: Partial_) => {
+          writes.push(p);
+          return true;
+        },
+        handleShowQrChange: () => {},
+      };
+      const client = new QueryClient();
+      const tree = (st: Partial_) =>
+        React.createElement(
+          QueryClientProvider,
+          { client },
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(BrandingSection, { stageState: { ...BASE, ...st }, handlers } as never),
+          ),
+        );
+      const view = render(tree(state));
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      if (openPanel) await press(button(d, "Home-screen background, custom colour"));
+      return { writes, view, tree, d };
+    }
+
+    test("closing the dialog within the debounce still writes the colour the wheel stopped on", async () => {
+      const restoreSource = iconSource();
+      const restoreCanvas = fakeCanvas();
+      try {
+        const { writes } = await openCustom({ ...SAVED_ICON });
+        await act(async () => {
+          fireEvent.change(screen.getByLabelText("Home-screen background, custom colour value"), { target: { value: "#123456" } });
+        });
+        assert.equal(writes.length, 0, "written before the debounce");
+        // Close inside the 350 ms window.
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
+        });
+        await wait(100);
+        await wait(500);
+        const icons = writes.filter((w) => w.icon).map((w) => (w.icon as { background: string }).background);
+        assert.deepEqual(icons, ["#123456"], "the last colour was dropped with the dialog");
+      } finally {
+        restoreCanvas();
+        restoreSource();
+      }
+    });
+
+    test("a colour still pending when the dialog closes mid-save is made once that save is done", async () => {
+      const before = globalThis.fetch;
+      const beforeTimeout = AbortSignal.timeout;
+      AbortSignal.timeout = () => new AbortController().signal;
+      // The icon source read is what makeIcon waits on: hold it, so the first redraw is still running.
+      let release: () => void = () => {};
+      const gate = new Promise<void>((r) => (release = r));
+      globalThis.fetch = (async () => {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ original: null, crop: { scale: 1, x: 0, y: 0 }, art: "/branding-images/cccccccccccccccc.png" }),
+        };
+      }) as unknown as typeof fetch;
+      const restoreCanvas = fakeCanvas();
+      try {
+        const { writes, d } = await openCustom({ ...SAVED_ICON }, false);
+        await press(button(d, "Home-screen background white"));
+        await press(button(d, "Home-screen background, custom colour"));
+        await act(async () => {
+          fireEvent.change(screen.getByLabelText("Home-screen background, custom colour value"), { target: { value: "#123456" } });
+        });
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
+        });
+        await wait(50);
+        assert.equal(writes.filter((w) => w.icon).length, 0, "nothing can have been written while the first redraw is held");
+        release();
+        await wait(100);
+        const icons = writes.filter((w) => w.icon).map((w) => (w.icon as { background: string }).background);
+        assert.deepEqual(icons, ["#ffffff", "#123456"], "the pending colour was dropped while the icon was busy");
+      } finally {
+        restoreCanvas();
+        globalThis.fetch = before;
+        AbortSignal.timeout = beforeTimeout;
+      }
+    });
+
+    test("the Custom swatch follows a colour saved from another browser", async () => {
+      // The panel's draft is taken from the swatch when it opens, so the swatch is what is read:
+      // change the saved value with the panel shut, then open it.
+      const { view, tree, d } = await openCustom({ ...SAVED_ICON, appIconBackground: "#112233" }, false);
+      view.rerender(tree({ ...SAVED_ICON, appIconBackground: "#445566" }));
+      await wait(0);
+      await press(button(d, "Home-screen background, custom colour"));
+      const box = screen.getByLabelText("Home-screen background, custom colour value") as HTMLInputElement;
+      assert.match(box.value.toLowerCase(), /445566/, "the swatch kept the colour it was first drawn with");
+    });
+  });
+
   test("the tab and home screen are picked apart: a tab pick redraws with the home background untouched", async () => {
     const restoreSource = iconSource();
     const restoreCanvas = fakeCanvas();

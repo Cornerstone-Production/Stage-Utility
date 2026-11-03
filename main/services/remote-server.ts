@@ -67,7 +67,7 @@ import { baptismTimerService } from "./baptism-timer-service.js";
 import { videoService } from "./video/video-service.js";
 import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
-import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
+import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
@@ -104,6 +104,8 @@ import { homeRoutes } from "./routes/home-routes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
 import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
+import { BOARDS_CHANGED_CHANNEL } from "../types/boards-changed.js";
+import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
@@ -507,6 +509,9 @@ export function writeHelloBurst(res: EventSink): void {
   // so once made the scan find a channel named by prose, which is the same
   // trap from the other side.
   sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+  // Charger bays, for the same reason: a pack left charging moves a percent a
+  // minute and then nothing for days. The LITERAL with `satisfies`, as above.
+  sseWrite(res, "wireless:chargers" satisfies typeof CHARGER_BAYS_CHANNEL, stageController.chargerBayStatuses());
   // A calendar is STATE, not an event: a display opened in the middle of a
   // month must show it at once, not sit blank until somebody moves a booking
   // — which on this channel can be days.
@@ -538,6 +543,12 @@ export function writeHelloBurst(res: EventSink): void {
   // show a handled problem as new until the next one.
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "home:snoozes" satisfies typeof HOME_SNOOZES_CHANNEL, homeSnoozes.state());
+  // The last write to the slot boards and its place in this process's sequence.
+  // Not a change to act on: a Mic slots page compares the sequence with the
+  // last it saw, and re-reads every board when it missed one (a reconnect, or
+  // a restart, which a restore always is).
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "boards:changed" satisfies typeof BOARDS_CHANGED_CHANNEL, boardsChangedState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

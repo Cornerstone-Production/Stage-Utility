@@ -39,6 +39,7 @@ import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiv
 import { useBaptismStatus } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
+import { useChargerBays } from "./use-charger-bays";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
@@ -1032,7 +1033,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           interactive={!!live}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
           actionable={live}
-          linked={ctx.interactive && !ctx.home}
         />
       </div>
     );
@@ -1334,7 +1334,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "charger-battery":
-      return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
+      return <ChargerBattery config={c} fallback={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     case "spl-meter":
       return <SplMeterValue config={c} spl={ctx.spl} align={o.style?.textAlign} />;
     case "people-counter": {
@@ -2317,15 +2317,18 @@ export function runtimeColor(minutes: number | null): string | null {
 // only the metrics toggled on; an empty/undocked bay reads "empty".
 function ChargerBattery({
   config,
-  all,
+  fallback,
   H,
   baseStyle,
 }: {
   config: Extract<LayoutObjectConfig, { type: "charger-battery" }>;
-  all: ChargerBayDTO[];
+  /** The render context's bays, until `wireless:chargers` answers. */
+  fallback: ChargerBayDTO[];
   H: number;
   baseStyle: CSSProperties;
 }) {
+  // Live: the state's copy is re-sent only on structural changes.
+  const all = useChargerBays(fallback).bays;
   const show = config.show ?? {};
   const anyShown = show.battery || show.charging || show.cycles || show.health || show.temp;
   const showBattery = show.battery || !anyShown; // never render a fully-empty row
