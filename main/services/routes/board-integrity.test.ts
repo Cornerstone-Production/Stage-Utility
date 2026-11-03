@@ -103,3 +103,34 @@ describe("overwriting a saved layout from a view", () => {
     assert.deepEqual(ids((await preset()).slots), ["p"]);
   });
 });
+
+describe("PATCH /api/presets/:id refuses before it renames", () => {
+  const name = async () => (await presetsStore.load()).find((p) => p.id === "p-1")!.name;
+
+  it("a board id that is not a string", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { name: "Renamed", slots: [slot("w")], boardId: 7 });
+    assert.equal(r.status, 400);
+    assert.equal(await name(), "Opening", "the rename landed beside a refused body");
+  });
+
+  it("a board that does not exist", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { name: "Renamed", slots: [slot("w")], boardId: "b-gone" });
+    assert.equal(r.status, 404);
+    assert.equal(await name(), "Opening", "the rename landed beside a refused body");
+  });
+
+  it("an overwrite from a view with no slots", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { name: "Renamed", overwriteFromDisplayId: "blank" });
+    assert.equal(r.status, 400);
+    assert.equal(await name(), "Opening", "the rename landed beside a refused body");
+  });
+
+  it("and still renames and overwrites together when nothing is refused", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { name: "Renamed", slots: [slot("w")], boardId: "b-right" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const saved = (await presetsStore.load()).find((p) => p.id === "p-1")!;
+    assert.equal(saved.name, "Renamed");
+    assert.equal(saved.boardId, "b-right");
+    assert.equal(saved.slots.length, 1);
+  });
+});
