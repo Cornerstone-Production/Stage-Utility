@@ -12,6 +12,7 @@ import {
   pointedGrid,
   positiveOrNull,
   viewBoardId,
+  repointBoards,
 } from "./slot-boards.js";
 import { checkBoards, noCapsuleSlots } from "./board-check.js";
 import { walkLayoutObjects } from "./view-refs.js";
@@ -2866,25 +2867,10 @@ export class StageController {
       if (replacement === boardId) throw new SlotsNotFoundError("A board cannot be replaced by itself.", 400);
     }
     const shownOn = this.boardShownOn(boardId);
-    // Every layout, a dormant one too (a view switched to another kind keeps
-    // its layout): switched back to custom, it must not point at a board that
-    // is gone.
-    const views = this.state.views.map((v): View => {
-      let next = v;
-      if (v.boardId === boardId || (v.kind === "slots" && viewBoardId(v) === boardId)) next = { ...next, boardId: replacement };
-      if (next.layout) {
-        const objects = structuredClone(next.layout.objects);
-        let touched = false;
-        walkLayoutObjects(objects, (o) => {
-          if (o.config.type === "slots-grid" && gridBoardId(o.config, o.id) === boardId) {
-            o.config = pointedGrid(o.config, replacement);
-            touched = true;
-          }
-        });
-        if (touched) next = { ...next, layout: { ...next.layout, objects } };
-      }
-      return next;
-    });
+    // Every pointer, a dormant one too (a view switched to another kind keeps
+    // its board pointer and its layout): switched back, it must not point at a
+    // board that is gone. A pointer from before boards is read as well.
+    const views = repointBoards(this.state.views, (b) => (b === boardId ? replacement : undefined), { legacy: true });
     if (views.some((v, i) => v !== this.state.views[i])) {
       this.state = { ...this.state, views };
       await viewsStore.save(views);
