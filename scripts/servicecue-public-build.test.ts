@@ -167,6 +167,7 @@ describe("what is in the bundle", () => {
       "renderer/lib/server-clock.ts",
       "renderer/lib/sse-channels.ts",
       "renderer/lib/subscribe-reporter.ts",
+      "renderer/lib/uid.ts",
       "renderer/lib/use-failed-reads.ts",
       "renderer/lib/use-media-query.ts",
       "renderer/lib/use-resync-on.ts",
