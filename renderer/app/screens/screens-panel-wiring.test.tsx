@@ -327,6 +327,38 @@ describe("the panel and its Settings button", () => {
     assert.equal(localStorage.length, 0, "the panel wrote its state to the browser");
   });
 
+  test("closing slides it shut: inert and hidden at once, still drawn through the slide, gone after it", async () => {
+    await mountScreens();
+    await click(toggle());
+    const shell = () => document.querySelector("[data-screen-panel-shell]") as HTMLElement;
+    assert.equal(shell().getAttribute("data-screen-panel-shell"), "open");
+    assert.equal(shell().hasAttribute("inert"), false);
+    await click(toggle());
+    assert.equal(shell().getAttribute("data-screen-panel-shell"), "closed");
+    assert.equal(shell().hasAttribute("inert"), true, "a closed panel can take focus");
+    assert.equal(shell().getAttribute("aria-hidden"), "true", "a closed panel is announced");
+    assert.ok(shell().querySelector("aside"), "the panel was unmounted at once, so there is no slide to see");
+    // The slide is 260ms (--motion-settled); wait it out inside act so the unmount is committed.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    assert.equal(shell().querySelector("aside"), null, "the panel stays mounted after it has slid shut");
+  });
+
+  // A close starts a timer that, once the slide is done, drops a half-filled new
+  // screen. Reopening mid-slide must cancel it, or it wipes the reopened panel.
+  test("Add a screen pressed while the panel slides shut keeps its new form", async () => {
+    await mountScreens();
+    await click(toggle());
+    await click(toggle());
+    await click(addTile());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    assert.equal(panelIsOpen(), true);
+    assert.ok(panel().queryByText("New screen · step 1 of 2"), "the closing slide's timer wiped the new screen opened after it");
+  });
+
   test("an old stored choice to keep it open is ignored: the panel is closed on arrival", async () => {
     localStorage.setItem(OLD_PANEL_OPEN_KEY, "1");
     await mountScreens();

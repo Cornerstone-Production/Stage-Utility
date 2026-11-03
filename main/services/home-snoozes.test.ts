@@ -237,8 +237,12 @@ describe("home snoozes", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       live("item");
-      await new Promise<void>((r) => setImmediate(r));
-      for (let i = 0; i < 20 && keys(homeSnoozes.state()).length > 0; i++) await new Promise<void>((r) => setImmediate(r));
+      // Wait for the failed save to arm its retry, not just for the clear: on a
+      // slow runner the write is still in flight after the clear, and a tick
+      // before the timer exists advances nothing, leaving a real 30 s retry.
+      const deadline = Date.now() + 5_000;
+      while (!inner.retry && Date.now() < deadline) await new Promise<void>((r) => setImmediate(r));
+      assert.ok(inner.retry, "the failed save never armed its retry");
       await fs.rmdir(FILE);
       mock.timers.tick(SAVE_RETRY_MS + 10);
     } finally {

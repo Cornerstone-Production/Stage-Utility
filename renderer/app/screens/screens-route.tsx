@@ -24,7 +24,7 @@
 // side panel. Manual view REORDERING was dropped on purpose: nothing read the
 // order except that one dropdown, which now sorts by name.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection, screenFlashId } from "../../settings/sections/outputs-section";
@@ -41,6 +41,10 @@ import { usePageActions } from "../page-actions";
 import { useStageSettings } from "../use-stage-settings";
 import { UnclaimedScreens } from "./unclaimed-screens";
 import { viewBoardId } from "@main/services/slot-boards";
+import { cn } from "../../lib/cn";
+
+/** How long the panel's width takes to settle: styles.css --motion-settled (260ms) plus a frame or two. */
+const PANEL_SLIDE_MS = 300;
 
 export function ScreensRoute() {
   const s = useStageSettings();
@@ -51,6 +55,23 @@ export function ScreensRoute() {
   // visit and never remembered: it opens only when asked.
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<PanelTarget | null>(null);
+  // True from a close until its slide ends: the panel's content stays mounted, on
+  // what it showed, and is dropped once out of sight so a closed panel holds no
+  // subscriptions.
+  const [closing, setClosing] = useState(false);
+  // A half-filled new screen is not kept: closing creates nothing. Nor is the note
+  // after one that was made. Applied when the slide ends, or on a reopen before it.
+  function forgetDraft() {
+    setPanel((p) => (p?.kind === "new" ? null : p?.kind === "edit" ? { kind: "edit", outputId: p.outputId } : p));
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const t = setTimeout(() => {
+      forgetDraft();
+      setClosing(false);
+    }, PANEL_SLIDE_MS);
+    return () => clearTimeout(t);
+  }, [closing]);
   // Counts starts of a new screen, so pressing Add a screen again resets the form.
   const starts = useRef(0);
   // A screen's picker asked for a new view of this kind: the one dialog for it,
@@ -60,17 +81,17 @@ export function ScreensRoute() {
   // Any selection opens the panel: the operator asked to see it.
   function select(target: PanelTarget | null) {
     setPanel(target);
+    setClosing(false);
+    setOpen(true);
+  }
+  function reopen() {
+    forgetDraft();
+    setClosing(false);
     setOpen(true);
   }
   function close() {
     setOpen(false);
-    // A half-filled new screen is not kept: closing creates nothing. Nor is the note
-    // after one that was made.
-    setPanel((p) => {
-      if (p?.kind === "new") return null;
-      if (p?.kind === "edit") return { kind: "edit", outputId: p.outputId };
-      return p;
-    });
+    setClosing(true);
   }
 
   usePageActions(
@@ -78,7 +99,7 @@ export function ScreensRoute() {
       variant="filled"
       size="medium"
       aria-pressed={open}
-      onClick={() => (open ? close() : setOpen(true))}
+      onClick={() => (open ? close() : reopen())}
       tooltip="Show or hide the settings panel"
       className={open ? "border border-accent/55 bg-accent/12" : "border border-line-strong"}
     >
@@ -136,7 +157,7 @@ export function ScreensRoute() {
   const requestNewView = (outputId: string, surface: ViewSurface) => setNewViewFor({ outputId, surface });
 
   return (
-    <div className="pb-[50vh] max-sm:pb-24 lg:flex lg:items-start lg:gap-4">
+    <div className="pb-[50vh] max-sm:pb-24 lg:flex lg:items-start">
       <div className="min-w-0 flex-1">
         <OutputsSection
           // The same call the section's "Set up as a new screen" makes: the panel
@@ -184,27 +205,41 @@ export function ScreensRoute() {
         }}
         trigger={<span className="hidden" />}
       />
-      {open && (
-        <ScreenPanelHost
-          stageState={state}
-          handlers={s.handlers}
-          target={panel}
-          onClose={close}
-          onSelect={select}
-          onAddScreen={addScreen}
-          onRequestNewView={requestNewView}
-          onCreated={(outputId, viewMade) => {
-            // The panel stays open, on the screen that now exists, and its card is
-            // scrolled to and outlined so the operator sees where it went.
-            setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
-            if (outputId) flashTarget(screenFlashId(outputId));
-          }}
-          onEditLayout={editLayout}
-          onRemoveScreen={requestRemoveScreen}
-          onDeleteView={requestDeleteView}
-          onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
-        />
-      )}
+      {/* The outer box animates its width; ScreenPanelHost keeps its own, so nothing
+          reflows while it slides. Closed, it is inert and hidden from assistive tech.
+          Below lg the panel is a fixed sheet and the box takes no room. */}
+      <div
+        data-screen-panel-shell={open ? "open" : "closed"}
+        inert={!open}
+        aria-hidden={!open}
+        className={cn(
+          "lg:sticky lg:top-3 lg:shrink-0 lg:overflow-hidden lg:transition-[width,margin-left] lg:duration-(--motion-settled) lg:ease-(--motion-ease) motion-reduce:transition-none",
+          // Below lg there is no slide to wait for: a closed sheet goes at once.
+          open ? "lg:ml-4 lg:w-[400px]" : "max-lg:hidden lg:ml-0 lg:w-0",
+        )}
+      >
+        {(open || closing) && (
+          <ScreenPanelHost
+            stageState={state}
+            handlers={s.handlers}
+            target={panel}
+            onClose={close}
+            onSelect={select}
+            onAddScreen={addScreen}
+            onRequestNewView={requestNewView}
+            onCreated={(outputId, viewMade) => {
+              // The panel stays open, on the screen that now exists, and its card is
+              // scrolled to and outlined so the operator sees where it went.
+              setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
+              if (outputId) flashTarget(screenFlashId(outputId));
+            }}
+            onEditLayout={editLayout}
+            onRemoveScreen={requestRemoveScreen}
+            onDeleteView={requestDeleteView}
+            onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
+          />
+        )}
+      </div>
     </div>
   );
 }
