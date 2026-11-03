@@ -52,7 +52,7 @@ import {
   normalizeCaptionColor,
 } from "./settings-rules.js";
 import { plural } from "./plural.js";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
@@ -209,13 +209,19 @@ export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
  * write failing mid-way — a full disk, a TypeError — read to the operator as
  * "there was nothing to revert" and the real fault never reached the log.
  */
+/** A short content hash of a board's saved rows at one target (null: none). */
+function slotsRev(rows: Slot[] | null): string {
+  return createHash("sha1").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
+}
+
 export class SlotsNotFoundError extends Error {
   readonly code = "slots-target";
   constructor(
     message: string,
     /** 404 for "no such view / object / override", 400 for a target that cannot
-     *  be true (a plan target naming another service type). */
-    readonly status: 404 | 400 = 404,
+     *  be true (a plan target naming another service type), 409 for a layout
+     *  saved elsewhere since the caller read it. */
+    readonly status: 404 | 400 | 409 = 404,
   ) {
     super(message);
     this.name = "SlotsNotFoundError";
@@ -2680,6 +2686,11 @@ export class StageController {
     const isCurrent = planId !== null && planId === this.state.planId;
     const row = isCurrent ? null : this.cachedUpcoming(planId);
     const override = serviceTypeId && planId ? await slotsStore.getOverride(boardId, planId) : null;
+    const defaultSlots = serviceTypeId ? await slotsStore.getDefault(boardId, serviceTypeId) : [];
+    // A record saved against a DIFFERENT service type is not this type's
+    // override, and offering it as one would let a revert discard a board the
+    // operator cannot see.
+    const overrideSlots = override && override.serviceTypeId === serviceTypeId ? override.slots : null;
     return {
       scope,
       key,
@@ -2695,12 +2706,18 @@ export class StageController {
       planId,
       planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
       planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),
-      defaultSlots: serviceTypeId ? await slotsStore.getDefault(boardId, serviceTypeId) : [],
-      // A record saved against a DIFFERENT service type is not this type's
-      // override, and offering it as one would let a revert discard a board the
-      // operator cannot see.
-      overrideSlots: override && override.serviceTypeId === serviceTypeId ? override.slots : null,
+      defaultSlots,
+      overrideSlots,
+      defaultRev: slotsRev(defaultSlots),
+      overrideRev: slotsRev(overrideSlots),
     };
+  }
+
+  /** The revision of what is saved at one target, as getSlotTargets reports it. */
+  private async slotsRevAt(boardId: string, target: SlotsTarget): Promise<string> {
+    if (target.kind === "default") return slotsRev(await slotsStore.getDefault(boardId, target.serviceTypeId));
+    const override = await slotsStore.getOverride(boardId, target.planId);
+    return slotsRev(override && override.serviceTypeId === target.serviceTypeId ? override.slots : null);
   }
 
   // ── Slot boards ──────────────────────────────────────────────────────
@@ -2923,7 +2940,7 @@ export class StageController {
    * and then every entry lands in ONE write of slots.json. A refusal names the
    * board it is about, so the page can point at it.
    */
-  async saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget }[]): Promise<StageState> {
+  async saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
     const writes: SlotsWrite[] = [];
     const seen = new Set<string>();
     const refuse = (boardId: string, err: unknown): never => {
@@ -2945,6 +2962,28 @@ export class StageController {
         writes.push({ boardId: e.boardId, target, slots: e.slots });
       } catch (err) {
         refuse(e.boardId, err);
+      }
+    }
+    // A `rev` is what the caller read (getSlotTargets): a layout saved elsewhere
+    // since then is a refusal, not a silent overwrite. Read after every await
+    // above, so a save that landed while a plan was being checked is caught.
+    for (const [i, w] of writes.entries()) {
+      const rev = entries[i]!.rev;
+      if (rev === undefined) continue;
+      if ((await this.slotsRevAt(w.boardId, w.target)) !== rev) {
+        refuse(
+          w.boardId,
+          new SlotsNotFoundError(`It was changed elsewhere since this page read it (${describeSlotsTarget(w.target)}). Nothing was saved.`, 409),
+        );
+      }
+    }
+    // And every board again, with no await before the write: a board deleted
+    // while the checks above awaited would otherwise get rows written for it.
+    for (const w of writes) {
+      try {
+        this.boardFor("board", w.boardId);
+      } catch (err) {
+        refuse(w.boardId, err);
       }
     }
     // Dated only once every entry has passed: datedTarget logs an undated
