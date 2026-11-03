@@ -659,7 +659,7 @@ describe("a handover that fails after this Button's own command is made", () => 
     await gridReady(container);
     await eventually(() => assert.equal(keyAt(container, 2, 0)!.getAttribute("aria-pressed"), "true"));
     fireEvent.click(keyAt(container, 0, 0)!);
-    await eventually(() => assert.equal(configs.length, 1), "the Button was not bound to its new command");
+    await eventually(() => assert.equal(configs.length, 1)); // bound to its new command
     assert.equal(s.posts.length, 1);
     await eventually(() => assert.ok(container.querySelector('[role="alert"]')?.textContent?.includes("disk full")));
   });
