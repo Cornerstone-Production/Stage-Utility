@@ -236,6 +236,13 @@ Two cases are settled rather than guessed. A person with more than one capsule t
 shows the first alphabetically. An `IEMs:` value other than `Own` is ignored. Each
 is logged once on the `[pco-tags]` tag.
 
+When Planning Center lists prep tags but returns nobody on any of them (what an
+account without Editor in Services gets, see [Setup](#setup)), Stage logs one
+`[pco-tags] Planning Center lists N prep tags but nobody on them` warning naming
+that cause, and says it again only if the tags have had people in between. The
+Mic slots page's **This plan's check** shows the same sentence for as long as the
+state lasts, since no capsule can be checked then.
+
 The read is tag-first, because Planning Center ignores `include=person.tags` on team
 members and `where[]` filters on people. It costs one request for the tag groups,
 one per person group for its tags, and one per matching tag for the people holding

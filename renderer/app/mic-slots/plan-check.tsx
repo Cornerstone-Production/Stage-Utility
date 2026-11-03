@@ -36,7 +36,8 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
     toast.info(`${slotIds.length === 1 ? "That slot is" : "Those slots are"} on ${mic.hasPlan ? `${mic.label}'s layout` : "a layout this page is not showing"}. Switch to it to see ${slotIds.length === 1 ? "it" : "them"}.`);
   }
   const check = q.data;
-  const problems = (check?.unplaced.length ?? 0) + (check?.noPosition.length ?? 0) + (check?.noCapsule.length ?? 0);
+  const problems =
+    (check?.unplaced.length ?? 0) + (check?.noPosition.length ?? 0) + (check?.noCapsule.length ?? 0) + (check?.prepTagsNobody ? 1 : 0);
 
   return (
     <section aria-label="This plan's check" className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-4 shadow-[var(--su-shadow-1)]">
@@ -92,6 +93,11 @@ export function PlanCheck({ mic }: { mic: MicSlots }) {
                 </div>
               ))}
             </div>
+          )}
+          {check.prepTagsNobody && (
+            <p className="text-footnote text-warn-11" data-check-prep-tags-nobody={check.prepTagsNobody.tagCount}>
+              Planning Center lists {plural(check.prepTagsNobody.tagCount, "prep tag")} but nobody on {check.prepTagsNobody.tagCount === 1 ? "it" : "them"}, so capsules and in-ears are not read. The Planning Center account likely needs Editor in Services.
+            </p>
           )}
           {check.noCapsule.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-footnote text-fg" data-check-no-capsule={check.noCapsule.length}>

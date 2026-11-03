@@ -421,6 +421,10 @@ export interface BoardCheckDTO {
   /** Filled slots with a mic whose person has no Capsule tag. Empty while no tag has
    *  been read at all, and for a plan with no roster: nothing is known to be missing. */
   noCapsule: BoardCheckNoCapsule[];
+  /** Present only while the last tag read found prep tags with nobody on any of
+   *  them, which is what Planning Center returns to an account without Editor in
+   *  Services. Then `noCapsule` is empty for want of data, not because all is well. */
+  prepTagsNobody?: { tagCount: number };
 }
 
 /**
