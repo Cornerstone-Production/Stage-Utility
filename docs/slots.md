@@ -23,7 +23,9 @@ A Mic Slots screen's **Edit** on the Screens page opens it on that screen's boar
 while any board has work in it, with **Discard** (after asking) to throw it away. A
 board deleted from another browser while you have edits to it is dropped from the
 page, and a message names whose edits went; Save all then saves the other boards. Leaving the page, or moving the plan switcher, with
-unsaved work asks first.
+unsaved work asks first. A board whose layouts could not be read says so in its
+frame, and cannot be edited (its **+ Slot**, **+ Spacer** and drop zones are off)
+until they are: what it would show is not what is saved.
 
 ### The top bar
 
@@ -38,6 +40,13 @@ unsaved work asks first.
 Save all is all or nothing. The server checks every board before it writes any, and
 a refusal names the board that failed (`Board "Left wall": …`): the page keeps every
 edit and marks that board.
+
+A board saved from another browser after you started editing it is not overwritten
+silently. Save all is refused, nothing is written, and the page asks: **Save over
+it**, or Cancel to keep your edits unsaved and look first (**Discard** shows what
+was saved). The page re-reads a board's layouts when a screen showing it changes,
+and when the tab is looked at again. Edits made while a save is in flight stay
+unsaved.
 
 ### A board
 
@@ -326,7 +335,10 @@ service type, and a save there changes nothing on any screen until that plan com
 round. The save toast is the ordinary one while live and a quieter one while not.
 
 **Now** returns to the plan the screens are following, and the editor follows it
-forward from then on, including when auto mode advances it mid-session.
+forward from then on, including when auto mode advances it mid-session. With
+unsaved edits it does not: if the plan advances or clears under them, the editor
+stays on the plan (and side) they were made against and says so, so Save all
+never writes one week's edits onto another. Save or discard, then **Now**.
 
 The previews follow the switcher: step to next Sunday and every board draws next
 Sunday's people. On a **default** it reads "positions only, no plan": a default is

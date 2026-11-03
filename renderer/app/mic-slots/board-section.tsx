@@ -14,6 +14,7 @@ import { useStageState } from "../../main/use-stage-state";
 import { useUpcomingPlans } from "../../settings/sections/plan-switcher";
 import { SlotsPreviewNote } from "../../settings/sections/slots-preview-target";
 import { namedType } from "../../settings/sections/slots-target-pill";
+import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 import { groupColumns, isSpacerColumn } from "../../components/slots-columns";
 import { BoardPreview, EmptyBoardDrop, chargerBanks } from "./board-preview";
@@ -194,7 +195,11 @@ export function BoardSection({
   const used = layout ? usedWidthIn(slots, layout) : 0;
   const over = layout ? used > layout.displayWidthIn + 0.01 : false;
   const banks = chargerBanks(slots, layout);
-  const empty = mic.loaded && slots.length === 0;
+  // Per board: a board whose layouts are not read is neither empty nor editable,
+  // and one board failing says nothing about the others.
+  const ready = mic.isReady(board.id);
+  const readFailed = mic.targetsErrorById.get(board.id);
+  const empty = ready && slots.length === 0;
   const selectedHere = mic.selection?.boardId === board.id ? mic.selection.slotId : null;
   const failed = mic.saveError?.boardId === board.id ? mic.saveError.message : null;
   const typeName = mic.typeName;
@@ -251,11 +256,11 @@ export function BoardSection({
         <span className="text-caption1 text-fg-muted">· {plural(slotCount(slots), "slot")}</span>
         {dirty && <span className="text-caption2 text-fg-muted">unsaved</span>}
         <span className="flex-1" />
-        <Button variant="filled" size="small" onClick={() => mic.addSlot(board.id)}>
+        <Button variant="filled" size="small" disabled={!ready} onClick={() => mic.addSlot(board.id)}>
           <PlusIcon className="size-3.5 text-fg-muted" />
           Slot
         </Button>
-        <Button variant="filled" size="small" onClick={() => mic.addSpacer(board.id)}>
+        <Button variant="filled" size="small" disabled={!ready} onClick={() => mic.addSpacer(board.id)}>
           <PlusIcon className="size-3.5 text-fg-muted" />
           Spacer
         </Button>
@@ -265,7 +270,13 @@ export function BoardSection({
 
       <div className="flex flex-col items-center gap-2 bg-black/[0.04] p-4 dark:bg-black/25">
         <div className="kiosk-surface aspect-video w-full max-w-[1056px] rounded-md p-3 shadow-[0_0_0_6px_#1b1b1b,0_0_0_7px_rgba(255,255,255,0.10)]">
-          {empty ? (
+          {!ready ? (
+            // No drop zones: a card dropped here would be laid over a layout this
+            // page has not read, and Save all would replace the real one with it.
+            <div className="flex h-full items-center justify-center text-center text-caption1 text-fg-muted" data-mic-unread={board.id}>
+              {readFailed != null ? `Couldn't read this board's layouts: ${errorMessage(readFailed)}` : "Loading…"}
+            </div>
+          ) : empty ? (
             <EmptyBoardDrop boardId={board.id}>
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center" data-mic-empty={board.id}>
               <span className="text-subheadline font-medium text-fg">

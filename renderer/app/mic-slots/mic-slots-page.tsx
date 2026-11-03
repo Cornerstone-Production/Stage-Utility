@@ -108,7 +108,7 @@ export function MicSlotsPage() {
   const activeBoardId = mic.selection?.boardId ?? linkedBoard;
   const seeded = useRef<string | null>(null);
   useEffect(() => {
-    if (!linkedBoard || seeded.current === linkedBoard || !mic.loaded) return;
+    if (!linkedBoard || seeded.current === linkedBoard || !mic.isReady(linkedBoard)) return;
     seeded.current = linkedBoard;
     const first = (mic.boardsMap[linkedBoard] ?? []).find((s) => !isSpacer(s));
     if (first) mic.select(first.id);
@@ -212,7 +212,7 @@ export function MicSlotsPage() {
       {router && <LeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
       <TopBar mic={mic} savedOpen={savedOpen} onSavedOpen={setSavedOpen} savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null} />
       {mic.targetsFailed != null && (
-        <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. Boards that failed show as empty; do not save over them.</ErrorNote>
+        <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>
       )}
       <div className="lg:flex lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
