@@ -139,6 +139,18 @@ describe("home snoozes", () => {
     for (const k of keys(homeSnoozes.state())) await homeSnoozes.unsnooze(k);
   });
 
+  it("two new keys posted together at 499 store 500, not 501", async () => {
+    const held = keys(homeSnoozes.state());
+    for (let i = 0; i < SNOOZE_MAX - 1 - held.length; i++) await homeSnoozes.snooze(`cap2:${i}`, "warn", true);
+    const results = await Promise.allSettled([
+      homeSnoozes.snooze("cap2:x", "warn", true),
+      homeSnoozes.snooze("cap2:y", "warn", true),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    assert.equal(homeSnoozes.state().snoozes.length, SNOOZE_MAX);
+    for (const k of keys(homeSnoozes.state())) await homeSnoozes.unsnooze(k);
+  });
+
   it("a snooze committed while a drop waits is not lost with it", async () => {
     await homeSnoozes.snooze("race:a", "warn", true);
     const pending = homeSnoozes.snooze("race:b", "warn", true); // queued first
