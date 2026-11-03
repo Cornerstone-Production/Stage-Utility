@@ -50,6 +50,7 @@ import type { Slot, SlotBoardMeta, SlotLink } from "../types/stage.js";
 import { stripResolvedFields } from "./slot-resolver.js";
 import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
+import { announceSlotsSaved } from "./boards-changed.js";
 import { assertSafeKey, isSafeKey } from "./safe-key.js";
 import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
@@ -148,6 +149,9 @@ export function describeSlotsTarget(target: SlotsTarget): string {
 // The file has held four shapes over its life, so what comes back off disk is
 // `unknown` and normalise() is the only thing that decides which one it is.
 const store = new DataStore<unknown>("slots.json", {}, "config", { restoreCheck: checked(checkRestoredSlots) });
+// Every write, from whichever path, tells an open Mic slots page which boards it
+// changed: see boards-changed.ts.
+store.onSaved(announceSlotsSaved);
 
 /**
  * A restored slots.json, read the way a load reads it — any of the five shapes,

@@ -67,6 +67,10 @@ export const HYDRATED_CHANNELS = [
   // Snoozes are a decision about this week, made once and standing until a
   // service starts: a Home opened Thursday must show Tuesday's snooze as one.
   "home:snoozes",
+  // The slot boards' write sequence. The Mic slots page reads it as a position,
+  // not an instruction: a frame that is not the next one says a change was
+  // missed, and the page re-reads every board.
+  "boards:changed",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

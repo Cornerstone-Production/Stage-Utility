@@ -104,6 +104,8 @@ import { homeRoutes } from "./routes/home-routes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
 import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
+import { BOARDS_CHANGED_CHANNEL } from "../types/boards-changed.js";
+import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
@@ -538,6 +540,12 @@ export function writeHelloBurst(res: EventSink): void {
   // show a handled problem as new until the next one.
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "home:snoozes" satisfies typeof HOME_SNOOZES_CHANNEL, homeSnoozes.state());
+  // The last write to the slot boards and its place in this process's sequence.
+  // Not a change to act on: a Mic slots page compares the sequence with the
+  // last it saw, and re-reads every board when it missed one (a reconnect, or
+  // a restart, which a restore always is).
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "boards:changed" satisfies typeof BOARDS_CHANGED_CHANNEL, boardsChangedState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

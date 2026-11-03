@@ -739,7 +739,9 @@ something to change:
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
 `wireless:channels` · `calendar:grid` · `displays:presence` · `video:state` ·
-`video:probe` · `messages:state` · `home:snoozes`
+`video:probe` · `messages:state` · `home:snoozes` · `boards:changed` (the last
+write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
+[Network traffic](../ops/network-traffic.md#slot-boards))
 
 **Pushed only when something happens:**
 
