@@ -189,14 +189,24 @@ export const EARS_STYLE: Record<BadgeInk | "neutral", { background: string; boxS
  * patch of photo the badge covers. The photo is a sibling this component does not
  * own, so it listens for the load event in the capture phase on the shared parent
  * (img load does not bubble) and also looks at an image that finished before the
- * effect ran. `null` means "not known": no image yet, a failed or unreadable one.
+ * effect ran. `null` means "not known": no image yet, a failed or unreadable one,
+ * or no photo at all, which drops whatever an earlier photo picked. Falling back
+ * to the neutral plate is not a failure worth a log line: it still reads.
  */
-function useBadgeInk(layerRef: RefObject<HTMLElement | null>, badgeRef: RefObject<HTMLElement | null>, active: boolean): BadgeInk | null {
+function useBadgeInk(
+  layerRef: RefObject<HTMLElement | null>,
+  badgeRef: RefObject<HTMLElement | null>,
+  active: boolean,
+  photo: string | null,
+): BadgeInk | null {
   const [ink, setInk] = useState<BadgeInk | null>(null);
   useEffect(() => {
     const layer = layerRef.current;
     const host = layer?.parentElement;
-    if (!active || !layer || !host) return;
+    if (!active || !photo || !layer || !host) {
+      setInk(null);
+      return;
+    }
     const sample = (img: HTMLImageElement) => {
       const badge = badgeRef.current;
       if (!badge) return;
@@ -212,11 +222,7 @@ function useBadgeInk(layerRef: RefObject<HTMLElement | null>, badgeRef: RefObjec
         { x: frac(px), y: frac(py) },
       );
       const result = source ? sampleImagePatch(img, source) : null;
-      if (result?.ok) setInk(inkForLuminance(result.luminance));
-      else {
-        setInk(null);
-        console.warn(`[slot-badge] ears ink: keeping the neutral plate (${result ? result.reason : "badge is outside the photo"})`);
-      }
+      setInk(result?.ok ? inkForLuminance(result.luminance) : null);
     };
     const onLoad = (e: Event) => {
       if (e.target instanceof HTMLImageElement) sample(e.target);
@@ -232,7 +238,7 @@ function useBadgeInk(layerRef: RefObject<HTMLElement | null>, badgeRef: RefObjec
       host.removeEventListener("load", onLoad, true);
       host.removeEventListener("error", onError, true);
     };
-  }, [active, layerRef, badgeRef]);
+  }, [active, photo, layerRef, badgeRef]);
   return ink;
 }
 
@@ -247,18 +253,21 @@ export function PhotoBadges({
   ownIems,
   capsule,
   plate,
+  photo = null,
 }: {
   channel: string;
   ownIems: boolean;
   capsule: string | null;
   /** Draw the plate here. False when the card puts it in its scrim instead. */
   plate: boolean;
+  /** The photo drawn under the badges, if any: the ears badge reads its ink from it. */
+  photo?: string | null;
 }) {
   // Nothing validates a channel on save, so a slot can arrive without one.
   const ch = (channel ?? "").trim();
   const layerRef = useRef<HTMLDivElement>(null);
   const earsRef = useRef<HTMLSpanElement>(null);
-  const ink = useBadgeInk(layerRef, earsRef, ownIems);
+  const ink = useBadgeInk(layerRef, earsRef, ownIems, photo);
   const ears = EARS_STYLE[ink ?? "neutral"];
   return (
     <div ref={layerRef} className="pointer-events-none absolute inset-0 z-[1]" style={PX_UNIT} data-slot-badges="">
