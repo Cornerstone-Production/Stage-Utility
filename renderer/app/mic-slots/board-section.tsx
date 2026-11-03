@@ -20,7 +20,7 @@ import { BoardPreview, EmptyBoardDrop, chargerBanks } from "./board-preview";
 import { slotCount } from "./board-model";
 import { showLabel } from "./board-dialogs";
 import { useBoardPreview } from "./use-board-preview";
-import type { MicSlots, ShowTarget } from "./use-mic-slots";
+import { displayWidthOf, type MicSlots, type ShowTarget } from "./use-mic-slots";
 
 /** What a screen is assumed to be when none of the ones showing a board says. */
 export const FALLBACK_DISPLAY_WIDTH_IN = 32.25;
@@ -35,21 +35,8 @@ export interface BoardDialogs {
 /** The display width the screens showing a board give it: the first that sets one. */
 export function displayWidthFor(board: SlotBoardDTO, views: readonly View[]): number {
   for (const s of board.shownOn) {
-    const v = views.find((x) => x.id === s.viewId);
-    if (!v) continue;
-    if (s.kind === "view" && v.slotsLayout?.displayWidthIn) return v.slotsLayout.displayWidthIn;
-    if (s.kind === "object") {
-      const walk = (objs: LayoutObject[] | undefined): number | null => {
-        for (const o of objs ?? []) {
-          if (o.id === s.id && o.config.type === "slots-grid") return o.config.displayWidthIn ?? o.config.slotsLayout?.displayWidthIn ?? null;
-          const inner = walk(o.children);
-          if (inner) return inner;
-        }
-        return null;
-      };
-      const w = walk(v.layout?.objects);
-      if (w) return w;
-    }
+    const w = displayWidthOf({ ...s, boardId: board.id }, views);
+    if (w !== null) return w;
   }
   return FALLBACK_DISPLAY_WIDTH_IN;
 }

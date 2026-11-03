@@ -22,7 +22,7 @@ import { useStageState } from "../../main/use-stage-state";
 import { useEditingTarget, registerTargetGuard } from "../../settings/sections/editing-target";
 import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
 import { errorMessage } from "@main/services/errors";
-import { gridBoardId, forEachSlotsGrid, viewBoardId } from "@main/services/slot-boards";
+import { gridBoardId, gridDisplayWidthIn, forEachSlotsGrid, pointedGrid, positiveOrNull, viewBoardId } from "@main/services/slot-boards";
 import { plural } from "@main/services/plural";
 import {
   append,
@@ -83,10 +83,10 @@ export interface CopyFrom {
 export function displayWidthOf(t: ShowTarget, views: readonly View[]): number | null {
   const v = views.find((x) => x.id === t.viewId);
   if (!v) return null;
-  if (t.kind === "view") return v.slotsLayout?.displayWidthIn ?? null;
+  if (t.kind === "view") return positiveOrNull(v.slotsLayout?.displayWidthIn);
   let found: number | null = null;
   forEachSlotsGrid([v], (oid, config) => {
-    if (oid === t.id) found = config.displayWidthIn ?? config.slotsLayout?.displayWidthIn ?? null;
+    if (oid === t.id) found = gridDisplayWidthIn(config);
   });
   return found;
 }
@@ -503,11 +503,7 @@ export function useMicSlots() {
       if (next) takeState(next);
       return !!next;
     }
-    return rewriteGrid(t, `show the board on ${t.name}`, (c) => {
-      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
-      const displayWidthIn = c.displayWidthIn ?? c.slotsLayout?.displayWidthIn;
-      return { ...rest, boardId, ...(displayWidthIn ? { displayWidthIn } : {}) };
-    });
+    return rewriteGrid(t, `show the board on ${t.name}`, (c) => pointedGrid(c, boardId));
   }
 
   /** A screen's or a widget's own display width, the other half of charger alignment. */
@@ -519,10 +515,7 @@ export function useMicSlots() {
       if (next) takeState(next);
       return !!next;
     }
-    return rewriteGrid(t, `set the display width of ${t.name}`, (c) => {
-      const { source: _s, sourceViewId: _v, slotsLayout: _l, ...rest } = c;
-      return { ...rest, displayWidthIn };
-    });
+    return rewriteGrid(t, `set the display width of ${t.name}`, (c) => pointedGrid(c, gridBoardId(c, t.id), displayWidthIn));
   }
 
   /**
