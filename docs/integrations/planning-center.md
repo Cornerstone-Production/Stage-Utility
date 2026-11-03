@@ -244,8 +244,9 @@ to a plan, so the result is cached for 15 minutes and read again by the next
 refresh after that, whichever plan is selected. The read runs beside the roster's,
 never ahead of it. If a read fails the last good tags stay and no slot goes
 blank; a failed read with no earlier result means no prep is shown. A failed read
-is not retried for five minutes. The token
-needs the same read access it already has for people.
+is not retried for five minutes. Reading who carries a tag needs **Editor** in
+Services (see [Setup](#setup)): with Viewer, Planning Center lists the tags but
+nobody on them, and `/log` shows `[pco-tags] read 0 tagged people from N tags`.
 
 ## Item times
 
@@ -377,6 +378,14 @@ never calls `toggle_control`, so it cannot take control from whoever is driving.
 
 **In Planning Center:** api.planningcenteronline.com → Developers → Personal
 Access Tokens → create a token. Note the **App ID** and **Secret** shown there.
+
+The token acts as the person who made it, with that person's permissions. Give
+that account **Editor** in Services. With Viewer, Stage still sees service types,
+plans and rosters, but the people carrying [prep tags](#prep-tags) come back
+empty, and plan reads used for [ServiceCue](../features/servicecue-and-baptisms.md)
+rundowns and Live state can answer 404 (`[publish] could not read the rundown`,
+`[pco] live service read failed`). A [slot](../slots.md) linked to a person not on
+any Services team also needs People read access.
 
 **In Stage:** Settings → Integrations → **Planning Center** → enter the **App ID**
 and **Secret**, pick a **Refresh interval** and **Pre-service countdown**, enable
