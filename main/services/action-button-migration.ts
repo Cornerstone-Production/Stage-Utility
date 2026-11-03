@@ -259,7 +259,7 @@ export async function runActionButtonMigration(
   const plan = planActionButtonMigration(views, existing, d.actionLabel);
   if (plan.unconfigured > 0) {
     console.warn(
-      `[automation] ${plural(plan.unconfigured, "Run an action button")} with no action chosen ${plan.unconfigured === 1 ? "was" : "were"} left unconverted: ` +
+      `[automation] ${scrub(plural(plan.unconfigured, "Run an action button"))} with no action chosen ${scrub(plan.unconfigured === 1 ? "was" : "were")} left unconverted: ` +
         "they show Needs converting and do nothing. Choose an action for each in the layout editor, or delete it.",
     );
   }

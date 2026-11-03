@@ -506,8 +506,13 @@ class AutomationEngine {
       // A cue's name is a URL somebody else holds, and Buttons name it: say which went and how many are left pressing nothing.
       const cue = calledCueName(gone.trigger);
       const pressing = cue ? (cueUsage(stageController.getState().views)[cue.trim().toLowerCase()] ?? []).length : 0;
-      const orphaned = cue ? ` as cue "${scrub(cue)}", ${plural(pressing, "Button still names", "Buttons still name")} it` : "";
-      console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})${orphaned}`);
+      if (cue) {
+        console.log(
+          `[automation] rule removed "${scrub(gone.name)}" (${scrub(id)}) as cue "${scrub(cue)}", ${scrub(plural(pressing, "Button still names", "Buttons still name"))} it`,
+        );
+      } else {
+        console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})`);
+      }
     }
     this.rulesChanged();
     return this.listRules();
