@@ -414,7 +414,10 @@ things over the bottom of the photo.
   badge when the person brings their own in-ears. Bottom left, the capsule plate:
   their microphone capsule. The last two come from [prep tags](integrations/planning-center.md#prep-tags)
   in Planning Center and appear only for a slot filled by a tagged person. The badges
-  are neutral white on dark glass; the app's accent colour is never used on stage.
+  are neutral; the app's accent colour is never used on stage. The ears badge reads
+  the patch of photo behind it once when the photo loads and draws dark ink on a
+  light patch, light ink on a dark one; with no photo, or one the browser will not
+  let the page read, it keeps a near-opaque dark plate.
 - **The band.** The name, the position line, a hairline, then flat rows: the **mic
   row** (RF bars, the label or frequency, and the battery percentage) and, when an
   IEM is bound, the **IEM row** (headphones, its label, its percentage). Percentages

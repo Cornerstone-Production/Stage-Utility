@@ -117,7 +117,10 @@ describe("prep badges", () => {
   test("the ears badge is neutral: no brand accent on stage", () => {
     const { container } = render(<SlotPanel slot={slot({ prep: { capsule: null, ownIems: true } })} />);
     const ears = badge(container, "ears")!;
-    assert.match(ears.style.background, /rgba\(255,\s*255,\s*255,\s*0\.18\)/);
+    // Until a sample says otherwise (no photo, or one that cannot be read) the plate
+    // is the near-opaque neutral one: it must read on any photo.
+    assert.equal(ears.getAttribute("data-ears-ink"), "neutral");
+    assert.match(ears.style.background, /rgba\(24,\s*24,\s*24,\s*0\.92\)/);
     assert.doesNotMatch(ears.getAttribute("style") ?? "", /accent|--su-/);
     cleanup();
   });
