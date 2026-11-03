@@ -20,7 +20,8 @@ import type { Slot } from "../../types/stage.js";
  *  else goes up to the dispatcher, which answers 500 and logs. */
 function boardFailure(res: RouteCtx["res"], err: unknown): void {
   if (!(err instanceof SlotsNotFoundError)) throw err;
-  error(res, err.message, err.status);
+  if (err.body) json(res, { error: err.message, ...err.body }, err.status);
+  else error(res, err.message, err.status);
 }
 
 /** The body as an object; anything else (null, a list) reads as empty, which

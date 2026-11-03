@@ -187,10 +187,16 @@ const STATE = () =>
     const asked = (JSON.parse(body ?? "{}").boards ?? []) as { boardId: string; rev?: string; target?: { kind: string } }[];
     const dead = asked.find((b) => goneBoards.has(b.boardId));
     const side = (b: { target?: { kind: string } }) => (b.target?.kind === "plan" ? "plan" : "default");
-    const stale = asked.find((b) => b.rev !== undefined && b.rev !== revOf(b.boardId, side(b)));
-    if (stale) {
+    // As the server does: every stale board is listed, not the first.
+    const stale = asked.filter((b) => b.rev !== undefined && b.rev !== revOf(b.boardId, side(b)));
+    if (stale.length > 0) {
       status = 409;
-      out = { error: `Board "${boards.find((x) => x.id === stale.boardId)?.name}": It was changed elsewhere since this page read it. Nothing was saved.` };
+      const names = stale.map((b) => `"${boards.find((x) => x.id === b.boardId)?.name}"`).join(", ");
+      out = {
+        error: stale.length === 1 ? `Board ${names}: It was changed elsewhere since this page read it. Nothing was saved.` : `Boards ${names}: They were changed elsewhere since this page read them. Nothing was saved.`,
+        code: "boards-changed",
+        boards: stale.map((b) => ({ boardId: b.boardId, name: boards.find((x) => x.id === b.boardId)?.name, target: `${side(b)}:st-1` })),
+      };
     } else if (dead) {
       status = 404;
       out = { error: `Board "${dead.boardId}": There is no board ${dead.boardId}.` };
@@ -1367,6 +1373,20 @@ describe("a board saved from another browser", () => {
     assert.ok(unsaved(), "the work is kept");
     assert.ok(within(section("b-left")).getByRole("alert").textContent!.includes("changed elsewhere"));
     assert.equal(posts("/api/boards/slots").length, 1, "nothing was sent again");
+  });
+
+  test("two boards saved elsewhere: the question and the marks name both", async () => {
+    await mount();
+    await click(leftSlot());
+    await click(rightSlot());
+    revs = { "b-left|default": 1, "b-right|default": 1 };
+    await click(screen.getByRole("button", { name: "Save all" }));
+    const asked = alertDialog().textContent ?? "";
+    assert.ok(asked.includes("Left wall") && asked.includes("Right wall"), `the question named only one board: ${asked}`);
+    await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
+    for (const id of ["b-left", "b-right"]) {
+      assert.ok(within(section(id)).queryByRole("alert")?.textContent?.includes("changed elsewhere"), `${id} is not marked`);
+    }
   });
 
   test("Save over it sends the edits again over what is saved now", async () => {

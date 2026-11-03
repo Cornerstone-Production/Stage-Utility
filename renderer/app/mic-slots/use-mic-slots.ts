@@ -22,7 +22,7 @@
 // board saved elsewhere since is a 409 the operator decides about, never a
 // silent overwrite.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { confirm, toast } from "../../components/ui";
@@ -122,6 +122,18 @@ interface BufferTarget {
   side: SlotsTargetSide;
   /** What to call it when telling the operator the editor stayed on it. */
   label: string;
+}
+
+/** The boards a 409 from Save all lists, or null when the answer lists none. */
+function staleNamed(err: unknown): string[] | null {
+  const listed = (err as { body?: { boards?: unknown } }).body?.boards;
+  if (!Array.isArray(listed)) return null;
+  return listed.flatMap((b) => (b && typeof (b as { boardId?: unknown }).boardId === "string" ? [(b as { boardId: string }).boardId] : []));
+}
+
+/** "A", "A and B", "A, B and C". */
+function listNames(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 export interface Selection {
@@ -251,7 +263,10 @@ export function useMicSlots() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boards, dataVersion, effectiveSide, edits]);
   const latest = useRef(boardsMap);
-  latest.current = boardsMap;
+  // After render, before any handler can run: a handler reads what was drawn.
+  useLayoutEffect(() => {
+    latest.current = boardsMap;
+  }, [boardsMap]);
 
   const hasOverride = boards.some((b) => targetsById.get(b.id)?.overrideSlots != null);
 
@@ -300,11 +315,9 @@ export function useMicSlots() {
    * already used, and be refused.
    */
   const latestViews = useRef(new Map<string, View>());
-  const seenState = useRef<StageState | null>(null);
-  if (state && state !== seenState.current) {
-    seenState.current = state;
-    for (const v of state.views) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
-  }
+  useLayoutEffect(() => {
+    for (const v of state?.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
+  }, [state]);
   function takeState(next: StageState): void {
     qc.setQueryData(["stage:getState"], next);
     for (const v of next.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
@@ -361,8 +374,8 @@ export function useMicSlots() {
 
   // ── Save all ─────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
-  /** The refusal from the last Save all, and the board it named when it did. */
-  const [saveError, setSaveError] = useState<{ message: string; boardId: string | null } | null>(null);
+  /** The refusal from the last Save all, and the boards it named. */
+  const [saveError, setSaveError] = useState<{ message: string; boardIds: string[] } | null>(null);
 
   async function saveAll(): Promise<boolean> {
     return submitSave(dirtyIds, false);
@@ -409,7 +422,7 @@ export function useMicSlots() {
       return true;
     } catch (err) {
       const message = errorMessage(err);
-      if ((err as { status?: number }).status === 409 && !retried) return resolveConflict(ids, message);
+      if ((err as { status?: number }).status === 409 && !retried) return resolveConflict(ids, message, staleNamed(err));
       if (!retried) {
         const fresh = await qc.fetchQuery({ queryKey: BOARDS_KEY, queryFn: () => ipc<SlotBoardDTO[]>("boards:list"), staleTime: 0 }).catch(() => null);
         const gone = fresh ? ids.filter((id) => !fresh.some((b) => b.id === id)) : [];
@@ -420,9 +433,10 @@ export function useMicSlots() {
           return submitSave(ids.filter((id) => !gone.includes(id)), true);
         }
       }
-      // The server names the board it refused: `Board "Left wall": …`.
-      const named = boards.find((b) => message.startsWith(`Board "${b.name}"`));
-      setSaveError({ message, boardId: named?.id ?? null });
+      // The server names the boards it refused: a 409's body lists them, any
+      // other refusal starts `Board "Left wall": …`.
+      const named = staleNamed(err) ?? boards.filter((b) => message.startsWith(`Board "${b.name}"`)).map((b) => b.id);
+      setSaveError({ message, boardIds: named });
       toast.error(`Nothing was saved. ${message}`);
       return false;
     } finally {
@@ -431,23 +445,26 @@ export function useMicSlots() {
   }
 
   /**
-   * A board was saved elsewhere since this page read it. Nothing was written.
-   * Say which, show what is saved now underneath the edits, and let the operator
-   * choose: save over it, or keep the edits unsaved (Discard then shows theirs).
+   * Boards were saved elsewhere since this page read them. Nothing was written.
+   * Say which (every one the server named, so "Save over it" overwrites nothing
+   * the question did not name), show what is saved now underneath the edits, and
+   * let the operator choose: save over them, or keep the edits unsaved (Discard
+   * then shows theirs).
    */
-  async function resolveConflict(ids: string[], message: string): Promise<boolean> {
-    const named = boards.find((b) => message.startsWith(`Board "${b.name}"`));
-    console.warn(`[mic-slots] save-all refused, a board changed elsewhere: ${message}`);
+  async function resolveConflict(ids: string[], message: string, staleIds: string[] | null): Promise<boolean> {
+    const named = staleIds ?? boards.filter((b) => message.startsWith(`Board "${b.name}"`)).map((b) => b.id);
+    console.warn(`[mic-slots] save-all refused, ${plural(named.length, "board")} changed elsewhere: ${message}`);
     await refresh();
-    const name = named?.name ?? "A board";
+    const names = named.length > 0 ? listNames(named.map(nameOf)) : "A board";
+    const one = named.length <= 1;
     const ok = await confirm({
-      title: `${name} was changed elsewhere`,
-      message: `Someone saved ${name} after you started editing it, so nothing was saved. Save yours over theirs, or keep your changes unsaved and look first (Discard shows what they saved).`,
+      title: `${names} ${one ? "was" : "were"} changed elsewhere`,
+      message: `Someone saved ${names} after you started editing ${one ? "it" : "them"}, so nothing was saved. Save yours over theirs, or keep your changes unsaved and look first (Discard shows what they saved).`,
       confirmLabel: "Save over it",
       destructive: true,
     });
     if (!ok) {
-      setSaveError({ message, boardId: named?.id ?? null });
+      setSaveError({ message, boardIds: named });
       toast.error(`Nothing was saved. ${message}`);
       return false;
     }

@@ -223,10 +223,21 @@ export class SlotsNotFoundError extends Error {
      *  be true (a plan target naming another service type), 409 for a layout
      *  saved elsewhere since the caller read it. */
     readonly status: 404 | 400 | 409 = 404,
+    /** More for the answer than its message: a save-all refused for boards
+     *  changed elsewhere lists every one of them. */
+    readonly body?: { code: string; [k: string]: unknown },
   ) {
     super(message);
     this.name = "SlotsNotFoundError";
   }
+}
+
+/** One board a save-all was refused for: saved elsewhere since the page read it. */
+export interface StaleBoard {
+  boardId: string;
+  name: string;
+  /** `default:<serviceTypeId>` or `plan:<planId>`. */
+  target: string;
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
@@ -2966,15 +2977,27 @@ export class StageController {
     // A `rev` is what the caller read (getSlotTargets): a layout saved elsewhere
     // since then is a refusal, not a silent overwrite. Read after every await
     // above, so a save that landed while a plan was being checked is caught.
+    // EVERY stale board is named, not the first: a page that is told about one
+    // and answers "save over it" would otherwise overwrite a second it never saw.
+    const stale: StaleBoard[] = [];
     for (const [i, w] of writes.entries()) {
       const rev = entries[i]!.rev;
       if (rev === undefined) continue;
       if ((await this.slotsRevAt(w.boardId, w.target)) !== rev) {
-        refuse(
-          w.boardId,
-          new SlotsNotFoundError(`It was changed elsewhere since this page read it (${describeSlotsTarget(w.target)}). Nothing was saved.`, 409),
-        );
+        stale.push({ boardId: w.boardId, name: this.describeBoard(w.boardId), target: describeSlotsTarget(w.target) });
       }
+    }
+    if (stale.length > 0) {
+      const names = stale.map((b) => `"${b.name}"`).join(", ");
+      const msg =
+        stale.length === 1
+          ? `Board ${names}: It was changed elsewhere since this page read it (${stale[0]!.target}). Nothing was saved.`
+          : `Boards ${names}: They were changed elsewhere since this page read them. Nothing was saved.`;
+      console.warn(
+        `[boards] save-all refused, nothing written: ${scrub(stale.length)} board(s) changed elsewhere: ` +
+          scrub(stale.map((b) => `"${b.name}" (${b.boardId}) ${b.target}`).join(", ")),
+      );
+      throw new SlotsNotFoundError(msg, 409, { code: "boards-changed", boards: stale });
     }
     // And every board again, with no await before the write: a board deleted
     // while the checks above awaited would otherwise get rows written for it.

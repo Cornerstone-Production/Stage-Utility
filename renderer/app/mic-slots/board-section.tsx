@@ -201,7 +201,7 @@ export function BoardSection({
   const readFailed = mic.targetsErrorById.get(board.id);
   const empty = ready && slots.length === 0;
   const selectedHere = mic.selection?.boardId === board.id ? mic.selection.slotId : null;
-  const failed = mic.saveError?.boardId === board.id ? mic.saveError.message : null;
+  const failed = mic.saveError?.boardIds.includes(board.id) ? mic.saveError.message : null;
   const typeName = mic.typeName;
   const other = useOtherTypeLayout(board.id, mic.serviceTypeId, empty);
   const dirty = mic.dirtyIds.includes(board.id);

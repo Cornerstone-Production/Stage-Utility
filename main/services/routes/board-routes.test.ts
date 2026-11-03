@@ -170,6 +170,35 @@ describe("POST /api/boards/slots — save all", () => {
     assert.equal(again.status, 200, JSON.stringify(again.json));
   });
 
+  it("names EVERY board saved elsewhere, not the first, so Save over it cannot overwrite one unseen", async () => {
+    const read = async (id: string) =>
+      (await call(boardRoutes, `/api/boards/${id}/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string };
+    const left = await read("b-left");
+    const right = await read("b-right");
+    // Another browser saves both.
+    await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [
+        { boardId: "b-left", slots: [slot("theirs-l")], target: { kind: "default", serviceTypeId: TYPE } },
+        { boardId: "b-right", slots: [slot("theirs-r")], target: { kind: "default", serviceTypeId: TYPE } },
+      ],
+    });
+    const r = await call(boardRoutes, "/api/boards/slots", "POST", {
+      boards: [
+        { boardId: "b-left", slots: [slot("mine-l")], target: { kind: "default", serviceTypeId: TYPE }, rev: left.defaultRev },
+        { boardId: "b-right", slots: [slot("mine-r")], target: { kind: "default", serviceTypeId: TYPE }, rev: right.defaultRev },
+      ],
+    });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const body = r.json as { error: string; code: string; boards: { boardId: string; name: string; target: string }[] };
+    assert.equal(body.code, "boards-changed");
+    assert.deepEqual(body.boards, [
+      { boardId: "b-left", name: "Left", target: `default:${TYPE}` },
+      { boardId: "b-right", name: "Right", target: `default:${TYPE}` },
+    ], "the refusal named only some of the boards changed elsewhere");
+    assert.match(body.error, /^Boards "Left", "Right": /);
+    assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), ["theirs-r"]);
+  });
+
   it("two saves sent at the same rev at once: one lands, the other is refused (409)", async () => {
     await slotsStore.setDefault("b-left", TYPE, [slot("ours")]);
     const { defaultRev } = (await call(boardRoutes, `/api/boards/b-left/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string };
