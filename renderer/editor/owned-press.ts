@@ -69,7 +69,8 @@ export interface PressTarget {
   name: string;
 }
 
-type Wrote = { ok: true; cue: string; rule: Rule } | { ok: false; error: string };
+/** `warning`: written, but a follow-up step failed and the operator should be told. */
+type Wrote = { ok: true; cue: string; rule: Rule; warning?: string } | { ok: false; error: string };
 
 /** One Button that names a command, as `GET /api/cues/usage` lists it. */
 interface UsageUse {
@@ -140,24 +141,28 @@ export async function writeOwnedRule(opts: {
   draftUsersOf?: (cue: string) => PressOwner[];
 }): Promise<Wrote> {
   try {
-    const ruleName = chosenLabel(opts.label) ?? (opts.target.name.trim() || opts.target.action.id);
+    const pickName = opts.target.name.trim() || opts.target.action.id;
+    // The rule's name, in the Automation list, is the label first. What the Button DRAWS when
+    // its label is blank is `says`, and that is the pick's name only: a label typed at pick
+    // time and cleared later would otherwise leave the Button drawing the old label.
+    const ruleName = chosenLabel(opts.label) ?? pickName;
+    const sayName = pickName;
     const { rules } = await invoke<{ rules: Rule[] }>("automation:rules");
     let existing = ownedRuleFor(rules, opts.owner, opts.cue);
+    // The Button another one's rule is handed to, once this Button has its own.
+    let handOverTo: { rule: Rule; to: UsageUse } | null = null;
     if (existing) {
       const cue = calledCueName(existing.trigger);
       const sharers = await otherUsers(cue, opts.owner, opts.draftUsersOf?.(cue) ?? []);
       if (sharers.length > 0) {
-        await invoke("automation:updateRule", {
-          id: existing.id,
-          patch: { ownedBy: { viewId: sharers[0]!.viewId, objectId: sharers[0]!.objectId } },
-        });
+        handOverTo = { rule: existing, to: sharers[0]! };
         existing = null;
       }
     }
     if (existing) {
       // `says` is what a Button with no label of its own draws (the manifest names a command
       // by it), so it follows the pick; the command's own name, beside it, never changes.
-      const trigger = { id: existing.trigger.id, params: { ...existing.trigger.params, says: ruleName } };
+      const trigger = { id: existing.trigger.id, params: { ...existing.trigger.params, says: sayName } };
       const patch = { name: ruleName, action: opts.target.action, enabled: true, trigger };
       await invoke("automation:updateRule", { id: existing.id, patch });
       return { ok: true, cue: calledCueName(existing.trigger), rule: { ...existing, ...patch } };
@@ -170,8 +175,25 @@ export async function writeOwnedRule(opts: {
       "automation:addRule",
       // `says` because a Button with no label draws the command's spoken name, and without it the
       // manifest falls back to the cue name humanised: "Btn Shutter" for a button called Shutter.
-      buttonCueRule({ name: ruleName, cueName, action: opts.target.action, ownedBy: opts.owner, says: ruleName }),
+      buttonCueRule({ name: ruleName, cueName, action: opts.target.action, ownedBy: opts.owner, says: sayName }),
     );
+    if (handOverTo) {
+      // Only now, with this Button's own command made: a handover that came first and then
+      // lost the addRule left this Button on the other's rule with nobody owning it.
+      try {
+        await invoke("automation:updateRule", {
+          id: handOverTo.rule.id,
+          patch: { ownedBy: { viewId: handOverTo.to.viewId, objectId: handOverTo.to.objectId } },
+        });
+      } catch (e) {
+        return {
+          ok: true,
+          cue: cueName,
+          rule: made,
+          warning: `This Button has its own command now, but the Button that shared the old one could not be given it: ${errorMessage(e)}`,
+        };
+      }
+    }
     return { ok: true, cue: cueName, rule: made };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };

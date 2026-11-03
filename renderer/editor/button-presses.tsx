@@ -162,7 +162,8 @@ export function ButtonPresses({
         setError(made.error);
         return;
       }
-      setError(null);
+      // Written, but a follow-up step failed: the Button is bound, and the reason stays shown.
+      setError(made.warning ?? null);
       refreshRules();
       if (epoch.current === started && latest.current.cue !== made.cue) onConfig({ ...latest.current, cue: made.cue });
     });
