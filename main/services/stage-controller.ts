@@ -592,6 +592,9 @@ export class StageController {
   /** Layout saves, one at a time — see setViewLayout. */
   private layoutWrites = new WriteQueue();
 
+  /** Save-all, one at a time, so a rev checked is still the rev written over. */
+  private boardWrites = new WriteQueue();
+
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
@@ -2932,7 +2935,11 @@ export class StageController {
    * and then every entry lands in ONE write of slots.json. A refusal names the
    * board it is about, so the page can point at it.
    */
-  async saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
+  saveBoards(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
+    return this.boardWrites.enqueue(() => this.saveBoardsNow(entries));
+  }
+
+  private async saveBoardsNow(entries: { boardId: string; slots: Slot[]; target?: SlotsTarget; rev?: string }[]): Promise<StageState> {
     const writes: SlotsWrite[] = [];
     const seen = new Set<string>();
     const refuse = (boardId: string, err: unknown): never => {

@@ -170,6 +170,17 @@ describe("POST /api/boards/slots — save all", () => {
     assert.equal(again.status, 200, JSON.stringify(again.json));
   });
 
+  it("two saves sent at the same rev at once: one lands, the other is refused (409)", async () => {
+    await slotsStore.setDefault("b-left", TYPE, [slot("ours")]);
+    const { defaultRev } = (await call(boardRoutes, `/api/boards/b-left/targets?serviceTypeId=${TYPE}`)).json as { defaultRev: string };
+    const save = (name: string) =>
+      call(boardRoutes, "/api/boards/slots", "POST", {
+        boards: [{ boardId: "b-left", slots: [slot(name)], target: { kind: "default", serviceTypeId: TYPE }, rev: defaultRev }],
+      });
+    const [a, b] = await Promise.all([save("a"), save("b")]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409], "both saves made at one rev landed; the first was overwritten unseen");
+  });
+
   it("checks a plan save against the plan's own layout, which a default save does not change", async () => {
     ctl.state = { ...ctl.state, planId: PLAN };
     const read = async () =>
