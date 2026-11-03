@@ -492,7 +492,7 @@ export function HomeRoute() {
               ? (o, cancelPress) => (
                   <CardChrome
                     card={o}
-                    note={editorNote(o, home?.layout?.objects ?? [])}
+                    note={editorNote(o, objects)}
                     dragging={dragId === o.id}
                     onSize={(size) => save((objs) => resizeCard(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
