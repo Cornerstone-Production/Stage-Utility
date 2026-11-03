@@ -21,6 +21,7 @@ const { automationStore } = await import("./automation-store.js");
 const { automationEngine } = await import("./automation-engine.js");
 const { applyViewBundle } = await import("./view-import.js");
 const { planActionButtonMigration } = await import("./action-button-migration.js");
+const { stageController } = await import("./stage-controller.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
 after(async () => {
@@ -81,5 +82,24 @@ describe("a stored Run an action Button that cannot be converted", () => {
     const run = await runActionButtonMigration([view([actionButton({ actionId: "", params: {}, label: "Action" })])]);
     assert.equal(run.failure, null);
     assert.ok(lines.some((l) => l.startsWith("[automation]") && l.includes("no action chosen")), JSON.stringify(lines));
+  });
+});
+
+describe("deleting a command that Buttons still press", () => {
+  test("the log names the command and how many Buttons still name it", async (t) => {
+    await automationStore.saveRules([]);
+    await automationEngine.init();
+    const rule = await automationEngine.addRule({
+      name: "Record", enabled: true, trigger: { id: "call.by-name", params: { name: "btn_record" } },
+      conditions: [], action: { id: "log.message", params: { message: "x" } }, cooldownSec: 0, oncePerService: false,
+    } as never);
+    const button = (id: string) => ({ id, x: 0, y: 0, w: 0.1, h: 0.1, z: 1, config: { type: "cue-button", cue: "btn_record", label: "Rec" } });
+    const held = stageController as unknown as { state: { views: View[] } };
+    held.state = { ...held.state, views: [view([button("a"), button("b")])] };
+    const lines = captureConsole(t, "log");
+    await automationEngine.removeRule(rule.id);
+    assert.deepEqual(lines.filter((l) => l.includes("rule removed")), [
+      `[automation] rule removed "Record" (${rule.id}) as cue "btn_record", 2 Buttons still name it`,
+    ]);
   });
 });

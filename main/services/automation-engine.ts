@@ -52,7 +52,7 @@ import { calledCueName, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
-import { ownedByProblem, watchOwnedRules } from "./button-ownership.js";
+import { cueUsage, ownedByProblem, watchOwnedRules } from "./button-ownership.js";
 
 /**
  * What updateRule accepts. `ownedBy: null` clears it, which is how a rule is
@@ -502,7 +502,13 @@ class AutomationEngine {
     const gone = this.rules.find((r) => r.id === id);
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
-    if (gone) console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})`);
+    if (gone) {
+      // A cue's name is a URL somebody else holds, and Buttons name it: say which went and how many are left pressing nothing.
+      const cue = calledCueName(gone.trigger);
+      const pressing = cue ? (cueUsage(stageController.getState().views)[cue.trim().toLowerCase()] ?? []).length : 0;
+      const orphaned = cue ? ` as cue "${scrub(cue)}", ${plural(pressing, "Button still names", "Buttons still name")} it` : "";
+      console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})${orphaned}`);
+    }
     this.rulesChanged();
     return this.listRules();
   }
