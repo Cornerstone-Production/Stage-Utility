@@ -46,7 +46,7 @@ import { viewsStore } from "./views-store.js";
  */
 interface StoredActionButton {
   type: "action-button";
-  actionId: string;
+  actionId?: unknown;
   params?: Record<string, unknown>;
   label?: string;
 }
@@ -62,6 +62,8 @@ export interface ActionButtonMigration {
   rules: Rule[];
   /** How many Buttons were converted, rules already there included. */
   count: number;
+  /** Buttons with no action chosen: left unconverted, since there is nothing for a command to run. */
+  unconfigured: number;
   /** How many of those per view name, in the order the views appear. */
   perView: { viewName: string; count: number }[];
 }
@@ -90,6 +92,7 @@ export function planActionButtonMigration(
   // By view id: names are not unique, and two views called "Console" are two entries.
   const perView = new Map<string, { viewName: string; count: number }>();
   let count = 0;
+  let unconfigured = 0;
 
   // Returns `o` itself when nothing under it changed, which is what migrateViews
   // reads as "this view is untouched".
@@ -97,9 +100,16 @@ export function planActionButtonMigration(
     let next = o;
     const cfg: unknown = o.config;
     if (isStoredActionButton(cfg)) {
+      // A hand-edited layout may hold no action id, or a non-string one. Nothing to press:
+      // left as it is, drawing Needs converting, and counted so the run can say so.
+      const actionId = typeof cfg.actionId === "string" ? cfg.actionId : "";
+      if (!actionId.trim()) {
+        unconfigured++;
+        return o;
+      }
       const known = ownedAlready.get(`${view.id}\n${o.id}`);
       const label = chosenLabel(cfg.label);
-      const registryName = actionLabel(cfg.actionId)?.trim() || cfg.actionId;
+      const registryName = actionLabel(actionId)?.trim() || actionId;
       // The rule is read by an operator in a list: the label the Button wears, or
       // the action's own name. The cue is named from the same, unless the label
       // has no letters in it.
@@ -112,7 +122,7 @@ export function planActionButtonMigration(
           ...buttonCueRule({
             name: ruleName,
             cueName,
-            action: { id: cfg.actionId, params: ruleParams(cfg.params) },
+            action: { id: actionId, params: ruleParams(cfg.params) },
             ownedBy: { viewId: view.id, objectId: o.id },
           }),
           id: randomUUID(),
@@ -137,7 +147,7 @@ export function planActionButtonMigration(
   };
 
   const out = migrateViews(views, convert);
-  return { views: out, rules, count, perView: [...perView.values()] };
+  return { views: out, rules, count, unconfigured, perView: [...perView.values()] };
 }
 
 /** The one line a run logs, or null when there was nothing to migrate. */
@@ -152,7 +162,8 @@ export function migrationLine(m: Pick<ActionButtonMigration, "count" | "perView"
 /** What the pass reads and writes, so a test can swap any of it. */
 export interface ActionButtonMigrationDeps {
   loadRules(): Promise<Rule[]>;
-  saveRules(rules: Rule[]): Promise<void>;
+  /** Append `rules` to the ones already there. */
+  addRules(rules: Rule[]): Promise<void>;
   /** Why the rules or the views would refuse a save, or null. */
   refusal(): Error | null;
   /** The registry's name for an action id. */
@@ -173,12 +184,12 @@ export interface ActionButtonMigrationRun {
   failure: string | null;
 }
 
-async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
+async function storeDeps(): Promise<ActionButtonMigrationDeps> {
   // Lazily: the action registry reaches back into the stage controller, which calls this.
   const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
   return {
     loadRules: () => automationStore.loadRules(),
-    saveRules: (rules) => automationStore.saveRules(rules),
+    addRules: async (rules) => automationStore.saveRules([...(await automationStore.loadRules()), ...rules]),
     refusal: () => automationStore.refusingSaves() ?? viewsStore.refusingSaves(),
     actionLabel: (id) => AUTOMATION_ACTIONS[id]?.label,
   };
@@ -187,19 +198,28 @@ async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
 /**
  * The same deps over the RUNNING engine, for a pass made while the server is up. Rules written
  * straight to the store would not be in the engine until the next start, and a Button bound to
- * a cue the engine does not know refuses every press. New rules go through `addRule`, which
- * gives each its id; the cue names the Buttons keep are the plan's own.
+ * a cue the engine does not know refuses every press (and the engine's next save would rewrite
+ * the store without them). New rules go through `addRule`, which gives each its id; the cue
+ * names the Buttons keep are the plan's own.
  */
 export async function liveRulesDeps(): Promise<ActionButtonMigrationDeps> {
   const { automationEngine } = await import("./automation-engine.js");
   return {
-    ...(await defaultDeps()),
+    ...(await storeDeps()),
     loadRules: async () => automationEngine.listRules(),
-    saveRules: async (all) => {
-      const known = new Set(automationEngine.listRules().map((r) => r.id));
-      for (const { id, ...rule } of all) if (!known.has(id)) await automationEngine.addRule(rule);
+    addRules: async (rules) => {
+      for (const { id: _id, ...rule } of rules) await automationEngine.addRule(rule);
     },
   };
+}
+
+/**
+ * The store before the engine has read the rules (the start-up pass runs ahead of
+ * `automationEngine.init()`, which then loads what this wrote); the running engine after.
+ */
+async function defaultDeps(): Promise<ActionButtonMigrationDeps> {
+  const { automationEngine } = await import("./automation-engine.js");
+  return automationEngine.hasLoadedRules() ? liveRulesDeps() : storeDeps();
 }
 
 /**
@@ -237,10 +257,16 @@ export async function runActionButtonMigration(
   const refusal = d.refusal();
   if (refusal) return left(refusedSentence(refusal));
   const plan = planActionButtonMigration(views, existing, d.actionLabel);
+  if (plan.unconfigured > 0) {
+    console.warn(
+      `[automation] ${plural(plan.unconfigured, "Run an action button")} with no action chosen ${plan.unconfigured === 1 ? "was" : "were"} left unconverted: ` +
+        "they show Needs converting and do nothing. Choose an action for each in the layout editor, or delete it.",
+    );
+  }
   if (plan.count === 0) return left(null);
   if (plan.rules.length > 0) {
     try {
-      await d.saveRules([...existing, ...plan.rules]);
+      await d.addRules(plan.rules);
     } catch (err) {
       return left(
         `[automation] ${plural(plan.count, "Run an action button")} were not converted: the cues could not be saved (${errorMessage(err)}). ` +

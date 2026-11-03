@@ -156,13 +156,20 @@ class AutomationEngine {
    *  nobody watching turning into a cue that fires on a call made yesterday. */
   private pendingConfirm = new Map<string, { token: string; expiresAt: number }>();
   private subscribed = false;
+  /** Has init read the rules? Before that, a pass that wants to add rules writes the store and init loads them. */
+  private rulesLoaded = false;
   private watchingViews = false;
+
+  hasLoadedRules(): boolean {
+    return this.rulesLoaded;
+  }
 
   async init(): Promise<void> {
     await automationLog.init();
     // Populate the signal cache before any client can ask for the hello burst.
     await signalStore.init();
     this.rules = await automationStore.loadRules();
+    this.rulesLoaded = true;
     this.rulesUnread = automationStore.rulesUnreadable();
     this.settings = await automationStore.loadSettings();
     // The rules file is not always something this app wrote. A restored config
