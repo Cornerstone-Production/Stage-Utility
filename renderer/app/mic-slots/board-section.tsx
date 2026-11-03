@@ -179,7 +179,7 @@ export function BoardSection({
   const { state } = useStageState();
   const slots = mic.boardsMap[board.id] ?? [];
   const target = mic.serviceTypeId ? { serviceTypeId: mic.serviceTypeId, planId: mic.side === "plan" ? mic.planId : null } : null;
-  const preview = useBoardPreview(slots, target);
+  const preview = useBoardPreview(slots, target, mic.liveDevices);
   useEffect(() => onResolved(board.id, preview.resolved), [board.id, preview.resolved, onResolved]);
   const [renaming, setRenaming] = useState(!!startRenaming);
   const name = useNameDraft(board.name, (renamed) => void mic.renameBoard(board.id, renamed));

@@ -1,21 +1,25 @@
-// A board's slots as a screen would draw them: names, photos and device readings
+// A board's slots as a screen would draw them: names, photos and live telemetry
 // filled in for the layout being edited.
 //
 // The structure (which card is where, in which column) is always the DRAFT's, so
-// a move shows at once. The people and devices come from the server's resolver,
-// debounced, and are laid over the draft by slot id; a card the resolver has not
-// answered for yet (one just added) draws as the draft is.
+// a move shows at once. The people come from the server's resolver, debounced,
+// and are laid over the draft by slot id; a card the resolver has not answered
+// for yet (one just added) draws as the draft is.
 //
-// The device readings (battery, RF, level) are as of that resolve, which runs on
-// an edit or a target change and not on telemetry: this is an editor, and asking
-// the server again for every board on every meter twitch is not worth it. The
-// screens themselves are live; this preview is not.
+// The device readings (battery, RF, level, the IEM pack) are live: the page's one
+// `wireless:channels` subscription is laid over each card by its DRAFT's
+// bindings, through the same mapping the resolver uses (slotDevice). A meter
+// moving re-renders the cards and asks the server nothing. A charge bar read from
+// a charger bay is the exception: bays are not on that channel, so it is as of
+// the last resolve.
 
 import { useEffect, useMemo, useState } from "react";
 
 import { invoke as ipc } from "../../lib/api";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { errorMessage } from "@main/services/errors";
+import { slotDevice } from "@main/services/slot-resolver";
+import type { DeviceStatus } from "@main/types/devices";
 
 /** How long to wait after the last edit before asking the server. */
 const DEBOUNCE_MS = 250;
@@ -32,7 +36,15 @@ export interface BoardPreview {
   resolved: ReadonlyMap<string, Slot>;
 }
 
-export function useBoardPreview(slots: Slot[], target: SlotsPreviewTarget | null): BoardPreview {
+/**
+ * @param live  every wireless channel's telemetry by channel id, or null until it
+ *              has answered (the resolve's readings stand until then).
+ */
+export function useBoardPreview(
+  slots: Slot[],
+  target: SlotsPreviewTarget | null,
+  live: ReadonlyMap<string, DeviceStatus> | null = null,
+): BoardPreview {
   const [resolution, setResolution] = useState<SlotsPreviewDTO | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const serviceTypeId = target?.serviceTypeId ?? null;
@@ -75,10 +87,21 @@ export function useBoardPreview(slots: Slot[], target: SlotsPreviewTarget | null
     const resolved = new Map((resolution?.slots ?? []).map((s) => [s.id, s]));
     const merged = slots.map((s) => {
       const r = resolved.get(s.id);
-      if (!r) return s;
-      // The draft owns structure; the resolver owns who and what is live.
-      return { ...r, order: s.order, stackWithPrevious: s.stackWithPrevious, widthIn: s.widthIn, link: s.link, channel: s.channel };
+      // The draft owns structure; the resolver owns who.
+      const base = r ? { ...r, order: s.order, stackWithPrevious: s.stackWithPrevious, widthIn: s.widthIn, link: s.link, channel: s.channel } : s;
+      return live ? withLiveDevice(base, s, r, live) : base;
     });
     return { slots: merged, resolution, resolved, failure };
-  }, [slots, resolution, failure]);
+  }, [slots, resolution, failure, live]);
+}
+
+/** A card's device readings from live telemetry, by the draft's own bindings, so
+ *  a binding changed a moment ago reads its new device before the next resolve. */
+function withLiveDevice(base: Slot, draft: Slot, resolved: Slot | undefined, live: ReadonlyMap<string, DeviceStatus>): Slot {
+  // A spacer or an empty slot draws no device, whatever it is bound to.
+  if (draft.link.kind === "spacer" || draft.link.kind === "empty") return base;
+  const device = slotDevice(draft, live);
+  // Charger bays are not on the telemetry channel: keep what the resolve read.
+  if ((draft.chargeSource ?? "mic") === "charger") device.charge = resolved?.device?.charge ?? null;
+  return { ...base, device };
 }

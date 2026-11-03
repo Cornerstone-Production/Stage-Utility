@@ -109,6 +109,8 @@ let goneBoards = new Set<string>();
 /** Each board's saved revision, "board|default" or "board|plan"; a save carrying an older one is a 409. */
 let revs: Record<string, number> = {};
 const revOf = (boardId: string, side: "default" | "plan") => `r${revs[`${boardId}|${side}`] ?? 0}`;
+/** What GET /api/integrations/wireless/statuses answers. */
+let wirelessStatuses: unknown[] = [];
 /** While set, Save all answers only once it resolves. */
 let holdSave: Promise<void> | null = null;
 /** While set, Save all WRITES (the revisions move) and then answers only once it resolves:
@@ -179,7 +181,7 @@ const STATE = () =>
   } else if (path === "/api/plans/upcoming") out = { plans: upcomingPlans, cacheAgeMs: 0 };
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
-  else if (path === "/api/integrations/wireless/statuses") out = [];
+  else if (path === "/api/integrations/wireless/statuses") out = wirelessStatuses;
   else if (path === "/api/views/resolve-slots" && failing.has("resolve")) {
     status = 500;
     out = { error: "the roster could not be read" };
@@ -278,6 +280,7 @@ beforeEach(() => {
   revs = {};
   holdSave = null;
   holdAfterWrite = null;
+  wirelessStatuses = [];
   withWidgets = false;
   padRev = 0;
   padLayout = null;
@@ -1470,6 +1473,36 @@ describe("boards:changed", () => {
     await settle();
     assert.ok(!unsaved(), "saved");
     assert.equal(!!within(section("b-left")).queryByRole("alert"), false);
+  });
+});
+
+describe("live readings on the previews", () => {
+  const rx = (battery: number) => ({
+    channelId: "rx-1::1", name: "Pastor", deviceType: "receiver", online: true, rfBars: 4, rfLevelDbm: null, battery, batteryMinutes: null,
+    charging: null, frequencyLabel: "G50 512.000", audioLevel: null, cycles: null, health: null, tempC: null, updatedAt: "",
+  });
+
+  test("a card shows a new battery reading from telemetry, with no edit and no new resolve", async () => {
+    layouts["b-left"] = [
+      slot("pastor", { link: { kind: "static", label: "Pastor", color: "#888888" }, deviceBinding: { providerId: "shure", channelId: "rx-1::1" } } as Partial<Slot>),
+    ];
+    // What the resolve read, a while ago.
+    resolvedExtras = { pastor: { device: { status: "ok", rf: 4, battery: 40, freq: null, audioLevel: null, charge: 40, iemCharge: null, label: null, iemLabel: null } } };
+    wirelessStatuses = [rx(40)];
+    await mount();
+    // The preview's resolve is debounced.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle();
+    const text = () => section("b-left").textContent ?? "";
+    assert.ok(posts("/api/views/resolve-slots").length > 0, "the preview never resolved");
+    assert.ok(text().includes("40%"), `the preview did not draw the reading: ${text()}`);
+    const resolves = posts("/api/views/resolve-slots").length;
+    await act(async () => emit("wireless:channels", [rx(81)]));
+    await settle();
+    assert.ok(text().includes("81%"), `the preview held the battery from its last resolve: ${text()}`);
+    assert.equal(posts("/api/views/resolve-slots").length, resolves, "a telemetry push asked the server to resolve again");
   });
 });
 

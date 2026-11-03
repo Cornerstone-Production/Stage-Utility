@@ -29,6 +29,8 @@ import { confirm, toast } from "../../components/ui";
 import { invoke as ipc, onNotification } from "../../lib/api";
 import { BOARDS_CHANGED_CHANNEL, type BoardsChanged } from "@main/types/boards-changed";
 import { useStageState } from "../../main/use-stage-state";
+import { useWirelessTelemetryStatus } from "../../main/use-wireless-telemetry";
+import type { DeviceStatus } from "@main/types/devices";
 import { useEditingTarget, registerTargetGuard, requestEditingTarget } from "../../settings/sections/editing-target";
 import { boardTargetsKey, confirmDiscardSlotEdits, namedType, useSlotsTarget, type SlotsTargetSide } from "../../settings/sections/slots-target-pill";
 import { errorMessage } from "@main/services/errors";
@@ -152,6 +154,17 @@ export function useMicSlots() {
   useEffect(() => {
     void qc.invalidateQueries({ queryKey: BOARDS_KEY });
   }, [pointers, qc]);
+
+  // ── live device readings, for every board's preview ──────────────────
+  // ONE subscription for the page, keyed by channel id: each preview lays it over
+  // its cards by binding, so a meter moving asks the server nothing.
+  const telemetry = useWirelessTelemetryStatus();
+  const liveDevices = useMemo<ReadonlyMap<string, DeviceStatus> | null>(
+    // A read that failed with nothing pushed yet is not "no devices": the
+    // resolve's readings stand until the channel speaks.
+    () => (telemetry.known && !(telemetry.failed && telemetry.channels.length === 0) ? new Map(telemetry.channels.map((d) => [d.channelId, d])) : null),
+    [telemetry.known, telemetry.failed, telemetry.channels],
+  );
 
   // ── which plan, and which side of it ─────────────────────────────────
   // One target for the whole page, read off the first board: the plan's date and
@@ -961,6 +974,7 @@ export function useMicSlots() {
     views,
     boardsMap,
     targetsById,
+    liveDevices,
     // the target
     editing,
     serviceTypeId,
