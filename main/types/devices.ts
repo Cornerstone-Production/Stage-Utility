@@ -24,6 +24,10 @@ export interface WirelessConnection {
  */
 export const WIRELESS_STATUS_CHANNEL = "wireless:channels";
 
+/** The SSE channel carrying every charger bay (ChargerBayDTO[]), on change.
+ *  Separate from WIRELESS_STATUS_CHANNEL, which leaves chargers out on purpose. */
+export const CHARGER_BAYS_CHANNEL = "wireless:chargers";
+
 export interface DeviceStatus {
   channelId: string;
   name: string | null;

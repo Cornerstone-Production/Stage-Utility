@@ -21,17 +21,25 @@ import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
-// The widget reads its bays from the render context, not from a stream, but
-// `ObjectContent` reaches hooks that open one on other branches.
+// The widget draws the render context's bays until `wireless:chargers` answers,
+// and its read of /api/integrations/wireless/chargers answers the same bays, as
+// the server would. Everything else this reaches is answered empty.
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
+let served: ChargerBayDTO[] = [];
+(globalThis as { fetch?: unknown }).fetch = async (input: unknown) => {
+  const body = String(input).includes("/api/integrations/wireless/chargers") ? served : {};
+  return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
+};
 
 const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 
-after(() => {
+after(async () => {
   cleanup();
+  // Let the reads the widget started land before the DOM goes.
+  await new Promise((r) => setTimeout(r, 50));
   teardown();
 });
 
@@ -57,6 +65,7 @@ const BASE_BAY = {
 function textFor(bay: Partial<ChargerBayDTO>, show: Record<string, boolean> = { battery: true, charging: true }): string {
   cleanup();
   const merged = { ...BASE_BAY, ...bay };
+  served = [merged];
   const ctx = makeRenderCtx({
     state: { ...DEFAULT_STAGE_STATE, chargerBays: [merged] },
   });

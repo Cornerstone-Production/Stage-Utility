@@ -648,6 +648,7 @@ export type IpcChannel =
   | "window:closeSettings"
   | "wireless:addConnection"
   | "wireless:channelStatuses"
+  | "wireless:chargerBays"
   | "wireless:getMeterRate"
   | "wireless:listChannels"
   | "wireless:listConnections"
@@ -1535,6 +1536,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // see use-wireless-channels.ts for what conflating them cost.
     case "wireless:channelStatuses":
       return apiFetch<T>("/api/integrations/wireless/statuses");
+
+    case "wireless:chargerBays":
+      return apiFetch<T>("/api/integrations/wireless/chargers");
 
     case "wireless:getMeterRate":
       return apiFetch<T>("/api/wireless/meter-rate");

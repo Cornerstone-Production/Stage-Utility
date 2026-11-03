@@ -58,6 +58,7 @@ import { useReaperStatus } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { useChargerBays } from "../main/use-charger-bays";
 import { toast } from "../components/ui/toast";
 import { useProdcomChannels } from "../main/use-prodcom-channels";
 import { useTranscript } from "../main/use-transcript";
@@ -855,7 +856,7 @@ export function Inspector({
   // An object saved as one of the four widgets the Timer replaced is edited as the
   // Timer, and the first edit writes it as one.
   const c = readConfig(o.config);
-  const chargerBays = useStageState().state?.chargerBays ?? [];
+  const chargerBays = useChargerBays().bays;
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const pvp = usePvpState();

@@ -53,6 +53,8 @@ export const HYDRATED_CHANNELS = [
   // "broadcast on change" leaves a late subscriber blank indefinitely — exactly
   // the case this list exists for.
   "wireless:channels",
+  // Charger bays: the same reasoning, for a pack sitting in a charger.
+  "wireless:chargers",
   // Feeds are STATE, and rarely change mid-service — a display or the Video
   // feeds page opened after the burst would show nothing until an operator
   // happened to edit a feed.

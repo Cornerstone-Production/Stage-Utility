@@ -42,6 +42,12 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // Every charger bay, the snapshot `wireless:chargers` also carries.
+    if (method === "GET" && pathname === "/api/integrations/wireless/chargers") {
+      json(res, stageController.chargerBayStatuses());
+      return;
+    }
+
     // ── Wireless connections ───────────────────────────────────────────────
 
     if (method === "GET" && pathname === "/api/wireless/meter-rate") {

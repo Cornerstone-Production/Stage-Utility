@@ -81,7 +81,7 @@ import type {
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
-import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
+import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
@@ -5484,6 +5484,7 @@ export class StageController {
     this.connectionNames = names;
     this.recomputeResolved();
     this.broadcast();
+    this.broadcastChargerBays();
   }
 
   applyDeviceStatus(channelId: string, status: DeviceStatus): void {
@@ -5511,11 +5512,13 @@ export class StageController {
       if (
         channelInDemand("stage:state-changed") ||
         channelInDemand("slots:devices") ||
-        channelInDemand(WIRELESS_STATUS_CHANNEL)
+        channelInDemand(WIRELESS_STATUS_CHANNEL) ||
+        channelInDemand(CHARGER_BAYS_CHANNEL)
       ) {
         this.recomputeResolved();
         this.broadcastDevices();
         this.broadcastWirelessChannels();
+        this.broadcastChargerBays();
       } else {
         this.deviceStatusDirty = true;
       }
@@ -5574,6 +5577,30 @@ export class StageController {
   }
 
   private lastWirelessSig: string | null = null;
+
+  /** Every charger bay, as the charger widget and the Mic slots previews draw them. */
+  chargerBayStatuses(): ChargerBayDTO[] {
+    return this.computeChargerBays();
+  }
+
+  /**
+   * Push the charger bays, on change and only while a browser is watching.
+   *
+   * Bays are in stage state too, but the device-status path above re-resolves
+   * without re-sending that state, so a bay's level changing used to reach no
+   * screen until something structural did. The channel is the bays alone: a
+   * charge creeping up does not re-send the whole state.
+   */
+  private broadcastChargerBays(): void {
+    if (!channelHasSubscribers(CHARGER_BAYS_CHANNEL)) return;
+    const bays = this.computeChargerBays();
+    const sig = JSON.stringify(bays);
+    if (sig === this.lastChargerSig) return;
+    this.lastChargerSig = sig;
+    broadcast(CHARGER_BAYS_CHANNEL, bays, sig);
+  }
+
+  private lastChargerSig: string | null = null;
 
   /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
   stopDeviceStatusUpdates(): void {

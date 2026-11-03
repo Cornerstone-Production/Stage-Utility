@@ -231,6 +231,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
 | GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label, deviceType}` per configured channel, whether or not it has ever reported. For pickers; `deviceType` is what lets one offer mics without charger bays |
 | GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
+| GET | `/api/integrations/wireless/chargers` | Every charger bay, `ChargerBayDTO[]` (battery, charging, cycles, health, temperature, time to full, fault, storage mode), the snapshot `wireless:chargers` also carries |
 | GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval, `{ms}`; `POST` takes a non-negative number (`400` otherwise) |
 
 `PATCH /api/wireless/connections/:id` also accepts `POST`, and takes either the
@@ -738,7 +739,7 @@ something to change:
 `service-timeline:history` · `baptism:state` · `obs:status` · `reaper:status` ·
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
-`wireless:channels` · `calendar:grid` · `displays:presence` · `video:state` ·
+`wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
 `video:probe` · `messages:state` · `home:snoozes` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
 [Network traffic](../ops/network-traffic.md#slot-boards))

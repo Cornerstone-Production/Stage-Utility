@@ -502,7 +502,7 @@ widgets and the Timer pick which instance they follow. See
 | **Mic slots** | Who is on which mic, as a grid of cards | Planning Center team + wireless gear |
 | **Wireless summary** | How many packs are online, and their batteries | Every wireless connection |
 | **Mic channel** | RF, battery, runtime and frequency for one pack | One wireless channel |
-| **Charger battery** | Battery levels in the charger bays | Shure SBC chargers |
+| **Charger battery** | Battery levels in the charger bays, live as each bay reports | Shure SBC chargers |
 
 **Wireless summary** can be expanded on Home to list every channel with its battery, time left, RF bars and whether it is muted or offline; see [Expanding a tile](../features/operator-app.md#expanding-a-tile).
 

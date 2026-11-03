@@ -67,7 +67,7 @@ import { baptismTimerService } from "./baptism-timer-service.js";
 import { videoService } from "./video/video-service.js";
 import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
-import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
+import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
@@ -509,6 +509,9 @@ export function writeHelloBurst(res: EventSink): void {
   // so once made the scan find a channel named by prose, which is the same
   // trap from the other side.
   sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+  // Charger bays, for the same reason: a pack left charging moves a percent a
+  // minute and then nothing for days. The LITERAL with `satisfies`, as above.
+  sseWrite(res, "wireless:chargers" satisfies typeof CHARGER_BAYS_CHANNEL, stageController.chargerBayStatuses());
   // A calendar is STATE, not an event: a display opened in the middle of a
   // month must show it at once, not sit blank until somebody moves a booking
   // — which on this channel can be days.
