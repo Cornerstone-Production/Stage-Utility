@@ -136,16 +136,16 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.boardId must be a board id");
         return;
       }
-      if (Array.isArray(body.slots)) {
-        try {
+      try {
+        if (Array.isArray(body.slots)) {
           presets = await stageController.overwritePreset(id, "", body.slots as Slot[], body.boardId as string | undefined);
-        } catch (err) {
-          if (!(err instanceof SlotsNotFoundError)) throw err;
-          error(res, err.message, err.status);
-          return;
+        } else if (typeof body.overwriteFromDisplayId === "string") {
+          presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
         }
-      } else if (typeof body.overwriteFromDisplayId === "string") {
-        presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
+      } catch (err) {
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+        return;
       }
       json(res, presets);
       return;

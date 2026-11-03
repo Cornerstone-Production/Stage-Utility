@@ -3668,18 +3668,23 @@ export class StageController {
   //
   // `boardId` records the board the layout now comes from, so recalling it defaults
   // there; an unknown board is refused, and so is overwriting with no slots (that
-  // would empty a saved layout the operator meant to keep).
+  // would empty a saved layout the operator meant to keep) — whether they were
+  // sent empty or read from a view that shows none. A view's slots are read the
+  // way savePreset reads them, so a custom view's one widget counts.
   async overwritePreset(id: string, target: string, explicitSlots?: Slot[], newBoardId?: string): Promise<SlotPreset[]> {
     if (newBoardId !== undefined) this.boardFor("board", newBoardId);
-    if (explicitSlots !== undefined && explicitSlots.length === 0) {
-      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
-    }
-    const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
-    const view = this.state.views.find((v) => v.id === viewId);
-    const boardId = view ? viewBoardId(view) : null;
-    const rawSlots = explicitSlots ?? (boardId ? this.rawSlotsByBoard.get(boardId) : undefined) ?? [];
+    let rawSlots: Slot[];
+    if (explicitSlots !== undefined) {
+      rawSlots = explicitSlots;
+    } else {
+      const boardId = this.boardForPresetTarget(this.viewIdForTarget(target));
+      rawSlots = boardId ? (this.rawSlotsByBoard.get(boardId) ?? (await this.rawFor(boardId))) : [];
+    }
+    if (rawSlots.length === 0) {
+      throw new SlotsNotFoundError("A saved layout cannot be overwritten with no slots.", 400);
+    }
     console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
       p.id === id

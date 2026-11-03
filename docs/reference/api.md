@@ -212,7 +212,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | POST | `/api/presets/import` | Add one from data: `{name, slots, boardId?}`. `boardId` records the board the layout came from, which is where recalling it defaults; an unknown board is `404`, a blank one `400` |
 | POST | `/api/presets/reorder` | `{ids: string[]}` |
 | POST | `/api/presets/:id/apply` | Write it onto the board a view shows: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
-| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots, boardId?}` replaces its slots (never with none: `400`) and records the board they came from, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
+| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots, boardId?}` replaces its slots (never with none: `400`) and records the board they came from, or `{overwriteFromDisplayId}` overwrites it from that view's current slots: the board a slots view shows, or the one a custom view's single slots widget shows (`400` when that is none, or no slots) |
 | DELETE | `/api/presets/:id` | Delete |
 
 **Integrations & wireless**

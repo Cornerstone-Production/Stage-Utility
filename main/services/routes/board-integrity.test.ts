@@ -16,6 +16,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { viewRoutes } = await import("./view-routes.js");
+const { presetRoutes } = await import("./preset-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 const { slotsStore } = await import("../slots-store.js");
@@ -84,5 +85,21 @@ describe("a custom view's leftover board pointer", () => {
     const r = await call(viewRoutes, "/api/views/pad/slots", "POST", { slots: [slot("x")] });
     assert.equal(r.status, 404, JSON.stringify(r.json));
     assert.deepEqual(ids(await slotsStore.getDefault("b-right", TYPE)), ["r1"], "a write landed on a board the custom view does not show");
+  });
+});
+
+describe("overwriting a saved layout from a view", () => {
+  const preset = async () => (await presetsStore.load()).find((p) => p.id === "p-1")!;
+
+  it("from a custom view takes the board its one widget shows", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { overwriteFromDisplayId: "pad" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal((await preset()).slots.length, 2, "the saved layout was emptied, not overwritten with the widget's board");
+  });
+
+  it("from a view with no slots is refused, and the saved layout is kept", async () => {
+    const r = await call(presetRoutes, "/api/presets/p-1", "PATCH", { overwriteFromDisplayId: "blank" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.deepEqual(ids((await preset()).slots), ["p"]);
   });
 });
