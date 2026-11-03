@@ -49,8 +49,12 @@ ServiceCue file in the diff.
 The pass answers two questions, with `file:line` evidence either way:
 
 - **Does anything leak?** Trace the payload from its builder to the wire and
-  name its allowlist. Only the operator's chosen rundowns, chosen columns and
-  the live item may leave. Nothing else: no credentials or tokens, no LAN
+  name its allowlist. Only what
+  [ServiceCue on the web](docs/ops/servicecue-on-the-web.md#who-can-see-it)
+  says is public may leave: the offered service types, layouts and plans, their
+  whole rundowns, the live item, and the six state fields. Anything new on that
+  list is a change to that page, decided on purpose. Nothing else: no
+  credentials or tokens, no LAN
   addresses, hostnames or device ids, no people's contact details or photos, no
   log or error text, no internal ids the public side does not need — in the
   payload, in an error reply, or in the deployed bundle.
