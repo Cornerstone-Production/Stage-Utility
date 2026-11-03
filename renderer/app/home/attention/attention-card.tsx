@@ -13,8 +13,7 @@ import { AppLink } from "../../app-link";
 import { flashTarget } from "../../flash";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/cn";
-import { invoke } from "../../../lib/api";
-import { callAnswerNote, type CallAnswer } from "../../../lib/command-answer";
+import { pressCommand } from "../../../lib/command-answer";
 import { errorMessage } from "@main/services/errors";
 import type { HomeSnooze } from "@main/types/home-snoozes";
 import { homeMode } from "../home-mode";
@@ -68,13 +67,10 @@ function FixButton({ fix, onFailed }: { fix: AttentionFix; onFailed: (why: strin
       onClick={() => {
         if (!command) return;
         setBusy(true);
-        invoke<CallAnswer>("cues:call", { name: command })
-          .then((r) => {
-            const said = callAnswerNote(r);
-            if (said !== null) onFailed(said);
-          })
-          .catch((err: unknown) => onFailed(errorMessage(err)))
-          .finally(() => setBusy(false));
+        void pressCommand(command).then((said) => {
+          if (said !== null) onFailed(said);
+          setBusy(false);
+        });
       }}
     >
       {busy ? "Working…" : fix.label}

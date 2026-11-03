@@ -246,7 +246,7 @@ describe("a failed action", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    assert.match(screen.getByRole("alert").textContent ?? "", /Reaper did not answer/);
+    assert.match(screen.getByRole("alert").textContent ?? "", /Reaper: Could not reach the server/);
     act(() => mock.timers.tick(ACTION_NOTE_MS));
     assert.ok(screen.queryByRole("alert") === null, "and then it clears");
   });

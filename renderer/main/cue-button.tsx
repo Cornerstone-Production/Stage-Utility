@@ -12,7 +12,7 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
-import { callAnswerNote, type CallAnswer } from "../lib/command-answer";
+import { pressCommand, type CallAnswer } from "../lib/command-answer";
 import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
 
@@ -112,15 +112,10 @@ export function CueButton({
           : entry.row.on; // unknown or stale presses ON
     setBusy(true);
     setSaid(null);
-    try {
-      setSaid(callAnswerNote(await cueButtonDeps.call(target)));
-    } catch {
-      // The only case with no body to read a reason out of. Said on the button
-      // rather than logged away: this is the answer to the operator's press.
-      setSaid("Could not reach the server");
-    } finally {
-      setBusy(false);
-    }
+    // Said on the button rather than logged away: this is the answer to the
+    // operator's press, a failed request included.
+    setSaid(await pressCommand(target, cueButtonDeps.call));
+    setBusy(false);
   }
 
   const label = unset ? "Choose what it presses" : config.label || name || (known ? "Unbound" : "—");

@@ -23,10 +23,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 
-import { errorMessage } from "@main/services/errors";
 
-import { invoke } from "../../lib/api";
-import { callAnswerNote, type CallAnswer } from "../../lib/command-answer";
+import { pressCommand } from "../../lib/command-answer";
 import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/button";
 import { useLiveStep } from "../../main/live-controls";
@@ -215,13 +213,8 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
       await Promise.all(
         these.map(async (r) => {
           const a = RECORDER_COMMAND[r.name]!;
-          try {
-            const res = await invoke<CallAnswer>("cues:call", { name: `${a.base}_${verb === "start" ? "on" : "off"}` });
-            const said = callAnswerNote(res);
-            if (said !== null) failures.push(`${a.label}: ${said}`);
-          } catch (e) {
-            failures.push(`${a.label} did not answer: ${errorMessage(e)}`);
-          }
+          const said = await pressCommand(`${a.base}_${verb === "start" ? "on" : "off"}`);
+          if (said !== null) failures.push(`${a.label}: ${said}`);
         }),
       );
       if (failures.length > 0) {
