@@ -13,6 +13,9 @@ name: survival
 
 on:
   push:
+    # Branches only. With no branches filter a tag push matches too, and path
+    # filters are not evaluated for tags, so every release tag would start it.
+    branches: ["**"]
     paths:
       - "scripts/survival/**"
       - "main/services/update/**"

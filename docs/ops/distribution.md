@@ -172,11 +172,14 @@ job ends. The job's own token is read-only for contents.
 The app's private key is a secret of the `release` environment, not of the
 repository, and only `beta` and `main` may deploy to that environment. A workflow
 pushed to any other branch cannot read the key, and so cannot use it to push past the
-ruleset. The release job is the only job that names the environment.
+ruleset. The release job is the only job that names the environment. That branch
+limit is the whole of the protection: an environment the workflow creates on its
+first run has none, so create it, limited, before the first release that uses it.
 
 Unlike `GITHUB_TOKEN`, a push made with the app's token starts workflows. The bump
-commit's `[skip ci]` is what keeps it from starting Release, CodeQL and the secret
-scan a second time.
+commit's `[skip ci]` keeps it from starting Release, CodeQL and the secret scan a
+second time, and every workflow's push trigger is limited to branches, so the tag
+starts none.
 
 Setting it up, once:
 
