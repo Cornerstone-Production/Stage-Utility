@@ -39,6 +39,7 @@ interface Job {
   "timeout-minutes"?: number;
   outputs?: Record<string, string>;
   permissions?: Record<string, string>;
+  environment?: string;
   steps?: Step[];
 }
 const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
@@ -178,8 +179,48 @@ describe("the release itself is unchanged by the helper", () => {
     // The only step in the job that pushes is the one given the token.
     const pushers = steps.filter((s) => /\bgit push\b/.test(s.run ?? ""));
     assert.deepEqual(pushers.map((s) => s.id), ["push"]);
-    assert.equal(pushers[0]?.env?.["GH_TOKEN"], "${{ github.token }}");
+    assert.equal(pushers[0]?.env?.["GH_TOKEN"], "${{ steps.app-token.outputs.token }}");
     assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  });
+
+  // beta and main admit only the maintainer and the release app, and
+  // GITHUB_TOKEN cannot be put on that list: a push made with it is refused.
+  it("pushes with the release app's token, minted just before the push, and the job's own token cannot write", () => {
+    const steps = jobs["release"].steps ?? [];
+    assert.deepEqual(jobs["release"].permissions, { contents: "read", statuses: "write" });
+    assert.equal(jobs["release"].environment, "release", "the app's key is an environment secret only beta and main can reach");
+    const mint = steps.findIndex((s) => s.id === "app-token");
+    const push = steps.findIndex((s) => s.id === "push");
+    assert.equal(mint, push - 1, "the token is minted in the step right before the push");
+    const step = steps[mint];
+    assert.match(step?.uses ?? "", /^actions\/create-github-app-token@[0-9a-f]{40}$/);
+    assert.equal(step?.if, steps[push]?.if, "minted on exactly the runs that push");
+    assert.deepEqual(step?.with, {
+      "client-id": "${{ vars.RELEASE_APP_CLIENT_ID }}",
+      "private-key": "${{ secrets.RELEASE_APP_PRIVATE_KEY }}",
+      "permission-contents": "write",
+    });
+    const holders = Object.entries(jobs).flatMap(([job, j]) =>
+      (j.steps ?? []).filter((s) => JSON.stringify(s).includes("secrets.RELEASE_APP_PRIVATE_KEY")).map((s) => `${job}: ${s.name}`));
+    assert.deepEqual(holders, ["release: Mint the release app token"]);
+  });
+
+  // An app-token push starts workflows, which a GITHUB_TOKEN push never did.
+  it("pushes nothing that starts a workflow: the bump is [skip ci], and no push trigger matches the tag", () => {
+    const push = jobs["release"].steps?.find((s) => s.id === "push");
+    const commits = (push?.run ?? "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("git commit"));
+    assert.deepEqual(commits, ['git commit -m "chore(release): v$V [skip ci]"']);
+    // A push trigger with no branches filter (or with a tags filter) matches a
+    // tag push, and path filters are not evaluated for tags.
+    const dir = path.dirname(WORKFLOW);
+    const onTags = fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort().filter((f) => {
+      const on = (parse(fs.readFileSync(path.join(dir, f), "utf8")) as { on?: unknown }).on;
+      if (on === "push" || (Array.isArray(on) && on.includes("push"))) return true;
+      const trigger = (on as Record<string, Record<string, unknown> | null> | undefined)?.["push"];
+      if (trigger === undefined) return false;
+      return trigger === null || !("branches" in trigger) || "tags" in trigger;
+    });
+    assert.deepEqual(onTags, []);
   });
 
   it("downloads every architecture's artifact only from a helper that succeeded, by a pattern that matches each name", () => {
@@ -280,7 +321,7 @@ describe("the helper's download reaches the release", () => {
 
 describe("the helper jobs hold only the permissions they use", () => {
   it("the gate and the build read the repository and nothing else", () => {
-    // The workflow's default is contents: write and statuses: write.
+    // The workflow's default is contents: read; these say so themselves.
     assert.deepEqual(jobs["helper-gate"].permissions, { contents: "read" });
     assert.deepEqual(jobs["helper"].permissions, { contents: "read" });
   });

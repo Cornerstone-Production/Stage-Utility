@@ -160,8 +160,16 @@ jobs:
     # The gate passed here, or it passed on beta for this tree and was not run.
     if: ${{ !cancelled() && (needs.already-verified.outputs.verified == 'true' || (needs.verify-checks.result == 'success' && needs.verify-tests.result == 'success')) }}
     runs-on: ubuntu-latest
+    # The release app's private key is a secret of this environment, which only
+    # beta and main may deploy to. As a repository secret, a workflow pushed to
+    # any branch could read it and push past the ruleset with it.
+    environment: release
     permissions:
-      contents: write # push the version-bump commit and the tag
+      # Read only: the version-bump commit and the tag are pushed with the
+      # release app's token (the step before the push), never this one, because
+      # beta and main admit only that app and the maintainer. A push with this
+      # token would be refused.
+      contents: read
       # To mark the version-bump commit with the `build` status the verify jobs
       # earned, so the release PR whose head it is shows a verified commit without
       # a second run of the suite.
@@ -376,14 +384,28 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: scripts/sign-release-assets.sh --check
 
+      # beta and main admit pushes only from the maintainer and the release
+      # GitHub App; GITHUB_TOKEN cannot be put on a ruleset's bypass list. So the
+      # push takes a token minted here: this repository only, contents only, and
+      # revoked when the job ends. A missing RELEASE_APP_CLIENT_ID variable or
+      # RELEASE_APP_PRIVATE_KEY secret fails this step, before anything is pushed.
+      - name: Mint the release app token
+        id: app-token
+        if: steps.version.outputs.skip == 'false'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - name: Bump, tag and push
         id: push
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
-          # The checkout does not keep the token (persist-credentials: false), so
+          # The checkout does not keep a token (persist-credentials: false), so
           # nothing after it can push by accident. This step is the one that may.
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -391,13 +413,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version "$V" --no-git-tag-version
           git add package.json package-lock.json
-          # `[skip ci]` is inert today: a push made with GITHUB_TOKEN triggers
-          # no workflows at all, marker or not. Kept because it stops a
-          # redundant push-triggered run if the token here is ever swapped for
-          # a PAT (which does trigger workflows). Such a run would stand down on
-          # its own — the bump is a `chore`, so there is nothing releasable since
-          # the tag just created — but it would run the gate a second time over
-          # the same tree for nothing. The commit is marked with a `build`
+          # `[skip ci]` matters: unlike GITHUB_TOKEN, a push made with the app's
+          # token triggers workflows, and this one would start Release again on
+          # the bump (plus CodeQL and the secret scan). That run would stand down
+          # on its own — the bump is a `chore`, so there is nothing releasable
+          # since the tag just created — but it would run the gate a second time
+          # over the same tree for nothing. The commit is marked with a `build`
           # status below instead, from the verification this run already did.
           git commit -m "chore(release): v$V [skip ci]"
           git tag "v$V"
@@ -445,8 +466,8 @@ jobs:
       # exist — see the note there. This job only tags.
 
       # The bump commit differs from the verified tree by one version string.
-      # Mark it with the same status rather than running the suite again; a
-      # GITHUB_TOKEN push triggers no workflows.
+      # Mark it with the same status rather than running the suite again; its
+      # `[skip ci]` keeps the push from starting any workflow.
       #
       # Its own step, after the tag is out. A failure here fails the run — a red
       # Release naming the commit is a checkmark somebody has to go and look at,

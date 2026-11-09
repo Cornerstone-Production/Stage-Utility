@@ -159,6 +159,51 @@ packages (`fflate`, `read-excel-file`, `write-excel-file`) and no native modules
 rest of `dependencies` is interface code, compiled into `build/` by Vite. There is no
 compilation step per platform.
 
+## The release app
+
+`beta` and `main` take pushes and merges from the maintainer and one GitHub App,
+and from nobody else. A repository ruleset on both branches requires a pull request
+and restricts updates, and its bypass list names only those two. The workflow's own
+`GITHUB_TOKEN` cannot be put on that list, so the release job pushes the version-bump
+commit and the tag with a token minted from the app, in the step right before the
+push. The token is scoped to this repository and to contents, and is revoked when the
+job ends. The job's own token is read-only for contents.
+
+The app's private key is a secret of the `release` environment, not of the
+repository, and only `beta` and `main` may deploy to that environment. A workflow
+pushed to any other branch cannot read the key, and so cannot use it to push past the
+ruleset. The release job is the only job that names the environment. That branch
+limit is the whole of the protection: an environment the workflow creates on its
+first run has none, so create it, limited, before the first release that uses it.
+
+Unlike `GITHUB_TOKEN`, a push made with the app's token starts workflows. The bump
+commit's `[skip ci]` keeps it from starting Release, CodeQL and the secret scan a
+second time, and every workflow's push trigger is limited to branches, so the tag
+starts none.
+
+Setting it up, once:
+
+1. Create a GitHub App owned by the organisation, with no webhook, and one
+   repository permission: **Contents: read and write**.
+2. Install it on this repository only.
+3. Create the `release` environment (Settings → Environments), with deployment
+   branches limited to `beta` and `main`.
+4. Set the variable and the environment secret the release job reads:
+   ```sh
+   gh variable set RELEASE_APP_CLIENT_ID --repo Cornerstone-Production/Stage-Utility --body <client id>
+   gh secret set RELEASE_APP_PRIVATE_KEY --env release --repo Cornerstone-Production/Stage-Utility < <app>.private-key.pem
+   ```
+5. Add the ruleset on `refs/heads/beta` and `refs/heads/main`: require a pull request
+   (0 approvals), restrict updates, and bypass for the maintainer's account and the app.
+
+Without the variable or the secret, the release job fails at "Mint the release app
+token", with nothing tagged or pushed. Without the app on the ruleset's bypass list,
+it fails at the push, which reports that it was refused for a reason other than the
+branch moving. Either way the fix is the setting, then **Run workflow** on Release.
+
+To rotate the key, generate a new private key in the app's settings, set the secret
+again, and delete the old key there.
+
 ## Installing
 
 See [install-and-config.md](install-and-config.md). Installers download the archive

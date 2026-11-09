@@ -229,7 +229,9 @@ everything since the last stable tag.
   two PRs on a casual "you can merge them".)
 - **Nothing is pushed directly to `beta` or `main`.** Every change — including a
   one-line fix — goes through a pull request off `beta`. Release automation is the
-  exception: it commits the version bump and tag to those branches by design.
+  exception: it commits the version bump and tag to those branches by design. A
+  ruleset enforces this, admitting only the maintainer and the release app (see
+  [The release app](ops/distribution.md#the-release-app)).
 
 ## Running it locally
 
