@@ -857,6 +857,23 @@ describe("the sound measure", () => {
     assert.equal(delta(tile), 6);
   });
 
+  test("a level keeps the tenth it is printed at: 113.91 is 113.9, never 114", () => {
+    // The tile prints a decibel figure at one decimal. Rounding to a whole
+    // decibel first made 113.91 read "114.0 dB" and 111.73 read "112.0 dB".
+    const [tile] = typeTrends(
+      weekly("weekend", Array(4).fill(500), { db: [111.73, 111.73, 111.73, 113.91] }),
+      { measure: "sound" },
+    );
+    assert.equal(tile.latest, 113.9);
+    assert.equal(tile.priorAverage, 111.7);
+    assert.ok(tile.latestRaw != null && tile.priorAverageRaw != null, "still a comparison");
+  });
+
+  test("a head count is still whole people", () => {
+    const [tile] = typeTrends(weekly("weekend", [400, 400, 400, 412.6]), { measure: "attendance" });
+    assert.equal(tile.latest, 413);
+  });
+
   test("A TILE'S LEVEL IS ONE RECORDING'S, whatever a day's traffic", () => {
     // The other half of the day-total change, at the tile: eight Sundays of
     // three services, each at 96/99/104. Every figure the tile prints must stay
