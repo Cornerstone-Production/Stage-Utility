@@ -1,0 +1,39 @@
+{
+  // The tooling plain `node` runs by stripping types, held to what erasure can run.
+  // The rules, and what tsc cannot check, are in docs/contributing.md (Tooling scripts).
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "scripts/**/*.ts",
+    // Keeps the project non-empty until the first script is converted. Deleted
+    // with is-main.d.mts.
+    "scripts/is-main.d.mts",
+    "publish/servicecue/scripts/**/*.ts",
+    "publish/servicecue/test/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    // Run through tsx (npm test, npm run build), and they import main/, which
+    // uses parameter properties. The root tsconfig.json checks them.
+    "scripts/**/*.test.ts",
+    "scripts/changed-files-test-helpers.ts",
+    "scripts/listen-measure.ts",
+    "scripts/servicecue-bundle.ts",
+    "scripts/servicecue-deploy-try.ts"
+  ]
+}

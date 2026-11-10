@@ -29,7 +29,7 @@
     "icons": "node scripts/build-icons.mjs",
     "docs:screenshots": "node scripts/docs-screenshots/run.mjs",
     "test": "node scripts/run-tests.mjs",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.tooling.json",
     "format": "oxfmt ."
   },
   "dependencies": {
