@@ -16,7 +16,7 @@ import { HOME_VIEW_ID } from "@main/services/home-view";
 import { ObjectContent, boxStyle, statusCtx, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
-import { boxesOf, rowsNeeded, type Box } from "./home-placement";
+import { boxesForPage, rowsNeeded, type Box } from "./home-placement";
 import { useSlideOnMove } from "../../lib/use-slide-on-move";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
@@ -353,7 +353,11 @@ export function HomeGrid({
   onChoosePress?: (objectId: string) => void;
 }) {
   const ctx = useHomeCtx(layout, menuCardId, onChoosePress);
-  const boxes = boxesOverride ?? boxesOf(cards);
+  // Outside edit mode a row with no card in it is a blank band, so it closes up.
+  // The editor (chrome present) draws the full grid, spare rows included, so a
+  // card can still be dropped into one. A drag preview is only ever drawn there.
+  const editing = !!chrome;
+  const boxes = boxesOverride ?? boxesForPage(cards, editing);
   const byId = new Map(boxes.map((b) => [b.id, b]));
   // A signature rather than the array: the effect must run when a card MOVES,
   // and an array identity changes on every render.
@@ -383,7 +387,7 @@ export function HomeGrid({
         // page is somewhere a widget can actually be dropped. Without it the
         // grid ends at its content and "leave a gap at the bottom" had no
         // surface to land on.
-        style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes)}, ${ROW_PX}px)` }}
+        style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes, editing ? 2 : 0)}, ${ROW_PX}px)` }}
       >
         {cards.map((o) => {
           const { w, h } = SIZES[sizeOf(o)];

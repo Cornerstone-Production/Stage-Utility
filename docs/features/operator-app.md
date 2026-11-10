@@ -245,6 +245,12 @@ Dropping onto an occupied cell pushes what was there downward rather than
 covering it, and so does growing a placed card, from its size chips or its
 right-click menu: it keeps its cell and the cards it grows onto move down.
 
+A gap between two rows of cards is for editing. Outside edit mode a row with no
+visible card in it closes up, so a card hidden by its **When** setting, or an
+empty row left in the layout, never leaves a blank band; a gap beside a card in
+the same row stays as placed. Editing shows the whole grid, so a card can still
+be dropped into an empty row.
+
 **Pack tight**, beside the pencil while editing, throws every placement away and
 lets the page flow again. It appears only once something has actually been
 placed.
