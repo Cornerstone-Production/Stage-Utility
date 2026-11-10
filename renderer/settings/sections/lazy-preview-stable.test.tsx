@@ -190,3 +190,29 @@ test("coming back after the fade-out has played hides the new iframe until it ha
   await load(fresh);
   assert.match(fadeClass(fresh), /opacity-100/);
 });
+
+// ---- Unmounting gives the slot back -------------------------------------------
+//
+// Read before afterEach's reset(), which would otherwise hide a slot that leaked:
+// the cap is module state, so a card deleted while it streamed would hold its
+// slot for the life of the page.
+
+test("unmounting a streaming preview releases its slot", async () => {
+  const { iframe, unmount } = await mount();
+  await load(iframe);
+  assert.equal(__previewLimits.liveCount(), 1);
+  unmount();
+  assert.equal(__previewLimits.liveCount(), 0, "the unmounted preview kept its slot");
+});
+
+test("unmounting a preview part way through its fade-out releases its slot", async () => {
+  const { iframe, unmount, scroll } = await mount();
+  await load(iframe);
+  await scroll(false);
+  await tick(FADE_MS - 1);
+  unmount();
+  assert.equal(__previewLimits.liveCount(), 0, "the unmounted preview kept its slot");
+  // The fade timer was cleared with the card, so it cannot release anything later.
+  await tick(FADE_MS);
+  assert.equal(__previewLimits.liveCount(), 0);
+});
