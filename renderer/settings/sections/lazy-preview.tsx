@@ -20,6 +20,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PlayIcon, ExpandIcon } from "lucide-react";
+import { cn } from "../../lib/cn";
 import { ViewPreview } from "./view-preview";
 
 /**
@@ -31,6 +32,15 @@ import { ViewPreview } from "./view-preview";
  * problem, and nothing else bounds how many screens an operator can create.
  */
 const MAX_LIVE_PREVIEWS = 12;
+
+/**
+ * How long a preview that has left the screen keeps its iframe, and its slot, so
+ * it can fade out rather than vanish. Matches `--motion-settled`, the duration the
+ * fade runs at. The slot is held for the whole of it: the cap counts iframes that
+ * exist, not iframes that are visible, so releasing early would let the next
+ * preview boot while this one is still there.
+ */
+const FADE_MS = 260;
 
 /** Ids currently streaming, and everyone waiting for a slot to free up. */
 const live = new Set<symbol>();
@@ -112,6 +122,9 @@ export function LazyPreview({
   const tokenRef = useRef<symbol>(Symbol("preview"));
   const [visible, setVisible] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  // The iframe has finished loading, so there is something to show. Until then the
+  // card is the black box ViewPreview draws, not a half-painted kiosk page.
+  const [loaded, setLoaded] = useState(false);
   // Set when the operator asks for this one specifically, which jumps the queue
   // rather than leaving them with a placeholder they cannot resolve.
   const [forced, setForced] = useState(false);
@@ -132,20 +145,30 @@ export function LazyPreview({
     return () => obs.disconnect();
   }, []);
 
-  // Claim a slot when visible; give it back when not. The cleanup is what makes
-  // scrolling free connections rather than accumulate them.
+  // Claim a slot when visible; give it back when not. Scrolling away frees the
+  // connection rather than accumulating them.
   //
   // Scheduled rather than run inline: claiming may have to WAIT for a slot, so
   // it is asynchronous by nature, and setting state synchronously inside an
   // effect triggers cascading renders (the compiler lint rejects it).
+  //
+  // Leaving the screen does not release at once: the preview fades out first (the
+  // render below drops its opacity as soon as it is neither visible nor forced),
+  // and the iframe and slot go FADE_MS later. Coming back inside that window
+  // cancels the timer and the same iframe fades back in, untouched. The slot is
+  // released on unmount by the effect after this one.
   useEffect(() => {
     const token = tokenRef.current;
     let cancelled = false;
 
     if (!visible && !forced) {
-      release(token);
-      queueMicrotask(() => { if (!cancelled) setStreaming(false); });
-      return () => { cancelled = true; };
+      const timer = setTimeout(() => {
+        if (cancelled) return;
+        release(token);
+        setStreaming(false);
+        setLoaded(false);
+      }, FADE_MS);
+      return () => { cancelled = true; clearTimeout(timer); };
     }
 
     const tryClaim = () => {
@@ -158,13 +181,33 @@ export function LazyPreview({
     return () => {
       cancelled = true;
       waiting.delete(tryClaim);
-      release(token);
     };
   }, [visible, forced]);
 
+  useEffect(() => {
+    const token = tokenRef.current;
+    return () => release(token);
+  }, []);
+
   // Edge to edge: both callers are Screens cards, which clip to their own radius,
   // so nothing here rounds a corner or draws outside the preview.
-  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />;
+  //
+  // The black sits on the outer box and only the preview inside it fades, so a
+  // preview still loading, or on its way out, is the dark panel it is about to
+  // be and not a hole in the card. `load` does not bubble, but a capture handler
+  // above the iframe still sees it, which keeps this out of ViewPreview. The
+  // global reduced-motion rule collapses the transition to one frame.
+  const shown = loaded && (visible || forced);
+  const preview = (
+    <div className="bg-black">
+      <div
+        onLoadCapture={() => setLoaded(true)}
+        className={cn("transition-opacity duration-(--motion-settled)", shown ? "opacity-100" : "opacity-0")}
+      >
+        <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />
+      </div>
+    </div>
+  );
 
   /**
    * The live preview, wrapped for whatever the card does with a click on it.

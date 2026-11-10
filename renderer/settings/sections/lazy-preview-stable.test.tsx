@@ -70,3 +70,80 @@ test("closing the side panel keeps the same iframe", async () => {
   assert.ok(before.isConnected);
   assert.ok(screen.getByRole("button", { name: "Edit it" }));
 });
+
+// ---- Fade in once loaded, fade out on leaving, cap still held -----------------
+//
+// The opacity classes are asserted, not the pixels: jsdom paints nothing. What is
+// pinned is the sequence - hidden until the iframe's load event, hidden again the
+// moment the card leaves the screen, and the slot held until the fade has played.
+
+type IoCallback = (entries: { isIntersecting: boolean }[]) => void;
+
+function stubIntersectionObserver() {
+  const g = globalThis as unknown as { IntersectionObserver?: unknown };
+  const saved = g.IntersectionObserver;
+  let cb: IoCallback | null = null;
+  g.IntersectionObserver = class {
+    constructor(callback: IoCallback) { cb = callback; }
+    observe() {}
+    disconnect() {}
+  };
+  return {
+    set: (isIntersecting: boolean) => cb!([{ isIntersecting }]),
+    restore: () => { g.IntersectionObserver = saved; },
+  };
+}
+
+function fadeClass(iframe: HTMLIFrameElement): string {
+  // iframe -> ViewPreview box -> the fading wrapper.
+  return iframe.parentElement!.parentElement!.className;
+}
+
+test("fades in on load, fades out on leaving, and holds its slot until gone", async () => {
+  const io = stubIntersectionObserver();
+  try {
+    const { container } = render(card(undefined));
+    const { act, fireEvent } = await import("@testing-library/react");
+    await act(async () => io.set(true));
+    const iframe = await streamingIframe(container);
+    assert.equal(__previewLimits.liveCount(), 1);
+    assert.match(fadeClass(iframe), /opacity-0/, "visible before its iframe has loaded");
+
+    await act(async () => { fireEvent.load(iframe); });
+    assert.match(fadeClass(iframe), /opacity-100/, "did not fade in on load");
+
+    await act(async () => io.set(false));
+    assert.match(fadeClass(iframe), /opacity-0/, "did not start fading out on leaving");
+    // Well inside the fade: long enough for an immediate release to have happened.
+    await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
+    assert.ok(iframe.isConnected, "the iframe went before the fade could play");
+    assert.equal(__previewLimits.liveCount(), 1, "the slot was released before the iframe went");
+
+    await eventually(() => {
+      assert.ok(container.querySelector("iframe") === null, "the iframe never went");
+      assert.equal(__previewLimits.liveCount(), 0, "the slot was never released");
+    });
+  } finally {
+    io.restore();
+  }
+});
+
+test("returning during the fade-out keeps the same iframe", async () => {
+  const io = stubIntersectionObserver();
+  try {
+    const { container } = render(card(undefined));
+    const { act, fireEvent } = await import("@testing-library/react");
+    await act(async () => io.set(true));
+    const iframe = await streamingIframe(container);
+    await act(async () => { fireEvent.load(iframe); });
+    await act(async () => io.set(false));
+    await act(async () => io.set(true));
+    assert.ok(container.querySelector("iframe") === iframe, "the iframe was remounted");
+    assert.match(fadeClass(iframe), /opacity-100/);
+    await new Promise((r) => setTimeout(r, 350));
+    assert.ok(container.querySelector("iframe") === iframe, "the cancelled fade-out still unmounted it");
+    assert.equal(__previewLimits.liveCount(), 1);
+  } finally {
+    io.restore();
+  }
+});
