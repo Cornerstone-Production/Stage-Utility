@@ -7,7 +7,7 @@
 // Usage:  git diff --name-only <old> <new> | node scripts/build-inputs.mjs
 // Output: true | false      (an unreadable list reports true: do the work)
 
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 /** Sorted, one per line. A path that starts with any of these is a build input. */
 export const BUILD_INPUT_PREFIXES = [

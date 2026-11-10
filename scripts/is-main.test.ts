@@ -13,7 +13,7 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +21,7 @@ describe("isMain", () => {
   test("is true for the script itself, however the host writes its path", () => {
     assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.mjs", "C:\\repo\\scripts\\manifest-changed.mjs", { windows: true }), true);
     assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.mjs", "c:\\repo\\scripts\\.\\manifest-changed.mjs", { windows: true }), true, "a drive letter's case");
-    assert.equal(isMain(`file://${SCRIPTS}/is-main.mjs`, path.join(SCRIPTS, "is-main.mjs")), true);
+    assert.equal(isMain(`file://${SCRIPTS}/is-main.ts`, path.join(SCRIPTS, "is-main.ts")), true);
   });
 
   test("on a Windows host, with no option given, reads Windows paths and ignores case", () => {
@@ -48,8 +48,8 @@ describe("isMain", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "is-main-"));
     try {
       const link = path.join(dir, "link.mjs");
-      fs.symlinkSync(path.join(SCRIPTS, "is-main.mjs"), link);
-      assert.equal(isMain(`file://${SCRIPTS}/is-main.mjs`, link), true);
+      fs.symlinkSync(path.join(SCRIPTS, "is-main.ts"), link);
+      assert.equal(isMain(`file://${SCRIPTS}/is-main.ts`, link), true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

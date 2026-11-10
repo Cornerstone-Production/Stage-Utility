@@ -1,4 +1,4 @@
-// is-main.mjs — is this module the script node was started on?
+// is-main.ts — is this module the script node was started on?
 //
 //   if (isMain(import.meta.url, process.argv[1])) main();
 //
@@ -13,7 +13,11 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** `windows` is whether paths are read as Windows writes them (and compared without regard to case): this host's own answer unless a test says otherwise. */
-export function isMain(importMetaUrl, argv1, { windows = process.platform === "win32" } = {}) {
+export function isMain(
+  importMetaUrl: string,
+  argv1: string | undefined,
+  { windows = process.platform === "win32" }: { windows?: boolean } = {},
+): boolean {
   if (!argv1) return false;
   const p = windows ? path.win32 : path;
   const self = p.resolve(fileURLToPath(importMetaUrl, { windows }));

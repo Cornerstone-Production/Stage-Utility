@@ -23,23 +23,23 @@
 // annotation when running in Actions, so they are hard to miss without ever
 // failing the job.
 //
-//   node scripts/check-beta-only.mjs <base-ref>
+//   node scripts/check-beta-only.ts <base-ref>
 
 import { execFileSync } from "node:child_process";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 const TRAILER_PATTERN = /^Beta-only:\s*(true|yes)\s*$/im;
-const subjectOf = (types) => new RegExp(`^(${types.join("|")})(\\([^)]+\\))?!?:`);
+const subjectOf = (types: string[]) => new RegExp(`^(${types.join("|")})(\\([^)]+\\))?!?:`);
 const PATCH_SUBJECT = subjectOf(COMMIT_TYPE_FILE.patch);
 const FEAT_SUBJECT = subjectOf(COMMIT_TYPE_FILE.minor);
 
-function git(args) {
+function git(args: string[]): string {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
-function lastStableTag() {
-  let out;
+function lastStableTag(): string | null {
+  let out: string;
   try {
     out = git(["tag", "-l", "v*", "--sort=-v:refname"]);
   } catch {
@@ -49,7 +49,7 @@ function lastStableTag() {
   return tags.find((t) => !t.includes("-")) ?? null;
 }
 
-function commitFiles(sha) {
+function commitFiles(sha: string): string[] {
   return git(["show", "--name-only", "--format=", sha])
     .split("\n")
     .filter(Boolean);
@@ -59,12 +59,12 @@ function commitFiles(sha) {
  * feat: commits since the stable tag, each with the files they touched, so a
  * fix's files can be checked against them for overlap.
  */
-function featCommitsSince(stableTag) {
+function featCommitsSince(stableTag: string): { sha: string; subject: string; files: string[] }[] {
   const shas = git(["log", "--no-merges", "--format=%H", `${stableTag}..HEAD`])
     .split("\n")
     .filter(Boolean);
 
-  const feats = [];
+  const feats: { sha: string; subject: string; files: string[] }[] = [];
   for (const sha of shas) {
     const subject = git(["log", "-1", "--format=%s", sha]).trim();
     if (!FEAT_SUBJECT.test(subject)) continue;
@@ -73,14 +73,20 @@ function featCommitsSince(stableTag) {
   return feats;
 }
 
-export function findBetaOnlyCandidates(base, stableTag) {
+export interface BetaOnlyCandidate {
+  sha: string;
+  subject: string;
+  sharedWith: { sha: string; subject: string; file: string }[];
+}
+
+export function findBetaOnlyCandidates(base: string, stableTag: string): BetaOnlyCandidate[] {
   const feats = featCommitsSince(stableTag);
 
   const shas = git(["log", "--no-merges", "--format=%H", `${base}..HEAD`])
     .split("\n")
     .filter(Boolean);
 
-  const flagged = [];
+  const flagged: BetaOnlyCandidate[] = [];
   for (const sha of shas) {
     const subject = git(["log", "-1", "--format=%s", sha]).trim();
     if (!PATCH_SUBJECT.test(subject)) continue;
@@ -91,7 +97,7 @@ export function findBetaOnlyCandidates(base, stableTag) {
     const files = commitFiles(sha);
     if (files.length === 0) continue;
 
-    const sharedWith = [];
+    const sharedWith: BetaOnlyCandidate["sharedWith"] = [];
     for (const feat of feats) {
       const sharedFile = files.find((f) => feat.files.includes(f));
       if (sharedFile) {
@@ -109,7 +115,7 @@ export function findBetaOnlyCandidates(base, stableTag) {
 function main() {
   const base = process.argv[2];
   if (!base) {
-    console.error("Usage: node scripts/check-beta-only.mjs <base-ref>");
+    console.error("Usage: node scripts/check-beta-only.ts <base-ref>");
     process.exitCode = 0;
     return;
   }

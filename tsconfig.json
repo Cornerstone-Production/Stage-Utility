@@ -32,9 +32,6 @@
   "exclude": [
     "node_modules",
     "scripts/build-inputs.test.ts",
-    "scripts/check-beta-only.test.ts",
-    "scripts/check-commit-subjects.test.ts",
-    "scripts/check-public-hygiene.test.ts",
     "scripts/verified-tree.test.ts"
   ]
 }

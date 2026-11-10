@@ -53,7 +53,7 @@ enforced in code rather than left to care:
 - **Names and addresses**: everything shown is invented ([world.mjs](world.mjs)):
   people are `Alex Rivera`, `Jordan Lee` and the like; service types are `Weekend`,
   `The Gathering` and `Youth Night`; every address is in `192.168.1.x`, which is also
-  what `scripts/check-public-hygiene.mjs` allows. There are no photos: a person with
+  what `scripts/check-public-hygiene.ts` allows. There are no photos: a person with
   no photo draws the app's default avatar.
 
 ## How each feature is fed

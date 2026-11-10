@@ -5,7 +5,7 @@
 // directory, the name of the room or the ministry. This script reads every
 // tracked file and fails on the ones that name something real.
 //
-//   node scripts/check-public-hygiene.mjs [repo-root]
+//   node scripts/check-public-hygiene.ts [repo-root]
 //
 // Four rules. The first three name nothing private, so they can be published:
 //
@@ -35,6 +35,22 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** One thing the scan objects to. A private-term finding on a file's name has line 0. */
+export interface Finding {
+  file: string;
+  line: number;
+  message: string;
+}
+
+/** A line whose findings `hygiene-allow` suppressed. */
+export interface SkippedLine {
+  file: string;
+  line: number;
+}
+
+/** The term list in the forms the scan compares against, from `prepareTerms`. */
+export type PreparedTerms = ReturnType<typeof prepareTerms>;
 
 /** The one escape: a line carrying this is skipped by every rule. */
 export const ALLOW_MARKER = "hygiene-allow";
@@ -101,7 +117,7 @@ const ALLOWED_ADDRESSES = new Set([
 // addresses.
 const EMAIL = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![A-Za-z0-9-])/g;
 
-function emailAllowed(address, domain) {
+function emailAllowed(address: string, domain: string): boolean {
   const a = address.toLowerCase();
   const d = domain.toLowerCase();
   if (ALLOWED_ADDRESSES.has(a)) return true;
@@ -139,12 +155,10 @@ const VARIABLE_USER = /^(?:\$\{?[A-Za-z_]\w*\}?|\$\(|%[A-Za-z_]\w*%)/;
  * The private term list: `$PRIVATE_TERMS` entries first, then `.private-terms`.
  * One term per line, trimmed, blank lines ignored.
  *
- * @param {string | undefined} envValue
- * @param {string} root repository root, where `.private-terms` would live
- * @returns {string[]}
+ * `root` is the repository root, where `.private-terms` would live.
  */
-export function loadPrivateTerms(envValue, root) {
-  const lines = [];
+export function loadPrivateTerms(envValue: string | undefined, root: string): string[] {
+  const lines: string[] = [];
   if (envValue) lines.push(...envValue.split(/\r?\n/));
   const file = path.join(root, ".private-terms");
   if (fs.existsSync(file)) lines.push(...fs.readFileSync(file, "utf8").split(/\r?\n/));
@@ -161,10 +175,8 @@ const SEPARATORS = /[\s*#>/]+/g;
  * form: the same with every run of separators collapsed to one space. An entry
  * that squashes to nothing (only punctuation) is left out of the whole-file pass,
  * where it would match everywhere.
- *
- * @param {string[]} terms
  */
-export function prepareTerms(terms) {
+export function prepareTerms(terms: string[]) {
   const lower = terms.map((t) => t.normalize("NFC").toLowerCase());
   const squashed = lower.map((t) => t.replace(SEPARATORS, " ").trim());
   return { count: terms.length, lower, squashed };
@@ -174,7 +186,7 @@ export function prepareTerms(terms) {
 
 const LOCKFILES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "Package.resolved"]);
 
-function isBinary(buf) {
+function isBinary(buf: Buffer): boolean {
   const head = buf.subarray(0, 8192);
   return head.includes(0);
 }
@@ -186,9 +198,9 @@ function isBinary(buf) {
  * indexes, so they cannot disagree. If lower-casing changed the path's length the
  * indexes no longer line up with the original, and the whole path is withheld.
  */
-export function redactPath(file, prepared) {
+export function redactPath(file: string, prepared: PreparedTerms): string {
   const hay = file.normalize("NFC").toLowerCase();
-  const ranges = [];
+  const ranges: [number, number][] = [];
   for (const t of prepared.lower) {
     if (!t) continue;
     for (let at = hay.indexOf(t); at !== -1; at = hay.indexOf(t, at + 1)) ranges.push([at, at + t.length]);
@@ -210,10 +222,10 @@ export function redactPath(file, prepared) {
  * The text with every separator run squashed to one space, for the whole-file
  * term pass, plus a way to find which original line a position came from.
  */
-function squash(text) {
+function squash(text: string) {
   let out = "";
   /** [offset in `out` where a separator run starts, line number after the run] */
-  const marks = [[0, 1]];
+  const marks: [number, number][] = [[0, 1]];
   let line = 1;
   let last = 0;
   for (const m of text.matchAll(SEPARATORS)) {
@@ -226,7 +238,7 @@ function squash(text) {
   out += text.slice(last).toLowerCase();
   return {
     text: out,
-    lineAt(pos) {
+    lineAt(pos: number): number {
       let lo = 0;
       let hi = marks.length - 1;
       while (lo < hi) {
@@ -242,11 +254,9 @@ function squash(text) {
 /**
  * Findings on one line for rules 1-3 and the per-line pass of rule 4. A private
  * term finding carries `term`, its 1-based position in the list.
- *
- * @returns {{ message: string, term?: number }[]}
  */
-function lineFindings(line, prepared) {
-  const out = [];
+function lineFindings(line: string, prepared: PreparedTerms): { message: string; term?: number }[] {
+  const out: { message: string; term?: number }[] = [];
   for (const m of line.matchAll(PRIVATE_IPV4)) {
     const net = m[0].split(".").slice(0, 3).join(".");
     if (!PLACEHOLDER_NETS.includes(net) && !ALLOWED_IPV4.has(m[0])) out.push({ message: `private IPv4 ${m[0]}` });
@@ -270,15 +280,11 @@ function lineFindings(line, prepared) {
 /**
  * Every finding in one file's text. Pure, so a test can drive it directly.
  *
- * @param {string} file path as reported (relative to the repo root)
- * @param {string} text
- * @param {ReturnType<typeof prepareTerms>} prepared the private term list
- * @param {{ file: string, line: number }[]} [skipped] receives each line whose
- *   findings `hygiene-allow` suppressed
- * @returns {{ file: string, line: number, message: string }[]}
+ * `file` is the path as reported (relative to the repo root); `skipped` receives
+ * each line whose findings `hygiene-allow` suppressed.
  */
-export function scanText(file, text, prepared, skipped = []) {
-  const out = [];
+export function scanText(file: string, text: string, prepared: PreparedTerms, skipped: SkippedLine[] = []): Finding[] {
+  const out: Finding[] = [];
 
   // A private term in a FILE NAME is as public as one in its content, and the
   // name is printed on every finding, so it is printed with the term blanked.
@@ -291,8 +297,8 @@ export function scanText(file, text, prepared, skipped = []) {
   const nfc = text.normalize("NFC");
   const lines = nfc.split(/\r?\n/);
   /** "term index:line" for every term the per-line pass reported. */
-  const perLine = new Set();
-  const allowedLines = new Set();
+  const perLine = new Set<string>();
+  const allowedLines = new Set<number>();
   lines.forEach((line, idx) => {
     const n = idx + 1;
     const found = lineFindings(line, prepared);
@@ -311,7 +317,7 @@ export function scanText(file, text, prepared, skipped = []) {
   // non-breaking spaces, which no single line contains.
   if (prepared.count > 0) {
     const squashed = squash(nfc);
-    const reported = new Set();
+    const reported = new Set<string>();
     prepared.squashed.forEach((t, i) => {
       if (!t) return;
       for (let at = squashed.text.indexOf(t); at !== -1; at = squashed.text.indexOf(t, at + 1)) {
@@ -328,7 +334,7 @@ export function scanText(file, text, prepared, skipped = []) {
 }
 
 /** The tracked files of the repository containing `dir`, and its top level. */
-export function listTrackedFiles(dir) {
+export function listTrackedFiles(dir: string): { root: string; files: string[] } {
   const top = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
   const raw = execFileSync("git", ["-C", top, "ls-files", "-z"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   return { root: top, files: raw.split("\0").filter(Boolean) };
@@ -338,7 +344,7 @@ export function listTrackedFiles(dir) {
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
 /** Code-unit order, as `<` gives it: the same on every machine, unlike a locale's. */
-function compareText(a, b) {
+function compareText(a: string, b: string): number {
   if (a < b) return -1;
   return a > b ? 1 : 0;
 }
@@ -346,31 +352,30 @@ function compareText(a, b) {
 /**
  * Scan tracked files and return every finding, sorted by file, line, message.
  *
- * @param {string} root repository root
- * @param {string[]} files paths relative to `root` (from `git ls-files`)
- * @param {string[]} terms the private term list
- * @param {{ file: string, line: number }[]} [skipped] receives lines `hygiene-allow` suppressed
+ * `files` are paths relative to `root` (from `git ls-files`); `skipped` receives
+ * the lines `hygiene-allow` suppressed.
  */
-export function findViolations(root, files, terms, skipped = []) {
+export function findViolations(root: string, files: string[], terms: string[], skipped: SkippedLine[] = []): Finding[] {
   const prepared = prepareTerms(terms);
-  const findings = [];
+  const findings: Finding[] = [];
   for (const file of files) {
     if (LOCKFILES.has(path.basename(file))) continue;
     const abs = path.join(root, file);
     // Opened once, and everything after is asked of that one descriptor: checking
     // the path and then reading the path again is a window in which the file can
     // be swapped. O_NOFOLLOW refuses a symlink at the open itself.
-    let fd;
+    let fd: number;
     try {
       fd = fs.openSync(abs, fs.constants.O_RDONLY | NOFOLLOW);
     } catch (err) {
       // Tracked but deleted in this working tree: nothing there to read.
-      if (err.code === "ENOENT") continue;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue;
       // A tracked symlink has no content of its own to scan.
-      if (err.code === "ELOOP" || err.code === "EMLINK") continue;
+      if (code === "ELOOP" || code === "EMLINK") continue;
       throw err;
     }
-    let buf;
+    let buf: Buffer;
     try {
       // A submodule is a directory: no content of its own either.
       if (!fs.fstatSync(fd).isFile()) continue;
@@ -385,7 +390,7 @@ export function findViolations(root, files, terms, skipped = []) {
 }
 
 /** `path:line: message`, the one line printed per finding. */
-export function formatFinding(f) {
+export function formatFinding(f: Finding): string {
   return `${f.file}:${f.line}: ${f.message}`;
 }
 
@@ -403,7 +408,7 @@ function main() {
     }
     console.log("[hygiene] PRIVATE_TERMS not set; checking generic rules only");
   }
-  const skipped = [];
+  const skipped: SkippedLine[] = [];
   const findings = findViolations(root, files, terms, skipped);
   for (const f of findings) console.log(formatFinding(f));
   if (skipped.length > 0) {

@@ -9,13 +9,13 @@
 // copies of a rule is how the copies drift, and a lint rule that disagrees with
 // the CI enforcing it is worse than no lint rule.
 //
-//   node scripts/check-commit-subjects.mjs [base]
+//   node scripts/check-commit-subjects.ts [base]
 //
 // `base` defaults to origin/beta, which is what a branch here is normally cut
 // from. Exits non-zero and names every subject that does not conform.
 
 import { execFileSync } from "node:child_process";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 /**
@@ -42,13 +42,13 @@ export const SUBJECT_PATTERN = new RegExp(
  */
 export const REVERT_PATTERN = /^Revert ".+"/;
 
-export function subjectIsValid(subject) {
+export function subjectIsValid(subject: string): boolean {
   return SUBJECT_PATTERN.test(subject) || REVERT_PATTERN.test(subject);
 }
 
 function main() {
   const base = process.argv[2] ?? "origin/beta";
-  let subjects;
+  let subjects: string[];
   try {
     // --no-merges: GitHub authors merge commits and they carry no release meaning.
     const out = execFileSync("git", ["log", "--no-merges", "--format=%s", `${base}..HEAD`], {

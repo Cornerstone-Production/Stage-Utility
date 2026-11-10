@@ -26,7 +26,7 @@
 // state does the work rather than skipping it.
 
 import { execFileSync } from "node:child_process";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 /** A file at a revision, or null when it isn't there / can't be read. */
 function fileAt(rev, file) {

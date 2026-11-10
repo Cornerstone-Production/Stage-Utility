@@ -2,7 +2,7 @@
 //
 // Nobody in here exists. Names, service types, songs and addresses are made up,
 // and every address is in 192.168.1.x (the placeholder range
-// scripts/check-public-hygiene.mjs allows). The fake Planning Center answers from
+// scripts/check-public-hygiene.ts allows). The fake Planning Center answers from
 // this, and the seed step writes history records that line up with it, so a
 // service page in History names the same plans the rest of the app shows.
 //

@@ -63,7 +63,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
   git(repo, "checkout", "-q", "-b", "main");
 
   // What the scripts call from the checkout, and a manifest that never changes.
-  for (const f of ["manifest-changed.mjs", "build-inputs.mjs", "is-main.mjs"]) write(repo, `scripts/${f}`, fs.readFileSync(path.join(SCRIPTS, f), "utf8"));
+  for (const f of ["manifest-changed.mjs", "build-inputs.mjs", "is-main.ts"]) write(repo, `scripts/${f}`, fs.readFileSync(path.join(SCRIPTS, f), "utf8"));
   write(repo, "package.json", '{"name":"x","version":"1.0.0","scripts":{}}\n');
   write(repo, "package-lock.json", '{"name":"x","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"x","version":"1.0.0"}}}\n');
   write(repo, "README.md", "first\n");

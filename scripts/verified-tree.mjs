@@ -19,7 +19,7 @@
 
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 const VERSION_FILES = new Set(["package.json", "package-lock.json"]);
 /** The release.yml jobs that make up the gate, as the Actions API names them. */

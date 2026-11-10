@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 /** 5x7, row by row. `#` lit, `.` unlit. */
 const S = [".###.", "#...#", "#....", ".###.", "....#", "#...#", ".###."];

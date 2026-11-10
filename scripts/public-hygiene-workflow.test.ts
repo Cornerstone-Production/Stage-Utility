@@ -20,6 +20,7 @@ const WORKFLOW = path.join(HERE, "..", ".github", "workflows", "public-hygiene.y
 interface Step {
   name?: string;
   uses?: string;
+  with?: Record<string, unknown>;
   run?: string;
   env?: Record<string, string>;
 }
@@ -47,8 +48,8 @@ describe("public-hygiene workflow", () => {
 
   it("has one run step, and it is exactly the script", () => {
     assert.equal(check.length, 1);
-    assert.equal(check[0].run, "node scripts/check-public-hygiene.mjs");
-    assert.ok(fs.existsSync(path.join(HERE, "check-public-hygiene.mjs")), "the script the workflow runs does not exist");
+    assert.equal(check[0].run, "node scripts/check-public-hygiene.ts");
+    assert.ok(fs.existsSync(path.join(HERE, "check-public-hygiene.ts")), "the script the workflow runs does not exist");
   });
 
   it("gives that step the secret list, and requires it only for a same-repo, non-Dependabot PR", () => {
@@ -62,5 +63,11 @@ describe("public-hygiene workflow", () => {
   it("checks the repository out before it runs", () => {
     const at = steps.findIndex((s) => s.uses?.startsWith("actions/checkout@"));
     assert.ok(at >= 0 && at < steps.indexOf(check[0]), "no checkout before the check");
+  });
+
+  it("sets up Node 24 before it runs: the script is TypeScript, run by stripping its types", () => {
+    const at = steps.findIndex((s) => s.uses?.startsWith("actions/setup-node@"));
+    assert.ok(at >= 0 && at < steps.indexOf(check[0]), "no setup-node before the check; the runner image's Node may not strip types");
+    assert.equal(steps[at]?.with?.["node-version"], 24);
   });
 });

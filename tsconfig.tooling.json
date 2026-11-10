@@ -20,9 +20,6 @@
   },
   "include": [
     "scripts/**/*.ts",
-    // Keeps the project non-empty until the first script is converted. Deleted
-    // with is-main.d.mts.
-    "scripts/is-main.d.mts",
     "publish/servicecue/scripts/**/*.ts",
     "publish/servicecue/test/**/*.ts"
   ],
