@@ -1,4 +1,4 @@
-// parent.mjs — stands in for the running server.
+// parent.ts — stands in for the running server.
 //
 // Spawns the worker exactly as updater.ts does: detached, stdio ignored,
 // unref'd. Then stays alive, as the server does, so the service manager has a
@@ -16,20 +16,20 @@ const out = process.env.SURVIVAL_LOG;
 // could mean the child was killed, or that the parent never got as far as
 // spawning it, and those need completely different fixes. A run that fails
 // should say which.
-function note(line) {
+function note(line: string) {
   if (!out) return;
   try {
     fs.appendFileSync(out, `${line}\n`);
   } catch (err) {
     // Nowhere to report to but stderr, which the service manager captures.
-    console.error(`parent could not write to SURVIVAL_LOG=${out}: ${err.message}`);
+    console.error(`parent could not write to SURVIVAL_LOG=${out}: ${(err as Error).message}`);
   }
 }
 
 note(`PARENT-START pid=${process.pid} uid=${process.getuid?.() ?? "?"} node=${process.execPath}`);
 
 try {
-  const child = spawn(process.execPath, [path.join(here, "child.mjs")], {
+  const child = spawn(process.execPath, [path.join(here, "child.ts")], {
     detached: true,
     stdio: "ignore",
     env: process.env,
@@ -37,7 +37,7 @@ try {
   child.unref();
   note(`PARENT-SPAWNED child=${child.pid}`);
 } catch (err) {
-  note(`PARENT-SPAWN-FAILED ${err.message}`);
+  note(`PARENT-SPAWN-FAILED ${(err as Error).message}`);
 }
 
 setInterval(() => {}, 1000);

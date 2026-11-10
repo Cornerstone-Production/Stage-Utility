@@ -1,4 +1,4 @@
-// child.mjs — stands in for the updater doing real work after its parent dies.
+// child.ts — stands in for the updater doing real work after its parent dies.
 //
 // Writes a tick a second and a FINISHED marker at the end. The test is simply
 // whether FINISHED appears once the service that spawned it has been torn down.

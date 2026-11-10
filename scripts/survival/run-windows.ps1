@@ -28,7 +28,7 @@ try {
 
   # SURVIVAL_LOG has to reach the task, and a scheduled task does not inherit
   # this shell's environment - so it is passed through the command line.
-  $inner = "`$env:SURVIVAL_LOG='$log'; & '$node' '$here\parent.mjs'"
+  $inner = "`$env:SURVIVAL_LOG='$log'; & '$node' '$here\parent.ts'"
   $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$inner`""
   $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -50,7 +50,7 @@ try {
   # to ask. Same false-alarm reasoning as the earlier PARENT-START wait, one
   # step further along.
   #
-  # PARENT-SPAWN-FAILED (parent.mjs:40) ends the wait immediately: the child is
+  # PARENT-SPAWN-FAILED (parent.ts:40) ends the wait immediately: the child is
   # never coming, and burning the full deadline on a question already answered
   # just delays the diagnosis by a minute.
   #
