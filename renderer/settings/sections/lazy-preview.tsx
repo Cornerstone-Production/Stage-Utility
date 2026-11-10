@@ -166,36 +166,68 @@ export function LazyPreview({
   // so nothing here rounds a corner or draws outside the preview.
   const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />;
 
-  /** The live preview, wrapped for whatever the card does with a click on it. */
+  /**
+   * The live preview, wrapped for whatever the card does with a click on it.
+   *
+   * ONE tree whatever `following` is. The card passes `following` only while its
+   * side panel is open, and this used to build a different element tree in each
+   * case; React remounted ViewPreview on every toggle and the iframe reloaded.
+   * Only the click handlers, the label and the hover chrome differ now, and none of
+   * them change where the preview sits in the tree.
+   */
   function streamingPreview() {
-    if (onExpand && following) {
-      return (
-        <div className="group relative">
-          <button
-            type="button"
-            data-retarget
-            aria-label={following.label}
-            onClick={(e) => {
-              // Not a plain click: the card must not also move its panel.
-              if (opensInNewTab(e) && following.onOpenDisplay) {
-                e.stopPropagation();
-                following.onOpenDisplay();
-              }
-            }}
-            onAuxClick={(e) => {
-              if (e.button === 1 && following.onOpenDisplay) {
-                e.preventDefault();
-                e.stopPropagation();
-                following.onOpenDisplay();
-              }
-            }}
-            className="group relative block w-full focus:outline-none"
-          >
-            {preview}
-            {FOCUS_RING}
-          </button>
-          {/* The way into the editor, as a control of its own: a click on it is
-              its own and does not move the panel. */}
+    if (!onExpand) return preview;
+    const label = following ? following.label : expandLabel;
+    return (
+      <div className="group relative">
+        <button
+          type="button"
+          data-retarget={following ? true : undefined}
+          title={following ? undefined : expandLabel}
+          aria-label={label}
+          onClick={(e) => {
+            if (!following) {
+              // The preview IS the way in.
+              onExpand();
+              return;
+            }
+            // Not a plain click: the card must not also move its panel.
+            if (opensInNewTab(e) && following.onOpenDisplay) {
+              e.stopPropagation();
+              following.onOpenDisplay();
+            }
+          }}
+          onAuxClick={(e) => {
+            if (following && e.button === 1 && following.onOpenDisplay) {
+              e.preventDefault();
+              e.stopPropagation();
+              following.onOpenDisplay();
+            }
+          }}
+          className="group relative block w-full focus:outline-none"
+        >
+          {preview}
+          {/* A scrim plus a centred expand icon on hover, while the preview is the
+              way in; the preview's job is to show what the screen shows, and chrome
+              sitting on it all the time competes with that. Not rendered while
+              following: the corner button below is the way in then. */}
+          {!following && (
+            <span
+              className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+              aria-hidden="true"
+            >
+              {/* A SOLID neutral grey, not white at reduced opacity: the icon should
+                  look like an affordance, not like it is disappearing. #d4d4d4 is
+                  strictly R=G=B, per the no-colour-cast rule for dark surfaces. */}
+              <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
+            </span>
+          )}
+          {/* After the scrim, so the hover and focus wash does not dim it. */}
+          {FOCUS_RING}
+        </button>
+        {/* While following, the way into the editor is a control of its own: a
+            click on it is its own and does not move the panel. */}
+        {following && (
           <button
             type="button"
             onClick={onExpand}
@@ -205,40 +237,9 @@ export function LazyPreview({
           >
             <ExpandIcon className="size-4" strokeWidth={1.75} />
           </button>
-        </div>
-      );
-    }
-    if (onExpand) {
-      // The preview IS the way in. A scrim plus a centred expand icon on hover,
-      // rather than a permanently-visible affordance: the preview's job is to show
-      // what the screen shows, and chrome sitting on it all the time competes with
-      // that.
-      return (
-        <button
-          type="button"
-          onClick={onExpand}
-          title={expandLabel}
-          aria-label={expandLabel}
-          className="group relative block w-full focus:outline-none"
-        >
-          {preview}
-          <span
-            className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
-            aria-hidden="true"
-          >
-            {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
-                it read as faded rather than as a deliberate colour — the icon
-                should look like an affordance, not like it is disappearing.
-                #d4d4d4 is strictly R=G=B, per the no-colour-cast rule for
-                anything sitting on a dark surface. */}
-            <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
-          </span>
-          {/* After the scrim, so the hover and focus wash does not dim it. */}
-          {FOCUS_RING}
-        </button>
-      );
-    }
-    return preview;
+        )}
+      </div>
+    );
   }
 
   return (
