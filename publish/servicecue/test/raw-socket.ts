@@ -1,4 +1,4 @@
-// raw-socket.mjs — a WebSocket client with nothing between it and the wire.
+// raw-socket.ts — a WebSocket client with nothing between it and the wire.
 //
 // The runtime's own WebSocket will not send a header of its choosing, a close code it
 // does not allow or a frame it does not make, and a hostile client does all three. This
@@ -6,17 +6,19 @@
 // the Worker what a script would.
 
 import { createHash, randomBytes } from "node:crypto";
-import { request } from "node:http";
+import { request, type IncomingHttpHeaders } from "node:http";
+import type { Socket } from "node:net";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One open socket. `messages` is every text message received, `closed` how the server ended it, if it has. */
 export class RawSocket {
-  messages = [];
-  closed = null;
+  socket: Socket;
+  messages: string[] = [];
+  closed: { code: number; reason: string } | null = null;
   #buffer = Buffer.alloc(0);
 
-  constructor(socket) {
+  constructor(socket: Socket) {
     this.socket = socket;
     socket.on("data", (chunk) => this.#read(chunk));
     socket.on("close", () => (this.closed ??= { code: 1006, reason: "the connection dropped" }));
@@ -24,11 +26,11 @@ export class RawSocket {
   }
 
   /** The messages that are frames (JSON), not the answer to a ping. */
-  frames() {
+  frames(): any[] {
     return this.messages.filter((m) => m !== "pong").map((m) => JSON.parse(m));
   }
 
-  #read(chunk) {
+  #read(chunk: Buffer) {
     this.#buffer = Buffer.concat([this.#buffer, chunk]);
     for (;;) {
       const b = this.#buffer;
@@ -58,7 +60,7 @@ export class RawSocket {
   }
 
   /** A client frame: masked, as the protocol requires of one. */
-  #frame(opcode, payload) {
+  #frame(opcode: number, payload: Buffer) {
     const mask = randomBytes(4);
     const header =
       payload.length < 126
@@ -69,16 +71,16 @@ export class RawSocket {
     return Buffer.concat([header, mask, masked]);
   }
 
-  sendText(text) {
+  sendText(text: string) {
     this.socket.write(this.#frame(1, Buffer.from(text, "utf8")));
   }
 
-  sendBinary(bytes) {
+  sendBinary(bytes: Uint8Array | readonly number[]) {
     this.socket.write(this.#frame(2, Buffer.from(bytes)));
   }
 
   /** A close frame with any code at all, the reserved ones included. */
-  sendClose(code, reason = "") {
+  sendClose(code: number, reason = "") {
     const payload = Buffer.alloc(2 + Buffer.byteLength(reason));
     payload.writeUInt16BE(code, 0);
     payload.write(reason, 2);
@@ -91,7 +93,7 @@ export class RawSocket {
   }
 
   /** Wait until `check(this)` is true, or say what never came. */
-  async until(check, what, ms = 5000) {
+  async until(check: (socket: RawSocket) => boolean, what: string, ms = 5000) {
     const deadline = Date.now() + ms;
     while (!check(this)) {
       if (Date.now() > deadline) throw new Error(`never got ${what}; got ${JSON.stringify(this.messages)} closed=${JSON.stringify(this.closed)}`);
@@ -105,7 +107,11 @@ export class RawSocket {
  * other answer. `headers` are added to the handshake: an Origin, or the address a Cloudflare edge
  * would have set (`CF-Connecting-IP`, which a local runtime takes from the client).
  */
-export function open(base, headers = {}, path = "/api/live") {
+export function open(
+  base: string,
+  headers: Record<string, string> = {},
+  path = "/api/live",
+): Promise<{ socket?: RawSocket; status?: number; body?: string; headers?: IncomingHttpHeaders }> {
   const { hostname, port } = new URL(base);
   return new Promise((resolve, reject) => {
     const key = randomBytes(16).toString("base64");

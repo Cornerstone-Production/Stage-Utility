@@ -96,7 +96,7 @@ describe("what does not make an update rebuild", () => {
       "README.md",
       "CLAUDE.md",
       "publish/servicecue/README.md",
-      "publish/servicecue/test/worker.integration.test.mjs",
+      "publish/servicecue/test/worker.integration.test.ts",
       "scripts/update.sh",
       "scripts/update.ps1",
       "scripts/build-inputs.ts",

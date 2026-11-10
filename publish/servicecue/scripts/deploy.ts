@@ -1,4 +1,4 @@
-// deploy.mjs — `wrangler deploy`, with this install's own address.
+// deploy.ts — `wrangler deploy`, with this install's own address.
 //
 // The repository is public, so no church's domain is written into wrangler.jsonc.
 // An optional, gitignored `deploy.local.json` beside wrangler.jsonc names it:
@@ -17,31 +17,22 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isViewerBuildId, viewerBuildFromHtml } from "../../../main/types/servicecue-publish.ts";
+
 const here = join(dirname(fileURLToPath(import.meta.url)), "..");
 const localPath = join(here, "deploy.local.json");
 
-/**
- * The build id a built page's document carries, or null: viewerBuildFromHtml in
- * main/types/servicecue-publish.ts, which this cannot import (it is TypeScript). A test holds the two
- * to the same answer.
- */
-export function buildIdOf(html) {
-  let bare = html;
-  for (let before = ""; before !== bare; ) {
-    before = bare;
-    bare = bare.replace(/<!--[\s\S]*?-->/g, "");
-  }
-  const m = /<meta\s+name="servicecue-build"\s+content="([^"]*)"\s*\/?>/.exec(bare);
-  return m !== null && /^[0-9a-f]{12}$/.test(m[1]) ? m[1] : null;
-}
-
 /** The wrangler arguments and, when workers.dev is off, the config text to deploy with. `release` is `{ version, build }`. */
-export function deployPlan(local, configText, release) {
-  if (!release || typeof release.version !== "string" || release.version === "" || !/^[0-9a-f]{12}$/.test(release.build ?? "")) {
+export function deployPlan(
+  local: { domain?: unknown; workersDev?: unknown } | null | undefined,
+  configText: string,
+  release: { version?: unknown; build?: string } | null | undefined,
+): { args: string[]; config: string | null } {
+  if (!release || typeof release.version !== "string" || release.version === "" || !isViewerBuildId(release.build)) {
     throw new Error("a deploy is annotated with the app's version and the built page's build id, and one of them is missing");
   }
   const args = ["deploy", "--message", `Stage Utility ${release.version}`, "--tag", release.build];
-  let config = null;
+  let config: string | null = null;
   if (local?.domain !== undefined) {
     if (typeof local.domain !== "string" || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(local.domain)) {
       throw new Error(`deploy.local.json: "domain" is not a host name: ${JSON.stringify(local.domain)}`);
@@ -58,7 +49,7 @@ export function deployPlan(local, configText, release) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const local = existsSync(localPath) ? JSON.parse(readFileSync(localPath, "utf8")) : null;
-  const build = buildIdOf(readFileSync(join(here, "public", "servicecue.html"), "utf8"));
+  const build = viewerBuildFromHtml(readFileSync(join(here, "public", "servicecue.html"), "utf8"));
   if (build === null) throw new Error("public/servicecue.html carries no build id: run `npm run servicecue:build` first");
   const { version } = JSON.parse(readFileSync(join(here, "..", "..", "package.json"), "utf8"));
   const { args, config } = deployPlan(local, readFileSync(join(here, "wrangler.jsonc"), "utf8"), { version, build });
@@ -72,7 +63,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { cleanUp(); process.exit(130); });
   }
   console.log(`[servicecue-deploy] wrangler ${args.join(" ")}`);
-  let r;
+  let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync("npx", ["wrangler", ...args], { cwd: here, stdio: "inherit" });
   } finally {

@@ -14,16 +14,16 @@
 // `npm test`. Nothing is sent to Cloudflare: `wrangler dev` runs locally, given no account.
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { open } from "./raw-socket.mjs";
+import { open, type RawSocket } from "./raw-socket.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "..");
@@ -36,22 +36,22 @@ const MAX_VIEWERS = 6;
 const PER_ADDRESS = 3;
 const IDLE_MS = 2500;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A port nothing holds, by asking the OS for one and giving it back. */
-function freePort() {
+function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
+      const { port } = server.address() as AddressInfo;
       server.close(() => resolve(port));
     });
   });
 }
 
-let child;
-let base;
+let child: ChildProcess | undefined;
+let base = "";
 let log = "";
 
 before(async () => {
@@ -88,8 +88,8 @@ before(async () => {
     ],
     { cwd: PACKAGE, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false", WRANGLER_LOG_PATH: path.join(scratch, "logs") } },
   );
-  child.stdout.on("data", (d) => (log += d));
-  child.stderr.on("data", (d) => (log += d));
+  child.stdout!.on("data", (d) => (log += d));
+  child.stderr!.on("data", (d) => (log += d));
   const deadline = Date.now() + 60_000;
   for (;;) {
     if (log.includes("Ready on")) break;
@@ -104,10 +104,10 @@ after(() => {
 });
 
 const auth = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
-const send = (method, route, body, headers = auth) =>
-  fetch(base + route, { method, headers, body: body === undefined || typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body) });
-const put = (key, body, headers) => send("PUT", `/_publish/v1/doc/${key}`, body, headers);
-const frame = (channel, data) => send("POST", "/_publish/v1/frame", { channel, data });
+const send = (method: string, route: string, body?: unknown, headers: Record<string, string> = auth) =>
+  fetch(base + route, { method, headers, body: body === undefined || typeof body === "string" || Buffer.isBuffer(body) ? (body as string | undefined) : JSON.stringify(body) });
+const put = (key: string, body?: unknown, headers?: Record<string, string>) => send("PUT", `/_publish/v1/doc/${key}`, body, headers);
+const frame = (channel: string, data: unknown) => send("POST", "/_publish/v1/frame", { channel, data });
 const viewers = async () => (await (await send("GET", "/_publish/v1/status")).json()).viewers;
 
 let nextAddress = 1;
@@ -251,7 +251,7 @@ describe("a viewer", () => {
     const stored = (await (await send("GET", "/_publish/v1/status")).json()).docs;
     await send("PUT", "/_publish/v1/manifest", { docs: ["state", "pco-live"], assets: ["logo-abc.png"] });
     await v.until(() => docs().length === 4, "the manifest's removals");
-    assert.deepEqual(docs()[3], { keys: stored.filter((key) => key !== "state" && key !== "pco-live") });
+    assert.deepEqual(docs()[3], { keys: stored.filter((key: string) => key !== "state" && key !== "pco-live") });
     assert.ok(docs()[3].keys.includes("service-types"));
     v.destroy();
   });
@@ -287,13 +287,14 @@ describe("a viewer", () => {
 
     v.sendText(JSON.stringify({ channel: "pco:live", data: { forged: true } }));
     await v.until((s) => s.closed !== null, "the close");
-    assert.equal(v.closed.code, 1008);
+    // The assertion above narrowed `closed` to null, and the socket has been closed since.
+    assert.equal((v.closed as RawSocket["closed"])?.code, 1008);
     assert.notDeepEqual(await (await fetch(`${base}/api/pco/live`)).json(), { forged: true });
 
     const binary = await viewer();
     binary.sendBinary([1, 2, 3]);
     await binary.until((s) => s.closed !== null, "the close of a binary message");
-    assert.equal(binary.closed.code, 1008);
+    assert.equal(binary.closed?.code, 1008);
   });
 
   test("a close it is sent is answered with a code that can be sent, whatever the client chose", async () => {
@@ -314,7 +315,7 @@ describe("a viewer", () => {
       const v = await viewer();
       v.sendClose(sent, "bye");
       await v.until((s) => s.closed !== null, `the answer to a close with ${sent}`);
-      assert.equal(v.closed.code, answered, `a close with ${sent}`);
+      assert.equal(v.closed?.code, answered, `a close with ${sent}`);
       v.destroy();
     }
     assert.doesNotMatch(log, /InvalidAccessError/, "the object threw on a close code it could not send");
@@ -343,11 +344,11 @@ describe("who may hold a socket", () => {
   test("one address holds only its share, and another is not affected", async () => {
     await allGone();
     const address = "203.0.113.50";
-    const held = [];
+    const held: Awaited<ReturnType<typeof viewer>>[] = [];
     for (let i = 0; i < PER_ADDRESS; i++) held.push(await viewer(address));
     const refused = await open(base, { "CF-Connecting-IP": address });
     assert.equal(refused.status, 429);
-    assert.equal(refused.headers["retry-after"], "30");
+    assert.equal(refused.headers!["retry-after"], "30");
     const other = await viewer("203.0.113.51");
     assert.equal(await viewers(), PER_ADDRESS + 1, "the refused socket was held, or a held one was closed for it");
     for (const s of [...held, other]) s.destroy();
@@ -357,7 +358,7 @@ describe("who may hold a socket", () => {
   test("a full page turns away the next, until a socket that has stopped pinging can be closed for it, and one that pings is kept", async () => {
     await allGone();
     // Six sockets on two addresses fill the page. One of them pings; the rest never do.
-    const quiet = [];
+    const quiet: Awaited<ReturnType<typeof viewer>>[] = [];
     for (let i = 0; i < PER_ADDRESS; i++) quiet.push(await viewer("203.0.113.60"));
     const mixed = [await viewer("203.0.113.61"), await viewer("203.0.113.61"), await viewer("203.0.113.61")];
     const pinger = mixed[0];
@@ -375,7 +376,7 @@ describe("who may hold a socket", () => {
     const admitted = await open(base, { "CF-Connecting-IP": "203.0.113.62" });
     assert.ok(admitted.socket, `an idle page was still full: ${admitted.status} ${admitted.body}`);
     await Promise.all([...quiet, mixed[1], mixed[2]].map((s) => s.until((x) => x.closed !== null, "the close of an idle socket")));
-    for (const s of [...quiet, mixed[1], mixed[2]]) assert.equal(s.closed.code, 1001, "an idle socket was closed with another code");
+    for (const s of [...quiet, mixed[1], mixed[2]]) assert.equal(s.closed?.code, 1001, "an idle socket was closed with another code");
     assert.equal(pinger.closed, null, "a socket that pings was closed as idle");
     admitted.socket.destroy();
     pinger.destroy();
@@ -384,7 +385,7 @@ describe("who may hold a socket", () => {
 });
 
 describe("the files the asset service answers itself", () => {
-  const getRaw = (rawPath) => fetch(base + rawPath);
+  const getRaw = (rawPath: string) => fetch(base + rawPath);
 
   test("are answered without the Worker: a path only the asset service would serve, and its own headers", async () => {
     for (const file of ["/assets/app-abc123.js", "/assets/nested/x.js", "/favicon.svg"]) {
