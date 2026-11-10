@@ -159,18 +159,17 @@ export function LazyPreview({
   // released on unmount by the effect after this one.
   useEffect(() => {
     const token = tokenRef.current;
-    let cancelled = false;
 
     if (!visible && !forced) {
       const timer = setTimeout(() => {
-        if (cancelled) return;
         release(token);
         setStreaming(false);
         setLoaded(false);
       }, FADE_MS);
-      return () => { cancelled = true; clearTimeout(timer); };
+      return () => clearTimeout(timer);
     }
 
+    let cancelled = false;
     const tryClaim = () => {
       if (cancelled) return;
       if (acquire(token)) queueMicrotask(() => { if (!cancelled) setStreaming(true); });
@@ -220,14 +219,13 @@ export function LazyPreview({
    */
   function streamingPreview() {
     if (!onExpand) return preview;
-    const label = following ? following.label : expandLabel;
     return (
       <div className="group relative">
         <button
           type="button"
           data-retarget={following ? true : undefined}
           title={following ? undefined : expandLabel}
-          aria-label={label}
+          aria-label={following ? following.label : expandLabel}
           onClick={(e) => {
             if (!following) {
               // The preview IS the way in.
@@ -310,6 +308,7 @@ export function LazyPreview({
 /** Test seam: the cap, and the current live count. */
 export const __previewLimits = {
   MAX_LIVE_PREVIEWS,
+  FADE_MS,
   liveCount: () => live.size,
   reset: () => {
     live.clear();
