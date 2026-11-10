@@ -116,6 +116,11 @@ update whatever changed, unless `build/servicecue.failed` says the last build fa
 make it on the commit the update starts from: then only a change to a build input rebuilds
 ([the marker](servicecue-on-the-web.md#the-copy-every-build-prepares)).
 
+Both helpers are TypeScript that the update scripts run with the `node` on `PATH`, which
+must be Node 24 or later to strip the types. A helper that cannot run counts as an
+unreadable answer, and the run log says so: `[update] manifest-changed.ts exited N -
+reinstalling and rebuilding`, or `[update] build-inputs.ts exited N - rebuilding`.
+
 ### What's new
 
 The panel lists the pending commits, filtered to what an operator could actually

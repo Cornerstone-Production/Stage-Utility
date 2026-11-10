@@ -51,10 +51,12 @@ interface Case {
   hasBundle?: boolean;
   /** A failure marker left by the last build: for the commit the update starts from, or an older one. */
   marker?: "this-commit" | "older-commit";
+  /** The checkout's change helpers exit non-zero without answering (3 and 4, so the log can tell them apart), as an unrunnable one does. */
+  brokenHelpers?: boolean;
 }
 
-/** One update, whole: what npm was asked to do. */
-function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string[]; marker: string | null; head: string } {
+/** One update, whole: what npm was asked to do, and the run's log as the result file carries it. */
+function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string[]; marker: string | null; head: string; log: string } {
   const dir = fs.mkdtempSync(path.join(SCRATCH, "case-"));
   const origin = path.join(dir, "origin.git");
   const repo = path.join(dir, "repo");
@@ -64,6 +66,10 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
 
   // What the scripts call from the checkout, and a manifest that never changes.
   for (const f of ["manifest-changed.ts", "build-inputs.ts", "is-main.ts"]) write(repo, `scripts/${f}`, fs.readFileSync(path.join(SCRIPTS, f), "utf8"));
+  if (c.brokenHelpers) {
+    write(repo, "scripts/manifest-changed.ts", "process.exit(3);\n");
+    write(repo, "scripts/build-inputs.ts", "process.exit(4);\n");
+  }
   write(repo, "package.json", '{"name":"x","version":"1.0.0","scripts":{}}\n');
   write(repo, "package-lock.json", '{"name":"x","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"x","version":"1.0.0"}}}\n');
   write(repo, "README.md", "first\n");
@@ -102,7 +108,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
       : spawnSync("pwsh", ["-NoProfile", "-File", path.join(SCRIPTS, "update.ps1")], { env, encoding: "utf8" });
   const log = fs.existsSync(path.join(dir, "live.log")) ? fs.readFileSync(path.join(dir, "live.log"), "utf8") : "";
   assert.equal(run.status, 0, `${script}: ${run.stdout}${run.stderr}\n${log}`);
-  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { ok: boolean };
+  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { ok: boolean; log: string };
   assert.equal(result.ok, true, log);
   const calls = path.join(dir, "npm-calls");
   const marker = path.join(repo, "build/servicecue.failed");
@@ -110,6 +116,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
     calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n") : [],
     marker: fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null,
     head: git(repo, "rev-parse", "HEAD").trim(),
+    log: result.log,
   };
 }
 
@@ -152,6 +159,14 @@ for (const [script, available] of SCRIPT_LIST) {
 
     test("a marker from an older commit is not trusted: the bundle is retried", () => {
       assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false, marker: "older-commit" }).calls, ["ci --include=dev", "run build"]);
+    });
+
+    test("a change helper that exits without answering reinstalls and builds, even for docs, and the log says which", () => {
+      const r = runUpdate(script, { changes: ["docs/ops/x.md"], brokenHelpers: true });
+      assert.deepEqual(r.calls, ["ci --include=dev", "run build"]);
+      // manifest-changed failing already forces the build, so only the log can show build-inputs was heard.
+      assert.match(r.log, /\[update\] manifest-changed\.ts exited 3 - reinstalling and rebuilding/);
+      assert.match(r.log, /\[update\] build-inputs\.ts exited 4 - rebuilding/);
     });
   });
 }
