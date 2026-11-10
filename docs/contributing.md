@@ -407,9 +407,12 @@ both ways of running a file have to work.
 
 Node only erases types, so `tsconfig.tooling.json` makes `npm run type-check` refuse
 what it cannot run: no `enum`, `namespace` or constructor parameter property; a
-relative import names its `.ts` file; a type-only import says `import type`; no path
-alias. A script run by `tsx` that imports `main/` is left out of that project and is
-checked by `tsconfig.json` alone.
+type-only import says `import type`; no path alias. A script run by `tsx` that imports
+`main/` is left out of that project and is checked by `tsconfig.json` alone.
+
+A relative import names its `.ts` file. tsc cannot hold the tooling to that: it
+resolves `./x.js` to `x.ts`, which plain Node does not. `scripts/tooling-imports.test.ts`
+does, for every file that project includes and every file they import.
 
 `scripts/manifest-changed.mjs` and `scripts/build-inputs.mjs` forward to their `.ts`
 files, and stay. An update script is loaded before the pull, and an install updates
