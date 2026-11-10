@@ -155,3 +155,31 @@ for (const [script, available] of SCRIPT_LIST) {
     });
   });
 }
+
+// An older install's update script calls the .mjs paths, and reads both the answer and the exit
+// status, so each forwarder must pass on its arguments, its input and its target's exit status.
+describe("the .mjs forwarders older update scripts call", () => {
+  const run = (file: string, args: string[], input?: string) => {
+    const r = spawnSync(process.execPath, [path.join(SCRIPTS, file), ...args], { cwd: path.dirname(SCRIPTS), input, encoding: "utf8" });
+    return { status: r.status, stdout: r.stdout };
+  };
+
+  test("manifest-changed.mjs passes its arguments through", () => {
+    assert.deepEqual(run("manifest-changed.mjs", ["HEAD", "HEAD"]), { status: 0, stdout: '{"deps":false,"manifest":false}' });
+    assert.deepEqual(run("manifest-changed.mjs", ["HEAD", "HEAD"]), run("manifest-changed.ts", ["HEAD", "HEAD"]));
+  });
+
+  test("build-inputs.mjs passes its input through", () => {
+    assert.deepEqual(run("build-inputs.mjs", [], "README.md\n"), { status: 0, stdout: "false" });
+    assert.deepEqual(run("build-inputs.mjs", [], "renderer/app/x.tsx\n"), { status: 0, stdout: "true" });
+  });
+
+  for (const name of ["manifest-changed", "build-inputs"]) {
+    test(`${name}.mjs exits with its target's status`, () => {
+      const dir = fs.mkdtempSync(path.join(SCRATCH, "forwarder-"));
+      fs.copyFileSync(path.join(SCRIPTS, `${name}.mjs`), path.join(dir, `${name}.mjs`));
+      write(dir, `${name}.ts`, "process.exit(3);\n");
+      assert.equal(spawnSync(process.execPath, [path.join(dir, `${name}.mjs`)], { input: "", encoding: "utf8" }).status, 3);
+    });
+  }
+});

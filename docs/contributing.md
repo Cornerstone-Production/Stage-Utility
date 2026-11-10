@@ -411,6 +411,12 @@ relative import names its `.ts` file; a type-only import says `import type`; no 
 alias. A script run by `tsx` that imports `main/` is left out of that project and is
 checked by `tsconfig.json` alone.
 
+`scripts/manifest-changed.mjs` and `scripts/build-inputs.mjs` forward to their `.ts`
+files, and stay. An update script is loaded before the pull, and an install updates
+from whatever release it is on straight to the newest, so an older install runs an
+update script that calls the `.mjs` paths. Renaming any script either update script
+calls needs a permanent forwarder at the old path.
+
 A script whose output a caller parses (`verified-tree.ts` writes `$GITHUB_OUTPUT`,
 `release-notes.ts` writes the notes) or whose stderr an update script shows runs with
 `node --no-warnings`: older Node 24 releases print a type-stripping warning to stderr.
