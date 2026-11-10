@@ -1,14 +1,14 @@
-// preload.mjs — loaded into the screenshot server with `node --import`.
+// preload.ts — loaded into the screenshot server with `node --import`.
 //
 // The server under capture runs the app's own, unmodified code. This file changes
 // what its process can reach, so a screenshot run cannot touch anything real:
 //
 //   fetch                 Planning Center (api.planningcenteronline.com) is answered
-//                         by fakes/pco.mjs. Loopback is left alone. Every other host
+//                         by fakes/pco.ts. Loopback is left alone. Every other host
 //                         is refused, so nothing leaves the machine and no update
 //                         check, scores feed or photo CDN is ever contacted.
 //   net.Socket.connect    the invented wireless receivers (192.168.1.41/42:2202)
-//                         are redirected to fakes/shure.mjs on loopback. Any other
+//                         are redirected to fakes/shure.ts on loopback. Any other
 //                         connection to a private address goes to loopback port 1
 //                         and is refused: the invented cameras are never dialled.
 //   UDP                   a datagram to a private address (an OSC target, a
@@ -21,7 +21,7 @@
 //                         invented address rather than this Mac's own.
 //
 // The kiosk discovery port itself is moved in the scratch settings.json (see
-// lib/server.mjs), so the real Mac helper's probes on UDP 8789 are never answered.
+// lib/server.ts), so the real Mac helper's probes on UDP 8789 are never answered.
 //
 // Controlled by the orchestrator through the environment:
 //   DOCS_SHOT_NOW         ISO instant the invented world is anchored to
@@ -33,16 +33,16 @@ import net from "node:net";
 import os from "node:os";
 import { syncBuiltinESMExports } from "node:module";
 
-import { handlePco } from "./fakes/pco.mjs";
-import { startFakeShure } from "./fakes/shure.mjs";
-import { FAKE_DEVICES, SERVER_LAN_IP, WIRELESS_CHANNELS } from "./world.mjs";
+import { handlePco } from "./fakes/pco.ts";
+import { startFakeShure } from "./fakes/shure.ts";
+import { FAKE_DEVICES, SERVER_LAN_IP, WIRELESS_CHANNELS } from "./world.ts";
 
 const PCO_HOST = "api.planningcenteronline.com";
 const PCO_PREFIX = "/services/v2";
 
 /** An address on a private network: nothing there is real, and nothing may be dialled. */
-const isPrivate = (host) => typeof host === "string" && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
-const isLoopback = (host) => host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+const isPrivate = (host: unknown): boolean => typeof host === "string" && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 
 // ── time ──────────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,10 @@ globalThis.fetch = async (input, init) => {
 const fakeShure = await startFakeShure();
 const RECEIVER_HOSTS = new Set(Object.keys(WIRELESS_CHANNELS));
 
-const realConnect = net.Socket.prototype.connect;
-net.Socket.prototype.connect = function connect(...args) {
+// The patched methods are overloaded and take their arguments positionally, so the
+// replacements take them as a list and are cast back to the method they replace.
+const realConnect = net.Socket.prototype.connect as (...args: any[]) => net.Socket;
+net.Socket.prototype.connect = function connect(this: net.Socket, ...args: any[]) {
   const [first, second] = args;
   const options = typeof first === "object" && first !== null && !Array.isArray(first);
   const host = options ? first.host : second;
@@ -103,20 +105,20 @@ net.Socket.prototype.connect = function connect(...args) {
     }
   }
   return realConnect.apply(this, args);
-};
+} as typeof net.Socket.prototype.connect;
 
 // ── UDP ───────────────────────────────────────────────────────────────────────
 
-const realSend = dgram.Socket.prototype.send;
-dgram.Socket.prototype.send = function send(...args) {
+const realSend = dgram.Socket.prototype.send as (...args: any[]) => void;
+dgram.Socket.prototype.send = function send(this: dgram.Socket, ...args: any[]) {
   return realSend.apply(
     this,
     args.map((a) => (isPrivate(a) ? "127.0.0.1" : a)),
   );
-};
+} as typeof dgram.Socket.prototype.send;
 
-const realEmit = dgram.Socket.prototype.emit;
-dgram.Socket.prototype.emit = function emit(event, ...args) {
+const realEmit = dgram.Socket.prototype.emit as (event: string | symbol, ...args: any[]) => boolean;
+dgram.Socket.prototype.emit = function emit(this: dgram.Socket, event: string | symbol, ...args: any[]) {
   if (event === "message" && args[1]?.address === "127.0.0.1") {
     try {
       const device = FAKE_DEVICES.find((d) => d.id === JSON.parse(String(args[0])).id);
@@ -126,7 +128,7 @@ dgram.Socket.prototype.emit = function emit(event, ...args) {
     }
   }
   return realEmit.call(this, event, ...args);
-};
+} as typeof dgram.Socket.prototype.emit;
 
 // ── the machine's own address ─────────────────────────────────────────────────
 

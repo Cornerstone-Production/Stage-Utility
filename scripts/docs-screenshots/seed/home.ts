@@ -1,14 +1,16 @@
-// seed/home.mjs — which cards Home shows.
+// seed/home.ts — which cards Home shows.
 //
 // Home is a view like the others (id "home"), its tiles layout objects with a grid
 // size and a mood. The default set includes Recording and SPL, which read
 // "Offline" on a machine with no recorder and no Smaart; this set keeps to cards
 // that have something to say here, and adds the clock and the wireless summary.
 
-import { layout, obj } from "./layout-kit.mjs";
+import type { Api } from "../lib/api.ts";
+import type { Json } from "../lib/json.ts";
+import { layout, obj } from "./layout-kit.ts";
 
-export async function seedHome(api) {
-  const tile = (config, home, id) => obj(config, [0, 0, 1, 0.1], { id, extra: { home }, style: {} });
+export async function seedHome(api: Api) {
+  const tile = (config: Json, home: Json, id: string) => obj(config, [0, 0, 1, 0.1], { id, extra: { home }, style: {} });
   const objects = [
     tile({ type: "home-attention" }, { size: "m", when: "always" }, "home-attention"),
     tile({ type: "timer", source: "service", nextItem: true }, { size: "xl", when: "live" }, "home-timer"),

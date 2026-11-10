@@ -1,4 +1,4 @@
-// fakes/shure.mjs — a Shure ULX-D receiver, as far as the app can tell.
+// fakes/shure.ts — a Shure ULX-D receiver, as far as the app can tell.
 //
 // Speaks the ASCII-over-TCP protocol the driver in
 // main/providers/wireless/shure-ulxd.ts reads: `< GET 0 ALL >` is answered with
@@ -7,12 +7,12 @@
 
 import net from "node:net";
 
-import { WIRELESS_CHANNELS } from "../world.mjs";
+import { WIRELESS_CHANNELS, type WirelessChannel } from "../world.ts";
 
-const pad = (n, width) => String(n).padStart(width, "0");
+const pad = (n: number, width: number) => String(n).padStart(width, "0");
 
-function repFrames(channels) {
-  const frames = [];
+function repFrames(channels: WirelessChannel[]): string[] {
+  const frames: string[] = [];
   channels.forEach((c, i) => {
     const ch = i + 1;
     const present = c.bars !== 255;
@@ -29,7 +29,12 @@ function repFrames(channels) {
   return frames;
 }
 
-function sampleFrames(channels, tick) {
+/** The channels an invented host stands for; the first receiver's when the host is unknown. */
+function channelsFor(host: string | undefined): WirelessChannel[] {
+  return WIRELESS_CHANNELS[host ?? ""] ?? WIRELESS_CHANNELS["192.168.1.41"]!;
+}
+
+function sampleFrames(channels: WirelessChannel[], tick: number): string[] {
   return channels.map((c, i) => {
     if (c.bars === 255) return `SAMPLE ${i + 1} ALL X 000 000`;
     // A little movement so the meters read as live rather than painted.
@@ -44,14 +49,12 @@ function sampleFrames(channels, tick) {
  *
  * One server answers for every invented receiver address: the connection's
  * remote address is gone by the time it arrives, so `hostFor` is told which
- * address the app meant when it dialled (see preload.mjs).
- *
- * @returns {Promise<{ port: number, close: () => void, expect: (localPort: number, host: string) => void }>}
+ * address the app meant when it dialled (see preload.ts).
  */
-export async function startFakeShure() {
+export async function startFakeShure(): Promise<{ port: number; close: () => void; expect: (localPort: number | undefined, host: string) => void }> {
   /** Which invented host each inbound socket stands for, keyed by remote port. */
-  const hosts = new Map();
-  const sockets = new Set();
+  const hosts = new Map<number | undefined, string>();
+  const sockets = new Set<net.Socket>();
   let tick = 0;
 
   const server = net.createServer((socket) => {
@@ -61,7 +64,7 @@ export async function startFakeShure() {
     socket.on("data", (chunk) => {
       // Looked up here, not at accept: the dialling side records which address it
       // meant on its own 'connect', which can land after the accept.
-      const channels = WIRELESS_CHANNELS[hosts.get(socket.remotePort)] ?? WIRELESS_CHANNELS["192.168.1.41"];
+      const channels = channelsFor(hosts.get(socket.remotePort));
       buffer += chunk;
       const segments = buffer.split(">");
       buffer = segments.pop() ?? "";
@@ -79,16 +82,16 @@ export async function startFakeShure() {
     tick++;
     for (const socket of sockets) {
       const host = hosts.get(socket.remotePort);
-      const channels = WIRELESS_CHANNELS[host] ?? WIRELESS_CHANNELS["192.168.1.41"];
+      const channels = channelsFor(host);
       for (const f of sampleFrames(channels, tick)) socket.write(`< ${f} >\n`);
     }
   }, 1000);
   timer.unref();
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
-    port: server.address().port,
-    expect: (localPort, host) => hosts.set(localPort, host),
+    port: (server.address() as net.AddressInfo).port,
+    expect: (localPort: number | undefined, host: string) => hosts.set(localPort, host),
     close: () => {
       clearInterval(timer);
       for (const s of sockets) s.destroy();

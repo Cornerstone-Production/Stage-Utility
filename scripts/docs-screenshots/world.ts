@@ -1,4 +1,4 @@
-// world.mjs — the invented world every screenshot is made from.
+// world.ts — the invented world every screenshot is made from.
 //
 // Nobody in here exists. Names, service types, songs and addresses are made up,
 // and every address is in 192.168.1.x (the placeholder range
@@ -11,8 +11,10 @@
 
 export const ORG_TIME_ZONE = "America/Chicago";
 
+export type TypeKey = "weekend" | "gathering" | "youth";
+
 /** The three service types. Ids are PCO-shaped (digits only). */
-export const SERVICE_TYPES = [
+export const SERVICE_TYPES: { id: string; name: string; key: TypeKey }[] = [
   { id: "1001001", name: "Weekend", key: "weekend" },
   { id: "1001002", name: "The Gathering", key: "gathering" },
   { id: "1001003", name: "Youth Night", key: "youth" },
@@ -42,7 +44,9 @@ export const TEAMS = [
 ];
 
 /** Who is on a Weekend plan: [person, team, position, note]. */
-export const WEEKEND_ROSTER = [
+export type RosterRow = [person: string, team: string, position: string, note: string];
+
+export const WEEKEND_ROSTER: RosterRow[] = [
   ["Alex Rivera", "Vocals", "Worship Leader", "1"],
   ["Casey Nguyen", "Vocals", "Vocals", "2"],
   ["Drew Alvarez", "Vocals", "Vocals (BGVs)", "3"],
@@ -57,7 +61,7 @@ export const WEEKEND_ROSTER = [
   ["Skyler Adams", "Hosts", "Host", "Lav"],
 ];
 
-export const ROSTERS = {
+export const ROSTERS: Record<TypeKey, RosterRow[]> = {
   weekend: WEEKEND_ROSTER,
   gathering: WEEKEND_ROSTER.filter((r) => !["Drew Alvarez", "Avery Kim", "Morgan Chen"].includes(r[0])),
   youth: WEEKEND_ROSTER.filter((r) =>
@@ -95,7 +99,7 @@ const DAY = 86_400_000;
  * host clock: the same reason the app does it (a UTC box rolls its date at 19:00
  * in Chicago).
  */
-export function zonedParts(date, timeZone = ORG_TIME_ZONE) {
+export function zonedParts(date: Date, timeZone = ORG_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -106,7 +110,7 @@ export function zonedParts(date, timeZone = ORG_TIME_ZONE) {
     weekday: "short",
     hourCycle: "h23",
   }).formatToParts(date);
-  const get = (t) => parts.find((p) => p.type === t)?.value ?? "";
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   return {
     year: +get("year"),
     month: +get("month"),
@@ -118,7 +122,7 @@ export function zonedParts(date, timeZone = ORG_TIME_ZONE) {
 }
 
 /** The instant at which the org's wall clock reads y-m-d h:min. */
-export function zonedInstant(y, m, d, h, min, timeZone = ORG_TIME_ZONE) {
+export function zonedInstant(y: number, m: number, d: number, h: number, min: number, timeZone = ORG_TIME_ZONE): Date {
   const want = Date.UTC(y, m - 1, d, h, min);
   let guess = want;
   for (let i = 0; i < 2; i++) {
@@ -131,7 +135,7 @@ export function zonedInstant(y, m, d, h, min, timeZone = ORG_TIME_ZONE) {
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** The next date (org zone) on or after `now` that falls on `weekday`. */
-function nextWeekday(now, weekday) {
+function nextWeekday(now: Date, weekday: string) {
   const here = zonedParts(now);
   const ahead = (WEEKDAYS.indexOf(weekday) - WEEKDAYS.indexOf(here.weekday) + 7) % 7;
   const t = new Date(Date.UTC(here.year, here.month - 1, here.day) + ahead * DAY);
@@ -139,7 +143,7 @@ function nextWeekday(now, weekday) {
 }
 
 /** Service-time pattern per service type. */
-const SCHEDULE = {
+const SCHEDULE: Record<TypeKey, { weekday: string; times: [number, number][] }> = {
   weekend: { weekday: "Sun", times: [[9, 0], [11, 0]] },
   gathering: { weekday: "Wed", times: [[19, 0]] },
   youth: { weekday: "Fri", times: [[19, 0]] },
@@ -151,8 +155,9 @@ const SERIES = ["Rooted", "Open Hands", "Common Ground", "Steady"];
  * The plan `week` weeks from the next occurrence (0 = the upcoming one, -1 = the
  * one before it, 1 = the one after). Ids are stable and PCO-shaped (digits only).
  */
-export function planFor(typeKey, week, now) {
+export function planFor(typeKey: TypeKey, week: number, now: Date) {
   const type = SERVICE_TYPES.find((t) => t.key === typeKey);
+  if (!type) throw new Error(`no service type ${typeKey}`);
   const sched = SCHEDULE[typeKey];
   const base = nextWeekday(now, sched.weekday);
   const day = new Date(Date.UTC(base.y, base.m - 1, base.d) + week * 7 * DAY);
@@ -186,7 +191,7 @@ export const LIVE_PLAN_ID = "2900001";
  * its clock showing Sunday. The capture step switches the app onto this plan when
  * it goes live.
  */
-export function liveWeekendPlan(now) {
+export function liveWeekendPlan(now: Date) {
   const plan = planFor("weekend", 0, now);
   const first = new Date(now.getTime() - 14 * 60_000);
   const second = new Date(now.getTime() + 106 * 60_000);
@@ -204,8 +209,8 @@ export function liveWeekendPlan(now) {
 }
 
 /** Plans of a type, oldest first. */
-export function plansFor(typeKey, now, back = 14, ahead = 3) {
-  const out = [];
+export function plansFor(typeKey: TypeKey, now: Date, back = 14, ahead = 3) {
+  const out: ReturnType<typeof planFor>[] = [];
   for (let w = -back; w <= ahead; w++) out.push(planFor(typeKey, w, now));
   return out;
 }
@@ -226,7 +231,19 @@ export const WIRELESS_RECEIVERS = [
  * Telemetry per receiver channel. `bars` is BATT_BARS (255 = no transmitter),
  * `charge` percent, `mins` runtime left, `rf` dBm, `audio` 0..1, `freq` kHz.
  */
-export const WIRELESS_CHANNELS = {
+export interface WirelessChannel {
+  name: string;
+  bars: number;
+  charge: number;
+  mins: number;
+  rf: number;
+  audio: number;
+  freq: number;
+  quality: number;
+  muted?: boolean;
+}
+
+export const WIRELESS_CHANNELS: Record<string, WirelessChannel[]> = {
   "192.168.1.41": [
     { name: "Worship Lead", bars: 5, charge: 92, mins: 540, rf: -52, audio: 0.6, freq: 518350, quality: 5 },
     { name: "Vocal 2", bars: 5, charge: 78, mins: 455, rf: -58, audio: 0.45, freq: 520125, quality: 5 },

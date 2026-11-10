@@ -1,4 +1,4 @@
-// capture/shots.mjs — every image, what it shows, and how it is taken.
+// capture/shots.ts — every image, what it shows, and how it is taken.
 //
 // Each entry names its file (`docs/images/<name>.png`), the phase it needs, and a
 // `run` that drives a real Chrome against the seeded server. `phase` is "week"
@@ -9,13 +9,43 @@
 //
 // `shows` is what docs/images/README.md prints beside the file.
 
-import { announceDevices } from "../lib/probe.mjs";
-import { DISCOVERY_PORT } from "../lib/server.mjs";
-import { SERVICE_TYPES } from "../world.mjs";
+import type { Page } from "playwright-core";
 
-const SCREEN_NAMES = (world) => Object.values(world.outputs);
+import type { Api } from "../lib/api.ts";
+import { announceDevices } from "../lib/probe.ts";
+import { DISCOVERY_PORT } from "../lib/server.ts";
+import type { seedApp } from "../seed/app.ts";
+import { SERVICE_TYPES } from "../world.ts";
+import type { Session } from "./kit.ts";
 
-export const SHOTS = [
+/** The ids `seedApp` returns: views, screens and widgets the shots point at. */
+export type World = Awaited<ReturnType<typeof seedApp>>;
+
+/** What a shot is handed. */
+export interface ShotContext {
+  session: Session;
+  page: Page;
+  api: Api;
+  world: World;
+}
+
+export interface Shot {
+  name: string;
+  phase: "week" | "live";
+  shows: string;
+  run: (ctx: ShotContext) => Promise<void>;
+}
+
+const SCREEN_NAMES = (world: World) => Object.values(world.outputs);
+
+/** The open screen a shot reads, by the output it shows. */
+function screenOf(session: Session, outputId: string) {
+  const screen = session.screens.find((s) => s.id === outputId);
+  if (!screen) throw new Error(`screen ${outputId} is not open`);
+  return screen;
+}
+
+export const SHOTS: Shot[] = [
   // ── week ────────────────────────────────────────────────────────────────────
   {
     name: "history-overview",
@@ -176,7 +206,7 @@ export const SHOTS = [
     phase: "live",
     shows: "A wall display as it renders at 1920x1080: mic slots with wireless telemetry, clock, countdown, messages with replies, the service order and integration status.",
     async run({ session, world }) {
-      const screen = session.screens.find((s) => s.id === world.outputs.wall);
+      const screen = screenOf(session, world.outputs.wall);
       await session.shoot(screen.page, "wall-stage-wall");
     },
   },
@@ -185,7 +215,7 @@ export const SHOTS = [
     phase: "live",
     shows: "A ServiceCue rundown on a screen, with the live item highlighted and the Audio and Band note columns.",
     async run({ session, world }) {
-      const screen = session.screens.find((s) => s.id === world.outputs.greenRoom);
+      const screen = screenOf(session, world.outputs.greenRoom);
       await session.shoot(screen.page, "wall-servicecue");
     },
   },
@@ -194,7 +224,7 @@ export const SHOTS = [
     phase: "live",
     shows: "A lobby screen built in the layout editor: clock and countdown.",
     async run({ session, world }) {
-      const screen = session.screens.find((s) => s.id === world.outputs.lobby);
+      const screen = screenOf(session, world.outputs.lobby);
       await session.shoot(screen.page, "wall-lobby");
     },
   },
@@ -212,7 +242,7 @@ export const SHOTS = [
     phase: "live",
     shows: "A stage-side panel showing the thread with each reply under its message and quick-reply buttons.",
     async run({ session, world }) {
-      const screen = session.screens.find((s) => s.id === world.outputs.stageLeft);
+      const screen = screenOf(session, world.outputs.stageLeft);
       await session.shoot(screen.page, "messages-panel");
     },
   },
@@ -222,9 +252,9 @@ export const SHOTS = [
     shows: "A stage message sent as an alert, drawn over a wall display as a red banner.",
     async run({ session, api, world }) {
       const messaging = await api.get("/api/messaging");
-      const stage = messaging.groups.find((g) => g.name === "Stage");
+      const stage = messaging.groups.find((g: any) => g.name === "Stage");
       await api.post("/api/messages", { to: [stage.id], text: "Wrap it up, we are running long", alert: true, from: "Jamie Park" });
-      const screen = session.screens.find((s) => s.id === world.outputs.wall);
+      const screen = screenOf(session, world.outputs.wall);
       await screen.page.waitForTimeout(2500);
       await session.shoot(screen.page, "messages-alert");
     },

@@ -1,13 +1,14 @@
-// seed/layouts.mjs — views, their layouts and slot boards, and the screens that
+// seed/layouts.ts — views, their layouts and slot boards, and the screens that
 // show them.
 
-import { SERVICE_TYPES } from "../world.mjs";
-import { CARD, layout, obj } from "./layout-kit.mjs";
+import type { Api } from "../lib/api.ts";
+import { SERVICE_TYPES } from "../world.ts";
+import { CARD, layout, obj } from "./layout-kit.ts";
 
 const NO_DEVICE = { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
 
 /** A mic-board slot filled by a Planning Center position, optionally on a mic. */
-function slot(n, channel, positions, binding, extra = {}) {
+function slot(n: number, channel: string, positions: unknown[] | null, binding: string | null, extra: { label?: string } = {}) {
   return {
     id: `slot-${n}`,
     channel,
@@ -21,7 +22,7 @@ function slot(n, channel, positions, binding, extra = {}) {
   };
 }
 
-function micBoard(wirelessIds) {
+function micBoard(wirelessIds: string[]) {
   const [rackA, rackB] = wirelessIds;
   return [
     slot(1, "1", [{ name: "Worship Leader" }], `${rackA}::1`),
@@ -35,13 +36,13 @@ function micBoard(wirelessIds) {
   ];
 }
 
-async function createView(api, body) {
+async function createView(api: Api, body: { name: string; kind: string; surface?: string }): Promise<string> {
   const state = await api.post("/api/views", body);
-  const view = [...state.views].reverse().find((v) => v.name === body.name);
+  const view = [...state.views].reverse().find((v: any) => v.name === body.name);
   return view.id;
 }
 
-function stageWall(micBoardViewId, rundownViewId) {
+function stageWall(micBoardViewId: string, rundownViewId: string) {
   const title = { fontSize: 0.034, fontWeight: 700, color: "#9aa0a6", uppercase: true, letterSpacing: 0.12, vAlign: "middle" };
   const big = { fontSize: 0.075, fontWeight: 600, color: "#f1f3f4", vAlign: "middle" };
   return layout([
@@ -68,7 +69,7 @@ const CONSOLE_BUTTONS = [
   { id: "docs-console-refresh", cue: "btn_refresh_screens", label: "Refresh screens", action: "display.refresh" },
 ];
 
-function producerConsole(wallOutputId) {
+function producerConsole(wallOutputId: string) {
   const button = { ...CARD, fontSize: 0.03, fontWeight: 600, textAlign: "center", vAlign: "middle" };
   return layout(
     [
@@ -108,7 +109,7 @@ function stageConsole() {
 
 /** ServiceCue: the service types on its landing page, the roles its columns use,
  *  and three column presets, one per department. */
-async function seedServiceCue(api) {
+async function seedServiceCue(api: Api) {
   await api.post("/api/servicecue/config", { serviceTypeIds: SERVICE_TYPES.map((t) => t.id) });
   await api.post("/api/servicecue/roles/seed", { serviceTypeId: SERVICE_TYPES[0].id });
   const shared = { showClock: true, showLength: true, showKey: true, showBpm: true, showMeter: true, showArrangement: true, showItemNotes: true, showTotalTime: true, rowColor: "none" };
@@ -120,13 +121,16 @@ async function seedServiceCue(api) {
     ],
   });
   const layouts = Array.isArray(saved) ? saved : saved.layouts;
-  return { audioLayoutId: layouts.find((l) => l.name === "Audio").id, layouts };
+  return { audioLayoutId: layouts.find((l: any) => l.name === "Audio").id, layouts };
 }
 
-export async function seedLayouts(api, { wirelessIds }) {
+/** The ids the later seed steps and the capture step need. */
+export type Layouts = Awaited<ReturnType<typeof seedLayouts>>;
+
+export async function seedLayouts(api: Api, { wirelessIds }: { wirelessIds: string[]; now?: Date }) {
   // The first display ships with the app: make it the mic board.
   const { views, outputs } = await api.get("/api/state");
-  const micView = views.find((v) => v.kind === "slots");
+  const micView = views.find((v: any) => v.kind === "slots");
   // The board a slots screen shows; the screen's own id until it is pointed elsewhere.
   const micBoardId = micView.boardId ?? micView.id;
   const firstOutputId = outputs[0].id;

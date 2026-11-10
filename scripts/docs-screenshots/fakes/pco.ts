@@ -1,9 +1,9 @@
-// fakes/pco.mjs — a stand-in for the Planning Center Services API, answering from
+// fakes/pco.ts — a stand-in for the Planning Center Services API, answering from
 // the invented world.
 //
 // The app pins every credentialed request to api.planningcenteronline.com (that is
 // deliberate and stays), so this cannot be a server the app is pointed at. The
-// preload (../preload.mjs) swaps `fetch` inside the screenshot server's own
+// preload (../preload.ts) swaps `fetch` inside the screenshot server's own
 // process for a function that calls handlePco() when the host is Planning
 // Center's, and leaves every other request alone. Nothing in the app changes.
 //
@@ -22,21 +22,25 @@ import {
   TEAMS,
   liveWeekendPlan,
   plansFor,
-} from "../world.mjs";
+} from "../world.ts";
+import type { Json as Doc } from "../lib/json.ts";
+
+/** A plan as the world builds it. */
+type Plan = ReturnType<typeof liveWeekendPlan>;
 
 const MINUTE = 60_000;
-const iso = (d) => new Date(d).toISOString();
+const iso = (d: Date | number) => new Date(d).toISOString();
 
 /**
  * Every plan Planning Center has right now. In live mode the Weekend service that
- * is under way (world.mjs liveWeekendPlan) is listed too, with an item on air.
+ * is under way (world.ts liveWeekendPlan) is listed too, with an item on air.
  */
-function allPlans(now, live) {
+function allPlans(now: Date, live: boolean): Plan[] {
   const plans = SERVICE_TYPES.flatMap((t) => plansFor(t.key, now));
   return live ? [...plans, liveWeekendPlan(now)] : plans;
 }
 
-const planNode = (p) => ({
+const planNode = (p: Plan) => ({
   type: "Plan",
   id: p.id,
   attributes: {
@@ -47,13 +51,13 @@ const planNode = (p) => ({
   },
 });
 
-const itemId = (plan, index) => `${plan.id}${String(index).padStart(2, "0")}`;
+const itemId = (plan: Plan, index: number) => `${plan.id}${String(index).padStart(2, "0")}`;
 
-function itemsBody(plan) {
-  const data = [];
-  const included = [];
+function itemsBody(plan: Plan): Doc {
+  const data: Doc[] = [];
+  const included: Doc[] = [];
   RUNDOWN.forEach((item, index) => {
-    const relationships = {};
+    const relationships: Doc = {};
     if (item.notes) {
       const refs = Object.entries(item.notes).map(([category, content]) => {
         const id = `${itemId(plan, index)}${ITEM_NOTE_CATEGORIES.indexOf(category)}`;
@@ -85,14 +89,15 @@ function itemsBody(plan) {
   return { data, included };
 }
 
-function teamMembersBody(plan) {
+function teamMembersBody(plan: Plan): Doc {
   const roster = ROSTERS[plan.typeKey];
-  const data = [];
-  const included = [];
-  const teamsSeen = new Set();
+  const data: Doc[] = [];
+  const included: Doc[] = [];
+  const teamsSeen = new Set<string>();
   roster.forEach(([name, team, position, note], index) => {
-    const person = PEOPLE.find((p) => p.name === name);
-    const teamDef = TEAMS.find((t) => t.name === team);
+    // The roster names only people and teams the world defines.
+    const person = PEOPLE.find((p) => p.name === name)!;
+    const teamDef = TEAMS.find((t) => t.name === team)!;
     data.push({
       type: "PlanPerson",
       id: `${plan.id}${String(index).padStart(2, "0")}`,
@@ -111,9 +116,9 @@ function teamMembersBody(plan) {
   return { data, included };
 }
 
-function teamsBody() {
-  const data = [];
-  const included = [];
+function teamsBody(): Doc {
+  const data: Doc[] = [];
+  const included: Doc[] = [];
   for (const team of TEAMS) {
     const refs = team.positions.map((name, i) => {
       const id = `${team.id}${i}`;
@@ -130,7 +135,7 @@ function teamsBody() {
   return { data, included };
 }
 
-function liveBody(plan, live) {
+function liveBody(plan: Plan, live: boolean): Doc {
   if (!live || plan.id !== LIVE_PLAN_ID) {
     return { data: { type: "Live", id: plan.id, attributes: {}, relationships: {} } };
   }
@@ -160,17 +165,14 @@ const PREP_TAGS = [
   { id: "102", name: "IEMs: Own", people: [1] },
 ];
 
-const ok = (body) => ({ status: 200, body });
+const ok = (body: Doc) => ({ status: 200, body });
 const missing = () => ({ status: 404, body: { errors: [{ title: "Not Found", status: "404" }] } });
 
 /**
- * Answer one Services API GET.
- *
- * @param {string} pathname  the path after /services/v2, no query ("" = the organisation)
- * @param {URLSearchParams} query
- * @param {{ now: Date, live: boolean }} state
+ * Answer one Services API GET. `pathname` is the path after /services/v2, no
+ * query ("" = the organisation).
  */
-export function handlePco(pathname, query, state) {
+export function handlePco(pathname: string, query: URLSearchParams, state: { now: Date; live: boolean }): { status: number; body: Doc } {
   const { now, live } = state;
   const parts = pathname.split("/").filter(Boolean);
 
@@ -213,8 +215,8 @@ export function handlePco(pathname, query, state) {
       const cutoff = now.getTime();
       const future = mine.filter((p) => p.times[0].startsAt.getTime() >= cutoff - 6 * 3_600_000);
       const past = mine.filter((p) => !future.includes(p));
-      if (filter === "future") return ok({ data: future.sort((a, b) => a.times[0].startsAt - b.times[0].startsAt).map(planNode) });
-      if (filter === "past") return ok({ data: past.sort((a, b) => b.times[0].startsAt - a.times[0].startsAt).map(planNode) });
+      if (filter === "future") return ok({ data: future.sort((a, b) => a.times[0].startsAt.getTime() - b.times[0].startsAt.getTime()).map(planNode) });
+      if (filter === "past") return ok({ data: past.sort((a, b) => b.times[0].startsAt.getTime() - a.times[0].startsAt.getTime()).map(planNode) });
       return ok({ data: mine.map(planNode) });
     }
     if (section === "teams") return ok(teamsBody());

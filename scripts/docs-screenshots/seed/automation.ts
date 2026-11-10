@@ -1,11 +1,14 @@
-// seed/automation.mjs — rules, and the OSC target they point at.
+// seed/automation.ts — rules, and the OSC target they point at.
 
-export async function seedAutomation(api, { groups, consoleId, panelId } = {}) {
+import type { Api } from "../lib/api.ts";
+import type { Json } from "../lib/json.ts";
+
+export async function seedAutomation(api: Api, { groups, consoleId, panelId }: { groups?: unknown; consoleId?: string; panelId?: string } = {}) {
   const targets = await api.post("/api/osc/targets", { name: "Lighting Console" });
-  const target = targets.find((t) => t.name === "Lighting Console") ?? targets[targets.length - 1];
+  const target = targets.find((t: any) => t.name === "Lighting Console") ?? targets[targets.length - 1];
   await api.patch(`/api/osc/targets/${target.id}`, { host: "192.168.1.80", port: 8000 });
 
-  const rules = [
+  const rules: Json[] = [
     {
       name: "Ten minutes to service",
       trigger: { id: "pco.before-plan-time", params: { minutes: 10, timeTypes: "service" } },
@@ -63,7 +66,7 @@ export async function seedAutomation(api, { groups, consoleId, panelId } = {}) {
       action: { id: "log.message", params: { message: "Planning Center disconnected" } },
     },
   ];
-  const created = [];
+  const created: unknown[] = [];
   for (const r of rules) {
     created.push(
       await api.post("/api/automation/rules", {
@@ -78,7 +81,7 @@ export async function seedAutomation(api, { groups, consoleId, panelId } = {}) {
 
   // Buttons on two screens name the commands, so the Commands tab has screens to put on its
   // "Used on" lines. A pair's Buttons store its base, `lobby_lights`.
-  const button = (id, cue, label, x, y) => ({
+  const button = (id: string, cue: string, label: string, x: number, y: number) => ({
     id,
     x,
     y,
@@ -87,10 +90,10 @@ export async function seedAutomation(api, { groups, consoleId, panelId } = {}) {
     z: 50,
     config: { type: "cue-button", cue, label },
   });
-  const onScreen = async (viewId, buttons) => {
+  const onScreen = async (viewId: string | undefined, buttons: unknown[]) => {
     if (!viewId) return;
     const state = await api.get("/api/state");
-    const view = state.views.find((v) => v.id === viewId);
+    const view = state.views.find((v: any) => v.id === viewId);
     if (!view?.layout) return;
     await api.patch(`/api/views/${viewId}`, {
       layout: { ...view.layout, objects: [...view.layout.objects, ...buttons] },

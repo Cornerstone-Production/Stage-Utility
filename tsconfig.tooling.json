@@ -3,7 +3,7 @@
   // The rules, and what tsc cannot check, are in docs/contributing.md (Tooling scripts).
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["node"],

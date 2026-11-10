@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-// run.mjs — make the documentation screenshots.
+// run.ts — make the documentation screenshots.
 //
 //   npm run docs:screenshots                 every image
 //   npm run docs:screenshots -- --only home-dashboard,screens-overview
@@ -11,21 +10,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { makeApi } from "./lib/api.mjs";
-import { DEFAULT_PORT, REPO_ROOT, assertScratchDir, killByPort, startServer } from "./lib/server.mjs";
-import { seedHistoryFiles } from "./seed/history.mjs";
-import { seedApp } from "./seed/app.mjs";
-import { capture } from "./capture/index.mjs";
+import { makeApi } from "./lib/api.ts";
+import { DEFAULT_PORT, REPO_ROOT, assertScratchDir, killByPort, startServer } from "./lib/server.ts";
+import { seedHistoryFiles } from "./seed/history.ts";
+import { seedApp } from "./seed/app.ts";
+import { capture } from "./capture/index.ts";
 
-function parseArgs(argv) {
-  const out = { only: null, port: DEFAULT_PORT, serve: false, data: null, out: path.join(REPO_ROOT, "docs/images") };
+function parseArgs(argv: string[]) {
+  const out: { only: string[] | null; port: number; serve: boolean; data: string | null; out: string } = { only: null, port: DEFAULT_PORT, serve: false, data: null, out: path.join(REPO_ROOT, "docs/images") };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--only") out.only = argv[++i].split(",").filter(Boolean);
+    if (a === "--only") out.only = argv[++i]!.split(",").filter(Boolean);
     else if (a === "--port") out.port = Number(argv[++i]);
     else if (a === "--serve") out.serve = true;
-    else if (a === "--data") out.data = argv[++i];
-    else if (a === "--out") out.out = path.resolve(argv[++i]);
+    else if (a === "--data") out.data = argv[++i]!;
+    else if (a === "--out") out.out = path.resolve(argv[++i]!);
     else throw new Error(`unknown argument ${a}`);
   }
   return out;
@@ -55,12 +54,12 @@ process.on("SIGINT", async () => {
 
 try {
   const api = makeApi(server.base);
-  const world = await seedApp(api, { now, dataDir });
+  const world = await seedApp(api, { now });
   if (args.serve) {
     console.log(`serving ${server.base} (data ${dataDir}); stop with: kill $(lsof -tiTCP:${args.port} -sTCP:LISTEN)`);
     await new Promise(() => {});
   }
-  await capture({ base: server.base, api, world, only: args.only, outDir: args.out, setLive: (live) => fs.writeFileSync(stateFile, JSON.stringify({ live })) });
+  await capture({ base: server.base, api, world, only: args.only, outDir: args.out, setLive: (live: boolean) => fs.writeFileSync(stateFile, JSON.stringify({ live })) });
 } finally {
   if (!args.serve) {
     await stop();

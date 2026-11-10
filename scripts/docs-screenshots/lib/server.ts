@@ -1,4 +1,4 @@
-// lib/server.mjs — start the app under capture, on a scratch data dir, and stop it.
+// lib/server.ts — start the app under capture, on a scratch data dir, and stop it.
 //
 // The rules this enforces, because the machine this runs on usually has a real
 // install beside it:
@@ -25,7 +25,7 @@ export const DISCOVERY_PORT = 48789;
 
 const REAL_DATA_DIRS = ["/usr/local/var/stage-utility", "/var/lib/stage-utility", "/opt/stage-utility"];
 
-export function assertScratchDir(dir) {
+export function assertScratchDir(dir: string): void {
   const resolved = path.resolve(dir);
   const home = process.env.HOME ? path.resolve(process.env.HOME, ".stage-utility") : null;
   if (REAL_DATA_DIRS.some((d) => resolved === d || resolved.startsWith(`${d}/`)) || resolved === home) {
@@ -37,7 +37,7 @@ export function assertScratchDir(dir) {
 }
 
 /** Anything already listening on the port means a real or stale server; stop before starting. */
-export function portHolder(port) {
+export function portHolder(port: number): number[] {
   try {
     const out = execFileSync("lsof", ["-tiTCP:" + port, "-sTCP:LISTEN"], { encoding: "utf8" }).trim();
     return out ? out.split("\n").map(Number) : [];
@@ -46,7 +46,7 @@ export function portHolder(port) {
   }
 }
 
-export function killByPort(port) {
+export function killByPort(port: number): void {
   for (const pid of portHolder(port)) {
     try {
       process.kill(pid, "SIGTERM");
@@ -56,25 +56,22 @@ export function killByPort(port) {
   }
 }
 
-async function waitFor(fn, what, ms = 60_000) {
+async function waitFor<T>(fn: () => T | Promise<T>, what: string, ms = 60_000): Promise<NonNullable<T>> {
   const until = Date.now() + ms;
-  let last;
+  let last: unknown;
   while (Date.now() < until) {
     try {
       const v = await fn();
-      if (v) return v;
+      if (v) return v as NonNullable<T>;
     } catch (err) {
       last = err;
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ""}`);
+  throw new Error(`timed out waiting for ${what}${last ? `: ${(last as Error).message}` : ""}`);
 }
 
-/**
- * @param {{ dataDir: string, port: number, now: Date, stateFile: string, logFile: string, preload?: boolean }} opts
- */
-export async function startServer(opts) {
+export async function startServer(opts: { dataDir: string; port: number; now: Date; stateFile: string; logFile: string; preload?: boolean }) {
   const { dataDir, port, now, stateFile, logFile } = opts;
   if (portHolder(port).length > 0) {
     throw new Error(`port ${port} is already in use; stop whatever holds it (by port) or pass --port`);
@@ -88,12 +85,12 @@ export async function startServer(opts) {
   try {
     fs.writeFileSync(settingsFile, JSON.stringify({ kioskDiscovery: true, kioskDiscoveryPort: DISCOVERY_PORT }, null, 2), { flag: "wx" });
   } catch (err) {
-    if (err.code !== "EEXIST") throw err;
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   }
   const log = fs.openSync(logFile, "a");
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", "--import", path.join(here, "../preload.mjs"), path.join(REPO_ROOT, "server.ts")],
+    ["--import", "tsx", "--import", path.join(here, "../preload.ts"), path.join(REPO_ROOT, "server.ts")],
     {
       cwd: REPO_ROOT,
       stdio: ["ignore", log, log],

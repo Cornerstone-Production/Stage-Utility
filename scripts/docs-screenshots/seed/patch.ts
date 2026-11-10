@@ -1,9 +1,10 @@
-// seed/patch.mjs — a stage patch sheet, with a Weekend standard and a variant that
+// seed/patch.ts — a stage patch sheet, with a Weekend standard and a variant that
 // changes two channels this week.
 
-import { SERVICE_TYPES, planFor } from "../world.mjs";
+import type { Api } from "../lib/api.ts";
+import { SERVICE_TYPES, planFor } from "../world.ts";
 
-const INPUTS = [
+const INPUTS: [label: string, mic: string, phantom: boolean][] = [
   ["Kick In", "Beta 91A", false],
   ["Snare Top", "SM57", false],
   ["Snare Bottom", "SM57", false],
@@ -30,7 +31,7 @@ const INPUTS = [
   ["Talkback", "SM58", false],
 ];
 
-export async function seedPatch(api, now) {
+export async function seedPatch(api: Api, now: Date) {
   const sheetId = "sheet-stage";
   const devices = [
     { id: "dev-sd", name: "SD Rack", kind: "rack", inputs: 48, outputs: 24, color: "#2563eb" },
@@ -55,7 +56,7 @@ export async function seedPatch(api, now) {
       ...(i < 10 ? { owner: "Drums and Bass" } : i < 16 ? { owner: "Band" } : { owner: "Vocals and Speakers" }),
     };
   });
-  const outputs = [
+  const outputs = ([
     ["Wedge 1", "wedge"],
     ["Wedge 2", "wedge"],
     ["Wedge 3", "wedge"],
@@ -64,7 +65,7 @@ export async function seedPatch(api, now) {
     ["IEM Mix 3", "IEM"],
     ["Stream Mix", "stream"],
     ["Record Mix", "record"],
-  ].map(([label, feedType], i) => ({
+  ] as [string, string][]).map(([label, feedType], i) => ({
     rackId: "dev-sd",
     dir: "out",
     index: i + 1,

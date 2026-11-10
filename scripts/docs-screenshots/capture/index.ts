@@ -1,16 +1,30 @@
-// capture/index.mjs — take the screenshots, week-phase shots first, then live.
+// capture/index.ts — take the screenshots, week-phase shots first, then live.
 
-import { Session, launch } from "./kit.mjs";
-import { SHOTS } from "./shots.mjs";
-import { until } from "../lib/api.mjs";
+import { until, type Api } from "../lib/api.ts";
+import { Session, launch } from "./kit.ts";
+import { SHOTS, type World } from "./shots.ts";
 
-export async function capture({ base, api, world, only, outDir, setLive }) {
+export async function capture({
+  base,
+  api,
+  world,
+  only,
+  outDir,
+  setLive,
+}: {
+  base: string;
+  api: Api;
+  world: World;
+  only: string[] | null;
+  outDir: string;
+  setLive: (live: boolean) => void;
+}) {
   const wanted = only ? SHOTS.filter((s) => only.includes(s.name)) : SHOTS;
   const unknown = (only ?? []).filter((n) => !SHOTS.some((s) => s.name === n));
   if (unknown.length > 0) throw new Error(`no such image: ${unknown.join(", ")}`);
 
   const session = new Session(await launch(), base, outDir);
-  const failures = [];
+  const failures: { name: string; error: string }[] = [];
   try {
     await session.openScreens(Object.values(world.outputs));
     const page = await session.appPage();
@@ -19,7 +33,7 @@ export async function capture({ base, api, world, only, outDir, setLive }) {
       const shots = wanted.filter((s) => s.phase === phase);
       if (shots.length === 0) continue;
       if (phase === "live") {
-        // The service that is on is a plan of its own (see world.mjs liveWeekendPlan).
+        // The service that is on is a plan of its own (see world.ts liveWeekendPlan).
         setLive(true);
         await api.post("/api/refresh"); // a manual refresh drops the cached plan list
         await api.post("/api/plan", { id: world.livePlanId });
@@ -32,8 +46,8 @@ export async function capture({ base, api, world, only, outDir, setLive }) {
         try {
           await shot.run({ session, page, api, world });
         } catch (err) {
-          failures.push({ name: shot.name, error: err.message });
-          console.error(`  ${shot.name}: FAILED: ${err.message}`);
+          failures.push({ name: shot.name, error: (err as Error).message });
+          console.error(`  ${shot.name}: FAILED: ${(err as Error).message}`);
         }
       }
     }

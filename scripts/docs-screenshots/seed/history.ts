@@ -1,4 +1,4 @@
-// seed/history.mjs — recorded services, written into the data dir before the server
+// seed/history.ts — recorded services, written into the data dir before the server
 // starts.
 //
 // Attendance, SPL and timeline records are written by the recorders while a real
@@ -14,15 +14,27 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { RUNDOWN, SERVICE_TYPES, planFor, zonedParts } from "../world.mjs";
+import { RUNDOWN, SERVICE_TYPES, planFor, zonedParts } from "../world.ts";
 
 const MINUTE = 60_000;
 
+type ServiceType = (typeof SERVICE_TYPES)[number];
+type Plan = ReturnType<typeof planFor>;
+/** The seeded generator: a fresh number in [0, 1) per call. */
+type Rand = () => number;
+/** What the three record builders share. */
+interface Service {
+  type: ServiceType;
+  plan: Plan;
+  timeIndex: number;
+  rand: Rand;
+}
+
 /** Same rule as KeyedRecordStore's filename: a key holds colons. */
-const fileName = (key) =>
+const fileName = (key: string) =>
   `${key.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/\.{2,}/g, ".").replace(/^[-.]+|[-.]+$/g, "") || "unknown"}.json`;
 
-function rng(seed) {
+function rng(seed: number): Rand {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -33,8 +45,8 @@ function rng(seed) {
   };
 }
 
-const pad2 = (n) => String(n).padStart(2, "0");
-const localDate = (d) => {
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const localDate = (d: Date) => {
   const p = zonedParts(d);
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 };
@@ -46,19 +58,19 @@ const PLAN = {
   youth: { weeks: 7, peaks: [71], growth: 1.1 },
 };
 
-function attendanceRecord({ type, plan, timeIndex, peak, rand, baseline }) {
+function attendanceRecord({ type, plan, timeIndex, peak, rand, baseline }: Service & { peak: number; baseline: number }) {
   const time = plan.times[timeIndex];
   const start = time.startsAt.getTime();
   const end = start + 78 * MINUTE;
   const first = start - 32 * MINUTE;
   const last = end + 14 * MINUTE;
-  const samples = [];
+  const samples: { t: string; attendance: number; occupancy: number; phase?: string }[] = [];
   let attendance = 0;
   let peakOcc = 0;
   let minOcc = Infinity;
   for (let t = first; t <= last; t += 3 * MINUTE) {
     const phase = t < start ? "pre" : t > end ? "post" : undefined;
-    let share;
+    let share: number;
     if (t < start) share = 0.08 + 0.5 * ((t - first) / (start - first)) ** 1.4;
     else if (t <= end) share = 0.58 + 0.42 * Math.min(1, (t - start) / (22 * MINUTE)) - 0.1 * Math.max(0, (t - (end - 14 * MINUTE)) / (14 * MINUTE));
     else share = Math.max(0.05, 0.9 - 0.95 * ((t - end) / (14 * MINUTE)));
@@ -97,13 +109,13 @@ function attendanceRecord({ type, plan, timeIndex, peak, rand, baseline }) {
 }
 
 /** Plan items that happen in a service, with the actual length each ran. */
-function playedItems(plan, timeIndex, rand) {
+function playedItems(plan: Plan, timeIndex: number, rand: Rand) {
   const start = plan.times[timeIndex].startsAt.getTime();
   const preLen = RUNDOWN.slice(0, 3).reduce((s, i) => s + i.len, 0);
   // The service proper (the first song) goes up a little after its scheduled time.
   const late = Math.round((5 + rand() * 80) * 1000);
   let clock = start - preLen * 1000;
-  const out = [];
+  const out: { item: (typeof RUNDOWN)[number]; index: number; startedAt: number; endedAt: number; actual: number }[] = [];
   RUNDOWN.forEach((item, index) => {
     if (item.t === "header") return;
     const overrun = item.title.startsWith("Message") ? 0.96 + rand() * 0.2 : 0.94 + rand() * 0.14;
@@ -116,7 +128,7 @@ function playedItems(plan, timeIndex, rand) {
   return out;
 }
 
-function timelineRecord({ type, plan, timeIndex, rand }) {
+function timelineRecord({ type, plan, timeIndex, rand }: Service) {
   const time = plan.times[timeIndex];
   const played = playedItems(plan, timeIndex, rand);
   return {
@@ -147,7 +159,7 @@ function timelineRecord({ type, plan, timeIndex, rand }) {
 
 const METER = "main-foh";
 
-function splRecord({ type, plan, timeIndex, rand, bias }) {
+function splRecord({ type, plan, timeIndex, rand, bias }: Service & { bias: number }) {
   const time = plan.times[timeIndex];
   const played = playedItems(plan, timeIndex, rand);
   const items = played.map((p, sequence) => {
@@ -187,15 +199,15 @@ function splRecord({ type, plan, timeIndex, rand, bias }) {
   };
 }
 
-function write(dataDir, dir, record) {
+function write(dataDir: string, dir: string, record: { serviceKey: string }) {
   const target = path.join(dataDir, dir);
   fs.mkdirSync(target, { recursive: true });
   fs.writeFileSync(path.join(target, fileName(record.serviceKey)), JSON.stringify(record, null, 2));
 }
 
 /** Baptism sessions on recent Weekend services, as baptism.json holds them. */
-function baptismFile(now) {
-  const sessions = [];
+function baptismFile(now: Date) {
+  const sessions: ({ startedAt: string } & Record<string, unknown>)[] = [];
   const type = SERVICE_TYPES[0];
   const counts = { 1: 3, 2: 5, 4: 2, 5: 4, 8: 6, 11: 2 };
   for (const [weeks, people] of Object.entries(counts)) {
@@ -227,7 +239,7 @@ function baptismFile(now) {
 }
 
 /** Write every recorded-history file the screenshots need. */
-export function seedHistoryFiles(dataDir, now) {
+export function seedHistoryFiles(dataDir: string, now: Date) {
   for (const type of SERVICE_TYPES) {
     const cfg = PLAN[type.key];
     for (let w = 1; w <= cfg.weeks; w++) {
