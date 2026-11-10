@@ -110,7 +110,9 @@ rather than skipping it.
 
 Which files count is one list, `scripts/build-inputs.ts`, used by both update scripts:
 the interface (`renderer/`, `main/`, `public/`, the HTML documents, the Vite, Tailwind,
-PostCSS and TypeScript config) and the public ServiceCue page's Worker source and config.
+PostCSS and TypeScript config, but not `tsconfig.tooling.json`, which only type-checks
+the tooling) and the public ServiceCue page's Worker source and config.
+
 A checkout with no `build/servicecue/deploy.json` reinstalls and rebuilds on the next
 update whatever changed, unless `build/servicecue.failed` says the last build failed to
 make it on the commit the update starts from: then only a change to a build input rebuilds

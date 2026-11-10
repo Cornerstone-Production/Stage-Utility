@@ -26,9 +26,14 @@ export const BUILD_INPUT_PREFIXES = [
   "vite.servicecue.config",
 ];
 
+/** Sorted, one per line. Paths a prefix above matches that no build reads. */
+export const NOT_BUILD_INPUTS = [
+  "tsconfig.tooling.json", // type-checks the tooling only; vite and the Worker's bundle never read it
+];
+
 /** Does any changed path need a rebuild? */
 export function needsBuild(paths: string[]): boolean {
-  return paths.some((p) => BUILD_INPUT_PREFIXES.some((prefix) => p.startsWith(prefix)));
+  return paths.some((p) => !NOT_BUILD_INPUTS.includes(p) && BUILD_INPUT_PREFIXES.some((prefix) => p.startsWith(prefix)));
 }
 
 if (isMain(import.meta.url, process.argv[1])) {
