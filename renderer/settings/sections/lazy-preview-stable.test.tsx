@@ -1,5 +1,6 @@
 // lazy-preview-stable.test.tsx — the preview iframe survives the side panel
-// opening and closing, and fades in and out without giving up its slot early.
+// opening and closing, fades in once loaded, and is kept for a grace window
+// after it leaves so scrolling straight back does not reload it.
 //
 // The Screens card passes `following` only while its panel is open. LazyPreview
 // once built a different element tree for each case, so React remounted the
@@ -119,13 +120,14 @@ test("closing the side panel keeps the same iframe", async () => {
   assert.ok(screen.getByRole("button", { name: "Edit it" }));
 });
 
-// ---- Fade in once loaded, fade out on leaving, cap still held -----------------
+// ---- Fade in once loaded, kept for FADE_MS after leaving, cap still held -----
 //
-// What is pinned is the sequence: hidden until the iframe's load event, hidden
-// again the moment the card leaves the screen, and the slot held until the fade
-// has played, to the millisecond.
+// What is pinned is the sequence: hidden until the iframe's load event,
+// transparent again the moment the card leaves (which is 200px off screen, so
+// nobody sees it go), and the iframe and slot kept for FADE_MS, to the
+// millisecond.
 
-test("fades in on load, fades out on leaving, and holds its slot until gone", async () => {
+test("fades in on load, goes transparent on leaving, and holds its slot for FADE_MS", async () => {
   const { container, iframe, scroll } = await mount();
   assert.equal(__previewLimits.liveCount(), 1);
   assert.match(fadeClass(iframe), /opacity-0/, "visible before its iframe has loaded");
@@ -134,17 +136,17 @@ test("fades in on load, fades out on leaving, and holds its slot until gone", as
   assert.match(fadeClass(iframe), /opacity-100/, "did not fade in on load");
 
   await scroll(false);
-  assert.match(fadeClass(iframe), /opacity-0/, "did not start fading out on leaving");
+  assert.match(fadeClass(iframe), /opacity-0/, "did not go transparent on leaving");
   await tick(FADE_MS - 1);
-  assert.ok(iframe.isConnected, "the iframe went before the fade could play");
+  assert.ok(iframe.isConnected, "the iframe went before FADE_MS was up");
   assert.equal(__previewLimits.liveCount(), 1, "the slot was released before the iframe went");
 
   await tick(1);
-  assert.ok(container.querySelector("iframe") === null, "the iframe outlived the fade");
-  assert.equal(__previewLimits.liveCount(), 0, "the slot was not released when the fade ended");
+  assert.ok(container.querySelector("iframe") === null, "the iframe outlived FADE_MS");
+  assert.equal(__previewLimits.liveCount(), 0, "the slot was not released when FADE_MS was up");
 });
 
-test("returning during the fade-out keeps the same iframe", async () => {
+test("coming back within FADE_MS keeps the same iframe", async () => {
   const { container, iframe, scroll } = await mount();
   await load(iframe);
   await scroll(false);
@@ -153,7 +155,7 @@ test("returning during the fade-out keeps the same iframe", async () => {
   assert.ok(container.querySelector("iframe") === iframe, "the iframe was remounted");
   assert.match(fadeClass(iframe), /opacity-100/);
   await tick(FADE_MS);
-  assert.ok(container.querySelector("iframe") === iframe, "the cancelled fade-out still unmounted it");
+  assert.ok(container.querySelector("iframe") === iframe, "the cancelled release still unmounted it");
   assert.equal(__previewLimits.liveCount(), 1);
 });
 
@@ -182,12 +184,12 @@ for (const [what, next] of [
   });
 }
 
-test("coming back after the fade-out has played hides the new iframe until it has loaded", async () => {
+test("coming back after FADE_MS hides the new iframe until it has loaded", async () => {
   const { container, iframe: old, scroll } = await mount();
   await load(old);
   await scroll(false);
   await tick(FADE_MS);
-  assert.ok(container.querySelector("iframe") === null, "the fade-out never released the iframe");
+  assert.ok(container.querySelector("iframe") === null, "FADE_MS passed and the iframe was not released");
 
   await scroll(true);
   const fresh = container.querySelector("iframe");
@@ -211,27 +213,28 @@ test("unmounting a streaming preview releases its slot", async () => {
   assert.equal(__previewLimits.liveCount(), 0, "the unmounted preview kept its slot");
 });
 
-test("unmounting a preview part way through its fade-out releases its slot", async () => {
+test("unmounting a preview inside its FADE_MS hold releases its slot", async () => {
   const { iframe, unmount, scroll } = await mount();
   await load(iframe);
   await scroll(false);
   await tick(FADE_MS - 1);
   unmount();
   assert.equal(__previewLimits.liveCount(), 0, "the unmounted preview kept its slot");
-  // The fade timer was cleared with the card, so it cannot release anything later.
+  // The release timer was cleared with the card, so it cannot release anything later.
   await tick(FADE_MS);
   assert.equal(__previewLimits.liveCount(), 0);
 });
 
-// ---- The slot is held exactly as long as the fade runs ------------------------
+// ---- The hold is as long as the transition ------------------------------------
 //
-// The fade runs at --motion-settled, a CSS token; the slot is held for FADE_MS,
-// a JS constant. Neither can be the source of the other cleanly: an inline
+// The opacity transition runs at --motion-settled, a CSS token; the iframe and
+// slot are held for FADE_MS, a JS constant. Neither can be the source of the other cleanly: an inline
 // duration would leave the token system (motion-tokens.test.ts forbids literal
 // durations), and reading the token at runtime needs a fallback constant for
 // when there is no stylesheet, which is this duplication again. So they are
-// tied here. A shorter FADE_MS cuts the fade off; a longer one holds a slot for
-// nothing.
+// tied here, so an iframe is never removed part way through its transition. The
+// leaving half of it plays off screen today; the tie is what keeps it whole if
+// a card is ever made to leave while it can still be seen.
 //
 // Read from the DECLARATION at the start of a line, so a comment naming the
 // token cannot satisfy it, and from the rendered class, so the wrapper really

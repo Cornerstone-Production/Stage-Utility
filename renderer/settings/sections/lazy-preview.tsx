@@ -35,8 +35,11 @@ const MAX_LIVE_PREVIEWS = 12;
 
 /**
  * How long a preview that has left the screen keeps its iframe, and its slot, so
- * it can fade out rather than vanish. Matches `--motion-settled`, the duration the
- * fade runs at; lazy-preview-stable.test.tsx fails when the two differ. The slot is held for the whole of it: the cap counts iframes that
+ * scrolling straight back reuses the same iframe rather than loading a new one.
+ * The preview goes transparent as it leaves, but it leaves only once it is 200px
+ * past the edge, so that fade is never seen. Matches `--motion-settled`, the
+ * duration the fade-in runs at; lazy-preview-stable.test.tsx fails when the two
+ * differ. The slot is held for the whole of it: the cap counts iframes that
  * exist, not iframes that are visible, so releasing early would let the next
  * preview boot while this one is still there.
  */
@@ -168,11 +171,12 @@ export function LazyPreview({
   // it is asynchronous by nature, and setting state synchronously inside an
   // effect triggers cascading renders (the compiler lint rejects it).
   //
-  // Leaving the screen does not release at once: the preview fades out first (the
-  // render below drops its opacity as soon as it is neither visible nor forced),
-  // and the iframe and slot go FADE_MS later. Coming back inside that window
-  // cancels the timer and the same iframe fades back in, untouched. The slot is
-  // released on unmount by the effect after this one.
+  // Leaving does not release at once: the preview goes transparent (the render
+  // below drops its opacity as soon as it is neither visible nor forced, which
+  // happens off screen) and the iframe and slot go FADE_MS later. Coming back
+  // inside that window cancels the timer and the same iframe is shown again,
+  // untouched, with no reload. The slot is released on unmount by the effect
+  // after this one.
   useEffect(() => {
     const token = tokenRef.current;
 
@@ -317,8 +321,8 @@ export function LazyPreview({
 }
 
 /**
- * The live preview, shown once its iframe has loaded and faded out while it is
- * leaving.
+ * The live preview, faded in once its iframe has loaded and transparent while it
+ * is leaving (which is off screen, so only the fade-in is ever seen).
  *
  * `loaded` lives here rather than in LazyPreview so it lives and dies with the
  * iframe it describes: this unmounts when the slot is released, and is remounted
