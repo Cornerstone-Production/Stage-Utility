@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// update-homebrew-formula.mjs — rewrite the formula for a given release.
+// update-homebrew-formula.ts — rewrite the formula for a given release.
 //
 // A Homebrew formula pins a version and a checksum per platform, so it is stale
 // the moment a release is cut. Rewriting it by hand is the kind of step that gets
@@ -9,7 +9,7 @@
 // Reads the checksums scripts/build-artifacts.sh wrote rather than re-hashing
 // anything, so the formula can only ever agree with what was actually built.
 //
-//   node scripts/update-homebrew-formula.mjs <version> --sums path/to/SHA256SUMS
+//   node scripts/update-homebrew-formula.ts <version> --sums path/to/SHA256SUMS
 //
 // SHA256SUMS is local to the build (scripts/build-artifacts.sh writes it beside the
 // archives), not a release asset, and is always a path, never fetched here.
@@ -24,7 +24,7 @@ const FORMULA = path.join(ROOT, "packaging", "homebrew", "stage-utility.rb");
 const version = process.argv[2];
 const sumsArg = process.argv.indexOf("--sums");
 if (!version || sumsArg === -1 || !process.argv[sumsArg + 1]) {
-  console.error("usage: update-homebrew-formula.mjs <version> --sums <SHA256SUMS>");
+  console.error("usage: update-homebrew-formula.ts <version> --sums <SHA256SUMS>");
   console.error("  the file is written by scripts/build-artifacts.sh, beside the archives it built");
   process.exit(1);
 }
@@ -35,7 +35,7 @@ const PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
 const sums = fs.readFileSync(process.argv[sumsArg + 1], "utf8");
 
 /** platform -> sha256, from the release's own checksum file. */
-const bySha = new Map();
+const bySha = new Map<string, string>();
 for (const line of sums.split("\n")) {
   const m = /^([0-9a-f]{64})\s+stage-utility-(.+)-([a-z0-9]+-[a-z0-9]+)\.tar\.gz$/.exec(line.trim());
   if (m && m[2] === version) bySha.set(m[3], m[1]);
@@ -120,12 +120,12 @@ for (const platform of PLATFORMS) {
 // and then reading it. The two-step version is a check-then-use race: the state it
 // tested for can change before the read, and the "does it exist" answer is already
 // carried by the read itself.
-let existing = null;
+let existing: string | null = null;
 try {
   existing = fs.readFileSync(target, "utf8");
 } catch (err) {
   // No formula yet is the create case. Anything else is a real failure.
-  if (err.code !== "ENOENT") throw err;
+  if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 }
 if (existing === src) {
   console.log(`[homebrew] ${path.basename(target)} already at ${version}`);

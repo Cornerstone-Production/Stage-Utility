@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// verified-tree.mjs — has the tree a push to main carries already passed the release gate on beta?
+// verified-tree.ts — has the tree a push to main carries already passed the release gate on beta?
 //
-//   node scripts/verified-tree.mjs        (in release.yml; writes `verified` to $GITHUB_OUTPUT)
+//   node --no-warnings scripts/verified-tree.ts        (in release.yml; writes `verified` to $GITHUB_OUTPUT)
 //
 // A stable release is beta merged into main, so the tree main is handed is beta's, which
 // the release run on beta lint-checked, type-checked, built and tested minutes or days
@@ -30,7 +30,7 @@ export const GATE_JOBS = ["verify lint, type-check, build", "verify tests (1/4)"
  * package-lock.json's `version` and `packages[""].version`. Nothing else: the lockfile has
  * a `version` for every dependency, and one of those changing is a real change.
  */
-export function withoutOwnVersion(name, text) {
+export function withoutOwnVersion(name: string, text: string): string {
   const doc = JSON.parse(text);
   delete doc.version;
   if (name === "package-lock.json" && doc.packages?.[""]) delete doc.packages[""].version;
@@ -38,14 +38,14 @@ export function withoutOwnVersion(name, text) {
 }
 
 /** Whether a run's jobs (the Actions API's `jobs` array) include every gate job, each a success. */
-export function gatePassed(jobs) {
+export function gatePassed(jobs: { name: string; conclusion: string | null }[]): boolean {
   return GATE_JOBS.every((name) => jobs.some((j) => j.name === name && j.conclusion === "success"));
 }
 
-const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (args: string[], cwd: string) => execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
 /** Whether commit `from` is in HEAD's history and its tree differs from HEAD's only in the project's own version. */
-export function sameButVersion(from, cwd = process.cwd()) {
+export function sameButVersion(from: string, cwd = process.cwd()): boolean {
   try {
     git(["merge-base", "--is-ancestor", from, "HEAD"], cwd);
   } catch {
@@ -63,14 +63,26 @@ export function sameButVersion(from, cwd = process.cwd()) {
   return true;
 }
 
-async function getJson(url, token) {
+async function getJson(url: string, token: string | undefined): Promise<any> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } });
   if (!res.ok) throw new Error(`${url} answered ${res.status}`);
   return res.json();
 }
 
 /** The newest beta release run whose gate passed on a commit whose tree this one matches, or null. */
-export async function findVerified({ api, repo, token, cwd, runs = 20 }) {
+export async function findVerified({
+  api,
+  repo,
+  token,
+  cwd,
+  runs = 20,
+}: {
+  api: string;
+  repo: string | undefined;
+  token: string | undefined;
+  cwd: string;
+  runs?: number;
+}): Promise<{ sha: string; url: string } | null> {
   const list = await getJson(`${api}/repos/${repo}/actions/workflows/release.yml/runs?branch=beta&event=push&per_page=${runs}`, token);
   for (const run of list.workflow_runs ?? []) {
     if (!sameButVersion(run.head_sha, cwd)) continue;
@@ -81,7 +93,7 @@ export async function findVerified({ api, repo, token, cwd, runs = 20 }) {
 }
 
 async function main() {
-  const out = (k, v) => {
+  const out = (k: string, v: string) => {
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`);
   };
   if (process.env.GITHUB_REF !== "refs/heads/main") {
@@ -106,6 +118,9 @@ async function main() {
       out("verified", "false");
     }
   } catch (err) {
+    // The ternary errorMessage() replaces, kept here on purpose: this runs on a runner that installs
+    // nothing, and main/ imports its own modules as `.js`, which plain Node cannot resolve.
+    // eslint-disable-next-line no-restricted-syntax
     console.log(`::warning title=Gate::could not tell whether beta verified this tree (${err instanceof Error ? err.message : String(err)}), so the gate runs.`);
     out("verified", "false");
   }

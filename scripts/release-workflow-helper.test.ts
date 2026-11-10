@@ -383,7 +383,7 @@ describe("the gate is not run twice for one tree", () => {
     assert.equal(already.if, "${{ github.ref == 'refs/heads/main' }}");
     assert.deepEqual(already.permissions, { contents: "read", actions: "read" });
     const check = already.steps?.find((st) => st.id === "check");
-    assert.equal(check?.run, "node scripts/verified-tree.mjs");
+    assert.equal(check?.run, "node --no-warnings scripts/verified-tree.ts");
     assert.equal(check?.env?.["GH_TOKEN"], "${{ github.token }}");
     assert.equal(already.steps?.find((st) => st.uses?.startsWith("actions/checkout@"))?.with?.["fetch-depth"], 0, "the beta commit must be in the clone to compare with");
   });

@@ -30,7 +30,6 @@
     "publish/servicecue/src/**/*.test.ts"
   ],
   "exclude": [
-    "node_modules",
-    "scripts/verified-tree.test.ts"
+    "node_modules"
   ]
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// release-notes.mjs — the notes attached to a GitHub release.
+// release-notes.ts — the notes attached to a GitHub release.
 //
 // The workflow used to pass `git log` straight through from the previous tag of
 // any kind. On main that range is nearly empty — the betas already consumed it —
@@ -10,7 +10,7 @@
 // So: span the range a reader actually cares about, drop everything invisible,
 // and group what is left.
 //
-//   node scripts/release-notes.mjs <version> <from-ref>
+//   node scripts/release-notes.ts <version> <from-ref>
 //
 // `from-ref` is the previous STABLE release for a stable release, and the
 // previous tag for a prerelease — the caller decides, because that is the same
@@ -29,7 +29,7 @@ import * as path from "node:path";
 
 const [, , version, fromRef] = process.argv;
 if (!version) {
-  console.error("usage: release-notes.mjs <version> [from-ref]");
+  console.error("usage: release-notes.ts <version> [from-ref]");
   process.exit(1);
 }
 
@@ -64,7 +64,7 @@ function releaseNotesDir() {
  *
  * docs/release-notes/1.10.0.md → shown on the v1.10.0 release, and nowhere else.
  */
-function upgradeNotice(v) {
+function upgradeNotice(v: string): string {
   try {
     // Trailing newline restored after the trim: the generated sections each end
     // in one and are joined with another, which is what puts a blank line
@@ -134,7 +134,7 @@ const SECTION_FLOOR = 6;
  * each section still has left, and the rounding loss goes back out in display
  * order — so the budget is always spent exactly.
  */
-function allocate(sizes) {
+function allocate(sizes: number[]): number[] {
   const alloc = sizes.map(() => 0);
   let left = BULLET_BUDGET;
 
@@ -161,7 +161,7 @@ function allocate(sizes) {
   return alloc;
 }
 
-function log(range) {
+function log(range: string): string[] {
   try {
     return execFileSync("git", ["log", "--no-merges", "--format=%s", range], { encoding: "utf8" })
       .split("\n")
@@ -180,7 +180,7 @@ function log(range) {
  * contains blank lines, bullet lists and code fences, and every cheaper
  * separator has appeared inside one.
  */
-function commits(range) {
+function commits(range: string): { sha: string; subject: string; body: string }[] {
   try {
     return execFileSync("git", ["log", "--no-merges", "--format=%H%x00%s%x00%b%x1e", range], { encoding: "utf8" })
       .split("\x1e")
@@ -233,34 +233,35 @@ const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
  * this mechanism exists to prevent, and a stale or mistyped override is a
  * correction that would silently never be applied.
  *
- * @returns {Map<string, {betaOnly: boolean, reason: string, given: string}>} by full SHA
+ * Returned by full SHA.
  */
-function betaOnlyOverrides(v) {
+function betaOnlyOverrides(v: string): Map<string, { betaOnly: boolean; reason: string; given: string }> {
   const file = path.join(releaseNotesDir(), "overrides", `${v}.json`);
   const shown = path.posix.join("docs/release-notes/overrides", `${v}.json`);
 
-  let text;
+  let text: string;
   try {
     text = readFileSync(file, "utf8");
   } catch (err) {
     // The ordinary case: no release needs one. Anything else is a file that
     // exists and could not be read, which is not the same answer at all.
-    if (err.code === "ENOENT") return new Map();
-    throw new Error(`cannot read ${shown}: ${err.message}`, { cause: err });
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    throw new Error(`cannot read ${shown}: ${(err as Error).message}`, { cause: err });
   }
 
-  let list;
+  let list: unknown;
   try {
     list = JSON.parse(text);
   } catch (err) {
-    throw new Error(`${shown} is not valid JSON: ${err.message}`, { cause: err });
+    throw new Error(`${shown} is not valid JSON: ${(err as Error).message}`, { cause: err });
   }
   if (!Array.isArray(list)) throw new Error(`${shown} must be a JSON array of overrides`);
 
-  const out = new Map();
-  list.forEach((e, i) => {
+  const out = new Map<string, { betaOnly: boolean; reason: string; given: string }>();
+  list.forEach((entry: unknown, i: number) => {
     const at = `${shown} entry ${i}`;
-    if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} is not an object`);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${at} is not an object`);
+    const e = entry as Record<string, unknown>;
     if (typeof e.commit !== "string" || !e.commit.trim()) throw new Error(`${at} has no "commit"`);
     // A SHA, not a name. `git rev-parse` resolves "beta" perfectly happily, and
     // an override pinned to a branch would apply to whatever that branch points
@@ -274,7 +275,7 @@ function betaOnlyOverrides(v) {
       throw new Error(`${at} (${e.commit}) has no "reason" — say why the commit's own trailer cannot be trusted`);
     }
 
-    let sha;
+    let sha: string;
     try {
       sha = execFileSync("git", ["rev-parse", "--verify", "--quiet", `${e.commit.trim()}^{commit}`], {
         encoding: "utf8",
@@ -300,9 +301,9 @@ const isPrerelease = version.includes("-");
  * the anchor. Used to tell "a fix to something you already had" apart from "a
  * fix made while building something you have never seen".
  */
-function scopesBefore(ref) {
+function scopesBefore(ref: string | undefined): Set<string> | null {
   if (!ref) return null; // no anchor: nothing is known to be old, so suppress nothing
-  const before = new Set();
+  const before = new Set<string>();
   for (const subject of log(ref)) {
     const m = CONVENTIONAL.exec(subject);
     if (m?.[2]) before.add(m[2].toLowerCase());
@@ -310,8 +311,8 @@ function scopesBefore(ref) {
   return before;
 }
 
-const features = [];
-const fixes = [];
+const features: string[] = [];
+const fixes: string[] = [];
 /**
  * `perf` and `polish`: every patch-level type but `fix`. A section of its own
  * rather than a share of Fixed, which is where `perf` used to land: "anchor the
@@ -320,21 +321,30 @@ const fixes = [];
  * sidebar") is not one either. The dialog has rendered an Improved heading since
  * it learned about sections.
  */
-const improvements = [];
-const breaking = [];
+const improvements: string[] = [];
+const breaking: string[] = [];
 /** Held back as build-out churn, counted so each omission is stated. */
 let buildOutFixes = 0;
 let buildOutImprovements = 0;
 const seen = new Set();
 
-const parsed = [];
-const featScopes = new Set();
+interface Parsed {
+  type: string;
+  scope: string | undefined;
+  key: string | null;
+  bang: string | undefined;
+  text: string;
+  betaOnly: boolean;
+  override: boolean | null;
+}
+const parsed: Parsed[] = [];
+const featScopes = new Set<string>();
 
 // A prerelease keeps every fix either way, so its notes are not a place a
 // trailer decision can go wrong and the file for the stable version it is
 // building towards is deliberately not read here.
 const overrides = isPrerelease ? new Map() : betaOnlyOverrides(version);
-const overridesApplied = new Set();
+const overridesApplied = new Set<string>();
 
 for (const { sha, subject, body } of entries) {
   const m = CONVENTIONAL.exec(subject);
@@ -366,7 +376,7 @@ for (const { sha, subject, body } of entries) {
 }
 
 /** What an applied override did, for the release log. */
-function say(betaOnly, trailer) {
+function say(betaOnly: boolean, trailer: boolean): string {
   if (betaOnly === trailer) return `override changes nothing: the commit already reads ${trailer ? "beta-only" : "not beta-only"}`;
   if (betaOnly) return "held back as beta-only, overriding a missing trailer";
   return "kept in the notes, overriding a wrong Beta-only trailer";
@@ -398,7 +408,7 @@ for (const [sha, o] of overrides) {
  * Prereleases keep everything. Someone on the beta track has been running the
  * broken version — for them the fix IS the news.
  */
-function isBuildOutFix(entry, oldScopes) {
+function isBuildOutFix(entry: Parsed, oldScopes: Set<string> | null): boolean {
   if (isPrerelease) return false;
   // An override is the author correcting a decision the commit can no longer
   // carry, and it decides outright — in BOTH directions. Letting it set only
@@ -444,12 +454,12 @@ for (const entry of parsed) {
  * A scope that is not listed is shown as written — scores, calendar, patch,
  * layout and the rest already say what they are.
  */
-function scopeLabel(scope) {
+function scopeLabel(scope: string): string {
   return SCOPE_LABELS[scope.toLowerCase()] ?? scope;
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
-function bulletList(items, limit) {
+function bulletList(items: string[], limit: number): string {
   const shown = items.slice(0, limit).map((s) => `- ${s}`);
   const rest = items.length - shown.length;
   if (rest > 0) shown.push(`- …and ${rest} more`);
@@ -471,16 +481,15 @@ function bulletList(items, limit) {
  * to go above it, after the `head`. A `## comment` inside a code fence is not a
  * heading at all.
  *
- * @returns {{ prose: string, lead: Map<string, {head: string, tail: string}> }}
- *   `lead` by lower-case title
+ * Returns the remaining prose, and `lead` by lower-case title.
  */
-function takeGeneratedSections(notice, titles) {
+function takeGeneratedSections(notice: string, titles: string[]): { prose: string; lead: Map<string, { head: string; tail: string }> } {
   const wanted = new Set(titles.map((t) => t.toLowerCase()));
-  const prose = [];
-  const lead = new Map();
-  let into = null;
+  const prose: string[] = [];
+  const lead = new Map<string, { head: string[]; tail: string[] }>();
+  let into: string | null = null;
   let underSubheading = false;
-  let fence = null; // the marker that opened the code fence we are inside, if any
+  let fence: string | null = null; // the marker that opened the code fence we are inside, if any
   for (const line of notice.split("\n")) {
     const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
     if (marker) {
@@ -501,7 +510,7 @@ function takeGeneratedSections(notice, titles) {
       continue;
     }
     if (!fence && line.trim().startsWith("#")) underSubheading = true;
-    lead.get(into)[underSubheading ? "tail" : "head"].push(line);
+    lead.get(into)![underSubheading ? "tail" : "head"].push(line);
   }
   const text = prose.join("\n").trim();
   return {
@@ -551,14 +560,23 @@ running it? Update from **Settings → Advanced → Updates**.
  * budget, which is there so the release page and the dialog's NOTES_CAP agree; the
  * notice's other sections, `Changed` included, have never been counted either.
  */
-function renderSection({ title, items, held = 0, one, many, lead = { head: "", tail: "" } }, limit) {
+interface Section {
+  title: string;
+  items: string[];
+  held?: number;
+  one?: string;
+  many?: string;
+  lead?: { head: string; tail: string };
+}
+
+function renderSection({ title, items, held = 0, one, many, lead = { head: "", tail: "" } }: Section, limit: number): string {
   const note = held
     ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.`
     : "";
   const bullets = items.length ? bulletList(items, limit) : "";
   // A hand-written list and the generated bullets are one tight list. After
   // hand-written prose they get a blank line, as any new paragraph does.
-  const endsInBullet = /^\s*[-*] /.test(lead.head.split(/\n\s*\n/).pop());
+  const endsInBullet = /^\s*[-*] /.test(lead.head.split(/\n\s*\n/).pop()!);
   const list = [lead.head, bullets].filter(Boolean).join(endsInBullet ? "\n" : "\n\n");
   // The note gets a blank line too: directly under a bullet it is a lazy
   // continuation of it, and reads as part of that bullet on the release page.
@@ -571,7 +589,7 @@ function renderSection({ title, items, held = 0, one, many, lead = { head: "", t
  * See main/services/update/release-notes.ts, which must recognise every heading
  * named here or the section disappears from the dialog without a word.
  */
-const SECTIONS = [
+const SECTIONS: Section[] = [
   { title: "Breaking", items: breaking },
   { title: "New", items: features },
   { title: "Improved", items: improvements, held: buildOutImprovements, one: "improvement", many: "improvements" },

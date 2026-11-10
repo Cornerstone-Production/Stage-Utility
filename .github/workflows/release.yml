@@ -41,7 +41,7 @@ jobs:
   # A stable release is beta merged into main, and beta's release run already put
   # that tree through the gate below. When it did, and the tree main is handed
   # differs from the verified one only in the version the beta release bumped,
-  # the gate is not run again (scripts/verified-tree.mjs says when, and why not).
+  # the gate is not run again (scripts/verified-tree.ts says when, and why not).
   # Main only: a push to beta is a merge nothing has tested together yet. This
   # job never fails the run; any doubt is a "no", and the gate runs.
   already-verified:
@@ -69,7 +69,7 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verified-tree.mjs
+        run: node --no-warnings scripts/verified-tree.ts
 
   # Every push, releasable or not. This is the only gate a push to beta or main
   # gets (ci.yml runs on pull requests only), and it is the merged tree that
@@ -855,7 +855,7 @@ jobs:
           # since the previous tag. Reading from the last tag on main is what made
           # v1.9.3 ship two lines, one of them its own release-bump commit.
           if [ "$PRE" = true ]; then FROM="$LAST"; else FROM="$STABLE"; fi
-          node scripts/release-notes.mjs "$V" "$FROM" > /tmp/notes.md
+          node --no-warnings scripts/release-notes.ts "$V" "$FROM" > /tmp/notes.md
           assets=(dist/*.tar.gz)
           # The Mac output helper's two zips, when the helper job made them. Named by
           # pattern, so nothing else that lands in helper-dist is published.
@@ -916,7 +916,7 @@ jobs:
           V: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
-          node scripts/update-homebrew-formula.mjs "$V" --sums dist/SHA256SUMS
+          node --no-warnings scripts/update-homebrew-formula.ts "$V" --sums dist/SHA256SUMS
           git clone --depth 1 \
             "https://x-access-token:${TAP_TOKEN}@github.com/Cornerstone-Production/homebrew-stage-utility.git" tap
           mkdir -p tap/Formula

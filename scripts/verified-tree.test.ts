@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 
-import { GATE_JOBS, gatePassed, sameButVersion } from "./verified-tree.mjs";
+import { GATE_JOBS, gatePassed, sameButVersion } from "./verified-tree.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
