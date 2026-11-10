@@ -16,6 +16,7 @@
 // `actual` to build its failure message, and a live jsdom element does not finish.
 
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
@@ -215,4 +216,27 @@ test("unmounting a preview part way through its fade-out releases its slot", asy
   // The fade timer was cleared with the card, so it cannot release anything later.
   await tick(FADE_MS);
   assert.equal(__previewLimits.liveCount(), 0);
+});
+
+// ---- The slot is held exactly as long as the fade runs ------------------------
+//
+// The fade runs at --motion-settled, a CSS token; the slot is held for FADE_MS,
+// a JS constant. Neither can be the source of the other cleanly: an inline
+// duration would leave the token system (motion-tokens.test.ts forbids literal
+// durations), and reading the token at runtime needs a fallback constant for
+// when there is no stylesheet, which is this duplication again. So they are
+// tied here. A shorter FADE_MS cuts the fade off; a longer one holds a slot for
+// nothing.
+//
+// Read from the DECLARATION at the start of a line, so a comment naming the
+// token cannot satisfy it, and from the rendered class, so the wrapper really
+// uses that token.
+
+test("FADE_MS is --motion-settled, and the fade runs at --motion-settled", async () => {
+  const css = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
+  const declared = [...css.matchAll(/^\s*--motion-settled:\s*(\d+)ms\s*;/gm)].map((m) => Number(m[1]));
+  assert.deepEqual(declared, [FADE_MS], "FADE_MS and --motion-settled in styles.css disagree");
+
+  const { iframe } = await mount();
+  assert.match(fadeClass(iframe), /(^|\s)duration-\(--motion-settled\)(\s|$)/, "the fade does not run at --motion-settled");
 });
