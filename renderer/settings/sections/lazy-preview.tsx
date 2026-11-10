@@ -122,9 +122,6 @@ export function LazyPreview({
   const tokenRef = useRef<symbol>(Symbol("preview"));
   const [visible, setVisible] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  // The iframe has finished loading, so there is something to show. Until then the
-  // card is the black box ViewPreview draws, not a half-painted kiosk page.
-  const [loaded, setLoaded] = useState(false);
   // Set when the operator asks for this one specifically, which jumps the queue
   // rather than leaving them with a placeholder they cannot resolve.
   const [forced, setForced] = useState(false);
@@ -164,7 +161,6 @@ export function LazyPreview({
       const timer = setTimeout(() => {
         release(token);
         setStreaming(false);
-        setLoaded(false);
       }, FADE_MS);
       return () => clearTimeout(timer);
     }
@@ -188,24 +184,20 @@ export function LazyPreview({
     return () => release(token);
   }, []);
 
-  // Edge to edge: both callers are Screens cards, which clip to their own radius,
-  // so nothing here rounds a corner or draws outside the preview.
-  //
-  // The black sits on the outer box and only the preview inside it fades, so a
-  // preview still loading, or on its way out, is the dark panel it is about to
-  // be and not a hole in the card. `load` does not bubble, but a capture handler
-  // above the iframe still sees it, which keeps this out of ViewPreview. The
-  // global reduced-motion rule collapses the transition to one frame.
-  const shown = loaded && (visible || forced);
+  // Keyed on what ViewPreview remounts its iframe on (it keys the iframe on the
+  // view and the height the aspect gives), so a card switched to another View
+  // gets a fresh FadingPreview, and with it a fresh `loaded`, rather than showing
+  // the new iframe at full opacity before it has loaded. Keying on the raw aspect
+  // is the safe side of ViewPreview's rounding: an aspect change that keeps the
+  // height reloads an iframe it did not have to, and never strands one hidden.
   const preview = (
-    <div className="bg-black">
-      <div
-        onLoadCapture={() => setLoaded(true)}
-        className={cn("transition-opacity duration-(--motion-settled)", shown ? "opacity-100" : "opacity-0")}
-      >
-        <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />
-      </div>
-    </div>
+    <FadingPreview
+      key={`${viewId}:${aspect}`}
+      leaving={!visible && !forced}
+      viewId={viewId}
+      outputId={outputId}
+      aspect={aspect}
+    />
   );
 
   /**
@@ -301,6 +293,51 @@ export function LazyPreview({
           </span>
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The live preview, shown once its iframe has loaded and faded out while it is
+ * leaving.
+ *
+ * `loaded` lives here rather than in LazyPreview so it lives and dies with the
+ * iframe it describes: this unmounts when the slot is released, and is remounted
+ * by its key when the iframe is, so a new iframe always starts hidden.
+ *
+ * Edge to edge: both callers are Screens cards, which clip to their own radius,
+ * so nothing here rounds a corner or draws outside the preview.
+ *
+ * The black sits on the outer box and only the preview inside it fades, so a
+ * preview still loading, or on its way out, is the dark panel it is about to be
+ * and not a hole in the card. `load` does not bubble, but a capture handler above
+ * the iframe still sees it, which keeps this out of ViewPreview. The global
+ * reduced-motion rule collapses the transition to one frame.
+ */
+function FadingPreview({
+  leaving,
+  viewId,
+  outputId,
+  aspect,
+}: {
+  leaving: boolean;
+  viewId: string;
+  outputId: string | null;
+  aspect?: number;
+}) {
+  // Until the iframe loads, the card is the black box, not a half-painted kiosk page.
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="bg-black">
+      <div
+        onLoadCapture={() => setLoaded(true)}
+        className={cn(
+          "transition-opacity duration-(--motion-settled)",
+          loaded && !leaving ? "opacity-100" : "opacity-0",
+        )}
+      >
+        <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />
+      </div>
     </div>
   );
 }

@@ -37,10 +37,11 @@ afterEach(() => {
   __previewLimits.reset();
 });
 
-function card(following?: { label: string }, viewId = "v1") {
+function card(following?: { label: string }, viewId = "v1", aspect?: number) {
   return React.createElement(LazyPreview, {
     viewId,
     outputId: "o1",
+    aspect,
     onExpand: () => {},
     expandLabel: "Edit it",
     following,
@@ -148,4 +149,44 @@ test("returning during the fade-out keeps the same iframe", async () => {
   await tick(FADE_MS);
   assert.ok(container.querySelector("iframe") === iframe, "the cancelled fade-out still unmounted it");
   assert.equal(__previewLimits.liveCount(), 1);
+});
+
+// ---- A new iframe starts hidden, whatever came before it ----------------------
+//
+// `loaded` describes ONE iframe. Each case below swaps the iframe while the card
+// stays mounted, after the old one had loaded and shown.
+
+for (const [what, next] of [
+  ["picking a different view", card(undefined, "v2")],
+  ["a different aspect", card(undefined, "v1", 4 / 3)],
+] as const) {
+  test(`${what} hides the new iframe until it has loaded`, async () => {
+    const { container, rerender, iframe: old } = await mount();
+    await load(old);
+    assert.match(fadeClass(old), /opacity-100/);
+
+    rerender(next);
+    const fresh = container.querySelector("iframe");
+    assert.ok(fresh, "the preview stopped streaming");
+    assert.ok(fresh !== old, "ViewPreview kept its iframe, so this case tests nothing");
+    assert.match(fadeClass(fresh), /opacity-0/, "the new iframe showed before it had loaded");
+
+    await load(fresh);
+    assert.match(fadeClass(fresh), /opacity-100/, "the new iframe never faded in");
+  });
+}
+
+test("coming back after the fade-out has played hides the new iframe until it has loaded", async () => {
+  const { container, iframe: old, scroll } = await mount();
+  await load(old);
+  await scroll(false);
+  await tick(FADE_MS);
+  assert.ok(container.querySelector("iframe") === null, "the fade-out never released the iframe");
+
+  await scroll(true);
+  const fresh = container.querySelector("iframe");
+  assert.ok(fresh, "the preview did not stream again");
+  assert.match(fadeClass(fresh), /opacity-0/, "the returning iframe showed before it had loaded");
+  await load(fresh);
+  assert.match(fadeClass(fresh), /opacity-100/);
 });
