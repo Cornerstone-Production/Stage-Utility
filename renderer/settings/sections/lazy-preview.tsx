@@ -36,7 +36,7 @@ const MAX_LIVE_PREVIEWS = 12;
 /**
  * How long a preview that has left the screen keeps its iframe, and its slot, so
  * it can fade out rather than vanish. Matches `--motion-settled`, the duration the
- * fade runs at. The slot is held for the whole of it: the cap counts iframes that
+ * fade runs at; lazy-preview-stable.test.tsx fails when the two differ. The slot is held for the whole of it: the cap counts iframes that
  * exist, not iframes that are visible, so releasing early would let the next
  * preview boot while this one is still there.
  */
