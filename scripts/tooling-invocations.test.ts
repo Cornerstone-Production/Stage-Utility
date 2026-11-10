@@ -140,3 +140,114 @@ describe("how the scripts are started", () => {
     assert.deepEqual(missing, []);
   });
 });
+
+// A step that runs a TypeScript script needs Node 24 to strip its types, and a runner image's own
+// Node may be older. So every workflow job with such a step sets up Node 24 in an earlier step of
+// the same job. A step runs TypeScript when its run string (each value of a `${{ matrix.x }}` in
+// it) starts `node` on a .ts file, runs an npm script that does (`npm test`, `npm run x`,
+// `npm --prefix dir run x`, followed through npm scripts that call npm), or starts a .sh or
+// .ps1 under scripts/ whose own text starts `node` on a .ts file. That last is one level deep: a
+// script started by a script is not followed, and neither is node started through a variable
+// (the survival runners' "$NODE" "$HERE/parent.ts").
+
+interface Step {
+  name?: string;
+  uses?: string;
+  run?: string;
+  with?: Record<string, unknown>;
+}
+interface Job {
+  steps?: Step[];
+  strategy?: { matrix?: Record<string, unknown> };
+}
+
+/** `node [flags] <something>.ts` anywhere on a command line, scripts/ or not (`node --test test/*.test.ts`). */
+const TS_RUN = /\bnode(?:[ \t]+[^\s;&|<>]+)*?[ \t]+\S*\.ts\b/;
+/** `npm test`, `npm start`, `npm run[-script] x`, each with an optional `--prefix dir`. */
+const NPM_RUN = /\bnpm[ \t]+(?:--prefix[ \t]+(\S+)[ \t]+)?(?:run(?:-script)?[ \t]+([\w:.-]+)|(test|start)\b)/g;
+/** A .sh or .ps1 under scripts/ started as a command: at the start of one, or after bash, sh, pwsh or &. */
+const SCRIPT_RUN = /(?:^|[;&|({]|\$\()[ \t]*(?:(?:bash|sh|pwsh(?:[ \t]+-File)?|&)[ \t]+)?["']?(?:\.\/|\$\{?\w+\}?\/)?(scripts\/[\w./-]+\.(?:sh|ps1))\b/gm;
+
+function startsTs(text: string, dir: string, seen = new Set<string>()): boolean {
+  if (TS_RUN.test(text.replace(/\\\r?\n[ \t]*/g, " "))) return true;
+  for (const m of text.matchAll(NPM_RUN)) {
+    const pkgDir = path.resolve(dir, m[1] ?? ".");
+    const name = m[2] ?? m[3]!;
+    const key = `${pkgDir}#${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+    const command = pkg.scripts?.[name];
+    if (command !== undefined && startsTs(command, pkgDir, seen)) return true;
+  }
+  for (const m of text.matchAll(SCRIPT_RUN)) {
+    const file = path.join(ROOT, m[1]!);
+    if (fs.existsSync(file) && TS_RUN.test(fs.readFileSync(file, "utf8").replace(/[\\`]\r?\n[ \t]*/g, " "))) return true;
+  }
+  return false;
+}
+
+/** A run string once per value of each `${{ matrix.x }}` in it. */
+function expandMatrix(run: string, matrix: Record<string, unknown> | undefined): string[] {
+  const keys = [...run.matchAll(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g)].map((m) => m[1]!);
+  if (keys.length === 0 || !matrix) return [run];
+  let out = [run];
+  for (const key of new Set(keys)) {
+    const include = Array.isArray(matrix["include"]) ? (matrix["include"] as Record<string, unknown>[]).map((row) => row[key]) : [];
+    const values = [...(Array.isArray(matrix[key]) ? (matrix[key] as unknown[]) : []), ...include].filter((v) => v !== undefined).map(String);
+    const token = new RegExp(String.raw`\$\{\{\s*matrix\.${key}\s*\}\}`, "g");
+    out = values.length === 0 ? out : out.flatMap((r) => values.map((v) => r.replace(token, v)));
+  }
+  return out;
+}
+
+/** Per job that runs TypeScript: its name, and the steps that run it with no Node 24 set up before them. */
+function nodeJobs(): { jobs: string[]; unready: string[] } {
+  const jobs: string[] = [];
+  const unready: string[] = [];
+  const dir = path.join(ROOT, ".github", "workflows");
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".yml")).sort()) {
+    const doc = parse(fs.readFileSync(path.join(dir, file), "utf8")) as { jobs?: Record<string, Job> };
+    for (const [id, job] of Object.entries(doc.jobs ?? {})) {
+      const steps = job.steps ?? [];
+      let ready: boolean | string = false;
+      let runsTs = false;
+      steps.forEach((step, i) => {
+        if (step.uses?.startsWith("actions/setup-node@")) {
+          const version = String(step.with?.["node-version"] ?? "");
+          const major = /^(\d+)(?:\.|$|\.x)/.exec(version);
+          ready = major === null ? `step ${i + 1} sets up Node "${version}", which is not a version this can read` : Number(major[1]) >= 24 || `step ${i + 1} sets up Node ${version}`;
+        }
+        if (step.run === undefined || !expandMatrix(step.run, job.strategy?.matrix).some((run) => startsTs(run, ROOT))) return;
+        runsTs = true;
+        if (ready !== true) unready.push(`${file} ${id}: step ${i + 1} (${step.name ?? step.run.split("\n")[0]}) runs TypeScript, ${ready === false ? "with no setup-node before it" : `but ${ready}`}`);
+      });
+      if (runsTs) jobs.push(`${file} ${id}`);
+    }
+  }
+  return { jobs: jobs.sort(), unready };
+}
+
+describe("a workflow job that runs a TypeScript script", () => {
+  const { jobs, unready } = nodeJobs();
+
+  it("sets up Node 24 in an earlier step of the same job", () => {
+    assert.deepEqual(unready, []);
+  });
+
+  it("is one of exactly these, so a scan that finds none cannot pass", () => {
+    assert.deepEqual(jobs, [
+      "ci.yml checks",
+      "ci.yml test",
+      "ci.yml worker",
+      "commit-lint.yml conventional-commits",
+      "coverage.yml coverage",
+      "public-hygiene.yml hygiene",
+      "release.yml already-verified",
+      "release.yml archives",
+      "release.yml artifacts",
+      "release.yml verify-checks",
+      "release.yml verify-tests",
+    ]);
+  });
+});

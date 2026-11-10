@@ -424,6 +424,12 @@ A script whose output a caller parses (`verified-tree.ts` writes `$GITHUB_OUTPUT
 `release-notes.ts` writes the notes) or whose stderr an update script shows runs with
 `node --no-warnings`: older Node 24 releases print a type-stripping warning to stderr.
 
+Every `node … scripts/<file>` call, in a workflow, a composite action, any
+`package.json` or a shell or PowerShell script, is one line of the sorted list in
+`scripts/tooling-invocations.test.ts`, so a new or renamed call is added there. The same
+test fails a workflow job that runs TypeScript without an `actions/setup-node` step for
+Node 24 or later before it.
+
 ### Merge-friendly guards
 
 A test that pins an exact registry (every layout object type, every route,
