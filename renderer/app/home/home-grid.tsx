@@ -162,7 +162,7 @@ const NOMINAL_H = ROW_PX * 6;
  */
 function useHomeCtx(
   layout: LayoutDTO,
-  menuCardId: string | null,
+  menuCardId: string | null | undefined,
   choosePress: ((objectId: string) => void) | undefined,
 ): LayoutRenderCtx | null {
   // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
@@ -311,17 +311,8 @@ export function HomeCardCell({
   );
 }
 
-export function HomeGrid({
-  layout,
-  cards,
-  chrome,
-  boxes: boxesOverride,
-  animate = false,
-  gridRef,
-  onCardContextMenu,
-  menuCardId = null,
-  onChoosePress,
-}: {
+/** What HomeGrid takes: everything the grid draws from, minus the context it builds. */
+export interface HomeGridProps {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
   cards: readonly LayoutObject[];
@@ -351,8 +342,30 @@ export function HomeGrid({
   /** Open the sheet that chooses what a Button with nothing chosen presses, from
    *  tapping its tile. Absent where Home cannot be edited. */
   onChoosePress?: (objectId: string) => void;
-}) {
-  const ctx = useHomeCtx(layout, menuCardId, onChoosePress);
+}
+
+/**
+ * The grid as HomeGridView draws it, over a render context already built.
+ *
+ * HomeGrid itself needs the whole Home data context (stage state from the SSE
+ * stream) before it draws anything, so the placement decisions made here —
+ * which rows exist while editing and while reading — could not be reached by a
+ * test. They can through this, with a context the test supplies.
+ */
+export function HomeGrid(props: HomeGridProps) {
+  const ctx = useHomeCtx(props.layout, props.menuCardId, props.onChoosePress);
+  return ctx ? <HomeGridView {...props} ctx={ctx} /> : null;
+}
+
+export function HomeGridView({
+  cards,
+  chrome,
+  boxes: boxesOverride,
+  animate = false,
+  gridRef,
+  onCardContextMenu,
+  ctx,
+}: HomeGridProps & { ctx: LayoutRenderCtx }) {
   // Outside edit mode a row with no card in it is a blank band, so it closes up.
   // The editor (chrome present) draws the full grid, spare rows included, so a
   // card can still be dropped into one. A drag preview is only ever drawn there.
@@ -363,8 +376,6 @@ export function HomeGrid({
   // and an array identity changes on every render.
   const signature = boxes.map((b) => `${b.id}:${b.col}:${b.row}`).join("|");
   const { setHost } = useSlideOnMove(signature, animate);
-  if (!ctx) return null;
-
   return (
     <div
       // NO kiosk-surface. Home is an app page, and its widgets wear the app's
