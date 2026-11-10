@@ -7,12 +7,13 @@
 // beneath, or drops out when there is no room; buttons shrink and then go as the
 // box narrows; text truncates. See fit.ts for the arithmetic.
 
-import { useContext, useLayoutEffect, useState, type ReactNode, type RefObject, type SyntheticEvent } from "react";
+import { useContext, useState, type ReactNode, type SyntheticEvent } from "react";
 
 import { AppLink } from "../../app-link";
 import { flashTarget } from "../../flash";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/cn";
+import { useElementSize } from "../../../lib/use-element-size";
 import { useExpand } from "../../../main/expand-overlay";
 import { pressCommand } from "../../../lib/command-answer";
 import { errorMessage } from "@main/services/errors";
@@ -32,26 +33,6 @@ import { useAttentionInput } from "./use-attention";
 import { snoozeItem, thenRefresh, unsnoozeItem, useHomeSnoozes } from "./use-home-snoozes";
 
 const DOT = { critical: "bg-danger-9", warn: "bg-warn-9" } as const;
-
-/** The box's own size, watched as it resizes. 0x0 until measured, which is also
- *  all a DOM with no layout ever reports. */
-function useBoxSize(ref: RefObject<HTMLElement | null>) {
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      const next = { w: el.clientWidth, h: el.clientHeight };
-      setSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next));
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return size;
-}
 
 function FixButton({ fix, onFailed, size }: { fix: AttentionFix; onFailed: (why: string) => void; size: "medium" | "small" }) {
   const [busy, setBusy] = useState(false);
@@ -214,7 +195,8 @@ export function AttentionView({
   const editing = useContext(HomeEditing);
   const expandable = interactive && !editing;
   const { tileRef, overlay, open, controlRef } = useExpand<HTMLElement>(expandable);
-  const size = useBoxSize(tileRef);
+  // 0x0 until measured, which fit.ts reads as "not measured": a default, not nothing.
+  const size = useElementSize(tileRef);
   // A failure, a fix's or a snooze's, clears itself as a failed Start does on the
   // recording tile. It is drawn in the header line, never on a line of its own:
   // a box with room for one row has none to spare, and a note that took a row's

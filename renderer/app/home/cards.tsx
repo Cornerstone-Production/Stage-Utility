@@ -40,6 +40,7 @@ export type HomeCardType = Exclude<Extract<LayoutObjectConfig, { type: `home-${s
 
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
+import { useElementSize } from "../../lib/use-element-size";
 import { invoke, onNotification } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { joinWithAnd } from "../../lib/join-with-and";
@@ -495,17 +496,9 @@ const HEADER_PX = 45;
  */
 function useRowBudget(rowPx: number, headerPx: number) {
   const wrapRef = useRef<HTMLElement | null>(null);
-  const [rows, setRows] = useState(99);
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const measure = () => setRows(Math.max(1, Math.floor((el.clientHeight - headerPx) / rowPx)));
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [rowPx, headerPx]);
-  return { wrapRef, rows };
+  // Measured before the first paint, so the unmeasured 0 is never drawn.
+  const { h } = useElementSize(wrapRef);
+  return { wrapRef, rows: Math.max(1, Math.floor((h - headerPx) / rowPx)) };
 }
 
 /**
