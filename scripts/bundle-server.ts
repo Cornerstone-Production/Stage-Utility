@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-// bundle-server.mjs — collapse the backend into one file for a packaged install.
+// bundle-server.ts — collapse the backend into one file for a packaged install.
 //
 // A git checkout runs `server.ts` through tsx, resolving imports from
 // node_modules as it goes. A packaged install ships neither, so the backend is
@@ -11,7 +10,7 @@
 // there are no native modules on this path, so there is nothing to compile per
 // platform.
 //
-// Usage: node scripts/bundle-server.mjs [--outfile build/server.mjs]
+// Usage: node scripts/bundle-server.ts [--outfile build/server.mjs]
 
 import { build } from "esbuild";
 import * as fs from "node:fs";

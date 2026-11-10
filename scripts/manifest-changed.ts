@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-// manifest-changed.mjs — did an update actually change dependencies or build inputs?
+// manifest-changed.ts — did an update actually change dependencies or build inputs?
 //
 // The update scripts skip `npm ci` and `npm run build` when nothing relevant
 // changed, which on a Pi is the difference between a ~3s restart and a couple of
@@ -19,7 +18,7 @@
 // read from package.json at runtime rather than compiled into the bundle, so a
 // version-only change genuinely needs neither step.
 //
-// Usage:  node scripts/manifest-changed.mjs <oldRev> <newRev>
+// Usage:  node scripts/manifest-changed.ts <oldRev> <newRev>
 // Output: {"deps":bool,"manifest":bool}   (deps => reinstall, either => rebuild)
 //
 // Fails safe: anything unreadable or unparseable reports true, so an unknown
@@ -29,7 +28,7 @@ import { execFileSync } from "node:child_process";
 import { isMain } from "./is-main.ts";
 
 /** A file at a revision, or null when it isn't there / can't be read. */
-function fileAt(rev, file) {
+function fileAt(rev: string, file: string): string | null {
   try {
     return execFileSync("git", ["show", `${rev}:${file}`], {
       encoding: "utf8",
@@ -41,7 +40,7 @@ function fileAt(rev, file) {
 }
 
 /** Parse, or null when the text isn't JSON. */
-function parse(text) {
+function parse(text: string | null): unknown {
   if (text === null) return null;
   try {
     return JSON.parse(text);
@@ -51,9 +50,11 @@ function parse(text) {
 }
 
 /** The lockfile's dependency graph — everything except this package's version. */
-function lockShape(lock) {
+type Json = Record<string, any>;
+
+function lockShape(lock: unknown): string | null {
   if (!lock || typeof lock !== "object") return null;
-  const copy = structuredClone(lock);
+  const copy: Json = structuredClone(lock);
   delete copy.version;
   // npm writes the root package's version here too (lockfileVersion 2+).
   if (copy.packages && typeof copy.packages === "object" && copy.packages[""]) {
@@ -63,14 +64,18 @@ function lockShape(lock) {
 }
 
 /** package.json without its version — scripts, deps, build config. */
-function manifestShape(pkg) {
+function manifestShape(pkg: unknown): string | null {
   if (!pkg || typeof pkg !== "object") return null;
-  const copy = structuredClone(pkg);
+  const copy: Json = structuredClone(pkg);
   delete copy.version;
   return JSON.stringify(copy);
 }
 
-export function compareRevs(oldRev, newRev, read = fileAt) {
+export function compareRevs(
+  oldRev: string | undefined,
+  newRev: string | undefined,
+  read: (rev: string, file: string) => string | null = fileAt,
+): { deps: boolean; manifest: boolean } {
   // No old revision to compare against — do everything.
   if (!oldRev || !newRev || oldRev === "none" || newRev === "none") {
     return { deps: true, manifest: true };

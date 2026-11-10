@@ -1,6 +1,6 @@
 // is-main.test.ts — a script knows it is the one that was run, on Windows too.
 //
-// manifest-changed.mjs decided that with `import.meta.url.endsWith(argv[1].split("/").pop())`.
+// manifest-changed.ts decided that with `import.meta.url.endsWith(argv[1].split("/").pop())`.
 // On Windows argv[1] has backslashes, so that is never true: the script printed nothing, and
 // the update read that as "no dependency changed" and skipped `npm ci`. Every script that runs
 // itself now asks isMain; this holds it to Windows-shaped input, and runs each real script.
@@ -19,8 +19,8 @@ const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 
 describe("isMain", () => {
   test("is true for the script itself, however the host writes its path", () => {
-    assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.mjs", "C:\\repo\\scripts\\manifest-changed.mjs", { windows: true }), true);
-    assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.mjs", "c:\\repo\\scripts\\.\\manifest-changed.mjs", { windows: true }), true, "a drive letter's case");
+    assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.ts", "C:\\repo\\scripts\\manifest-changed.ts", { windows: true }), true);
+    assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.ts", "c:\\repo\\scripts\\.\\manifest-changed.ts", { windows: true }), true, "a drive letter's case");
     assert.equal(isMain(`file://${SCRIPTS}/is-main.ts`, path.join(SCRIPTS, "is-main.ts")), true);
   });
 
@@ -59,9 +59,9 @@ describe("isMain", () => {
 describe("every script that runs itself asks it", () => {
   test("and runs when started by its own path, which is the decision isMain makes", () => {
     // Real runs: each of these printed nothing, or did nothing, when the check was false.
-    const manifest = spawnSync(process.execPath, [path.join(SCRIPTS, "manifest-changed.mjs"), "HEAD", "HEAD"], { encoding: "utf8" });
+    const manifest = spawnSync(process.execPath, [path.join(SCRIPTS, "manifest-changed.ts"), "HEAD", "HEAD"], { encoding: "utf8" });
     assert.equal(manifest.stdout, '{"deps":false,"manifest":false}');
-    const inputs = spawnSync(process.execPath, [path.join(SCRIPTS, "build-inputs.mjs")], { input: "renderer/x.ts\n", encoding: "utf8" });
+    const inputs = spawnSync(process.execPath, [path.join(SCRIPTS, "build-inputs.ts")], { input: "renderer/x.ts\n", encoding: "utf8" });
     assert.equal(inputs.stdout, "true");
   });
 

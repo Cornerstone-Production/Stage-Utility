@@ -112,12 +112,12 @@ try {
     # changing a single dependency — matching on the path made this skip fire on
     # every update, so it never once saved the work it exists to save.
     $manifest = '{"deps":true,"manifest":true}'
-    try { $manifest = (node (Join-Path $repo "scripts/manifest-changed.mjs") $oldRev $newRev) } catch {}
+    try { $manifest = (node --no-warnings (Join-Path $repo "scripts/manifest-changed.ts") $oldRev $newRev) } catch {}
     if ($manifest -match '"deps":true') { $needInstall = $true; $needBuild = $true }
     if ($manifest -match '"manifest":true') { $needBuild = $true }
-    # scripts/build-inputs.mjs lists the build inputs; unreadable means rebuild.
+    # scripts/build-inputs.ts lists the build inputs; unreadable means rebuild.
     $inputs = "true"
-    try { $inputs = (($changed | Out-String) | node (Join-Path $repo "scripts/build-inputs.mjs")) } catch {}
+    try { $inputs = (($changed | Out-String) | node --no-warnings (Join-Path $repo "scripts/build-inputs.ts")) } catch {}
     if ($inputs -ne "false") { $needBuild = $true }
   }
 

@@ -124,12 +124,12 @@ write_result() {
     # version bump that rewrites package.json and package-lock.json without
     # changing a single dependency — matching on the path made this skip fire on
     # every update, so it never once saved the work it exists to save.
-    MANIFEST="$(node "$REPO/scripts/manifest-changed.mjs" "$OLD_REV" "$NEW_REV" 2>/dev/null || echo '{"deps":true,"manifest":true}')"
+    MANIFEST="$(node --no-warnings "$REPO/scripts/manifest-changed.ts" "$OLD_REV" "$NEW_REV" 2>/dev/null || echo '{"deps":true,"manifest":true}')"
     case "$MANIFEST" in *'"deps":true'*) NEED_INSTALL=1; NEED_BUILD=1 ;; esac
     case "$MANIFEST" in *'"manifest":true'*) NEED_BUILD=1 ;; esac
-    # Any build input change (scripts/build-inputs.mjs lists them: the interface, and the
+    # Any build input change (scripts/build-inputs.ts lists them: the interface, and the
     # public ServiceCue page's Worker and contract) -> rebuild. Unreadable means rebuild.
-    [ "$(printf '%s\n' "$CHANGED" | node "$REPO/scripts/build-inputs.mjs" 2>/dev/null || echo true)" = "false" ] || NEED_BUILD=1
+    [ "$(printf '%s\n' "$CHANGED" | node --no-warnings "$REPO/scripts/build-inputs.ts" 2>/dev/null || echo true)" = "false" ] || NEED_BUILD=1
   fi
 
   # Nothing changed that the build reads: the failed bundle is still the failed bundle, now on this commit.

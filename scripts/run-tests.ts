@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-// run-tests.mjs — `npm test`. The one place the test file patterns live.
+// run-tests.ts — `npm test`. The one place the test file patterns live.
 //
 // Extra arguments go to Node's test runner ahead of the patterns, which is how CI
 // splits the suite across parallel jobs without repeating them:

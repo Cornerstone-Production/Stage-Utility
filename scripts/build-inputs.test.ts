@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { build as viteBuild, type Plugin } from "vite";
 
 import { PUBLIC_STATIC_FILES } from "../main/types/servicecue-publish.js";
-import { BUILD_INPUT_PREFIXES, needsBuild } from "./build-inputs.mjs";
+import { BUILD_INPUT_PREFIXES, needsBuild } from "./build-inputs.ts";
 import { bundleServiceCue } from "./servicecue-bundle.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -99,7 +99,7 @@ describe("what does not make an update rebuild", () => {
       "publish/servicecue/test/worker.integration.test.mjs",
       "scripts/update.sh",
       "scripts/update.ps1",
-      "scripts/build-inputs.mjs",
+      "scripts/build-inputs.ts",
       "helper/macos/Package.swift",
       ".github/workflows/ci.yml",
     ]) {

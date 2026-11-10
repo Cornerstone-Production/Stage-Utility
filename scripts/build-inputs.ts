@@ -1,10 +1,9 @@
-#!/usr/bin/env node
-// build-inputs.mjs — did an update change something `npm run build` is made from?
+// build-inputs.ts — did an update change something `npm run build` is made from?
 //
 // update.sh and update.ps1 skip the build when nothing it reads changed. Which paths those
 // are lives here, once, so the two scripts cannot disagree and a test can run the real rule.
 //
-// Usage:  git diff --name-only <old> <new> | node scripts/build-inputs.mjs
+// Usage:  git diff --name-only <old> <new> | node scripts/build-inputs.ts
 // Output: true | false      (an unreadable list reports true: do the work)
 
 import { isMain } from "./is-main.ts";
@@ -28,7 +27,7 @@ export const BUILD_INPUT_PREFIXES = [
 ];
 
 /** Does any changed path need a rebuild? */
-export function needsBuild(paths) {
+export function needsBuild(paths: string[]): boolean {
   return paths.some((p) => BUILD_INPUT_PREFIXES.some((prefix) => p.startsWith(prefix)));
 }
 

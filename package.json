@@ -26,9 +26,9 @@
     "server": "tsx server.ts",
     "start": "node --import tsx server.ts",
     "lint": "eslint .",
-    "icons": "node scripts/build-icons.mjs",
+    "icons": "node scripts/build-icons.ts",
     "docs:screenshots": "node scripts/docs-screenshots/run.mjs",
-    "test": "node scripts/run-tests.mjs",
+    "test": "node scripts/run-tests.ts",
     "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.tooling.json",
     "format": "oxfmt ."
   },

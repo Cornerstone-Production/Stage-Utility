@@ -3,10 +3,8 @@
 //   if (isMain(import.meta.url, process.argv[1])) main();
 //
 // So a test can import a script without running it. Compared as paths, not as a suffix of
-// the URL: argv[1] is `C:\repo\scripts\x.mjs` on Windows, whose last "/"-separated piece is
-// the whole string, and a suffix test that fails there is a script that prints nothing and
-// exits 0. For a check that is a silent pass, and for manifest-changed.mjs it was `npm ci`
-// never running after a dependency change.
+// the URL: argv[1] is `C:\repo\scripts\x.ts` on Windows, whose last "/"-separated piece is
+// the whole string, so a suffix test there never matches and the script does nothing.
 
 import * as fs from "node:fs";
 import * as path from "node:path";

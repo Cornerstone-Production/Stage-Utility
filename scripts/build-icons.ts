@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-// build-icons.mjs — every app icon file, drawn from one geometry.
+// build-icons.ts — every app icon file, drawn from one geometry.
 //
 // The mark is a 5x7 dot-matrix S (the lettering of under-monitor displays and
 // stage message boards) with a red tally dot hanging off its bottom-right like a
@@ -38,8 +37,15 @@ const X0 = (1024 - (5 * P - (P - D))) / 2;
 const Y0 = (1024 - (7 * P - (P - D))) / 2;
 
 /** Every dot, as { cx, cy, r, role } in 1024 space. */
-function dots({ unlit }) {
-  const out = [];
+interface Dot {
+  cx: number;
+  cy: number;
+  r: number;
+  role: "lit" | "unlit" | "tally";
+}
+
+function dots({ unlit }: { unlit: boolean }): Dot[] {
+  const out: Dot[] = [];
   S.forEach((row, r) =>
     [...row].forEach((ch, c) => {
       const lit = ch === "#";
@@ -58,11 +64,11 @@ const MASKABLE_SCALE = 0.8;
  *  wide, so it is drawn larger, the tally still inside the rounded corner. */
 const FAVICON_SCALE = 1.25;
 
-function place(d, scale) {
+function place(d: Dot, scale: number): Dot {
   return { ...d, cx: 512 + (d.cx - 512) * scale, cy: 512 + (d.cy - 512) * scale, r: d.r * scale };
 }
 
-const fmt = (n) => String(Math.round(n * 100) / 100);
+const fmt = (n: number) => String(Math.round(n * 100) / 100);
 
 /**
  * The browser tab icon: a rounded tile with the lit dots only (unlit dots are noise
@@ -84,17 +90,17 @@ export function faviconSvg() {
   );
 }
 
-const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const hex = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 
 /** Rasterize the square icon at `size`, 4x4 supersampled. Returns RGB rows. */
-function rasterize(theme, size, { maskable = false } = {}) {
+function rasterize(theme: keyof typeof THEMES, size: number, { maskable = false }: { maskable?: boolean } = {}): Buffer[] {
   const t = THEMES[theme];
   const scale = maskable ? MASKABLE_SCALE : 1;
   const tile = hex(t.tile);
   const circles = dots({ unlit: true }).map((d) => ({ ...place(d, scale), rgb: hex(t[d.role]) }));
   const SS = 4;
   const k = 1024 / size;
-  const rows = [];
+  const rows: Buffer[] = [];
   for (let y = 0; y < size; y++) {
     const row = Buffer.alloc(size * 3);
     for (let x = 0; x < size; x++) {
@@ -126,12 +132,12 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   for (let i = 0; i < 8; i++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
   return c >>> 0;
 });
-function crc32(buf) {
+function crc32(buf: Buffer): number {
   let c = 0xffffffff;
   for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
-function chunk(type, data) {
+function chunk(type: string, data: Buffer): Buffer {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
@@ -140,7 +146,7 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 /** An opaque 8-bit RGB PNG. Opaque on purpose: iOS fills transparency with black. */
-function encodePng(rows) {
+function encodePng(rows: Buffer[]): Buffer {
   const size = rows.length;
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
