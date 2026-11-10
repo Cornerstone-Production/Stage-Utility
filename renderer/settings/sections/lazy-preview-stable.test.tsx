@@ -53,13 +53,18 @@ function card(following?: { label: string }, viewId = "v1", aspect?: number) {
 // brings the card on screen, `scroll(false)` takes it off.
 type IoCallback = (entries: { isIntersecting: boolean }[]) => void;
 let restoreIo: (() => void) | null = null;
+/** The options the last IntersectionObserver was built with. */
+let ioOptions: IntersectionObserverInit | undefined;
 
 function stubIntersectionObserver(): (isIntersecting: boolean) => void {
   const g = globalThis as unknown as { IntersectionObserver?: unknown };
   const saved = g.IntersectionObserver;
   let cb: IoCallback | null = null;
   g.IntersectionObserver = class {
-    constructor(callback: IoCallback) { cb = callback; }
+    constructor(callback: IoCallback, options?: IntersectionObserverInit) {
+      cb = callback;
+      ioOptions = options;
+    }
     observe() {}
     disconnect() {}
   };
@@ -73,7 +78,7 @@ function stubIntersectionObserver(): (isIntersecting: boolean) => void {
  * "not wrapped in act(...)". The clock is faked from here on, so the fade timer
  * moves only when a test ticks it.
  */
-async function mount(element = card()) {
+async function mount(element: React.ReactElement = card()) {
   const io = stubIntersectionObserver();
   mock.timers.enable({ apis: ["setTimeout"] });
   let result!: ReturnType<typeof render>;
@@ -239,4 +244,28 @@ test("FADE_MS is --motion-settled, and the fade runs at --motion-settled", async
 
   const { iframe } = await mount();
   assert.match(fadeClass(iframe), /(^|\s)duration-\(--motion-settled\)(\s|$)/, "the fade does not run at --motion-settled");
+});
+
+// ---- The pre-load margin reaches the page's own scroller ----------------------
+//
+// The Screens page scrolls inside a <main>, not the window. rootMargin only grows
+// the observer's ROOT, and every scrolling ancestor still clips at its own edge,
+// so with the viewport as root the 200px did nothing: measured in a browser, a
+// card 100px below the fold was not live. jsdom computes no layout, so what is
+// pinned here is the root the observer is given; the pre-load itself was driven
+// in a browser.
+
+test("the observer's root is the nearest scrolling ancestor, so its margin pre-loads", async () => {
+  await mount(
+    React.createElement("div", { "data-testid": "scroller", style: { overflowY: "auto" } },
+      React.createElement("div", null, card())),
+  );
+  assert.ok(ioOptions?.root === screen.getByTestId("scroller"), "the observer is not rooted on the scroller");
+  assert.equal(ioOptions?.rootMargin, "200px");
+});
+
+test("with no scrolling ancestor the observer's root is the viewport", async () => {
+  await mount();
+  assert.ok(ioOptions, "no observer was built");
+  assert.ok((ioOptions.root ?? null) === null, "the observer was rooted on an element that does not scroll");
 });

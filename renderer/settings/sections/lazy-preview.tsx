@@ -64,6 +64,23 @@ function release(token: symbol): void {
   }
 }
 
+/**
+ * The element a preview scrolls inside, or null for the viewport.
+ *
+ * An IntersectionObserver's rootMargin only grows its ROOT; every scrolling
+ * ancestor still clips at its own edge. The Screens page scrolls inside a
+ * <main>, so with the viewport as root a card only intersected once it was
+ * inside main's edge, and the 200px pre-load did nothing. The body and the
+ * document element are left out: as an explicit root they are the whole
+ * document, not the part of it on screen.
+ */
+function scrollParent(el: HTMLElement): Element | null {
+  for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+    if (/(auto|scroll|overlay)/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return null;
+}
+
 /** Apple platforms, where Ctrl-click is a right click and Cmd is the key that opens
  *  a link in a new tab. */
 function isApple(): boolean {
@@ -126,8 +143,10 @@ export function LazyPreview({
   // rather than leaving them with a placeholder they cannot resolve.
   const [forced, setForced] = useState(false);
 
-  // Only render while on screen. rootMargin starts it slightly before it
-  // arrives, so scrolling does not feel like it is waiting on you.
+  // Only render while on screen, or within 200px of it: the margin starts a
+  // preview loading before it scrolls in, so it arrives already showing, and
+  // keeps it until it is 200px past the edge. Rooted on the scroller the card
+  // sits in, which is what makes the margin reach past that scroller's clip.
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof IntersectionObserver === "undefined") {
@@ -136,7 +155,7 @@ export function LazyPreview({
     }
     const obs = new IntersectionObserver(
       ([entry]) => setVisible(entry.isIntersecting),
-      { rootMargin: "200px" },
+      { root: scrollParent(el), rootMargin: "200px" },
     );
     obs.observe(el);
     return () => obs.disconnect();
