@@ -59,8 +59,10 @@ const OPEN_MS = 260;
 // however the listeners happen to be ordered.
 const openPanels: Array<() => void> = [];
 
-export function useExpand(enabled: boolean) {
-  const tileRef = useRef<HTMLDivElement | null>(null);
+// `T` is the tile's element, which the FLIP below starts from: a div for
+// ExpandableTile, Needs attention's own <section>.
+export function useExpand<T extends HTMLElement = HTMLDivElement>(enabled: boolean) {
+  const tileRef = useRef<T | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const controlRef = useRef<HTMLButtonElement | null>(null);
@@ -273,5 +275,9 @@ export function useExpand(enabled: boolean) {
   // hook that hands back more surface than anyone calls is surface that drifts.
   // `open` is returned for Home's cards with no controls of their own, which
   // open on a press of the card as well as on the corner control.
-  return { tileRef, control, overlay, open };
+  //
+  // `controlRef` is for a caller whose own control opens the panel and is not the
+  // corner button (Needs attention's "+N more"): focus returns to whatever the
+  // ref names on close, as it does for the corner control.
+  return { tileRef, control, overlay, open, controlRef };
 }

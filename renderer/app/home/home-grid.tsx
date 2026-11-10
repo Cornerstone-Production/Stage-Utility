@@ -23,6 +23,7 @@ import { useCoarsePointer } from "../../lib/use-media-query";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { displayType } from "../../main/timer-config";
 import { ExpandableTile } from "./expanded/expandable-tile";
+import { HomeEditing } from "./home-editing";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -400,6 +401,7 @@ export function HomeGridView({
         // surface to land on.
         style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes, editing ? 2 : 0)}, ${ROW_PX}px)` }}
       >
+        <HomeEditing value={editing}>
         {cards.map((o) => {
           const { w, h } = SIZES[sizeOf(o)];
           const box = byId.get(o.id);
@@ -414,13 +416,14 @@ export function HomeGridView({
               chrome={chrome}
             >
               <CardFrame o={o}>
-                <ExpandableTile o={o} ctx={ctx} editing={!!chrome}>
+                <ExpandableTile o={o} ctx={ctx} editing={editing}>
                   <ObjectContent o={o} ctx={ctx} />
                 </ExpandableTile>
               </CardFrame>
             </HomeCardCell>
           );
         })}
+        </HomeEditing>
       </div>
       <style>{`
         /* A widget is a fixed box. It does not scroll — a tile you can scroll
