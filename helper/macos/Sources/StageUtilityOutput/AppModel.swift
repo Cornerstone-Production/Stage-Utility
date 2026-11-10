@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     var discovery: OutputDiscovery?
     var serverURL: String?
     var serverName: String?
+    /// The server id two URLs answer this output for, while the window says so.
+    var duplicateId: String?
     /// When the server last answered this output's probe.
     var answeredAt: Date?
     var loaded = false
@@ -396,7 +398,7 @@ final class AppModel: ObservableObject {
 
   private func beginDiscovery(_ key: String, _ rt: Runtime) {
     // An output that was off and set up has one running already.
-    rt.discovery?.stop()
+    endDiscovery(key, rt)
     // With a `server` file the page loads from it at once and the probes go to that
     // server alone, so the output still shows up under "Not set up yet". The latency
     // test page needs no server: it is up from the start.
@@ -425,8 +427,7 @@ final class AppModel: ObservableObject {
   /// for quit.
   private func deactivate(_ key: String, keepListening: Bool = false) {
     guard let rt = runtimes[key] else { return }
-    rt.discovery?.stop()
-    rt.discovery = nil
+    endDiscovery(key, rt)
     rt.sink?.stop()
     rt.sink = nil
     rt.loaded = false
@@ -466,15 +467,32 @@ final class AppModel: ObservableObject {
   // MARK: Server
 
   private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply, _ change: OutputBinding) {
-    rt.serverName = reply.name
     rt.answeredAt = Date()
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
-    if identity.server == nil, rt.serverURL != reply.url {
-      Log.notice(.discovery, "\(rt.descriptor.port): server is \"\(reply.name)\" at \(Redact.url(reply.url))")
-      rt.serverURL = reply.url
-      navigate(rt)
+    if identity.server == nil, let choice = rt.discovery?.choose(reply, current: rt.serverURL) {
+      switch choice {
+      case .adopt:
+        Log.notice(.discovery, "\(rt.descriptor.port): server is \"\(reply.name)\" at \(Redact.url(reply.url))")
+        rt.serverURL = reply.url
+        // Moving between the two keeps the note: the pair is reported once.
+        if reply.serverId != rt.duplicateId { clearDuplicate(key, rt) }
+        navigate(rt)
+      case .keep:
+        break
+      case .duplicateGone:
+        Log.notice(.discovery, "\(rt.descriptor.port): only one server answers for server id \(reply.serverId) again")
+        clearDuplicate(key, rt)
+      case .duplicate(let current, let other):
+        let fact = "\(rt.descriptor.port): two servers answer for server id \(reply.serverId), at \(Redact.url(current)) and \(Redact.url(other))"
+        let advice = "Give one of them its own id (a config restore copies it from the backup)."
+        Log.error(.discovery, "\(fact); staying with \(Redact.url(current)). \(advice)")
+        rt.duplicateId = reply.serverId
+        setNote(duplicateNote(key), "\(fact). \(advice)")
+      }
     }
+    // Only the server it loads names it, so the window does not flicker between two.
+    if identity.server != nil || reply.url == rt.serverURL { rt.serverName = reply.name }
     if case .forget(let server) = change {
       Log.notice(.discovery, "\(rt.descriptor.port): \"\(reply.name)\" (\(server)) no longer has this output set up; forgot it, so any server can set it up")
     }
@@ -482,11 +500,26 @@ final class AppModel: ObservableObject {
     // Off and no longer set up anywhere: nothing to say, so stop probing, as an off
     // output always did.
     if rt.sink == nil, let record = store.record(for: key), !record.enabled, record.boundTo == nil {
-      rt.discovery?.stop()
-      rt.discovery = nil
+      endDiscovery(key, rt)
       if identity.server == nil { rt.serverURL = nil }
     }
     refresh()
+  }
+
+  /// The window note for two servers answering one output with one id. Cleared when
+  /// the output follows a server with another id, or its discovery ends, since the
+  /// next discovery reports the pair again.
+  private func duplicateNote(_ key: String) -> String { "server-duplicate-\(key)" }
+
+  private func clearDuplicate(_ key: String, _ rt: Runtime) {
+    rt.duplicateId = nil
+    clearNote(duplicateNote(key))
+  }
+
+  private func endDiscovery(_ key: String, _ rt: Runtime) {
+    rt.discovery?.stop()
+    rt.discovery = nil
+    clearDuplicate(key, rt)
   }
 
   private func navigate(_ rt: Runtime) {

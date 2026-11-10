@@ -152,3 +152,91 @@ public enum OutputBinding: Equatable {
     }
   }
 }
+
+/// Which server URL an output with no server file loads, when more than one answers.
+///
+/// A config restore can copy one server's id onto another, and then two URLs answer
+/// for the same id on every probe round. Loading whichever answered last reloads the
+/// page every round and sends the output's health to a server that keeps losing it.
+/// So the URL it has stays while it keeps answering for its id. Another URL is
+/// adopted:
+/// - when there is none;
+/// - when it answers for a different server id: `ReplyFilter` lets that through only
+///   when the output is claimed there, and `OutputBinding` rebinds to it;
+/// - on the first answer after a search begins (the server may have moved, or the
+///   last one was failing);
+/// - when the current URL has been quiet for longer than `window`. A server whose own
+///   address changed never answers at the old one again, so it is followed then.
+///
+/// A same-id URL is a duplicate only once the current URL answers again after it
+/// appeared: until then it may be the same server at a new address.
+///
+/// `now` is a monotonic clock in seconds (`ProcessInfo.systemUptime`), so a wall-clock
+/// step cannot hold or end the window.
+public struct StickyServer: Equatable {
+  public enum Choice: Equatable {
+    case adopt
+    case keep
+    /// Another URL answered for the current URL's server id, and the current URL
+    /// answered again after it. Once per pair, in either order, while this output's
+    /// discovery runs, so the log has the line and a probe every 30 s cannot fill it.
+    case duplicate(current: String, other: String)
+    /// No other URL has answered for the current URL's id for longer than `window`
+    /// since a duplicate was reported: it is gone, and could be reported again.
+    case duplicateGone
+  }
+
+  /// How long the current URL may be quiet before another with its id is followed:
+  /// past one lost answer (a 60 s gap, which UDP on a busy LAN produces) and short of
+  /// a second (90 s), so one dropped packet does not move the output.
+  public static let window: TimeInterval = 2.5 * ProbeSchedule.slowInterval
+
+  /// The server id the current URL last answered for.
+  private var currentId: String?
+  /// When the current URL last answered. Nil while a search has not yet been answered
+  /// by it.
+  private var currentAnsweredAt: TimeInterval?
+  /// Same-id URLs heard since the current URL last answered.
+  private var pending = Set<String>()
+  private var reported = Set<[String]>()
+  /// When a same-id URL other than the current one last answered.
+  private var otherHeardAt: TimeInterval?
+
+  public init() {}
+
+  /// Discovery started or started again: the next answer is believed.
+  public mutating func searchBegan() { currentAnsweredAt = nil }
+
+  public mutating func choose(url: String, serverId: String, current: String?, now: TimeInterval) -> Choice {
+    guard let current else { return adopt(serverId, now) }
+    if url == current {
+      // Held URLs answered for the id the current URL had; a new one makes them strangers.
+      if serverId != currentId { pending = [] }
+      currentId = serverId
+      currentAnsweredAt = now
+      let others = pending.sorted()
+      pending = []
+      for other in others where reported.insert([current, other].sorted()).inserted {
+        return .duplicate(current: current, other: other)
+      }
+      if !reported.isEmpty, let heard = otherHeardAt, now - heard > Self.window {
+        reported = []
+        otherHeardAt = nil
+        return .duplicateGone
+      }
+      return .keep
+    }
+    if serverId != currentId { return adopt(serverId, now) }
+    guard let answered = currentAnsweredAt, now - answered <= Self.window else { return adopt(serverId, now) }
+    pending.insert(url)
+    otherHeardAt = now
+    return .keep
+  }
+
+  private mutating func adopt(_ serverId: String, _ now: TimeInterval) -> Choice {
+    currentId = serverId
+    currentAnsweredAt = now
+    pending = []
+    return .adopt
+  }
+}
