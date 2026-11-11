@@ -587,7 +587,8 @@ the macOS and Windows agents, never by the Linux agent, until it is updated or t
 device's `bound-to` file (`boundTo` in the helper's `outputs.json`) is removed by
 hand.
 
-No coordination between servers, and nothing to get out of sync.
+No coordination between servers over bindings, and nothing about them to get out
+of sync. (Two servers carrying one id is another matter: see below.)
 
 A device that cannot reach the server that owns it keeps trying and says so on
 screen. It does not re-home itself — a display that changed servers during an
@@ -603,6 +604,10 @@ then switch between them: a helper output reloads, and reports its health to
 whichever answered last. A config restore is the usual way it happens, which is
 why a restore keeps this server's own id unless told this box replaces the one the
 config came from ([Restoring a config snapshot](ops/reliability.md#restoring-a-config-snapshot)).
+A restore that keeps the id but brings the config's screens also releases every
+screen set up here, because a binding names a screen id (`display-2`) that now
+means the config's screen: each one shows under **Not set up yet**, to be set up
+again.
 
 The server finds such a twin itself, whatever made it. While discovery is on, it
 sends a check when it starts (at boot, and after the restart a restore or the
@@ -626,8 +631,9 @@ found by both.
   id. The other server keeps the old id, and the screens both have set up stay
   with it. Screens set up only on this server are told by the other one that they
   are not set up there, are answered as set up here, and follow the new id on
-  their own: a Mac output within 30 seconds, a kiosk the next time it starts. An
-  older Pi or Linux kiosk that sends no binding of its own, set up on both, is
+  their own: a Mac output within 30 seconds, a kiosk the next time it starts.
+  They learn it from the other server, so leave it running until they have moved.
+  An older Pi or Linux kiosk that sends no binding of its own, set up on both, is
   answered by both until it is released on one. Nothing restarts, and the check
   runs again at once under the new id.
 - The Server id row says what the last check found and when (**Checking…** for
