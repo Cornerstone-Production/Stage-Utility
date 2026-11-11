@@ -104,8 +104,9 @@ import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
 import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
-import type { ServerIdentity } from "../types/kiosk.js";
-import { changeServerId } from "./kiosk-responder.js";
+import type { DuplicateCheck } from "../types/kiosk.js";
+import { recheckServerId } from "./kiosk-responder.js";
+import { sameDuplicateCheck } from "./kiosk-duplicate-check.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
@@ -731,7 +732,7 @@ export class StageController {
       showQr,
       kioskDiscovery,
       // Read-only here: minted by discovery (remote-server.startDiscovery), which
-      // reports it through setServerIdentity.
+      // reports it through setServerId.
       serverIdentity: { ...this.state.serverIdentity, id: settings.serverId ?? null },
       autoUpdateMachines,
       allowedServiceTypeIds,
@@ -3210,11 +3211,21 @@ export class StageController {
     return this.state;
   }
 
-  /** This server's id and what discovery knows about it. Broadcast only when it
-   *  changes, so a responder reporting the same thing twice costs nothing. */
-  setServerIdentity(next: ServerIdentity): void {
-    if (JSON.stringify(next) === JSON.stringify(this.state.serverIdentity)) return;
-    this.state = { ...this.state, serverIdentity: next };
+  /** This server's id: the live copy the responder answers with (it reads it from
+   *  here), set at boot from settings, when discovery mints one, and by New server
+   *  id. A changed id voids whatever was heard about the old one. */
+  setServerId(id: string): void {
+    if (id === this.state.serverIdentity.id) return;
+    this.state = { ...this.state, serverIdentity: { ...this.state.serverIdentity, id, duplicates: [] } };
+    this.broadcast();
+  }
+
+  /** What the duplicate-id check knows. Broadcast only when it changes, so a
+   *  responder reporting the same thing twice costs nothing. */
+  setDuplicateCheck(next: DuplicateCheck): void {
+    const cur = this.state.serverIdentity;
+    if (sameDuplicateCheck(cur, next)) return;
+    this.state = { ...this.state, serverIdentity: { ...cur, check: next.check, duplicates: next.duplicates } };
     this.broadcast();
   }
 
@@ -3235,10 +3246,13 @@ export class StageController {
       throw new NoDuplicateServerError();
     }
     const next = randomUUID();
+    // Saved first: an id answered with but not saved would be lost at the next
+    // start. Then the live copy, which the responder reads on every datagram, and
+    // a check at once under it.
     await settingsStore.patch({ serverId: next });
     console.log(`[stage-controller] newServerId: ${scrub(before.id ?? "none")} → ${scrub(next)}`);
-    this.setServerIdentity({ ...before, id: next, duplicates: [] });
-    changeServerId(next);
+    this.setServerId(next);
+    recheckServerId();
     return this.state;
   }
 

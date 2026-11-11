@@ -45,8 +45,8 @@ async function onDisk(): Promise<unknown> {
 }
 
 function heard(addresses: string[]) {
-  stageController.setServerIdentity({
-    id: OWN,
+  stageController.setServerId(OWN);
+  stageController.setDuplicateCheck({
     check: { state: "ok", at: 1 },
     duplicates: addresses.map((address) => ({ address, since: 1 })),
   });

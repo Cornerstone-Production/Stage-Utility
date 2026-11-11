@@ -251,19 +251,17 @@ export function broadcastAddresses(interfaces: Record<string, readonly Interface
 }
 
 /**
- * What this server does about a duplicate-id check (a probe with `check`).
+ * Is this duplicate-id check (a probe with `check`) another server checking for
+ * THIS server's id? Then it is answered (that is what tells the other server),
+ * never listed as a screen, and is itself the evidence: two servers carry one id.
  *
- * `own`       — its own check, heard back off the broadcast. Told apart by the
- *               per-start id it put on it, not by MAC: a box that reports no MAC,
- *               or a second server on the same machine, shares or lacks them.
- * `duplicate` — another server checking for THIS server's id. Answered (that is
- *               what tells the other server) and never listed as a screen, and
- *               the probe is itself the evidence: two servers carry one id.
- * `ignore`    — a check for some other id. Nothing to answer, nothing to list.
+ * This server's own check, heard back off the broadcast, is not: it is told apart
+ * by the per-start id it carries, not by MAC, because a box that reports no MAC,
+ * or a second server on the same machine, shares or lacks them. A check for any
+ * other id is nothing to answer and nothing to list.
  */
-export function decideCheck(probe: DiscoveryProbe, serverId: string, ownCheckId: string): "own" | "duplicate" | "ignore" {
-  if (probe.id === ownCheckId) return "own";
-  return probe.boundTo === serverId ? "duplicate" : "ignore";
+export function isDuplicateCheck(probe: DiscoveryProbe, serverId: string, ownCheckId: string): boolean {
+  return probe.id !== ownCheckId && probe.boundTo === serverId;
 }
 
 /**

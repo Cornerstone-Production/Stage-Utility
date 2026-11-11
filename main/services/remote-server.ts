@@ -88,8 +88,8 @@ import { automationRoutes } from "./routes/automation-routes.js";
 import { cueRoutes } from "./routes/cue-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
-import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
-import { settingsStore } from "./settings-store.js";
+import { startKioskResponder, stopKioskResponder, type ResponderOptions } from "./kiosk-responder.js";
+import { settingsStore, type SettingsData } from "./settings-store.js";
 import { recordDisplayScreen } from "./kiosk-devices-store.js";
 import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
@@ -598,6 +598,27 @@ function sendStatic(
   }
 }
 
+/**
+ * What the discovery responder is started with, wired to the stage controller:
+ * the id it answers with is the controller's live copy (so New server id takes
+ * effect at once, no socket rebind), and what the duplicate-id check finds goes
+ * back there, to reach Home and Advanced through StageState. Exported so a test
+ * can hold the wiring to that, rather than only the parts on either side of it.
+ */
+export function discoveryOptions(
+  settings: Pick<SettingsData, "appName" | "kioskDiscoveryPort" | "serverId">,
+  url: () => string,
+): ResponderOptions {
+  const minted = settings.serverId ?? "";
+  return {
+    serverId: () => stageController.getState().serverIdentity.id ?? minted,
+    serverName: settings.appName || "Stage Utility",
+    url,
+    port: settings.kioskDiscoveryPort,
+    onCheck: (state) => stageController.setDuplicateCheck(state),
+  };
+}
+
 export class RemoteServer {
   private server: http.Server | null = null;
   private friendlyServer: http.Server | null = null;
@@ -719,7 +740,7 @@ export class RemoteServer {
    * only when the operator says so (see serverId in settings-store.ts): every
    * binding on every device refers to it.
    */
-  private async startDiscovery(): Promise<void> {
+  private async startDiscovery(overrides: Partial<ResponderOptions> = {}): Promise<void> {
     try {
       const settings = await settingsStore.load();
       if (!settings.kioskDiscovery) return;
@@ -729,16 +750,9 @@ export class RemoteServer {
         await settingsStore.patch({ serverId });
         console.log(`[remote-server] made this server's id ${serverId}; screens set up here will bind to it`);
       }
-      stageController.setServerIdentity({ ...stageController.getState().serverIdentity, id: serverId });
-      startKioskResponder({
-        serverId,
-        serverName: settings.appName || "Stage Utility",
-        url: () => this.getLanUrl(),
-        port: settings.kioskDiscoveryPort,
-        // What the duplicate-id check finds reaches Home and Advanced through
-        // StageState, broadcast only when it changes.
-        onIdentity: (identity) => stageController.setServerIdentity(identity),
-      });
+      stageController.setServerId(serverId);
+      // `overrides` is for a test: where the check goes and how fast, never the wiring.
+      startKioskResponder({ ...discoveryOptions({ ...settings, serverId }, () => this.getLanUrl()), ...overrides });
     } catch (err) {
       // Reported, never fatal: a server that cannot answer discovery still runs
       // every display already bound to it.

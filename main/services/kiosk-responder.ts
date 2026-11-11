@@ -3,27 +3,29 @@
 // node:dgram, no dependency — the same broadcast/respond shape the OSC manager
 // and the Sennheiser provider already use.
 //
-// Everything this module DECIDES lives in kiosk-discovery.ts as pure functions;
-// what is left here is the socket, which is the part that cannot be unit tested
-// and therefore should hold no policy.
+// Everything this module DECIDES lives in kiosk-discovery.ts as pure functions,
+// and the duplicate-id check's schedule in kiosk-duplicate-check.ts; what is left
+// here is the socket, which is the part that cannot be unit tested and therefore
+// should hold no policy.
 
 import { randomBytes } from "node:crypto";
 import * as dgram from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
 import {
-  broadcastAddresses, decodeProbe, decodeReply, encodeProbe, encodeReply, decideCheck, decideProbe, listedBoundTo,
+  broadcastAddresses, decodeProbe, decodeReply, encodeProbe, encodeReply, isDuplicateCheck, decideProbe, listedBoundTo,
   isFromThisMachine,
 } from "./kiosk-discovery.js";
+import { heardDuplicate, recheckFromScratch, startDuplicateCheck, stopDuplicateCheck } from "./kiosk-duplicate-check.js";
 import { recordSeen, scanning, forgetSeen, noteReleased } from "./kiosk-presence.js";
 import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
-import { scrub } from "./scrub.js";
 import { errorMessage } from "./errors.js";
-import { DEFAULT_DISCOVERY_PORT, type DuplicateServer, type ServerIdentity } from "../types/kiosk.js";
+import { DEFAULT_DISCOVERY_PORT, type DuplicateCheck } from "../types/kiosk.js";
 
 export interface ResponderOptions {
-  /** Stable per install. A device uses it to tell two servers apart. */
-  serverId: string;
+  /** Stable per install. A device uses it to tell two servers apart. Read on
+   *  every datagram, so a new id (New server id) is answered with at once. */
+  serverId: () => string;
   /** Shown in Devices so a binding is attributable to a named server. */
   serverName: string;
   /** How a device should reach us, e.g. "http://192.168.1.50". */
@@ -35,177 +37,16 @@ export interface ResponderOptions {
   /** Where the duplicate-id check goes. Each interface's directed broadcast
    *  address on the discovery port (broadcastAddresses); a test names a peer. */
   probeTo?: { address: string; port: number };
-  /** How often the check repeats while another server is answering with this
-   *  id, so the flag clears once it stops. Nothing repeats while none is. */
+  /** See kiosk-duplicate-check.ts. */
   recheckMs?: number;
-  /** How long after a check its answers are counted. */
   replyWindowMs?: number;
-  /** Told whenever what discovery knows about this server's id changes. */
-  onIdentity?: (identity: ServerIdentity) => void;
+  /** Told whenever what the duplicate-id check knows changes. */
+  onCheck?: (state: DuplicateCheck) => void;
 }
 
 let socket: dgram.Socket | null = null;
 /** Whether the last read of the bindings failed, so the log says so once. */
 let bindingsUnreadable = false;
-
-/** The duplicate-id check. Module state, like the socket it rides on. */
-const RECHECK_MS = 60_000;
-const REPLY_WINDOW_MS = 3_000;
-/** Answers carrying our id are evidence of a duplicate only from this many
- *  addresses; the first ones heard are kept, and each was logged. */
-const MAX_DUPLICATES = 8;
-/** Rounds in a row an address may go unheard before it is cleared. Two, so one
- *  lost datagram cannot flicker the flag. */
-const CLEAR_AFTER_MISSES = 2;
-
-interface Heard extends DuplicateServer {
-  missed: number;
-}
-const duplicates = new Map<string, Heard>();
-/** Addresses heard answering (or checking for) our id since the round began. */
-const heardThisRound = new Set<string>();
-let check: ServerIdentity["check"] = { state: "off" };
-let roundTimer: ReturnType<typeof setTimeout> | null = null;
-let recheckTimer: ReturnType<typeof setTimeout> | null = null;
-/** The current responder's own options, for the check's timers. */
-let current: ResponderOptions | null = null;
-/** This start's own check id: how its own check, heard back, is told apart. */
-let ownCheckId = "";
-/** The id this server answers with. Starts as the option; New server id changes
- *  it in place (changeServerId), with no socket rebind mid-service. */
-let serverId = "";
-let sendFailing = false;
-
-function identity(): ServerIdentity {
-  const list = [...duplicates.values()]
-    .map(({ missed: _missed, ...d }) => d)
-    .sort((a, b) => a.address.localeCompare(b.address));
-  return { id: current ? serverId : null, check, duplicates: list };
-}
-
-function report(): void {
-  current?.onIdentity?.(identity());
-}
-
-/**
- * Another server is answering with this server's id. Logged once per address,
- * when first heard; after that it only stays fresh.
- */
-function noteDuplicate(address: string, how: string, from?: { url: string; name: string }): void {
-  heardThisRound.add(address);
-  const known = duplicates.get(address);
-  if (known) {
-    known.missed = 0;
-    if (from && !known.url) Object.assign(known, { url: from.url, name: from.name });
-    report();
-    return;
-  }
-  if (duplicates.size >= MAX_DUPLICATES) return;
-  duplicates.set(address, { address, ...(from && { url: from.url, name: from.name }), since: Date.now(), missed: 0 });
-  console.warn(
-    `[kiosk-responder] another server at ${scrub(address)}${from ? ` (${scrub(from.url)})` : ""} answers as this server, id ${scrub(serverId)} (${how}); ` +
-      "screens set up here may switch between the two. Give one of them a new server id: Settings > Advanced > Network",
-  );
-  report();
-  scheduleRecheck();
-}
-
-/** While anything is flagged, check again later: that is how a flag clears. */
-function scheduleRecheck(): void {
-  if (recheckTimer || duplicates.size === 0 || !current) return;
-  recheckTimer = setTimeout(() => {
-    recheckTimer = null;
-    sendCheck();
-  }, current.recheckMs ?? RECHECK_MS);
-  recheckTimer.unref?.();
-}
-
-/**
- * One round of the duplicate-id check: today's probe, naming this server's own id
- * as the server it is bound to, marked `check`. Every server with another id
- * ignores it (decideProbe rule 1); one with the same id answers it on any build
- * (rule 3), and a build that reads `check` also takes the probe as evidence.
- *
- * Sent when the responder starts (boot, the restart after a restore, discovery
- * switched on: all of them start it), and again every recheckMs only while
- * something is flagged. A server with nothing flagged sends nothing on a timer.
- */
-function sendCheck(): void {
-  const sock = socket;
-  const opts = current;
-  if (!sock || !opts) return;
-  if (roundTimer) clearTimeout(roundTimer);
-  heardThisRound.clear();
-  const port = opts.port ?? DEFAULT_DISCOVERY_PORT;
-  const targets = opts.probeTo
-    ? [opts.probeTo]
-    : broadcastAddresses(networkInterfaces()).map((address) => ({ address, port }));
-  const probe = Buffer.from(
-    encodeProbe({
-      id: ownCheckId,
-      macs: [...(opts.ownMacs ?? ownMacs)()],
-      hostname: hostname(),
-      os: "Stage Utility server",
-      boundTo: serverId,
-      check: true,
-    }),
-  );
-  const sends = targets.map(
-    (to) =>
-      new Promise<string | null>((resolve) => {
-        sock.send(probe, to.port, to.address, (err) => resolve(err ? `${to.address}: ${err.message}` : null));
-      }),
-  );
-  void Promise.all(sends).then((failures) => {
-    if (socket !== sock) return; // stopped, or restarted, while these were in flight
-    const failed = failures.filter((f): f is string => f !== null);
-    // One interface refusing is not the check failing: it went out on the others.
-    if (failed.length === targets.length) {
-      const reason = failed.join("; ");
-      if (!sendFailing) console.warn(`[kiosk-responder] could not send the duplicate-id check on udp/${port}: ${scrub(reason, 400)}`);
-      sendFailing = true;
-      check = { state: "failed", at: Date.now(), reason };
-      report();
-      // Still flagged, and the only way a flag clears is a round that goes out:
-      // keep trying on the same slow schedule rather than stopping here for good.
-      scheduleRecheck();
-      return;
-    }
-    sendFailing = false;
-    // Out, and its answers still arriving: "nobody answered" is not true yet.
-    check = { state: "checking", at: Date.now() };
-    report();
-    roundTimer = setTimeout(() => endRound(), opts.replyWindowMs ?? REPLY_WINDOW_MS);
-    roundTimer.unref?.();
-  });
-}
-
-/** Count who was not heard this round; clear whoever has been silent long enough. */
-function endRound(): void {
-  roundTimer = null;
-  for (const [address, d] of duplicates) {
-    if (heardThisRound.has(address)) continue;
-    d.missed += 1;
-    if (d.missed >= CLEAR_AFTER_MISSES) {
-      duplicates.delete(address);
-      console.log(`[kiosk-responder] ${scrub(address)} no longer answers as this server`);
-    }
-  }
-  // The answers are counted: "ok", dated when the check went out.
-  check = { state: "ok", at: check.at };
-  report();
-  scheduleRecheck();
-}
-
-function resetCheck(state: ServerIdentity["check"]): void {
-  if (roundTimer) clearTimeout(roundTimer);
-  if (recheckTimer) clearTimeout(recheckTimer);
-  roundTimer = null;
-  recheckTimer = null;
-  duplicates.clear();
-  heardThisRound.clear();
-  check = state;
-}
 
 /** Our own MACs, so we never treat this machine as a kiosk device. */
 function ownMacs(): ReadonlySet<string> {
@@ -222,15 +63,51 @@ export function startKioskResponder(opts: ResponderOptions): void {
   const mine = (opts.ownMacs ?? ownMacs)();
   const sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
   socket = sock;
-  current = opts;
-  serverId = opts.serverId;
-  sendFailing = false;
-  ownCheckId = `server-check-${randomBytes(6).toString("hex")}`;
-  resetCheck({ state: "off" });
+  /** This start's own check id: how its own check, heard back, is told apart. */
+  const ownCheckId = `server-check-${randomBytes(6).toString("hex")}`;
+  /** Why broadcast was refused, if it was: then the check cannot be sent. */
+  let broadcastRefused: string | null = null;
 
   sock.on("message", (buf, rinfo) => {
     void handle(buf, rinfo);
   });
+
+  /** Answer a probe: who we are, where to load from, and whether it is set up here. */
+  function replyTo(rinfo: dgram.RemoteInfo, claimed: boolean): void {
+    const reply = Buffer.from(encodeReply({ serverId: opts.serverId(), name: opts.serverName, url: opts.url(), claimed }));
+    sock.send(reply, rinfo.port, rinfo.address, (err) => {
+      if (err) console.warn("[kiosk-responder] reply failed:", err.message);
+    });
+  }
+
+  /** One duplicate-id check, out on every target. Null when it went out anywhere:
+   *  one interface refusing is not the check failing. */
+  async function sendCheck(): Promise<string | null> {
+    if (broadcastRefused) return `broadcast refused (${broadcastRefused})`;
+    const targets = opts.probeTo
+      ? [opts.probeTo]
+      : broadcastAddresses(networkInterfaces()).map((address) => ({ address, port }));
+    const probe = Buffer.from(
+      encodeProbe({
+        id: ownCheckId,
+        macs: [...mine],
+        hostname: hostname(),
+        os: "Stage Utility server",
+        boundTo: opts.serverId(),
+        check: true,
+      }),
+    );
+    const failures = await Promise.all(
+      targets.map(
+        (to) =>
+          new Promise<string | null>((resolve) => {
+            sock.send(probe, to.port, to.address, (err) => resolve(err ? `${to.address}: ${err.message}` : null));
+          }),
+      ),
+    );
+    const failed = failures.filter((f): f is string => f !== null);
+    return failed.length === targets.length ? failed.join("; ") : null;
+  }
 
   async function handle(buf: Buffer, rinfo: dgram.RemoteInfo): Promise<void> {
     const probe = decodeProbe(buf);
@@ -242,8 +119,8 @@ export function startKioskResponder(opts: ResponderOptions): void {
       // servers on one machine sharing the port, the kernel gives a unicast to
       // whichever socket it likes.
       const reply = decodeReply(buf);
-      if (reply && reply.serverId === serverId && reply.url !== opts.url()) {
-        noteDuplicate(rinfo.address, "it answered this server's check", { url: reply.url, name: reply.name });
+      if (reply && reply.serverId === opts.serverId() && reply.url !== opts.url()) {
+        heardDuplicate(rinfo.address, "it answered this server's check", { url: reply.url, name: reply.name });
       }
       // Anything else is not ours, malformed, or oversized. A broadcast port hears everything.
       return;
@@ -251,16 +128,9 @@ export function startKioskResponder(opts: ResponderOptions): void {
     // Another server's duplicate-id check, before the same-machine rule: a second
     // server on this machine shares its MACs, and its check is still evidence.
     if (probe.check) {
-      if (decideCheck(probe, serverId, ownCheckId) !== "duplicate") return;
-      noteDuplicate(rinfo.address, "it checked for this id");
-      sock.send(
-        Buffer.from(encodeReply({ serverId, name: opts.serverName, url: opts.url(), claimed: false })),
-        rinfo.port,
-        rinfo.address,
-        (err) => {
-          if (err) console.warn("[kiosk-responder] reply failed:", err.message);
-        },
-      );
+      if (!isDuplicateCheck(probe, opts.serverId(), ownCheckId)) return;
+      heardDuplicate(rinfo.address, "it checked for this id");
+      replyTo(rinfo, false);
       return;
     }
     // Our own announcement bouncing back, or this machine running an agent
@@ -281,6 +151,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
     }
     bindingsUnreadable = false;
     const bound = !!findById(devices, probe.id);
+    const serverId = opts.serverId();
     const decision = decideProbe(probe, serverId, { scanning: scanning(), bound });
     if (!bound && probe.boundTo === serverId) noteReleased(probe.id);
 
@@ -334,13 +205,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
       forgetSeen(probe.id);
     }
 
-    if (!decision.answer) return;
-    const reply = Buffer.from(
-      encodeReply({ serverId, name: opts.serverName, url: opts.url(), claimed: bound }),
-    );
-    sock.send(reply, rinfo.port, rinfo.address, (err) => {
-      if (err) console.warn("[kiosk-responder] reply failed:", err.message);
-    });
+    if (decision.answer) replyTo(rinfo, bound);
   }
 
   sock.on("error", (err) => {
@@ -355,38 +220,34 @@ export function startKioskResponder(opts: ResponderOptions): void {
       sock.setBroadcast(true);
     } catch (err) {
       // Replies are unicast, so a platform that refuses this still answers
-      // probes. What it cannot do is send the duplicate-id check, so say so and
-      // leave the check marked failed rather than quietly reading as fine.
-      const reason = errorMessage(err);
-      console.warn(`[kiosk-responder] broadcast refused on udp/${port} (${reason}); cannot check for another server with this id`);
-      check = { state: "failed", at: Date.now(), reason };
-      console.log(`[kiosk-responder] listening on udp/${port} as "${opts.serverName}"`);
-      report();
-      return;
+      // probes. What it cannot do is send the duplicate-id check: each check then
+      // fails, and says so, on the check's own failure path.
+      broadcastRefused = errorMessage(err);
     }
     console.log(`[kiosk-responder] listening on udp/${port} as "${opts.serverName}"`);
-    sendCheck();
+    startDuplicateCheck({
+      send: sendCheck,
+      serverId: opts.serverId,
+      port,
+      recheckMs: opts.recheckMs,
+      replyWindowMs: opts.replyWindowMs,
+      onChange: opts.onCheck,
+    });
   });
 }
 
 /**
- * Answer as `next` from now on, and check at once whether anyone else does.
- *
- * What was heard about the old id is dropped with it: the server that shares the
- * old id keeps it, and the screens bound to it follow that server. A no-op while
- * discovery is off, when nothing answers and nothing checks.
+ * This server's id just changed (New server id): what was heard about the old one
+ * says nothing any more, so forget it and check at once under the new one. The
+ * id itself is read from the options on every datagram; this only re-checks. A
+ * no-op while discovery is off, when nothing answers and nothing checks.
  */
-export function changeServerId(next: string): void {
-  if (!socket || !current) return;
-  serverId = next;
-  resetCheck(check);
-  report();
-  sendCheck();
+export function recheckServerId(): void {
+  if (socket) recheckFromScratch();
 }
 
-/** Stop answering and stop checking. What the check knew goes with it: a stopped
- *  responder hears nobody, so it can claim nothing. */
-export function stopKioskResponder(state: ServerIdentity["check"] = { state: "off" }): void {
+/** Stop answering and stop checking. */
+export function stopKioskResponder(state: DuplicateCheck["check"] = { state: "off" }): void {
   if (!socket) return;
   try {
     socket.close();
@@ -394,7 +255,5 @@ export function stopKioskResponder(state: ServerIdentity["check"] = { state: "of
     // Already closed — nothing to do.
   }
   socket = null;
-  resetCheck(state);
-  report();
-  current = null;
+  stopDuplicateCheck(state);
 }

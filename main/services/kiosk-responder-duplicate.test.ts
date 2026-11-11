@@ -25,11 +25,11 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-responder-dup-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { startKioskResponder, stopKioskResponder, changeServerId } = await import("./kiosk-responder.js");
+const { startKioskResponder, stopKioskResponder, recheckServerId } = await import("./kiosk-responder.js");
 const { encodeProbe, encodeReply, decodeProbe, decodeReply } = await import("./kiosk-discovery.js");
 const { seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
 const { updateDevices } = await import("./kiosk-devices-store.js");
-type ServerIdentity = import("../types/kiosk.js").ServerIdentity;
+type DuplicateCheck = import("../types/kiosk.js").DuplicateCheck;
 type DiscoveryProbe = import("../types/kiosk.js").DiscoveryProbe;
 
 const OWN = "3f2a9c1e-5b7d-4e21-9a0c-6d8e2f41b7a3";
@@ -64,7 +64,9 @@ const checks: DiscoveryProbe[] = [];
 const peerReplies: string[] = [];
 
 let responderPort = 0;
-const identities: ServerIdentity[] = [];
+const identities: DuplicateCheck[] = [];
+/** The id the responder answers with, read on every datagram (the stage controller's live copy in production). */
+let currentId = OWN;
 const latest = () => identities[identities.length - 1];
 const realLog = console.log;
 const realWarn = console.warn;
@@ -89,7 +91,7 @@ before(async () => {
   peerPort = peer.address().port;
   responderPort = await freePort();
   startKioskResponder({
-    serverId: OWN,
+    serverId: () => currentId,
     serverName: "This box",
     url: () => "http://192.0.2.50:8788",
     port: responderPort,
@@ -97,7 +99,7 @@ before(async () => {
     probeTo: { address: "127.0.0.1", port: peerPort },
     recheckMs: RECHECK_MS,
     replyWindowMs: WINDOW_MS,
-    onIdentity: (i) => identities.push(i),
+    onCheck: (i) => identities.push(i),
   });
 });
 
@@ -121,7 +123,6 @@ describe("the check this server sends", () => {
     const dup = latest().duplicates[0];
     assert.equal(dup.address, "127.0.0.1");
     assert.equal(dup.url, "http://192.0.2.60:8788");
-    assert.equal(latest().id, OWN);
     // Flagged as the answer arrives, while the round is still being counted.
     assert.ok(["checking", "ok"].includes(latest().check.state), latest().check.state);
     await until("the round to be counted", () => latest().check.state === "ok");
@@ -204,8 +205,8 @@ describe("a new server id", () => {
     await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
     // The peer keeps the OLD id: it answers only checks for OWN from here on.
     const before = checks.length;
-    changeServerId(NEXT);
-    assert.equal(latest().id, NEXT);
+    currentId = NEXT;
+    recheckServerId();
     assert.deepEqual(latest().duplicates, [], "the old id's duplicate outlived the change");
     await until("a check under the new id", () => checks.slice(before).some((c) => c.boundTo === NEXT));
   });
@@ -249,7 +250,7 @@ describe("this server's own check, heard back", () => {
     stopKioskResponder();
     identities.length = 0;
     startKioskResponder({
-      serverId: OWN,
+      serverId: () => currentId,
       serverName: "This box",
       url: () => "http://192.0.2.50:8788",
       port: responderPort,
@@ -257,7 +258,7 @@ describe("this server's own check, heard back", () => {
       probeTo: { address: "127.0.0.1", port: responderPort },
       recheckMs: RECHECK_MS,
       replyWindowMs: WINDOW_MS,
-      onIdentity: (i) => identities.push(i),
+      onCheck: (i) => identities.push(i),
     });
     await until("a finished check", () => latest()?.check.state === "ok");
     await new Promise((r) => setTimeout(r, 150));
@@ -267,10 +268,11 @@ describe("this server's own check, heard back", () => {
 
 describe("a check that cannot be sent while something is flagged", () => {
   test("keeps trying on the re-check schedule, so the flag can still clear", async () => {
+    currentId = OWN;
     stopKioskResponder();
     identities.length = 0;
     startKioskResponder({
-      serverId: OWN,
+      serverId: () => currentId,
       serverName: "This box",
       url: () => "http://192.0.2.50:8788",
       port: responderPort,
@@ -279,7 +281,7 @@ describe("a check that cannot be sent while something is flagged", () => {
       probeTo: { address: "no-such-host.invalid", port: peerPort },
       recheckMs: RECHECK_MS,
       replyWindowMs: WINDOW_MS,
-      onIdentity: (i) => identities.push(i),
+      onCheck: (i) => identities.push(i),
     });
     await until("the check to fail", () => latest()?.check.state === "failed");
     peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: OWN, check: true }), responderPort, "127.0.0.1");

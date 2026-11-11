@@ -130,7 +130,7 @@ export interface DiscoveryProbe {
    * Set by a SERVER checking whether another one answers with its id: such a probe
    * names that id as `boundTo`, so only a server with the same id answers it.
    * A server that reads this answers without listing the probe as a screen, and
-   * takes the probe itself as evidence of a duplicate. See decideCheck.
+   * takes the probe itself as evidence of a duplicate. See isDuplicateCheck.
    */
   check?: boolean;
 }
@@ -155,14 +155,10 @@ export interface DiscoveryReply {
 }
 
 /**
- * This server's identity on the discovery port, as the operator sees it.
- *
- * `id` is what every kiosk and Mac output binds to (settings.json `serverId`),
- * null until discovery first starts and mints one. A restore that brings another
- * server's config asks whether to take that server's id only when the two differ.
+ * What the duplicate-id check knows: whether it ran, and who else answers with
+ * this server's id. Reported by kiosk-duplicate-check.ts, which never holds the id.
  */
-export interface ServerIdentity {
-  id: string | null;
+export interface DuplicateCheck {
   /** The last duplicate-id check. `off` while discovery is off (nothing answers,
    *  nothing checks); `failed` when the check could not be sent; `checking` while
    *  its answers are still being counted; `ok` once they have been, `at` being
@@ -171,6 +167,19 @@ export interface ServerIdentity {
   /** Other servers answering discovery with this id, by address. Empty is the
    *  healthy case. Any entry means screens bound here can switch between them. */
   duplicates: DuplicateServer[];
+}
+
+/**
+ * This server's identity on the discovery port, as the operator sees it.
+ *
+ * `id` is what every kiosk and Mac output binds to (settings.json `serverId`),
+ * null until discovery first starts and mints one. The stage controller holds the
+ * live copy; the responder reads it from there rather than keeping its own. A
+ * restore that brings another server's config asks whether to take that server's
+ * id only when the two differ.
+ */
+export interface ServerIdentity extends DuplicateCheck {
+  id: string | null;
 }
 
 /** Another server heard answering with this server's id. */

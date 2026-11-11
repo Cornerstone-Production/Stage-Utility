@@ -44,7 +44,7 @@ let replies: string[] = [];
 before(async () => {
   port = await freePort();
   startKioskResponder({
-    serverId: "srv-test",
+    serverId: () => "srv-test",
     serverName: "Test server",
     url: () => "http://192.0.2.10:8788",
     port,
@@ -308,7 +308,7 @@ describe("an output released on one server is set up on another", () => {
   async function serveAs(s: { serverId: string; name: string; url: string }): Promise<void> {
     stopKioskResponder();
     startKioskResponder({
-      serverId: s.serverId, serverName: s.name, url: () => s.url, port, ownMacs: () => new Set([THIS_MAC]),
+      serverId: () => s.serverId, serverName: s.name, url: () => s.url, port, ownMacs: () => new Set([THIS_MAC]),
       probeTo: { address: "127.0.0.1", port },
     });
     await new Promise((r) => setTimeout(r, 100));

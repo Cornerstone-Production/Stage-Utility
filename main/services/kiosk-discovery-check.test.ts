@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { broadcastAddresses, decideCheck, decideProbe, decodeProbe, encodeProbe } from "./kiosk-discovery.js";
+import { broadcastAddresses, isDuplicateCheck, decideProbe, decodeProbe, encodeProbe } from "./kiosk-discovery.js";
 import type { DiscoveryProbe } from "../types/kiosk.js";
 
 const OWN = "3f2a9c1e-5b7d-4e21-9a0c-6d8e2f41b7a3";
@@ -45,26 +45,26 @@ describe("the check on the wire", () => {
   });
 });
 
-describe("decideCheck", () => {
+describe("isDuplicateCheck", () => {
   test("ANOTHER SERVER CHECKING FOR THIS SERVER'S ID is a duplicate", () => {
-    assert.equal(decideCheck(check(), OWN, MY_CHECK), "duplicate");
+    assert.equal(isDuplicateCheck(check(), OWN, MY_CHECK), true);
   });
 
   test("a check for another server's id is ignored", () => {
-    assert.equal(decideCheck(check({ boundTo: OTHER }), OWN, MY_CHECK), "ignore");
-    assert.equal(decideCheck(check({ boundTo: undefined }), OWN, MY_CHECK), "ignore");
+    assert.equal(isDuplicateCheck(check({ boundTo: OTHER }), OWN, MY_CHECK), false);
+    assert.equal(isDuplicateCheck(check({ boundTo: undefined }), OWN, MY_CHECK), false);
   });
 
   test("this server's own check, heard back off the broadcast, is its own", () => {
     // By the per-start id, not by MAC: a box that reports no MAC, or two servers
     // on one machine, would otherwise read their own check as somebody else's.
-    assert.equal(decideCheck(check({ id: MY_CHECK }), OWN, MY_CHECK), "own");
+    assert.equal(isDuplicateCheck(check({ id: MY_CHECK }), OWN, MY_CHECK), false);
   });
 });
 
 describe("an older server, which knows nothing of check", () => {
   test("still answers a check for its own id, which is what makes it detectable", () => {
-    // decideProbe is what a build without decideCheck runs: rule 3.
+    // decideProbe is what a build without isDuplicateCheck runs: rule 3.
     assert.equal(decideProbe(check(), OWN, { scanning: false, bound: false }).answer, true);
   });
 
