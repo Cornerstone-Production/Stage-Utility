@@ -26,10 +26,10 @@
     "server": "tsx server.ts",
     "start": "node --import tsx server.ts",
     "lint": "eslint .",
-    "icons": "node scripts/build-icons.mjs",
-    "docs:screenshots": "node scripts/docs-screenshots/run.mjs",
-    "test": "node scripts/run-tests.mjs",
-    "type-check": "tsc --noEmit",
+    "icons": "node scripts/build-icons.ts",
+    "docs:screenshots": "node scripts/docs-screenshots/run.ts",
+    "test": "node scripts/run-tests.ts",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.tooling.json",
     "format": "oxfmt ."
   },
   "dependencies": {

@@ -28,6 +28,7 @@ final class OutputDiscovery {
   /// Across restarts, so trouble that has not changed is not said again.
   private var link = ProbeLinkState()
   private var filter = ReplyFilter()
+  private var server = StickyServer()
 
   /// The server answered. Called on the main queue, for every answer the filter
   /// believes, with what it does to the server this output remembers.
@@ -53,7 +54,14 @@ final class OutputDiscovery {
     answered = false
     unanswered = 0
     filter = ReplyFilter()
+    server.searchBegan()
     tick()
+  }
+
+  /// Whether to load `reply`'s URL, given the one the output has. See `StickyServer`.
+  /// Timed by the uptime clock, which a wall-clock step does not move.
+  func choose(_ reply: DiscoveryReply, current: String?) -> StickyServer.Choice {
+    server.choose(url: reply.url, serverId: reply.serverId, current: current, now: ProcessInfo.processInfo.systemUptime)
   }
 
   /// The server stopped answering: go back to probing every 2 s.

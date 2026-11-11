@@ -6,7 +6,7 @@ Stage Utility uses [Conventional Commits](https://www.conventionalcommits.org/).
 CI checks every subject and the release tooling reads the types, so the convention
 decides the version number.
 
-`node scripts/check-commit-subjects.mjs [base]` runs the same check locally over
+`node scripts/check-commit-subjects.ts [base]` runs the same check locally over
 the commits since `base` (default `origin/beta`), naming each subject that does
 not conform.
 
@@ -126,7 +126,7 @@ the author knows whether the bug ever shipped, so only the author can say.
 Rule of thumb: if somebody upgrading from the last stable release could not have
 hit the bug, mark it.
 
-CI runs a heuristic check (`scripts/check-beta-only.mjs`) that warns, but never
+CI runs a heuristic check (`scripts/check-beta-only.ts`) that warns, but never
 fails the build, on a `fix:`, `perf:` or `polish:` commit that touches a file also
 touched by a `feat:` commit from this release cycle. It is a reminder, not a
 judge: sharing a file does not mean sharing a bug, and a fix to a new feature in a
@@ -201,7 +201,7 @@ pull requests only, and the release PR from `beta` to `main` is skipped there
 because its head is a `beta` commit the release run has already verified and
 marked with a `build` status. On `main` the gate is not run again when beta's release
 run passed it on the same tree, apart from the version its release bump changed in
-`package.json` and `package-lock.json` (`scripts/verified-tree.mjs`); any other
+`package.json` and `package-lock.json` (`scripts/verified-tree.ts`); any other
 difference, or any doubt, and it runs.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
@@ -269,8 +269,8 @@ npm run lint && npm run type-check && npm test && npm run build
 
 CI runs the same four, plus `npm audit --audit-level=high`. Lint is clean; a new
 warning is yours to fix. Two cheap checks run on every pull request and are worth
-running first: `node scripts/check-public-hygiene.mjs` (see
-[Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.mjs`.
+running first: `node scripts/check-public-hygiene.ts` (see
+[Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.ts`.
 
 CI runs them side by side rather than one after another: lint, type-check, build
 and the audit in one job, the test suite split across four more with
@@ -395,6 +395,40 @@ in the Security tab as well as the job log. ShellCheck and PSScriptAnalyzer have
 no SARIF output; theirs are annotations on the PR diff. A fork or Dependabot pull
 request cannot write to code scanning and skips the upload; the job still gates on
 the scan.
+
+### Tooling scripts
+
+The scripts under `scripts/`, the screenshot kit and the ServiceCue Worker's
+`scripts/deploy.ts` and tests are TypeScript run directly by Node 24, which strips
+the types: no `tsx`, no build, no install. That is what lets a CI job that never runs
+`npm ci` call one, and what lets the update scripts call them on an install that has
+not fetched its dependencies yet. A script a test imports is run by `tsx` there, so
+both ways of running a file have to work.
+
+Node only erases types, so `tsconfig.tooling.json` makes `npm run type-check` refuse
+what it cannot run: no `enum`, `namespace` or constructor parameter property; a
+type-only import says `import type`; no path alias. A script run by `tsx` that imports
+`main/` is left out of that project and is checked by `tsconfig.json` alone.
+
+A relative import names its `.ts` file. tsc cannot hold the tooling to that: it
+resolves `./x.js` to `x.ts`, which plain Node does not. `scripts/tooling-imports.test.ts`
+does, for every file that project includes and every file they import.
+
+`scripts/manifest-changed.mjs` and `scripts/build-inputs.mjs` forward to their `.ts`
+files, and stay. An update script is loaded before the pull, and an install updates
+from whatever release it is on straight to the newest, so an older install runs an
+update script that calls the `.mjs` paths. Renaming any script either update script
+calls needs a permanent forwarder at the old path.
+
+A script whose output a caller parses (`verified-tree.ts` writes `$GITHUB_OUTPUT`,
+`release-notes.ts` writes the notes) or whose stderr an update script shows runs with
+`node --no-warnings`: older Node 24 releases print a type-stripping warning to stderr.
+
+Every `node … scripts/<file>` call, in a workflow, a composite action, any
+`package.json` or a shell or PowerShell script, is one line of the sorted list in
+`scripts/tooling-invocations.test.ts`, so a new or renamed call is added there. The same
+test fails a workflow job that runs TypeScript without an `actions/setup-node` step for
+Node 24 or later before it.
 
 ### Merge-friendly guards
 
@@ -614,7 +648,7 @@ because they are believed.
 ## Public hygiene
 
 This repository is public, so tracked files carry no real addresses, people or
-places. `node scripts/check-public-hygiene.mjs` reads every file `git ls-files`
+places. `node scripts/check-public-hygiene.ts` reads every file `git ls-files`
 lists (binaries and lockfiles are skipped) and exits 1 on any of:
 
 | Rule | Fails on | Use instead |

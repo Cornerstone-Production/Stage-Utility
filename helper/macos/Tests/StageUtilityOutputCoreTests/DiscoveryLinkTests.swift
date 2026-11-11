@@ -201,3 +201,142 @@ import Testing
     #expect(ProbeSchedule.interval(unanswered: 0, answered: false, socketOpen: true) == 2)
   }
 }
+
+/// `StickyServer` only. The wiring in StageUtilityOutput (`OutputDiscovery.start()`
+/// calling `searchBegan()`, `AppModel.heard()` acting on the choice) has no test
+/// target and is checked by reading.
+@Suite struct StickyServerTests {
+  let a = "http://192.0.2.1:8788"
+  let b = "http://192.0.2.2:8788"
+  let id = "server-1"
+  let otherId = "server-2"
+  let t0: TimeInterval = 1_000
+  let round = ProbeSchedule.slowInterval
+
+  /// A started search that has already settled on `a`.
+  func settled() -> StickyServer {
+    var s = StickyServer()
+    #expect(s.choose(url: a, serverId: id, current: nil, now: t0) == .adopt)
+    return s
+  }
+
+  @Test func twoUrlsAnsweringForOneIdDoNotSwapThePage() {
+    var s = settled()
+    var current = a
+    var adoptions = 0
+    for n in 1...20 {
+      let now = t0 + Double(n) * round
+      for url in [b, a] {
+        if s.choose(url: url, serverId: id, current: current, now: now) == .adopt {
+          adoptions += 1
+          current = url
+        }
+      }
+      #expect(current == a, "round \(n)")
+    }
+    #expect(adoptions == 0)
+  }
+
+  @Test func theDuplicateIsReportedOnlyOnceTheCurrentUrlAnswersAgain() {
+    var s = settled()
+    // b first: it may be a's server at a new address, so nothing is said yet.
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .keep)
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 2) == .keep)
+    // a answers after it: two servers, one id.
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 3) == .duplicate(current: a, other: b))
+    for i in 4..<14 {
+      #expect(s.choose(url: b, serverId: id, current: a, now: t0 + Double(i)) == .keep)
+      #expect(s.choose(url: a, serverId: id, current: a, now: t0 + Double(i) + 0.5) == .keep)
+    }
+  }
+
+  @Test func aDuplicateThatStopsAnsweringIsGoneAndCanBeReportedAgain() {
+    var s = settled()
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 2) == .duplicate(current: a, other: b))
+    // b is given its own id and stops answering for this one: a alone, every round.
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1 + round) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1 + 2 * round) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1 + 3 * round) == .duplicateGone)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1 + 4 * round) == .keep)
+    // It comes back: reported again.
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1 + 5 * round) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 2 + 5 * round) == .duplicate(current: a, other: b))
+  }
+
+  @Test func theDuplicateIsReportedOncePerPairInEitherOrder() {
+    var s = settled()
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 2) == .duplicate(current: a, other: b))
+    // A new search lands on b, and a is now the other one.
+    s.searchBegan()
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 3) == .adopt)
+    #expect(s.choose(url: a, serverId: id, current: b, now: t0 + 4) == .keep)
+    #expect(s.choose(url: b, serverId: id, current: b, now: t0 + 5) == .keep)
+  }
+
+  @Test func anAnswerForAnotherServerIdIsFollowedAtOnce() {
+    var s = settled()
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1) == .keep)
+    // The current server is fresh and no search is on: only the id can move it.
+    #expect(s.choose(url: b, serverId: otherId, current: a, now: t0 + 2) == .adopt)
+    #expect(s.choose(url: b, serverId: otherId, current: b, now: t0 + 3) == .keep)
+  }
+
+  @Test func aServerThatMovedIsFollowedAfterTheWindowWithNoDuplicate() {
+    var s = settled()
+    var n = 1.0
+    // a's server now answers at b alone.
+    while n * round <= StickyServer.window {
+      #expect(s.choose(url: b, serverId: id, current: a, now: t0 + n * round) == .keep)
+      n += 1
+    }
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + n * round) == .adopt)
+  }
+
+  @Test func oneLostAnswerKeepsTheServerAndTwoMoveIt() {
+    var s = settled()
+    // One answer from the current server lost: the next arrives a round late, with jitter.
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 2 * round + 0.5) == .keep)
+    var t = settled()
+    // Two in a row lost: it has gone.
+    #expect(t.choose(url: b, serverId: id, current: a, now: t0 + 3 * round + 0.5) == .adopt)
+  }
+
+  @Test func theFirstAnswerAfterASearchBeginsIsAdopted() {
+    var s = settled()
+    s.searchBegan()
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .adopt)
+    // Then the other one is held.
+    #expect(s.choose(url: a, serverId: id, current: b, now: t0 + 2) == .keep)
+    #expect(s.choose(url: b, serverId: id, current: b, now: t0 + 3) == .duplicate(current: b, other: a))
+  }
+
+  @Test func anAnswerFromTheCurrentUrlEndsTheSearch() {
+    var s = settled()
+    s.searchBegan()
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 1) == .keep)
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 2) == .keep)
+  }
+
+  /// An output switched off but still set up keeps its URL and gets a new discovery,
+  /// so the id is learned from the current URL's answer, not from an adopt.
+  @Test func theCurrentUrlsAnswerTeachesItsId() {
+    var s = StickyServer()
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0) == .keep)
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .keep)
+    #expect(s.choose(url: a, serverId: id, current: a, now: t0 + 2) == .duplicate(current: a, other: b))
+  }
+
+  @Test func aNewIdAtTheCurrentUrlForgetsTheHeldOther() {
+    var s = settled()
+    #expect(s.choose(url: b, serverId: id, current: a, now: t0 + 1) == .keep)
+    // a now answers for another id: b no longer shares it.
+    #expect(s.choose(url: a, serverId: otherId, current: a, now: t0 + 2) == .keep)
+  }
+
+  @Test func noCurrentUrlAdopts() {
+    var s = settled()
+    #expect(s.choose(url: b, serverId: id, current: nil, now: t0 + 1) == .adopt)
+  }
+}

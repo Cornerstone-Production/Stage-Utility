@@ -120,6 +120,27 @@ export const COMPARABLE_ABOVE: Record<TrendMeasure, number> = {
   sound: 0,
 };
 
+/**
+ * How many decimals a measure prints, and so the precision its tile's figures
+ * are ROUNDED to. Whole people; tenths of a decibel.
+ *
+ * ONE definition, read by `typeTrends` when it rounds the headline and the prior
+ * average AND by the card when it prints them, so what is printed is exactly
+ * what was rounded. Rounding to whole units here and printing tenths there is how
+ * a 113.91 dB peak read "114.0 dB": a figure that cannot carry the precision it
+ * is printed at.
+ */
+export const DECIMALS: Record<TrendMeasure, number> = {
+  attendance: 0,
+  sound: 1,
+};
+
+/** Round to `dp` decimal places. */
+export function atPrecision(v: number, dp: number): number {
+  const f = 10 ** dp;
+  return Math.round(v * f) / f;
+}
+
 /** How many DAYS a tile's SPARKLINE draws, and the only thing this bounds. The
  *  change and the chart are both bounded by the RANGE CONTROL — see `rangeSpan`
  *  — so the sparkline is the last eight days the range contains, not the last
@@ -704,8 +725,10 @@ export function typeTrends(
       ? mean(basisDays.map((d) => combineFirst(d.values, basisSlice(d), measure)))
       : null;
 
-    const rounded = latest == null ? null : Math.round(latest);
-    const priorRounded = priorMean == null ? null : Math.round(priorMean);
+    // To the measure's OWN precision, never whole units: see DECIMALS. Whole
+    // units are right for a head count and wrong for a level read to a tenth.
+    const rounded = latest == null ? null : atPrecision(latest, DECIMALS[measure]);
+    const priorRounded = priorMean == null ? null : atPrecision(priorMean, DECIMALS[measure]);
     /** Both figures are there, and the prior one is something to compare
      *  against. Narrows for the type checker as well as reading once. */
     const comparable = rounded != null && priorRounded != null && priorRounded > COMPARABLE_ABOVE[measure];

@@ -186,6 +186,35 @@ export function resetPlacement(cards: readonly LayoutObject[]): LayoutObject[] {
   });
 }
 
+/**
+ * `boxes` with every row no card occupies taken out, the rows below closing up.
+ *
+ * Home keeps explicit cells on purpose, so a gap the operator left stays a gap
+ * WHILE EDITING. Drawn for reading, a row that holds no visible card is a blank
+ * band: a stray empty row in the stored layout, or a card hidden by its "when"
+ * setting that still owns its rows. A row any card reaches into, including one a
+ * tall card only passes through, is kept whole, so a gap BESIDE a card stays
+ * where it was placed. Columns never move.
+ */
+export function collapseEmptyRows(boxes: readonly Box[]): Box[] {
+  const used = new Set<number>();
+  for (const b of boxes) for (let r = b.row; r < b.row + b.h; r++) used.add(r);
+  const renumbered = new Map<number, number>();
+  [...used].sort((a, b) => a - b).forEach((r, i) => renumbered.set(r, i + 1));
+  return boxes.map((b) => ({ ...b, row: renumbered.get(b.row)! }));
+}
+
+/**
+ * The footprints Home draws for `cards`: the full grid while editing, so a card
+ * can be dropped into an empty row, and the page with its empty rows closed up
+ * otherwise. `cards` is already what is VISIBLE (see visibleCards), so a card
+ * hidden by its "when" setting no longer holds its rows.
+ */
+export function boxesForPage(cards: readonly LayoutObject[], editing: boolean): Box[] {
+  const boxes = boxesOf(cards);
+  return editing ? boxes : collapseEmptyRows(boxes);
+}
+
 /** How many rows the page needs, so the drop area covers the empty space below
  *  the last card — you cannot drop into a gap the grid does not draw. */
 export function rowsNeeded(boxes: readonly Box[], extra = 2): number {

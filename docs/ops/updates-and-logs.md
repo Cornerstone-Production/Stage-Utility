@@ -94,7 +94,7 @@ keeps its plain label: it cannot reach the override, so it does not offer one.
 just restarts, because the backend runs via tsx.
 
 That decision compares the **content** of `package.json` and `package-lock.json` at
-each revision, with the root version removed (`scripts/manifest-changed.mjs`), rather
+each revision, with the root version removed (`scripts/manifest-changed.ts`), rather
 than matching filenames. Every release carries the workflow's own version bump, which
 rewrites both manifests without changing a single dependency:
 
@@ -108,13 +108,20 @@ A filename rule fires on that every time, so the skip never happened. Anything
 unreadable or unparseable is treated as changed, so an unknown state does the work
 rather than skipping it.
 
-Which files count is one list, `scripts/build-inputs.mjs`, used by both update scripts:
+Which files count is one list, `scripts/build-inputs.ts`, used by both update scripts:
 the interface (`renderer/`, `main/`, `public/`, the HTML documents, the Vite, Tailwind,
-PostCSS and TypeScript config) and the public ServiceCue page's Worker source and config.
+PostCSS and TypeScript config, but not `tsconfig.tooling.json`, which only type-checks
+the tooling) and the public ServiceCue page's Worker source and config.
+
 A checkout with no `build/servicecue/deploy.json` reinstalls and rebuilds on the next
 update whatever changed, unless `build/servicecue.failed` says the last build failed to
 make it on the commit the update starts from: then only a change to a build input rebuilds
 ([the marker](servicecue-on-the-web.md#the-copy-every-build-prepares)).
+
+Both helpers are TypeScript that the update scripts run with the `node` on `PATH`, which
+must be Node 24 or later to strip the types. A helper that cannot run counts as an
+unreadable answer, and the run log says so: `[update] manifest-changed.ts exited N -
+reinstalling and rebuilding`, or `[update] build-inputs.ts exited N - rebuilding`.
 
 ### Coming in the next release
 

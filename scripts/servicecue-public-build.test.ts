@@ -52,7 +52,10 @@ const built = await build({
   logLevel: "silent",
   build: { outDir: OUT, emptyOutDir: true },
 });
-const chunks = (Array.isArray(built) ? built[0]! : built).output.flatMap((o) => (o.type === "chunk" ? [o] : []));
+const result = Array.isArray(built) ? built[0]! : built;
+// A one-shot build returns its output; only a watch build returns a watcher.
+if (!("output" in result)) throw new Error("the ServiceCue build returned a watcher, not its output");
+const chunks = result.output.flatMap((o) => (o.type === "chunk" ? [o] : []));
 
 /** Every file the build left in its folder, by path from it. */
 function filesUnder(dir: string, base = ""): string[] {

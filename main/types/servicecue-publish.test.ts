@@ -390,6 +390,14 @@ describe("the page's build id", () => {
     assert.equal(viewerBuildFromHtml(html), "bbbbbbbbbbbb");
     assert.equal(viewerBuildFromHtml(`<!-- ${viewerBuildTag("aaaaaaaaaaaa")} --><html><head></head></html>`), null);
   });
+
+  test("a comment ends at its first -->, as HTML reads it", () => {
+    assert.equal(viewerBuildFromHtml(`<!-- <!-- --> ${viewerBuildTag("aaaaaaaaaaaa")} -->${viewerBuildTag("0123456789ab")}`), "aaaaaaaaaaaa");
+  });
+
+  test("extra whitespace between the attributes is still the tag", () => {
+    assert.equal(viewerBuildFromHtml(`<meta  name="${VIEWER_BUILD_META}"   content="0123456789ab"/>`), "0123456789ab");
+  });
 });
 
 // The check tsc runs. The server's StageState is assignable to PublicState exactly

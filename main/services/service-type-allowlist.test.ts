@@ -117,9 +117,9 @@ const REPO = path.resolve(MAIN, "..");
 /**
  * Every source or data file under a root.
  *
- * Every extension the repo actually ships, not just `.ts`/`.tsx`: `scripts/`
- * holds `.mjs` and `.mts`, one of them a PCO probe, which is precisely where a
- * response gets pasted while somebody is working something out.
+ * Every extension the repo has shipped, not just `.ts`/`.tsx`: `scripts/` held
+ * `.mjs` and `.mts` until its tooling became `.ts`, one of them a PCO probe, which
+ * is precisely where a response gets pasted while somebody is working something out.
  *
  * Code files exclude tests — they invent ids on purpose, and this repo's own
  * `["65533", "65534", "65535"]` is a battery reading. `.json` is NOT excluded,

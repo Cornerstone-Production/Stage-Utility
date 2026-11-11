@@ -272,6 +272,18 @@ released there) the output forgets it, logs `no longer has this output set up; f
 it`, and stops naming it, so any server can set it up. An output set up nowhere
 follows the first server to answer, in memory only, until a server says it is set up
 there. A server older than the `claimed` field is kept as `boundTo` on any answer.
+An output with no `server` file, bound or not, keeps the address it loads while that
+address keeps answering (with a `server` file it loads that address and nothing else).
+Two addresses answering for one server id (a config restore copied one server's id
+onto another) would otherwise reload the page on every probe round; once the current
+address answers again after the other appeared, the helper logs one error naming both,
+shows it in its window, and stays. The window note clears once no other address has
+answered for that id for 75 s, and the pair is reported again if it comes back. It follows another address at once when that answer
+is for a different server id (the output was just set up there, or released by the
+last one), on the first answer after a search begins, or once the current address has
+missed two probe rounds in a row (75 s quiet, so one lost answer does not move it). A
+server whose own address changed is followed that way, on its first answer after 75 s
+of quiet at the old one, with no error.
 After 30 unanswered probes to its server (the Linux agent's threshold) the probe also
 carries `unreachable: true`, so another server can list the output as *bound
 elsewhere*.

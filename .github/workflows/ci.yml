@@ -24,7 +24,7 @@ permissions:
 
 # Four jobs run side by side so the slowest one sets the wait, not the sum:
 # lint, type-check, build and audit in one; the test suite split four ways across
-# the others (Node's --test-shard, with the file patterns in scripts/run-tests.mjs
+# the others (Node's --test-shard, with the file patterns in scripts/run-tests.ts
 # only); the ServiceCue Worker package, which has its own dependencies and so its
 # own install, type-check, audit and test, in one; and `build`, which passes only
 # when all of them did. The suite is most of the time: every test file runs in its

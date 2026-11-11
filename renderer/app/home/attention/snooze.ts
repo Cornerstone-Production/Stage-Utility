@@ -9,7 +9,8 @@ import type { HomeSnooze } from "@main/types/home-snoozes";
 
 import type { AttentionItem, AttentionSeverity } from "./types";
 
-const RANK: Record<AttentionSeverity, number> = { warn: 1, critical: 2 };
+/** How bad a severity is, for "has it got worse". */
+export const RANK: Record<AttentionSeverity, number> = { warn: 1, critical: 2 };
 
 /** True while `snooze` still covers `item`: same key, and the item no worse than when snoozed. */
 export function snoozeCovers(snooze: HomeSnooze | undefined, item: AttentionItem): boolean {
