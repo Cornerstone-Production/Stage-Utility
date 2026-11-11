@@ -1,8 +1,10 @@
 import { errorMessage } from "@main/services/errors";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, ErrorNote, Collapsible, confirm, SkeletonRows } from "../../components/ui";
+import { Button, Checkbox, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
+import { useRouter } from "@tanstack/react-router";
+import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
@@ -10,11 +12,10 @@ import { RundownTable } from "../../main/rundown-table";
 import { resolveServiceCueSpec, computeClocks, buildServiceCueColumns, totalLengthSec, fmtTotal } from "../../main/servicecue-columns";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { plural } from "@main/services/plural";
 import { freeLayoutName, usersMessage } from "./servicecue-layout-names";
 import { useLayoutSaves, type LayoutEdit } from "./use-layout-saves";
 import { useNameDraft } from "../../lib/use-name-draft";
-import { PublicLinkCard } from "./servicecue-public-link";
+import { PublicLinkCard, usePublishSummary } from "./servicecue-public-link";
 import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
 import { uid } from "@renderer/lib/uid";
@@ -275,35 +276,23 @@ export function ServiceCueSection() {
         ? "Service types unavailable"
         : "Loading service types…";
 
+  const typeName = (id: string) => types.find((t) => t.id === id)?.name;
+  const shownNames = shownIds.map(typeName).filter((n): n is string => !!n);
+  const publishWord = usePublishSummary();
+
   return (
-    <div className="pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* ServiceCue is its own rail destination now, so there is no "open it"
-          link here: the viewer is one click away in the sidebar. */}
-      {error && <ErrorNote className="mb-3">{error}</ErrorNote>}
-
-      {/* Which service types appear on the landing page (curated per church). */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-5">
-        <span className="text-caption1 text-gray-11">Shown on the landing page</span>
-        <MultiSelect
-          label="Shown on the landing page"
-          className="w-64 max-sm:w-full"
-          options={types.map((t) => ({ value: t.id, label: t.name }))}
-          selected={shownIds}
-          onChange={setShown}
-          placeholder={types.length > 0 ? "Select service types…" : typesPending}
-          disabled={types.length === 0}
-        />
-        <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ServiceCue landing page.</span>
+    <div className="max-w-[920px] pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+      <div className="pb-1">
+        <BackLink to="/servicecue/manage">ServiceCue</BackLink>
+        <h1 className="mt-0.5 text-title3 font-semibold text-fg">ServiceCue layouts</h1>
       </div>
+      {error && <ErrorNote className="mt-3">{error}</ErrorNote>}
 
-      {/* The same landing page and layouts, handed to anyone with a link. It lists
-          what it publishes from the two lists above and below it, so it cannot say
-          one thing while the page does another. */}
-      <PublicLinkCard
-        typeNames={shownIds.map((id) => types.find((t) => t.id === id)?.name).filter((n): n is string => !!n)}
-        layoutNames={sortedLayouts.map((l) => l.name)}
-        timeZone={appZoneOf(stage.state, hostTimeZone())}
-      />
+      <section className="mt-7" aria-labelledby="sc-layouts-h">
+        <SectionHead id="sc-layouts-h" title="Layouts">
+          A layout is the set of columns a rundown shows. The landing page offers them in this order, then All columns; the first
+          is its default.
+        </SectionHead>
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-caption1 text-gray-11">Preview with</span>
@@ -503,18 +492,113 @@ export function ServiceCueSection() {
           })}
 
           <Button variant="filled" size="small" className="self-start" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>
-
-      {/* Roles last and collapsed: set up once, rarely revisited. */}
-      <Collapsible
-        label={<span className="text-callout font-semibold text-fg">Category roles</span>}
-        summary={plural(roles.length, "role")}
-        className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
-      >
-        <RolesPanel roles={roles} categories={noteCats} categoriesFailed={failed.has("noteCats")} onChange={saveRoles} />
-      </Collapsible>
         </div>
       )}
+      </section>
 
+      <section className="mt-7" aria-labelledby="sc-roles-h">
+        <SectionHead id="sc-roles-h" title="Category roles">
+          A role is one column. It groups the names different service types give the same notes, like Audio and Sound. When several
+          have a note, the first in the role is shown first.
+        </SectionHead>
+        {/* Always drawn, with or without a layout, but only once the settings are read:
+            the roles save as a whole list, and one built before the read would replace
+            every saved role. */}
+        {failed.has("settings") ? null : !settingsRead ? (
+          <SkeletonRows rows={2} />
+        ) : (
+          <RolesPanel roles={roles} categories={noteCats} categoriesFailed={failed.has("noteCats")} onChange={saveRoles} />
+        )}
+      </section>
+
+      <section className="mt-7 flex flex-col gap-2" aria-label="Landing page and public link">
+        <MoreRow
+          title="Landing page"
+          summary={shownNames.length ? shownNames.join(", ") : shownIds.length ? typesPending : "No service types"}
+        >
+          <p className="text-caption1 text-fg-muted">
+            Only these service types appear on the ServiceCue landing page, each with the layouts above, in that order, then All
+            columns.
+          </p>
+          {types.length === 0 ? (
+            <p className="text-caption1 text-fg-subtle">{typesPending}</p>
+          ) : (
+            types.map((t) => (
+              <label key={t.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
+                <Checkbox
+                  checked={shownIds.includes(t.id)}
+                  onCheckedChange={(on) => void setShown(on === true ? [...shownIds, t.id] : shownIds.filter((id) => id !== t.id))}
+                />
+                {t.name}
+              </label>
+            ))
+          )}
+        </MoreRow>
+        <MoreRow title="Public link" summary={publishWord}>
+          {/* The same landing page and layouts, handed to anyone with a link. It lists
+              what it publishes from the two lists above, so it cannot say one thing
+              while the page does another. */}
+          <PublicLinkCard
+            typeNames={shownNames}
+            layoutNames={sortedLayouts.map((l) => l.name)}
+            timeZone={appZoneOf(stage.state, hostTimeZone())}
+            embedded
+          />
+        </MoreRow>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * The link back to ServiceCue. A real link, so it opens in a new tab like any
+ * other; inside the app's router a plain click navigates without a reload.
+ * `warn: false` answers null outside a router (the tests render the page bare).
+ */
+function BackLink({ to, children }: { to: string; children: ReactNode }) {
+  const router = useRouter({ warn: false }) as { navigate: (o: { to: string }) => unknown } | null;
+  return (
+    <a
+      href={to}
+      onClick={(e) => {
+        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        void router.navigate({ to });
+      }}
+      className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+    >
+      <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+      {children}
+    </a>
+  );
+}
+
+/** A section's heading and the sentence under it. */
+function SectionHead({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <div className="mb-2.5">
+      <h2 id={id} className="text-subheadline font-semibold text-fg">{title}</h2>
+      <p className="mt-0.5 max-w-[72ch] text-caption1 text-fg-muted">{children}</p>
+    </div>
+  );
+}
+
+/** A collapsed row at the foot of the page: a title, what it holds, and its body when open. */
+function MoreRow({ title, summary, children }: { title: string; summary: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-[10px] border border-line bg-surface">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex min-h-11 w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-footnote transition-colors hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <span className="whitespace-nowrap font-semibold text-fg">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-fg-muted">· {summary}</span>
+        <ChevronDownIcon className={cn("size-4 shrink-0 text-fg-subtle transition-transform", open && "rotate-180")} aria-hidden="true" />
+      </button>
+      {open && <div className="flex flex-col gap-2.5 border-t border-line p-3">{children}</div>}
     </div>
   );
 }

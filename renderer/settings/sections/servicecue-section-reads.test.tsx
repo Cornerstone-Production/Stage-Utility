@@ -205,8 +205,6 @@ test("a failed note-category read says so, above the previews and inside the rol
   try {
     await mount();
     await eventually(() => assert.match(alerts(), /Couldn't load this service type's note categories/i));
-    fireEvent.click(screen.getByRole("button", { name: /Category roles/i }));
-    await settle();
     assert.equal(
       screen.queryAllByRole("alert").filter((n) => /note categories/i.test(n.textContent ?? "")).length,
       2,

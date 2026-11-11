@@ -286,6 +286,15 @@ export interface NestedRoute {
   label?: string;
   /** Subtitle under the desktop title. Only meaningful alongside a label. */
   description?: string;
+  /**
+   * The rail destination this page belongs to, when its path does not say so.
+   *
+   * The rail lights the destination whose path prefixes the URL. A page that
+   * sits under a different prefix (the layouts editor is `/servicecue/presets`,
+   * kept for bookmarks, while ServiceCue's rail entry is `/servicecue/manage`)
+   * names its destination here, or nothing in the rail is lit on it.
+   */
+  parent?: string;
 }
 
 export const NESTED_ROUTES: readonly NestedRoute[] = [
@@ -308,7 +317,9 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     description: "Pick a service and a layout to open its rundown.",
   },
   { path: SERVICECUE_PLAN_PATH, Component: ServiceCuePlanRoute },
-  { path: "/servicecue/presets", Component: ServiceCueSection },
+  // The layouts editor. Untitled: it draws its own heading and a link back to
+  // ServiceCue, whose rail entry it lights.
+  { path: "/servicecue/presets", Component: ServiceCueSection, parent: "/servicecue/manage" },
   { path: "/patch/edit", Component: PatchSection },
   // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
   // page draws its own heading, as the other child routes do. The segment is read by

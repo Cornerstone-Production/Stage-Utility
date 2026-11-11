@@ -351,8 +351,8 @@ describe("Publishing", () => {
     assert.ok(text().includes("11 plans in the next 60 days"));
     assert.ok(text().includes("4 layouts"));
     assert.ok(text().includes("What the public sees"));
-    assert.ok(text().includes('Weekend, Salt, Youth, Special Events · follows "Shown on the landing page" above'), text());
-    assert.ok(text().includes("Audio, Video, Lighting, All columns · every layout below"));
+    assert.ok(text().includes('Weekend, Salt, Youth, Special Events · follows Landing page'), text());
+    assert.ok(text().includes("Audio, Video, Lighting, All columns · every layout above"));
     assert.ok(text().includes("The live item, countdown and clock · as they change"));
     assert.equal(alerts(), "");
     // Not the setup fields: they are for a card that is not set up.
@@ -378,8 +378,8 @@ describe("Publishing", () => {
 
   test("lists the landing page's types and the layouts as the page around it says them", async () => {
     await mount({ typeNames: ["Only One"], layoutNames: [] });
-    assert.ok(text().includes('Only One · follows "Shown on the landing page" above'));
-    assert.ok(text().includes("All columns · every layout below"));
+    assert.ok(text().includes('Only One · follows Landing page'));
+    assert.ok(text().includes("All columns · every layout above"));
     cleanup();
     await mount({ typeNames: [], layoutNames: ["A"] });
     assert.ok(text().includes("No service types yet"));
