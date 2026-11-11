@@ -1,9 +1,9 @@
-// The ServiceCue layout editor: what its "Shows" list offers, and the ground its
-// preview draws the rundown on.
+// The ServiceCue layout editor: what its Under the title row offers, and the ground
+// its preview draws the rundown on.
 //
 // Both are things that render, keep every other test green, and are wrong:
 //
-//   the Time signature entry   delete one line of ELEMENTS and the switch is gone
+//   the Time signature toggle  delete one line of UNDER_TITLE and the toggle is gone
 //                              from the editor while the rundown, the spec and
 //                              their tests all still work — there was simply no
 //                              way left to turn the time signature off
@@ -77,22 +77,19 @@ async function mountOpen(): Promise<void> {
   await settle();
 }
 
-test("the Shows list offers a Time signature switch, on for a layout saved without it", async () => {
+test("Under the title offers a Time signature toggle, on for a layout saved without it", async () => {
   const f = stubFetch();
   try {
     await mountOpen();
-    fireEvent.click(screen.getByRole("button", { name: /^Shows, Audio/ }));
-    await settle();
-    // Names read from the rendered list, in order: the time signature sits with
-    // the other two pieces of song meta, between BPM and Arrangement.
-    const labels = Array.from(document.querySelectorAll("[role=dialog] *"))
-      .filter((e) => e.children.length === 0)
-      .map((e) => e.textContent ?? "");
+    // The toggles in the order the row draws them: the time signature sits with the
+    // other two pieces of song meta, between BPM and Arrangement.
+    const toggles = screen.getAllByRole("button").filter((b) => b.hasAttribute("aria-pressed") && !b.hasAttribute("data-grip"));
+    const labels = toggles.map((b) => b.textContent ?? "");
     const at = (name: string) => labels.indexOf(name);
-    assert.ok(at("Time signature") > -1, `no Time signature switch in: ${JSON.stringify(labels)}`);
+    assert.ok(at("Time signature") > -1, `no Time signature toggle in: ${JSON.stringify(labels)}`);
     assert.ok(at("BPM") < at("Time signature") && at("Time signature") < at("Arrangement"), JSON.stringify(labels));
-    // Eight on, Max SPL (opt-in) off: the layout has no showMeter field at all.
-    assert.match(document.querySelector("[role=dialog]")?.textContent ?? "", /^8 of 9/);
+    // The layout has no showMeter field at all: shown.
+    assert.equal(toggles[at("Time signature")].getAttribute("aria-pressed"), "true");
   } finally {
     f.restore();
   }

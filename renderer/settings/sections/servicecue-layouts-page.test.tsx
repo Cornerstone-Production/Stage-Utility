@@ -22,7 +22,7 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -58,6 +58,10 @@ async function mount(): Promise<void> {
   );
   for (let i = 0; i < 5; i++) await settle();
 }
+
+/** How many saves went to `path`. Only the page's own: the event stream's subscribe is a POST too. */
+const saves = (s: { requests: { method: string; path: string }[] }, path: string) =>
+  s.requests.filter((r) => r.method === "POST" && r.path === path).length;
 
 const headings = () => [...document.querySelectorAll("h1, h2")].map((h) => h.textContent ?? "");
 const rowHeads = () =>
@@ -242,7 +246,7 @@ test("Escape puts the name back and leaves the field, saving nothing", async () 
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(box.value, "Audio");
     assert.equal(document.activeElement === box, false, "Escape did not leave the field");
-    assert.equal(s.requests.filter((r) => r.method === "POST").length, 0, "the name thrown away was saved as Escape left the field");
+    assert.equal(saves(s, "/api/servicecue/layouts"), 0, "the name thrown away was saved as Escape left the field");
   } finally {
     s.restore();
   }
@@ -260,6 +264,125 @@ test("a name typed, then Duplicate clicked: the rename saves and the copy carrie
     fireEvent.blur(box);
     fireEvent.click(screen.getByRole("button", { name: /^Duplicate/ }));
     await eventually(() => assert.deepEqual(s.layouts().map((l) => l.name), ["Front desk", "Front desk copy", "Lighting"]));
+  } finally {
+    s.restore();
+  }
+});
+
+// ── Columns, Not in this layout, Under the title, Footer ────────────────────
+
+/** The Columns row as drawn, one entry per chip; a chip that can be removed ends in " x". */
+const columnsRow = (layoutId: string) =>
+  [...(document.querySelector(`[data-cols="${layoutId}"]`)?.children ?? [])].map((c) => {
+    const x = c.querySelector('button[aria-label^="Remove"]') ? " x" : "";
+    return `${c.textContent}${x}`;
+  });
+const trayRow = (layoutId: string) =>
+  [...(document.querySelector(`[data-tray="${layoutId}"]`)?.querySelectorAll("button") ?? [])].map((b) => b.textContent ?? "");
+
+const RUNDOWN = {
+  serviceTypeId: "sun", planId: "p1", planTitle: "Sun 15 Nov", planSeriesTitle: null, planDates: null,
+  items: [{ id: "i1", title: "Open the Gates", itemType: "song", lengthSec: 270, sequence: 0, notesByCategory: { Audio: "Click to band", Lighting: "Cue 12" }, description: null }],
+  noteCategories: ["Audio", "Lighting"], serviceTimes: [], timeZone: null, isActivePlan: false, isDefaultPlan: true,
+};
+const CATS = { sun: ["Audio", "Lighting", "Band", "Graphics"], wed: ["Sound", "Lights"], yth: ["Audio"] };
+const previewHeads = () => [...document.querySelectorAll("[data-preview] th")].map((th) => th.textContent ?? "");
+
+test("the Columns row holds every column in the rundown's order; Item has no X", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    // The roles' left/right controls are named, so strip them to the chip's own words.
+    const row = columnsRow("l-audio").map((c) => c.replace(/^Move .*?left|Move .*?right/g, ""));
+    assert.deepEqual(row, ["Clock x", "Time x", "Item", "Audio x", "Band x", "Max SPL x"]);
+    assert.deepEqual(trayRow("l-audio"), ["Lighting"], "what this layout lacks: every role it does not show");
+  } finally {
+    s.restore();
+  }
+});
+
+test("removing a column sends it to Not in this layout, and clicking it there puts it back in its place", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    fireEvent.click(screen.getByRole("button", { name: "Remove Clock" }));
+    await eventually(() => assert.equal(s.layouts()[0].showClock, false));
+    assert.deepEqual(trayRow("l-audio"), ["Clock", "Lighting"], "Clock leads the tray, as it leads the row");
+    assert.equal((document.activeElement as HTMLElement | null)?.getAttribute("aria-label"), "Add Clock", "focus fell off the removed chip");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Lighting" }));
+    await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio", "r-band", "r-light"]), undefined);
+    assert.equal((document.activeElement as HTMLElement | null)?.getAttribute("aria-label"), "Remove Lighting");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Clock" }));
+    await eventually(() => assert.equal(s.layouts()[0].showClock, true));
+    assert.equal(columnsRow("l-audio")[0], "Clock x", "Clock goes back to its fixed place, first");
+    assert.deepEqual(trayRow("l-audio"), []);
+    assert.match(document.querySelector('[data-tray="l-audio"]')?.textContent ?? "", /Every column is in this layout\./);
+  } finally {
+    s.restore();
+  }
+});
+
+test("Max SPL, off on a layout saved without it, waits in the tray and goes in last", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Lighting");
+    assert.deepEqual(trayRow("l-light"), ["Audio", "Band", "Max SPL"]);
+    fireEvent.click(screen.getByRole("button", { name: "Add Max SPL" }));
+    await eventually(() => assert.equal(s.layouts()[1].showMaxSpl, true));
+    assert.equal(columnsRow("l-light").at(-1), "Max SPL x");
+  } finally {
+    s.restore();
+  }
+});
+
+test("removing the column a layout tints rows by stops the tint", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Lighting");
+    fireEvent.click(within(document.querySelector('[data-cols="l-light"]') as HTMLElement).getByRole("button", { name: "Remove Lighting" }));
+    await eventually(() => assert.deepEqual(s.layouts()[1].columnRoles, []));
+    assert.equal(s.layouts()[1].accentRole, null, "the layout still tints by a role it no longer shows");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Under the title and Footer: each toggle says whether it is on, saves, and redraws the preview", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, cats: CATS, rundown: () => RUNDOWN });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.equal(!!document.querySelector("[data-preview] table"), true));
+    const songKey = screen.getByRole("button", { name: "Song key", pressed: true });
+    fireEvent.click(songKey);
+    await eventually(() => assert.equal(s.layouts()[0].showKey, false));
+    assert.equal(screen.getByRole("button", { name: "Song key" }).getAttribute("aria-pressed"), "false");
+    assert.match(document.querySelector("[data-preview]")?.textContent ?? "", /total time/);
+    fireEvent.click(screen.getByRole("button", { name: "Total time", pressed: true }));
+    await eventually(() => assert.equal(s.layouts()[0].showTotalTime, false));
+    assert.doesNotMatch(document.querySelector("[data-preview]")?.textContent ?? "", /total time/, "the footer is still drawn");
+  } finally {
+    s.restore();
+  }
+});
+
+test("the preview follows the Columns row, and says which role the previewed type has no category for", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, cats: CATS, rundown: () => RUNDOWN });
+  try {
+    await mount();
+    await openCard("Lighting");
+    await eventually(() => assert.equal(previewHeads().includes("Lighting"), true, JSON.stringify(previewHeads())));
+    fireEvent.click(screen.getByRole("button", { name: "Add Audio" }));
+    await eventually(() => assert.equal(previewHeads().includes("Audio"), true, JSON.stringify(previewHeads())));
+    // Youth names no lighting category: the column is left out, and the page says why.
+    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    await eventually(() => assert.match(document.body.textContent ?? "", /Lighting has no category in Youth, so the preview leaves it out\./));
   } finally {
     s.restore();
   }

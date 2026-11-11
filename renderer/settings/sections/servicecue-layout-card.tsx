@@ -4,33 +4,30 @@
 // it is the name field, Duplicate and Delete, the rows that set what the layout shows,
 // and a preview of it against the plan the page previews with.
 
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CopyIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CopyIcon, LockIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useRef, type ReactNode, type Ref } from "react";
 
-import { Button, ErrorNote, Input, MultiSelect, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { RundownTable } from "../../main/rundown-table";
 import { buildServiceCueColumns, computeClocks, fmtTotal, resolveServiceCueSpec, totalLengthSec } from "../../main/servicecue-columns";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
-import { columnSummary, layoutRoles, listOf, roleApplies } from "./servicecue-layouts-model";
-
-/** The per-layout element toggles, until the Columns row replaces them. */
-const ELEMENTS = [
-  { key: "showClock", label: "Clock" },
-  { key: "showLength", label: "Time" },
-  { key: "showKey", label: "Song key" },
-  { key: "showBpm", label: "BPM" },
-  { key: "showMeter", label: "Time signature" },
-  { key: "showArrangement", label: "Arrangement" },
-  { key: "showItemNotes", label: "Item notes" },
-  { key: "showTotalTime", label: "Total time" },
-  { key: "showMaxSpl", label: "Max SPL", optIn: true },
-] as const satisfies readonly { key: keyof ServiceCueLayout; label: string; optIn?: boolean }[];
-
-const elementOn = (e: (typeof ELEMENTS)[number], l: ServiceCueLayout): boolean =>
-  "optIn" in e && e.optIn ? l[e.key] === true : l[e.key] !== false;
+import {
+  columnSummary,
+  FIXED_LABEL,
+  fixedOn,
+  FOOTER,
+  layoutRoles,
+  listOf,
+  roleApplies,
+  toggleOn,
+  trayItems,
+  UNDER_TITLE,
+  type ColumnChange,
+  type FixedKey,
+} from "./servicecue-layouts-model";
 
 /** What the preview draws against: the page-wide service type and its plan. */
 export interface PreviewSource {
@@ -59,6 +56,7 @@ export function LayoutCard({
   onDuplicate,
   onDelete,
   onUpdate,
+  onColumns,
   preview,
   move,
   nameRef,
@@ -73,6 +71,8 @@ export function LayoutCard({
   onDuplicate: () => void;
   onDelete: () => void;
   onUpdate: (patch: LayoutPatch) => void;
+  /** A change to the Columns row. `focus` names the control to focus once it has drawn. */
+  onColumns: (change: ColumnChange, focus?: string) => void;
   preview: PreviewSource;
   /** Up and down, until a card can be dragged. */
   move: { first: boolean; last: boolean; by: (dir: -1 | 1) => void };
@@ -80,6 +80,8 @@ export function LayoutCard({
   nameRef?: Ref<HTMLInputElement>;
 }) {
   const summary = columnSummary(l, roles).join(" · ");
+  const cols = layoutRoles(l, roles);
+  const tray = trayItems(l, roles);
   const arrows = (
     <>
       <Button variant="transparent" size="small" iconOnly touchTargetY disabled={move.first} onClick={() => move.by(-1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
@@ -130,50 +132,73 @@ export function LayoutCard({
       {nameError && <ErrorNote className="mx-3 mb-3">{nameError}</ErrorNote>}
 
       <div className="flex flex-col gap-3.5 border-t border-line px-3.5 pb-4 pt-3.5 max-sm:p-3">
-        <Row label="Columns">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {layoutRoles(l, roles).map((r, ci, cols) => (
-              <span key={r.id} className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-surface-raised py-1 pl-2 pr-1 text-caption1 text-fg">
-                <button type="button" className="touch-target-y text-fg-subtle hover:text-fg disabled:opacity-30" disabled={ci === 0} onClick={() => onUpdate((cur) => ({ columnRoles: swap(cur.columnRoles ?? [], r.id, -1) }))} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
+        <Row label="Columns" hint="Drag roles to reorder" id={`sc-cols-${l.id}`}>
+          <div role="list" aria-labelledby={`sc-cols-${l.id}`} className="flex min-w-0 flex-wrap items-center gap-1.5" data-cols={l.id}>
+            {fixedOn(l, "showClock") && <PinnedChip layoutId={l.id} k="showClock" where="Always first" onColumns={onColumns} />}
+            {fixedOn(l, "showLength") && <PinnedChip layoutId={l.id} k="showLength" where="Always before Item" onColumns={onColumns} />}
+            <span
+              role="listitem"
+              title="Always shown"
+              aria-label="Item, always shown"
+              data-anchor="item"
+              className={cn(CHIP, "gap-[5px] border-transparent bg-fill pl-2 pr-2.5 text-fg-muted")}
+            >
+              <LockIcon className="size-[13px]" aria-hidden="true" />
+              Item
+            </span>
+            {cols.map((r, ci) => (
+              <span key={r.id} role="listitem" data-sort-id={r.id} className={cn(CHIP, "pl-px")}>
+                <button type="button" className={ICON_BUTTON} disabled={ci === 0} onClick={() => onColumns({ kind: "move-role", roleId: r.id, index: ci - 1 })} aria-label={`Move ${r.name} left`}><ChevronLeftIcon className="size-[13px]" /></button>
                 {r.name}
-                <button type="button" className="touch-target-y text-fg-subtle hover:text-fg disabled:opacity-30" disabled={ci === cols.length - 1} onClick={() => onUpdate((cur) => ({ columnRoles: swap(cur.columnRoles ?? [], r.id, 1) }))} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
-                <button
-                  type="button"
-                  className="touch-target-y ml-0.5 text-fg-subtle hover:text-danger-11"
-                  onClick={() => onUpdate((cur) => ({
-                    columnRoles: (cur.columnRoles ?? []).filter((c) => c !== r.id),
-                    ...(cur.accentRole === r.id ? { accentRole: null } : {}),
-                  }))}
-                  aria-label={`Remove ${r.name}`}
-                >
-                  <XIcon className="size-3.5" />
-                </button>
+                <button type="button" className={ICON_BUTTON} disabled={ci === cols.length - 1} onClick={() => onColumns({ kind: "move-role", roleId: r.id, index: ci + 1 })} aria-label={`Move ${r.name} right`}><ChevronRightIcon className="size-[13px]" /></button>
+                <RemoveX label={`Remove ${r.name}`} focusKey={`x:${l.id}:${r.id}`} onClick={() => onColumns({ kind: "remove-role", roleId: r.id }, `tray:${l.id}:${r.id}`)} />
               </span>
             ))}
-            {roles.some((r) => !(l.columnRoles ?? []).includes(r.id)) && (
-              <Select value="" onValueChange={(v) => onUpdate((cur) => ({ columnRoles: [...(cur.columnRoles ?? []).filter((c) => c !== v), v] }))}>
-                <SelectTrigger className="h-7 w-auto px-2 text-caption1" aria-label="Add a column">
-                  <SelectValue placeholder="+ Add column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.filter((r) => !(l.columnRoles ?? []).includes(r.id)).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
+            {fixedOn(l, "showMaxSpl") && <PinnedChip layoutId={l.id} k="showMaxSpl" where="Always last" onColumns={onColumns} />}
           </div>
         </Row>
-        <Row label="Shows">
-          <MultiSelect
-            label={`Shows, ${l.name}`}
-            className="w-64 max-sm:w-full"
-            options={ELEMENTS.map((e) => ({ value: e.key, label: e.label }))}
-            selected={ELEMENTS.filter((e) => elementOn(e, l)).map((e) => e.key)}
-            onChange={(next) => {
-              const on = new Set(next);
-              onUpdate(Object.fromEntries(ELEMENTS.map((e) => [e.key, on.has(e.key)])) as Partial<ServiceCueLayout>);
-            }}
-            placeholder="Nothing shown"
-          />
+        <Row label="Not in this layout" hint="Click or drag in" id={`sc-tray-${l.id}`}>
+          <div
+            role="list"
+            aria-labelledby={`sc-tray-${l.id}`}
+            data-tray={l.id}
+            className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-line-strong p-1.5 transition-colors"
+          >
+            {tray.map((it) => {
+              const id = it.kind === "fixed" ? `fixed:${it.key}` : it.id;
+              return (
+                <span key={id} role="listitem" className="inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => onColumns(it.kind === "fixed" ? { kind: "set-fixed", key: it.key, on: true } : { kind: "add-role", roleId: it.id }, `x:${l.id}:${id}`)}
+                    title={it.kind === "fixed" ? "Goes to its fixed place" : undefined}
+                    aria-label={`Add ${it.name}`}
+                    data-focus-key={`tray:${l.id}:${id}`}
+                    className={TRAY_CHIP}
+                  >
+                    <PlusIcon className="size-[13px]" aria-hidden="true" />
+                    {it.name}
+                  </button>
+                </span>
+              );
+            })}
+            {tray.length === 0 && <span className="px-1.5 text-caption1 text-fg-subtle">Every column is in this layout.</span>}
+            {roles.length === 0 && <span className="px-1.5 text-caption1 text-fg-subtle">Department columns come from category roles, below.</span>}
+          </div>
+        </Row>
+        <Row label="Under the title">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {UNDER_TITLE.map((t) => (
+              <Toggle key={t.key} label={t.label} on={toggleOn(l, t.key)} onClick={() => onUpdate((cur) => ({ [t.key]: !toggleOn(cur, t.key) }))} />
+            ))}
+          </div>
+        </Row>
+        <Row label="Footer">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {FOOTER.map((t) => (
+              <Toggle key={t.key} label={t.label} on={toggleOn(l, t.key)} onClick={() => onUpdate((cur) => ({ [t.key]: !toggleOn(cur, t.key) }))} />
+            ))}
+          </div>
         </Row>
         <Row label="Row color">
           <RowColor layout={l} roles={roles} onUpdate={onUpdate} />
@@ -184,13 +209,50 @@ export function LayoutCard({
   );
 }
 
-function swap(cols: string[], id: string, dir: -1 | 1): string[] {
-  const out = [...cols];
-  const i = out.indexOf(id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= out.length) return cols;
-  [out[i], out[j]] = [out[j], out[i]];
-  return out;
+/** A chip in the Columns row. */
+const CHIP =
+  "inline-flex h-[30px] max-w-full select-none items-center gap-0.5 whitespace-nowrap rounded-md border border-line-strong bg-surface-raised pl-2.5 pr-[3px] text-footnote text-fg";
+
+/** A chip in "Not in this layout": dashed, because it is not in the layout yet. */
+const TRAY_CHIP =
+  "inline-flex h-[30px] select-none items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-line-strong bg-transparent pl-[7px] pr-2.5 text-footnote text-fg-muted transition-colors hover:border-accent hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+
+const ICON_BUTTON =
+  "inline-grid size-6 shrink-0 place-items-center rounded-[5px] p-0 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-30";
+
+/** A chip's X: takes the column out of the layout, into "Not in this layout". */
+function RemoveX({ label, focusKey, onClick }: { label: string; focusKey: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label={label} data-focus-key={focusKey} className={cn(ICON_BUTTON, "touch-target-y ml-0.5 hover:text-danger-11")}>
+      <XIcon className="size-[13px]" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** Clock, Time or Max SPL: a column with a fixed place, removable but not movable. */
+function PinnedChip({ layoutId, k, where, onColumns }: { layoutId: string; k: FixedKey; where: string; onColumns: (c: ColumnChange, focus?: string) => void }) {
+  return (
+    <span role="listitem" title={where} data-fixed={k} className={cn(CHIP, "border-transparent bg-fill")}>
+      <PinIcon className="mr-[3px] size-3 text-fg-subtle" aria-hidden="true" />
+      {FIXED_LABEL[k]}
+      <RemoveX label={`Remove ${FIXED_LABEL[k]}`} focusKey={`x:${layoutId}:fixed:${k}`} onClick={() => onColumns({ kind: "set-fixed", key: k, on: false }, `tray:${layoutId}:fixed:${k}`)} />
+    </span>
+  );
+}
+
+/** One thing a layout shows or hides, as a pill that says which. */
+function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className="group inline-flex h-[30px] items-center gap-[5px] whitespace-nowrap rounded-full border border-line-strong bg-transparent pl-2 pr-[11px] text-footnote text-fg-muted transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus aria-pressed:border-accent/40 aria-pressed:bg-accent-soft aria-pressed:text-fg"
+    >
+      <CheckIcon className="size-3.5 opacity-0 group-aria-pressed:text-accent group-aria-pressed:opacity-100" aria-hidden="true" />
+      {label}
+    </button>
+  );
 }
 
 /** One labelled row of the open card: the label in a column of its own, stacked above on a phone. */

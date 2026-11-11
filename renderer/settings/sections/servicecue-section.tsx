@@ -16,7 +16,7 @@ import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
 import { uid } from "@renderer/lib/uid";
 import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-layout-card";
-import { deleteLayoutBody, duplicateLayout, newLayout, type Rich } from "./servicecue-layouts-model";
+import { columnPatch, deleteLayoutBody, duplicateLayout, newLayout, type Rich } from "./servicecue-layouts-model";
 
 /** The ServiceCue layouts page: the layouts, the category roles their columns come
  *  from, and the landing page and public link that offer them. */
@@ -174,6 +174,18 @@ export function ServiceCueSection() {
     nameField.current.select();
   });
 
+  // The control a change moves focus to once it has drawn: the tray chip a removed
+  // column became, the X of one just added. Without it focus falls to the page.
+  const focusNext = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const key = focusNext.current;
+    if (!key) return;
+    const el = [...document.querySelectorAll<HTMLElement>("[data-focus-key]")].find((n) => n.dataset.focusKey === key);
+    if (!el) return;
+    focusNext.current = null;
+    el.focus();
+  });
+
   function addLayout() {
     if (!settingsRead) return;
     const id = uid("svl");
@@ -308,6 +320,10 @@ export function ServiceCueSection() {
                 onDuplicate={() => duplicate(l)}
                 onDelete={() => void removeLayout(l)}
                 onUpdate={(patch) => void update(l.id, patch)}
+                onColumns={(change, focus) => {
+                  if (focus) focusNext.current = focus;
+                  void update(l.id, (cur) => columnPatch(cur, change));
+                }}
                 preview={preview}
                 move={{ first: li === 0, last: li === sortedLayouts.length - 1, by: (dir) => moveLayout(l, dir) }}
                 nameRef={openId === l.id ? nameField : undefined}
