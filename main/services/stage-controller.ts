@@ -105,6 +105,7 @@ import { WriteQueue } from "./write-queue.js";
 import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import type { ServerIdentity } from "../types/kiosk.js";
+import { changeServerId } from "./kiosk-responder.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
@@ -349,6 +350,16 @@ export class ViewSurfaceChangedError extends Error {
         `not ${expected === "console" ? "a control surface" : "a wall view"}. Nothing was changed.`,
     );
     this.name = "ViewSurfaceChangedError";
+  }
+}
+
+/** New server id asked for while no other server answers with this one. */
+export class NoDuplicateServerError extends Error {
+  readonly status = 409;
+  readonly code = "no-duplicate-server";
+  constructor() {
+    super("New server id is offered only while another server answers with this server's id.");
+    this.name = "NoDuplicateServerError";
   }
 }
 
@@ -3205,6 +3216,30 @@ export class StageController {
     if (JSON.stringify(next) === JSON.stringify(this.state.serverIdentity)) return;
     this.state = { ...this.state, serverIdentity: next };
     this.broadcast();
+  }
+
+  /**
+   * Give this server a new id, while another server answers with this one.
+   *
+   * The way out for a box that already carries another server's id: a restore
+   * keeps the id a box has, and here that id is the copy. Refused while no other
+   * server is heard with it, because every screen bound here refers to the id and
+   * changing it without cause would orphan the lot. The screens both servers have
+   * set up stay with the other one, which keeps the old id; the ones set up only
+   * here are told "not set up" by it, and are answered as claimed here, so they
+   * follow the new id on their own. Nothing restarts.
+   */
+  async newServerId(): Promise<StageState> {
+    const before = this.state.serverIdentity;
+    if (before.duplicates.length === 0) {
+      throw new NoDuplicateServerError();
+    }
+    const next = randomUUID();
+    await settingsStore.patch({ serverId: next });
+    console.log(`[stage-controller] newServerId: ${scrub(before.id ?? "none")} → ${scrub(next)}`);
+    this.setServerIdentity({ ...before, id: next, duplicates: [] });
+    changeServerId(next);
+    return this.state;
   }
 
   /** Let Mac output helpers and Windows kiosks update themselves, or stop them.

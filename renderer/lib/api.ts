@@ -593,6 +593,7 @@ export type IpcChannel =
   | "stage:listPlans"
   | "stage:listServiceTypes"
   | "stage:listTeamPositions"
+  | "stage:newServerId"
   | "stage:refresh"
   | "stage:selectNextPlan"
   | "stage:setAllowedServiceTypes"
@@ -1095,6 +1096,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // ── Kiosk devices ─────────────────────────────────────────────────────
     case "stage:setKioskDiscovery":
       return post<T>("/api/kiosk-discovery", p);
+
+    case "stage:newServerId":
+      return post<T>("/api/server-id/new", {});
 
     case "devices:list":
       return apiFetch<T>("/api/devices");

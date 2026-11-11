@@ -72,6 +72,13 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // A new id for this server, offered while another server answers with this
+    // one. Refused (409) otherwise, by the controller, which says why.
+    if (method === "POST" && pathname === "/api/server-id/new") {
+      json(res, await stageController.newServerId());
+      return;
+    }
+
     // ── Mac helpers and Windows kiosks follow this server's version ───────
     if (method === "POST" && pathname === "/api/machine-updates/auto") {
       const body = (await readBody(req)) as Record<string, unknown>;

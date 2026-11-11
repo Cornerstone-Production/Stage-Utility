@@ -620,6 +620,16 @@ found by both.
   server changing its id or going away. With none heard, nothing repeats: two
   servers that are both already running when they first meet (a laptop install
   joining the network, say) are found when either next starts.
+- **New server id…**, in the alert on that row, gives this server a new id, after
+  a confirm. It is offered only while another server is heard with this one (the
+  API refuses it otherwise, `409`), because every screen bound here refers to the
+  id. The other server keeps the old id, and the screens both have set up stay
+  with it. Screens set up only on this server are told by the other one that they
+  are not set up there, are answered as set up here, and follow the new id on
+  their own: a Mac output within 30 seconds, a kiosk the next time it starts. An
+  older Pi or Linux kiosk that sends no binding of its own, set up on both, is
+  answered by both until it is released on one. Nothing restarts, and the check
+  runs again at once under the new id.
 - The Server id row says what the last check found and when, **Not checked** while
   discovery is off (nothing answers or checks), and why when the check could not
   be sent.

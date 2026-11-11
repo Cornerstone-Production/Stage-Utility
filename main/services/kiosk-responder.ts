@@ -70,13 +70,16 @@ let recheckTimer: ReturnType<typeof setTimeout> | null = null;
 let current: ResponderOptions | null = null;
 /** This start's own check id: how its own check, heard back, is told apart. */
 let ownCheckId = "";
+/** The id this server answers with. Starts as the option; New server id changes
+ *  it in place (changeServerId), with no socket rebind mid-service. */
+let serverId = "";
 let sendFailing = false;
 
 function identity(): ServerIdentity {
   const list = [...duplicates.values()]
     .map(({ missed: _missed, ...d }) => d)
     .sort((a, b) => a.address.localeCompare(b.address));
-  return { id: current?.serverId ?? null, check, duplicates: list };
+  return { id: current ? serverId : null, check, duplicates: list };
 }
 
 function report(): void {
@@ -99,7 +102,7 @@ function noteDuplicate(address: string, how: string, from?: { url: string; name:
   if (duplicates.size >= MAX_DUPLICATES) return;
   duplicates.set(address, { address, ...(from && { url: from.url, name: from.name }), since: Date.now(), missed: 0 });
   console.warn(
-    `[kiosk-responder] another server at ${scrub(address)}${from ? ` (${scrub(from.url)})` : ""} answers as this server, id ${scrub(current?.serverId ?? "")} (${how}); ` +
+    `[kiosk-responder] another server at ${scrub(address)}${from ? ` (${scrub(from.url)})` : ""} answers as this server, id ${scrub(serverId)} (${how}); ` +
       "screens set up here may switch between the two. Give one of them a new server id: Settings > Advanced > Network",
   );
   report();
@@ -140,7 +143,7 @@ function sendCheck(): void {
       macs: [...(opts.ownMacs ?? ownMacs)()],
       hostname: hostname(),
       os: "Stage Utility server",
-      boundTo: opts.serverId,
+      boundTo: serverId,
       check: true,
     }),
   );
@@ -202,6 +205,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
   const sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
   socket = sock;
   current = opts;
+  serverId = opts.serverId;
   ownCheckId = `server-check-${randomBytes(6).toString("hex")}`;
   resetCheck({ state: "off" });
 
@@ -216,7 +220,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
       // here because we probed, and we never answer our own check, so one that
       // carries our id is another server that has it.
       const reply = decodeReply(buf);
-      if (reply && reply.serverId === opts.serverId) {
+      if (reply && reply.serverId === serverId) {
         noteDuplicate(rinfo.address, "it answered this server's check", { url: reply.url, name: reply.name });
       }
       // Anything else is not ours, malformed, or oversized. A broadcast port hears everything.
@@ -225,10 +229,10 @@ export function startKioskResponder(opts: ResponderOptions): void {
     // Another server's duplicate-id check, before the same-machine rule: a second
     // server on this machine shares its MACs, and its check is still evidence.
     if (probe.check) {
-      if (decideCheck(probe, opts.serverId, ownCheckId) !== "duplicate") return;
+      if (decideCheck(probe, serverId, ownCheckId) !== "duplicate") return;
       noteDuplicate(rinfo.address, "it checked for this id");
       sock.send(
-        Buffer.from(encodeReply({ serverId: opts.serverId, name: opts.serverName, url: opts.url(), claimed: false })),
+        Buffer.from(encodeReply({ serverId, name: opts.serverName, url: opts.url(), claimed: false })),
         rinfo.port,
         rinfo.address,
         (err) => {
@@ -255,8 +259,8 @@ export function startKioskResponder(opts: ResponderOptions): void {
     }
     bindingsUnreadable = false;
     const bound = !!findById(devices, probe.id);
-    const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
-    if (!bound && probe.boundTo === opts.serverId) noteReleased(probe.id);
+    const decision = decideProbe(probe, serverId, { scanning: scanning(), bound });
+    if (!bound && probe.boundTo === serverId) noteReleased(probe.id);
 
     // Listed means somebody could set it up, or it cannot reach its own server.
     // Which is which is decideProbe's call; this only records it. A new device is
@@ -269,7 +273,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
         hostname: probe.hostname,
         os: probe.os,
         ip: rinfo.address,
-        boundTo: listedBoundTo(probe, opts.serverId),
+        boundTo: listedBoundTo(probe, serverId),
         unreachable: probe.unreachable,
         screen: probe.mode ? { w: 0, h: 0, mode: probe.mode } : undefined,
         output: probe.output,
@@ -310,7 +314,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
 
     if (!decision.answer) return;
     const reply = Buffer.from(
-      encodeReply({ serverId: opts.serverId, name: opts.serverName, url: opts.url(), claimed: bound }),
+      encodeReply({ serverId, name: opts.serverName, url: opts.url(), claimed: bound }),
     );
     sock.send(reply, rinfo.port, rinfo.address, (err) => {
       if (err) console.warn("[kiosk-responder] reply failed:", err.message);
@@ -341,6 +345,21 @@ export function startKioskResponder(opts: ResponderOptions): void {
     console.log(`[kiosk-responder] listening on udp/${port} as "${opts.serverName}"`);
     sendCheck();
   });
+}
+
+/**
+ * Answer as `next` from now on, and check at once whether anyone else does.
+ *
+ * What was heard about the old id is dropped with it: the server that shares the
+ * old id keeps it, and the screens bound to it follow that server. A no-op while
+ * discovery is off, when nothing answers and nothing checks.
+ */
+export function changeServerId(next: string): void {
+  if (!socket || !current) return;
+  serverId = next;
+  resetCheck(check);
+  report();
+  sendCheck();
 }
 
 /** Stop answering and stop checking. What the check knew goes with it: a stopped

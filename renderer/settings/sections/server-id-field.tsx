@@ -6,9 +6,12 @@
 // with its id, so "nobody answered" is only true as of that check.
 
 import { AlertTriangleIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
-import type { ServerIdentity } from "@main/types/kiosk";
+import { errorMessage } from "@main/services/errors";
+import type { DuplicateServer, ServerIdentity } from "@main/types/kiosk";
+import { Button, confirm, toast } from "../../components/ui";
+import { invoke } from "../../lib/api";
 import { formatClock } from "../../lib/clock-format";
 
 /** The `data-flash-id` the row carries: Needs attention's fix points here. */
@@ -26,15 +29,51 @@ function checkLine(check: ServerIdentity["check"], timeZone: string | null | und
   );
 }
 
+/** "192.168.1.60", "192.168.1.60 and 192.168.1.61": the sentence the confirm says it in. */
+function addresses(duplicates: readonly DuplicateServer[]): string {
+  const all = duplicates.map((d) => d.address);
+  return all.length <= 1 ? (all[0] ?? "") : `${all.slice(0, -1).join(", ")} and ${all.at(-1)}`;
+}
+
+/**
+ * Give this server a new id. Offered only while another server answers with this
+ * one (the server refuses it otherwise), behind a confirm that says where the
+ * screens go: those both servers have set up stay with the other one, which keeps
+ * the id, and those set up only here follow the new id on their own.
+ */
+function NewServerIdButton({ duplicates }: { duplicates: readonly DuplicateServer[] }) {
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    const other = addresses(duplicates);
+    if (!(await confirm({
+      title: "Give this server a new id?",
+      message: `The server at ${other} keeps the current id, and the screens both servers have set up stay with it. Screens set up only on this server follow the new id on their own the next time they look for their server. Nothing restarts.`,
+      confirmLabel: "New id",
+      destructive: true,
+    }))) return;
+    setBusy(true);
+    try {
+      await invoke("stage:newServerId");
+      toast.success("This server has a new id.");
+    } catch (e) {
+      toast.error(`Could not give this server a new id: ${errorMessage(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Button variant="filled" size="small" disabled={busy} onClick={() => void run()}>
+      New server id…
+    </Button>
+  );
+}
+
 export function ServerIdStatus({
   identity,
   timeZone,
-  action,
 }: {
   identity: ServerIdentity | undefined;
   timeZone?: string | null;
-  /** What the alert offers to do about it, when anything. */
-  action?: ReactNode;
 }) {
   const id = identity?.id ?? null;
   const duplicates = identity?.duplicates ?? [];
@@ -62,7 +101,9 @@ export function ServerIdStatus({
               answers as this one, so screens set up here may switch between the two. Give one of them a new id.
               Screens both servers have set up stay with the one that keeps it.
             </p>
-            {action ? <div className="mt-2">{action}</div> : null}
+            <div className="mt-2">
+              <NewServerIdButton duplicates={duplicates} />
+            </div>
           </div>
         </div>
       ) : (

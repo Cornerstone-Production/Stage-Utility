@@ -23,7 +23,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-responder-dup-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { startKioskResponder, stopKioskResponder } = await import("./kiosk-responder.js");
+const { startKioskResponder, stopKioskResponder, changeServerId } = await import("./kiosk-responder.js");
 const { encodeProbe, encodeReply, decodeProbe, decodeReply } = await import("./kiosk-discovery.js");
 const { seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
 type ServerIdentity = import("../types/kiosk.js").ServerIdentity;
@@ -173,6 +173,33 @@ describe("a check another server sends", () => {
     assert.equal(peerReplies.length, 0);
     assert.equal(latest().duplicates.length, 0);
     assert.deepEqual(seenDevices().map((d) => d.id), []);
+  });
+});
+
+describe("a new server id", () => {
+  const NEXT = "b84d17f0-3c2e-4a91-8d5b-e6097f2a1c34";
+
+  test("drops what was heard about the old id, and checks again at once under the new one", async () => {
+    answering = true;
+    // The peer checks for this server's id, which flags it.
+    peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: OWN, check: true }), responderPort, "127.0.0.1");
+    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    // The peer keeps the OLD id: it answers only checks for OWN from here on.
+    const before = checks.length;
+    changeServerId(NEXT);
+    assert.equal(latest().id, NEXT);
+    assert.deepEqual(latest().duplicates, [], "the old id's duplicate outlived the change");
+    await until("a check under the new id", () => checks.slice(before).some((c) => c.boundTo === NEXT));
+  });
+
+  test("and it answers devices as the new id", async () => {
+    peerReplies.length = 0;
+    peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: NEXT, check: true }), responderPort, "127.0.0.1");
+    await until("an answer", () => peerReplies.length > 0);
+    assert.equal(decodeReply(peerReplies[0])?.serverId, NEXT);
+    // It also flagged the peer, now as checking for the new id; drop that for what follows.
+    answering = false;
+    await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
   });
 });
 
