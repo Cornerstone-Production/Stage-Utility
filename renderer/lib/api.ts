@@ -456,6 +456,8 @@ export type IpcChannel =
   | "history:editWindow"
   | "history:live"
   | "history:listMilestones"
+  | "history:getTrendsPrefs"
+  | "history:setTrendsPrefs"
   | "history:merge"
   | "history:rebuild"
   | "history:recalcAttendance"
@@ -917,6 +919,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "history:live":
       return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
 
+    case "history:getTrendsPrefs":
+      return apiFetch<T>("/api/history/trends-prefs", { cache: "no-store" });
+    case "history:setTrendsPrefs":
+      return post<T>("/api/history/trends-prefs", { soundMetric: p.soundMetric });
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":

@@ -107,6 +107,8 @@ import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
 import { BOARDS_CHANGED_CHANNEL } from "../types/boards-changed.js";
 import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
+import { TRENDS_PREFS_CHANNEL } from "../types/trends-prefs.js";
+import { trendsPrefs } from "./trends-prefs.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
 
@@ -549,6 +551,11 @@ export function writeHelloBurst(res: EventSink): void {
   // a restart, which a restore always is).
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "boards:changed" satisfies typeof BOARDS_CHANGED_CHANNEL, boardsChangedState());
+  // The metric the History Trends card plots under Sound. Chosen once and
+  // standing, so a card opened after the last change would otherwise draw the
+  // default until somebody chose again.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "trends:prefs" satisfies typeof TRENDS_PREFS_CHANNEL, trendsPrefs.state());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */
