@@ -37,7 +37,7 @@ import { invoke } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
 import { readStored, writeStored } from "../../../lib/safe-storage";
 import { HistoryChart, useStoredKeys, type ChartMilestone, type StripHover } from "../history-chart";
-import { Skeleton, toast } from "../../../components/ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
 import { ContextMenu, type ContextMenuItem } from "../../../components/ui/context-menu";
@@ -141,6 +141,12 @@ function fmtDayShort(day: string): string {
   return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** What the card says where the Sound measure has nothing to show: the tile's
+ *  note, the legend's, and the empty chart's. One wording, so the three agree. */
+function noSound(metric: string | null): string {
+  return metric ? `no ${metric} reading` : "no sound recorded";
+}
+
 /**
  * "22 prior services" — what a tile's percentage change was measured against.
  *
@@ -239,11 +245,31 @@ export function TrendsCard({
    *  "No recordings in this range" before it has read a single recording,
    *  which on a slow link is most of the wait. */
   loading = false,
+  /** The Smaart metric the Sound measure plots, already resolved by the page
+   *  (saved choice, else the default). Null: nothing to plot. Every wording that
+   *  names the reading — subtitle, tiles, chart label — says this, so the
+   *  figure and its name cannot come apart. */
+  soundMetric = null,
+  /** Every metric the select offers: what the summaries carry that the server
+   *  would accept as a choice, in one stable order. */
+  soundMetrics = [],
+  /** Whether the organisation's saved choice has been heard (a read or a push,
+   *  success or failure). Until it has, Sound holds its loading state and names
+   *  no metric: the default drawn and then swapped for the saved one is a
+   *  wrong figure on screen, seen whenever the read lands after the summaries. */
+  soundMetricKnown = true,
+  /** Choose a metric for the whole organisation. Omitted, the select is not
+   *  offered (a surface with no settings to write). May reject; the card says so. */
+  onSoundMetric,
 }: {
   recordings: TrendRecording[];
   clock?: TrendClock | null;
   soundUnavailable?: boolean;
   loading?: boolean;
+  soundMetric?: string | null;
+  soundMetrics?: readonly string[];
+  soundMetricKnown?: boolean;
+  onSoundMetric?: (metric: string) => Promise<void> | void;
 }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
   /** Attendance or sound. Attendance by default: it is the question the tab is
@@ -308,6 +334,24 @@ export function TrendsCard({
   }
 
   const sound = measure === "sound";
+  /** Sound, before the saved metric is known — see `soundMetricKnown`. */
+  const soundHeld = sound && !soundMetricKnown;
+  /** "over the last 16 weeks", or for All "over every recorded day" — the chart's
+   *  label said "the last all weeks". */
+  const overSpan = weeks === "all" ? "over every recorded day" : `over the last ${weeks} weeks`;
+  /** What the figure is a figure OF, for every sentence that names it. */
+  const peakWhat = sound && soundMetric && !soundHeld ? `Peak ${soundMetric}` : "Peak level";
+  /** The page's handler shows the choice at once and puts the old one back if
+   *  the save fails; this only says so. */
+  async function pickMetric(next: string) {
+    if (next === soundMetric || !onSoundMetric) return;
+    try {
+      await onSoundMetric(next);
+    } catch (err) {
+      toast.error(`Couldn't save the sound metric: ${errorMessage(err)}`);
+      logToServer("history", `could not save the Trends sound metric: ${errorMessage(err)}`);
+    }
+  }
   /** How many decimals this measure prints — see DECIMALS. */
   const dp = DECIMALS[measure];
   /** How many decimals this measure's CHANGE PERCENTAGE prints — see
@@ -382,11 +426,23 @@ export function TrendsCard({
     // blue on Attendance and green on Sound.
     const order = tiles.map((t) => t.serviceTypeId ?? "").filter((k) => byType.has(k));
     for (const k of byType.keys()) if (!order.includes(k)) order.push(k);
+    // A type with no reading AT ALL for the chosen sound metric keeps its LEGEND
+    // entry, noted, and draws nothing: without it the line simply is not there
+    // and nothing on the chart says why. Its tile says the same, so the test is
+    // the tile's own: `latest == null`. A type whose readings are merely older
+    // than the range has a figure on its tile and no note here, and with the
+    // summary unread no type is noted, because the tiles say "sound unavailable".
+    // Never a type that already draws a line: one legend entry per series.
+    const unread = sound && soundMetric && !soundUnavailable
+      ? tiles.filter((t) => t.latest == null && !byType.has(t.serviceTypeId ?? "")).map((t) => t.serviceTypeId ?? "")
+      : [];
+    for (const k of unread) order.push(k);
     return order.map((key, i) => {
       const days = dailyValues(byType.get(key) ?? [], measure, clock);
+      const noReading = unread.includes(key);
       return {
       id: key || "all",
-      label: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.name ?? "Services",
+      label: `${tiles.find((t) => (t.serviceTypeId ?? "") === key)?.name ?? "Services"}${noReading ? ` · ${noSound(soundMetric)}` : ""}`,
       color: colorOf(key),
       // Every line the same weight — see TREND_LINE_WIDTH. `role` still picks
       // which one the gradient and the live edge would belong to; this chart
@@ -426,7 +482,7 @@ export function TrendsCard({
     // measure, which IS a dependency. `colorOf` reads `colorIndexes`, which is
     // one too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, tiles, hidden, measure, colorIndexes, clock]);
+  }, [ranged, tiles, hidden, measure, colorIndexes, clock, sound, soundMetric, soundUnavailable]);
 
   /** The tiles that are DRAWN. `hidden` keys a type by its series id, which is
    *  the type id or "all" for the no-type bucket — the same key the series and
@@ -515,7 +571,7 @@ export function TrendsCard({
             <span data-sound-unavailable className="text-caption2 text-warn-11">sound summary unavailable</span>
           )}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         {/* What is plotted. Two options, so buttons rather than a menu that has
             to be opened to see them — the same shape as the range beside it. */}
         <div role="group" aria-label="Trend measure" className="flex items-center gap-1 rounded-lg border border-line p-0.5">
@@ -535,6 +591,35 @@ export function TrendsCard({
             </button>
           ))}
         </div>
+        {/* WHICH sound reading, only under Sound, and only where the choice can
+            be saved. The organisation's choice, not this browser's: the booth
+            and the tablet by the desk read one number. Offered whenever the
+            recordings carry any metric, even when none resolves (this browser's
+            Customize list hides every one), so there is always a way to pick.
+            `Select` renders a NATIVE <select>; `appearance-none` strips the
+            browser's own arrow so every browser draws the same one, the span
+            after it. A saved metric nothing carries still shows, marked by
+            Select. */}
+        {sound && onSoundMetric && !soundHeld && soundMetrics.length > 0 && (
+          <span data-metric-wrap className="relative inline-block">
+            <Select value={soundMetric ?? ""} onValueChange={pickMetric}>
+              <SelectTrigger className="appearance-none pr-[26px] text-caption1" aria-label="Sound metric">
+                {/* Only with nothing resolved: a native select with no matching
+                    value shows its FIRST option as if chosen (see select.tsx). */}
+                {soundMetric === null && <SelectValue placeholder="Metric" />}
+              </SelectTrigger>
+              <SelectContent>
+                {soundMetrics.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute right-2.5 top-1/2 -mt-1 size-[5px] rotate-45 border-b-[1.5px] border-r-[1.5px] border-fg-muted"
+            />
+          </span>
+        )}
         {/* The range control. A segmented set of three rather than a Select:
             three options that are always the same three read faster as buttons
             than behind a menu that has to be opened to see them. */}
@@ -598,7 +683,7 @@ export function TrendsCard({
         ) : (
           <>
             {sound
-              ? "Peak level per service type, each day's loudest recording"
+              ? `${peakWhat} per service type, each day's loudest recording`
               : "Attendance per service type, each day's services added up"}
             {/* THE RANGE, not a fixed window. The sentence used to say "last 8
                 days" — the sparkline's window — while the tile beside it
@@ -609,7 +694,7 @@ export function TrendsCard({
         )}
       </p>
 
-      {loading ? (
+      {loading || soundHeld ? (
         // The shape of what is coming, at its size, so the card does not jump
         // when the tiles and the plot arrive.
         <div data-trends-loading aria-busy="true" className="flex flex-col gap-4">
@@ -648,7 +733,7 @@ export function TrendsCard({
                   color={colorOf(t.serviceTypeId ?? "")}
                   width={90}
                   height={34}
-                  label={`${t.name}: ${sound ? "the loudest recording" : "every service added up"} on each of the last ${t.recent.length} days it recorded`}
+                  label={`${t.name}: ${sound ? `the loudest recording${soundMetric ? `, ${soundMetric}` : ""}` : "every service added up"} on each of the last ${t.recent.length} days it recorded`}
                 />
                 <div className="flex min-w-0 flex-col gap-0.5">
                 {/* WHAT THE NUMBER IS, not what it averages. "avg peak" named a
@@ -663,14 +748,18 @@ export function TrendsCard({
                     so. The date is pinned and the NAME truncates, so on a narrow
                     tile the date is the last thing lost rather than the first. */}
                 <span className="flex items-baseline gap-1.5 text-caption2 text-fg-subtle">
-                  <span className="truncate">
-                    {t.name} · latest day {sound ? "peak" : "total"}
-                  </span>
+                  <span data-trend-name className="truncate">{t.name}</span>
                   {t.latestDate && (
                     <span data-trend-latest-date className="shrink-0 tabular-nums">
                       {fmtDayShort(t.latestDate)}
                     </span>
                   )}
+                </span>
+                {/* WHAT the figure is, on its own line: the date and the name
+                    keep the first line to themselves, so neither pushes this
+                    off the tile. Under Sound it names the metric. */}
+                <span data-trend-what className="truncate text-caption2 text-fg-subtle">
+                  {sound ? `latest day ${soundMetric ? `peak ${soundMetric}` : "peak"}` : "latest day total"}
                 </span>
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span data-trend-latest className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
@@ -718,7 +807,9 @@ export function TrendsCard({
                           // load is not a service type that recorded no sound.
                           // Same lie as the empty plot's, one level down.
                           : sound
-                            ? soundUnavailable ? "sound unavailable" : "no sound recorded"
+                            ? soundUnavailable
+                              ? "sound unavailable"
+                              : noSound(soundMetric)
                             : "no attendance recorded"}
                       </span>
                     );
@@ -756,12 +847,12 @@ export function TrendsCard({
             onSeriesContextMenu={openMenu}
             ariaLabel={
               sound
-                ? `The loudest recording of each day over the last ${weeks} weeks`
-                : `Each day's services added up over the last ${weeks} weeks`
+                ? `${peakWhat}: the loudest recording of each day ${overSpan}`
+                : `Each day's services added up ${overSpan}`
             }
             emptyNote={
               sound
-                ? "No sound recorded in this range — try a longer one."
+                ? `${noSound(soundMetric).replace(/^n/, "N")} in this range — try a longer one.`
                 : "No recordings in this range — try a longer one."
             }
           />

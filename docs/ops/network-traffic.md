@@ -22,10 +22,10 @@ page first loads.
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
 | `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
-| `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses |
-| `trends:prefs` | under 0.1 KB | only when somebody chooses the Trends sound metric, sent only to an open History page |
+| `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses, and once on connect |
+| `trends:prefs` | under 0.1 KB | only when somebody chooses the Trends sound metric, sent only to an open History page, and once on connect |
 | `wireless:chargers` | ~0.3 KB per bay | when a bay's reading changes (a charging pack moves about a percent a minute), only to a page drawing bays: a Charger battery widget, the Mic slots page |
-| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page; screens do not name it |
+| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page, and once on connect; screens do not name it |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
 

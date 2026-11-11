@@ -24,6 +24,8 @@ import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
+import { effectiveSoundMetric, peakOn, soundMetricOptions } from "./history-trends/sound-metric";
+import { useTrendsPrefs } from "./history-trends/use-trends-prefs";
 import { AllServicesLink, RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
@@ -844,23 +846,37 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     [],
   );
 
+  /**
+   * The Trends card's sound metric: ONE for the whole card and the whole
+   * organisation, chosen in the card's select and kept on the server.
+   *
+   * Resolved once against the metrics the select offers (every key the loaded
+   * summaries carry that the server would accept) — saved choice,
+   * else LAeq 2, else LAeq 1, else this browser's own primary metric (the same
+   * Customize rule the rows use, so `metricsVersion` below still matters on
+   * that last branch). Only Trends reads it: the History SPL rows' Peak keeps
+   * following each browser's own Customize list.
+   */
+  const trendsPrefs = useTrendsPrefs();
+  const { soundMetrics, soundMetric } = useMemo(() => {
+    // Read so the subscription is not "unused": the fallback branch reads the
+    // Customize list, and a change to it must re-resolve this.
+    void metricsVersion;
+    const offered = soundMetricOptions(splList.map((x) => Object.keys(x.metrics)));
+    return { soundMetrics: offered, soundMetric: effectiveSoundMetric(trendsPrefs.soundMetric, offered, primaryMetricOf) };
+  }, [splList, trendsPrefs.soundMetric, metricsVersion]);
+
   const trendRecordings = useMemo<TrendRecording[]>(
     () => {
-      // Read so the subscription is not "unused". The VALUE is never wanted;
-      // the hook's own state update is what re-renders when Customize writes a
-      // different metric, and without it the chart and the rows would go on
-      // quoting the old metric's peak until the page was reopened.
-      void metricsVersion;
       const splByKey = new Map(splList.map((x) => [x.serviceKey, x]));
       return rows.map((r) => {
         // The SPL SUMMARY, not the record. It is already loaded for this page,
         // it carries a peak per metric (see SplServiceSummary.metrics), and the
         // trend plots one point per recording across up to 52 weeks — fetching
         // every full record for that would be hundreds of files to answer one
-        // number each. The primary-metric rule is the rows' own, imported, so
-        // the chart and a row cannot name different metrics.
+        // number each. The metric is the card's one, so a recording that lacks
+        // it contributes no point rather than another metric's figure.
         const summary = splByKey.get(r.serviceKey);
-        const metric = summary ? primaryMetricOf(Object.keys(summary.metrics)) : null;
         return {
           serviceKey: r.serviceKey,
           serviceTypeId: r.serviceTypeId,
@@ -869,7 +885,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
           seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
           peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
-          peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+          peakDb: summary ? peakOn(summary.metrics, soundMetric) : null,
           // HAS IT ENDED. The same test the row beside it calls `live`, off the
           // same record: the timeline when there is one, otherwise the arrival
           // ramp's own. A trend counts a running service either way — see
@@ -880,7 +896,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         };
       });
     },
-    [rows, splList, metricsVersion],
+    [rows, splList, soundMetric],
   );
 
   /** The row for the current selection, if any — known synchronously from `list`/
@@ -1863,6 +1879,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         clock={clock}
         soundUnavailable={loadFailed.has("spl")}
         loading={list === null || !attSettled || !splSettled}
+        soundMetric={soundMetric}
+        soundMetrics={soundMetrics}
+        soundMetricKnown={trendsPrefs.known}
+        // The shared /history link is read-only: it shows the organisation's
+        // choice and offers no way to change it.
+        onSoundMetric={readOnly ? undefined : trendsPrefs.chooseSoundMetric}
       />
 
       {/* Calendar (sticky) beside the month's services. The calendar decides
