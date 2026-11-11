@@ -90,6 +90,18 @@ otherwise. The connect-time snapshot is the last frame.
   subscribes to everything, so every widget's preview has data.
 - **Nothing is produced for nobody.** An integration with no subscribers stops
   resolving and serialising.
+- **Screens previews kept while the operator is away ride the shared stream.**
+  The Screens page stays mounted, hidden, for ten minutes after the operator
+  leaves it (see [Previews](../features/operator-app.md#previews)), and its
+  previews go on receiving updates through the browser's one shared event stream.
+  That adds no connection: the server sees one from that browser either way. It
+  does keep the previews' channels in that stream's subscriptions for up to the
+  ten minutes, so the cost shows only when a previewed layout draws a channel the
+  page now open does not, and the real screens showing those layouts are
+  subscribed to the same channels already. A browser not on the shared stream
+  does not keep the page at all. A preview that falls off it while the page is
+  hidden says so in its next live report, and the kept page is dropped then, so a
+  hidden preview holds a connection of its own only for that moment.
 - **Images are content-addressed and immutable.** Logos and layout images are
   named by a hash of their bytes, and a person's photo by Planning Center's URL,
   which changes when the photo does; all are cached for a year, except a

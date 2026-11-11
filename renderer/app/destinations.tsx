@@ -34,7 +34,7 @@ import { ServiceHistorySection } from "../settings/sections/service-history-sect
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
-import { ScreensRoute } from "./screens/screens-route";
+import { ScreensRouteSlot } from "./screens/kept-screens";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
@@ -82,7 +82,8 @@ export const DESTINATIONS: readonly Destination[] = [
     label: "Screens",
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
-    Component: ScreensRoute,
+    // The shell draws the page itself, kept across navigation: kept-screens.tsx.
+    Component: ScreensRouteSlot,
   },
   {
     // Every mic slot board, edited together: the screens and widgets that show

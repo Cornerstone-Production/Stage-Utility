@@ -966,4 +966,7 @@ Each screen writes its own `[video]` lines from the browser:
 A layout's preview on the Screens page never opens a live connection to a
 feed: a Video widget there shows **Video paused in preview** with a **Play**
 button, so browsing layouts does not quietly connect to every feed on the
-list. Press Play to watch it inside the preview.
+list. Press Play to watch it inside the preview. Leaving the Screens page stops
+it: the page is kept for ten minutes while you are away (see
+[Previews](../features/operator-app.md#previews)), but its previews are told they
+are hidden, and a playing one lets go of its feed until you come back.

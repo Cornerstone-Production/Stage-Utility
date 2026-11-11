@@ -334,18 +334,37 @@ gets a line naming the card: `[preview] <name>: the preview did not go live
 (<why>)`, where the reason is `the page did not load` (the frame loaded an error
 page instead) or `no answer in 10 s`.
 
-A preview is never a still passing for live. Each preview tells its card whether it
-is receiving live updates. One that has stopped stays on the card, dimmed and grey,
-under a **Not live** chip with **Retry**, until it is live again:
+Leaving Screens keeps the page, hidden, for ten minutes. Come back within that and
+every preview that was showing is there at once, still live, with no reload, and
+the page is scrolled to where you left it, so the cards you were looking at are the
+ones still showing. The ten minutes start again each time you leave. After that, or
+after reloading the browser tab, the page opens at the top and the previews load
+again as above.
+
+A kept preview is never a still passing for live. Each preview tells its card
+whether it is receiving live updates, and the card asks again as you come back. One
+that has stopped stays on the card, dimmed and grey, under a **Not live** chip with
+**Retry**, until it is live again:
 
 | Chip | Means |
 |---|---|
 | **Not live · updated just now** | its updates stopped less than a minute ago |
 | **Not live · updated N min ago** | its updates stopped N minutes ago |
+| **Not live** | asked as you came back, the preview did not answer within three seconds, so when it stopped is not known |
 
 A stream that stays open but goes quiet counts as stopped: the server sends every
 page a heartbeat every 20 seconds, and a page that has heard nothing for 50 seconds
 takes its stream as down and reopens it once. Retry loads that preview afresh.
+
+The page is kept only while the browser shares one event stream between all its
+tabs and previews, which it does by default, and while every preview on it does too.
+A browser that cannot (one with no SharedWorker, one where it has been turned off,
+or the app opened with `?transport=poll`), or a preview that has fallen back to a
+stream of its own, would hold a connection for every hidden preview. So there
+leaving Screens drops the page as it always did, and `/log` says why, once per page
+load: `[preview] not keeping the Screens previews while away: <reason>`, with a
+reason such as `poll transport`, `worker abandoned: …` or `a preview is off the
+shared event stream`.
 
 ### The settings panel
 

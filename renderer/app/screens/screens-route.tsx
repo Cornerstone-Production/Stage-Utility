@@ -78,6 +78,21 @@ export function ScreensRoute() {
   // wherever the picker is (a card or the panel).
   const [newViewFor, setNewViewFor] = useState<{ outputId: string; surface: ViewSurface } | null>(null);
 
+  // The panel starts closed on every visit and nothing is remembered, and that holds
+  // for the kept page too (kept-screens.tsx). Kept, this component and its state
+  // outlive a trip to Home, but leaving hides it and destroys its Effects, so this
+  // cleanup IS the leave: the panel, whatever it was on and a half-filled new
+  // screen are dropped, as an unmount used to drop them. Only the previews are kept.
+  useEffect(
+    () => () => {
+      setOpen(false);
+      setClosing(false);
+      setPanel(null);
+      setNewViewFor(null);
+    },
+    [],
+  );
+
   // Any selection opens the panel: the operator asked to see it.
   function select(target: PanelTarget | null) {
     setPanel(target);
