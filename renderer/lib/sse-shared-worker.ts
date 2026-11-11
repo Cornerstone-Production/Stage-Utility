@@ -20,6 +20,7 @@
 // until it had them.
 
 import { HYDRATED_SET } from "./sse-channels";
+import { SSE_HEARTBEAT_EVENT, SSE_SILENCE_MS } from "../../main/types/sse";
 import { SUBSCRIBE_REPORT_TIMEOUT_MS, createSubscribeReporter } from "./subscribe-reporter";
 
 // The renderer tsconfig uses the DOM lib (self: Window), so type the shared-worker
@@ -44,6 +45,49 @@ const attached = new Set<string>();
  */
 const lastPayload = new Map<string, { data: unknown; at: number }>();
 let es: EventSource | null = null;
+/**
+ * Whether the stream is delivering, as every tab on this worker should see it.
+ * Told to each tab as it connects and to all of them on every change, so a Screens
+ * preview can say it is *Not live* while the stream is down. Delivering means heard
+ * from within SSE_SILENCE_MS: the server's heartbeat is an event (main/types/sse.ts),
+ * so a stream that is open but has gone quiet, a frozen server say, is not
+ * delivering. The ping's `streamOpen` is a different question (has the browser
+ * given up for good), and stays as it is.
+ */
+let streamDelivering = false;
+let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function tellStream(delivering: boolean): void {
+  if (streamDelivering === delivering) return;
+  streamDelivering = delivering;
+  for (const port of portChannels.keys()) port.postMessage({ type: "stream", delivering });
+}
+
+/**
+ * Something arrived: delivering, until SSE_SILENCE_MS passes with nothing more.
+ * Then the stream is reopened, once: a connection that died without a reset never
+ * errors, so nothing else would replace it. The new one arms this again only when
+ * it opens or hears something, so an unreachable server costs one reopen per
+ * stall, not one every 50 s.
+ */
+function heard(): void {
+  tellStream(true);
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    silenceTimer = null;
+    tellStream(false);
+    es?.close();
+    es = null;
+    ensureEs();
+    report();
+  }, SSE_SILENCE_MS);
+}
+
+function lost(): void {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = null;
+  tellStream(false);
+}
 // One stable id for the shared connection (insecure-context safe — no crypto.randomUUID).
 const cid = `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -150,11 +194,14 @@ function ensureEs(): void {
     // A successful connect earns the short delay back, so one blip does not leave
     // the machine on a 30s cadence for the rest of the service.
     reconnectDelayMs = RECONNECT_MIN_MS;
+    heard();
     report(); // re-report + re-attach after every (re)connect
   };
   es.onerror = () => {
+    lost();
     if (es?.readyState === EventSource.CLOSED) scheduleReconnect();
   };
+  es.addEventListener(SSE_HEARTBEAT_EVENT, heard);
   for (const c of union()) attach(c);
 }
 
@@ -208,6 +255,7 @@ ctx.onconnect = (e: MessageEvent) => {
     }
   };
   port.start();
+  port.postMessage({ type: "stream", delivering: streamDelivering });
   ensureEs();
   report();
 };

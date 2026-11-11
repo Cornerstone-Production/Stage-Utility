@@ -109,6 +109,7 @@ import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
+import { SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_MS } from "../types/sse.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -323,11 +324,33 @@ hostNames.onRefusalOn(() => {
   }
   if (closed > 0) console.warn(`[security] closed ${scrub(closed)} event stream(s) opened by a name now refused`);
 });
-// Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
-// lines, but the write itself fails (or backs up) on a half-open socket so we can
-// reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
-// one of the browser's ~6 HTTP/1.1 connection slots.
-const SSE_HEARTBEAT_MS = 20_000;
+// Keep the SSE pipe warm and surface dead clients: the write fails (or backs up) on
+// a half-open socket so we can reap it. Without this, a slept/dropped kiosk lingers
+// forever holding memory and one of the browser's ~6 HTTP/1.1 connection slots. A
+// named event, so a page can tell a quiet stream from a dead one: see
+// main/types/sse.ts.
+/**
+ * One heartbeat to every open event stream. It exercises the write, so a half-open
+ * or stalled client surfaces and gets reaped, and it tells a page its stream is
+ * still delivering (main/types/sse.ts). Exported for its test; start() runs it on a
+ * timer.
+ */
+export function writeSseHeartbeats(): void {
+  for (const client of sseClients) {
+    let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
+    if (ok) {
+      try {
+        client.write(SSE_HEARTBEAT_FRAME);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      sseClients.delete(client);
+      client.destroy();
+    }
+  }
+}
 // If a client's un-flushed write buffer grows past this, it's stalled (asleep, wifi
 // gone). Drop it rather than let its backlog grow server memory without bound — the
 // broadcast loop has no backpressure otherwise.
@@ -848,24 +871,7 @@ export class RemoteServer {
 
     // Heartbeat: ping every open stream so idle intermediaries don't drop it and so
     // half-open/stalled clients get reaped (write fails or backs up → dropped).
-    this.heartbeatTimer = setInterval(() => {
-      for (const client of sseClients) {
-        // ": ..." is an SSE comment line — EventSource ignores it; it just exercises
-        // the write so a half-open or stalled client surfaces and gets reaped.
-        let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
-        if (ok) {
-          try {
-            client.write(`: ping\n\n`);
-          } catch {
-            ok = false;
-          }
-        }
-        if (!ok) {
-          sseClients.delete(client);
-          client.destroy();
-        }
-      }
-    }, SSE_HEARTBEAT_MS);
+    this.heartbeatTimer = setInterval(writeSseHeartbeats, SSE_HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
 
     const trackConn = (socket: net.Socket) => {

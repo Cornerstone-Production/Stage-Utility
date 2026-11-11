@@ -92,3 +92,21 @@ test("recovering onto the worker closes the tab's own stream", () => {
   assert.equal(direct.readyState, FakeEventSource.CLOSED, "the direct stream stayed open beside the recovered worker");
   assert.equal(__sseFallback.listenerCount(), 0, "the fallback wrappers were left on the direct path");
 });
+
+// The reviewer's case. With the direct stream now closed on recovery, its silence
+// clock outlived it: armed when the direct stream opened, it fired 50 s later and
+// marked the worker's healthy stream down, and the worker, which reports only
+// changes, never said otherwise. A kept Screens preview then read Not live for good.
+test("going back onto the worker stops the closed stream's silence clock", async () => {
+  const { getStreamStatus } = await import("./api.js");
+  const { SSE_SILENCE_MS } = await import("../../main/types/sse.js");
+  onNotification("pco:live", () => {});
+  __sseFallback.abandon("no pong");
+  const direct = sources.at(-1)!;
+  direct.onopen?.();
+  mock.timers.tick(FIRST_RETRY_MS);
+  assert.equal(direct.readyState, FakeEventSource.CLOSED, "the case needs the direct stream closed");
+  ports.at(-1)?.onmessage?.({ data: { type: "stream", delivering: true } });
+  mock.timers.tick(SSE_SILENCE_MS);
+  assert.equal(getStreamStatus().up, true, "a closed stream's silence clock marked the worker's healthy stream down");
+});

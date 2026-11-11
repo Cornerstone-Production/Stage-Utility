@@ -662,8 +662,13 @@ one at a time and wait for the answer before the next. A `cid` over
 marked `?client=companion` (or with an `X-Companion-Module` header) is counted
 toward the Companion integration's connected-client total.
 
-A comment heartbeat goes out every 20 seconds, and a client whose socket backs up
-past 2 MB is dropped rather than buffered.
+A heartbeat goes out every 20 seconds, as an event named `sse:heartbeat` with data
+`{}` rather than an SSE comment, so a page can tell a quiet stream from one that has
+stopped: the app takes a stream it has heard nothing on for 50 seconds as down and
+reopens it once, since a connection that died without a reset never errors. It
+is sent to every stream whatever its channel filter; a client that does not listen
+for it by name never sees it. A client whose socket backs up past 2 MB is dropped
+rather than buffered.
 
 Both transports are named on [`/log`](../ops/updates-and-logs.md):
 `[events] stream client connected (3 streams)` and its `closed` counterpart, and

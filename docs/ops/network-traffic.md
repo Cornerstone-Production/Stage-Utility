@@ -105,8 +105,12 @@ otherwise. The connect-time snapshot is the last frame.
   against 837 KB on the full-size screens. See
   [Photos](../integrations/planning-center.md#photos).
 
-Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
-nothing happening.
+Idle, the stream is all but silent: measured at 0 bytes over 12 seconds on a
+server with nothing happening, and then a heartbeat of about 40 bytes every 20
+seconds, which is how a page tells a quiet stream from a dead one (see
+[API](../reference/api.md)). A page that has heard nothing for 50 seconds reopens
+its stream once, which replaces a connection that died without being closed; it
+does not reopen again until the new stream has opened and gone quiet in turn.
 
 A screen on the [polling transport](../display-urls.md#polling-transport)
 (`?transport=poll`) is the exception: it costs one request every two seconds
