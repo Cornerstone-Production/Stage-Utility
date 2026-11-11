@@ -247,7 +247,13 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       if (refuseUnansweredHost(req, res)) return;
       // A snapshot carries every config file and every uploaded image, base64'd,
       // so the ordinary JSON ceiling would refuse a bundle this app exported.
-      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
+      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown> | null;
+      // `in` throws on a JSON null or a string: that was a 500 for a request that is
+      // simply wrong. The route takes an object, the bundle itself or {bundle}.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        error(res, "Expected a config snapshot, or {bundle}, as a JSON object.");
+        return;
+      }
       const wrapped = "bundle" in body;
       const bundle = wrapped ? body.bundle : body;
       // Read only from the wrapper, and only a literal true. A bare bundle is a
