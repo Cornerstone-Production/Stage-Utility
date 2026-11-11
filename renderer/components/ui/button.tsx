@@ -4,7 +4,9 @@ import { cn } from "../../lib/cn";
 import { Tooltip } from "./tooltip";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "accent" | "filled" | "transparent";
+  /** `soft` is the accent at low strength: for a control that must be easy to
+   *  find without competing with a solid `accent` action beside it. */
+  variant?: "accent" | "soft" | "filled" | "transparent";
   size?: "small" | "medium";
   iconOnly?: boolean;
   /**
@@ -58,6 +60,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           variant === "accent" && [
             "bg-accent text-white",
             "hover:bg-accent-hover active:bg-accent-active",
+          ],
+          // An inset ring, not a border or a box-shadow of its own: it composes
+          // with the focus ring (both are Tailwind ring layers) and takes no room.
+          variant === "soft" && [
+            "bg-accent-soft text-accent-soft-fg inset-ring inset-ring-accent-soft-line",
+            "hover:bg-accent-soft-hover active:bg-accent-soft-active",
           ],
           variant === "filled" && [
             "bg-fill text-fg",

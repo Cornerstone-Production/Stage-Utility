@@ -33,6 +33,7 @@ import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon
 import { DataArchivePanel } from "./data-archive-panel";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
+import { WhatsNewButton } from "./whats-new";
 import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
@@ -472,11 +473,14 @@ export function UpdatesPanel({
             <Field orientation="vertical" data-setting-id="update-status">
               <FieldContent>
                 <FieldLabel>{settingText("update-status").name}</FieldLabel>
-                <FieldDescription>
-                  {s.updateBlockedReason ??
-                    "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
-                  Current version: v{s.version}.
-                </FieldDescription>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <FieldDescription className="mt-0">
+                    {s.updateBlockedReason ??
+                      "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
+                    Current version: <span className="font-mono">v{s.version}</span>.
+                  </FieldDescription>
+                  <WhatsNewButton version={s.version} />
+                </div>
               </FieldContent>
             </Field>
           )}
@@ -497,39 +501,47 @@ export function UpdatesPanel({
                   ? "Checking for updates…"
                   : available > 0
                     ? s.tagBased && s.targetTag
-                      ? `${s.targetTag} available`
+                      ? <><span className="font-mono">{s.targetTag}</span> available</>
                       : `${plural(available, "update")} available`
                     : "Up to date"}
               </FieldLabel>
-              <FieldDescription>
-                {s ? (
-                  <>
-                    Running {s.currentTag ?? `v${s.version}`}
-                    {s.currentSha ? ` · ${s.currentSha}` : ""}
-                    {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
+              {s ? (
+                // The status line, and What's new at its end: the notes of the
+                // release this line names. It wraps under the line on a narrow card.
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <FieldDescription className="mt-0">
+                    Running <span className="font-mono">{s.currentTag ?? `v${s.version}`}</span>
+                    {s.currentSha ? <> · <span className="font-mono">{s.currentSha}</span></> : null}
+                    {s.currentDate ? <> · <span className="font-mono">{new Date(s.currentDate).toLocaleDateString()}</span></> : null}
                     {s.branch ? ` (${s.branch})` : ""}.
                     {available > 1 ? ` ${available} releases behind.` : ""}
-                    {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
+                    {s.lastCheckedAt ? <> Last checked <span className="font-mono">{new Date(s.lastCheckedAt).toLocaleString()}</span>.</> : null}
                     {/* Said plainly rather than hidden. The banner stays quiet because
                         nothing pending changes what the app does, but Update still
                         works if you want the version number to line up. */}
                     {!s.tagBased && behindNews === 0 && behind > 0
                       ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
                       : ""}
-                  </>
-                ) : (
-                  "Comparing this install against the latest release…"
-                )}
-              </FieldDescription>
+                  </FieldDescription>
+                  <WhatsNewButton version={s.version} />
+                </div>
+              ) : (
+                <FieldDescription>Comparing this install against the latest release…</FieldDescription>
+              )}
 
               {/* Live progress while applying (survives until the page auto-reloads). */}
               {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
 
-              {/* Changelog of pending commits */}
+              {/* Changelog of pending commits. Named for the release it is coming
+                  in, not "What's new": that is the running release's button above. */}
               {!updating && available > 0 && s?.changelog?.length ? (
                 <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
                   <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
-                    What's new
+                    {s.tagBased && s.targetTag ? (
+                      <>Coming in <span className="font-mono">{s.targetTag}</span></>
+                    ) : (
+                      "Coming in the next update"
+                    )}
                   </p>
                   <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2.5 text-caption2 text-gray-11">
                     {s.changelog.map((line, i) => (

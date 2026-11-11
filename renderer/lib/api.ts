@@ -612,6 +612,7 @@ export type IpcChannel =
   | "update:dismissNotice"
   | "update:lock"
   | "update:notices"
+  | "update:releaseNotes"
   | "update:restart"
   | "update:setAuto"
   | "update:setTrack"
@@ -1310,6 +1311,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/update/notices");
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
+    // What's new: the running release's notes, read-only. Read on a button
+    // press only, never on load; a failure is an answer ({ok: false}), not an error.
+    case "update:releaseNotes":
+      return apiFetch<T>("/api/update/release-notes");
 
     // The bundle IS the payload — a view export file, posted verbatim — unless
     // the caller also names a service type or a clash choice, which only a plan

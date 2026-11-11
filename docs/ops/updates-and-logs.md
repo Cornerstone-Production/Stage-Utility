@@ -116,9 +116,11 @@ update whatever changed, unless `build/servicecue.failed` says the last build fa
 make it on the commit the update starts from: then only a change to a build input rebuilds
 ([the marker](servicecue-on-the-web.md#the-copy-every-build-prepares)).
 
-### What's new
+### Coming in the next release
 
-The panel lists the pending commits, filtered to what an operator could actually
+With an update waiting, the panel lists the pending commits under **Coming in
+vX.Y.Z** (**Coming in the next update** on a track with no release tags),
+filtered to what an operator could actually
 notice (`changelog.ts`). Types that change nothing an operator could notice — `chore`,
 `ci`, `build`, `docs`, `test`, `refactor`, and the legacy `style` — are dropped, along
 with merge commits and the release workflow's own `chore(release): vX.Y.Z [skip ci]`
@@ -314,7 +316,7 @@ a path or a credential. If you see one, report it.
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
-| `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read |
+| `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
@@ -431,9 +433,10 @@ and stays until you press Dismiss. Closing the tab or reloading does not count �
 the notice is held by the server, so it is waiting next time. That is also why a
 second browser does not show it again once dismissed.
 
-A release with no usable notes shows the version alone. An install updating from
-a git checkout lists commit subjects without headings, since commit subjects
-carry no sections.
+A release with no usable notes shows the version alone in this dialog (What's
+new says the notes could not be loaded instead; see below). An install updating
+from a git checkout lists commit subjects without headings, since commit
+subjects carry no sections.
 
 **Each section says how much it is not showing.** A release's notes carry a
 fixed number of bullets and the dialog shows a fixed number of lines, so a busy
@@ -465,6 +468,34 @@ is always listed. Fixed and Improved each state their own held-back count at the
 end of the section, so the filter is never silent. Prereleases list everything:
 on the beta track, the fix is the reason to update.
 
-Notes are captured **before** the update runs. Afterwards the update status
-describes the next pending release rather than the one just installed, so there
-is no later moment when the right answer is still knowable.
+The after-update dialog's notes are captured **before** the update runs.
+Afterwards the update status describes the next pending release rather than the
+one just installed, so for that dialog there is no later moment when the right
+answer is still knowable. What's new, below, reads the kept notes or the
+release itself instead.
+
+### What's new, at any time
+
+The Updates card in Advanced has a **What's new** button at the end of the line
+naming the running version. It opens the after-update dialog again, read-only,
+for the release that is running: titled *What's new in X.Y.Z*, with Close in
+place of Dismiss. Closing it changes nothing on the
+server, so it never spends an after-update dialog somebody has not seen, and
+never brings back one that was dismissed. It always shows the running release,
+even with an update waiting (what that update brings is the card's **Coming in**
+list), and on a beta it shows that beta's own notes.
+
+Dismissing the after-update dialog keeps its notes on the server for this
+button, so it works with no network, and after an update that installed several
+releases at once it shows what the after-update dialog showed: all of them. An
+install with nothing kept, such as one that updated before the button existed,
+reads the GitHub release for the running tag when the button is pressed (never
+on a timer or a page load), through the update check's cache, and keeps what it
+gets. If that read fails the dialog says the notes could not be loaded and links
+the release page, and `/log` has one `[updater]` line naming the tag and why;
+a release whose notes list no changes is treated the same way, so the dialog is
+never empty. A failed read is not remembered: the next press tries again. A git
+checkout on a track with release tags shows the commit subjects its
+after-update dialog showed. One on a track with none records its update under
+no version, so its subjects are not kept, and What's new shows the release
+named by its `package.json` version instead.
