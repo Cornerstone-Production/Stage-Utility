@@ -72,7 +72,10 @@ function record(level: LogLevel, args: unknown[]): void {
       typeof a === "string" ? a : a instanceof Error ? (a.stack ?? a.message) : safeStringify(a),
     )
     .join(" ");
-  sink?.(push(level, msg, new Date().toISOString()));
+  // Push first, unconditionally: the buffer is what /log reads, and it must fill
+  // even when log-persist never got as far as installing its disk sink.
+  const line = push(level, msg, new Date().toISOString());
+  sink?.(line);
 }
 
 /** Patch console.{log,info,warn,error} to also capture into the ring buffer. The
