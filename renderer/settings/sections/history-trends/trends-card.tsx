@@ -49,6 +49,8 @@ import {
 } from "./series-colors";
 import {
   DEFAULT_RANGE_WEEKS,
+  DECIMALS,
+  atPrecision,
   dailyValues,
   RANGE_WEEKS,
   rangeLabel,
@@ -106,18 +108,9 @@ function storedRange(): RangeWeeks {
 const TREND_LINE_WIDTH = 2;
 
 /**
- * How many decimals a measure prints. Whole people; tenths of a decibel.
- *
- * ONE definition, read by the tile's headline AND by its change, so the change
- * is always exactly the difference between the two figures it came from. Two
- * precisions is how "+1" ends up beside two numbers that are equal on screen.
- */
-const DECIMALS: Record<TrendMeasure, number> = { attendance: 0, sound: 1 };
-
-/**
  * Decimal places a tile's CHANGE PERCENTAGE prints at.
  *
- * A SEPARATE decision from DECIMALS, even though today's values match it:
+ * A SEPARATE decision from DECIMALS (trends.ts), even though today's values match it:
  * DECIMALS answers "how precisely does this measure's own unit print," and
  * reusing it here would let a third measure inherit a percentage precision
  * nobody actually chose for it. Keyed by TrendMeasure for the same reason
@@ -171,12 +164,6 @@ function fmtDayShort(day: string): string {
  */
 export function basisLabel(priorServices: number): string {
   return plural(priorServices, "prior service");
-}
-
-/** Round to a measure's own precision. */
-function atPrecision(v: number, dp: number): number {
-  const f = 10 ** dp;
-  return Math.round(v * f) / f;
 }
 
 /**

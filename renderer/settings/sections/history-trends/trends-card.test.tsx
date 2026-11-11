@@ -245,6 +245,24 @@ describe("a day with three services", () => {
     view.unmount();
   });
 
+  test("a level prints the tenth it has: 113.91 reads 113.9 dB, not 114.0 dB", async () => {
+    const recs = threeServicesADay().map((r, i, all) => ({
+      ...r,
+      // The last Sunday's loudest service is 113.91; the earlier four peak at 111.73.
+      peakDb: i >= all.length - 3 ? [96, 99, 113.91][i - (all.length - 3)] : [96, 99, 111.73][i % 3],
+    }));
+    const view = await renderCard(recs);
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(
+      view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent,
+      "113.9 dB",
+    );
+    view.unmount();
+  });
+
   test("but its LEVEL is one recording's, on the tile and on the line", async () => {
     // Decibels do not add. Three services at 96, 99 and 104 are a 104 dB day,
     // and summing them would put 299 dB on the card and an axis to match.
@@ -1058,7 +1076,7 @@ describe("while the page's history is still arriving", () => {
 
   test("once it has arrived, an empty history still says so", async () => {
     const view = await renderCard([], { loading: false });
-    assert.equal(view.container.querySelector("[data-trends-loading]"), null);
+    assert.ok(view.container.querySelector("[data-trends-loading]") === null, "still loading");
     assert.match(view.container.textContent ?? "", EMPTY);
   });
 });
@@ -1089,7 +1107,7 @@ describe("when the milestone list will not load", () => {
 
   test("a list that loads fine says nothing", async () => {
     const view = await renderCard(alternating());
-    assert.equal(view.container.querySelector("[data-milestones-failed]"), null);
+    assert.ok(view.container.querySelector("[data-milestones-failed]") === null, "milestones reported failed");
   });
 });
 

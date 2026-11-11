@@ -135,8 +135,16 @@ somebody has edited is left as it is. Placed on a wall or console, it draws the
 same rows with no buttons.
 
 A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
-takes the colour of the worst problem showing. At the medium size the list is
-three rows and **+N more**, which opens the rest inside the tile.
+takes the colour of the worst problem showing. The tile never scrolls and nothing
+in it overlaps: it measures its box and shows as many whole rows as fit, then
+**+N more**; on Home, **+N more** opens every problem in an overlay (the one
+Screens uses), each row with its full-size Snooze and fix, and the snoozed list,
+open if the tile was showing it, and closing it returns focus to the control.
+On a wall or console, and on Home while it is being arranged, it stays a
+count. The healthy line keeps its own line at the foot and drops out when
+there is no room for it beside a row. Buttons shrink as the box narrows, then
+Snooze goes, then the fix, and titles and reasons end in an ellipsis. The same
+holds wherever it is placed, on Home or on a layout.
 
 | Problem | When it appears | Severity | The fix |
 |---|---|---|---|
@@ -155,9 +163,16 @@ until it knows whether a service is live.
 booth and the iPad agree on what is handled. Outside Planning Center it lasts
 12 hours, and with it a snooze still lapses after 7 days if no service starts
 in that time. At most 500 can be held at once. A problem that clears and comes back stays snoozed, but one that gets
-worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
-lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
-configuration backup and restoring one does not bring any back.
+worse (a warn that becomes critical) shows again. **Show N snoozed**, at the
+foot of the tile, replaces the problem list with **Snoozed · N**: what is
+hidden, each with **Unsnooze**, as many as fit and **+N more** for the rest.
+**Hide snoozed**, in that list's header, goes back to the problems, and so does
+a new problem appearing or a snoozed one getting worse; unsnoozing one leaves
+the list open. A tile with no room for a row of that list does not offer it. A
+Snooze or Unsnooze that fails says which problem and why ("Could not snooze
+Screen 2 is offline: ..."), and a fix that fails says why, in place of the
+tile's title for five seconds, so it never takes a row's room. Snoozes are not part of
+a configuration backup and restoring one does not bring any back.
 
 ### Expanding a tile
 
@@ -196,7 +211,7 @@ by accident and too public to get wrong.
 for three seconds; a second press inside that stops, and one after it lapses is
 a first press again. **Start** shows a spinner until the recorder itself reports
 that it is recording, and says so on the tile if it has not within ten seconds.
-A failed action names the problem on the tile for five seconds.
+A failed action says what went wrong on the tile for five seconds.
 
 Start and Stop press the built-in commands **REAPER recording** and **OBS
 recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
@@ -244,6 +259,12 @@ afterwards, which is what lets you leave a deliberate gap between two widgets.
 Dropping onto an occupied cell pushes what was there downward rather than
 covering it, and so does growing a placed card, from its size chips or its
 right-click menu: it keeps its cell and the cards it grows onto move down.
+
+A gap between two rows of cards is for editing. Outside edit mode a row with no
+visible card in it closes up, so a card hidden by its **When** setting, or an
+empty row left in the layout, never leaves a blank band; a gap beside a card in
+the same row stays as placed. Editing shows the whole grid, so a card can still
+be dropped into an empty row.
 
 **Pack tight**, beside the pencil while editing, throws every placement away and
 lets the page flow again. It appears only once something has actually been
