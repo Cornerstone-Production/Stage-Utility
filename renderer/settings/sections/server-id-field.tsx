@@ -86,36 +86,52 @@ export function ServerIdStatus({
       ) : (
         <span className="text-caption1 text-fg-muted">None yet: one is made when discovery first starts.</span>
       )}
-      {duplicates.length > 0 ? (
-        <div role="alert" className="flex items-start gap-2.5 rounded-[10px] border border-danger-9/30 bg-danger-9/12 p-3">
+      {/* One live region for the whole status, there from the start, so a change
+          is announced politely: the alert's text, or the Checking… to result
+          line. The button sits outside it, so it is never read out as news. */}
+      <div
+        className={
+          duplicates.length > 0
+            ? "flex items-start gap-2.5 rounded-[10px] border border-danger-9/30 bg-danger-9/12 p-3"
+            : "flex items-center gap-1.5"
+        }
+      >
+        {duplicates.length > 0 ? (
           <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-danger-11" />
-          <div className="min-w-0 flex-1">
-            <p className="text-footnote font-semibold text-fg">Another server is using this id</p>
-            <p className="mt-0.5 text-caption1 text-fg-muted">
-              The server at{" "}
-              {duplicates.map((d, i) => (
-                <span key={d.address}>
-                  {i === 0 ? "" : i === duplicates.length - 1 ? " and " : ", "}
-                  <span className="font-mono">{d.address}</span>
-                </span>
-              ))}{" "}
-              answers as this one, so screens set up here may switch between the two. Give one of them a new id.
-              Screens both servers have set up stay with the one that keeps it.
-            </p>
-            <div className="mt-2">
-              <NewServerIdButton duplicates={duplicates} />
-            </div>
-          </div>
-        </div>
-      ) : (
-        <p className="flex items-center gap-1.5 text-caption1 text-fg-muted">
+        ) : (
           <span
             aria-hidden="true"
             className={check.state === "ok" ? "size-2 shrink-0 rounded-full bg-live-9" : "size-2 shrink-0 rounded-full border border-fg-subtle"}
           />
-          <span>{checkLine(check, timeZone)}</span>
-        </p>
-      )}
+        )}
+        <div className="min-w-0 flex-1">
+          <div aria-live="polite" aria-atomic="true">
+            {duplicates.length > 0 ? (
+              <>
+                <p className="text-footnote font-semibold text-fg">Another server is using this id</p>
+                <p className="mt-0.5 text-caption1 text-fg-muted">
+                  The server at{" "}
+                  {duplicates.map((d, i) => (
+                    <span key={d.address}>
+                      {i === 0 ? "" : i === duplicates.length - 1 ? " and " : ", "}
+                      <span className="font-mono">{d.address}</span>
+                    </span>
+                  ))}{" "}
+                  answers as this one, so screens set up here may switch between the two. Give one of them a new id.
+                  Screens both servers have set up stay with the one that keeps it.
+                </p>
+              </>
+            ) : (
+              <p className="text-caption1 text-fg-muted">{checkLine(check, timeZone)}</p>
+            )}
+          </div>
+          {duplicates.length > 0 && (
+            <div className="mt-2">
+              <NewServerIdButton duplicates={duplicates} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

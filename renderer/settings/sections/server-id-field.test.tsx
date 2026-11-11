@@ -75,6 +75,19 @@ describe("the Server id row", () => {
     assert.equal(networkMark(), true, "the Network tab carries no mark");
   });
 
+  test("the status is a polite live region, and the New server id button is outside it", async () => {
+    // role="alert" around a button reads the button out as news, assertively,
+    // every time the row changes. The text is announced politely; the control is not.
+    mount({ id: OWN, check: { state: "ok", at: 1 }, duplicates: [{ address: "192.168.1.60", since: 1 }] });
+    await settle();
+    await eventually(() => assert.match(rowText(), /Another server is using this id/));
+    assert.equal(row()?.querySelectorAll('[role="alert"]').length, 0, "the row still uses role=alert");
+    const live = row()?.querySelector('[aria-live="polite"]');
+    assert.ok(live, "no polite live region in the row");
+    assert.match(live.textContent ?? "", /Another server is using this id/);
+    assert.equal(live.querySelectorAll("button").length, 0, "the button is inside the live region");
+  });
+
   test("none heard: when the last check went out, and no mark", async () => {
     mount({ id: OWN, check: { state: "ok", at: Date.UTC(2026, 10, 11, 9, 38) }, duplicates: [] });
     await settle();
