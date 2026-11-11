@@ -24,6 +24,11 @@ layout or plan, and an address copied from the browser's bar carries it along. A
 rundown opened without `?from=` (a typed address, a QR code, a kiosk), or with
 any other page in it, goes to `/servicecue`.
 
+`?transport=poll` and `?text=` stay with a screen: the launcher's link to a rundown
+and the rundown's back arrow both carry them (and nothing else of the query). A panel
+whose browser buffers the live stream, opened as `/servicecue?transport=poll`, therefore
+keeps polling from the launcher to the rundown and back, and keeps its text size.
+
 Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
 preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
