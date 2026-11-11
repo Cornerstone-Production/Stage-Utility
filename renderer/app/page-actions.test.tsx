@@ -104,3 +104,33 @@ describe("a route that does not", () => {
     cleanup();
   });
 });
+
+describe("two pages mounted across one navigation", () => {
+  test("the page being left takes only its OWN actions with it", () => {
+    // The kept Screens page comes back in the commit the address changes, and the
+    // router takes the page being left down a commit later. That later cleanup
+    // used to clear the slot whatever was in it, so Screens lost its Settings
+    // button on every return from Home. The three renders are those commits.
+    const pages = (home: boolean, screens: boolean) => (
+      <PageActionsProvider>
+        <header>
+          <PageActionsSlot />
+        </header>
+        <main>
+          {home && <RouteWithActions key="home" label="Edit widgets" />}
+          {screens && <RouteWithActions key="screens" label="Settings" />}
+        </main>
+      </PageActionsProvider>
+    );
+    const { container, rerender } = render(pages(true, false));
+    rerender(pages(true, true));
+    assert.equal(container.querySelector("header")!.textContent, "Settings");
+    rerender(pages(false, true));
+    assert.equal(
+      container.querySelector("header")!.textContent,
+      "Settings",
+      "the page left behind cleared the actions of the page now showing",
+    );
+    cleanup();
+  });
+});
