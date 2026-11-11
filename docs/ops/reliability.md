@@ -357,6 +357,9 @@ cleared, and nothing that runs in the background is paused.
   inside a config file (a wireless password, an integration's API key) is dropped
   rather than stored, and a screen binding's token is restored empty, so the
   screen pins a new one when it next connects.
+- A config that carries no server id (`serverId` in `settings.json`, absent or
+  `null`) leaves this server's own id in place, so the screens bound to it stay
+  bound.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.

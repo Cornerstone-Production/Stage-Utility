@@ -199,6 +199,22 @@ export function appVersion(): string {
 /** A settings blob, read far enough to reach its id floors and no further. */
 type FloorsOnly = { idFloors?: Record<string, unknown> };
 
+/** What a restore keeps from the settings.json it is about to replace. */
+interface LiveSettings {
+  /** The id floors, or null when there are none that can be read. */
+  idFloors: Record<string, unknown> | null;
+  /** This server's own id, or null when it has none or it cannot be read. */
+  serverId: string | null;
+  /** False when the file exists and does not parse: nothing in it is known. */
+  readable: boolean;
+}
+
+/** A server id read from a settings blob: a non-empty string, or null. */
+function serverIdIn(settings: unknown): string | null {
+  const v = (settings as { serverId?: unknown } | null)?.serverId;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
 /** The `id` of every entry in a restored `View[]` / `Output[]`, ignoring anything
  *  that is not shaped like one. A bundle's contents are whatever the file says. */
 function idsIn(value: unknown): string[] {
@@ -208,20 +224,21 @@ function idsIn(value: unknown): string[] {
     .filter((id): id is string => typeof id === "string");
 }
 
-/** The live floors, or null when there are none that can be read. */
-async function liveIdFloors(dest: string): Promise<Record<string, unknown> | null> {
+/** The live floors and server id, from one read of the settings.json a restore replaces. */
+async function liveSettings(dest: string): Promise<LiveSettings> {
   let raw: string;
   try {
     raw = await fs.readFile(dest, "utf8");
   } catch (err) {
     // No live settings.json at all — a restore onto a fresh install. Not a
-    // failure: there are simply no spent ids to carry forward. Anything else is
-    // rethrown rather than treated as "nothing there".
-    if (isNotFound(err)) return null;
+    // failure: there are simply no spent ids to carry forward, and no id of its
+    // own to keep. Anything else is rethrown rather than treated as "nothing there".
+    if (isNotFound(err)) return { idFloors: null, serverId: null, readable: true };
     throw err;
   }
   try {
-    return (JSON.parse(raw) as FloorsOnly).idFloors ?? {};
+    const parsed = JSON.parse(raw) as FloorsOnly;
+    return { idFloors: parsed.idFloors ?? {}, serverId: serverIdIn(parsed), readable: true };
   } catch {
     // The file exists but does not parse. This restore is about to replace it
     // anyway, and there is no floor to be read out of it — that IS the answer
@@ -230,8 +247,29 @@ async function liveIdFloors(dest: string): Promise<Record<string, unknown> | nul
     console.warn(
       "[config-snapshot] the existing settings.json does not parse, so its id floors could not be carried forward — ids created since this snapshot may be reissued",
     );
-    return null;
+    return { idFloors: null, serverId: null, readable: false };
   }
+}
+
+/**
+ * The server id a restored settings.json carries.
+ *
+ * A config with no id says nothing about this server's identity, so this server
+ * keeps its own. Written verbatim, the missing key used to leave settings.json
+ * with no id at all; the next start minted a new one, and every screen bound to
+ * this server's id was orphaned by a restore that was never about screens.
+ */
+export function serverIdFor(configId: string | null, ownId: string | null): string | null {
+  return configId ?? ownId;
+}
+
+/** settings.json as a restore writes it: id floors merged, server id decided. */
+function restoredSettings(contents: object, live: LiveSettings, files: Record<string, unknown>): unknown {
+  const merged = mergeIdFloors(contents, live.idFloors, files) as Record<string, unknown>;
+  const serverId = serverIdFor(serverIdIn(contents), live.serverId);
+  // Absent stays absent: a fresh box mints its id when discovery first starts.
+  if (serverId === null) return merged;
+  return { ...merged, serverId };
 }
 
 /**
@@ -622,7 +660,7 @@ class ConfigSnapshotService {
       const dest = path.join(getUserDataPath(), name);
       const toWrite =
         name === "settings.json" && typeof contents === "object" && !Array.isArray(contents)
-          ? mergeIdFloors(contents, await liveIdFloors(dest), bundle.files)
+          ? restoredSettings(contents, await liveSettings(dest), bundle.files)
           : contents;
       // Atomic, for the reason data-store.ts spells out: a plain writeFile
       // truncates in place, so a power cut here leaves a short settings.json that
