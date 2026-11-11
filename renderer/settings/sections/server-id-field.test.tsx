@@ -83,6 +83,13 @@ describe("the Server id row", () => {
     assert.equal(networkMark(), false);
   });
 
+  test("a check whose answers are still being counted says so, not all clear", async () => {
+    mount({ id: OWN, check: { state: "checking", at: 1 }, duplicates: [] });
+    await settle();
+    await eventually(() => assert.match(rowText(), /Checking for another server with this id…/));
+    assert.doesNotMatch(rowText(), /No other server answered/);
+  });
+
   test("discovery off: not checked, said so rather than implied fine", async () => {
     mount({ id: null, check: { state: "off" }, duplicates: [] });
     await settle();

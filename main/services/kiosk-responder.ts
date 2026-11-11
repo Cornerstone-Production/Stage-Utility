@@ -172,8 +172,8 @@ function sendCheck(): void {
       return;
     }
     sendFailing = false;
-    // "ok" means the check went out, at this time; who answered is `duplicates`.
-    check = { state: "ok", at: Date.now() };
+    // Out, and its answers still arriving: "nobody answered" is not true yet.
+    check = { state: "checking", at: Date.now() };
     report();
     roundTimer = setTimeout(() => endRound(), opts.replyWindowMs ?? REPLY_WINDOW_MS);
     roundTimer.unref?.();
@@ -191,6 +191,8 @@ function endRound(): void {
       console.log(`[kiosk-responder] ${scrub(address)} no longer answers as this server`);
     }
   }
+  // The answers are counted: "ok", dated when the check went out.
+  check = { state: "ok", at: check.at };
   report();
   scheduleRecheck();
 }

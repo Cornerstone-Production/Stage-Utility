@@ -630,7 +630,8 @@ found by both.
   older Pi or Linux kiosk that sends no binding of its own, set up on both, is
   answered by both until it is released on one. Nothing restarts, and the check
   runs again at once under the new id.
-- The Server id row says what the last check found and when, **Not checked** while
+- The Server id row says what the last check found and when (**Checking…** for
+  the three seconds its answers are counted), **Not checked** while
   discovery is off (nothing answers or checks), and why when the check could not
   be sent.
 - A server older than this check answers it too, and also lists the server that

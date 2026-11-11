@@ -164,9 +164,10 @@ export interface DiscoveryReply {
 export interface ServerIdentity {
   id: string | null;
   /** The last duplicate-id check. `off` while discovery is off (nothing answers,
-   *  nothing checks); `failed` when the check could not be sent; `ok` when it
-   *  went out, `at` being when, which is all "nobody else answered" can claim. */
-  check: { state: "off" | "ok" | "failed"; at?: number; reason?: string };
+   *  nothing checks); `failed` when the check could not be sent; `checking` while
+   *  its answers are still being counted; `ok` once they have been, `at` being
+   *  when it went out, which is all "nobody else answered" can claim. */
+  check: { state: "off" | "checking" | "ok" | "failed"; at?: number; reason?: string };
   /** Other servers answering discovery with this id, by address. Empty is the
    *  healthy case. Any entry means screens bound here can switch between them. */
   duplicates: DuplicateServer[];

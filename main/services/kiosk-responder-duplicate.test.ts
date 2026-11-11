@@ -7,10 +7,12 @@
 // other server.
 //
 // The peer is on loopback with its own port, and the responder's check is
-// pointed at it (`probeTo`). In production the check is a broadcast to the
-// discovery port, and two servers on ONE machine both bound to that port cannot
-// be told apart this way: the unicast answer reaches only one of them. Two real
-// servers were driven by hand for that; see the PR.
+// pointed at it (`probeTo`). In production the check is broadcast on each
+// interface (broadcastAddresses). Two real servers on one Mac, sharing the
+// discovery port, were driven by hand: both found the other (the second to start
+// at once, the first at the other's next check, because a unicast answer to the
+// shared port reaches only one socket), and the one left with the old id cleared
+// about two minutes after the other took a new one.
 
 import assert from "node:assert/strict";
 import * as dgram from "node:dgram";
@@ -26,6 +28,7 @@ process.env.HOME = path.join(TMP, "home");
 const { startKioskResponder, stopKioskResponder, changeServerId } = await import("./kiosk-responder.js");
 const { encodeProbe, encodeReply, decodeProbe, decodeReply } = await import("./kiosk-discovery.js");
 const { seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
+const { updateDevices } = await import("./kiosk-devices-store.js");
 type ServerIdentity = import("../types/kiosk.js").ServerIdentity;
 type DiscoveryProbe = import("../types/kiosk.js").DiscoveryProbe;
 
@@ -119,7 +122,9 @@ describe("the check this server sends", () => {
     assert.equal(dup.address, "127.0.0.1");
     assert.equal(dup.url, "http://192.0.2.60:8788");
     assert.equal(latest().id, OWN);
-    assert.equal(latest().check.state, "ok");
+    // Flagged as the answer arrives, while the round is still being counted.
+    assert.ok(["checking", "ok"].includes(latest().check.state), latest().check.state);
+    await until("the round to be counted", () => latest().check.state === "ok");
     assert.ok(
       logged.some((l) => l.includes("[kiosk-responder] another server at 127.0.0.1") && l.includes("answers as this server")),
       "no [kiosk-responder] line said so",
@@ -213,6 +218,28 @@ describe("a new server id", () => {
     // It also flagged the peer, now as checking for the new id; drop that for what follows.
     answering = false;
     await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
+  });
+
+  test("A SCREEN SET UP ONLY HERE follows the new id, as the confirm promises", async () => {
+    // What New server id tells the operator: screens set up only on this server
+    // follow the new id on their own. The other server (old id) tells such a
+    // screen it is not set up there, so it forgets the old id; its next probe
+    // names no server, and this one answers it as set up here, under the new id.
+    await updateDevices(() => [{ id: "pi-here", token: "", outputId: "1", macs: [] }]);
+    peerReplies.length = 0;
+    const probe = (boundTo?: string) =>
+      peer.send(encodeProbe({ id: "pi-here", macs: [OTHER_MAC], hostname: "pi", ...(boundTo && { boundTo }) }), responderPort, "127.0.0.1");
+
+    probe(OWN);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(peerReplies.length, 0, "answered a screen still naming the old id: the other server has that id now");
+
+    probe();
+    await until("an answer", () => peerReplies.length > 0);
+    const reply = decodeReply(peerReplies[0]);
+    assert.equal(reply?.serverId, NEXT);
+    assert.equal(reply?.claimed, true);
+    await updateDevices(() => []);
   });
 });
 

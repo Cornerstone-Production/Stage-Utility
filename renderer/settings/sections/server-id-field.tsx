@@ -21,6 +21,7 @@ export const SERVER_ID_FLASH = "server-id";
 function checkLine(check: ServerIdentity["check"], timeZone: string | null | undefined): ReactNode {
   if (check.state === "off") return "Not checked: discovery is off, so this server neither answers nor checks.";
   if (check.state === "failed") return `Not checked: the check could not be sent${check.reason ? ` (${check.reason})` : ""}.`;
+  if (check.state === "checking") return "Checking for another server with this id…";
   return (
     <>
       No other server answered the last check
