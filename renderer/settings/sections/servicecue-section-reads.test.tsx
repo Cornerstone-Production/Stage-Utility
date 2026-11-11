@@ -124,23 +124,28 @@ async function mount(): Promise<void> {
   await settle();
 }
 
-/** Open the Audio layout's card, which is where its preview draws. */
+/** Open the Audio layout's card, which is where its preview, and Preview with, draw. */
 async function openLayout(): Promise<void> {
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  fireEvent.click(await eventually(() => screen.getByRole("button", { name: /^Audio,/ })));
   await settle();
 }
+
+/** The Audio layout is on the page: a shut card's title, or the open card's name field. */
+const audioListed = () =>
+  [...document.querySelectorAll("[data-layout-name]")].some((n) => n.textContent === "Audio") ||
+  !!screen.queryByDisplayValue("Audio");
 
 const logged = (logs: { tag: string; message: string }[], re: RegExp) =>
   logs.some((l) => l.tag === "servicecue" && re.test(l.message));
 
-test("a failed settings read says so, and offers no empty list to Add a layout to", async () => {
+test("a failed settings read says so, and offers no empty list to add a layout to", async () => {
   const f = stubFetch({ failing: "layouts" });
   try {
     await mount();
     await eventually(() => assert.match(alerts(), /Couldn't load the ServiceCue layouts/i));
     assert.equal(!!screen.queryByText(/No layouts yet/i), false, "a failed read is not an empty layout list");
     assert.equal(
-      !!screen.queryByRole("button", { name: /Add layout/i }),
+      !!screen.queryByRole("button", { name: /New layout/i }),
       false,
       "adding to a list that never loaded would save over every real layout",
     );
@@ -150,20 +155,20 @@ test("a failed settings read says so, and offers no empty list to Add a layout t
   }
 });
 
-test("while the settings read is still in flight, no Add layout button can post over the saved layouts", async () => {
+test("while the settings read is still in flight, no New layout button can post over the saved layouts", async () => {
   let answerLayouts: () => void = () => {};
   const f = stubFetch({ layouts: () => new Promise((resolve) => { answerLayouts = () => resolve(ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: [] }])); }) });
   try {
     await mount();
     assert.equal(!!screen.queryByText(/No layouts yet/i), false, "no empty state while the read has not answered");
     assert.equal(
-      !!screen.queryByRole("button", { name: /Add layout/i }),
+      !!screen.queryByRole("button", { name: /New layout/i }),
       false,
-      "no Add layout button before the layouts have been read — clicking it would post an empty list",
+      "no New layout button before the layouts have been read — clicking it would post an empty list",
     );
     await act(async () => answerLayouts());
     await settle();
-    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the real layout is there once the read lands"));
+    await eventually(() => assert.equal(audioListed(), true, "the real layout is there once the read lands"));
     assert.equal(f.posts.length, 0, "the pending window issued no save");
   } finally {
     f.restore();
@@ -176,7 +181,7 @@ test("a failed service-type read costs the previews, never the layouts editor", 
     await mount();
     await eventually(() => assert.match(alerts(), /Couldn't load the service types/i));
     assert.equal(/ServiceCue layouts/i.test(alerts()), false, "the layouts themselves loaded");
-    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layout is there to edit"));
+    await eventually(() => assert.equal(audioListed(), true, "the layout is there to edit"));
     await eventually(() => assert.ok(logged(f.logs, /the service types/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
@@ -188,7 +193,7 @@ test("Planning Center not connected: the editor works, nothing alerts or logs, n
   try {
     await mount();
     await openLayout();
-    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layouts editor works without Planning Center"));
+    await eventually(() => assert.equal(audioListed(), true, "the layouts editor works without Planning Center"));
     await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to preview a plan/i), true));
     assert.equal(alerts(), "", "not connected is a state, not a failure");
     assert.deepEqual(f.logs, []);
@@ -225,6 +230,7 @@ test("a slow failure for the type the operator left does not land on the type th
   });
   try {
     await mount();
+    await openLayout();
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "st2" } });
     await settle();
     await settle();
@@ -243,6 +249,7 @@ test("a note-category failure for the type the operator left goes with it", asyn
   try {
     await mount();
     await eventually(() => assert.match(alerts(), /note categories/i));
+    await openLayout();
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "st2" } });
     await settle();
     await settle();
@@ -291,6 +298,7 @@ test("the landing page's first enabled type is the preview default, whichever re
     await settle();
     await settle();
     await settle();
+    await openLayout();
     assert.equal(previewWith(), "st2", "the landing page's own first type, not Planning Center's first");
   } finally {
     f.restore();
@@ -304,6 +312,7 @@ test("while the service types are on their way, the preview picker waits rather 
   const f = stubFetch({ types: () => new Promise((resolve) => { answerTypes = () => resolve(ok(TYPES)); }) });
   try {
     await mount();
+    await openLayout();
     assert.equal(/not found/i.test(previewShows()), false, `the picker reads "${previewShows()}"`);
     assert.match(previewShows(), /Loading service types/i);
     await act(async () => answerTypes());
@@ -319,6 +328,7 @@ test("Planning Center not connected: the preview picker says to connect it, neve
   const f = stubFetch({ pcoConfigured: false });
   try {
     await mount();
+    await openLayout();
     assert.equal(/not found/i.test(previewShows()), false, `the picker reads "${previewShows()}"`);
     assert.match(previewShows(), /Connect Planning Center/i);
   } finally {
@@ -339,6 +349,7 @@ test("a failure from before the state said not connected gives way to the connec
     await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: false }));
     await settle();
     await eventually(() => assert.equal(alerts(), "", "not connected is a state, not a failure"));
+    await openLayout();
     await eventually(() => assert.match(previewShows(), /Connect Planning Center/i));
   } finally {
     f.restore();
@@ -350,6 +361,7 @@ test("a stage state that cannot be read does not leave the page waiting for ever
   try {
     await mount();
     await eventually(() => assert.equal(f.asked.some((u) => u.includes("/api/service-types")), true, "the service types are still tried"));
+    await openLayout();
     await eventually(() => assert.equal(!!screen.queryByRole("option", { name: "Weekend" }), true, "and the picker fills"));
   } finally {
     f.restore();

@@ -91,9 +91,17 @@ async function mount(): Promise<void> {
   for (let i = 0; i < 4; i++) await settle();
 }
 
-/** The layout names in the order the page draws them. */
+/** The layout names in the order the page draws them: a shut card's title, the open one's field. */
 const pageNames = () =>
-  [...document.querySelectorAll('input[aria-label="Layout name"]')].map((n) => (n as HTMLInputElement).value);
+  [...document.querySelectorAll("[data-layout-card]")].map((card) => {
+    const field = card.querySelector('input[aria-label="Layout name"]') as HTMLInputElement | null;
+    return field ? field.value : (card.querySelector("[data-layout-name]")?.textContent ?? "");
+  });
+/** Open a layout's card; its name field is in the open card only. */
+async function openCard(name: string): Promise<void> {
+  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await settle();
+}
 const serverNames = (s: ServiceCueLayout[]) => [...s].sort((a, b) => a.order - b.order).map((l) => l.name);
 const nameBox = (name: string) => screen.getByDisplayValue(name) as HTMLInputElement;
 
@@ -106,6 +114,7 @@ test("a refused rename, then a reorder clicked before the refusal arrives: the r
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 60 });
   try {
     await mount();
+    await openCard("Audio");
     const box = nameBox("Audio");
     fireEvent.change(box, { target: { value: "video" } });
     fireEvent.blur(box);
@@ -131,8 +140,7 @@ test("two quick clicks: the first answer does not undo the second on screen, or 
   const server = fakeServer(AUDIO_VIDEO);
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Expand" })[0]);
-    await settle();
+    await openCard("Audio");
     const rowColor = screen.getByDisplayValue("From PCO") as HTMLSelectElement;
     fireEvent.change(rowColor, { target: { value: "none" } }); // click 1
     await settle();
@@ -154,7 +162,7 @@ test("two quick clicks: the first answer does not undo the second on screen, or 
   }
 });
 
-test("Add layout after a delete picks a name no layout has", async () => {
+test("New layout after a delete picks a name no layout has", async () => {
   const server = fakeServer([
     { id: "a", name: "Layout 1", order: 0, columnRoles: [] },
     { id: "b", name: "Layout 2", order: 1, columnRoles: [] },
@@ -162,11 +170,12 @@ test("Add layout after a delete picks a name no layout has", async () => {
   ], { delayMs: 0 });
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    await openCard("Layout 2");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Layout 2" }));
     const dialog = await eventually(() => screen.getByRole("alertdialog"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete layout" }));
     await eventually(() => assert.deepEqual(serverNames(server.stored()), ["Layout 1", "Layout 3"]));
-    fireEvent.click(screen.getByRole("button", { name: /Add layout/ }));
+    fireEvent.click(screen.getByRole("button", { name: /New layout/ }));
     await eventually(() => assert.equal(server.stored().length, 3, "the new layout was refused"));
     assert.deepEqual(serverNames(server.stored()), ["Layout 1", "Layout 3", "Layout 4"]);
     assert.deepEqual(pageNames(), ["Layout 1", "Layout 3", "Layout 4"]);
@@ -175,11 +184,11 @@ test("Add layout after a delete picks a name no layout has", async () => {
   }
 });
 
-test("Add layout, then rename it: the address moves to the new name once, and then stays", async () => {
+test("New layout, then rename it: the address moves to the new name once, and then stays", async () => {
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 0 });
   try {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: /Add layout/ }));
+    fireEvent.click(screen.getByRole("button", { name: /New layout/ }));
     await eventually(() => assert.equal(server.stored().length, 3));
     const slugOf = (name: string) => server.stored().find((l) => l.name === name)?.slug;
     assert.equal(slugOf("Layout 3"), "layout-3");

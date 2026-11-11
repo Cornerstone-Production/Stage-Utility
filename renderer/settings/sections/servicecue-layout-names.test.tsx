@@ -20,7 +20,8 @@ const { render, screen, cleanup, fireEvent } = await import("@testing-library/re
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
-const { freeLayoutName, usersMessage } = await import("./servicecue-layout-names.js");
+const { freeLayoutName } = await import("./servicecue-layout-names.js");
+const { deleteLayoutBody, plainText } = await import("./servicecue-layouts-model.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
@@ -37,9 +38,11 @@ const LAYOUTS = [
   { id: "svl2", name: "Video", slug: "video", order: 1, columnRoles: [] },
 ];
 const VIEWS = [
-  { id: "v1", name: "Booth tablet", serviceCueLayoutId: "svl1" },
-  { id: "v2", name: "Green room", serviceCueLayoutId: "svl1" },
-  { id: "v3", name: "Lobby", serviceCueLayoutId: null },
+  { id: "v1", name: "Booth tablet", kind: "script", serviceCueLayoutId: "svl1" },
+  { id: "v2", name: "Green room", kind: "script", serviceCueLayoutId: "svl1" },
+  { id: "v3", name: "Lobby", kind: "script", serviceCueLayoutId: null },
+  // Changed to a slots view since: it keeps the id, and draws no layout.
+  { id: "v4", name: "Stage left", kind: "slots", serviceCueLayoutId: "svl1" },
 ];
 
 /** `refuse` answers a save with 400 and that reason. */
@@ -71,12 +74,19 @@ async function mount(): Promise<void> {
   for (let i = 0; i < 4; i++) await settle();
 }
 
+/** Open a layout's card; its name field and its Delete are in the open card only. */
+async function openCard(name: string): Promise<void> {
+  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await settle();
+}
+
 const nameBox = (name: string) => screen.getByDisplayValue(name) as HTMLInputElement;
 
 test("typing a name saves nothing until the field is left", async () => {
   const f = stubFetch();
   try {
     await mount();
+    await openCard("Audio");
     const box = nameBox("Audio");
     for (const v of ["A", "Au", "Audio Cr", "Audio Crew"]) fireEvent.change(box, { target: { value: v } });
     await settle();
@@ -93,6 +103,7 @@ test("Enter saves it, and Escape puts the old name back without saving", async (
   const f = stubFetch();
   try {
     await mount();
+    await openCard("Audio");
     const box = nameBox("Audio");
     fireEvent.change(box, { target: { value: "Sound" } });
     fireEvent.keyDown(box, { key: "Escape" });
@@ -113,6 +124,7 @@ test("a name the server refuses is shown, and the old name stays", async () => {
   const f = stubFetch({ refuse: 'There is already a layout called "Video".' });
   try {
     await mount();
+    await openCard("Audio");
     const box = nameBox("Audio");
     fireEvent.change(box, { target: { value: "video" } });
     fireEvent.blur(box);
@@ -131,8 +143,10 @@ test("the delete confirm names the screens that use the layout", async () => {
   const f = stubFetch();
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
-    await eventually(() => assert.match(document.body.textContent ?? "", /Used by Booth tablet, Green room\. They will show all columns instead\./));
+    await openCard("Audio");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Audio" }));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Delete Audio\?/));
+    assert.match(document.body.textContent ?? "", /Booth tablet and Green room use this layout\. They will show All columns\. A tablet opened at its address will show All columns too\./);
   } finally {
     f.restore();
   }
@@ -142,15 +156,18 @@ test("the delete confirm says so when no display is set to the layout", async ()
   const f = stubFetch();
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
-    await eventually(() => assert.match(document.body.textContent ?? "", /No display is set to it\./));
+    await openCard("Video");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Video" }));
+    await eventually(() => assert.match(document.body.textContent ?? "", /No screens use this layout\./));
   } finally {
     f.restore();
   }
 });
 
-test("usersMessage claims nothing before the screens are known", () => {
-  assert.doesNotMatch(usersMessage({ id: "svl1" }, null), /No display is set to it/);
+test("the delete confirm claims nothing about screens before they are known", () => {
+  assert.doesNotMatch(plainText(deleteLayoutBody({ id: "svl1" }, null)), /No screens use/);
+  assert.equal(plainText(deleteLayoutBody({ id: "svl1" }, [{ name: "Lobby", kind: "script", serviceCueLayoutId: "svl1" }])),
+    "Lobby uses this layout. It will show All columns. A tablet opened at its address will show All columns too.");
 });
 
 test("a new layout's name is free even after one in the middle was deleted", () => {

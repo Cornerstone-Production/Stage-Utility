@@ -143,3 +143,124 @@ test("Landing page opens to the service types, and a tick saves them in Planning
     s.restore();
   }
 });
+
+// ── Layout cards ────────────────────────────────────────────────────────────
+
+/** Open a layout's card by its shut header, which is named for the layout and its columns. */
+async function openCard(name: string): Promise<void> {
+  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await settle();
+}
+const openCards = () => [...document.querySelectorAll('input[aria-label="Layout name"]')].map((n) => (n as HTMLInputElement).value);
+
+test("a shut card lists every column it draws, in the rundown's order", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await eventually(() => screen.getByRole("button", { name: "Audio, Clock · Time · Item · Audio · Band · Max SPL" }));
+    screen.getByRole("button", { name: "Lighting, Clock · Time · Item · Lighting" });
+  } finally {
+    s.restore();
+  }
+});
+
+test("one card is open at a time", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    assert.deepEqual(openCards(), ["Audio"]);
+    await openCard("Lighting");
+    assert.deepEqual(openCards(), ["Lighting"]);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Lighting" }));
+    await settle();
+    assert.deepEqual(openCards(), []);
+  } finally {
+    s.restore();
+  }
+});
+
+test("New layout starts with no roles, Clock and Time on and Max SPL off, open and ready to name", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /New layout/ })));
+    await eventually(() => assert.equal(s.layouts().length, 3));
+    const made = s.layouts()[2];
+    assert.deepEqual(
+      { name: made.name, columnRoles: made.columnRoles, showClock: made.showClock, showLength: made.showLength, showMaxSpl: made.showMaxSpl },
+      { name: "Layout 3", columnRoles: [], showClock: undefined, showLength: undefined, showMaxSpl: false },
+    );
+    await eventually(() => assert.deepEqual(openCards(), ["Layout 3"]));
+    const field = screen.getByDisplayValue("Layout 3") as HTMLInputElement;
+    assert.equal(document.activeElement === field, true, "the new layout's name is not focused");
+    assert.equal(field.selectionStart === 0 && field.selectionEnd === "Layout 3".length, true, "its name is not selected to type over");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Duplicate puts '<name> copy' right after it, under its own address, open to rename", async () => {
+  const s = serviceCueServer({
+    layouts: [...LAYOUTS, { id: "l-copy", name: "Audio copy", order: 2, columnRoles: [] }],
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+  });
+  try {
+    await mount();
+    await openCard("Audio");
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Audio" }));
+    await eventually(() => assert.equal(s.layouts().length, 4));
+    const stored = s.layouts();
+    assert.deepEqual(stored.map((l) => l.name), ["Audio", "Audio copy 2", "Lighting", "Audio copy"]);
+    const copy = stored[1];
+    assert.deepEqual(copy.columnRoles, ["r-audio", "r-band"]);
+    assert.equal(copy.showMaxSpl, true);
+    assert.notEqual(copy.id, "l-audio");
+    assert.equal(copy.slug, "audio-copy-2", "the copy took the original's address");
+    await eventually(() => assert.deepEqual(openCards(), ["Audio copy 2"]));
+    // Named by the page, not the operator: its first rename moves its address, as a new layout's does.
+    const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "Monitors" } });
+    fireEvent.blur(box);
+    await eventually(() => assert.equal(s.layouts()[1].slug, "monitors", "renaming the copy kept its Audio copy 2 address"));
+  } finally {
+    s.restore();
+  }
+});
+
+test("Escape puts the name back and leaves the field, saving nothing", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: "Monitors" } });
+    fireEvent.keyDown(box, { key: "Escape" });
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(box.value, "Audio");
+    assert.equal(document.activeElement === box, false, "Escape did not leave the field");
+    assert.equal(s.requests.filter((r) => r.method === "POST").length, 0, "the name thrown away was saved as Escape left the field");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a name typed, then Duplicate clicked: the rename saves and the copy carries the new name", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: "Front desk" } });
+    // A click on Duplicate blurs the field first.
+    fireEvent.blur(box);
+    fireEvent.click(screen.getByRole("button", { name: /^Duplicate/ }));
+    await eventually(() => assert.deepEqual(s.layouts().map((l) => l.name), ["Front desk", "Front desk copy", "Lighting"]));
+  } finally {
+    s.restore();
+  }
+});

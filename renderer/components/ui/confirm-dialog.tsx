@@ -18,6 +18,9 @@ import { Checkbox } from "./checkbox";
 export interface ConfirmOptions {
   title: string;
   message?: string;
+  /** In place of `message`: text with a few words set in bold, such as the names an
+   *  action touches. */
+  richMessage?: React.ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   /** Style the confirm button red and treat it as a dangerous action. */
@@ -106,9 +109,9 @@ export function ConfirmHost() {
           <AlertDialogPrimitive.Title className="text-subheadline font-semibold text-fg mb-1">
             {state?.title}
           </AlertDialogPrimitive.Title>
-          {state?.message && (
+          {(state?.richMessage || state?.message) && (
             <AlertDialogPrimitive.Description className="text-caption1 text-fg-subtle mb-4 whitespace-pre-line">
-              {state.message}
+              {state.richMessage ?? state.message}
             </AlertDialogPrimitive.Description>
           )}
           {state?.note && (

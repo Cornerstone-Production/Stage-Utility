@@ -56,7 +56,7 @@ const RUNDOWN: ServiceCueRundownDTO = {
   isDefaultPlan: true,
 };
 
-function stubFetch() {
+function stubFetch(rundown: ServiceCueRundownDTO = RUNDOWN) {
   return stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok({ pcoConfigured: true });
     if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
@@ -64,7 +64,7 @@ function stubFetch() {
     if (url.includes("/api/servicecue/config")) return ok({ serviceTypeIds: ["st1"] });
     if (url.includes("/api/servicecue/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
     if (url.includes("/api/servicecue/note-categories")) return ok(["Audio"]);
-    if (url.includes("/api/servicecue/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/servicecue/rundown")) return ok(rundown);
     return ok({});
   });
 }
@@ -72,7 +72,7 @@ function stubFetch() {
 async function mountOpen(): Promise<void> {
   render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection))));
   for (let i = 0; i < 4; i++) await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Audio,/ }));
   await settle();
   await settle();
 }
@@ -107,5 +107,29 @@ test("the layout preview draws the rundown on a kiosk ground", async () => {
     assert.equal(!!table?.closest(".kiosk-surface"), true, "the preview is off the kiosk ground: department notes draw #000 in the light app");
   } finally {
     f.restore();
+  }
+});
+
+test("the preview draws Clock at a card's width, as the Columns row says, where a narrow rundown would drop it", async () => {
+  // A rundown under 1024px wide drops the Clock column first. The editor's preview is
+  // that narrow inside its card, so a layout with Clock on previewed without one.
+  // jsdom measures nothing: the observer reports the card's width.
+  const g = globalThis as unknown as { ResizeObserver?: unknown };
+  const real = g.ResizeObserver;
+  g.ResizeObserver = class {
+    constructor(private cb: (e: { contentRect: { width: number } }[]) => void) {}
+    observe() { this.cb([{ contentRect: { width: 880 } }]); }
+    unobserve() {}
+    disconnect() {}
+  };
+  // A plan with a service time, which is what gives the Clock column times to show.
+  const f = stubFetch({ ...RUNDOWN, serviceTimes: ["2026-11-15T15:00:00Z"] });
+  try {
+    await mountOpen();
+    const heads = [...document.querySelectorAll("[data-preview] th")].map((th) => th.textContent ?? "");
+    assert.equal(heads.includes("Clock"), true, `the preview left out the Clock its layout shows: ${JSON.stringify(heads)}`);
+  } finally {
+    f.restore();
+    g.ResizeObserver = real;
   }
 });
