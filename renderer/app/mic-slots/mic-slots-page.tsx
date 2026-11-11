@@ -283,7 +283,12 @@ export function MicSlotsPage() {
             inspectorOpen ? "mt-4 lg:mt-0 lg:ml-4 lg:w-[340px]" : "max-lg:hidden lg:ml-0 lg:w-0",
           )}
         >
-          <div className="flex w-full flex-col gap-3.5 lg:w-[340px]">
+          {/* Pinned, the inspector must fit the window and scroll itself: the outer
+              box hides overflow for the slide, so without a cap a tall slot's
+              settings are cut off and the wheel scrolls the page instead.
+              9.25rem = the shell chrome above the scroller (~60px) + top-14 + a
+              32px bottom margin. x stays hidden, as the outer box already had it. */}
+          <div className="flex w-full flex-col gap-3.5 lg:max-h-[calc(100dvh-9.25rem)] lg:w-[340px] lg:overflow-x-hidden lg:overflow-y-auto lg:overscroll-contain">
             {sel && mic.selectedSlot && selBoard ? (
               isSpacer(mic.selectedSlot) ? (
                 <SpacerInspector
