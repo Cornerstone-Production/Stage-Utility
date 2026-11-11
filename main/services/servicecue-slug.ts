@@ -1,4 +1,5 @@
-// servicecue-slug.ts — the URL names ServiceCue pages are addressed by.
+// servicecue-slug.ts — the URL names ServiceCue pages are addressed by, and the rules
+// for a layout's name.
 //
 // A rundown lives at /servicecue/<service type>/<layout>. The layout part is a slug
 // stored ON the layout when it is created, so renaming a layout does not move every
@@ -83,4 +84,90 @@ export function assignSlugs(layouts: ServiceCueLayout[]): ServiceCueLayout[] {
     claim(i, `${base}-${n}`);
   }
   return layouts.map((l, i) => (l.slug === slugs.get(i) ? l : { ...l, slug: slugs.get(i) }));
+}
+
+/**
+ * What two layout names are compared by: NFKC, lower case, and only the runs of letters,
+ * marks and digits in any script. "Audio", "audio!" and "AUDIO" are one name; "Звук" and
+ * "Свет" are two, though both slugify to "x". A name with no letter or digit at all
+ * ("!!!") is compared as written, trimmed.
+ */
+export function layoutNameKey(name: string): string {
+  const n = name.normalize("NFKC").toLowerCase();
+  return n.match(/[\p{L}\p{M}\p{N}]+/gu)?.join(" ") ?? n.trim();
+}
+
+const ALL_COLUMNS_KEY = layoutNameKey("All columns");
+
+/** Why a save may not give a layout this name, or null. Checked only for a name the
+ *  save adds or changes, so a store that already holds two same-named layouts can
+ *  still be reordered or edited until one is renamed. The list's shape is the
+ *  route's to check: every entry here has a string id and name. */
+export function layoutNameRefusal(incoming: ServiceCueLayout[], stored: ServiceCueLayout[]): string | null {
+  const before = new Map(stored.map((l) => [l.id, l.name]));
+  for (const l of incoming) {
+    if (before.get(l.id) === l.name) continue;
+    if (!l.name.trim()) return "A layout needs a name.";
+    const key = layoutNameKey(l.name);
+    if (key === ALL_COLUMNS_KEY) return `"${l.name.trim()}" is the built-in All columns layout. Pick another name.`;
+    const clash = incoming.find((o) => o.id !== l.id && layoutNameKey(o.name) === key);
+    if (clash) return `There is already a layout called "${clash.name.trim()}". Layout names must differ, ignoring case and punctuation.`;
+  }
+  return null;
+}
+
+/** A save refused over a layout's name; the route answers it with a 400. */
+export class LayoutNameRefused extends Error {}
+
+/**
+ * The list a save stores: `incoming` checked against the naming rules, and each layout's
+ * slug decided by the server. The slug already stored for an id is kept through a
+ * rename, and a slug the caller sent is ignored, so no save can move the address a screen
+ * is pinned to. The one exception is a layout still carrying the name Add layout gave it
+ * (`autoNamed`): its first rename moves the slug to the new name, and from then on it is
+ * fixed. The flag is taken from the caller only for a layout that is not stored yet.
+ * Throws LayoutNameRefused.
+ */
+export function prepareLayoutsSave(incoming: ServiceCueLayout[], stored: ServiceCueLayout[]): ServiceCueLayout[] {
+  const refusal = layoutNameRefusal(incoming, stored);
+  if (refusal) throw new LayoutNameRefused(refusal);
+  const byId = new Map(stored.map((l) => [l.id, l]));
+  return assignSlugs(
+    incoming.map((l) => {
+      const { slug: _slug, autoNamed: _flag, ...rest } = l;
+      const prev = byId.get(l.id);
+      if (!prev) return l.autoNamed === true ? { ...rest, autoNamed: true } : rest;
+      if (prev.autoNamed && l.name !== prev.name) return rest;
+      return { ...rest, ...(prev.slug ? { slug: prev.slug } : {}), ...(prev.autoNamed ? { autoNamed: true } : {}) };
+    }),
+  );
+}
+
+/**
+ * The list an import stores: `stored` with `incoming` appended (ids already checked
+ * new by the caller). A file is not trusted the way the editor is: its `autoNamed` is
+ * dropped (an imported layout counts as named), its slug is kept only when well formed
+ * and free, and a name another layout already has, or a blank or All columns one, is
+ * replaced by the first free "<name> 2", "<name> 3" … rather than refusing the whole
+ * import. `renamed` says which, for the import's report.
+ */
+export function prepareLayoutsImport(
+  incoming: ServiceCueLayout[],
+  stored: ServiceCueLayout[],
+): { layouts: ServiceCueLayout[]; renamed: { from: string; to: string }[] } {
+  const keys = new Set([ALL_COLUMNS_KEY, ...stored.map((l) => layoutNameKey(l.name))]);
+  // assignSlugs settles a clash by `order`, and an imported layout may sort first: a slug
+  // a layout here already has is dropped up front, so an import never moves one.
+  const slugsHere = new Set(stored.map(layoutSlug));
+  const renamed: { from: string; to: string }[] = [];
+  const added = incoming.map((l) => {
+    const { autoNamed: _flag, slug, ...rest } = l;
+    const base = l.name.trim() || "Layout";
+    let name = base;
+    for (let n = 2; keys.has(layoutNameKey(name)); n++) name = `${base} ${n}`;
+    keys.add(layoutNameKey(name));
+    if (name !== l.name.trim()) renamed.push({ from: l.name, to: name });
+    return { ...rest, name, ...(isSlug(slug) && !slugsHere.has(slug) ? { slug } : {}) };
+  });
+  return { layouts: assignSlugs([...stored, ...added]), renamed };
 }

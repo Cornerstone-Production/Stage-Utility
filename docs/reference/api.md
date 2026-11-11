@@ -444,7 +444,7 @@ Two things to know:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/servicecue/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
-| GET / POST | `/api/servicecue/layouts` | List / save global layouts |
+| GET / POST | `/api/servicecue/layouts` | List / save global layouts. `POST` takes `{layouts: [...]}`, every entry with a text `id` and `name`, and answers the list as stored, with the `slug` the server gave each layout (a `slug` in the request is ignored; see [layouts](../features/servicecue-and-baptisms.md#layouts)). `400` `{error}` with the reason for a malformed list, or a name that is blank, "All columns", or another layout's ignoring case and punctuation; nothing is saved |
 | GET / POST | `/api/servicecue/config` | Get / set which service types show on the landing |
 | GET | `/api/servicecue/note-categories?serviceTypeId=…` | Note categories for the column picker |
 | GET / POST | `/api/servicecue/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |

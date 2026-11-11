@@ -25,6 +25,7 @@ import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
+import { isRecord } from "./is-record.js";
 import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { isLayoutShape } from "../types/views.js";
@@ -432,12 +433,23 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     // explains, re-implemented here without the guard.
     const add: typeof svIncoming = [];
     for (const l of svIncoming) {
+      if (!isRecord(l) || typeof l.id !== "string" || typeof l.name !== "string") {
+        skipped.push("a ServiceCue preset with no id or name");
+        continue;
+      }
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
-      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name ?? l.id}" — kept the one already here`);
+      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
-    if (add.length) await serviceCueLayoutsStore.save([...svAfter, ...add]);
+    // Through the store's own rules for a name and an address, which rename rather than
+    // refuse: a throw here would come after the views were written.
+    const renamed = add.length ? await serviceCueLayoutsStore.importLayouts(add) : [];
+    for (const r of renamed) {
+      const why = r.from.trim() ? "that name was taken here" : "it had no name";
+      skipped.push(`ServiceCue preset "${r.from}" — imported as "${r.to}", ${why}`);
+      console.log(`[view-import] ServiceCue preset "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
+    }
   }
 
   // A view can point at a preset that was already missing at the source: export

@@ -11,7 +11,7 @@ import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
-import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -20,7 +20,7 @@ const { render, screen, cleanup, fireEvent } = await import("@testing-library/re
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
-const { usersMessage } = await import("./servicecue-layout-names.js");
+const { freeLayoutName, usersMessage } = await import("./servicecue-layout-names.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
@@ -42,13 +42,14 @@ const VIEWS = [
   { id: "v3", name: "Lobby", serviceCueLayoutId: null },
 ];
 
-function stubFetch(opts: { views?: unknown[] } = {}) {
+/** `refuse` answers a save with 400 and that reason. */
+function stubFetch(opts: { refuse?: string; views?: unknown[] } = {}) {
   const posts: { layouts: { id: string; name: string }[] }[] = [];
   const f = stubFetchWithLog((url, init) => {
     if (init?.method === "POST" && url.includes("/api/servicecue/layouts")) {
       const body = JSON.parse(String(init.body));
       posts.push(body);
-      return ok(body.layouts);
+      return opts.refuse ? reply(400, { error: opts.refuse }) : ok(body.layouts);
     }
     if (url.includes("/api/state")) return ok({ pcoConfigured: false, views: opts.views ?? VIEWS });
     if (url.includes("/api/servicecue/layouts")) return ok(LAYOUTS);
@@ -108,6 +109,24 @@ test("Enter saves it, and Escape puts the old name back without saving", async (
   }
 });
 
+test("a name the server refuses is shown, and the old name stays", async () => {
+  const f = stubFetch({ refuse: 'There is already a layout called "Video".' });
+  try {
+    await mount();
+    const box = nameBox("Audio");
+    fireEvent.change(box, { target: { value: "video" } });
+    fireEvent.blur(box);
+    await eventually(() => assert.match(document.body.textContent ?? "", /already a layout called "Video"/));
+    assert.equal(box.value, "Audio");
+    // The page did not keep it either: the next save carries the old name.
+    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]);
+    await eventually(() => assert.equal(f.posts.length, 2));
+    assert.deepEqual(f.posts[1].layouts.map((l) => l.name), ["Video", "Audio"], "the page kept a name the server refused");
+  } finally {
+    f.restore();
+  }
+});
+
 test("the delete confirm names the screens that use the layout", async () => {
   const f = stubFetch();
   try {
@@ -132,4 +151,11 @@ test("the delete confirm says so when no display is set to the layout", async ()
 
 test("usersMessage claims nothing before the screens are known", () => {
   assert.doesNotMatch(usersMessage({ id: "svl1" }, null), /No display is set to it/);
+});
+
+test("a new layout's name is free even after one in the middle was deleted", () => {
+  const l = (name: string, i: number) => ({ id: String(i), name, order: i });
+  assert.equal(freeLayoutName([l("Layout 1", 1), l("Layout 3", 3)]), "Layout 4");
+  assert.equal(freeLayoutName([l("layout 3", 1), l("Layout 2", 2)]), "Layout 4");
+  assert.equal(freeLayoutName([]), "Layout 1");
 });

@@ -95,6 +95,7 @@ import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsOverride, type SlotsTarget, type SlotsWrite } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
+import { LayoutNameRefused } from "./servicecue-slug.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { autoApplyDecision, migrateAutoUpdate, type AutoApplyDecision } from "./auto-apply-gate.js";
@@ -1859,7 +1860,12 @@ export class StageController {
    * no option, so there is nothing on screen to explain it.
    */
   async saveServiceCueLayouts(layouts: ServiceCueLayout[]): Promise<ServiceCueLayout[]> {
-    layouts = await serviceCueLayoutsStore.save(layouts);
+    try {
+      layouts = await serviceCueLayoutsStore.save(layouts);
+    } catch (err) {
+      if (err instanceof LayoutNameRefused) console.log(`[servicecue] refused a layout save: ${scrub(err.message)}`);
+      throw err;
+    }
     const live = new Set(layouts.map((l) => l.id));
     const orphaned = this.state.views.filter(
       (v) => v.serviceCueLayoutId && !live.has(v.serviceCueLayoutId),

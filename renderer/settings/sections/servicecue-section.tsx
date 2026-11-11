@@ -11,7 +11,9 @@ import { resolveServiceCueSpec, computeClocks, buildServiceCueColumns, totalLeng
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { plural } from "@main/services/plural";
-import { usersMessage } from "./servicecue-layout-names";
+import { freeLayoutName, usersMessage } from "./servicecue-layout-names";
+import { useLayoutSaves, type LayoutEdit } from "./use-layout-saves";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { PublicLinkCard } from "./servicecue-public-link";
 import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
@@ -43,7 +45,7 @@ const elementOn = (e: (typeof ELEMENTS)[number], l: ServiceCueLayout): boolean =
 
 export function ServiceCueSection() {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
-  const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
+  const { layouts, adopt: adoptLayouts, edit: editLayouts } = useLayoutSaves();
   const [typeId, setTypeId] = useState<string | null>(null);
   const [noteCats, setNoteCats] = useState<string[]>([]);
   const [roles, setRoles] = useState<CategoryRole[]>([]);
@@ -51,6 +53,8 @@ export function ServiceCueSection() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // A rename the server refused, said under the name field it was typed into.
+  const [nameError, setNameError] = useState<{ id: string; message: string } | null>(null);
   // Which reads FAILED, as opposed to came back empty. The settings' failure is
   // the dangerous one: drawn as "No layouts yet", its Add layout saved a
   // one-layout list over every real one.
@@ -78,7 +82,7 @@ export function ServiceCueSection() {
       invoke<CategoryRole[]>("servicecue:listRoles"),
     ])
       .then(([l, c, r]) => {
-        setLayouts(l);
+        adoptLayouts(l);
         setRoles(r);
         setShownIds(c.serviceTypeIds ?? []);
         // Preview against the first enabled type; Planning Center's first is
@@ -87,7 +91,7 @@ export function ServiceCueSection() {
         setSettingsRead(true);
       })
       .catch((err: unknown) => fail("settings", "the ServiceCue layouts and settings", err));
-  }, [fail]);
+  }, [fail, adoptLayouts]);
 
   // After the settings, so the landing page's own first type stays the
   // preview's default whichever read answers first.
@@ -159,37 +163,45 @@ export function ServiceCueSection() {
   );
 
 
-  /** Saves the list; true when the server took it, and the page adopts the server's list,
-   *  which carries the slugs it assigned. */
-  async function persist(next: ServiceCueLayout[]): Promise<boolean> {
+  /** Saves an edit; true when the server took it. Edits save one at a time, each applied
+   *  to the newest list (see useLayoutSaves). A refusal is said at the name field when
+   *  the edit was a rename (`renamed` is that layout's id), else at the top of the page. */
+  async function persist(edit: LayoutEdit, renamed?: string): Promise<boolean> {
     // The settings read (this page's own layouts list) has not landed yet: `layouts`
     // is still `[]` regardless of what is actually saved. Posting now would replace
-    // every real layout with whatever `next` is built from that empty starting point.
+    // every real layout with whatever the edit builds from that empty starting point.
     if (!settingsRead) return false;
-    setLayouts(next);
-    try {
-      setLayouts(await invoke<ServiceCueLayout[]>("servicecue:saveLayouts", { layouts: next }));
-      setError(null);
-      return true;
-    } catch (e) {
-      setError(errorMessage(e));
-      return false;
-    }
+    const result = await editLayouts(edit);
+    const message = result.ok ? null : result.error;
+    if (renamed) setNameError(message === null ? null : { id: renamed, message });
+    else setError(message);
+    return result.ok;
   }
 
-  const update = (id: string, patch: Partial<ServiceCueLayout>) =>
-    persist(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  /** Changes one layout. `patch` may be a function of the layout as it is when the edit
+   *  saves, for a change built on what the layout already holds (its columns). */
+  const update = (id: string, patch: Partial<ServiceCueLayout> | ((l: ServiceCueLayout) => Partial<ServiceCueLayout>)) =>
+    persist((list) => list.map((l) => (l.id === id ? { ...l, ...(typeof patch === "function" ? patch(l) : patch) } : l)));
+
+  const rename = (id: string, name: string) =>
+    persist((list) => list.map((l) => (l.id === id ? { ...l, name } : l)), id);
 
   function addLayout() {
     if (!settingsRead) return;
-    const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
-    const layout: ServiceCueLayout = {
-      id: uid("svl"), name: `Layout ${sortedLayouts.length + 1}`, order,
-      columnRoles: roles.map((r) => r.id), // all element toggles default on
-      autoNamed: true, // its first rename moves its address; see ServiceCueLayout.autoNamed
-    };
-    setExpandedId(layout.id);
-    persist([...layouts, layout]);
+    const id = uid("svl");
+    const columnRoles = roles.map((r) => r.id); // all element toggles default on
+    setExpandedId(id);
+    void persist((list) => [
+      ...list,
+      {
+        id,
+        // The first free "Layout N" among the layouts as they are when this saves.
+        name: freeLayoutName(list),
+        order: list.length ? Math.max(...list.map((l) => l.order)) + 1 : 0,
+        columnRoles,
+        autoNamed: true, // its first rename moves its address; see ServiceCueLayout.autoNamed
+      },
+    ]);
   }
 
   async function removeLayout(l: ServiceCueLayout) {
@@ -199,28 +211,30 @@ export function ServiceCueSection() {
       confirmLabel: "Delete",
       destructive: true,
     }))) return;
-    persist(layouts.filter((x) => x.id !== l.id));
+    void persist((list) => list.filter((x) => x.id !== l.id));
   }
 
   function moveLayout(l: ServiceCueLayout, dir: -1 | 1) {
-    const arr = [...sortedLayouts];
-    const i = arr.findIndex((x) => x.id === l.id);
-    const j = i + dir;
-    if (j < 0 || j >= arr.length) return;
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-    persist(arr.map((x, idx) => ({ ...x, order: idx })));
+    void persist((list) => {
+      const arr = [...list].sort((a, b) => a.order - b.order);
+      const i = arr.findIndex((x) => x.id === l.id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= arr.length) return list;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return arr.map((x, idx) => ({ ...x, order: idx }));
+    });
   }
 
   async function saveRoles(next: CategoryRole[]) {
     setRoles(next);
     // Deleting a role must not leave layouts pointing at it.
     const live = new Set(next.map((r) => r.id));
-    const cleaned = layouts.map((l) => ({
+    const clean = (list: ServiceCueLayout[]) => list.map((l) => ({
       ...l,
       columnRoles: (l.columnRoles ?? []).filter((id) => live.has(id)),
       accentRole: l.accentRole && live.has(l.accentRole) ? l.accentRole : null,
     }));
-    if (JSON.stringify(cleaned) !== JSON.stringify(layouts)) await persist(cleaned);
+    if (JSON.stringify(clean(layouts)) !== JSON.stringify(layouts)) await persist(clean);
     try {
       await invoke("servicecue:saveRoles", { roles: next });
     } catch (e) {
@@ -232,21 +246,22 @@ export function ServiceCueSection() {
   // service type being viewed happens to call that category.
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const addColumn = (l: ServiceCueLayout, roleId: string) =>
-    update(l.id, { columnRoles: [...(l.columnRoles ?? []), roleId] });
-  const removeColumn = (l: ServiceCueLayout, roleId: string) => {
-    const next = (l.columnRoles ?? []).filter((c) => c !== roleId);
-    const patch: Partial<ServiceCueLayout> = { columnRoles: next };
-    // A layout must not keep accenting a role it no longer shows.
-    if (l.accentRole === roleId) patch.accentRole = null;
-    update(l.id, patch);
-  };
-  const moveColumn = (l: ServiceCueLayout, idx: number, dir: -1 | 1) => {
-    const cols = [...(l.columnRoles ?? [])];
-    const j = idx + dir;
-    if (j < 0 || j >= cols.length) return;
-    [cols[idx], cols[j]] = [cols[j], cols[idx]];
-    update(l.id, { columnRoles: cols });
-  };
+    update(l.id, (cur) => ({ columnRoles: [...(cur.columnRoles ?? []).filter((c) => c !== roleId), roleId] }));
+  const removeColumn = (l: ServiceCueLayout, roleId: string) =>
+    update(l.id, (cur) => ({
+      columnRoles: (cur.columnRoles ?? []).filter((c) => c !== roleId),
+      // A layout must not keep accenting a role it no longer shows.
+      ...(cur.accentRole === roleId ? { accentRole: null } : {}),
+    }));
+  const moveColumn = (l: ServiceCueLayout, roleId: string, dir: -1 | 1) =>
+    update(l.id, (cur) => {
+      const cols = [...(cur.columnRoles ?? [])];
+      const i = cols.indexOf(roleId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= cols.length) return {};
+      [cols[i], cols[j]] = [cols[j], cols[i]];
+      return { columnRoles: cols };
+    });
 
   // The expanded card is the one being edited + previewed. Null = all collapsed
   // (the default, and reachable by toggling the open one shut); a stale id (deleted
@@ -264,7 +279,7 @@ export function ServiceCueSection() {
     <div className="pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* ServiceCue is its own rail destination now, so there is no "open it"
           link here: the viewer is one click away in the sidebar. */}
-      {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
+      {error && <ErrorNote className="mb-3">{error}</ErrorNote>}
 
       {/* Which service types appear on the landing page (curated per church). */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-5">
@@ -342,7 +357,7 @@ export function ServiceCueSection() {
                   >
                     <ChevronRightIcon className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
                   </button>
-                  <LayoutNameInput name={l.name} onCommit={(name) => update(l.id, { name })} />
+                  <LayoutNameInput name={l.name} onCommit={(name) => void rename(l.id, name)} />
                   {!open && (
                     <span className="text-caption1 text-gray-9 truncate min-w-0 hidden sm:block">
                       {(l.columnRoles ?? []).length ? (l.columnRoles ?? []).map(roleName).join(" · ") : "No columns"}
@@ -354,6 +369,7 @@ export function ServiceCueSection() {
                     <Button variant="transparent" size="small" iconOnly touchTargetY onClick={() => removeLayout(l)} aria-label="Delete"><Trash2Icon className="size-4 text-red-10" /></Button>
                   </div>
                 </div>
+                {nameError?.id === l.id && <ErrorNote className="mx-3 mb-3 -mt-1">{nameError.message}</ErrorNote>}
 
                 {open && (
                   <div className="px-4 pb-4 border-t border-gray-a4 pt-3">
@@ -363,9 +379,9 @@ export function ServiceCueSection() {
                         {(l.columnRoles ?? []).length === 0 && <span className="text-caption1 text-gray-9">No columns — add one →</span>}
                         {(l.columnRoles ?? []).map((c, ci) => (
                           <span key={c} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-1 text-caption1 text-gray-12">
-                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, ci, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
+                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, c, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
                             {roleName(c)}
-                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === (l.columnRoles ?? []).length - 1} onClick={() => moveColumn(l, ci, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
+                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === (l.columnRoles ?? []).length - 1} onClick={() => moveColumn(l, c, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
                             <button className="touch-target-y text-gray-9 hover:text-red-10 ml-0.5" onClick={() => removeColumn(l, c)} aria-label={`Remove ${roleName(c)}`}><XIcon className="size-3.5" /></button>
                           </span>
                         ))}
@@ -503,6 +519,28 @@ export function ServiceCueSection() {
   );
 }
 
+/** A layout's name. Typing edits a draft; the name is saved on blur or Enter, so a
+ *  half-typed name is never the one a pinned screen's address was built from. A blank
+ *  or unchanged name goes back to what it was, and so does a refused one: the page
+ *  shows the new name while it saves and the stored one once it is refused, and the
+ *  draft follows the stored name each time it changes (see useNameDraft). */
+function LayoutNameInput({ name, onCommit }: { name: string; onCommit: (name: string) => void }) {
+  const draft = useNameDraft(name, onCommit);
+  return (
+    <Input
+      value={draft.draft}
+      aria-label="Layout name"
+      onChange={(e) => draft.setDraft(e.target.value)}
+      onBlur={draft.commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") draft.setDraft(name);
+      }}
+      className="max-w-[14rem] font-medium"
+    />
+  );
+}
+
 /**
  * One color per note category, app-wide.
  *
@@ -525,35 +563,6 @@ export function ServiceCueSection() {
  * Member ORDER is the priority chain — the first member with a note wins, and several
  * populated members merge in this order.
  */
-/** A layout's name. Typing edits a draft; the name is saved on blur or Enter, so a
- *  half-typed name is never the one a pinned screen's address was built from. A name
- *  that is blank, unchanged or refused by the server goes back to what it was. */
-function LayoutNameInput({ name, onCommit }: { name: string; onCommit: (name: string) => Promise<boolean> }) {
-  const [draft, setDraft] = useState(name);
-  useResyncOn([name], () => setDraft(name));
-  async function commit() {
-    const next = draft.trim();
-    if (!next || next === name) {
-      setDraft(name);
-      return;
-    }
-    if (!(await onCommit(next))) setDraft(name);
-  }
-  return (
-    <Input
-      value={draft}
-      aria-label="Layout name"
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => void commit()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") setDraft(name);
-      }}
-      className="max-w-[14rem] font-medium"
-    />
-  );
-}
-
 function RolesPanel({
   roles,
   categories,

@@ -92,10 +92,23 @@ slug. A name with no ASCII letter or digit ("Звук") is addressed as `x`, the
 and so on. An address that names no layout, because it was deleted or mistyped, shows
 `Layout "name" not found. Showing All columns.` above the All columns it falls back to.
 
-A name is saved when you leave the field or press Enter, not on each keystroke.
-Deleting a layout asks first and names the views whose **Columns** setting uses it,
-or says no display is set to it; those views go back to All columns. A tablet that
-opened the address directly is not a view, so the confirm cannot name it.
+Layout names must differ, ignoring case and punctuation, in any script ("Звук" and
+"Свет" are two names). The server refuses a save that adds or changes a name another
+layout already has (and a blank name, and "All columns") with a 400 and the reason,
+which the editor shows under the name field, and the old name stays; the refusal is on
+a `[servicecue]` log line. A new layout is named with the first free "Layout N". An
+install that already holds two layouts with one name can still be edited until one of
+them is renamed. A layout arriving in a view or plan export whose name is taken here is
+imported as "Audio 2" (the first free number), and the import report says so; it keeps
+its slug from the file unless a layout here already uses it.
+
+A name is saved when you leave the field or press Enter, not on each keystroke. Every
+other change saves when it is made. Saves go one at a time, each applied to the list as
+the last one left it, so a change made while another is still saving is not lost, and
+a refused change is dropped without undoing the ones after it. Deleting a layout asks
+first and names the views whose **Columns** setting uses it, or says no display is set
+to it; those views go back to All columns. A tablet that opened the address directly is
+not a view, so the confirm cannot name it.
 
 ![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
 

@@ -9,7 +9,7 @@ import { asArray, checked, namedEntries, optional, refuse } from "./restore-chec
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 import { serviceCueRolesStore } from "./servicecue-roles-store.js";
 import { migrateLayouts } from "./servicecue-layout-migration.js";
-import { assignSlugs, isSlug } from "./servicecue-slug.js";
+import { assignSlugs, isSlug, prepareLayoutsImport, prepareLayoutsSave } from "./servicecue-slug.js";
 
 // No starter layouts. They used to hardcode category names — "Audio", "Stage Manager",
 // "MD + Playback Tech" — which only exist in some churches, and in this org only in some
@@ -58,24 +58,21 @@ async function load(): Promise<ServiceCueLayout[]> {
 export const serviceCueLayoutsStore = {
   load,
 
-  /** Saves the list and returns it as stored. A layout's slug is the server's: the one
-   *  already stored for its id is kept through a rename, and a slug the caller sent is
-   *  ignored, so no save can move the address a screen is pinned to. The one exception
-   *  is a layout still carrying the name Add layout gave it (`autoNamed`): its first
-   *  rename moves the slug to the new name, and from then on it is fixed. The flag is
-   *  taken from the caller only for a layout that is not stored yet. */
+  /** Saves the list and returns it as stored, with the slugs the server decided (see
+   *  prepareLayoutsSave). Throws LayoutNameRefused, having written nothing, for a name
+   *  the rules refuse. */
   async save(layouts: ServiceCueLayout[]): Promise<ServiceCueLayout[]> {
-    const stored = new Map((await load()).map((l) => [l.id, l]));
-    const out = assignSlugs(
-      layouts.map((l) => {
-        const { slug: _slug, autoNamed: _flag, ...rest } = l;
-        const prev = stored.get(l.id);
-        if (!prev) return l.autoNamed === true ? { ...rest, autoNamed: true } : rest;
-        if (prev.autoNamed && l.name !== prev.name) return rest;
-        return { ...rest, ...(prev.slug ? { slug: prev.slug } : {}), ...(prev.autoNamed ? { autoNamed: true } : {}) };
-      }),
-    );
+    const out = prepareLayoutsSave(layouts, await load());
     await store.save(out);
     return out;
+  },
+
+  /** Appends layouts from an export file, whose ids the caller has checked are new. Never
+   *  refuses: a name already here is changed to a free one, and `renamed` says which (see
+   *  prepareLayoutsImport). */
+  async importLayouts(incoming: ServiceCueLayout[]): Promise<{ from: string; to: string }[]> {
+    const { layouts, renamed } = prepareLayoutsImport(incoming, await load());
+    await store.save(layouts);
+    return renamed;
   },
 };
