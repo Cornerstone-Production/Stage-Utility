@@ -48,7 +48,7 @@ function NewServerIdButton({ duplicates }: { duplicates: readonly DuplicateServe
     const other = addresses(duplicates);
     if (!(await confirm({
       title: "Give this server a new id?",
-      message: `The server at ${other} keeps the current id, and the screens both servers have set up stay with it. Screens set up only on this server follow the new id on their own the next time they look for their server. Nothing restarts.`,
+      message: `The server at ${other} keeps the current id, and the screens both servers have set up stay with it. Screens set up only on this server follow the new id on their own the next time they look for their server, so leave the other server running until they have moved. Nothing restarts.`,
       confirmLabel: "New id",
       destructive: true,
     }))) return;
