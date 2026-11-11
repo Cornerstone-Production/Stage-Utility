@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { compareTags, latestOnTrack, newerThan, parseTag } from "./release-tags.js";
+import { compareTags, latestOnTrack, newerThan, parseTag, releaseTagOf } from "./release-tags.js";
 
 const p = (t: string) => {
   const v = parseTag(t);
@@ -114,4 +114,18 @@ test("an untagged checkout is offered the whole track", () => {
 
 test("main ignores prereleases when counting what's available", () => {
   assert.deepEqual(newerThan(TAGS, "main", "v1.0.0").map((t) => t.tag), ["v1.9.2"]);
+});
+
+test("releaseTagOf: a version with or without its v, as the release tag it names", () => {
+  const cases: [string, string | null][] = [
+    ["1.28.1", "v1.28.1"],
+    ["v1.28.1", "v1.28.1"],
+    [" 1.29.0-beta.3\n", "v1.29.0-beta.3"],
+    // updater.ts's nothing-found version: no release carries it.
+    ["0.0.0", null],
+    ["unknown", null],
+    ["", null],
+    ["vv1.2.3", null],
+  ];
+  for (const [version, tag] of cases) assert.equal(releaseTagOf(version), tag, JSON.stringify(version));
 });

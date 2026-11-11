@@ -22,7 +22,7 @@ const avail = (tag: string): UpdateStatus =>
 
 beforeEach(async () => {
   sent.length = 0;
-  await updateNoticesStore.save({ announcedTag: null, justUpdated: null });
+  await updateNoticesStore.save({ announcedTag: null, justUpdated: null, releaseNotes: null });
 });
 
 describe("announcing an available update", () => {

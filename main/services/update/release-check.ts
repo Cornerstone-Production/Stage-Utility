@@ -13,7 +13,7 @@
 
 import type { UpdateStatus } from "../../types/stage.js";
 import { GITHUB_API_REPO, rateLimitMessage } from "../github-repo.js";
-import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
+import { compareTags, latestOnTrack, newerThan, releaseTagOf, type ParsedTag } from "../release-tags.js";
 import { parseReleaseIntro, parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
 
 const RELEASES_URL = `${GITHUB_API_REPO}/releases?per_page=30`;
@@ -154,8 +154,7 @@ export function packagedUpdateStatus(
   // shipped), claiming "up to date" would hide every future release — so an
   // unreadable current version counts as behind whatever is newest, which an
   // update then repairs.
-  const v = currentVersion.trim();
-  const currentTag = v !== "0.0.0" && parseTag(`v${v}`) ? `v${v}` : null;
+  const currentTag = releaseTagOf(currentVersion);
 
   const installableTags = releases.filter(installable).map((r) => r.tag);
   let newer: ParsedTag[];
@@ -330,4 +329,30 @@ export async function fetchReleases(doFetch: FetchLike = fetch): Promise<Release
     );
   }
   return releases;
+}
+
+/**
+ * One release, by its tag: `/releases/tags/<tag>`.
+ *
+ * For What's new, which wants the notes of the version RUNNING rather than the
+ * newest. fetchReleases cannot always find that one: its page is the thirty
+ * newest, and /releases/latest names only the newest stable, so a stable box one
+ * release behind with thirty betas since is on neither. Same conditional cache
+ * as the list, so asking again is a 304 and costs no quota.
+ *
+ * @returns the release, or null when GitHub has none for that tag (404).
+ * Throws on a network failure, any other non-OK answer, or a body that is not
+ * that release.
+ */
+export async function fetchReleaseByTag(tag: string, doFetch: FetchLike = fetch): Promise<ReleaseInfo | null> {
+  const url = `${GITHUB_API_REPO}/releases/tags/${encodeURIComponent(tag)}`;
+  const res = await getJson(url, doFetch);
+  if (res.status === 404) return null;
+  if (!res.ok && res.status !== 304) {
+    const quota = res.status === 403 ? rateLimitMessage(res) : null;
+    throw new Error(quota ? `Release read failed: ${quota}` : `Release read failed: GitHub answered ${res.status}`);
+  }
+  const [release] = parseReleases([await bodyOf(url, res)]);
+  if (release?.tag !== tag) throw new Error(`Release read failed: GitHub's answer is not the release ${tag}`);
+  return release;
 }

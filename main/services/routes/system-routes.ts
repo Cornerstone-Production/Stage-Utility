@@ -11,6 +11,7 @@ import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { updateNoticesStore } from "../update-notices-store.js";
+import { dismissJustUpdated, runningReleaseNotes } from "../update/running-notes.js";
 import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
@@ -81,11 +82,21 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // Dismissed. Nothing else clears it — not a reload, not navigating away —
-    // so a notice survives until somebody has actually seen it.
+    // Dismissed. Nothing else clears it — not a reload, not navigating away, not
+    // What's new — so a notice survives until somebody has actually seen it.
+    // The notes stay behind for What's new; only the acknowledgement goes.
     if (method === "POST" && pathname === "/api/update/notices/dismiss") {
-      await updateNoticesStore.update((cur) => ({ ...cur, justUpdated: null }));
+      await dismissJustUpdated();
       json(res, { ok: true });
+      return;
+    }
+
+    // What's new: the running release's notes, read-only. Fetched from GitHub
+    // only when nothing is kept, and only because somebody pressed the button.
+    // A failure is a 200 with ok:false, not an error status: the dialog has an
+    // answer to draw for it, and the line saying why is already in the log.
+    if (method === "GET" && pathname === "/api/update/release-notes") {
+      json(res, await runningReleaseNotes());
       return;
     }
 

@@ -381,6 +381,12 @@ const NOT_SCANNED = new Map<string, string>([
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
+  [
+    "update/running-notes.ts",
+    "reached by GET /api/update/release-notes, whose request carries nothing it reads: its two " +
+      "lines name the running tag, from package.json, and what GitHub, the network or the disk " +
+      "said back. Audited, not just excused.",
+  ],
   ["updater.ts", UNAUDITED],
   // acquire.ts logs nothing about a download or a checksum — relay-lifecycle.ts
   // (below) owns that, once per outage. It logs only when it clears an earlier
