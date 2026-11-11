@@ -7,7 +7,7 @@
 #
 # The private-term list is the PRIVATE_TERMS repository secret. Forks and
 # Dependabot cannot read it; the script says so and checks the generic rules only.
-# The script never prints a term — see scripts/check-public-hygiene.mjs and
+# The script never prints a term — see scripts/check-public-hygiene.ts and
 # docs/contributing.md ("Public hygiene").
 
 name: Public hygiene
@@ -28,6 +28,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # The script is TypeScript that Node runs by stripping the types, which the
+      # runner image's default Node may not do. It installs nothing, so no npm cache.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
       - name: Check tracked files for private details
         env:
           PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
@@ -35,4 +42,4 @@ jobs:
           # of this repository. A fork, or Dependabot (which reads its own secret
           # store, not this one), cannot have it, and runs the generic rules only.
           REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && '1' || '' }}
-        run: node scripts/check-public-hygiene.mjs
+        run: node scripts/check-public-hygiene.ts

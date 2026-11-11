@@ -24,9 +24,9 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { findViolations, formatFinding, listTrackedFiles, loadPrivateTerms } from "./check-public-hygiene.mjs";
+import { findViolations, formatFinding, listTrackedFiles, loadPrivateTerms } from "./check-public-hygiene.ts";
 
-const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-public-hygiene.mjs");
+const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-public-hygiene.ts");
 
 const ip = (...octets: number[]) => octets.join(".");
 const email = (local: string, domain: string) => `${local}@${domain}`;

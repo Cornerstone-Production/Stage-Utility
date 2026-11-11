@@ -51,10 +51,12 @@ interface Case {
   hasBundle?: boolean;
   /** A failure marker left by the last build: for the commit the update starts from, or an older one. */
   marker?: "this-commit" | "older-commit";
+  /** The checkout's change helpers exit non-zero without answering (3 and 4, so the log can tell them apart), as an unrunnable one does. */
+  brokenHelpers?: boolean;
 }
 
-/** One update, whole: what npm was asked to do. */
-function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string[]; marker: string | null; head: string } {
+/** One update, whole: what npm was asked to do, and the run's log as the result file carries it. */
+function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string[]; marker: string | null; head: string; log: string } {
   const dir = fs.mkdtempSync(path.join(SCRATCH, "case-"));
   const origin = path.join(dir, "origin.git");
   const repo = path.join(dir, "repo");
@@ -63,7 +65,11 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
   git(repo, "checkout", "-q", "-b", "main");
 
   // What the scripts call from the checkout, and a manifest that never changes.
-  for (const f of ["manifest-changed.mjs", "build-inputs.mjs", "is-main.mjs"]) write(repo, `scripts/${f}`, fs.readFileSync(path.join(SCRIPTS, f), "utf8"));
+  for (const f of ["manifest-changed.ts", "build-inputs.ts", "is-main.ts"]) write(repo, `scripts/${f}`, fs.readFileSync(path.join(SCRIPTS, f), "utf8"));
+  if (c.brokenHelpers) {
+    write(repo, "scripts/manifest-changed.ts", "process.exit(3);\n");
+    write(repo, "scripts/build-inputs.ts", "process.exit(4);\n");
+  }
   write(repo, "package.json", '{"name":"x","version":"1.0.0","scripts":{}}\n');
   write(repo, "package-lock.json", '{"name":"x","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"x","version":"1.0.0"}}}\n');
   write(repo, "README.md", "first\n");
@@ -102,7 +108,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
       : spawnSync("pwsh", ["-NoProfile", "-File", path.join(SCRIPTS, "update.ps1")], { env, encoding: "utf8" });
   const log = fs.existsSync(path.join(dir, "live.log")) ? fs.readFileSync(path.join(dir, "live.log"), "utf8") : "";
   assert.equal(run.status, 0, `${script}: ${run.stdout}${run.stderr}\n${log}`);
-  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { ok: boolean };
+  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { ok: boolean; log: string };
   assert.equal(result.ok, true, log);
   const calls = path.join(dir, "npm-calls");
   const marker = path.join(repo, "build/servicecue.failed");
@@ -110,6 +116,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string
     calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n") : [],
     marker: fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null,
     head: git(repo, "rev-parse", "HEAD").trim(),
+    log: result.log,
   };
 }
 
@@ -153,5 +160,41 @@ for (const [script, available] of SCRIPT_LIST) {
     test("a marker from an older commit is not trusted: the bundle is retried", () => {
       assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false, marker: "older-commit" }).calls, ["ci --include=dev", "run build"]);
     });
+
+    test("a change helper that exits without answering reinstalls and builds, even for docs, and the log says which", () => {
+      const r = runUpdate(script, { changes: ["docs/ops/x.md"], brokenHelpers: true });
+      assert.deepEqual(r.calls, ["ci --include=dev", "run build"]);
+      // manifest-changed failing already forces the build, so only the log can show build-inputs was heard.
+      assert.match(r.log, /\[update\] manifest-changed\.ts exited 3 - reinstalling and rebuilding/);
+      assert.match(r.log, /\[update\] build-inputs\.ts exited 4 - rebuilding/);
+    });
   });
 }
+
+// An older install's update script calls the .mjs paths, and reads both the answer and the exit
+// status, so each forwarder must pass on its arguments, its input and its target's exit status.
+describe("the .mjs forwarders older update scripts call", () => {
+  const run = (file: string, args: string[], input?: string) => {
+    const r = spawnSync(process.execPath, [path.join(SCRIPTS, file), ...args], { cwd: path.dirname(SCRIPTS), input, encoding: "utf8" });
+    return { status: r.status, stdout: r.stdout };
+  };
+
+  test("manifest-changed.mjs passes its arguments through", () => {
+    assert.deepEqual(run("manifest-changed.mjs", ["HEAD", "HEAD"]), { status: 0, stdout: '{"deps":false,"manifest":false}' });
+    assert.deepEqual(run("manifest-changed.mjs", ["HEAD", "HEAD"]), run("manifest-changed.ts", ["HEAD", "HEAD"]));
+  });
+
+  test("build-inputs.mjs passes its input through", () => {
+    assert.deepEqual(run("build-inputs.mjs", [], "README.md\n"), { status: 0, stdout: "false" });
+    assert.deepEqual(run("build-inputs.mjs", [], "renderer/app/x.tsx\n"), { status: 0, stdout: "true" });
+  });
+
+  for (const name of ["manifest-changed", "build-inputs"]) {
+    test(`${name}.mjs exits with its target's status`, () => {
+      const dir = fs.mkdtempSync(path.join(SCRATCH, "forwarder-"));
+      fs.copyFileSync(path.join(SCRIPTS, `${name}.mjs`), path.join(dir, `${name}.mjs`));
+      write(dir, `${name}.ts`, "process.exit(3);\n");
+      assert.equal(spawnSync(process.execPath, [path.join(dir, `${name}.mjs`)], { input: "", encoding: "utf8" }).status, 3);
+    });
+  }
+});

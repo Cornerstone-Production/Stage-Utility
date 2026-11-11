@@ -37,7 +37,7 @@ cat > "$PLIST" <<PLISTEOF
 <plist version="1.0"><dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$NODE</string><string>$HERE/parent.mjs</string></array>
+  <array><string>$NODE</string><string>$HERE/parent.ts</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>SURVIVAL_LOG</key><string>$LOG</string>
   </dict>

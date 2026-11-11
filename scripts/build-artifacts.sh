@@ -34,7 +34,7 @@ PLATFORMS=(
 )
 
 echo "==> building the server bundle and interface"
-node scripts/bundle-server.mjs
+node scripts/bundle-server.ts
 [ -d build/renderer ] || { echo "build/renderer missing — run npm run build first" >&2; exit 1; }
 # The public ServiceCue page, ready to upload. `npm run build` makes it too, but lets a
 # failure pass so an update never stops on it; a release must not ship without it, so

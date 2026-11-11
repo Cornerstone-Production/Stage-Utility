@@ -45,7 +45,7 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
 
   stop_unit
   sudo systemd-run --unit="$UNIT" --setenv=SURVIVAL_LOG="$log" \
-    "$NODE" "$HERE/parent.mjs" >/dev/null
+    "$NODE" "$HERE/parent.ts" >/dev/null
 
   if ! wait_for_spawn "$log"; then
     report_no_spawn linux "systemd unit" "$log"

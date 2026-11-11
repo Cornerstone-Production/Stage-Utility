@@ -112,12 +112,19 @@ try {
     # changing a single dependency — matching on the path made this skip fire on
     # every update, so it never once saved the work it exists to save.
     $manifest = '{"deps":true,"manifest":true}'
-    try { $manifest = (node (Join-Path $repo "scripts/manifest-changed.mjs") $oldRev $newRev) } catch {}
+    # A failing native command does not throw, so its exit code decides: anything but 0 keeps the safe default.
+    try {
+      $out = (node --no-warnings (Join-Path $repo "scripts/manifest-changed.ts") $oldRev $newRev)
+      if ($LASTEXITCODE -eq 0) { $manifest = $out } else { "[update] manifest-changed.ts exited $LASTEXITCODE - reinstalling and rebuilding" | Out-File -Append $log }
+    } catch {}
     if ($manifest -match '"deps":true') { $needInstall = $true; $needBuild = $true }
     if ($manifest -match '"manifest":true') { $needBuild = $true }
-    # scripts/build-inputs.mjs lists the build inputs; unreadable means rebuild.
+    # scripts/build-inputs.ts lists the build inputs; unreadable means rebuild.
     $inputs = "true"
-    try { $inputs = (($changed | Out-String) | node (Join-Path $repo "scripts/build-inputs.mjs")) } catch {}
+    try {
+      $out = (($changed | Out-String) | node --no-warnings (Join-Path $repo "scripts/build-inputs.ts"))
+      if ($LASTEXITCODE -eq 0) { $inputs = $out } else { "[update] build-inputs.ts exited $LASTEXITCODE - rebuilding" | Out-File -Append $log }
+    } catch {}
     if ($inputs -ne "false") { $needBuild = $true }
   }
 
