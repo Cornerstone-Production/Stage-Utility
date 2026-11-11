@@ -2073,8 +2073,12 @@ function abandonWorker(why: string): void {
           console.error(`[api] SSE parse error for "${channel}":`, err);
         }
       };
-      fallbackWrappers.push({ channel, handler });
-      sseListeners.push({ channel, handler });
+      // ONE object in both lists: recovery finds its wrappers in sseListeners by
+      // identity, and two copies left every one behind there, so the list never
+      // emptied and this tab's own stream was never closed.
+      const wrapper = { channel, handler };
+      fallbackWrappers.push(wrapper);
+      sseListeners.push(wrapper);
     }
   }
   ensureEventSource();
