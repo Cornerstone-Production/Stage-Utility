@@ -198,6 +198,15 @@ export const ADVANCED_SETTINGS = [
     keywords: ["kiosk", "discovery", "mdns", "bonjour", "broadcast", "screen", "claim", "find", "pi", "raspberry"],
   },
   {
+    id: "server-id",
+    tab: "network",
+    card: "Addresses",
+    name: "Server id",
+    description:
+      "How screens and Mac outputs tell this server from any other. Made once, and kept by a config restore unless you choose to use the config's server id.",
+    keywords: ["server id", "identity", "duplicate", "discovery", "restore", "kiosk", "screen", "mac", "helper", "bind"],
+  },
+  {
     id: "kiosk-setup",
     tab: "network",
     card: "Addresses",

@@ -34,6 +34,7 @@ import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon
 import { configServerId, restoreQuestion } from "../../lib/restore-server-id";
 import { logReadFailure } from "../../lib/client-log";
 import { DataArchivePanel } from "./data-archive-panel";
+import { SERVER_ID_FLASH, ServerIdStatus } from "./server-id-field";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { WhatsNewButton } from "./whats-new";
@@ -1227,6 +1228,7 @@ const SAMPLE_EVENING = new Date(2026, 0, 1, 20, 45, 30).getTime();
 /** Flash targets on this page, and the tab each one sits on. */
 const FLASH_TABS: Readonly<Record<string, AdvancedTabId>> = {
   [VIDEO_PORTS_FLASH_ID]: "video",
+  [SERVER_ID_FLASH]: "network",
 };
 
 /** The `data-flash-id` a card carries, when something elsewhere in the app points at it. */
@@ -1382,7 +1384,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
   const autoUpdate = stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE;
 
-  const signals = useAdvancedSignals();
+  const signals = useAdvancedSignals(stageState);
   const available = availableCount(updateStatus);
   const updatesBadge = !updateStatus
     ? undefined
@@ -1579,6 +1581,15 @@ export function AdvancedSection({
               }
               aria-label="Answer kiosk devices looking for a server"
             />
+          </Field>
+        )}
+        {show("server-id") && (
+          <Field orientation="vertical" data-setting-id="server-id" data-flash-id={SERVER_ID_FLASH}>
+            <FieldContent>
+              <FieldLabel>{settingText("server-id").name}</FieldLabel>
+              <FieldDescription>{settingText("server-id").description}</FieldDescription>
+            </FieldContent>
+            <ServerIdStatus identity={stageState.serverIdentity} timeZone={stageState.timezone} />
           </Field>
         )}
         {show("kiosk-setup") && (

@@ -50,6 +50,7 @@ export function encodeProbe(p: DiscoveryProbe): string {
     unreachable: p.unreachable || undefined,
     mode: p.mode,
     output: p.output,
+    check: p.check || undefined,
   });
 }
 
@@ -104,6 +105,9 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
     // "1920x1080" — bounded like everything else off the wire.
     mode: str(o.mode, MAX_MODE_LEN),
     ...(output && { output }),
+    // Only a literal true, and absent otherwise, so a plain probe decodes exactly
+    // as it did before the field existed.
+    ...(o.check === true && { check: true }),
   };
 }
 
@@ -204,6 +208,22 @@ export function decideProbe(
   if (opts.bound) return { answer: true, list: "mine" };
   if (probe.boundTo === serverId) return { answer: true, list: "unclaimed" };
   return { answer: opts.scanning, list: "unclaimed" };
+}
+
+/**
+ * What this server does about a duplicate-id check (a probe with `check`).
+ *
+ * `own`       — its own check, heard back off the broadcast. Told apart by the
+ *               per-start id it put on it, not by MAC: a box that reports no MAC,
+ *               or a second server on the same machine, shares or lacks them.
+ * `duplicate` — another server checking for THIS server's id. Answered (that is
+ *               what tells the other server) and never listed as a screen, and
+ *               the probe is itself the evidence: two servers carry one id.
+ * `ignore`    — a check for some other id. Nothing to answer, nothing to list.
+ */
+export function decideCheck(probe: DiscoveryProbe, serverId: string, ownCheckId: string): "own" | "duplicate" | "ignore" {
+  if (probe.id === ownCheckId) return "own";
+  return probe.boundTo === serverId ? "duplicate" : "ignore";
 }
 
 /**

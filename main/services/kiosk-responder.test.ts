@@ -49,6 +49,9 @@ before(async () => {
     url: () => "http://192.0.2.10:8788",
     port,
     ownMacs: () => new Set([THIS_MAC]),
+    // The duplicate-id check goes to this responder itself, where it is dropped
+    // as its own, rather than out on the real network from every test run.
+    probeTo: { address: "127.0.0.1", port },
   });
   // bind() is asynchronous and the responder does not say when it is ready.
   await new Promise((r) => setTimeout(r, 100));
@@ -306,6 +309,7 @@ describe("an output released on one server is set up on another", () => {
     stopKioskResponder();
     startKioskResponder({
       serverId: s.serverId, serverName: s.name, url: () => s.url, port, ownMacs: () => new Set([THIS_MAC]),
+      probeTo: { address: "127.0.0.1", port },
     });
     await new Promise((r) => setTimeout(r, 100));
   }

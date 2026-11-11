@@ -443,7 +443,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
-    serverIdentity: { id: null },
+    serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
     autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",

@@ -126,6 +126,13 @@ export interface DiscoveryProbe {
   mode?: string;
   /** Set by the Mac output helper, once per output. See {@link DeviceOutput}. */
   output?: DeviceOutput;
+  /**
+   * Set by a SERVER checking whether another one answers with its id: such a probe
+   * names that id as `boundTo`, so only a server with the same id answers it.
+   * A server that reads this answers without listing the probe as a screen, and
+   * takes the probe itself as evidence of a duplicate. See decideCheck.
+   */
+  check?: boolean;
 }
 
 /** What a server answers with. */
@@ -156,6 +163,25 @@ export interface DiscoveryReply {
  */
 export interface ServerIdentity {
   id: string | null;
+  /** The last duplicate-id check. `off` while discovery is off (nothing answers,
+   *  nothing checks); `failed` when the check could not be sent; `ok` when it
+   *  went out, `at` being when, which is all "nobody else answered" can claim. */
+  check: { state: "off" | "ok" | "failed"; at?: number; reason?: string };
+  /** Other servers answering discovery with this id, by address. Empty is the
+   *  healthy case. Any entry means screens bound here can switch between them. */
+  duplicates: DuplicateServer[];
+}
+
+/** Another server heard answering with this server's id. */
+export interface DuplicateServer {
+  /** Where its datagram came from. */
+  address: string;
+  /** What it told devices to load, when it answered a check (absent when it was
+   *  heard checking for this id itself). */
+  url?: string;
+  name?: string;
+  /** When it was first heard, epoch ms. */
+  since: number;
 }
 
 /** The default discovery port. Adjustable — AV gear is fond of odd UDP ports,

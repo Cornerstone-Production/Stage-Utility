@@ -735,6 +735,9 @@ export class RemoteServer {
         serverName: settings.appName || "Stage Utility",
         url: () => this.getLanUrl(),
         port: settings.kioskDiscoveryPort,
+        // What the duplicate-id check finds reaches Home and Advanced through
+        // StageState, broadcast only when it changes.
+        onIdentity: (identity) => stageController.setServerIdentity(identity),
       });
     } catch (err) {
       // Reported, never fatal: a server that cannot answer discovery still runs

@@ -21,8 +21,9 @@ export const ADVANCED_PANEL_ID = "advanced-tab-panel";
 /**
  * The strip.
  *
- * `signals` puts a dot on Updates while an update waits and a count on Network
- * while host names wait: the same two marks the rail's Advanced row carries.
+ * `signals` puts a dot on Updates while an update waits, a count on Network while
+ * host names wait, and a red dot on Network while another server answers with
+ * this server's id: the marks the rail's Advanced row carries.
  */
 export function AdvancedTabBar({
   tab,
@@ -38,7 +39,9 @@ export function AdvancedTabBar({
   const markFor = (id: AdvancedPageTab): TabMark => {
     const names = id === "network" ? signals.hostNamesWaiting : 0;
     const flagged = id === "updates" && signals.updateAvailable;
+    const duplicate = id === "network" && signals.duplicateServers > 0;
     const said: string[] = [];
+    if (duplicate) said.push("another server is using this server's id");
     if (flagged) said.push("update available");
     if (names > 0) said.push(`${plural(names, "host name")} waiting`);
     return {
@@ -46,6 +49,7 @@ export function AdvancedTabBar({
       mark: (
         <>
           {flagged && <span data-signal="update" aria-hidden="true" className="block size-1.5 rounded-full bg-accent" />}
+          {duplicate && <span data-signal="duplicate-server" aria-hidden="true" className="block size-1.5 rounded-full bg-danger-9" />}
           {names > 0 && (
             <span
               data-signal="host-names"

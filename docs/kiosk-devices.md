@@ -595,6 +595,38 @@ outage would be worse than a dark one — but other servers can show it as *boun
 elsewhere* behind an explicit force-claim, so recovering from a decommissioned
 server does not need SSH.
 
+## Two servers with one id
+
+A server's id (`serverId` in its `settings.json`) is what every screen and Mac
+output binds to. Two servers carrying the same id both answer those screens, which
+then switch between them: a helper output reloads, and reports its health to
+whichever answered last. A config restore is the usual way it happens, which is
+why a restore keeps this server's own id unless told this box replaces the one the
+config came from ([Restoring a config snapshot](ops/reliability.md#restoring-a-config-snapshot)).
+
+The server finds such a twin itself, whatever made it. While discovery is on, it
+sends a check when it starts (at boot, and after the restart a restore or the
+discovery switch causes): the ordinary probe, naming its own id as the server it is
+bound to. Every server with another id ignores it, and one with the same id
+answers, whatever its version. A server of this version that hears another one
+check for its id also takes that as the answer, so the second of two to start is
+found by both.
+
+- Another server found is shown on Home's **Needs attention** (one row per
+  address), on **Advanced → Network → Server id**, and as a red mark on the
+  Advanced row and the Network tab, and logged once on `[kiosk-responder]`.
+- While one is heard, the check repeats every 60 seconds. An address clears after
+  two checks in a row go unanswered, so within about two minutes of the other
+  server changing its id or going away. With none heard, nothing repeats: two
+  servers that are both already running when they first meet (a laptop install
+  joining the network, say) are found when either next starts.
+- The Server id row says what the last check found and when, **Not checked** while
+  discovery is off (nothing answers or checks), and why when the check could not
+  be sent.
+- A server older than this check answers it too, and also lists the server that
+  sent it as a screen not set up yet, for 90 seconds at a time; while it is
+  flagged, the 60-second re-check keeps it listed.
+
 ## Discovery
 
 The device broadcasts a probe on **UDP 8789** and the server answers it unicast.

@@ -42,7 +42,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   lanUrl: null,
   showQr: false,
   kioskDiscovery: false,
-  serverIdentity: { id: null },
+  serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
   autoUpdateMachines: true,
   allowedServiceTypeIds: [],
   planSwitcherMode: "upcoming",
