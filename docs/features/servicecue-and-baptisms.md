@@ -166,10 +166,19 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
+**All columns** is every role, then one column for each note category of that service
+type that is in no role, named as Planning Center names it and in Planning Center's
+order. A department whose category was added this week therefore shows without anyone
+making a role first. No role is created for it; a named layout shows only the roles it
+chose, so the category stays out of those until it is in a role and the layout picks it.
+Until the roles have been read (or when they cannot be), nothing is appended, since no
+category can be said to be in no role. The rundown pages, ServiceCue displays and the
+public page all draw columns the same way.
+
 **Managing them:** ServiceCue → Edit column presets → Category roles. Rename, add or remove
 members, reorder. Two diagnostics flag problems you would otherwise notice only by
-absence — categories in no role (which can never appear as a column) and
-categories in more than one (ambiguous, since two columns would claim the note).
+absence — categories in no role (which no named layout can show; All columns does)
+and categories in more than one (ambiguous, since two columns would claim the note).
 
 Seeding creates one role per category, containing only itself. Merging is always
 your call — automatic keyword matching guesses badly, and a wrong merge hides a
@@ -287,6 +296,12 @@ everything it shows, plan notes included,** and running it is
 nothing for two minutes, and a reload, once, of a page left open when the public page is
 updated. Its link is the page's address with `/servicecue` on the end, and
 `/servicecue/weekend/audio`, `?plan=` and `?text=` work on it as they do here.
+
+The public page runs the copy of ServiceCue it was deployed with. One deployed before
+layouts had stored slugs still finds a layout by its current name, so a renamed
+layout's old address shows All columns there, and its All columns does not add the
+categories in no role. Updating the page (**Keep the page up to date**, or a redeploy)
+brings it in line.
 
 The server sends; nothing on the internet connects to it. **Public link**, on the
 ServiceCue presets page (`/servicecue/presets`) under **Shown on the landing page**, is

@@ -40,9 +40,12 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ServiceCueRundownDTO | null>(null);
-  const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
-  const [layoutsRead, setLayoutsRead] = useState(false);
-  const [roles, setRoles] = useState<CategoryRole[]>([]);
+  // Null until the layouts have been read, so an address naming none is said only once
+  // that is known.
+  const [layouts, setLayouts] = useState<ServiceCueLayout[] | null>(null);
+  // Null until the roles have been read: All columns appends the categories in no role, and
+  // until it knows the roles it cannot know which those are.
+  const [roles, setRoles] = useState<CategoryRole[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // On the public page, what the church has not sent yet (see notPublishedYet): said to a visitor, not as a failure.
   const [typesNotSent, setTypesNotSent] = useState(false);
@@ -108,7 +111,6 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         .then((l) => {
           if (cancelled) return;
           setLayouts(l);
-          setLayoutsRead(true);
           clear("layouts");
         })
         .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts", err); });
@@ -214,7 +216,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
 
   const now = useServerClock(pcoLive?.serverNow);
 
-  const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
+  const allLayouts = useMemo(() => [...(layouts ?? [])].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
   const wantsAll = layoutParam === ALL_COLUMNS_SLUG || layoutParam === ALL_COLUMNS_LAYOUT_ID;
   const layout = wantsAll
@@ -223,7 +225,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // An address naming a layout that is not there (deleted, or a typo) used to open All
   // columns without a word. Said only once the layouts have answered: until then every
   // pinned address would flash it (and a read that failed never answers).
-  const layoutMissing = !wantsAll && !layout && layoutsRead;
+  const layoutMissing = !wantsAll && !layout && layouts !== null;
   const layoutName = layout?.name ?? "All columns";
   const currentLayoutKey = layout?.id ?? ALL_COLUMNS_LAYOUT_ID;
   const typeNameForUrl = serviceType?.name ?? serviceTypeParam;
@@ -327,7 +329,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         </div>
       )}
 
-      <ServiceCueBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
+      <ServiceCueBody rundown={rundown} roles={roles ?? []} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
     </div>
   );
 }

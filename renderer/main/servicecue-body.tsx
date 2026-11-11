@@ -48,7 +48,7 @@ export function fmtSvcTime(iso: string, timeZone?: string | null): string {
 export function useServiceCueRender(
   rundown: ServiceCueRundownDTO | null,
   layout: ServiceCueLayout | null,
-  roles: CategoryRole[],
+  roles: CategoryRole[] | null,
   pcoLive: PcoLiveDTO | null,
   now: number,
 ) {
