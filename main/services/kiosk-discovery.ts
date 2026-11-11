@@ -210,6 +210,46 @@ export function decideProbe(
   return { answer: opts.scanning, list: "unclaimed" };
 }
 
+/** One interface as os.networkInterfaces() reports it, as far as this reads. */
+export interface InterfaceAddress {
+  address: string;
+  netmask: string;
+  family: string | number;
+  internal: boolean;
+}
+
+const ipv4ToInt = (a: string): number | null => {
+  const parts = a.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+};
+const intToIpv4 = (n: number): string => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+
+/**
+ * Where the duplicate-id check is broadcast: each IPv4 interface's own directed
+ * broadcast address, sorted, or the limited broadcast when there is none.
+ *
+ * Not 255.255.255.255 alone. macOS refuses a send to the limited broadcast with
+ * EHOSTUNREACH on a typical setup, which is why the Mac helper and the macOS
+ * agent probe each interface's directed broadcast too; a check that never leaves
+ * the box finds nobody. A directed broadcast also covers a server on wired plus
+ * wifi. Loopback, a host route (a /32, such as a VPN tunnel: its "broadcast" is
+ * its own address) and anything that is not IPv4 are skipped.
+ */
+export function broadcastAddresses(interfaces: Record<string, readonly InterfaceAddress[] | undefined>): string[] {
+  const out = new Set<string>();
+  for (const list of Object.values(interfaces)) {
+    for (const n of list ?? []) {
+      if (n.internal || (n.family !== "IPv4" && n.family !== 4)) continue;
+      const address = ipv4ToInt(n.address);
+      const mask = ipv4ToInt(n.netmask);
+      if (address === null || mask === null || mask === 0xffffffff) continue;
+      out.add(intToIpv4((address | ~mask) >>> 0));
+    }
+  }
+  return out.size > 0 ? [...out].sort() : ["255.255.255.255"];
+}
+
 /**
  * What this server does about a duplicate-id check (a probe with `check`).
  *

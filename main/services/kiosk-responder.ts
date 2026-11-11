@@ -12,7 +12,8 @@ import * as dgram from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
 import {
-  decodeProbe, decodeReply, encodeProbe, encodeReply, decideCheck, decideProbe, listedBoundTo, isFromThisMachine,
+  broadcastAddresses, decodeProbe, decodeReply, encodeProbe, encodeReply, decideCheck, decideProbe, listedBoundTo,
+  isFromThisMachine,
 } from "./kiosk-discovery.js";
 import { recordSeen, scanning, forgetSeen, noteReleased } from "./kiosk-presence.js";
 import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
@@ -31,8 +32,8 @@ export interface ResponderOptions {
   /** This machine's MAC addresses, lower case. Read from the network interfaces
    *  when absent; a test names its own because a CI box may have none. */
   ownMacs?: () => ReadonlySet<string>;
-  /** Where the duplicate-id check goes. The limited broadcast address on the
-   *  discovery port, which is where every agent probes; a test names a peer. */
+  /** Where the duplicate-id check goes. Each interface's directed broadcast
+   *  address on the discovery port (broadcastAddresses); a test names a peer. */
   probeTo?: { address: string; port: number };
   /** How often the check repeats while another server is answering with this
    *  id, so the flag clears once it stops. Nothing repeats while none is. */
@@ -136,7 +137,9 @@ function sendCheck(): void {
   if (roundTimer) clearTimeout(roundTimer);
   heardThisRound.clear();
   const port = opts.port ?? DEFAULT_DISCOVERY_PORT;
-  const to = opts.probeTo ?? { address: "255.255.255.255", port };
+  const targets = opts.probeTo
+    ? [opts.probeTo]
+    : broadcastAddresses(networkInterfaces()).map((address) => ({ address, port }));
   const probe = Buffer.from(
     encodeProbe({
       id: ownCheckId,
@@ -147,11 +150,21 @@ function sendCheck(): void {
       check: true,
     }),
   );
-  sock.send(probe, to.port, to.address, (err) => {
-    if (err) {
-      if (!sendFailing) console.warn(`[kiosk-responder] could not send the duplicate-id check on udp/${port}: ${err.message}`);
+  const sends = targets.map(
+    (to) =>
+      new Promise<string | null>((resolve) => {
+        sock.send(probe, to.port, to.address, (err) => resolve(err ? `${to.address}: ${err.message}` : null));
+      }),
+  );
+  void Promise.all(sends).then((failures) => {
+    if (socket !== sock) return; // stopped, or restarted, while these were in flight
+    const failed = failures.filter((f): f is string => f !== null);
+    // One interface refusing is not the check failing: it went out on the others.
+    if (failed.length === targets.length) {
+      const reason = failed.join("; ");
+      if (!sendFailing) console.warn(`[kiosk-responder] could not send the duplicate-id check on udp/${port}: ${scrub(reason, 400)}`);
       sendFailing = true;
-      check = { state: "failed", at: Date.now(), reason: err.message };
+      check = { state: "failed", at: Date.now(), reason };
       report();
       return;
     }
@@ -218,9 +231,12 @@ export function startKioskResponder(opts: ResponderOptions): void {
     if (!probe) {
       // An answer to this server's duplicate-id check: a reply only ever comes
       // here because we probed, and we never answer our own check, so one that
-      // carries our id is another server that has it.
+      // carries our id is another server that has it. One carrying our own URL
+      // is our own answer to someone else's check, handed back to us: with two
+      // servers on one machine sharing the port, the kernel gives a unicast to
+      // whichever socket it likes.
       const reply = decodeReply(buf);
-      if (reply && reply.serverId === serverId) {
+      if (reply && reply.serverId === serverId && reply.url !== opts.url()) {
         noteDuplicate(rinfo.address, "it answered this server's check", { url: reply.url, name: reply.name });
       }
       // Anything else is not ours, malformed, or oversized. A broadcast port hears everything.

@@ -146,6 +146,19 @@ describe("the check this server sends", () => {
   });
 });
 
+describe("an answer carrying this server's own address", () => {
+  test("is this server's own answer handed back, not another server", async () => {
+    // Two servers on one machine share the discovery port, and a unicast to it
+    // can land on either socket: the answer this server sent the other one came
+    // back to it, and read as a twin at its own address.
+    answering = false;
+    await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
+    peer.send(encodeReply({ serverId: OWN, name: "This box", url: "http://192.0.2.50:8788", claimed: false }), responderPort, "127.0.0.1");
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(latest().duplicates.length, 0, "this server took its own answer for a twin");
+  });
+});
+
 describe("a check another server sends", () => {
   const send = (probe: DiscoveryProbe) =>
     new Promise<void>((resolve, reject) =>

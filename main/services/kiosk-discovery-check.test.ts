@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { decideCheck, decideProbe, decodeProbe, encodeProbe } from "./kiosk-discovery.js";
+import { broadcastAddresses, decideCheck, decideProbe, decodeProbe, encodeProbe } from "./kiosk-discovery.js";
 import type { DiscoveryProbe } from "../types/kiosk.js";
 
 const OWN = "3f2a9c1e-5b7d-4e21-9a0c-6d8e2f41b7a3";
@@ -70,5 +70,38 @@ describe("an older server, which knows nothing of check", () => {
 
   test("ignores a check for another id", () => {
     assert.deepEqual(decideProbe(check({ boundTo: OTHER }), OWN, { scanning: true, bound: false }), { answer: false, list: "none" });
+  });
+});
+
+describe("where the check is broadcast", () => {
+  const nic = (address: string, netmask: string, over: Partial<{ family: string | number; internal: boolean }> = {}) => ({
+    address, netmask, family: "IPv4", internal: false, ...over,
+  });
+
+  test("EACH INTERFACE'S DIRECTED BROADCAST, not the limited one macOS refuses", () => {
+    assert.deepEqual(
+      broadcastAddresses({ en0: [nic("192.168.1.50", "255.255.255.0")], en1: [nic("10.0.0.7", "255.255.255.0")] }),
+      ["10.0.0.255", "192.168.1.255"],
+    );
+  });
+
+  test("skips loopback, host routes, IPv6, and repeats", () => {
+    assert.deepEqual(
+      broadcastAddresses({
+        lo0: [nic("127.0.0.1", "255.0.0.0", { internal: true })],
+        utun4: [nic("10.0.0.9", "255.255.255.255")],
+        en0: [nic("192.168.1.50", "255.255.255.0"), { address: "fe80::1", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", internal: false }],
+        bridge0: [nic("192.168.1.51", "255.255.255.0")],
+      }),
+      ["192.168.1.255"],
+    );
+  });
+
+  test("an older Node's numeric family still counts", () => {
+    assert.deepEqual(broadcastAddresses({ eth0: [nic("192.168.1.50", "255.255.255.0", { family: 4 })] }), ["192.168.1.255"]);
+  });
+
+  test("with no usable interface, the limited broadcast", () => {
+    assert.deepEqual(broadcastAddresses({}), ["255.255.255.255"]);
   });
 });
