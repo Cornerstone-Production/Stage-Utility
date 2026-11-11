@@ -166,6 +166,9 @@ function sendCheck(): void {
       sendFailing = true;
       check = { state: "failed", at: Date.now(), reason };
       report();
+      // Still flagged, and the only way a flag clears is a round that goes out:
+      // keep trying on the same slow schedule rather than stopping here for good.
+      scheduleRecheck();
       return;
     }
     sendFailing = false;
@@ -219,6 +222,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
   socket = sock;
   current = opts;
   serverId = opts.serverId;
+  sendFailing = false;
   ownCheckId = `server-check-${randomBytes(6).toString("hex")}`;
   resetCheck({ state: "off" });
 

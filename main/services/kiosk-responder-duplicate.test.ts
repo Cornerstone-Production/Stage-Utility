@@ -237,3 +237,29 @@ describe("this server's own check, heard back", () => {
     assert.equal(latest().duplicates.length, 0, "this server took its own check for another server's");
   });
 });
+
+describe("a check that cannot be sent while something is flagged", () => {
+  test("keeps trying on the re-check schedule, so the flag can still clear", async () => {
+    stopKioskResponder();
+    identities.length = 0;
+    startKioskResponder({
+      serverId: OWN,
+      serverName: "This box",
+      url: () => "http://192.0.2.50:8788",
+      port: responderPort,
+      ownMacs: () => new Set([THIS_MAC]),
+      // A name that never resolves: every send fails.
+      probeTo: { address: "no-such-host.invalid", port: peerPort },
+      recheckMs: RECHECK_MS,
+      replyWindowMs: WINDOW_MS,
+      onIdentity: (i) => identities.push(i),
+    });
+    await until("the check to fail", () => latest()?.check.state === "failed");
+    peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: OWN, check: true }), responderPort, "127.0.0.1");
+    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    const failedAt = () => new Set(identities.filter((i) => i.check.state === "failed").map((i) => i.check.at)).size;
+    const before = failedAt();
+    await until("further attempts", () => failedAt() >= before + 2, RECHECK_MS * 20);
+    assert.ok(logged.filter((l) => l.includes("could not send the duplicate-id check")).length === 1, "a run of failed sends was not one line");
+  });
+});
