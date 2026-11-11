@@ -415,7 +415,7 @@ class means for backups.
 | `home-snoozes.json` | runtime | What is snoozed on Home's [Needs attention](../features/operator-app.md#needs-attention); cleared when a service starts |
 | `host-names-seen.json` | runtime | Every host name the server has been reached by |
 | `host-names.json` | config | The host names Settings > Advanced > Host names accepts or has dismissed |
-| `kiosk-devices.json` | config | Which device drives which screen |
+| `kiosk-devices.json` | config | Which device drives which screen. Bindings are to this server's id: a restore writes a config's only when it takes the config's id, and one that keeps this server's id but brings the config's screens releases these (see [Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)) |
 | `layout-groups.json` | config | Reusable object groups for the layout editor |
 | `layout-templates.json` | config | Saved custom layouts |
 | `messages.json` | runtime | The day's [stage messages](#stage-messages) |
@@ -433,7 +433,7 @@ class means for backups.
 | `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
-| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
+| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone, and `serverId`, the id kiosks and Mac outputs bind to, which a restore keeps unless told otherwise |
 | `signals.json` | runtime | The values the Companion module reads |
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |

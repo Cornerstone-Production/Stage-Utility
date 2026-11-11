@@ -30,6 +30,10 @@ export interface ConfirmOptions {
     detail?: string;
     /** The confirm button's label while the box is ticked. */
     confirmLabel?: string;
+    /** A line under the box while it is ticked, or while it is not: what that
+     *  answer does beyond what the label says. */
+    whenChecked?: string;
+    whenUnchecked?: string;
   };
 }
 
@@ -127,6 +131,11 @@ export function ConfirmHost() {
                 {state.checkbox.detail && <span className="block text-caption1 text-fg-muted">{state.checkbox.detail}</span>}
               </span>
             </label>
+          )}
+          {state?.checkbox && (checked ? state.checkbox.whenChecked : state.checkbox.whenUnchecked) && (
+            <p className="mb-3 border-l-2 border-line-strong pl-2.5 text-caption1 text-fg-muted">
+              {checked ? state.checkbox.whenChecked : state.checkbox.whenUnchecked}
+            </p>
           )}
           <div className="flex items-center justify-end gap-2 mt-2">
             <AlertDialogPrimitive.Cancel asChild>

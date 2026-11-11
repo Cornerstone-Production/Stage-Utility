@@ -67,6 +67,8 @@ const GOOD: Record<string, unknown> = {
   "servicecue-publish.json": { enabled: false, url: "https://cue.example.org" },
   "servicecue-roles.json": [{ id: "role-audio", name: "Audio", members: ["Audio"] }],
   "settings.json": {
+    // The id of the server the backup was made on: its screen bindings are to it.
+    serverId: "5e0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b",
     appName: "Stage Utility",
     accentColor: "#2e6691",
     planMode: "auto",
@@ -203,9 +205,10 @@ describe("config restore checks", () => {
   test("a backup this app made restores unchanged", async () => {
     const bundle = await configSnapshot.build();
     assert.deepEqual(Object.keys(bundle.files).sort(), configFiles().slice().sort(), "build() should carry every fixture");
-    // Restored onto an empty box, so what lands is the bundle's alone.
+    // Restored onto an empty box, so what lands is the bundle's alone: the box
+    // that replaces the one the backup came from, so its id and bindings come too.
     for (const name of configFiles()) await fs.rm(path.join(TMP, name), { force: true });
-    const applied = await configSnapshot.apply(JSON.parse(JSON.stringify(bundle)));
+    const applied = await configSnapshot.apply(JSON.parse(JSON.stringify(bundle)), { replacesOriginal: true });
     assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
     for (const name of configFiles()) {
       const onDisk = (await readOnDisk(name)) as Record<string, unknown>;
@@ -217,6 +220,9 @@ describe("config restore checks", () => {
 
   test("a restore cannot write the secrets file or the key, nor a credential into a config file", async () => {
     await fs.writeFile(path.join(TMP, "secrets.bin"), "sealed", "utf8");
+    // No bindings on this box, so the restore has none to release (see
+    // config-snapshot-server-id.test.ts) and writes only what this test is about.
+    await fs.rm(path.join(TMP, "kiosk-devices.json"), { force: true });
     const applied = await configSnapshot.apply(
       bundleOf({
         "secrets.bin": { forged: true },
@@ -324,7 +330,11 @@ describe("config restore checks", () => {
   });
 
   test("a bound device restored without its MAC list gets an empty one", async () => {
-    await configSnapshot.apply(bundleOf({ "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }));
+    // With the id of the server the bindings are to, taken: bindings are written only then.
+    await configSnapshot.apply(
+      bundleOf({ "settings.json": { serverId: "5e0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" }, "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }),
+      { replacesOriginal: true },
+    );
     assert.deepEqual(await readOnDisk("kiosk-devices.json"), [{ id: "dev-1", outputId: "1", macs: [], token: "" }]);
   });
 

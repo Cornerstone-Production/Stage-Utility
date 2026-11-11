@@ -243,7 +243,7 @@ export const ADVANCED_SETTINGS = [
     card: "Backups",
     name: "Config snapshot",
     description:
-      "Save, download, or restore your full configuration: views, custom layouts, integration hosts, ports and names, branding, and display options. Secrets are not included, so the file is safe to store. Upload and restore overwrites the current config and restarts the server. Saved snapshots are named copies kept on this server.",
+      "Save, download, or restore your full configuration: views, custom layouts, integration hosts, ports and names, branding, and display options. Secrets are not included, so the file is safe to store. Upload and restore overwrites the current config and restarts the server; a config saved on another server asks whether to use its server id. Saved snapshots are named copies kept on this server.",
     keywords: [
       "backup", "restore", "export", "import", "download", "upload", "recall", "saved snapshots", "named",
       "settings", "json", "save current",

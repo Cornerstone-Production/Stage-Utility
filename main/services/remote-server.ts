@@ -715,9 +715,9 @@ export class RemoteServer {
    * Bring up the kiosk discovery responder, if it is switched on.
    *
    * Off by default — see kioskDiscovery in settings-store.ts for why a fresh
-   * install must not answer. The server id is minted on first use and then never
-   * rewritten: every binding on every device refers to it, so changing it would
-   * orphan the lot.
+   * install must not answer. The server id is minted on first use and changes
+   * only when the operator says so (see serverId in settings-store.ts): every
+   * binding on every device refers to it.
    */
   private async startDiscovery(): Promise<void> {
     try {
@@ -727,7 +727,9 @@ export class RemoteServer {
       if (!serverId) {
         serverId = randomUUID();
         await settingsStore.patch({ serverId });
+        console.log(`[remote-server] made this server's id ${serverId}; screens set up here will bind to it`);
       }
+      stageController.setServerIdentity({ ...stageController.getState().serverIdentity, id: serverId });
       startKioskResponder({
         serverId,
         serverName: settings.appName || "Stage Utility",

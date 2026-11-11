@@ -183,6 +183,13 @@ export interface SnapshotMeta {
   createdAt: string;
   appVersion: string;
   fileCount: number;
+  /** The id of the server it was saved on, or null. A recall asks whether to take
+   *  it when it is not this server's own. */
+  serverId: string | null;
+  /** Whether it brings screens (settings.json) and screen bindings
+   *  (kiosk-devices.json): what decides whether a recall releases this server's. */
+  carriesScreens: boolean;
+  carriesBindings: boolean;
 }
 
 /** This build's version, for stamping a bundle. Exported so a view export
@@ -205,8 +212,6 @@ interface LiveSettings {
   idFloors: Record<string, unknown> | null;
   /** This server's own id, or null when it has none or it cannot be read. */
   serverId: string | null;
-  /** False when the file exists and does not parse: nothing in it is known. */
-  readable: boolean;
 }
 
 /** A server id read from a settings blob: a non-empty string, or null. */
@@ -233,42 +238,114 @@ async function liveSettings(dest: string): Promise<LiveSettings> {
     // No live settings.json at all — a restore onto a fresh install. Not a
     // failure: there are simply no spent ids to carry forward, and no id of its
     // own to keep. Anything else is rethrown rather than treated as "nothing there".
-    if (isNotFound(err)) return { idFloors: null, serverId: null, readable: true };
+    if (isNotFound(err)) return { idFloors: null, serverId: null };
     throw err;
   }
   try {
     const parsed = JSON.parse(raw) as FloorsOnly;
-    return { idFloors: parsed.idFloors ?? {}, serverId: serverIdIn(parsed), readable: true };
+    return { idFloors: parsed.idFloors ?? {}, serverId: serverIdIn(parsed) };
   } catch {
     // The file exists but does not parse. This restore is about to replace it
-    // anyway, and there is no floor to be read out of it — that IS the answer
-    // here, not a swallowed error. Said out loud because it means ids issued
-    // since the snapshot was taken could be handed out again.
+    // anyway, and there is no floor or id to be read out of it — that IS the
+    // answer here, not a swallowed error. Said out loud because it means ids
+    // issued since the snapshot was taken could be handed out again, and that
+    // this server's own id is gone unless the config's is taken.
     console.warn(
-      "[config-snapshot] the existing settings.json does not parse, so its id floors could not be carried forward — ids created since this snapshot may be reissued",
+      "[config-snapshot] the existing settings.json does not parse, so its id floors and server id could not be carried forward — ids created since this snapshot may be reissued, and unless the config's server id is taken a new one is made when discovery starts",
     );
-    return { idFloors: null, serverId: null, readable: false };
+    return { idFloors: null, serverId: null };
   }
 }
 
-/**
- * The server id a restored settings.json carries.
- *
- * A config with no id says nothing about this server's identity, so this server
- * keeps its own. Written verbatim, the missing key used to leave settings.json
- * with no id at all; the next start minted a new one, and every screen bound to
- * this server's id was orphaned by a restore that was never about screens.
- */
-export function serverIdFor(configId: string | null, ownId: string | null): string | null {
-  return configId ?? ownId;
+/** What the operator chose about the server the config was saved on. */
+export interface RestoreOptions {
+  /** This box replaces that server: take its server id, and with it its screens
+   *  and Mac outputs. Anything other than an explicit yes keeps this server's own. */
+  replacesOriginal: boolean;
 }
 
-/** settings.json as a restore writes it: id floors merged, server id decided. */
-function restoredSettings(contents: object, live: LiveSettings, files: Record<string, unknown>): unknown {
+/** The default for every caller that does not ask: a second box that also runs
+ *  must never come up answering discovery as the first. */
+const KEEP_OWN_ID: RestoreOptions = { replacesOriginal: false };
+
+/** The screen bindings a restore may leave as they are. Bindings are to a server
+ *  id: they go wherever the config's id goes. */
+const BINDINGS_FILE = "kiosk-devices.json";
+
+/**
+ * Whether a restore takes the config's server id, and with it the config's screen
+ * bindings (kiosk-devices.json). The one decision both follow.
+ *
+ * Kiosks and Mac output helpers bind to a server by this id. The config's id is
+ * the id of the server it was saved on, so writing it onto a second box that also
+ * runs makes two servers answer discovery as one, and every screen bound to it
+ * flips between them. It is right only for this server's own config, or for a box
+ * that REPLACES that server, which only the operator knows.
+ *
+ * A config with no id says nothing about identity: this server keeps its own.
+ * Written verbatim, the missing key used to leave settings.json with no id at all:
+ * the next start minted a new one, and every screen bound here was orphaned.
+ */
+export function takesConfigId(configId: string | null, ownId: string | null, replacesOriginal: boolean): boolean {
+  return configId !== null && (configId === ownId || replacesOriginal);
+}
+
+/**
+ * Release every screen binding on this server, for a restore that keeps its id
+ * but writes the config's screens: a device bound to display-2 here would
+ * otherwise show the config's display-2, whatever that is, and say nothing. Each
+ * released device probes as not set up here (decideProbe rule 3) and shows under
+ * Not set up yet, to be set up again. Each is named on [config-snapshot].
+ *
+ * Bindings that cannot be read are left as they are and said so: releasing means
+ * writing over the file, and a file nobody can read is not one to overwrite.
+ */
+async function releaseBindings(toRestore: Map<string, NonNullable<unknown>>): Promise<void> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(getUserDataPath(), BINDINGS_FILE), "utf8");
+  } catch (err) {
+    if (isNotFound(err)) return;
+    throw err;
+  }
+  let bound: unknown;
+  try {
+    bound = JSON.parse(raw);
+  } catch {
+    bound = null;
+  }
+  if (!Array.isArray(bound)) {
+    console.warn(`[config-snapshot] restore: this server's screen bindings (${BINDINGS_FILE}) could not be read, so they were not released; any screen still bound may show the config's screen of the same id`);
+    return;
+  }
+  if (bound.length === 0) return;
+  for (const d of bound as { id?: unknown; label?: unknown; outputId?: unknown }[]) {
+    const label = typeof d?.label === "string" && d.label ? ` ("${scrub(d.label)}")` : "";
+    console.log(
+      `[config-snapshot] restore: released ${scrub(String(d?.id))}${label} from screen ${scrub(String(d?.outputId))}: this server's screens are now the config's, so set it up again from Screens`,
+    );
+  }
+  toRestore.set(BINDINGS_FILE, []);
+}
+
+/** settings.json as a restore writes it: id floors merged, server id decided, and
+ *  the decision said on [config-snapshot] whenever the two ids differ. */
+function restoredSettings(contents: object, live: LiveSettings, files: Record<string, unknown>, take: boolean): unknown {
   const merged = mergeIdFloors(contents, live.idFloors, files) as Record<string, unknown>;
-  const serverId = serverIdFor(serverIdIn(contents), live.serverId);
-  // Absent stays absent: a fresh box mints its id when discovery first starts.
-  if (serverId === null) return merged;
+  const configId = serverIdIn(contents);
+  const serverId = take ? configId : live.serverId;
+  if (configId !== null && configId !== live.serverId) {
+    const own = scrub(live.serverId ?? "none");
+    console.log(
+      take
+        ? `[config-snapshot] restore: took the config's server id ${scrub(configId)} in place of ${own}, as its replacement; screens set up on that server follow this one`
+        : `[config-snapshot] restore: kept this server's id ${own}; the config's ${scrub(configId)} stays with the server it came from`,
+    );
+  }
+  // null is "none yet": the server mints one when discovery first starts. A
+  // config with no key and no id to keep is left as it came, so a restore of a
+  // config this server made writes back exactly what it read.
+  if (serverId === null && !Object.hasOwn(merged, "serverId")) return merged;
   return { ...merged, serverId };
 }
 
@@ -474,7 +551,7 @@ class ConfigSnapshotService {
    * one of them has passed its check (see checkBundle). Returns what was
    * applied. Caller restarts to apply.
    */
-  async apply(bundle: unknown): Promise<string[]> {
+  async apply(bundle: unknown, opts: RestoreOptions = KEEP_OWN_ID): Promise<string[]> {
     this.validate(bundle);
     // Every file and image checked before anything is paused, cleared or
     // written: a refusal leaves the box exactly as it was.
@@ -488,7 +565,7 @@ class ConfigSnapshotService {
     // at its source rather than trying to win it.
     const resumeBackgroundWriters = await pauseBackgroundWriters();
     try {
-      const applied = await this.writeSnapshot(bundle, checked);
+      const applied = await this.writeSnapshot(bundle, checked, opts);
       console.log(`[config-snapshot] restore accepted: ${scrub(applied.join(", "), 600)}`);
       return applied;
     } catch (err) {
@@ -646,9 +723,28 @@ class ConfigSnapshotService {
   }
 
   /** The write half of `apply`, split out so the resume can wrap all of it. */
-  private async writeSnapshot(bundle: ConfigSnapshot, checked: CheckedBundle): Promise<string[]> {
+  private async writeSnapshot(bundle: ConfigSnapshot, checked: CheckedBundle, opts: RestoreOptions): Promise<string[]> {
     const applied: string[] = [];
-    const toRestore = checked.files;
+    const toRestore = new Map(checked.files);
+    // Read once, before anything is written, because two files depend on it:
+    // settings.json takes its server id from it, and the screen bindings follow
+    // whichever id that turns out to be.
+    const configSettings = toRestore.get("settings.json");
+    const live = configSettings ? await liveSettings(path.join(getUserDataPath(), "settings.json")) : null;
+    const take = live !== null && takesConfigId(serverIdIn(configSettings), live.serverId, opts.replacesOriginal);
+    if (!take) {
+      // The config's bindings are to the server it was saved on, or to none it
+      // names: never this one's. And once the config's screens replace this
+      // server's, its own bindings point at screen ids (display-N, counters that
+      // collide across servers) that are now somebody else's screens.
+      toRestore.delete(BINDINGS_FILE);
+      if (configSettings) await releaseBindings(toRestore);
+    } else if (live && serverIdIn(configSettings) !== live.serverId && !toRestore.has(BINDINGS_FILE)) {
+      // Taken from another server that never set up a device: there are no
+      // bindings of its to write, but its screens still replace this server's,
+      // so this server's bindings name screens that are no longer theirs.
+      await releaseBindings(toRestore);
+    }
     // A bundle carries addresses and no secrets, so a stored credential would
     // follow whatever address it names. Cleared before anything is written: a
     // write that then fails costs the operator a password typed again, where
@@ -660,7 +756,7 @@ class ConfigSnapshotService {
       const dest = path.join(getUserDataPath(), name);
       const toWrite =
         name === "settings.json" && typeof contents === "object" && !Array.isArray(contents)
-          ? restoredSettings(contents, await liveSettings(dest), bundle.files)
+          ? restoredSettings(contents, live!, bundle.files, take)
           : contents;
       // Atomic, for the reason data-store.ts spells out: a plain writeFile
       // truncates in place, so a power cut here leaves a short settings.json that
@@ -685,6 +781,9 @@ class ConfigSnapshotService {
       createdAt: b.createdAt,
       appVersion: b.appVersion,
       fileCount: Object.keys(b.files ?? {}).length,
+      serverId: serverIdIn(b.files?.["settings.json"]),
+      carriesScreens: Object.hasOwn(b.files ?? {}, "settings.json"),
+      carriesBindings: Object.hasOwn(b.files ?? {}, BINDINGS_FILE),
     };
   }
 
@@ -727,8 +826,8 @@ class ConfigSnapshotService {
   }
 
   /** Apply a saved snapshot by id (caller restarts after). */
-  async recall(id: string): Promise<string[]> {
-    return this.apply(await this.get(id));
+  async recall(id: string, opts: RestoreOptions = KEEP_OWN_ID): Promise<string[]> {
+    return this.apply(await this.get(id), opts);
   }
 }
 

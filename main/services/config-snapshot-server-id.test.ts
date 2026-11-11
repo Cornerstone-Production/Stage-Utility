@@ -21,12 +21,16 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-restore-id-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { configSnapshot } = await import("./config-snapshot.js");
+const { configSnapshot, takesConfigId } = await import("./config-snapshot.js");
 const { livePoller } = await import("./live-poller.js");
 const { stageController } = await import("./stage-controller.js");
 
 const SETTINGS = path.join(TMP, "settings.json");
+const DEVICES = path.join(TMP, "kiosk-devices.json");
 const OWN = "3f2a9c1e-5b7d-4e21-9a0c-6d8e2f41b7a3";
+const OTHER = "7c1e04ab-92f3-4d6a-b1e8-0f5c3a9d2e64";
+const KEEP = { replacesOriginal: false };
+const REPLACE = { replacesOriginal: true };
 
 function snapshotOf(files: Record<string, unknown>) {
   return { kind: "stage-utility-config", version: 1, createdAt: "2026-11-11T00:00:00.000Z", files };
@@ -83,5 +87,187 @@ describe("a restore of a config with no server id", () => {
     await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live" }), "utf8");
     await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored" } }));
     assert.equal(await writtenServerId() ?? null, null);
+  });
+});
+
+describe("takesConfigId: whose id (and bindings) a restore keeps", () => {
+  // [config's id, this server's id, replaces the original?] -> takes the config's
+  const CASES: [string | null, string | null, boolean, boolean][] = [
+    [OTHER, OWN, false, false],
+    [OTHER, OWN, true, true],
+    [OWN, OWN, false, true],
+    [OWN, OWN, true, true],
+    [null, OWN, false, false],
+    [null, OWN, true, false],
+    [OTHER, null, false, false],
+    [OTHER, null, true, true],
+    [null, null, true, false],
+  ];
+  for (const [config, own, replaces, want] of CASES) {
+    it(`config ${config?.slice(0, 4) ?? "none"}, own ${own?.slice(0, 4) ?? "none"}, ${replaces ? "replacing" : "not replacing"} -> ${want ? "take" : "keep"}`, () => {
+      assert.equal(takesConfigId(config, own, replaces), want);
+    });
+  }
+});
+
+describe("a restore of a config saved on another server", () => {
+  const ownDevices = [{ id: "dev-own", token: "", outputId: "1", label: "Here", macs: [] }];
+  const theirDevices = [{ id: "dev-theirs", token: "", outputId: "1", label: "There", macs: [] }];
+
+  async function restore(opts: { replacesOriginal: boolean }) {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await fs.writeFile(DEVICES, JSON.stringify(ownDevices), "utf8");
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER }, "kiosk-devices.json": theirDevices }),
+      opts,
+    );
+  }
+
+  afterEach(async () => {
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(DEVICES, { force: true });
+  });
+
+  it("KEEPS THIS SERVER'S ID unless told it replaces the original", async () => {
+    await restore(KEEP);
+    assert.equal(
+      await writtenServerId(),
+      OWN,
+      "the restore took the other server's id: both now answer discovery as one, and its screens flip between them",
+    );
+  });
+
+  it("keeps this server's id when no option is given at all", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER } }));
+    assert.equal(await writtenServerId(), OWN);
+  });
+
+  it("takes the config's id when told it replaces the original", async () => {
+    await restore(REPLACE);
+    assert.equal(await writtenServerId(), OTHER);
+  });
+
+  it("writes the config's screen bindings when it replaces the original", async () => {
+    await restore(REPLACE);
+    assert.deepEqual((JSON.parse(await fs.readFile(DEVICES, "utf8")) as { id: string }[]).map((d) => d.id), ["dev-theirs"]);
+  });
+
+  it("writes no id when this server's settings.json cannot be read and it is not replacing", async () => {
+    await fs.writeFile(SETTINGS, "{ not json", "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER } }), KEEP);
+    assert.equal(await writtenServerId() ?? null, null, "an unreadable own id must not become the other server's");
+  });
+
+  it("recall passes the choice through, and a saved snapshot lists its server id", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Saved", serverId: OTHER }), "utf8");
+    const meta = await configSnapshot.save("from the other box");
+    assert.equal(meta.serverId, OTHER);
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await configSnapshot.recall(meta.id, KEEP);
+    assert.equal(await writtenServerId(), OWN);
+    quiet();
+    await configSnapshot.recall(meta.id, REPLACE);
+    assert.equal(await writtenServerId(), OTHER);
+    await configSnapshot.delete(meta.id);
+  });
+});
+
+describe("screen bindings on a restore", () => {
+  // Screen ids are counters (display-N) and collide across servers. A binding is
+  // a device pointed at a screen id on THIS server; once the config's screens
+  // replace this server's, that id is somebody else's screen.
+  const lobbyPi = [{ id: "pi-lobby", token: "", outputId: "display-2", label: "Lobby Pi", macs: [] }];
+  const theirPi = [{ id: "pi-theirs", token: "", outputId: "display-2", label: "Their Pi", macs: [] }];
+  const ourScreens = [{ id: "display-2", name: "Lobby TV", viewId: null }];
+  const theirScreens = [{ id: "display-2", name: "Left Mic Display", viewId: null }];
+  const logged: string[] = [];
+  const realLog = console.log;
+
+  async function live(devices: unknown[]) {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN, outputs: ourScreens }), "utf8");
+    await fs.writeFile(DEVICES, JSON.stringify(devices), "utf8");
+  }
+  const bindings = async () => (JSON.parse(await fs.readFile(DEVICES, "utf8")) as { id: string }[]).map((d) => d.id);
+
+  afterEach(async () => {
+    console.log = realLog;
+    logged.length = 0;
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(DEVICES, { force: true });
+  });
+
+  it("KEEPING THIS SERVER'S ID RELEASES ITS BINDINGS: the Lobby Pi does not end up on the config's display-2", async () => {
+    await live(lobbyPi);
+    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER, outputs: theirScreens }, "kiosk-devices.json": theirPi }),
+      KEEP,
+    );
+    assert.deepEqual(await bindings(), [], "the Lobby Pi is still bound to display-2, which is now the config's Left Mic Display");
+    assert.ok(
+      logged.some((l) => l.includes("[config-snapshot] restore: released pi-lobby") && l.includes("display-2")),
+      `no [config-snapshot] line named the released device: ${JSON.stringify(logged)}`,
+    );
+  });
+
+  it("A CONFIG WITH NO SERVER ID never writes its bindings, and releases this server's", async () => {
+    await live(lobbyPi);
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", outputs: theirScreens }, "kiosk-devices.json": theirPi }),
+      REPLACE,
+    );
+    assert.equal(await writtenServerId(), OWN);
+    assert.deepEqual(await bindings(), [], "bindings from a config that names no server were written beside this server's id");
+  });
+
+  it("A BUNDLE WITH NO settings.json never writes its bindings, and leaves this server's alone", async () => {
+    // Its screens are not restored, so this server's screens and their bindings
+    // still match; the bundle's bindings are to a server it does not name.
+    await live(lobbyPi);
+    await configSnapshot.apply(snapshotOf({ "kiosk-devices.json": theirPi }), REPLACE);
+    assert.deepEqual(await bindings(), ["pi-lobby"]);
+  });
+
+  it("TAKING ANOTHER SERVER'S ID WITH NO BINDINGS IN THE CONFIG releases this server's", async () => {
+    // The server the config came from never set up a device, so the bundle has no
+    // kiosk-devices.json. Its screens still replace this server's, and the Lobby
+    // Pi would otherwise land on the config's display-2.
+    await live(lobbyPi);
+    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER, outputs: theirScreens } }),
+      REPLACE,
+    );
+    assert.equal(await writtenServerId(), OTHER);
+    assert.deepEqual(await bindings(), [], "the Lobby Pi is still bound to display-2, which is now the config's Left Mic Display");
+    assert.ok(logged.some((l) => l.includes("[config-snapshot] restore: released pi-lobby")), JSON.stringify(logged));
+  });
+
+  it("this server's own config with no bindings in it leaves this server's alone", async () => {
+    // Same id, same screens: the bindings still name the right ones.
+    await live(lobbyPi);
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OWN, outputs: ourScreens } }), KEEP);
+    assert.deepEqual(await bindings(), ["pi-lobby"]);
+  });
+
+  it("taking the config's id takes its bindings", async () => {
+    await live(lobbyPi);
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER, outputs: theirScreens }, "kiosk-devices.json": theirPi }),
+      REPLACE,
+    );
+    assert.deepEqual(await bindings(), ["pi-theirs"]);
+  });
+
+  it("this server's own config restores its own bindings", async () => {
+    await live([]);
+    await configSnapshot.apply(
+      snapshotOf({ "settings.json": { appName: "Restored", serverId: OWN, outputs: ourScreens }, "kiosk-devices.json": lobbyPi }),
+      KEEP,
+    );
+    assert.deepEqual(await bindings(), ["pi-lobby"]);
   });
 });

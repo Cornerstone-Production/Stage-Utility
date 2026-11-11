@@ -104,6 +104,7 @@ import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
 import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
+import type { ServerIdentity } from "../types/kiosk.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
@@ -442,6 +443,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    serverIdentity: { id: null },
     autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
@@ -717,6 +719,9 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      // Read-only here: minted by discovery (remote-server.startDiscovery), which
+      // reports it through setServerIdentity.
+      serverIdentity: { ...this.state.serverIdentity, id: settings.serverId ?? null },
       autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
@@ -3192,6 +3197,14 @@ export class StageController {
     await settingsStore.patch({ kioskDiscovery: on });
     this.broadcast();
     return this.state;
+  }
+
+  /** This server's id and what discovery knows about it. Broadcast only when it
+   *  changes, so a responder reporting the same thing twice costs nothing. */
+  setServerIdentity(next: ServerIdentity): void {
+    if (JSON.stringify(next) === JSON.stringify(this.state.serverIdentity)) return;
+    this.state = { ...this.state, serverIdentity: next };
+    this.broadcast();
   }
 
   /** Let Mac output helpers and Windows kiosks update themselves, or stop them.

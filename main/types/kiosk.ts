@@ -147,6 +147,17 @@ export interface DiscoveryReply {
   claimed?: boolean;
 }
 
+/**
+ * This server's identity on the discovery port, as the operator sees it.
+ *
+ * `id` is what every kiosk and Mac output binds to (settings.json `serverId`),
+ * null until discovery first starts and mints one. A restore that brings another
+ * server's config asks whether to take that server's id only when the two differ.
+ */
+export interface ServerIdentity {
+  id: string | null;
+}
+
 /** The default discovery port. Adjustable — AV gear is fond of odd UDP ports,
  *  and a collision should be a settings change rather than a rebuild. */
 export const DEFAULT_DISCOVERY_PORT = 8789;
