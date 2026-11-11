@@ -16,7 +16,7 @@
 // wait into a visible one.
 
 import type { ReleaseInfo } from "./release-check.js";
-import { compareTags, parseTag } from "../release-tags.js";
+import { compareTags, parseTag, releaseTagOf } from "../release-tags.js";
 
 /** The archive name build-artifacts.sh publishes for a platform. */
 export function platformAsset(version: string, platform: NodeJS.Platform, arch: string): string | null {
@@ -35,8 +35,8 @@ export function tarballInstallable(
   platform: NodeJS.Platform,
   arch: string,
 ): boolean {
-  const version = release.tag.replace(/^v/, "");
-  const want = platformAsset(version, platform, arch);
+  const tag = releaseTagOf(release.tag);
+  const want = tag && platformAsset(tag.slice(1), platform, arch);
   if (!want) return false;
   // Exact membership, including the empty case: a release with no archives
   // attached is precisely the window this exists for — published, not yet
@@ -53,7 +53,8 @@ export function tarballInstallable(
  */
 export function homebrewInstallable(release: ReleaseInfo, formulaVersion: string | null): boolean {
   if (!formulaVersion) return true; // could not read the tap — do not invent a block
-  const formula = parseTag(`v${formulaVersion.replace(/^v/, "")}`);
+  const formulaTag = releaseTagOf(formulaVersion);
+  const formula = formulaTag ? parseTag(formulaTag) : null;
   const rel = parseTag(release.tag);
   if (!formula || !rel) return true;
   // The same comparator the rest of the updater orders releases with, so the

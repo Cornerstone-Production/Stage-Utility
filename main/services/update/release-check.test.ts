@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fetchReleases, packagedUpdateStatus, parseReleases, clearReleaseCache } from "./release-check.js";
+import { fetchReleaseByTag, fetchReleases, packagedUpdateStatus, parseReleases, clearReleaseCache } from "./release-check.js";
 
 // Shaped like the GitHub releases API: newest first, one object per release.
 // `prerelease` is here because GitHub sends it, not because it is read — the
@@ -318,5 +318,66 @@ describe("conditional requests, so polling does not spend the quota", () => {
     // Nothing to assert beyond it not throwing: the behaviour is covered above,
     // and this pins that the escape hatch a "check now" needs exists.
     assert.ok(true);
+  });
+});
+
+describe("fetchReleaseByTag, for What's new", () => {
+  const headers = (h: Record<string, string>) => ({ get: (n: string) => h[n.toLowerCase()] ?? null });
+
+  it("asks for exactly that tag and returns its release", async () => {
+    clearReleaseCache();
+    const urls: string[] = [];
+    const r = await fetchReleaseByTag("v1.9.4", async (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => gh("v1.9.4") };
+    });
+    assert.equal(r?.tag, "v1.9.4");
+    assert.deepEqual(urls, ["https://api.github.com/repos/Cornerstone-Production/Stage-Utility/releases/tags/v1.9.4"]);
+  });
+
+  it("a 404 is no release, not a failure", async () => {
+    clearReleaseCache();
+    assert.equal(await fetchReleaseByTag("v1.9.4", async () => ({ ok: false, status: 404, json: async () => ({}) })), null);
+  });
+
+  it("any other failure throws, saying a quota is a quota", async () => {
+    clearReleaseCache();
+    await assert.rejects(
+      fetchReleaseByTag("v1.9.4", async () => ({ ok: false, status: 500, json: async () => ({}) })),
+      /GitHub answered 500/,
+    );
+    await assert.rejects(
+      fetchReleaseByTag("v1.9.4", async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+        headers: headers({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 600) }),
+      })),
+      /hourly limit/,
+    );
+  });
+
+  it("a body that is some other release is a failure, not that release's notes", async () => {
+    clearReleaseCache();
+    await assert.rejects(
+      fetchReleaseByTag("v1.9.4", async () => ({ ok: true, status: 200, json: async () => gh("v1.9.5") })),
+      /not the release v1\.9\.4/,
+    );
+  });
+
+  it("shares the conditional cache: a repeat sends the ETag and reads the 304 from it", async () => {
+    clearReleaseCache();
+    const sent: (string | undefined)[] = [];
+    let phase = 0;
+    const doFetch = async (_url: string, init: { headers: Record<string, string> }) => {
+      sent.push(init.headers["If-None-Match"]);
+      return phase++ === 0
+        ? { ok: true, status: 200, json: async () => gh("v1.9.4"), headers: headers({ etag: 'W/"t1"' }) }
+        : { ok: false, status: 304, json: async () => null, headers: headers({}) };
+    };
+    await fetchReleaseByTag("v1.9.4", doFetch);
+    const again = await fetchReleaseByTag("v1.9.4", doFetch);
+    assert.equal(sent[1], 'W/"t1"');
+    assert.equal(again?.tag, "v1.9.4");
   });
 });

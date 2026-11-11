@@ -222,6 +222,11 @@
   --color-accent-hover:   var(--su-accent-hover);
   --color-accent-active:  var(--su-accent-active);
   --color-accent-text:    var(--su-accent-text);
+  --color-accent-soft:        var(--su-accent-soft);
+  --color-accent-soft-hover:  var(--su-accent-soft-hover);
+  --color-accent-soft-active: var(--su-accent-soft-active);
+  --color-accent-soft-line:   var(--su-accent-soft-line);
+  --color-accent-soft-fg:     var(--su-accent-soft-fg);
   --color-on-accent:      var(--su-on-accent);
   --color-focus:          var(--su-focus);
   --color-field:          var(--su-field);
@@ -290,6 +295,17 @@
      resolves HERE, so a kiosk preview inside the light app inherits this value
      rather than an undefined one. Never use it on a light ground. */
   --su-accent-text:    color-mix(in srgb, var(--brand-accent), white 45%);
+  /* The soft accent (Button variant="soft"): the accent at low strength, for a
+     control that has to be findable without competing with the one solid accent
+     action beside it — What's new beside Update now. A fill, an inset line and
+     accent text, all derived from --su-accent so they follow Branding. The text
+     is the accent itself on a light ground; .dark and .kiosk lift it to
+     --su-accent-text, since a deep picked hex does not read on near-black. */
+  --su-accent-soft:        color-mix(in srgb, var(--su-accent), transparent 86%);
+  --su-accent-soft-hover:  color-mix(in srgb, var(--su-accent), transparent 78%);
+  --su-accent-soft-active: color-mix(in srgb, var(--su-accent), transparent 70%);
+  --su-accent-soft-line:   color-mix(in srgb, var(--su-accent), transparent 70%);
+  --su-accent-soft-fg:     var(--su-accent);
   --su-on-accent:      #ffffff;
   --su-focus:          var(--brand-accent);   /* focus ring */
   --su-field:          var(--gray-a2);  /* input / control fill */
@@ -336,6 +352,7 @@
   /* On dark, accent states lighten (not darken). */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-accent-soft-fg: var(--su-accent-text);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 4px 18px rgba(0, 0, 0, 0.40);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 14px 44px rgba(0, 0, 0, 0.55);
 }
@@ -358,6 +375,7 @@
   --su-fg-soft:        rgba(255, 255, 255, 0.82);  /* rundown Clock and Time */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-accent-soft-fg: var(--su-accent-text);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 48px rgba(0, 0, 0, 0.6);
 }

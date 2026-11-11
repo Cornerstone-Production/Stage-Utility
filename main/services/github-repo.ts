@@ -14,6 +14,13 @@ export const GITHUB_API_REPO = `https://api.github.com/repos/${REPO}`;
 /** Where a release's assets download from: `<download>/v<version>/<name>`. */
 export const GITHUB_RELEASE_DOWNLOAD = `https://github.com/${REPO}/releases/download`;
 
+/** A release's page on GitHub, or the list of them when there is no tag to
+ *  name. Where What's new sends an operator when the notes cannot be loaded. */
+export function releasePageUrl(tag: string | null): string {
+  const list = `https://github.com/${REPO}/releases`;
+  return tag ? `${list}/tag/${encodeURIComponent(tag)}` : list;
+}
+
 /** A file on a branch, raw. */
 export const GITHUB_RAW = `https://raw.githubusercontent.com/${REPO}`;
 

@@ -45,6 +45,18 @@ export function parseTag(tag: string): ParsedTag | null {
   };
 }
 
+/**
+ * The release tag a version names, with or without its leading `v`
+ * ("1.28.1" and "v1.28.1" are both "v1.28.1"), or null when it names none.
+ *
+ * `0.0.0` names none: it is what updater.ts's pkgVersion() reports when it can
+ * find no version at all, and no release has ever carried it.
+ */
+export function releaseTagOf(version: string): string | null {
+  const tag = `v${version.trim().replace(/^v/, "")}`;
+  return tag !== "v0.0.0" && parseTag(tag) ? tag : null;
+}
+
 /** Semver precedence: negative when a is older, positive when a is newer. */
 export function compareTags(a: ParsedTag, b: ParsedTag): number {
   if (a.major !== b.major) return a.major - b.major;

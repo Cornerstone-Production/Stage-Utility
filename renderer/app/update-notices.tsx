@@ -10,6 +10,7 @@ import { invoke, onNotification } from "../lib/api";
 import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import type { JustUpdated } from "@main/services/update-notices-store";
+import type { ReleaseSection } from "@main/services/update/release-notes";
 import type { UpdateNoticePayload } from "@main/services/update/announce";
 import { externKeyed } from "@main/types/extern-keyed";
 
@@ -71,77 +72,7 @@ export function UpdateNotices() {
           {fromVersion && <DialogDescription>From {fromVersion}</DialogDescription>}
         </DialogHeader>
 
-        <div className="mt-4 flex max-h-[52vh] flex-col gap-3 overflow-y-auto">
-          {/* The release's own opening words, above the lists.
-              A section heading answers "what changed"; this answers "what does
-              that mean for me" — whether there is a manual step, whether the
-              config came across, where a page went. It only exists because
-              somebody wrote it for this release, so when it is absent nothing
-              is drawn rather than an empty box. Paragraphs are split on blank
-              lines; the parser has already stripped the markdown. */}
-          {intro && (
-            <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-line bg-fill/50 px-3 py-2.5">
-              {intro.split(/\n{2,}/).map((para, i) => (
-                <p key={i} className="text-footnote leading-relaxed text-fg-muted">{para}</p>
-              ))}
-            </div>
-          )}
-
-          {notes.map((s) => {
-            // A notice is captured BEFORE the update runs, so one written by an
-            // older server is read by this code. `omitted` is simply absent
-            // there, which is not the same claim as "nothing was cut" but is
-            // the only honest thing to draw: no count rather than a wrong one.
-            const omitted = s.omitted ?? 0;
-            return (
-              // shrink-0: these are flex children of a scrolling column, and a
-              // flex child shrinks by default. Without it every section was
-              // squashed to fit the box and `overflow-hidden` clipped the rest —
-              // a four-section release rendered as four headings with one bullet
-              // each, and no scrollbar to suggest anything was missing.
-              <div key={s.section} className="shrink-0 overflow-hidden rounded-lg border border-line">
-                <div className="flex items-center gap-2 bg-fill px-3 py-2">
-                  <span aria-hidden="true" className={cn("size-1.5 rounded-sm", SECTION_TONE[s.section] ?? "bg-accent")} />
-                  <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{s.section}</span>
-                </div>
-                {s.lines.length > 0 && (
-                  <ul className="flex list-disc flex-col gap-1.5 py-2.5 pl-8 pr-3">
-                    {s.lines.map((l, i) => <li key={i} className="text-footnote text-fg-muted">{l}</li>)}
-                  </ul>
-                )}
-                {/* What this section is NOT showing. Both halves were thrown
-                    away: the notes generator's `- …and 37 more` was dropped as
-                    markdown furniture, and its held-back sentence was dropped
-                    for not being a bullet. A release with 49 features showed
-                    twelve and said nothing about the rest. */}
-                {(omitted > 0 || s.note) && (
-                  <div
-                    className={cn(
-                      "flex flex-col gap-1 px-3 pb-2.5",
-                      s.lines.length > 0 ? "pt-0" : "pt-2.5",
-                    )}
-                  >
-                    {omitted > 0 && (
-                      <p className="text-caption1 text-fg-subtle">
-                        …and {omitted} more, in the release's full changelog
-                      </p>
-                    )}
-                    {s.note?.split(/\n{2,}/).map((para, i) => (
-                      <p key={i} className="text-caption1 text-fg-subtle">{para}</p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* A checkout's changelog is commit subjects, which carry no sections. */}
-          {notes.length === 0 && lines.length > 0 && (
-            <ul className="flex shrink-0 list-disc flex-col gap-1.5 rounded-lg border border-line py-2.5 pl-8 pr-3">
-              {lines.map((l, i) => <li key={i} className="text-footnote text-fg-muted">{l}</li>)}
-            </ul>
-          )}
-        </div>
+        <ReleaseNotesBody notes={notes} lines={lines} intro={intro} className="mt-4" />
 
         <div className="mt-4 flex justify-end">
           <Button variant="accent" size="small" onClick={() => void dismiss()} disabled={dismissing}>
@@ -150,5 +81,99 @@ export function UpdateNotices() {
         </div>
       </DialogContent>
     </DialogRoot>
+  );
+}
+
+/**
+ * What a release changed, as the release dialog draws it: the opening words,
+ * then each section, or a checkout's commit subjects when there are no sections.
+ *
+ * Shared by the after-update dialog and What's new, which reopens the same
+ * notes read-only. One body rather than two, so a fix to how a section, a count
+ * or a note is drawn reaches both.
+ */
+export function ReleaseNotesBody({
+  notes,
+  lines,
+  intro,
+  className,
+}: {
+  notes: ReleaseSection[];
+  lines: string[];
+  intro?: string | null;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex max-h-[52vh] flex-col gap-3 overflow-y-auto", className)}>
+      {/* The release's own opening words, above the lists.
+          A section heading answers "what changed"; this answers "what does
+          that mean for me" — whether there is a manual step, whether the
+          config came across, where a page went. It only exists because
+          somebody wrote it for this release, so when it is absent nothing
+          is drawn rather than an empty box. Paragraphs are split on blank
+          lines; the parser has already stripped the markdown. */}
+      {intro && (
+        <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-line bg-fill/50 px-3 py-2.5">
+          {intro.split(/\n{2,}/).map((para, i) => (
+            <p key={i} className="text-footnote leading-relaxed text-fg-muted">{para}</p>
+          ))}
+        </div>
+      )}
+
+      {notes.map((s) => {
+        // A notice is captured BEFORE the update runs, so one written by an
+        // older server is read by this code. `omitted` is simply absent
+        // there, which is not the same claim as "nothing was cut" but is
+        // the only honest thing to draw: no count rather than a wrong one.
+        const omitted = s.omitted ?? 0;
+        return (
+          // shrink-0: these are flex children of a scrolling column, and a
+          // flex child shrinks by default. Without it every section was
+          // squashed to fit the box and `overflow-hidden` clipped the rest —
+          // a four-section release rendered as four headings with one bullet
+          // each, and no scrollbar to suggest anything was missing.
+          <div key={s.section} className="shrink-0 overflow-hidden rounded-lg border border-line">
+            <div className="flex items-center gap-2 bg-fill px-3 py-2">
+              <span aria-hidden="true" className={cn("size-1.5 rounded-sm", SECTION_TONE[s.section] ?? "bg-accent")} />
+              <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{s.section}</span>
+            </div>
+            {s.lines.length > 0 && (
+              <ul className="flex list-disc flex-col gap-1.5 py-2.5 pl-8 pr-3">
+                {s.lines.map((l, i) => <li key={i} className="text-footnote text-fg-muted">{l}</li>)}
+              </ul>
+            )}
+            {/* What this section is NOT showing. Both halves were thrown
+                away: the notes generator's `- …and 37 more` was dropped as
+                markdown furniture, and its held-back sentence was dropped
+                for not being a bullet. A release with 49 features showed
+                twelve and said nothing about the rest. */}
+            {(omitted > 0 || s.note) && (
+              <div
+                className={cn(
+                  "flex flex-col gap-1 px-3 pb-2.5",
+                  s.lines.length > 0 ? "pt-0" : "pt-2.5",
+                )}
+              >
+                {omitted > 0 && (
+                  <p className="text-caption1 text-fg-subtle">
+                    …and {omitted} more, in the release's full changelog
+                  </p>
+                )}
+                {s.note?.split(/\n{2,}/).map((para, i) => (
+                  <p key={i} className="text-caption1 text-fg-subtle">{para}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* A checkout's changelog is commit subjects, which carry no sections. */}
+      {notes.length === 0 && lines.length > 0 && (
+        <ul className="flex shrink-0 list-disc flex-col gap-1.5 rounded-lg border border-line py-2.5 pl-8 pr-3">
+          {lines.map((l, i) => <li key={i} className="text-footnote text-fg-muted">{l}</li>)}
+        </ul>
+      )}
+    </div>
   );
 }
