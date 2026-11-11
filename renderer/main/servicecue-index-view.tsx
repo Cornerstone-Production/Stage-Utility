@@ -8,21 +8,18 @@ import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { useOriginHref } from "../lib/back-target";
+import { ALL_COLUMNS_SLUG, slugOf, slugify } from "@main/services/servicecue-slug";
 import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
 export const ALL_COLUMNS_LAYOUT_ID = "__all__";
-export const ALL_COLUMNS_SLUG = "all-columns";
 
-/** URL-friendly slug from a name ("The Gathering" → "the-gathering"). */
-export function slugify(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
-}
-
-/** Build a pretty ServiceCue URL from names (falls back to ids when unnamed). */
-export function serviceCueUrl(typeName: string, layoutId: string, layoutName?: string): string {
-  const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slugify(layoutName ?? layoutId);
+/** Build a pretty ServiceCue URL: the service type's name, then the layout's slug
+ *  (its id when the layout is unknown). The slug is the layout's stored one, which a
+ *  rename does not change. */
+export function serviceCueUrl(typeName: string, layoutId: string, slug?: string): string {
+  const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slug ?? layoutId;
   return `/servicecue/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
 }
 
@@ -158,7 +155,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
                   </div>
                   <Tooltip label={`Open ${type.name}`}>
                     <a
-                      href={withThisPage(serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name))}
+                      href={withThisPage(serviceCueUrl(type.name, cur, slugOf(globalLayouts, cur)))}
                       className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-fill-hover"
                       aria-label={`Open ${type.name}`}
                     >

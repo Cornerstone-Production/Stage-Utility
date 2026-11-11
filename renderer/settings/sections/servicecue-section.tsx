@@ -11,6 +11,7 @@ import { resolveServiceCueSpec, computeClocks, buildServiceCueColumns, totalLeng
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { plural } from "@main/services/plural";
+import { usersMessage } from "./servicecue-layout-names";
 import { PublicLinkCard } from "./servicecue-public-link";
 import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
@@ -158,14 +159,22 @@ export function ServiceCueSection() {
   );
 
 
-  async function persist(next: ServiceCueLayout[]) {
+  /** Saves the list; true when the server took it, and the page adopts the server's list,
+   *  which carries the slugs it assigned. */
+  async function persist(next: ServiceCueLayout[]): Promise<boolean> {
     // The settings read (this page's own layouts list) has not landed yet: `layouts`
     // is still `[]` regardless of what is actually saved. Posting now would replace
     // every real layout with whatever `next` is built from that empty starting point.
-    if (!settingsRead) return;
+    if (!settingsRead) return false;
     setLayouts(next);
-    try { await invoke("servicecue:saveLayouts", { layouts: next }); }
-    catch (e) { setError(errorMessage(e)); }
+    try {
+      setLayouts(await invoke<ServiceCueLayout[]>("servicecue:saveLayouts", { layouts: next }));
+      setError(null);
+      return true;
+    } catch (e) {
+      setError(errorMessage(e));
+      return false;
+    }
   }
 
   const update = (id: string, patch: Partial<ServiceCueLayout>) =>
@@ -177,13 +186,19 @@ export function ServiceCueSection() {
     const layout: ServiceCueLayout = {
       id: uid("svl"), name: `Layout ${sortedLayouts.length + 1}`, order,
       columnRoles: roles.map((r) => r.id), // all element toggles default on
+      autoNamed: true, // its first rename moves its address; see ServiceCueLayout.autoNamed
     };
     setExpandedId(layout.id);
     persist([...layouts, layout]);
   }
 
   async function removeLayout(l: ServiceCueLayout) {
-    if (!(await confirm({ title: `Delete "${l.name}"?`, confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirm({
+      title: `Delete "${l.name}"?`,
+      message: usersMessage(l, stage.state?.views),
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     persist(layouts.filter((x) => x.id !== l.id));
   }
 
@@ -327,7 +342,7 @@ export function ServiceCueSection() {
                   >
                     <ChevronRightIcon className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
                   </button>
-                  <Input value={l.name} onChange={(e) => update(l.id, { name: e.target.value })} className="max-w-[14rem] font-medium" />
+                  <LayoutNameInput name={l.name} onCommit={(name) => update(l.id, { name })} />
                   {!open && (
                     <span className="text-caption1 text-gray-9 truncate min-w-0 hidden sm:block">
                       {(l.columnRoles ?? []).length ? (l.columnRoles ?? []).map(roleName).join(" · ") : "No columns"}
@@ -510,6 +525,35 @@ export function ServiceCueSection() {
  * Member ORDER is the priority chain — the first member with a note wins, and several
  * populated members merge in this order.
  */
+/** A layout's name. Typing edits a draft; the name is saved on blur or Enter, so a
+ *  half-typed name is never the one a pinned screen's address was built from. A name
+ *  that is blank, unchanged or refused by the server goes back to what it was. */
+function LayoutNameInput({ name, onCommit }: { name: string; onCommit: (name: string) => Promise<boolean> }) {
+  const [draft, setDraft] = useState(name);
+  useResyncOn([name], () => setDraft(name));
+  async function commit() {
+    const next = draft.trim();
+    if (!next || next === name) {
+      setDraft(name);
+      return;
+    }
+    if (!(await onCommit(next))) setDraft(name);
+  }
+  return (
+    <Input
+      value={draft}
+      aria-label="Layout name"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(name);
+      }}
+      className="max-w-[14rem] font-medium"
+    />
+  );
+}
+
 function RolesPanel({
   roles,
   categories,

@@ -77,6 +77,26 @@ view.
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
+A layout's address is its **slug**, the last part of `/servicecue/weekend/audio`.
+The slug is taken from the name when the layout is created and kept through a rename,
+so a tablet or display pinned to the address keeps its page. A layout made with **Add
+layout** starts as "Layout 1", "Layout 2" and so on, and its first rename moves its slug
+to the new name; after that the slug is fixed. An address pinned to such a layout
+before that first rename therefore stops finding it and shows the notice below.
+
+A layout saved before slugs existed, when the rundown looked layouts up by name, keeps
+the address that opened it then. Of two whose names give the same slug the first in
+order kept it, so it keeps the bare slug, and the other gets a suffix no address used
+(`audio-3`, when a layout called "Audio 2" holds `audio-2`). Two layouts never share a
+slug. A name with no ASCII letter or digit ("Звук") is addressed as `x`, then `x-2`
+and so on. An address that names no layout, because it was deleted or mistyped, shows
+`Layout "name" not found. Showing All columns.` above the All columns it falls back to.
+
+A name is saved when you leave the field or press Enter, not on each keystroke.
+Deleting a layout asks first and names the views whose **Columns** setting uses it,
+or says no display is set to it; those views go back to All columns. A tablet that
+opened the address directly is not a view, so the confirm cannot name it.
+
 ![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
 
 Each has per-element toggles for the clock, item time, song key, BPM, time

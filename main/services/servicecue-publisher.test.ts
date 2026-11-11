@@ -78,6 +78,18 @@ describe("what a cycle sends", () => {
     assert.equal(body("rundown-100-1002").isDefaultPlan, false);
   });
 
+  it("sends each layout's address and not the editor's own autoNamed flag, which the page never reads", async () => {
+    const h = await harness();
+    h.source.data.layouts = [
+      { id: "svl1", name: "Audio", slug: "audio", order: 0, columnRoles: [] },
+      { id: "svl2", name: "Layout 2", slug: "layout-2", order: 1, columnRoles: [], autoNamed: true },
+    ];
+    await publishAll(h);
+    const sent = JSON.parse(lastPut(h, "servicecue-layouts")!) as Record<string, unknown>[];
+    assert.deepEqual(sent.map((l) => l.slug), ["audio", "layout-2"]);
+    assert.deepEqual(sent.filter((l) => "autoNamed" in l).map((l) => l.id), [], "autoNamed left the building");
+  });
+
   it("sends a document again only when its text changed, and the edited one alone", async () => {
     const h = await harness();
     await publishAll(h);

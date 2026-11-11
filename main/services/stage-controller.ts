@@ -1859,7 +1859,7 @@ export class StageController {
    * no option, so there is nothing on screen to explain it.
    */
   async saveServiceCueLayouts(layouts: ServiceCueLayout[]): Promise<ServiceCueLayout[]> {
-    await serviceCueLayoutsStore.save(layouts);
+    layouts = await serviceCueLayoutsStore.save(layouts);
     const live = new Set(layouts.map((l) => l.id));
     const orphaned = this.state.views.filter(
       (v) => v.serviceCueLayoutId && !live.has(v.serviceCueLayoutId),
