@@ -18,10 +18,14 @@
 // is the backstop for when that is unavailable — a browser without SharedWorker,
 // or a worker the heartbeat had to abandon — where the old limit still bites.
 
-import { useEffect, useRef, useState } from "react";
-import { PlayIcon, ExpandIcon } from "lucide-react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { PlayIcon, ExpandIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { logToServer } from "../../lib/client-log";
+import { useLatestRef } from "../../lib/use-latest-ref";
 import { ViewPreview } from "./view-preview";
+import { LIVE_ASK_TIMEOUT_MS, type Silence } from "./use-liveness-probe";
+import type { PreviewLiveReport } from "../../main/preview-messages";
 
 /**
  * How many previews may stream at once.
@@ -44,6 +48,13 @@ const MAX_LIVE_PREVIEWS = 12;
  * preview boot while this one is still there.
  */
 const FADE_MS = 260;
+
+/**
+ * How long a new preview has to say it is live (preview-live.ts) before its card
+ * says it did not load. A preview boots the whole kiosk page and reads its state;
+ * on a Pi serving twelve of them at once that is seconds, not tens of them.
+ */
+const LOAD_TIMEOUT_MS = 10_000;
 
 /** Ids currently streaming, and everyone waiting for a slot to free up. */
 const live = new Set<symbol>();
@@ -111,12 +122,15 @@ const FOCUS_RING = (
 export function LazyPreview({
   viewId,
   outputId = null,
+  name,
   aspect,
   onExpand,
   expandLabel,
   following,
 }: {
   viewId: string;
+  /** The screen's (or view's) name, for the line /log gets when its preview fails. */
+  name: string;
   /** The Output this preview stands in for — passed straight through to
    *  ViewPreview, which documents what it is for. Null when the card is a View
    *  rather than a screen. */
@@ -145,6 +159,14 @@ export function LazyPreview({
   // Set when the operator asks for this one specifically, which jumps the queue
   // rather than leaving them with a placeholder they cannot resolve.
   const [forced, setForced] = useState(false);
+  // Bumped by Retry: a fresh iframe, in the same slot.
+  const [attempt, setAttempt] = useState(0);
+  // Set by Retry so the new frame button takes the focus Retry had, instead of
+  // letting it fall to <body> as the old preview unmounts.
+  const focusFrameAfterRetry = useRef(false);
+  // What the always-mounted status region says (see FadingPreview).
+  const [status, setStatus] = useState("");
+  const streamingRef = useLatestRef(streaming);
 
   // Only render while on screen, or within 200px of it: the margin starts a
   // preview loading before it scrolls in, so it arrives already showing, and
@@ -189,6 +211,25 @@ export function LazyPreview({
     }
 
     let cancelled = false;
+    // A preview that still has its iframe reclaims its slot HERE, synchronously,
+    // before any card that has none. That is the kept Screens page being shown
+    // again (kept-screens.tsx): hiding it destroyed every Effect, so every slot was
+    // given back while the iframes stayed. Claiming on the microtask below, as a new
+    // card does, let a card with no iframe that sits earlier on the page take a slot
+    // first, and the twelfth kept iframe stayed up past the cap. A kept card that
+    // finds the cap full all the same drops its iframe and waits like any other.
+    //
+    // (A card that was leaving when the page was hidden comes back still leaving,
+    // and goes FADE_MS later from the branch above; it is off screen and transparent
+    // until then.)
+    if (streamingRef.current) {
+      if (acquire(token)) {
+        return () => {
+          cancelled = true;
+        };
+      }
+      queueMicrotask(() => { if (!cancelled) setStreaming(false); });
+    }
     const tryClaim = () => {
       if (cancelled) return;
       if (acquire(token)) queueMicrotask(() => { if (!cancelled) setStreaming(true); });
@@ -200,7 +241,7 @@ export function LazyPreview({
       cancelled = true;
       waiting.delete(tryClaim);
     };
-  }, [visible, forced]);
+  }, [visible, forced, streamingRef]);
 
   useEffect(() => {
     const token = tokenRef.current;
@@ -209,17 +250,25 @@ export function LazyPreview({
 
   // Keyed on what ViewPreview remounts its iframe on (it keys the iframe on the
   // view and the height the aspect gives), so a card switched to another View
-  // gets a fresh FadingPreview, and with it a fresh `loaded`, rather than showing
-  // the new iframe at full opacity before it has loaded. Keying on the raw aspect
+  // gets a fresh FadingPreview, and with it a fresh `live`, rather than showing
+  // the new iframe at full opacity before it has drawn. Keying on the raw aspect
   // is the safe side of ViewPreview's rounding: an aspect change that keeps the
   // height reloads an iframe it did not have to, and never strands one hidden.
+  // Retry bumps `attempt`, which is a new iframe for the same reason.
   const preview = (
     <FadingPreview
-      key={`${viewId}:${aspect}`}
+      key={`${viewId}:${aspect}:${attempt}`}
       leaving={!visible && !forced}
       viewId={viewId}
       outputId={outputId}
+      name={name}
       aspect={aspect}
+      frame={streamingFrame}
+      onStatus={setStatus}
+      onRetry={() => {
+        focusFrameAfterRetry.current = true;
+        setAttempt((a) => a + 1);
+      }}
     />
   );
 
@@ -232,8 +281,8 @@ export function LazyPreview({
    * Only the click handlers, the label and the hover chrome differ now, and none of
    * them change where the preview sits in the tree.
    */
-  function streamingPreview() {
-    if (!onExpand) return preview;
+  function streamingFrame(picture: ReactNode): ReactNode {
+    if (!onExpand) return picture;
     return (
       <div className="group relative">
         <button
@@ -261,8 +310,14 @@ export function LazyPreview({
             }
           }}
           className="group relative block w-full focus:outline-none"
+          ref={(el) => {
+            if (el && focusFrameAfterRetry.current) {
+              focusFrameAfterRetry.current = false;
+              el.focus();
+            }
+          }}
         >
-          {preview}
+          {picture}
           {/* A scrim plus a centred expand icon on hover, while the preview is the
               way in; the preview's job is to show what the screen shows, and chrome
               sitting on it all the time competes with that. Not rendered while
@@ -300,8 +355,14 @@ export function LazyPreview({
 
   return (
     <div ref={boxRef}>
+      {/* One status region per card, mounted for the card's whole life so a screen
+          reader hears it change: a region that mounts with its text in it is
+          often not read. The notices drawn over the picture carry no role. */}
+      <span role="status" className="sr-only">
+        {status}
+      </span>
       {streaming ? (
-        streamingPreview()
+        preview
       ) : (
         <button
           type="button"
@@ -321,47 +382,247 @@ export function LazyPreview({
 }
 
 /**
- * The live preview, faded in once its iframe has loaded and transparent while it
- * is leaving (which is off screen, so only the fade-in is ever seen).
+ * Where a preview stands, as its card shows it.
+ *  - loading: a new iframe, drawn as the black panel until its page says it is live
+ *  - live: the picture, at full strength
+ *  - not-live: it was live and its page says it is not now (its stream dropped), or,
+ *    asked on the kept page's return, it did not answer. The picture stays, dimmed
+ *    and grey, under a chip: a frozen frame must not pass for live
+ *  - failed: it never went live. Black, with *Preview didn't load* and why
+ */
+type Liveness =
+  | { k: "loading" }
+  | { k: "live" }
+  | { k: "not-live"; since: number | null }
+  | { k: "failed"; why: Silence };
+
+type LivenessEvent = { t: "report"; report: PreviewLiveReport } | { t: "silent"; why: Silence };
+
+const LOADING: Liveness = { k: "loading" };
+const LIVE: Liveness = { k: "live" };
+
+function liveness(state: Liveness, event: LivenessEvent): Liveness {
+  const wasLive = state.k === "live" || state.k === "not-live";
+  if (event.t === "report") {
+    if (event.report.live) return LIVE;
+    return wasLive ? { k: "not-live", since: event.report.since } : state;
+  }
+  if (wasLive) {
+    // Only an unanswered ask says anything about a preview that went live.
+    if (event.why !== "ask-timeout") return state;
+    return { k: "not-live", since: state.k === "not-live" ? state.since : null };
+  }
+  // A preview that never went live is judged by its own load timer, not by a kept
+  // page's three-second ask: kept before it had drawn, it still gets its ten seconds.
+  if (state.k === "loading" && event.why !== "ask-timeout") return { k: "failed", why: event.why };
+  return state;
+}
+
+/** /log's words for each silence, in one place. */
+const SILENCE_LOG: Record<Silence, string> = {
+  "error-page": "the page did not load",
+  "load-timeout": `no answer in ${LOAD_TIMEOUT_MS / 1000} s`,
+  "ask-timeout": `no answer in ${LIVE_ASK_TIMEOUT_MS / 1000} s when asked`,
+};
+
+/** What the card's status region says, for a screen reader. */
+function statusText(state: Liveness): string {
+  switch (state.k) {
+    case "not-live":
+      return "Not live";
+    case "failed":
+      return "Preview didn’t load";
+    default:
+      return "";
+  }
+}
+
+/** The picture's opacity for where it stands, and whether it is on its way out. */
+function pictureClass(state: Liveness, leaving: boolean): string {
+  if (leaving) return "opacity-0";
+  switch (state.k) {
+    case "live":
+      return "opacity-100";
+    case "not-live":
+      return "opacity-40 grayscale";
+    default:
+      return "opacity-0";
+  }
+}
+
+/**
+ * The live preview, faded in once its page says it is live and transparent while
+ * it is leaving (which is off screen, so only the fade-in is ever seen).
  *
- * `loaded` lives here rather than in LazyPreview so it lives and dies with the
- * iframe it describes: this unmounts when the slot is released, and is remounted
- * by its key when the iframe is, so a new iframe always starts hidden.
+ * Its state lives here rather than in LazyPreview so it lives and dies with the
+ * iframe it describes: this unmounts when the slot is released, and is remounted by
+ * its key when the iframe is, so a new iframe always starts as `loading`.
  *
- * Edge to edge: both callers are Screens cards, which clip to their own radius,
- * so nothing here rounds a corner or draws outside the preview.
+ * LIVE, NOT LOADED. It used to fade in on the iframe's `load`, which fires for a
+ * browser error page too and before the page has any state to draw. Now it fades in
+ * when the page itself says it has drawn and its event stream is delivering
+ * (preview-messages.ts), and a page that has not said so within LOAD_TIMEOUT_MS is
+ * a card that says *Preview didn't load*, with a Retry.
+ *
+ * Edge to edge: both callers are Screens cards, which clip to their own radius, so
+ * nothing here rounds a corner or draws outside the preview.
  *
  * The black sits on the outer box and only the preview inside it fades, so a
- * preview still loading, or on its way out, is the dark panel it is about to be
- * and not a hole in the card. `load` does not bubble, but a capture handler above
- * the iframe still sees it, which keeps this out of ViewPreview. The global
- * reduced-motion rule collapses the transition to one frame.
+ * preview still loading, or on its way out, is the dark panel it is about to be and
+ * not a hole in the card. The global reduced-motion rule collapses the transition
+ * to one frame.
+ *
+ * `frame` wraps the picture in whatever the card does with a click on it. The
+ * notices are drawn beside it, not inside it: their Retry is a button, and a button
+ * may not sit inside another.
  */
 function FadingPreview({
   leaving,
   viewId,
   outputId,
+  name,
   aspect,
+  frame,
+  onStatus,
+  onRetry,
 }: {
   leaving: boolean;
   viewId: string;
   outputId: string | null;
+  name: string;
   aspect?: number;
+  frame: (picture: ReactNode) => ReactNode;
+  onStatus: (text: string) => void;
+  onRetry: () => void;
 }) {
-  // Until the iframe loads, the card is the black box, not a half-painted kiosk page.
-  const [loaded, setLoaded] = useState(false);
+  const [state, dispatch] = useReducer(liveness, LOADING);
+
+  // A new preview that never says it is live: give it LOAD_TIMEOUT_MS.
+  useEffect(() => {
+    if (state.k !== "loading") return;
+    const timer = setTimeout(() => dispatch({ t: "silent", why: "load-timeout" }), LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [state.k]);
+
+  // A preview that failed is a failure an operator may have to explain on a Sunday
+  // morning; say so on /log.
+  const failedWhy = state.k === "failed" ? state.why : null;
+  useEffect(() => {
+    if (failedWhy) logToServer("preview", `${name}: the preview did not go live (${SILENCE_LOG[failedWhy]})`);
+  }, [failedWhy, name]);
+
+  // The card's status region, which outlives this preview.
+  const text = statusText(state);
+  useEffect(() => {
+    onStatus(text);
+    return () => onStatus("");
+  }, [text, onStatus]);
+
   return (
-    <div className="bg-black">
-      <div
-        onLoadCapture={() => setLoaded(true)}
-        className={cn(
-          "transition-opacity duration-(--motion-settled)",
-          loaded && !leaving ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />
-      </div>
+    <div className="relative">
+      {frame(
+        <div className="bg-black">
+          <div className={cn("transition-opacity duration-(--motion-settled)", pictureClass(state, leaving))}>
+            <ViewPreview
+              viewId={viewId}
+              outputId={outputId}
+              aspect={aspect}
+              bleed
+              liveness={{
+                onReport: (report) => dispatch({ t: "report", report }),
+                onSilent: (why) => dispatch({ t: "silent", why }),
+              }}
+            />
+          </div>
+        </div>,
+      )}
+      {!leaving && <PreviewNotice state={state} name={name} onRetry={onRetry} />}
     </div>
+  );
+}
+
+/**
+ * What is drawn over a preview that is not live, with its Retry. Over the picture,
+ * on black, in a neutral white: R=G=B, per the no-colour-cast rule for dark
+ * surfaces. No role: the card's one status region speaks for it.
+ */
+function PreviewNotice({ state, name, onRetry }: { state: Liveness; name: string; onRetry: () => void }) {
+  switch (state.k) {
+    case "not-live":
+      return (
+        <div className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-md bg-black/70 py-[3px] pl-2 pr-[3px] text-caption2 text-white/85">
+          <span aria-hidden="true" className="size-[7px] rounded-full border-[1.5px] border-white/85" />
+          Not live
+          <SinceText since={state.since} />
+          <RetryButton name={name} onRetry={onRetry} small />
+        </div>
+      );
+    case "failed":
+      return (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center text-caption1 text-white/85">
+          <span>Preview didn&rsquo;t load</span>
+          {/* The card's Online above is about the screen; this is about the picture. */}
+          <span className="text-caption2 text-white/55">This preview only: the screen&rsquo;s own status is above.</span>
+          <RetryButton name={name} onRetry={onRetry} />
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+/** "· updated N min ago" after *Not live*, or nothing when when is unknown. */
+function SinceText({ since }: { since: number | null }) {
+  const minutes = useMinutesSince(since);
+  if (minutes === null) return null;
+  return (
+    <>
+      <span aria-hidden="true">·</span>
+      <span>
+        {minutes < 1 ? (
+          "updated just now"
+        ) : (
+          <>
+            updated <span className="font-mono tabular-nums">{minutes}</span> min ago
+          </>
+        )}
+      </span>
+    </>
+  );
+}
+
+/** Whole minutes since `since`, kept current while shown; null when unknown. */
+function useMinutesSince(since: number | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (since === null) return;
+    // A display clock, not a poll: it asks nothing of the server, and runs only
+    // while a chip is up.
+    const timer = setTimeout(() => setNow(Date.now()), 30_000);
+    return () => clearTimeout(timer);
+  }, [since, now]);
+  return since === null ? null : Math.max(0, Math.floor((now - since) / 60_000));
+}
+
+/** Retry over a preview, named for the card it retries. */
+function RetryButton({ name, onRetry, small = false }: { name: string; onRetry: () => void; small?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Retry preview of ${name}`}
+      onClick={(e) => {
+        // The card behind it moves its panel on a click; this one is only a retry.
+        e.stopPropagation();
+        onRetry();
+      }}
+      className={cn(
+        "pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-white/20 bg-white/[0.06] text-white/85 transition-colors hover:bg-white/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+        small ? "h-5 px-1.5 text-caption2" : "h-[26px] px-2.5 text-caption1",
+      )}
+    >
+      <RefreshCwIcon aria-hidden="true" className={small ? "size-3" : "size-3.5"} />
+      Retry
+    </button>
   );
 }
 
@@ -369,6 +630,7 @@ function FadingPreview({
 export const __previewLimits = {
   MAX_LIVE_PREVIEWS,
   FADE_MS,
+  LOAD_TIMEOUT_MS,
   liveCount: () => live.size,
   reset: () => {
     live.clear();

@@ -1,6 +1,7 @@
 // lazy-preview-stable.test.tsx — the preview iframe survives the side panel
-// opening and closing, fades in once loaded, and is kept for a grace window
-// after it leaves so scrolling straight back does not reload it.
+// opening and closing, fades in once its page says it is live, says so when it
+// never does, and is kept for a grace window after it leaves so scrolling straight
+// back does not reload it.
 //
 // The Screens card passes `following` only while its panel is open. LazyPreview
 // once built a different element tree for each case, so React remounted the
@@ -25,10 +26,12 @@ import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
 const teardown = installRenderDom();
 
 const { render, screen, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { within } = await import("@testing-library/react");
 const React = await import("react");
 const { LazyPreview, __previewLimits } = await import("./lazy-preview.js");
+const { PREVIEW_MSG } = await import("../../main/preview-messages.js");
 
-const { FADE_MS } = __previewLimits;
+const { FADE_MS, LOAD_TIMEOUT_MS } = __previewLimits;
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => {
@@ -43,6 +46,7 @@ function card(following?: { label: string }, viewId = "v1", aspect?: number) {
   return React.createElement(LazyPreview, {
     viewId,
     outputId: "o1",
+    name: "Stage Left",
     aspect,
     onExpand: () => {},
     expandLabel: "Edit it",
@@ -51,7 +55,7 @@ function card(following?: { label: string }, viewId = "v1", aspect?: number) {
 }
 
 // jsdom has no IntersectionObserver. This one is driven by hand: `scroll(true)`
-// brings the card on screen, `scroll(false)` takes it off.
+// brings every card on screen, `scroll(false)` takes them off.
 type IoCallback = (entries: { isIntersecting: boolean }[]) => void;
 let restoreIo: (() => void) | null = null;
 /** The options the last IntersectionObserver was built with. */
@@ -60,17 +64,18 @@ let ioOptions: IntersectionObserverInit | undefined;
 function stubIntersectionObserver(): (isIntersecting: boolean) => void {
   const g = globalThis as unknown as { IntersectionObserver?: unknown };
   const saved = g.IntersectionObserver;
-  let cb: IoCallback | null = null;
+  // Every observer built, so a page of several cards scrolls together.
+  const cbs: IoCallback[] = [];
   g.IntersectionObserver = class {
     constructor(callback: IoCallback, options?: IntersectionObserverInit) {
-      cb = callback;
+      cbs.push(callback);
       ioOptions = options;
     }
     observe() {}
     disconnect() {}
   };
   restoreIo = () => { g.IntersectionObserver = saved; };
-  return (isIntersecting) => cb!([{ isIntersecting }]);
+  return (isIntersecting) => { for (const cb of cbs) cb([{ isIntersecting }]); };
 }
 
 /**
@@ -92,7 +97,23 @@ async function mount(element: React.ReactElement = card()) {
 }
 
 const tick = (ms: number) => act(async () => { mock.timers.tick(ms); });
-const load = (iframe: HTMLIFrameElement) => act(async () => { fireEvent.load(iframe); });
+/** The page inside the iframe saying it is live (or not), as stage-view.tsx does. */
+const report = (iframe: HTMLIFrameElement, live: boolean, viewId = iframeViewId(iframe)) =>
+  act(async () => {
+    const event = new MessageEvent("message", {
+      data: { type: PREVIEW_MSG.LIVE, viewId, live, since: live ? null : Date.now(), shared: true },
+      origin: window.location.origin,
+    });
+    // jsdom's constructor refuses an iframe's window as `source`; the card matches
+    // on it, so it is set on the event instead.
+    Object.defineProperty(event, "source", { value: iframe.contentWindow });
+    window.dispatchEvent(event);
+  });
+const goLive = (iframe: HTMLIFrameElement) => report(iframe, true);
+/** The view an iframe previews, from its address: `/preview-<viewId>`. */
+function iframeViewId(iframe: HTMLIFrameElement): string {
+  return decodeURIComponent(new URL(iframe.getAttribute("src")!, "http://x").pathname.slice("/preview-".length));
+}
 
 /** The class list of the wrapper that fades, wherever it sits above the iframe. */
 function fadeClass(iframe: HTMLIFrameElement): string {
@@ -120,20 +141,20 @@ test("closing the side panel keeps the same iframe", async () => {
   assert.ok(screen.getByRole("button", { name: "Edit it" }));
 });
 
-// ---- Fade in once loaded, kept for FADE_MS after leaving, cap still held -----
+// ---- Fade in once live, kept for FADE_MS after leaving, cap still held -------
 //
-// What is pinned is the sequence: hidden until the iframe's load event,
+// What is pinned is the sequence: hidden until the page says it is live,
 // transparent again the moment the card leaves (which is 200px off screen, so
 // nobody sees it go), and the iframe and slot kept for FADE_MS, to the
 // millisecond.
 
-test("fades in on load, goes transparent on leaving, and holds its slot for FADE_MS", async () => {
+test("fades in once live, goes transparent on leaving, and holds its slot for FADE_MS", async () => {
   const { container, iframe, scroll } = await mount();
   assert.equal(__previewLimits.liveCount(), 1);
-  assert.match(fadeClass(iframe), /opacity-0/, "visible before its iframe has loaded");
+  assert.match(fadeClass(iframe), /opacity-0/, "visible before its page said it was live");
 
-  await load(iframe);
-  assert.match(fadeClass(iframe), /opacity-100/, "did not fade in on load");
+  await goLive(iframe);
+  assert.match(fadeClass(iframe), /opacity-100/, "did not fade in once live");
 
   await scroll(false);
   assert.match(fadeClass(iframe), /opacity-0/, "did not go transparent on leaving");
@@ -148,7 +169,7 @@ test("fades in on load, goes transparent on leaving, and holds its slot for FADE
 
 test("coming back within FADE_MS keeps the same iframe", async () => {
   const { container, iframe, scroll } = await mount();
-  await load(iframe);
+  await goLive(iframe);
   await scroll(false);
   await tick(FADE_MS - 1);
   await scroll(true);
@@ -161,32 +182,32 @@ test("coming back within FADE_MS keeps the same iframe", async () => {
 
 // ---- A new iframe starts hidden, whatever came before it ----------------------
 //
-// `loaded` describes ONE iframe. Each case below swaps the iframe while the card
-// stays mounted, after the old one had loaded and shown.
+// `live` describes ONE iframe. Each case below swaps the iframe while the card
+// stays mounted, after the old one had gone live and shown.
 
 for (const [what, next] of [
   ["picking a different view", card(undefined, "v2")],
   ["a different aspect", card(undefined, "v1", 4 / 3)],
 ] as const) {
-  test(`${what} hides the new iframe until it has loaded`, async () => {
+  test(`${what} hides the new iframe until it is live`, async () => {
     const { container, rerender, iframe: old } = await mount();
-    await load(old);
+    await goLive(old);
     assert.match(fadeClass(old), /opacity-100/);
 
     rerender(next);
     const fresh = container.querySelector("iframe");
     assert.ok(fresh, "the preview stopped streaming");
     assert.ok(fresh !== old, "ViewPreview kept its iframe, so this case tests nothing");
-    assert.match(fadeClass(fresh), /opacity-0/, "the new iframe showed before it had loaded");
+    assert.match(fadeClass(fresh), /opacity-0/, "the new iframe showed before it was live");
 
-    await load(fresh);
+    await goLive(fresh);
     assert.match(fadeClass(fresh), /opacity-100/, "the new iframe never faded in");
   });
 }
 
-test("coming back after FADE_MS hides the new iframe until it has loaded", async () => {
+test("coming back after FADE_MS hides the new iframe until it is live", async () => {
   const { container, iframe: old, scroll } = await mount();
-  await load(old);
+  await goLive(old);
   await scroll(false);
   await tick(FADE_MS);
   assert.ok(container.querySelector("iframe") === null, "FADE_MS passed and the iframe was not released");
@@ -194,8 +215,8 @@ test("coming back after FADE_MS hides the new iframe until it has loaded", async
   await scroll(true);
   const fresh = container.querySelector("iframe");
   assert.ok(fresh, "the preview did not stream again");
-  assert.match(fadeClass(fresh), /opacity-0/, "the returning iframe showed before it had loaded");
-  await load(fresh);
+  assert.match(fadeClass(fresh), /opacity-0/, "the returning iframe showed before it was live");
+  await goLive(fresh);
   assert.match(fadeClass(fresh), /opacity-100/);
 });
 
@@ -207,7 +228,7 @@ test("coming back after FADE_MS hides the new iframe until it has loaded", async
 
 test("unmounting a streaming preview releases its slot", async () => {
   const { iframe, unmount } = await mount();
-  await load(iframe);
+  await goLive(iframe);
   assert.equal(__previewLimits.liveCount(), 1);
   unmount();
   assert.equal(__previewLimits.liveCount(), 0, "the unmounted preview kept its slot");
@@ -215,7 +236,7 @@ test("unmounting a streaming preview releases its slot", async () => {
 
 test("unmounting a preview inside its FADE_MS hold releases its slot", async () => {
   const { iframe, unmount, scroll } = await mount();
-  await load(iframe);
+  await goLive(iframe);
   await scroll(false);
   await tick(FADE_MS - 1);
   unmount();
@@ -272,3 +293,90 @@ test("with no scrolling ancestor the observer's root is the viewport", async () 
   assert.ok(ioOptions, "no observer was built");
   assert.ok((ioOptions.root ?? null) === null, "the observer was rooted on an element that does not scroll");
 });
+
+// ---- Live is what the page says, not what the iframe's load event says ----------
+//
+// `load` fires for a browser error page too, and before the page has any state to
+// draw. The fade waited on it, so a preview that could not load faded in a picture
+// of a failure, and one that loaded and never drew sat black for good.
+
+/** Lines logToServer sent while `run` ran. */
+async function logged(run: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    if (String(url).includes("/api/log/client")) {
+      const { tag, message } = JSON.parse(String(init?.body)) as { tag: string; message: string };
+      lines.push(`[${tag}] ${message}`);
+    }
+    return new Response("{}");
+  }) as typeof fetch;
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = real;
+    warn.mock.restore();
+  }
+  return lines;
+}
+
+test("the iframe's load event alone does not fade the preview in", async () => {
+  const { iframe } = await mount();
+  await act(async () => { fireEvent.load(iframe); });
+  assert.match(fadeClass(iframe), /opacity-0/, "faded in on `load`, before the page said it was live");
+});
+
+test("a page that never says it is live: the card says so, logs it once, and Retry loads it again", async () => {
+  let iframe!: HTMLIFrameElement;
+  let container!: HTMLElement;
+  const lines = await logged(async () => {
+    ({ iframe, container } = await mount());
+    await tick(LOAD_TIMEOUT_MS - 1);
+    assert.equal(screen.getByRole("status").textContent, "", "gave up before LOAD_TIMEOUT_MS");
+    await tick(1);
+  });
+  assert.equal(screen.getByRole("status").textContent, "Preview didn’t load", "a preview that never went live said nothing");
+  assert.match(container.textContent ?? "", /This preview only: the screen’s own status is above\./);
+  assert.match(fadeClass(iframe), /opacity-0/, "the failed preview faded in");
+  assert.deepEqual(lines, ["[preview] Stage Left: the preview did not go live (no answer in 10 s)"]);
+
+  await act(async () => { fireEvent.click(within(container).getByRole("button", { name: "Retry preview of Stage Left" })); });
+  const fresh = container.querySelector("iframe");
+  assert.ok(fresh && fresh !== iframe, "Retry did not load a new iframe");
+  assert.equal(screen.getByRole("status").textContent, "", "the notice outlived the retry");
+  assert.ok(document.activeElement === within(container).getByRole("button", { name: "Edit it" }), "Retry dropped the focus instead of handing it to the new preview");
+  await goLive(fresh);
+  assert.match(fadeClass(fresh), /opacity-100/, "the retried preview never faded in");
+});
+
+test("a report from another card's iframe of the same view does not move this one", async () => {
+  const io = stubIntersectionObserver();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(React.createElement("div", null, card(undefined, "v1"), card(undefined, "v1")));
+  });
+  await act(async () => { io(true); });
+  const frames = [...view.container.querySelectorAll("iframe")];
+  assert.equal(frames.length, 2);
+  await goLive(frames[0]);
+  assert.match(fadeClass(frames[0]), /opacity-100/);
+  assert.match(fadeClass(frames[1]), /opacity-0/, "one page's report faded in the other card's preview");
+});
+
+for (const [what, contentWindow] of [
+  ["an address it cannot read (a browser error page)", { postMessage() {}, get location(): Location { throw new DOMException("Blocked a frame", "SecurityError"); } }],
+  ["an address that is not a preview's", { postMessage() {}, location: { pathname: "/" } }],
+] as const) {
+  test(`an iframe that loads ${what} says the page did not load, at once`, async () => {
+    let iframe!: HTMLIFrameElement;
+    const lines = await logged(async () => {
+      ({ iframe } = await mount());
+      Object.defineProperty(iframe, "contentWindow", { configurable: true, get: () => contentWindow });
+      await act(async () => { fireEvent.load(iframe); });
+    });
+    assert.equal(screen.getByRole("status").textContent, "Preview didn’t load", "an error page was taken for a preview still loading");
+    assert.deepEqual(lines, ["[preview] Stage Left: the preview did not go live (the page did not load)"]);
+  });
+}

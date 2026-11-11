@@ -318,6 +318,35 @@ a custom layout whether it is a wall view or a control surface), **Import layout
 (see [Moving a view](../moving-a-view.md)) and **Refresh all**, which reloads every
 connected display.
 
+### Previews
+
+Each card's preview is the screen's own display page, scaled down to fit. A preview
+loads once its card is within 200px of the part of the page in view, and at most
+twelve load at a time; a card past that shows **Preview paused — tap to load**. A
+preview is black until its page has drawn and is receiving live updates, then fades
+in.
+
+One that has not managed that within ten seconds stays black and says **Preview
+didn't load**, with the line *This preview only: the screen's own status is
+above.* and a **Retry**. The line is there because the notice is about the picture
+on the card, not the screen: the screen's own **Online** is beside its name. `/log`
+gets a line naming the card: `[preview] <name>: the preview did not go live
+(<why>)`, where the reason is `the page did not load` (the frame loaded an error
+page instead) or `no answer in 10 s`.
+
+A preview is never a still passing for live. Each preview tells its card whether it
+is receiving live updates. One that has stopped stays on the card, dimmed and grey,
+under a **Not live** chip with **Retry**, until it is live again:
+
+| Chip | Means |
+|---|---|
+| **Not live · updated just now** | its updates stopped less than a minute ago |
+| **Not live · updated N min ago** | its updates stopped N minutes ago |
+
+A stream that stays open but goes quiet counts as stopped: the server sends every
+page a heartbeat every 20 seconds, and a page that has heard nothing for 50 seconds
+takes its stream as down and reopens it once. Retry loads that preview afresh.
+
 ### The settings panel
 
 A panel docks beside the cards, so a card and its preview stay in view while a

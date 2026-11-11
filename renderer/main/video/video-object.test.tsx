@@ -28,6 +28,15 @@ const teardown = installRenderDom();
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { VideoObject } = await import("./video-object.js");
+const { PREVIEW_MSG } = await import("../preview-messages.js");
+
+/** The card telling this preview page it is hidden (true) or shown (false). */
+function tellHidden(hidden: boolean): void {
+  const event = new MessageEvent("message", { data: { type: PREVIEW_MSG.HIDDEN, viewId: "abc", hidden }, origin: window.location.origin });
+  // jsdom's constructor refuses a window as `source`; the page checks it is its parent.
+  Object.defineProperty(event, "source", { value: window.parent });
+  window.dispatchEvent(event);
+}
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { __resetPlaybackRegistryForTests, anyPlaying, drainReports } = await import("./playback-reports.js");
 
@@ -215,6 +224,41 @@ test("preview route: paused, and nothing is requested until Play is pressed", as
     await settle();
 
     assert.ok(feedCalls(g.calls).length > 0, "expected Play to start the session it had withheld");
+  } finally {
+    g.restore();
+    history.pushState({}, "", originalPath);
+  }
+});
+
+test("preview hidden with the kept Screens page: a playing feed lets go, and picks up again when shown", async () => {
+  // Firefox keeps telling a hidden preview's IntersectionObserver its content is on
+  // screen, so the card says it instead (preview-messages.ts). Without this, a feed the
+  // operator pressed Play on in a preview was pulled for the whole ten-minute keep.
+  const originalPath = window.location.pathname;
+  history.pushState({}, "", "/preview-abc");
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settle();
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settle();
+    const play = screen.getByText("Play");
+    act(() => play.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await settle();
+    await settle();
+    const posts = () => feedCalls(g.calls).filter((c) => c.method === "POST").length;
+    const deletes = () => feedCalls(g.calls).filter((c) => c.method === "DELETE").length;
+    assert.equal(posts(), 1, "Play did not start the session");
+
+    act(() => tellHidden(true));
+    await settle();
+    await settle();
+    assert.equal(deletes(), 1, "hidden with the kept page, the preview held on to its feed");
+
+    act(() => tellHidden(false));
+    await settle();
+    await settle();
+    assert.equal(posts(), 2, "shown again, the preview did not pick its feed back up");
   } finally {
     g.restore();
     history.pushState({}, "", originalPath);
