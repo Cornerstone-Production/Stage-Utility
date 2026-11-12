@@ -118,6 +118,15 @@ export interface PlanItemsDTO {
 export interface ServiceCueLayout {
   id: string;
   name: string;
+  /** The layout's name in rundown addresses (/servicecue/<type>/<slug>). Set when the
+   *  layout is created and kept through a rename, so a pinned screen keeps its page.
+   *  The server assigns it; a client-sent value is ignored. */
+  slug?: string;
+  /** True while the layout still carries the name Add layout gave it ("Layout 3"). The
+   *  first rename moves the slug to the new name and clears this; after that the slug is
+   *  fixed. A flag rather than a look at the name, since "Layout 3" can be typed on
+   *  purpose. Set by the server for a new layout only; never set by a backfill. */
+  autoNamed?: boolean;
   order: number;
   /** @deprecated Ordered note-category NAMES. Migrated to `columnRoles` on load and
    *  kept only so an unmigrated file still parses. Category names vary per service

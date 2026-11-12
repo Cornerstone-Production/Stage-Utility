@@ -757,7 +757,9 @@ export class ServiceCuePublisher {
     }
     if (layouts.ok) {
       run.counts.layouts = layouts.value.length;
-      await this.put(run, "servicecue-layouts", JSON.stringify(layouts.value));
+      // autoNamed is the editor's (whether a layout's first rename moves its address); the
+      // page never reads it, so it does not leave the building.
+      await this.put(run, "servicecue-layouts", JSON.stringify(layouts.value.map(({ autoNamed: _a, ...l }) => l)));
     }
     if (roles.ok) await this.put(run, "servicecue-roles", JSON.stringify(roles.value));
     run.known.pcoConfigured = !!source.state().pcoConfigured;

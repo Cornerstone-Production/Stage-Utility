@@ -1,6 +1,6 @@
 import type { RundownColumn, RundownShape } from "./rundown-table";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
-import { resolveRole, roleAppliesTo } from "./role-resolve";
+import { resolveRole, roleAppliesTo, unassignedCategoryRoles } from "./role-resolve";
 import { formatClock } from "../lib/clock-format";
 
 // Shared column/clock logic for ServiceCue, used by both the standalone page and
@@ -25,21 +25,29 @@ export interface ServiceCueSpec {
 /** Resolve a layout (or the implicit "All columns" default when null) into a spec.
  *  Toggles default ON — undefined means shown, only `false` hides.
  *
+ *  All columns is every role, then a column for each category of this service type that
+ *  is in no role, so a department whose category is new in Planning Center still shows.
+ *  A named layout shows only the roles it chose. `roles` is null until they have been
+ *  read (or when the read failed): then no category is in a role *as far as anyone
+ *  knows*, so nothing is appended rather than every category drawn raw and then regrouped.
+ *
  *  `categories` is what THIS service type defines. A role none of whose members appear
  *  there is dropped rather than rendered as an empty column — a name-based column used
  *  to render blank on every service type that called the same thing something else. */
 export function resolveServiceCueSpec(
   layout: ServiceCueLayout | null,
-  roles: CategoryRole[],
+  roles: CategoryRole[] | null,
   categories: string[],
 ): ServiceCueSpec {
+  const known = roles ?? [];
   const on = (v: boolean | undefined) => v !== false;
-  const byId = new Map(roles.map((r) => [r.id, r]));
+  const byId = new Map(known.map((r) => [r.id, r]));
   const chosen = layout
     ? (layout.columnRoles ?? []).map((id) => byId.get(id)).filter((r): r is CategoryRole => !!r)
-    : roles;
+    : known;
+  const shown = chosen.filter((r) => roleAppliesTo(r, categories));
   return {
-    columns: chosen.filter((r) => roleAppliesTo(r, categories)),
+    columns: layout ? shown : [...shown, ...(roles ? unassignedCategoryRoles(roles, categories) : [])],
     showClock: layout ? on(layout.showClock) : true,
     showLength: layout ? on(layout.showLength) : true,
     showKey: layout ? on(layout.showKey) : true,

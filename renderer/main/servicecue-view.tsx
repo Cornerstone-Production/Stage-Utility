@@ -150,7 +150,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
     [layouts, serviceCueLayoutId],
   );
   const shownRoles = useMemo(() => roles ?? [], [roles]);
-  const render = useServiceCueRender(rundown, layout, shownRoles, pcoLive, now);
+  const render = useServiceCueRender(rundown, layout, roles, pcoLive, now);
   // Only a display set to a column set is wrong without the layouts; one on
   // All columns shows every column either way.
   const layoutsMissing = failed.has("layouts") && layouts === null && !!serviceCueLayoutId;

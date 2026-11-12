@@ -176,7 +176,8 @@ test("a reload of the rundown, and a change of layout or text size on it, all ke
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Larger text" })); });
     await eventually(() => assert.notEqual(sized.state.location.search.text, 100, "the size changed"));
     assert.equal(sized.state.location.search.from, "/servicecue/manage", "changing the text size did not drop the origin");
-    assert.equal(await hrefOf("All services"), "/servicecue/manage");
+    // The size it was changed to goes back with it: the page the arrow returns to opens at it.
+    assert.equal(await hrefOf("All services"), `/servicecue/manage?text=${sized.state.location.search.text}`);
   } finally {
     f.restore();
   }
@@ -189,6 +190,45 @@ test("an origin that is not one of the launchers is ignored, not followed", asyn
       await loadPage(`/servicecue/weekend/audio?from=${encodeURIComponent(from)}`);
       assert.equal(await hrefOf("All services"), "/servicecue", `from=${from} fell back`);
     }
+  } finally {
+    f.restore();
+  }
+});
+
+// A panel whose browser buffers SSE for about a minute is opened as ?transport=poll, and the
+// size it was set to is ?text=. Both links between the pages are anchors (document loads),
+// so a param the link does not carry is gone on the next page.
+test("the launcher's link to a rundown carries ?transport= and ?text=", async () => {
+  const f = stubFetch();
+  try {
+    await loadPage("/servicecue?transport=poll&text=120");
+    assert.equal(
+      await hrefOf("Open Weekend"),
+      "/servicecue/weekend/audio?from=%2Fservicecue&transport=poll&text=120",
+    );
+    // Nothing is invented for a launcher opened without them.
+    await loadPage("/servicecue");
+    assert.equal(await hrefOf("Open Weekend"), "/servicecue/weekend/audio?from=%2Fservicecue");
+  } finally {
+    f.restore();
+  }
+});
+
+test("the rundown's back arrow carries ?transport= and ?text=, through to the launcher's own link", async () => {
+  const f = stubFetch();
+  try {
+    await loadPage("/servicecue?transport=poll&text=120");
+    const open = await hrefOf("Open Weekend");
+    await loadPage(open);
+    const back = await hrefOf("All services");
+    assert.equal(back, "/servicecue?transport=poll&text=120");
+    // And so on round again: the second trip out still has them.
+    const again = await loadPage(back);
+    assert.equal(again.state.location.pathname, "/servicecue");
+    assert.equal(await hrefOf("Open Weekend"), open);
+    // Only those two cross: a stray param on the rundown does not follow the arrow.
+    await loadPage("/servicecue/weekend/audio?plan=p1&transport=poll&evil=1");
+    assert.equal(await hrefOf("All services"), "/servicecue?transport=poll");
   } finally {
     f.restore();
   }

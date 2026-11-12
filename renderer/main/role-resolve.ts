@@ -28,3 +28,26 @@ export function roleAppliesTo(role: CategoryRole, categories: string[]): boolean
   const have = new Set(categories.map(norm));
   return role.members.some((m) => have.has(norm(m)));
 }
+
+/** The id prefix of a column made for a category in no role. Role ids are `role-…`, so
+ *  nothing a person names can collide with it. */
+export const UNASSIGNED_ID_PREFIX = "category:";
+
+/**
+ * One single-member role for each category in `categories` that no role names, in the
+ * order given (Planning Center's own order, so it is stable from one plan to the next).
+ * Spellings that differ only in case are one column. Nothing is saved: these exist for
+ * the length of a render, so All columns shows a category before anyone has made a role
+ * for it.
+ */
+export function unassignedCategoryRoles(roles: CategoryRole[], categories: string[]): CategoryRole[] {
+  const claimed = new Set(roles.flatMap((r) => r.members.map(norm)));
+  const found = new Map<string, string>();
+  for (const c of categories) {
+    const key = norm(c);
+    if (key && !claimed.has(key) && !found.has(key)) found.set(key, c);
+  }
+  // Notes are matched to a member without regard to case (see resolveRole), so the
+  // first spelling reads every variant.
+  return [...found].map(([key, name]) => ({ id: `${UNASSIGNED_ID_PREFIX}${key}`, name, members: [name] }));
+}

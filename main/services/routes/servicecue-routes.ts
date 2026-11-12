@@ -16,6 +16,8 @@ import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
 import { broadcast } from "../broadcaster.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
+import { LayoutNameRefused } from "../servicecue-slug.js";
+import { isRecord } from "../is-record.js";
 
 export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -31,7 +33,17 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.layouts (array) required");
         return;
       }
-      json(res, await stageController.saveServiceCueLayouts(body.layouts as ServiceCueLayout[]));
+      if (!body.layouts.every((l) => isRecord(l) && typeof l.id === "string" && typeof l.name === "string")) {
+        error(res, "Each layout needs an id and a name.");
+        return;
+      }
+      try {
+        json(res, await stageController.saveServiceCueLayouts(body.layouts as ServiceCueLayout[]));
+      } catch (err) {
+        if (!(err instanceof LayoutNameRefused)) throw err;
+        error(res, err.message); // a name the save may not use: the editor shows why
+        return;
+      }
       servicecuePublisher.nudge(); // the public page follows an edit within a second or so
       return;
     }

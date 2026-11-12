@@ -66,6 +66,9 @@ function captureLog() {
 // ── Invented fixtures ───────────────────────────────────────────────────────
 
 const LAYOUTS = [{ id: "svl-1", name: "Audio", order: 0, columnRoles: ["role-audio"] }];
+// What the store hands back for them: the layouts untouched, plus the one field a load adds,
+// the URL slug taken from the current name.
+const LOADED = LAYOUTS.map((l) => ({ ...l, slug: "audio" }));
 const ROLES = [{ id: "role-audio", name: "Audio", members: ["Audio", "FOH"] }];
 const CONFIG = { serviceTypeIds: ["st-weekend"] };
 
@@ -111,7 +114,7 @@ describe("the three ServiceCue data files, on an install that has the old names"
 
     // And the stores, read for the first time after the move, hold the work.
     assert.deepEqual(await serviceCueConfigStore.load(), CONFIG);
-    assert.deepEqual(await serviceCueLayoutsStore.load(), LAYOUTS);
+    assert.deepEqual(await serviceCueLayoutsStore.load(), LOADED);
     assert.deepEqual(await serviceCueRolesStore.load(), ROLES);
   });
 
@@ -369,7 +372,7 @@ describe("view exports across the rename", () => {
   test("an export from before the rename imports its presets and keeps the view pointed at one", async () => {
     const report = await applyViewBundle(oldExport());
 
-    assert.deepEqual(await serviceCueLayoutsStore.load(), LAYOUTS, "the presets in the old key were dropped");
+    assert.deepEqual(await serviceCueLayoutsStore.load(), LOADED, "the presets in the old key were dropped");
     const [v] = (await viewsStore.load()) as unknown as Record<string, unknown>[];
     assert.equal(v!.serviceCueLayoutId, "svl-1", "the view lost its preset");
     assert.equal("scriptViewLayoutId" in v!, false);
@@ -386,7 +389,7 @@ describe("view exports across the rename", () => {
       { id: "view-a", name: "A", kind: "script", createdAt: 0, serviceCueLayoutId: "svl-1" },
     ] as never);
     const b = await buildViewBundle("view-a");
-    assert.deepEqual(b.sideData.serviceCueLayouts, LAYOUTS);
+    assert.deepEqual(b.sideData.serviceCueLayouts, LOADED);
     assert.equal("scriptviewLayouts" in b.sideData, false);
     assert.equal((b.views[0] as unknown as Record<string, unknown>).serviceCueLayoutId, "svl-1");
     assert.equal("scriptViewLayoutId" in (b.views[0] as object), false);

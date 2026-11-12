@@ -24,6 +24,11 @@ layout or plan, and an address copied from the browser's bar carries it along. A
 rundown opened without `?from=` (a typed address, a QR code, a kiosk), or with
 any other page in it, goes to `/servicecue`.
 
+`?transport=poll` and `?text=` stay with a screen: the launcher's link to a rundown
+and the rundown's back arrow both carry them (and nothing else of the query). A panel
+whose browser buffers the live stream, opened as `/servicecue?transport=poll`, therefore
+keeps polling from the launcher to the rundown and back, and keeps its text size.
+
 Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
 preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
@@ -77,6 +82,39 @@ view.
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
+A layout's address is its **slug**, the last part of `/servicecue/weekend/audio`.
+The slug is taken from the name when the layout is created and kept through a rename,
+so a tablet or display pinned to the address keeps its page. A layout made with **Add
+layout** starts as "Layout 1", "Layout 2" and so on, and its first rename moves its slug
+to the new name; after that the slug is fixed. An address pinned to such a layout
+before that first rename therefore stops finding it and shows the notice below.
+
+A layout saved before slugs existed, when the rundown looked layouts up by name, keeps
+the address that opened it then. Of two whose names give the same slug the first in
+order kept it, so it keeps the bare slug, and the other gets a suffix no address used
+(`audio-3`, when a layout called "Audio 2" holds `audio-2`). Two layouts never share a
+slug. A name with no ASCII letter or digit ("Звук") is addressed as `x`, then `x-2`
+and so on. An address that names no layout, because it was deleted or mistyped, shows
+`Layout "name" not found. Showing All columns.` above the All columns it falls back to.
+
+Layout names must differ, ignoring case and punctuation, in any script ("Звук" and
+"Свет" are two names). The server refuses a save that adds or changes a name another
+layout already has (and a blank name, and "All columns") with a 400 and the reason,
+which the editor shows under the name field, and the old name stays; the refusal is on
+a `[servicecue]` log line. A new layout is named with the first free "Layout N". An
+install that already holds two layouts with one name can still be edited until one of
+them is renamed. A layout arriving in a view or plan export whose name is taken here is
+imported as "Audio 2" (the first free number), and the import report says so; it keeps
+its slug from the file unless a layout here already uses it.
+
+A name is saved when you leave the field or press Enter, not on each keystroke. Every
+other change saves when it is made. Saves go one at a time, each applied to the list as
+the last one left it, so a change made while another is still saving is not lost, and
+a refused change is dropped without undoing the ones after it. Deleting a layout asks
+first and names the views whose **Columns** setting uses it, or says no display is set
+to it; those views go back to All columns. A tablet that opened the address directly is
+not a view, so the confirm cannot name it.
+
 ![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
 
 Each has per-element toggles for the clock, item time, song key, BPM, time
@@ -128,10 +166,19 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
+**All columns** is every role, then one column for each note category of that service
+type that is in no role, named as Planning Center names it and in Planning Center's
+order. A department whose category was added this week therefore shows without anyone
+making a role first. No role is created for it; a named layout shows only the roles it
+chose, so the category stays out of those until it is in a role and the layout picks it.
+Until the roles have been read (or when they cannot be), nothing is appended, since no
+category can be said to be in no role. The rundown pages, ServiceCue displays and the
+public page all draw columns the same way.
+
 **Managing them:** ServiceCue → Edit column presets → Category roles. Rename, add or remove
 members, reorder. Two diagnostics flag problems you would otherwise notice only by
-absence — categories in no role (which can never appear as a column) and
-categories in more than one (ambiguous, since two columns would claim the note).
+absence — categories in no role (which no named layout can show; All columns does)
+and categories in more than one (ambiguous, since two columns would claim the note).
 
 Seeding creates one role per category, containing only itself. Merging is always
 your call — automatic keyword matching guesses badly, and a wrong merge hides a
@@ -249,6 +296,12 @@ everything it shows, plan notes included,** and running it is
 nothing for two minutes, and a reload, once, of a page left open when the public page is
 updated. Its link is the page's address with `/servicecue` on the end, and
 `/servicecue/weekend/audio`, `?plan=` and `?text=` work on it as they do here.
+
+The public page runs the copy of ServiceCue it was deployed with. One deployed before
+layouts had stored slugs still finds a layout by its current name, so a renamed
+layout's old address shows All columns there, and its All columns does not add the
+categories in no role. Updating the page (**Keep the page up to date**, or a redeploy)
+brings it in line.
 
 The server sends; nothing on the internet connects to it. **Public link**, on the
 ServiceCue presets page (`/servicecue/presets`) under **Shown on the landing page**, is

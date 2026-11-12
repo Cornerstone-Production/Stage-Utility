@@ -213,6 +213,8 @@ describe("what is in the bundle", () => {
     assert.deepEqual(within("main"), [
       "main/services/clamp.ts",
       "main/services/errors.ts",
+      // The address a layout is found under, shared with the server that assigns it.
+      "main/services/servicecue-slug.ts",
       // renderer/lib/api.ts gives Update the page now its timeout from here: two
       // numbers, and types the build erases.
       "main/types/servicecue-deploy.ts",
