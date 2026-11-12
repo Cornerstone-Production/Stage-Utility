@@ -236,21 +236,21 @@ before *LAeq 10*). A name the server would refuse as a choice is left out (see
 choice is an **organisation** setting, not a browser one: it is saved on the
 server, shared by every browser, carried in a configuration backup, and a change
 in one browser reaches the others without a reload. Until somebody chooses, the
-card plots *LAeq 2* if any recording carries it, else *LAeq 1*, else the first of
-this browser's own History SPL metric list that a recording carries; choosing
-*LAeq 2* is choosing that default. Once a choice is made it stays until somebody
-picks another: there is no option to go back to "nobody has chosen", and a saved
-metric that the recordings stop carrying is kept, not swapped for a neighbour.
-It still shows in the select, marked *not found*.
+card plots *LAeq 2* if any recording carries it, else *LAeq 1*, else the first
+metric offered; choosing *LAeq 2* is choosing that default. Once a choice is
+made it stays until somebody picks another: there is no option to go back to
+"nobody has chosen", and a saved metric that the recordings stop carrying is
+kept, not swapped for a neighbour. It still shows in the select, marked *not
+found*.
 
 The subtitle (*Peak LAeq 2 per service type*), each tile's second line, and the
 chart's accessible label all name the metric. A recording that lacks the chosen
 metric adds no point for it, rather than another metric's figure; a service type
 none of whose recordings carry it keeps its tile and its legend entry, noted *no
 LCeq 2 reading*. The shared read-only `/history` link plots the organisation's
-choice and shows no select. This setting is Trends's own: the History SPL
-section's Customize list, and the *Peak* its rows and service header name, keep
-following each browser's own choice.
+choice and shows no select. The Sound card, the service header's peak figure
+and the All services rows plot this metric by default too; a browser can
+override it for itself (see Customize under the chart).
 
 A recording with no figure under the current measure is skipped rather than
 counted as zero, so a Sunday where two of three services had a counter running
@@ -396,7 +396,7 @@ log.
 | In room | the most people in the room at once, captioned *peak in room*. Named for the figure rather than for the reduction, because the app also tracks the cumulative door count and "peak" alone names either |
 | Ran | what the service ran; **Running**, counting up, while it is still recording |
 | vs plan | its difference against the planned total — a dash while recording, where most of a plan not yet run reads as a service running short |
-| Peak dB | the loudest reading on the primary Smaart metric, captioned with the metric it read |
+| Peak dB | the loudest reading on the plotted Smaart metric, captioned with the metric it read |
 
 A figure a row has nothing for is a dash in its own column, never a closed gap:
 the header is drawn once per group, and a row that slid its columns left would
@@ -408,7 +408,7 @@ service whose attendance recorder opened before its first plan item went live �
 the arrival ramp — is a simpler row saying how many are in the room so far.
 
 Where there is no level, the row says **why** under the dash — *no sound
-recorded*, *metric hidden in Sound*, or *sound unavailable* when the record
+recorded*, *no metrics recorded*, or *sound unavailable* when the record
 could not be read at all. The last one is its own case on purpose: a server that
 was down is not a meter that was off, and the reason is logged on a `[history]`
 line naming the service.
@@ -483,7 +483,7 @@ bottom:
   | Actual | what it ran, its difference against the plan, and when it ended |
   | Avg overrun | the mean per-item difference, and how many items of how many ran over |
   | Peak in room | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries, and the same words the All services row uses |
-  | Peak *metric* | the loudest reading on the primary Smaart metric, named after the metric it read |
+  | Peak *metric* | the loudest reading on the plotted Smaart metric, named after the metric it read (*FS Peak*, not *Peak FS Peak*) |
 
   Started, Planned and Actual count up live while a service is recording. A
   record with no attendance or no sound shows a dash, not a zero;
@@ -615,25 +615,45 @@ missed — stack onto their own lines rather than hiding under one another, up t
 two extra. Hovering picks the topmost.
 
 **Customize** is the sliders button at the section's right. It holds which series
-to draw, which figures the strip shows at rest, and for sound which Smaart
-metrics to surface.
+to draw and which figures the strip shows at rest. For sound it also holds two
+separate choices about Smaart metrics.
 
-The Smaart metric choice does more than pick table columns: the first one still
-ticked is the **primary** — the metric the chart's line is read from when the
-service has no raw samples, the one each item's peak triangle and the strip's Peak
-and Message figures report, and the one the raw series is requested for. Untick
-every metric and the chart says so rather than drawing an empty plot.
+**Plot** chooses the one metric the Sound card plots: one radio per metric the
+service recorded, the organisation's Trends metric tagged *Trends*. The card
+title names it (*Sound · LAeq 2*); the chart's line and Leq line, the peak
+triangles, the strip's figures, the service header's peak figure and the All
+services rows all follow it. Until a browser picks one the plot follows the
+Trends metric. Picking another radio overrides it in that browser only, and a
+line under Plot says what Trends plots for everyone, with **Use the Trends
+metric** to go back; picking the Trends radio does the same. A service that
+lacks the chosen metric plots the Trends metric, else the first it recorded, and
+says so in one line under the title. The browser's choice is kept for the next
+service that has it.
+
+**Table columns** chooses which metrics the per-item table shows, and nothing
+else: unticking one never changes the chart, and the plotted metric can be one
+the table does not show.
+
+On a service with no raw samples the chart draws the one plotted metric as a
+step, and its legend names it without toggling anything.
 
 The legend under the plot is the same choice as a row of buttons: clicking one
 turns that series off and on, and it stays in step with Customize because both
 write the same preference. A series that is off is still listed, struck through —
-a legend that dropped what was off could never turn it back on.
+a legend that dropped what was off could never turn it back on. When every line
+with readings is off, the plot says so and where to turn one on, rather than
+claiming nothing was recorded: *Every line is hidden*, or the name of the one
+hidden line when the lines still on have nothing to draw (a Trends service type
+with no reading for its metric).
 
 Every one of these is remembered **per browser** — they are view preferences,
 not recording settings: `attendance:visibleMetrics`, `spl:visibleFigures`,
-`spl:visibleSeries` and `spl:visibleMetrics`. A browser that has never chosen a
-Smaart metric is seeded once from the server's shared metric list, and after that
-its own choice is its own.
+`spl:visibleSeries`, `spl:visibleMetrics` (the table columns) and `spl:plotMetric`
+(the plotted metric). A browser that has never chosen table columns is seeded
+once from the server's shared metric list, and after that its own choice is its
+own. A plotted metric picked in one tab reaches the browser's other open tabs; a
+browser that will not store it (private mode, a full quota) plots it anyway
+until the page is closed, and says it could not remember the choice.
 
 While a service is recording, the chart grows with it: new samples extend the line
 in place, the newest stretch draws in, the live edge carries a pulsing dot, the
