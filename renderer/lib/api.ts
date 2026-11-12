@@ -595,6 +595,7 @@ export type IpcChannel =
   | "stage:listPlans"
   | "stage:listServiceTypes"
   | "stage:listTeamPositions"
+  | "stage:newServerId"
   | "stage:refresh"
   | "stage:selectNextPlan"
   | "stage:setAllowedServiceTypes"
@@ -1078,7 +1079,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "config:recallSnapshot": {
       const id = p.id as string;
-      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`);
+      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`, { replacesOriginal: p.replacesOriginal === true });
     }
 
     case "config:deleteSnapshot": {
@@ -1087,7 +1088,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
 
     case "config:import":
-      return post<T>("/api/config/import", { bundle: p.bundle });
+      return post<T>("/api/config/import", { bundle: p.bundle, replacesOriginal: p.replacesOriginal === true });
 
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
@@ -1101,6 +1102,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // ── Kiosk devices ─────────────────────────────────────────────────────
     case "stage:setKioskDiscovery":
       return post<T>("/api/kiosk-discovery", p);
+
+    case "stage:newServerId":
+      return post<T>("/api/server-id/new", {});
 
     case "devices:list":
       return apiFetch<T>("/api/devices");

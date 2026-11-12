@@ -28,9 +28,13 @@ import {
   SelectValue,
   toast,
   confirm,
+  confirmWith,
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { configServerId, restoreQuestion } from "../../lib/restore-server-id";
+import { logReadFailure } from "../../lib/client-log";
 import { DataArchivePanel } from "./data-archive-panel";
+import { SERVER_ID_FLASH, ServerIdStatus } from "./server-id-field";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { WhatsNewButton } from "./whats-new";
@@ -762,6 +766,28 @@ interface SnapshotMeta {
   createdAt: string;
   appVersion: string;
   fileCount: number;
+  /** The server it was saved on. Absent from a server older than the field. */
+  serverId?: string | null;
+  /** Whether it brings screens and screen bindings. Absent from an older server:
+   *  then both are assumed, so a release is said rather than missed. */
+  carriesScreens?: boolean;
+  carriesBindings?: boolean;
+}
+
+/**
+ * How many screens are set up on this server, read when a restore dialog opens:
+ * the dialog says when a restore will release them. Null when the read fails,
+ * which goes to /log (the restore itself still logs every release on
+ * [config-snapshot]); the dialog then says the line rather than promise silence.
+ */
+async function boundScreens(): Promise<number | null> {
+  try {
+    const devices = await invoke<{ bound?: unknown[] }>("devices:list");
+    return Array.isArray(devices?.bound) ? devices.bound.length : null;
+  } catch (e) {
+    logReadFailure("config-snapshot", "the screens set up on this server, for the restore dialog", e);
+    return null;
+  }
 }
 
 // Backup / restore the whole config (secrets excluded). Download/upload a file,
@@ -904,7 +930,7 @@ function AutoBackupPanel() {
   );
 }
 
-function ConfigSnapshotPanel() {
+function ConfigSnapshotPanel({ ownServerId }: { ownServerId: string | null }) {
   const queryClient = useQueryClient();
   // Read here rather than threaded down: the warning belongs beside the button
   // that causes it, and this is the same query the update panel already polls.
@@ -947,14 +973,26 @@ function ConfigSnapshotPanel() {
     }
   }
 
-  async function recall(id: string, label: string) {
-    if (!(await confirm({
-      title: `Recall "${label}"?`,
+  async function recall(s: SnapshotMeta) {
+    // Asked only when the snapshot was saved under another id, and the release
+    // line only when it will happen: see restore-server-id.ts.
+    const facts = {
+      configId: s.serverId,
+      ownId: ownServerId,
+      carriesScreens: s.carriesScreens ?? true,
+      carriesBindings: s.carriesBindings ?? true,
+      ownBindings: await boundScreens(),
+    };
+    const id = s.id;
+    const answer = await confirmWith({
+      title: `Recall "${s.name}"?`,
       message: `This overwrites the current config (views, integrations, branding, etc.). ${restartConsequence(selfRecovers)} Secrets (API keys/passwords) are kept as-is.`,
       confirmLabel: "Recall",
-    }))) return;
+      ...restoreQuestion(facts, "Recall as replacement"),
+    });
+    if (!answer.ok) return;
     try {
-      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id }));
+      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id, replacesOriginal: answer.checked }));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -974,13 +1012,24 @@ function ConfigSnapshotPanel() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const bundle = JSON.parse(await file.text());
-      if (await confirm({
+      const bundle: unknown = JSON.parse(await file.text());
+      const files = (bundle as { files?: unknown } | null)?.files;
+      const carries = (name: string) => !!files && typeof files === "object" && Object.hasOwn(files, name);
+      const facts = {
+        configId: configServerId(bundle),
+        ownId: ownServerId,
+        carriesScreens: carries("settings.json"),
+        carriesBindings: carries("kiosk-devices.json"),
+        ownBindings: await boundScreens(),
+      };
+      const answer = await confirmWith({
         title: `Restore from "${file.name}"?`,
         message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
         confirmLabel: "Restore",
-      })) {
-        toastRestored(await invoke<RestartAnswer>("config:import", { bundle }));
+        ...restoreQuestion(facts, "Restore as replacement"),
+      });
+      if (answer.ok) {
+        toastRestored(await invoke<RestartAnswer>("config:import", { bundle, replacesOriginal: answer.checked }));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
@@ -1037,7 +1086,7 @@ function ConfigSnapshotPanel() {
                       {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {plural(s.fileCount, "file")}
                     </p>
                   </div>
-                  <Button variant="filled" size="small" onClick={() => recall(s.id, s.name)}>
+                  <Button variant="filled" size="small" onClick={() => void recall(s)}>
                     <RotateCcwIcon className="size-3.5 text-gray-9" /> Recall
                   </Button>
                   <Button variant="transparent" size="small" iconOnly onClick={() => remove(s.id)} aria-label="Delete snapshot">
@@ -1179,6 +1228,7 @@ const SAMPLE_EVENING = new Date(2026, 0, 1, 20, 45, 30).getTime();
 /** Flash targets on this page, and the tab each one sits on. */
 const FLASH_TABS: Readonly<Record<string, AdvancedTabId>> = {
   [VIDEO_PORTS_FLASH_ID]: "video",
+  [SERVER_ID_FLASH]: "network",
 };
 
 /** The `data-flash-id` a card carries, when something elsewhere in the app points at it. */
@@ -1334,7 +1384,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
   const autoUpdate = stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE;
 
-  const signals = useAdvancedSignals();
+  const signals = useAdvancedSignals(stageState);
   const available = availableCount(updateStatus);
   const updatesBadge = !updateStatus
     ? undefined
@@ -1533,6 +1583,15 @@ export function AdvancedSection({
             />
           </Field>
         )}
+        {show("server-id") && (
+          <Field orientation="vertical" data-setting-id="server-id" data-flash-id={SERVER_ID_FLASH}>
+            <FieldContent>
+              <FieldLabel>{settingText("server-id").name}</FieldLabel>
+              <FieldDescription>{settingText("server-id").description}</FieldDescription>
+            </FieldContent>
+            <ServerIdStatus identity={stageState.serverIdentity} timeZone={stageState.timezone} />
+          </Field>
+        )}
         {show("kiosk-setup") && (
           <Field orientation="vertical" data-setting-id="kiosk-setup">
             <FieldContent>
@@ -1575,7 +1634,7 @@ export function AdvancedSection({
     "data/Backups": (show, title) => (
       <CardFrame title={title}>
         {show("auto-backups") && <AutoBackupPanel />}
-        {show("config-snapshot") && <ConfigSnapshotPanel />}
+        {show("config-snapshot") && <ConfigSnapshotPanel ownServerId={stageState.serverIdentity?.id ?? null} />}
       </CardFrame>
     ),
 

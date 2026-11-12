@@ -274,10 +274,12 @@ follows the first server to answer, in memory only, until a server says it is se
 there. A server older than the `claimed` field is kept as `boundTo` on any answer.
 An output with no `server` file, bound or not, keeps the address it loads while that
 address keeps answering (with a `server` file it loads that address and nothing else).
-Two addresses answering for one server id (a config restore copied one server's id
-onto another) would otherwise reload the page on every probe round; once the current
+Two addresses answering for one server id (however it happened: two servers carrying
+the same id) would otherwise reload the page on every probe round; once the current
 address answers again after the other appeared, the helper logs one error naming both,
-shows it in its window, and stays. The window note clears once no other address has
+shows it in its window, and stays. The fix is on either server: **New server id**,
+under Settings > Advanced > Network, which the server offers while it hears the
+other answering with its id. The window note clears once no other address has
 answered for that id for 75 s, and the pair is reported again if it comes back. It follows another address at once when that answer
 is for a different server id (the output was just set up there, or released by the
 last one), on the first answer after a search begins, or once the current address has

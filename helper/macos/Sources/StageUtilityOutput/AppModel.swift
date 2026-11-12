@@ -485,7 +485,7 @@ final class AppModel: ObservableObject {
         clearDuplicate(key, rt)
       case .duplicate(let current, let other):
         let fact = "\(rt.descriptor.port): two servers answer for server id \(reply.serverId), at \(Redact.url(current)) and \(Redact.url(other))"
-        let advice = "Give one of them its own id (a config restore copies it from the backup)."
+        let advice = "Give one of them a new server id: Settings > Advanced > Network, on either server."
         Log.error(.discovery, "\(fact); staying with \(Redact.url(current)). \(advice)")
         rt.duplicateId = reply.serverId
         setNote(duplicateNote(key), "\(fact). \(advice)")

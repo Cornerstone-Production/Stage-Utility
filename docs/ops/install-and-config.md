@@ -368,9 +368,9 @@ screens, each with its own URL. **Mic slots**, in the same sidebar group, edits 
 rules, recorded services, the baptism timer and the stage patch sheet.
 
 **Advanced** — updates and the update track, the server log, the context bar,
-kiosk devices, time zone and clock format, the public address, host names, how
-integrations back off between services, backup and restore, automatic backups, and
-the data archive.
+kiosk devices and the server id they bind to, time zone and clock format, the
+public address, host names, how integrations back off between services, backup
+and restore, automatic backups, and the data archive.
 
 **Host names** lists the DNS names this server answers to, its defence against DNS
 rebinding ([SECURITY.md](../../SECURITY.md)). IP addresses, names with no dot and

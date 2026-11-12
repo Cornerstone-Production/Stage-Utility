@@ -325,8 +325,10 @@ const idFloors: KeyCheck = (v, k) => asObject(v, k);
 
 const SERVER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Minted by the server (randomUUID) and never rewritten; a restore carries it
- *  so a replacement box keeps the devices bound to the old one. */
+/** Minted by the server (randomUUID). Checked here like any key, but what a
+ *  restore WRITES is decided in config-snapshot.ts (serverIdFor): this server's
+ *  own id, unless the operator said this box replaces the one the config came
+ *  from, so a second box never comes up answering as the first. */
 const serverId: KeyCheck = (v, k) => {
   if (v !== null && !(typeof v === "string" && SERVER_ID.test(v))) refuse(`${k} must be a server id or null`);
   return v;

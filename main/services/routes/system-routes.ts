@@ -247,10 +247,20 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       if (refuseUnansweredHost(req, res)) return;
       // A snapshot carries every config file and every uploaded image, base64'd,
       // so the ordinary JSON ceiling would refuse a bundle this app exported.
-      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
-      const bundle = "bundle" in body ? body.bundle : body;
+      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown> | null;
+      // `in` throws on a JSON null or a string: that was a 500 for a request that is
+      // simply wrong. The route takes an object, the bundle itself or {bundle}.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        error(res, "Expected a config snapshot, or {bundle}, as a JSON object.");
+        return;
+      }
+      const wrapped = "bundle" in body;
+      const bundle = wrapped ? body.bundle : body;
+      // Read only from the wrapper, and only a literal true. A bare bundle is a
+      // config file, and a config file cannot choose to take its own server id.
+      const replacesOriginal = wrapped && body.replacesOriginal === true;
       try {
-        const applied = await configSnapshot.apply(bundle);
+        const applied = await configSnapshot.apply(bundle, { replacesOriginal });
         json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));
@@ -294,8 +304,10 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
     if (method === "POST" && snapRecallMatch) {
       if (refuseUnansweredHost(req, res)) return;
+      // No body, as before this option existed, is not a replacement.
+      const replacesOriginal = (await readBodyOrEmpty(req)).replacesOriginal === true;
       try {
-        const applied = await configSnapshot.recall(snapRecallMatch[1]);
+        const applied = await configSnapshot.recall(snapRecallMatch[1], { replacesOriginal });
         json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));

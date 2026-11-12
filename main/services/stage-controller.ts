@@ -104,6 +104,9 @@ import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
 import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
+import type { DuplicateCheck } from "../types/kiosk.js";
+import { recheckServerId } from "./kiosk-responder.js";
+import { sameDuplicateCheck } from "./kiosk-duplicate-check.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
@@ -351,6 +354,16 @@ export class ViewSurfaceChangedError extends Error {
   }
 }
 
+/** New server id asked for while no other server answers with this one. */
+export class NoDuplicateServerError extends Error {
+  readonly status = 409;
+  readonly code = "no-duplicate-server";
+  constructor() {
+    super("New server id is offered only while another server answers with this server's id.");
+    this.name = "NoDuplicateServerError";
+  }
+}
+
 export class LayoutConflictError extends Error {
   readonly code = "layout-conflict";
   constructor(
@@ -442,6 +455,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
     autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
@@ -717,6 +731,9 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      // Read-only here: minted by discovery (remote-server.startDiscovery), which
+      // reports it through setServerId.
+      serverIdentity: { ...this.state.serverIdentity, id: settings.serverId ?? null },
       autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
@@ -3191,6 +3208,51 @@ export class StageController {
     this.state = { ...this.state, kioskDiscovery: on };
     await settingsStore.patch({ kioskDiscovery: on });
     this.broadcast();
+    return this.state;
+  }
+
+  /** This server's id: the live copy the responder answers with (it reads it from
+   *  here), set at boot from settings, when discovery mints one, and by New server
+   *  id. A changed id voids whatever was heard about the old one. */
+  setServerId(id: string): void {
+    if (id === this.state.serverIdentity.id) return;
+    this.state = { ...this.state, serverIdentity: { ...this.state.serverIdentity, id, duplicates: [] } };
+    this.broadcast();
+  }
+
+  /** What the duplicate-id check knows. Broadcast only when it changes, so a
+   *  responder reporting the same thing twice costs nothing. */
+  setDuplicateCheck(next: DuplicateCheck): void {
+    const cur = this.state.serverIdentity;
+    if (sameDuplicateCheck(cur, next)) return;
+    this.state = { ...this.state, serverIdentity: { ...cur, check: next.check, duplicates: next.duplicates } };
+    this.broadcast();
+  }
+
+  /**
+   * Give this server a new id, while another server answers with this one.
+   *
+   * The way out for a box that already carries another server's id: a restore
+   * keeps the id a box has, and here that id is the copy. Refused while no other
+   * server is heard with it, because every screen bound here refers to the id and
+   * changing it without cause would orphan the lot. The screens both servers have
+   * set up stay with the other one, which keeps the old id; the ones set up only
+   * here are told "not set up" by it, and are answered as claimed here, so they
+   * follow the new id on their own. Nothing restarts.
+   */
+  async newServerId(): Promise<StageState> {
+    const before = this.state.serverIdentity;
+    if (before.duplicates.length === 0) {
+      throw new NoDuplicateServerError();
+    }
+    const next = randomUUID();
+    // Saved first: an id answered with but not saved would be lost at the next
+    // start. Then the live copy, which the responder reads on every datagram, and
+    // a check at once under it.
+    await settingsStore.patch({ serverId: next });
+    console.log(`[stage-controller] newServerId: ${scrub(before.id ?? "none")} → ${scrub(next)}`);
+    this.setServerId(next);
+    recheckServerId();
     return this.state;
   }
 

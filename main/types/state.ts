@@ -8,6 +8,7 @@ import type { ReleaseSection } from "../services/update/release-notes.js";
 // re-exported from stage.ts, so no import anywhere had to change.
 
 import type { BaptismAutoStart } from "./baptism.js";
+import type { ServerIdentity } from "./kiosk.js";
 import type { PlanSwitcherMode } from "./pco.js";
 
 export interface StageState {
@@ -63,6 +64,8 @@ export interface StageState {
   /** Answer kiosk devices looking for a server. Off until switched on, so a test
    *  instance on the same LAN cannot claim a screen meant for the real one. */
   kioskDiscovery: boolean;
+  /** The id screens bind to, and what discovery has found about it. */
+  serverIdentity: ServerIdentity;
   /** Mac output helpers and Windows kiosks follow this server's version on their
    *  own. See machine-updates.ts. */
   autoUpdateMachines: boolean;

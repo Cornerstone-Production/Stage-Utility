@@ -3,6 +3,7 @@
 // by source, then by subject.
 
 import type { AttentionSource } from "../types";
+import { duplicateServer } from "./duplicate-server";
 import { integrationDown } from "./integration-down";
 import { readiness } from "./readiness";
 import { recorderIdle } from "./recorder-idle";
@@ -14,6 +15,7 @@ export const ATTENTION_SOURCES: readonly AttentionSource[] = [
   readiness,
   wirelessBattery,
   wirelessOffline,
+  duplicateServer,
   screenOffline,
   recorderIdle,
   integrationDown,

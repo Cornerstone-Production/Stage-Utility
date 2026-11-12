@@ -118,8 +118,8 @@ export function Rail({
   // Names the server was reached by that wait for an accept or a dismiss, on the
   // Host names card under Advanced. A count of NAMES, not requests: one display
   // asks every few seconds, and the number to act on is how many need a decision.
-  const advancedSignals = useAdvancedSignals();
-  const { updateAvailable, hostNamesWaiting } = advancedSignals;
+  const advancedSignals = useAdvancedSignals(state);
+  const { updateAvailable, hostNamesWaiting, duplicateServers } = advancedSignals;
 
   // A rail entry per console View the operator has not hidden from the sidebar.
   // A hidden console is still a page — the shell titles it from the full list —
@@ -259,11 +259,16 @@ export function Rail({
           const advanced = d.path === ADVANCED_PATH;
           const flagged = updateAvailable && advanced;
           const names = advanced ? hostNamesWaiting : 0;
+          const duplicate = advanced && duplicateServers > 0;
           const said: string[] = [];
+          if (duplicate) said.push("another server is using this server's id");
           if (flagged) said.push("update available");
           if (names > 0) said.push(`${plural(names, "host name")} waiting`);
           let badge: ReactNode;
-          if (names > 0) badge = <CountBadge count={names} compact={railed} />;
+          // Red, and first: screens are switching between two servers now. The
+          // other marks are things waiting, not things wrong.
+          if (duplicate) badge = <span title="Another server is using this server's id" className="block size-1.5 rounded-full bg-danger-9" />;
+          else if (names > 0) badge = <CountBadge count={names} compact={railed} />;
           else if (flagged) badge = <span title="Update available" className="block size-1.5 rounded-full bg-accent" />;
           return (
             <SidebarListItem

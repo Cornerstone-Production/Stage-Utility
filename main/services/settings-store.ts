@@ -81,8 +81,9 @@ export interface SettingsData extends AppIconSettings {
    *  UDP ports and a collision should be a settings change, not a rebuild. */
   kioskDiscoveryPort: number;
   /** Stable per install; a device uses it to tell two servers apart. Generated
-   *  on first use and never rewritten — every binding on every device refers to
-   *  it, so changing it would orphan the lot. */
+   *  on first use. Every binding on every device refers to it, so it changes only
+   *  when the operator says so: a restore that takes the config's id (this box
+   *  replaces that one), or New server id while another server answers with it. */
   serverId: string | null;
   /** Themeable brand accent as a #rrggbb hex, or null to use the built-in default. */
   accentColor: string | null;

@@ -340,6 +340,7 @@ const NOT_SCANNED = new Map<string, string>([
   ["device-manager.ts", DEVICE],
   ["encryption.ts", UNAUDITED],
   ["keyed-record-store.ts", UNAUDITED],
+  ["kiosk-duplicate-check.ts", DEVICE],
   ["kiosk-responder.ts", DEVICE],
   ["layout-image-store.ts", UNAUDITED],
   ["layout-library.ts", UNAUDITED],

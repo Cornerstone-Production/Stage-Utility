@@ -21,6 +21,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { configSnapshot, configFiles } = await import("./config-snapshot.js");
 const { stageController } = await import("./stage-controller.js");
+const { settingsStore } = await import("./settings-store.js");
 const { savedColorsStore } = await import("./saved-colors-store.js");
 const { notesStore } = await import("./notes-store.js");
 const { historyMilestonesStore } = await import("./history-milestones-store.js");
@@ -95,6 +96,9 @@ test("the backup of a fresh install, plus saves through the real setters, restor
   await stageController.addOutput({ name: "Lobby" });
   const lobby = stageController.getState().outputs.find((o) => o.name === "Lobby")!;
   await stageController.setOutputSlug(lobby.id, " Lobby-TV ");
+  // A screen can only be claimed once discovery has run, which mints the id the
+  // binding is to; set here as that start would.
+  await settingsStore.patch({ serverId: "5e0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" });
   await updateDevices((d) => claim(d, "pi-lobby", lobby.id, { secret: "s3cret", macs: ["aa:bb:cc:dd:ee:ff"], hostname: "lobby-pi" }).devices);
   const feed = await videoService.addFeed({ name: "Porch cam", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } });
   assert.ok(feed.ok, JSON.stringify(feed));
@@ -123,7 +127,9 @@ test("the backup of a fresh install, plus saves through the real setters, restor
   for (const name of configFiles()) await fs.rm(path.join(TMP, name), { force: true });
   for (const ref of images) await fs.rm(path.join(TMP, ref), { force: true });
 
-  await configSnapshot.apply(bundle);
+  // Onto an empty box that replaces the one the backup came from, so its id and
+  // the screen bindings to it come back too.
+  await configSnapshot.apply(bundle, { replacesOriginal: true });
   for (const [name, contents] of Object.entries(bundle.files as Record<string, unknown>)) {
     const onDisk = JSON.parse(await fs.readFile(path.join(TMP, name), "utf8"));
     assert.deepEqual(onDisk, contents, `${name} did not come back as it was saved`);

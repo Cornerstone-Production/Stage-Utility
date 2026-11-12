@@ -587,13 +587,62 @@ the macOS and Windows agents, never by the Linux agent, until it is updated or t
 device's `bound-to` file (`boundTo` in the helper's `outputs.json`) is removed by
 hand.
 
-No coordination between servers, and nothing to get out of sync.
+No coordination between servers over bindings, and nothing about them to get out
+of sync. (Two servers carrying one id is another matter: see below.)
 
 A device that cannot reach the server that owns it keeps trying and says so on
 screen. It does not re-home itself — a display that changed servers during an
 outage would be worse than a dark one — but other servers can show it as *bound
 elsewhere* behind an explicit force-claim, so recovering from a decommissioned
 server does not need SSH.
+
+## Two servers with one id
+
+A server's id (`serverId` in its `settings.json`) is what every screen and Mac
+output binds to. Two servers carrying the same id both answer those screens, which
+then switch between them: a helper output reloads, and reports its health to
+whichever answered last. A config restore is the usual way it happens, which is
+why a restore keeps this server's own id unless told this box replaces the one the
+config came from ([Restoring a config snapshot](ops/reliability.md#restoring-a-config-snapshot)).
+A restore that keeps the id but brings the config's screens also releases every
+screen set up here, because a binding names a screen id (`display-2`) that now
+means the config's screen: each one shows under **Not set up yet**, to be set up
+again.
+
+The server finds such a twin itself, whatever made it. While discovery is on, it
+sends a check when it starts (at boot, and after the restart a restore or the
+discovery switch causes): the ordinary probe, naming its own id as the server it is
+bound to. Every server with another id ignores it, and one with the same id
+answers, whatever its version. A server of this version that hears another one
+check for its id also takes that as the answer, so the second of two to start is
+found by both.
+
+- Another server found is shown on Home's **Needs attention** (one row per
+  address), on **Advanced → Network → Server id**, and as a red mark on the
+  Advanced row and the Network tab, and logged once on `[kiosk-responder]`.
+- While one is heard, the check repeats every 60 seconds. An address clears after
+  two checks in a row go unanswered, so within about two minutes of the other
+  server changing its id or going away. With none heard, nothing repeats: two
+  servers that are both already running when they first meet (a laptop install
+  joining the network, say) are found when either next starts.
+- **New server id…**, in the alert on that row, gives this server a new id, after
+  a confirm. It is offered only while another server is heard with this one (the
+  API refuses it otherwise, `409`), because every screen bound here refers to the
+  id. The other server keeps the old id, and the screens both have set up stay
+  with it. Screens set up only on this server are told by the other one that they
+  are not set up there, are answered as set up here, and follow the new id on
+  their own: a Mac output within 30 seconds, a kiosk the next time it starts.
+  They learn it from the other server, so leave it running until they have moved.
+  An older Pi or Linux kiosk that sends no binding of its own, set up on both, is
+  answered by both until it is released on one. Nothing restarts, and the check
+  runs again at once under the new id.
+- The Server id row says what the last check found and when (**Checking…** for
+  the three seconds its answers are counted), **Not checked** while
+  discovery is off (nothing answers or checks), and why when the check could not
+  be sent.
+- A server older than this check answers it too, and also lists the server that
+  sent it as a screen not set up yet, for 90 seconds at a time; while it is
+  flagged, the 60-second re-check keeps it listed.
 
 ## Discovery
 

@@ -126,6 +126,13 @@ export interface DiscoveryProbe {
   mode?: string;
   /** Set by the Mac output helper, once per output. See {@link DeviceOutput}. */
   output?: DeviceOutput;
+  /**
+   * Set by a SERVER checking whether another one answers with its id: such a probe
+   * names that id as `boundTo`, so only a server with the same id answers it.
+   * A server that reads this answers without listing the probe as a screen, and
+   * takes the probe itself as evidence of a duplicate. See isDuplicateCheck.
+   */
+  check?: boolean;
 }
 
 /** What a server answers with. */
@@ -145,6 +152,46 @@ export interface DiscoveryReply {
    * server, and the Linux agent does not.
    */
   claimed?: boolean;
+}
+
+/**
+ * What the duplicate-id check knows: whether it ran, and who else answers with
+ * this server's id. Reported by kiosk-duplicate-check.ts, which never holds the id.
+ */
+export interface DuplicateCheck {
+  /** The last duplicate-id check. `off` while discovery is off (nothing answers,
+   *  nothing checks); `failed` when the check could not be sent; `checking` while
+   *  its answers are still being counted; `ok` once they have been, `at` being
+   *  when it went out, which is all "nobody else answered" can claim. */
+  check: { state: "off" | "checking" | "ok" | "failed"; at?: number; reason?: string };
+  /** Other servers answering discovery with this id, by address. Empty is the
+   *  healthy case. Any entry means screens bound here can switch between them. */
+  duplicates: DuplicateServer[];
+}
+
+/**
+ * This server's identity on the discovery port, as the operator sees it.
+ *
+ * `id` is what every kiosk and Mac output binds to (settings.json `serverId`),
+ * null until discovery first starts and mints one. The stage controller holds the
+ * live copy; the responder reads it from there rather than keeping its own. A
+ * restore that brings another server's config asks whether to take that server's
+ * id only when the two differ.
+ */
+export interface ServerIdentity extends DuplicateCheck {
+  id: string | null;
+}
+
+/** Another server heard answering with this server's id. */
+export interface DuplicateServer {
+  /** Where its datagram came from. */
+  address: string;
+  /** What it told devices to load, when it answered a check (absent when it was
+   *  heard checking for this id itself). */
+  url?: string;
+  name?: string;
+  /** When it was first heard, epoch ms. */
+  since: number;
 }
 
 /** The default discovery port. Adjustable — AV gear is fond of odd UDP ports,

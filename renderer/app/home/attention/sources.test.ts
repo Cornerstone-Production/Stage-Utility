@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { ATTENTION_SOURCES } from "./sources/index.js";
 
 const EXPECTED = [
+  "duplicate-server",
   "integration-down",
   "readiness",
   "recorder-idle",
@@ -49,6 +50,7 @@ describe("attention sources", () => {
       "readiness",
       "wireless-battery",
       "wireless-offline",
+      "duplicate-server",
       "screen-offline",
       "recorder-idle",
       "integration-down",

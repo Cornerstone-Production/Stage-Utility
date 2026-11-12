@@ -357,6 +357,35 @@ cleared, and nothing that runs in the background is paused.
   inside a config file (a wireless password, an integration's API key) is dropped
   rather than stored, and a screen binding's token is restored empty, so the
   screen pins a new one when it next connects.
+- **The server id.** Kiosks and Mac outputs bind to a server by its id
+  (`serverId` in `settings.json`), and a config carries the id of the server it
+  was saved on. When that is not this server's id, **Upload & restore** and
+  **Recall** say "This config was saved on another server." and ask **Use the
+  config's server id**, unticked. Unticked, this server keeps its own id, which
+  is right for a second box, and the only safe answer while the original still
+  runs: two servers with one id both answer the same screens, which then switch
+  between them. Ticked, it takes the config's id and its screen bindings
+  (`kiosk-devices.json`), so that server's screens and Mac outputs follow this
+  one; use it only when this box replaces that one. A config whose server never
+  set up a screen has no bindings to take, and this server's own are released
+  instead, as below. A config that carries no id
+  (absent or `null`), or this server's own, asks nothing, and this server keeps
+  its id. Either decision is logged on `[config-snapshot]` when the two ids
+  differ. A restore through the API keeps this server's id unless it says
+  otherwise ([API](../reference/api.md)).
+- **Screen bindings follow the id.** A config's bindings are written only when
+  its id is taken (this server's own config, or ticked). A restore that keeps
+  this server's id but brings the config's screens (its `settings.json`), or
+  takes another server's id from a config with no bindings in it, **releases**
+  every screen set up on this server: screen ids are counters
+  (`display-2`) that mean a different screen on every server, so a device left
+  bound would show whatever the config calls `display-2`. Each released device is
+  named on `[config-snapshot]`, shows under **Not set up yet**, and is set up again
+  from Screens. Whenever a restore or recall will do this, and a screen is set up
+  here, its dialog says "Screens set up on this server will be released and need
+  setting up again.", including for a config with no server id, which asks
+  nothing else; with the box ticked, only when the config brings no bindings. A bundle with no `settings.json` changes no screens, and leaves
+  this server's bindings as they are.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.
