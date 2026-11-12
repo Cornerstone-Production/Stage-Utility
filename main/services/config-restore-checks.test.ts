@@ -317,6 +317,17 @@ describe("config restore checks", () => {
     assert.deepEqual(await readOnDisk("automation-rules.json"), [noParams]);
   });
 
+  test("refuses a condition that is not a step, naming it, and keeps one with no params", async () => {
+    const rule = (GOOD["automation-rules.json"] as Record<string, unknown>[])[0];
+    const refused = (conditions: unknown[]) => configSnapshot.apply(bundleOf({ "automation-rules.json": [{ ...rule, conditions }] }));
+    await assert.rejects(() => refused([null]), /rule "Lights off"'s condition 1 must be an object/);
+    await assert.rejects(() => refused([{ params: {} }]), /rule "Lights off"'s condition 1 id/);
+    await assert.rejects(() => refused([{ id: "service.live", params: "x" }]), /rule "Lights off"'s condition 1 params must be an object/);
+    const ok = { ...rule, conditions: [{ id: "service.live" }] };
+    await configSnapshot.apply(bundleOf({ "automation-rules.json": [ok] }));
+    assert.deepEqual(await readOnDisk("automation-rules.json"), [ok]);
+  });
+
   test("refuses ids that would reach the prototype, and a binding to no screen", async () => {
     const rule = (GOOD["automation-rules.json"] as object[])[0];
     const view = (GOOD["views.json"] as object[])[0];
