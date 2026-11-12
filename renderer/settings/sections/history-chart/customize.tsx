@@ -8,18 +8,33 @@
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { SlidersHorizontalIcon } from "lucide-react";
 
+import type { ReactNode } from "react";
+
 import { Checkbox } from "../../../components/ui/checkbox";
+import { Radio, RadioGroup } from "../../../components/ui/radio";
 import { cn } from "../../../lib/cn";
 
 export interface CustomizeOption {
   key: string;
   label: string;
+  /** A quiet word beside the label ("Trends"). */
+  tag?: string;
 }
 
 export interface CustomizeGroup {
   id: string;
   label: string;
   options: CustomizeOption[];
+  /**
+   * Makes this a choose-exactly-one group, drawn as radios and arrow-key
+   * navigable, with its OWN value. It does not read `selected` or call
+   * `onToggle`: the options of a choice are often named like another group's
+   * (a metric to plot and a metric to show as a column), and one flat list of
+   * ticked keys could not tell them apart.
+   */
+  choose?: { value: string; onChange: (key: string) => void };
+  /** Under the options: a note, or a control that belongs to the group. */
+  footer?: ReactNode;
 }
 
 export interface CustomizeProps {
@@ -61,27 +76,52 @@ export function CustomizePopover({ label, groups, selected, onToggle }: Customiz
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
-          <div className="max-h-[min(24rem,var(--radix-popover-content-available-height))] overflow-y-auto p-1">
+          <div className="max-h-[min(38rem,var(--radix-popover-content-available-height))] overflow-y-auto p-1">
             {shown.map((group, gi) => (
-              <div key={group.id} className={cn("flex flex-col gap-0.5 py-1", gi > 0 && "border-t border-line pt-2")}>
+              <div
+                key={group.id}
+                data-customize-group={group.id}
+                className={cn("flex flex-col gap-0.5 py-1", gi > 0 && "border-t border-line pt-2")}
+              >
                 <span className="px-2 pb-1 text-caption2 uppercase tracking-wider text-fg-subtle">{group.label}</span>
-                {group.options.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-footnote text-fg hover:bg-fill"
+                {group.choose ? (
+                  <RadioGroup
+                    value={group.choose.value}
+                    onValueChange={group.choose.onChange}
+                    aria-label={group.label}
+                    className="flex flex-col gap-0.5"
                   >
-                    <Checkbox
-                      checked={on.has(opt.key)}
-                      onCheckedChange={() => onToggle(opt.key)}
-                    />
-                    <span className="truncate">{opt.label}</span>
-                  </label>
-                ))}
+                    {group.options.map((opt) => (
+                      <OptionRow key={opt.key} opt={opt}>
+                        <Radio value={opt.key} />
+                      </OptionRow>
+                    ))}
+                  </RadioGroup>
+                ) : (
+                  group.options.map((opt) => (
+                    <OptionRow key={opt.key} opt={opt}>
+                      <Checkbox checked={on.has(opt.key)} onCheckedChange={() => onToggle(opt.key)} />
+                    </OptionRow>
+                  ))
+                )}
+                {group.footer}
               </div>
             ))}
           </div>
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  );
+}
+
+function OptionRow({ opt, children }: { opt: CustomizeOption; children: ReactNode }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-footnote text-fg hover:bg-fill">
+      {children}
+      <span className="truncate">{opt.label}</span>
+      {opt.tag && (
+        <span className="rounded border border-line px-1.5 text-caption2 text-fg-subtle">{opt.tag}</span>
+      )}
+    </label>
   );
 }

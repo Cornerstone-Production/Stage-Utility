@@ -23,7 +23,8 @@ import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
-import { SplDetail } from "./spl-history-section";
+import { SplDetail, usePlot } from "./spl-history-section";
+import { usePlotPrefs, type PlotPrefs } from "./sound-plot";
 import { effectiveSoundMetric, peakOn, soundMetricOptions } from "./history-trends/sound-metric";
 import { useTrendsPrefs } from "./history-trends/use-trends-prefs";
 import { AllServicesLink, RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
@@ -856,6 +857,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const offered = soundMetricOptions(splList.map((x) => Object.keys(x.metrics)));
     return { soundMetrics: offered, soundMetric: effectiveSoundMetric(trendsPrefs.soundMetric, offered) };
   }, [splList, trendsPrefs.soundMetric]);
+  /** What every sound figure on the page plots: Trends, unless this browser
+   *  chose. The page's ONE subscription to the choice, passed to the header, the
+   *  Sound card and its title, and the rows. */
+  const plotPrefs = usePlotPrefs(soundMetric);
 
   const trendRecordings = useMemo<TrendRecording[]>(
     () => {
@@ -1542,7 +1547,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           timeline={detail}
           attendance={attendance ?? selectedRow?.attendance ?? null}
           spl={spl}
-          trendsMetric={soundMetric}
+          plot={plotPrefs}
           soundUnavailable={detailFailed.has("spl")}
           soundLoading={splPending}
           now={nowTick}
@@ -1783,7 +1788,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SoundSection spl={spl} trendsMetric={soundMetric} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} plot={plotPrefs} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1825,7 +1830,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SoundSection spl={spl} trendsMetric={soundMetric} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} plot={plotPrefs} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -2012,7 +2017,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               s,
               row.attendance,
               splRow === "error" ? null : splRow,
-              soundMetric,
+              plotPrefs,
               live ? nowTick : undefined,
             );
             // A read that FAILED says so, rather than borrowing the sentence
@@ -2275,15 +2280,15 @@ function ExportPopover({
  */
 function SoundSection({
   spl,
-  trendsMetric,
+  plot,
   failed,
   loading,
   timeline,
   attendance,
 }: {
   spl: ServiceSplHistory | null;
-  /** The Trends sound metric as the page resolved it: the plot's default. */
-  trendsMetric: string | null;
+  /** The page's plot preferences: what the title names and the card plots. */
+  plot: PlotPrefs;
   /** The record could not be read, which is not a service with no sound. */
   failed: boolean;
   /** The record has not been read yet, which is not a service with no sound either. */
@@ -2291,8 +2296,10 @@ function SoundSection({
   timeline: ServiceTimeline | null;
   attendance: ServiceAttendance | null;
 }) {
+  // The title names the plotted metric, from the SAME hook the card plots by.
+  const plotted = usePlot(spl, plot);
   return (
-    <SectionCard id="history-sound" title="Sound">
+    <SectionCard id="history-sound" title="Sound" titleDetail={plotted?.metric}>
       {spl ? (
         <SplDetail
           // KEYED BY THE RECORD. The section fetches the raw series on
@@ -2303,7 +2310,7 @@ function SoundSection({
           detail={spl}
           timeline={timeline}
           attendance={attendance}
-          trendsMetric={trendsMetric}
+          plot={plot}
         />
       ) : failed ? (
         <ErrorNote>Couldn't load the sound for this service.</ErrorNote>
@@ -2369,11 +2376,16 @@ function ServiceLoading({ onBack }: { onBack: () => void }) {
 function SectionCard({
   id,
   title,
+  titleDetail,
   headerRight,
   children,
 }: {
   id?: string;
   title: string;
+  /** Quiet text after the title, inside the heading: its accessible name reads
+   *  "Sound · LAeq 2". The section's own aria-label stays the title alone,
+   *  "Sound". */
+  titleDetail?: string;
   /** A control beside the title, on the same row — the Baptisms card's own
    *  "Open in Baptisms" link. Absent for every other card today. */
   headerRight?: React.ReactNode;
@@ -2386,7 +2398,12 @@ function SectionCard({
       className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
     >
       <div className="flex items-center gap-3">
-        <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+        <h2 className="text-subheadline font-semibold text-fg">
+          {title}
+          {titleDetail && (
+            <span data-card-title-detail className="font-medium text-fg-muted"> · {titleDetail}</span>
+          )}
+        </h2>
         {headerRight && <span className="ml-auto">{headerRight}</span>}
       </div>
       {children}

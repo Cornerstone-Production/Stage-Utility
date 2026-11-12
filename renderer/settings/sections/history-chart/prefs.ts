@@ -16,12 +16,11 @@ import { readStored, storeFailure, writeStored } from "../../../lib/safe-storage
 /**
  * Who wants to know when a stored key list changes.
  *
- * localStorage fires `storage` only in OTHER tabs, so two components in ONE tab
- * reading the same entry never heard about each other's writes. That is not
- * theoretical: the Sound card owns the Smaart metric choice, and the service
- * header's "Peak <metric>" figure reads the same entry — switching metric in
- * Customize relabelled the card and left the header quoting the old metric's
- * level until the page was reopened.
+ * localStorage fires `storage` only in OTHER tabs, so two readers of one entry
+ * in ONE tab never hear about each other's writes. That is not theoretical: two
+ * strips on one page each holding their own copy of a ticked list disagree until
+ * the page is reopened, and the Sound card's plotted metric once relabelled the
+ * card and left the service header quoting the old metric's level.
  */
 const listeners = new Map<string, Set<() => void>>();
 
@@ -53,6 +52,19 @@ export function useStoredKeysVersion(storageKey: string): number {
   const [n, setN] = useState(0);
   useEffect(() => subscribeStoredKeys(storageKey, () => setN((v) => v + 1)), [storageKey]);
   return n;
+}
+
+/**
+ * Store a key list and tell this tab's other readers. Returns the failure.
+ *
+ * Announces only a write that LANDED: a reader woken by a refused write re-reads
+ * storage, finds the old list, and a `useStoredKeys` caller would then throw away
+ * the choice it is holding for the session.
+ */
+export function writeStoredKeys(storageKey: string, keys: readonly string[]): Error | null {
+  const failure = storeFailure(storageKey, JSON.stringify(keys));
+  if (!failure) notifyStoredKeys(storageKey);
+  return failure;
 }
 
 /** True when this browser has a stored choice at all — as opposed to an EMPTY
@@ -163,10 +175,7 @@ export function useStoredKeys(
   const replace = useCallback(
     (next: string[]): Error | null => {
       setKeys(next);
-      const failure = storeFailure(storageKey, JSON.stringify(next));
-      if (failure) return failure;
-      notifyStoredKeys(storageKey);
-      return null;
+      return writeStoredKeys(storageKey, next);
     },
     [storageKey],
   );

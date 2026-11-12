@@ -31,7 +31,7 @@ const teardown = installRenderDom();
 
 const { render, screen, cleanup, act, within } = await import("@testing-library/react");
 const React = await import("react");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 afterEach(cleanup);
 after(() => {
@@ -93,7 +93,7 @@ test("two runs of one item are two rows, with no duplicate-key warning", async (
 
   try {
     const r = render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: DETAIL,
       }),
     );

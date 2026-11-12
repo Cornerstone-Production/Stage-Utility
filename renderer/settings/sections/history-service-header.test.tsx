@@ -117,7 +117,7 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { ServiceHeader, serviceKpis } = await import("./history-service-header.js");
-const { PLOT_STORAGE_KEY, writePlotChoice } = await import("./sound-plot.js");
+const { PLOT_STORAGE_KEY, usePlotPrefs, writePlotChoice } = await import("./sound-plot.js");
 type ServiceHeaderProps = import("./history-service-header.js").ServiceHeaderProps;
 
 after(() => {
@@ -138,7 +138,7 @@ function mount(props: Partial<ServiceHeaderProps> = {}) {
         timeline: timeline(),
         attendance: attendance(),
         spl: spl(),
-        trendsMetric: null,
+        plot: { trends: null, chosen: null },
         meta: "Kickoff · The Gathering · Thu, Sep 17, 2026 · 8:15 PM",
         readOnly: false,
         onBack: noop,
@@ -166,7 +166,7 @@ describe("History service header", () => {
   });
 
   test("the six KPIs read off the record, signs and counts included", () => {
-    const kpis = serviceKpis(timeline(), attendance(), spl(), null);
+    const kpis = serviceKpis(timeline(), attendance(), spl(), { trends: null, chosen: null });
     assert.deepEqual(
       kpis.map((k) => k.label),
       ["Started", "Planned", "Actual", "Avg overrun", "Peak in room", "Peak SPL LAeq"],
@@ -188,13 +188,13 @@ describe("History service header", () => {
     // survived: 2,061 looked like a plausible "peak attendance".
     assert.equal(by("attendance").value, "1,196", "peak attendance is peak people IN THE ROOM");
     assert.equal(by("attendance").sub, "1,727 entries", "how many came in DURING the service, the recorder's own figure");
-    assert.equal(by("level").value, "102 dB", "the loudest item on the primary metric");
+    assert.equal(by("level").value, "102 dB", "the loudest item on the plotted metric");
   });
 
   test("an early start says early", () => {
     const early = timeline();
     early.items[0].startedAt = iso("20:14:30");
-    const started = serviceKpis(early, null, null, null).find((k) => k.key === "started")!;
+    const started = serviceKpis(early, null, null, { trends: null, chosen: null }).find((k) => k.key === "started")!;
     assert.equal(started.sub, "−0:30 early", "an early start must not read as late");
   });
 
@@ -205,7 +205,7 @@ describe("History service header", () => {
     // started showing the same sub-line.
     const punctual = timeline();
     punctual.items[0].startedAt = iso("20:15:00");
-    const started = serviceKpis(punctual, null, null, null).find((k) => k.key === "started")!;
+    const started = serviceKpis(punctual, null, null, { trends: null, chosen: null }).find((k) => k.key === "started")!;
     assert.equal(started.sub, "on time");
     assert.equal(
       started.color,
@@ -215,13 +215,13 @@ describe("History service header", () => {
   });
 
   test("a record with no attendance or sound shows a dash, not a zero", () => {
-    const kpis = serviceKpis(timeline(), null, null, null);
+    const kpis = serviceKpis(timeline(), null, null, { trends: null, chosen: null });
     assert.equal(kpis.find((k) => k.key === "attendance")!.value, "—");
     assert.equal(kpis.find((k) => k.key === "level")!.value, "—");
   });
 
   test("an absent level says WHICH kind of absent it is", () => {
-    const level = (rec: ServiceSplHistory | null) => serviceKpis(timeline(), null, rec, null).find((k) => k.key === "level")!;
+    const level = (rec: ServiceSplHistory | null) => serviceKpis(timeline(), null, rec, { trends: null, chosen: null }).find((k) => k.key === "level")!;
 
     // Nothing recorded.
     assert.equal(level(null).sub, "no sound recorded");
@@ -242,9 +242,11 @@ describe("History service header", () => {
   });
 
   test("the header follows the Sound card's metric choice", () => {
-    // `servicePeakLevel` reads localStorage, which React cannot see. The memo
-    // held on its other dependencies, so switching metric in the Sound card's
+    // The header takes the page's plot preferences as a value. When it read the
+    // choice behind its memo's back, switching metric in the Sound card's
     // Customize relabelled that card and left the header quoting the old one.
+    // Mounted here as the page mounts it, with `usePlotPrefs` above it; the
+    // page-level wiring itself is history-sound-plot-page.test.tsx's.
     const twoMetrics = spl();
     for (const it of twoMetrics.items as unknown as { metrics: Record<string, unknown> }[]) {
       it.metrics["LCeq"] = { max: 108.4, avg: 99, leq: 100, count: 60 };
@@ -253,20 +255,19 @@ describe("History service header", () => {
     // would make it recompute every time and hide a missing dependency.
     const tl = timeline();
     const att = attendance();
+    function OnPage({ trendsMetric }: { trendsMetric: string | null }) {
+      return React.createElement(ServiceHeader, {
+        timeline: tl,
+        attendance: att,
+        spl: twoMetrics,
+        plot: usePlotPrefs(trendsMetric),
+        meta: "",
+        onBack: noop, onEditTimes: noop, onCopyReport: noop, onMerge: noop,
+        onRebuild: noop, onDelete: noop, onResetPacing: noop,
+      });
+    }
     const header = (trendsMetric: string | null) =>
-      React.createElement(
-        TooltipProvider,
-        null,
-        React.createElement(ServiceHeader, {
-          timeline: tl,
-          attendance: att,
-          spl: twoMetrics,
-          trendsMetric,
-          meta: "",
-          onBack: noop, onEditTimes: noop, onCopyReport: noop, onMerge: noop,
-          onRebuild: noop, onDelete: noop, onResetPacing: noop,
-        }),
-      );
+      React.createElement(TooltipProvider, null, React.createElement(OnPage, { trendsMetric }));
     const view = render(header("SPL LAeq"));
     const label = () =>
       [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')]

@@ -20,7 +20,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = await import("react");
 const { AttendanceDetail } = await import("./attendance-history-section.js");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 const T0 = Date.parse("2026-09-17T20:15:00.000Z");
 const MIN = 60_000;
@@ -273,12 +273,12 @@ test("unticking a figure in Customize survives a reload", async () => {
   assert.ok(strip.textContent?.includes("Peak"), "the other figures were lost too");
 });
 
-test("the sound section draws the chart and offers its Smaart metrics in Customize", async () => {
+test("the sound section draws the chart and offers Plot and Table columns in Customize", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -295,8 +295,11 @@ test("the sound section draws the chart and offers its Smaart metrics in Customi
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
     const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
-    assert.ok(popover.getByText("Smaart metrics"), "no Smaart metrics group");
-    assert.ok(popover.getByText("LCeq"), "a recorded metric is missing from the picker");
+    assert.ok(popover.getByText("Plot"), "no Plot group");
+    assert.ok(popover.getByText("Table columns"), "no Table columns group");
+    assert.equal(popover.queryAllByText("Smaart metrics").length, 0, "the old group name is still there");
+    // Every recorded metric is offered twice: once to plot, once as a column.
+    assert.equal(popover.getAllByText("LCeq").length, 2, "a recorded metric is missing from a picker");
     cleanup();
     await flushReact();
   } finally {
@@ -309,7 +312,7 @@ test("the sound chart plots the real sample series when the route has one", asyn
   globalThis.fetch = splFetch({ series: true });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -346,7 +349,7 @@ test("the item peak is a triangle at the loudest bucket, named in the legend, an
   globalThis.fetch = splFetch({ series: true });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -399,7 +402,7 @@ test("the dashed sound series is named Leq, never Average", async () => {
   globalThis.fetch = splFetch({ series: true });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -425,7 +428,7 @@ test("a 404 falls back to the per-item step, one run per item", async () => {
   globalThis.fetch = splFetch({ series: false });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: TIMELINE,
       }),
@@ -527,7 +530,7 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   globalThis.fetch = splFetch({ series: false });
   try {
     render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: {
           items: [

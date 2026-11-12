@@ -29,7 +29,7 @@ const teardown = installRenderDom();
 
 const { render, screen, cleanup, act, fireEvent, within } = await import("@testing-library/react");
 const React = await import("react");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 async function flushReact(): Promise<void> {
   for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
@@ -103,7 +103,7 @@ function stubFetch(serverMetrics: string[] = []): typeof fetch {
 
 async function mount(detail: unknown = DETAIL): Promise<void> {
   render(
-    React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric: null }),
+    React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric: null }),
   );
   // The chart's table is there once the series read has answered (here, 404),
   // and the seed read lands with it or just behind.
@@ -116,6 +116,13 @@ async function mount(detail: unknown = DETAIL): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+/** The Table columns group of the open Customize popover: a metric name is also
+ *  a Plot radio, so a bare getByText would find two. */
+function columns() {
+  const dialog = screen.getByLabelText("Customize sound", { selector: "[role='dialog']" });
+  return within(dialog.querySelector("[data-customize-group='metrics']") as HTMLElement);
 }
 
 const stored = () => JSON.parse(localStorage.getItem(STORE) ?? "null");
@@ -132,7 +139,7 @@ test("unticking a default metric removes THAT one, on a store with nothing in it
     assert.equal(table.queryAllByText("LAeq 1").length, 1);
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
@@ -158,7 +165,7 @@ test("the choice is written per browser, and nothing is POSTed to the server", a
   try {
     await mount();
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
@@ -205,7 +212,7 @@ test("an EMPTY choice stays empty — it does not spring the defaults back", asy
   try {
     await mount();
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();

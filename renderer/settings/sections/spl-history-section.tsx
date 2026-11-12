@@ -17,7 +17,7 @@ import {
   type ChartSeries,
   type LaneItem,
 } from "./history-chart";
-import { peakFigureLabel, peakSeriesLabel, plottedFor, usePlotChoiceVersion } from "./sound-plot";
+import { peakLabel, plottedMetric, type PlotPrefs, type Plotted, writePlotChoice } from "./sound-plot";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -58,8 +58,8 @@ function metricKeysOf(record: ServiceSplHistory): string[] {
 /**
  * The metric the Sound card plots for a record and what the service peaked on it.
  *
- * The metric is `plottedFor`'s: this browser's own Plot choice, else the Trends
- * metric, else the first the record carries. The chart, its figure strip and
+ * The metric is `plottedMetric`'s: this browser's own Plot choice, else the
+ * Trends metric, else the first the record carries. The chart, its figure strip and
  * this header figure all ask it, so they can never name different metrics. It
  * is a function of the record and two preferences, so nothing here can come back
  * as "hidden": a record that carries any metric always plots one.
@@ -67,9 +67,8 @@ function metricKeysOf(record: ServiceSplHistory): string[] {
  * The empty cases are told apart because they are different situations and only
  * one of them is a fault in the recording.
  *
- * Read rather than hooked: the caller needs one figure, not the preference
- * machinery. A caller that must not go stale when the choice changes subscribes
- * with `usePlotChoiceVersion()`.
+ * Takes the preferences rather than reading them: the page holds them, from
+ * `usePlotPrefs`, and passes the same value to every figure.
  */
 export type ServicePeakLevel =
   | { kind: "level"; metric: string; db: number }
@@ -80,12 +79,11 @@ export type ServicePeakLevel =
   /** The metric is chosen and present, but no item on it recorded a peak. */
   | { kind: "no-samples"; metric: string };
 
-/** `trendsSaved` is the Trends metric as the page resolved it — see
- *  `plottedMetric`. */
-export function servicePeakLevel(record: ServiceSplHistory | null, trendsSaved: string | null): ServicePeakLevel {
+/** `plot` is the Trends metric as the page resolved it and this browser's own
+ *  choice — see `plottedMetric`. */
+export function servicePeakLevel(record: ServiceSplHistory | null, plot: PlotPrefs): ServicePeakLevel {
   if (!record || !record.items.length) return { kind: "no-record" };
-  const all = metricKeysOf(record);
-  const plotted = plottedFor(all, trendsSaved);
+  const plotted = plottedMetric(metricKeysOf(record), plot);
   if (!plotted) return { kind: "no-metrics" };
   const primary = plotted.metric;
   const maxes = record.items
@@ -96,13 +94,17 @@ export function servicePeakLevel(record: ServiceSplHistory | null, trendsSaved: 
     : { kind: "no-samples", metric: primary };
 }
 
-/** The metric-list preference, exported so a reader outside this file can
- *  subscribe to it rather than re-deriving the key. */
-export { SPL_METRICS_STORAGE_KEY };
+/**
+ * The metric the Sound card plots for `record`: the card's title and the card
+ * itself both ask it, with the same `plot`, so they cannot name different
+ * metrics.
+ */
+export function usePlot(record: ServiceSplHistory | null, plot: PlotPrefs): Plotted | null {
+  return useMemo(() => (record ? plottedMetric(metricKeysOf(record), plot) : null), [record, plot]);
+}
 
-/** Which at-rest figures the sound strip shows. Its own localStorage entry: the
- *  metric LIST is an operator-level setting kept on the server (it decides what
- *  is recorded into view across every browser), while which figures one person
+/** Which at-rest figures the sound strip shows. Its own localStorage entry,
+ *  apart from the table columns and the plotted metric: which figures one person
  *  wants in their strip is a view preference, like attendance's. */
 const SOUND_FIGURES = [
   { key: "peak", label: "Peak" },
@@ -254,14 +256,14 @@ export function SplDetail({
   detail,
   timeline,
   attendance,
-  trendsMetric,
+  plot,
 }: {
   detail: ServiceSplHistory;
-  /** The Trends sound metric as the page resolved it (null until the page's
-   *  recordings load). The plot's default, so it is the caller's to supply: the
-   *  page already holds it for the Trends card, and a second resolution here would
-   *  be a second copy that could disagree. */
-  trendsMetric: string | null;
+  /** The page's plot preferences (`usePlotPrefs`): the Trends metric it resolved
+   *  and this browser's choice. The caller's to supply, so the card, its title,
+   *  the header and the rows all plot from one value; a second subscription here
+   *  would be a second copy that could disagree. */
+  plot: PlotPrefs;
   timeline?: ServiceTimeline | null;
   attendance?: ServiceAttendance | null;
 }) {
@@ -277,14 +279,14 @@ export function SplDetail({
   }
 
   const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
-  // The ONE metric this card plots. Read through `plottedFor`, the rule the
-  // service header uses, and recomputed when the choice is written anywhere in
-  // the tab.
-  const plotVersion = usePlotChoiceVersion();
-  const plotted = useMemo(() => {
-    void plotVersion;
-    return plottedFor(allKeys, trendsMetric);
-  }, [allKeys, trendsMetric, plotVersion]);
+  const plotted = usePlot(detail, plot);
+  /** Plot `metric`, or go back to Trends with null. The Trends metric is the
+   *  default, so picking it forgets the override too: the browser then follows
+   *  Trends when the organisation changes it. */
+  function rememberPlot(metric: string | null) {
+    const err = writePlotChoice(metric === plotted?.trends ? null : metric);
+    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+  }
 
   /**
    * The metrics this browser shows.
@@ -482,7 +484,7 @@ export function SplDetail({
     ? [
       {
         id: "max",
-        label: peakSeriesLabel(raw.metric),
+        label: peakLabel(raw.metric, "suffix"),
         color: "var(--color-accent)",
         role: "primary",
         fill: true,
@@ -514,7 +516,7 @@ export function SplDetail({
     : primaryKey
       ? [{
         id: primaryKey,
-        label: peakSeriesLabel(primaryKey),
+        label: peakLabel(primaryKey, "suffix"),
         color: "var(--color-accent)",
         role: "primary" as const,
         // NO FILL, unlike attendance. A fill runs to the axis floor, and a dB
@@ -558,7 +560,7 @@ export function SplDetail({
       ? [{ key: "unavailable", label: "Sound", value: "Samples unavailable" }]
       : SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
         key: f.key,
-        label: f.key === "peak" && primaryKey ? peakFigureLabel(primaryKey) : f.label,
+        label: f.key === "peak" && primaryKey ? peakLabel(primaryKey, "suffix") : f.label,
         value: figureValue(f.key, items, detail, primaryKey),
         color: f.key === "peak" ? "var(--color-accent)" : undefined,
       }));
@@ -568,6 +570,13 @@ export function SplDetail({
   }
   return (
     <div className="flex flex-col gap-4">
+      {plotted?.wanted && (
+        // The record lacks what was asked for. Said, not hidden: a chart quietly
+        // plotting another metric is a wrong number under the right heading.
+        <p data-plot-fallback className="-mb-2 text-caption2 text-fg-subtle">
+          {plotted.wanted} wasn’t recorded for this service, so it shows {plotted.metric}.
+        </p>
+      )}
       <HistoryChart
         series={series}
         items={laneItems}
@@ -591,6 +600,24 @@ export function SplDetail({
             label="Customize sound"
             groups={[
               {
+                id: "plot",
+                label: "Plot",
+                options: allKeys.map((k) => ({ key: k, label: k, tag: k === plotted?.trends ? "Trends" : undefined })),
+                choose: { value: plotted?.metric ?? "", onChange: rememberPlot },
+                footer: plot.chosen ? (
+                  <p data-plot-override className="px-2 pt-1 text-caption2 text-fg-muted">
+                    Trends plots {plotted?.trends} for everyone.
+                    <button
+                      type="button"
+                      onClick={() => rememberPlot(null)}
+                      className="mt-0.5 block text-accent underline underline-offset-2 hover:text-accent-hover"
+                    >
+                      Use the Trends metric
+                    </button>
+                  </p>
+                ) : undefined,
+              },
+              {
                 id: "lines",
                 label: "Chart",
                 // The two LINES only exist on the raw sample series. The peak
@@ -600,7 +627,7 @@ export function SplDetail({
                 options: [...(hasRaw ? SOUND_SERIES.map((s) => ({ ...s })) : []), { ...PEAK_MARKS_OPTION }],
               },
               { id: "figures", label: "Figures", options: SOUND_FIGURES.map((f) => ({ ...f })) },
-              { id: "metrics", label: "Smaart metrics", options: allKeys.map((k) => ({ key: k, label: k })) },
+              { id: "metrics", label: "Table columns", options: allKeys.map((k) => ({ key: k, label: k })) },
             ]}
             selected={[
               ...(hasRaw ? seriesKeys : seriesKeys.filter((k) => k === PEAK_MARKS_KEY)),
