@@ -4,11 +4,12 @@
 // it is the name field, Duplicate and Delete, the rows that set what the layout shows,
 // and a preview of it against the plan the page previews with.
 
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CopyIcon, LockIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useRef, type ReactNode, type Ref } from "react";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { RundownTable } from "../../main/rundown-table";
 import { buildServiceCueColumns, computeClocks, fmtTotal, resolveServiceCueSpec, totalLengthSec } from "../../main/servicecue-columns";
@@ -58,7 +59,7 @@ export function LayoutCard({
   onUpdate,
   onColumns,
   preview,
-  move,
+  layoutIds,
   nameRef,
 }: {
   layout: ServiceCueLayout;
@@ -74,37 +75,47 @@ export function LayoutCard({
   /** A change to the Columns row. `focus` names the control to focus once it has drawn. */
   onColumns: (change: ColumnChange, focus?: string) => void;
   preview: PreviewSource;
-  /** Up and down, until a card can be dragged. */
-  move: { first: boolean; last: boolean; by: (dir: -1 | 1) => void };
+  /** Every layout's id in page order: what the card's grip moves it among. */
+  layoutIds: readonly string[];
   /** The open card's name field, for the page to focus on a new or copied layout. */
   nameRef?: Ref<HTMLInputElement>;
 }) {
-  const summary = columnSummary(l, roles).join(" · ");
-  const cols = layoutRoles(l, roles);
+  const card: DragItem = { kind: "layout", ctx: "", id: l.id, label: l.name };
+  const carried = useCarried(card);
+  const lifted = useLifted(card);
+  // While a column is picked up by the keyboard, the row, the summary and the
+  // preview draw the order the arrows have moved it to.
+  const liftedCols = useLiftedOrder("col", l.id);
+  const shown = liftedCols ? { ...l, columnRoles: liftedCols } : l;
+  const summary = columnSummary(shown, roles).join(" · ");
+  const cols = layoutRoles(shown, roles);
+  const colIds = layoutRoles(l, roles).map((r) => r.id);
   const tray = trayItems(l, roles);
-  const arrows = (
-    <>
-      <Button variant="transparent" size="small" iconOnly touchTargetY disabled={move.first} onClick={() => move.by(-1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
-      <Button variant="transparent" size="small" iconOnly touchTargetY disabled={move.last} onClick={() => move.by(1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
-    </>
+  const trayOn = useTrayOn(l.id);
+  const frame = cn(
+    "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)] transition-shadow",
+    carried && "opacity-40",
+    lifted && "shadow-[0_0_0_2px_var(--su-accent),var(--su-shadow-2)]",
   );
+  const grip = <Grip item={card} order={layoutIds} />;
 
   if (!open) {
     return (
-      <div className="rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]" data-layout-card={l.id}>
+      <div className={frame} data-layout-card={l.id}>
         <div className="flex min-h-12 items-center gap-1 py-[7px] pl-1 pr-2">
+          {grip}
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={false}
             aria-label={`${l.name}, ${summary}`}
+            data-focus-key={`open:${l.id}`}
             className="grid min-w-0 flex-1 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-md p-1 text-left transition-colors hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus max-sm:grid-cols-[minmax(0,1fr)_auto]"
           >
             <span className="max-w-[22ch] truncate text-[14px] font-semibold leading-[19px] text-fg" data-layout-name>{l.name}</span>
             <span className="min-w-0 truncate text-caption1 text-fg-muted max-sm:col-start-1 max-sm:row-start-2 max-sm:whitespace-normal">{summary}</span>
             <ChevronDownIcon className="size-4 text-fg-subtle max-sm:col-start-2 max-sm:row-span-2 max-sm:row-start-1" aria-hidden="true" />
           </button>
-          {arrows}
         </div>
         {nameError && <ErrorNote className="mx-3 mb-3">{nameError}</ErrorNote>}
       </div>
@@ -112,11 +123,11 @@ export function LayoutCard({
   }
 
   return (
-    <div className="rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]" data-layout-card={l.id}>
+    <div className={frame} data-layout-card={l.id}>
       <div className="flex min-h-12 items-center gap-1 py-[7px] pl-1 pr-2">
+        {grip}
         <NameField name={l.name} onCommit={onRename} label="Layout name" inputRef={nameRef} className="h-[30px] min-w-0 max-w-[280px] flex-1 text-[14px] font-semibold" />
         <span className="flex-1" />
-        {arrows}
         <Button variant="transparent" size="medium" onClick={onDuplicate} aria-label={`Duplicate ${l.name}`} className="max-sm:px-2">
           <CopyIcon className="size-[15px]" aria-hidden="true" />
           <span className="max-sm:hidden">Duplicate</span>
@@ -125,7 +136,7 @@ export function LayoutCard({
           <Trash2Icon className="size-[15px]" aria-hidden="true" />
           <span className="max-sm:hidden">Delete</span>
         </Button>
-        <Button variant="transparent" size="medium" iconOnly onClick={onToggle} aria-expanded aria-label={`Collapse ${l.name}`}>
+        <Button variant="transparent" size="medium" iconOnly onClick={onToggle} aria-expanded aria-label={`Collapse ${l.name}`} data-focus-key={`open:${l.id}`}>
           <ChevronDownIcon className="size-4 rotate-180 text-fg-subtle" aria-hidden="true" />
         </Button>
       </div>
@@ -146,13 +157,10 @@ export function LayoutCard({
               <LockIcon className="size-[13px]" aria-hidden="true" />
               Item
             </span>
-            {cols.map((r, ci) => (
-              <span key={r.id} role="listitem" data-sort-id={r.id} className={cn(CHIP, "pl-px")}>
-                <button type="button" className={ICON_BUTTON} disabled={ci === 0} onClick={() => onColumns({ kind: "move-role", roleId: r.id, index: ci - 1 })} aria-label={`Move ${r.name} left`}><ChevronLeftIcon className="size-[13px]" /></button>
-                {r.name}
-                <button type="button" className={ICON_BUTTON} disabled={ci === cols.length - 1} onClick={() => onColumns({ kind: "move-role", roleId: r.id, index: ci + 1 })} aria-label={`Move ${r.name} right`}><ChevronRightIcon className="size-[13px]" /></button>
+            {cols.map((r) => (
+              <RoleChip key={r.id} item={{ kind: "col", ctx: l.id, id: r.id, label: r.name }} order={colIds}>
                 <RemoveX label={`Remove ${r.name}`} focusKey={`x:${l.id}:${r.id}`} onClick={() => onColumns({ kind: "remove-role", roleId: r.id }, `tray:${l.id}:${r.id}`)} />
-              </span>
+              </RoleChip>
             ))}
             {fixedOn(l, "showMaxSpl") && <PinnedChip layoutId={l.id} k="showMaxSpl" where="Always last" onColumns={onColumns} />}
           </div>
@@ -162,23 +170,23 @@ export function LayoutCard({
             role="list"
             aria-labelledby={`sc-tray-${l.id}`}
             data-tray={l.id}
-            className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-line-strong p-1.5 transition-colors"
+            className={cn(
+              "flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-line-strong p-1.5 transition-colors",
+              trayOn && "border-accent bg-accent-soft",
+            )}
           >
             {tray.map((it) => {
               const id = it.kind === "fixed" ? `fixed:${it.key}` : it.id;
               return (
                 <span key={id} role="listitem" className="inline-flex">
-                  <button
-                    type="button"
-                    onClick={() => onColumns(it.kind === "fixed" ? { kind: "set-fixed", key: it.key, on: true } : { kind: "add-role", roleId: it.id }, `x:${l.id}:${id}`)}
+                  <TrayChip
+                    item={{ kind: "tray", ctx: l.id, id, label: it.name }}
                     title={it.kind === "fixed" ? "Goes to its fixed place" : undefined}
-                    aria-label={`Add ${it.name}`}
-                    data-focus-key={`tray:${l.id}:${id}`}
-                    className={TRAY_CHIP}
+                    onAdd={() => onColumns(it.kind === "fixed" ? { kind: "set-fixed", key: it.key, on: true } : { kind: "add-role", roleId: it.id }, `x:${l.id}:${id}`)}
                   >
                     <PlusIcon className="size-[13px]" aria-hidden="true" />
                     {it.name}
-                  </button>
+                  </TrayChip>
                 </span>
               );
             })}
@@ -203,7 +211,7 @@ export function LayoutCard({
         <Row label="Row color">
           <RowColor layout={l} roles={roles} onUpdate={onUpdate} />
         </Row>
-        <Preview layout={l} roles={roles} source={preview} />
+        <Preview layout={shown} roles={roles} source={preview} />
       </div>
     </div>
   );
@@ -213,12 +221,25 @@ export function LayoutCard({
 const CHIP =
   "inline-flex h-[30px] max-w-full select-none items-center gap-0.5 whitespace-nowrap rounded-md border border-line-strong bg-surface-raised pl-2.5 pr-[3px] text-footnote text-fg";
 
-/** A chip in "Not in this layout": dashed, because it is not in the layout yet. */
-const TRAY_CHIP =
-  "inline-flex h-[30px] select-none items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-line-strong bg-transparent pl-[7px] pr-2.5 text-footnote text-fg-muted transition-colors hover:border-accent hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-
 const ICON_BUTTON =
   "inline-grid size-6 shrink-0 place-items-center rounded-[5px] p-0 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-30";
+
+/** A role column: moved by its grip, taken out by its X. */
+function RoleChip({ item, order, children }: { item: DragItem; order: readonly string[]; children: ReactNode }) {
+  const carried = useCarried(item);
+  const lifted = useLifted(item);
+  return (
+    <span
+      role="listitem"
+      data-sort-id={item.id}
+      className={cn(CHIP, "pl-px", carried && "opacity-35", lifted && "bg-popover shadow-[0_0_0_2px_var(--su-accent),var(--su-shadow-2)]")}
+    >
+      <Grip item={item} order={order} />
+      {item.label}
+      {children}
+    </span>
+  );
+}
 
 /** A chip's X: takes the column out of the layout, into "Not in this layout". */
 function RemoveX({ label, focusKey, onClick }: { label: string; focusKey: string; onClick: () => void }) {

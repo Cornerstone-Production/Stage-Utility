@@ -7,7 +7,8 @@
 //
 // NOT unit-tested here, and driven in a browser instead (jsdom loads no stylesheet and lays
 // nothing out): the 260px cap on the preview and its inner scroll, the drop marker's place,
-// the drag ghost, touch, and how the page looks beside the mockup at 1280 and 390.
+// the drag ghost, touch, focus staying on a grip as its item is redrawn (jsdom never blurs
+// a moved node), and how the page looks beside the mockup at 1280 and 390.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND — see servicecue-section-reads.test.tsx.
 
@@ -17,6 +18,7 @@ import { after, afterEach, test } from "node:test";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { serviceCueServer } from "../../test-fixtures/servicecue-server.js";
+import { alerts, reply } from "../../test-fixtures/fetch-log.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 
 const teardown = installRenderDom();
@@ -234,6 +236,33 @@ test("Duplicate puts '<name> copy' right after it, under its own address, open t
   }
 });
 
+test("deleting a layout moves focus to the card that takes its place, else the one before, else New layout", async () => {
+  const s = serviceCueServer({
+    layouts: [...LAYOUTS, { id: "l-sm", name: "Stage manager", order: 2, columnRoles: [] }],
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+  });
+  const remove = async (name: string) => {
+    await openCard(name);
+    fireEvent.click(screen.getByRole("button", { name: `Delete ${name}` }));
+    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
+    for (let i = 0; i < 4; i++) await settle();
+  };
+  const focused = () => (document.activeElement as HTMLElement | null)?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? "";
+  try {
+    await mount();
+    await remove("Lighting");
+    await eventually(() => assert.match(focused(), /^Stage manager,/, `focus is on "${focused()}"`));
+    await remove("Stage manager");
+    await eventually(() => assert.match(focused(), /^Audio,/, `focus is on "${focused()}"`));
+    await remove("Audio");
+    await eventually(() => assert.match(focused(), /New layout/, `focus is on "${focused()}"`));
+  } finally {
+    s.restore();
+  }
+});
+
 test("Escape puts the name back and leaves the field, saving nothing", async () => {
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
@@ -383,6 +412,357 @@ test("the preview follows the Columns row, and says which role the previewed typ
     // Youth names no lighting category: the column is left out, and the page says why.
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
     await eventually(() => assert.match(document.body.textContent ?? "", /Lighting has no category in Youth, so the preview leaves it out\./));
+  } finally {
+    s.restore();
+  }
+});
+
+// ── Drag: keyboard ──────────────────────────────────────────────────────────
+
+/** A grip by what it moves: "the Audio layout", "the Audio column", "Sound in Audio". */
+const grip = (what: string) => screen.getByRole("button", { name: `Move ${what}. Press Space to pick up` });
+const press = async (el: Element, ...keys: string[]) => {
+  for (const key of keys) {
+    fireEvent.keyDown(el, { key });
+    await settle();
+  }
+};
+const said = () => document.querySelector("[data-announcer]")?.textContent ?? "";
+const roleRow = (layoutId: string) =>
+  [...(document.querySelector(`[data-cols="${layoutId}"]`)?.querySelectorAll("[data-sort-id]") ?? [])].map((c) => c.textContent ?? "");
+
+test("keyboard: Space picks a role column up, the arrows move it with the preview, Space drops and saves once", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, cats: CATS, rundown: () => RUNDOWN });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.equal(previewHeads().includes("Band"), true));
+    const audio = grip("the Audio column");
+    audio.focus();
+    await press(audio, " ");
+    assert.equal(audio.getAttribute("aria-pressed"), "true");
+    await eventually(() => assert.match(said(), /Picked up Audio, position 1 of 2\. Arrow keys move it, Space drops it, Escape cancels\./));
+    await press(audio, "ArrowRight");
+    assert.deepEqual(roleRow("l-audio"), ["Band", "Audio"], "the row did not follow the arrow");
+    const heads = previewHeads();
+    assert.equal(heads.indexOf("Band") < heads.indexOf("Audio"), true, `the preview did not follow: ${JSON.stringify(heads)}`);
+    // jsdom keeps focus on a node React moves, so this cannot fail on a grip that loses
+    // it; a browser blurs it, which is why Grip refocuses. Checked in a browser.
+    assert.equal(document.activeElement === grip("the Audio column"), true, "focus left the grip it was moving");
+    assert.equal(saves(s, "/api/servicecue/layouts"), 0, "a move saved before it was dropped");
+    await press(grip("the Audio column"), "ArrowRight");
+    await eventually(() => assert.match(said(), /Audio is already last\./));
+    await press(grip("the Audio column"), " ");
+    await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-band", "r-audio"]));
+    assert.equal(saves(s, "/api/servicecue/layouts"), 1, "one drop, one save");
+    await eventually(() => assert.match(said(), /Dropped Audio at position 2 of 2\./));
+  } finally {
+    s.restore();
+  }
+});
+
+test("keyboard: Escape puts the column back and saves nothing", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    const audio = grip("the Audio column");
+    audio.focus();
+    await press(audio, " ", "ArrowRight");
+    assert.deepEqual(roleRow("l-audio"), ["Band", "Audio"]);
+    await press(grip("the Audio column"), "Escape");
+    assert.deepEqual(roleRow("l-audio"), ["Audio", "Band"]);
+    await eventually(() => assert.match(said(), /Move cancelled\. Audio is back at position 1 of 2\./));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(saves(s, "/api/servicecue/layouts"), 0);
+  } finally {
+    s.restore();
+  }
+});
+
+test("keyboard: a layout card moves up, and the new order is what the page reads back", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    const lighting = await eventually(() => grip("the Lighting layout"));
+    lighting.focus();
+    await press(lighting, " ", "ArrowUp", " ");
+    await eventually(() => assert.deepEqual(s.layouts().map((l) => l.id), ["l-light", "l-audio"]));
+    // As a reload would: a fresh page reads the order back from the server.
+    cleanup();
+    resetStageState();
+    resetReplayCache();
+    await mount();
+    await eventually(() =>
+      assert.deepEqual([...document.querySelectorAll("[data-layout-name]")].map((n) => n.textContent), ["Lighting", "Audio"]),
+    );
+  } finally {
+    s.restore();
+  }
+});
+
+test("keyboard: a role's categories reorder, first has priority", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    const sound = await eventually(() => grip("Sound in Audio"));
+    sound.focus();
+    await press(sound, " ", "ArrowLeft", " ");
+    await eventually(() => assert.deepEqual(s.roles()[0].members, ["Sound", "Audio"]));
+  } finally {
+    s.restore();
+  }
+});
+
+// ── Drag: pointer ───────────────────────────────────────────────────────────
+//
+// jsdom lays nothing out, so every rect is empty. `placeRects` gives the open card's
+// Columns row and tray a rect each, and every chip in them one, from the DOM's own order:
+// the row along y=0, the tray along y=60, each chip 80px wide with a 10px gap. That is
+// all a drop needs; where the marker sits against the real chips is checked in a browser.
+
+type Box = { x: number; y: number; w: number; h: number };
+const rects = new WeakMap<Element, Box>();
+const realRect = Element.prototype.getBoundingClientRect;
+function placeRects(layoutId: string, dy = 0): void {
+  const lay = (row: Element | null, y: number, chipSel: string) => {
+    if (!row) return;
+    rects.set(row, { x: 0, y, w: 900, h: 30 });
+    [...row.querySelectorAll(chipSel)].forEach((c, i) => rects.set(c, { x: i * 90, y, w: 80, h: 30 }));
+  };
+  lay(document.querySelector(`[data-cols="${layoutId}"]`), dy, ":scope > *");
+  lay(document.querySelector(`[data-tray="${layoutId}"]`), 60 + dy, ":scope > *");
+  installRects();
+}
+/** The layout cards stacked 60px apart, and a role's categories in a row at y=300. */
+function placeStack(roleId: string): void {
+  const list = document.querySelector('[data-sort-list="layouts"]')!;
+  rects.set(list, { x: 0, y: 0, w: 900, h: 200 });
+  [...list.querySelectorAll("[data-layout-card]")].forEach((c, i) => rects.set(c, { x: 0, y: i * 60, w: 900, h: 50 }));
+  const members = document.querySelector(`[data-members="${roleId}"]`)!;
+  rects.set(members, { x: 0, y: 300, w: 900, h: 26 });
+  [...members.querySelectorAll("[data-sort-id]")].forEach((c, i) => rects.set(c, { x: i * 90, y: 300, w: 80, h: 26 }));
+  installRects();
+}
+function installRects(): void {
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const r = rects.get(this) ?? (this.closest("[role=listitem]") ? rects.get(this.closest("[role=listitem]")!) : undefined);
+    if (!r) return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON() {} } as DOMRect;
+    return { x: r.x, y: r.y, left: r.x, top: r.y, right: r.x + r.w, bottom: r.y + r.h, width: r.w, height: r.h, toJSON() {} } as DOMRect;
+  };
+}
+const centre = (el: Element) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+
+/** Press on `source`, carry it to (x, y), then let go there, or press Escape first. */
+async function carry(source: Element, to: { x: number; y: number }, opts: { escape?: boolean; back?: boolean } = {}) {
+  const s = centre(source);
+  fireEvent.mouseDown(source, { button: 0, clientX: s.x, clientY: s.y });
+  fireEvent.mouseMove(document, { clientX: s.x + 8, clientY: s.y + 8 });
+  await settle();
+  fireEvent.mouseMove(document, { clientX: to.x, clientY: to.y });
+  await settle();
+  const markerShown = !(document.querySelector("[data-drop-marker]") as HTMLElement | null)?.hidden;
+  if (opts.escape) {
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    await settle();
+    // A person lets go well after the Escape: past the 50ms dnd-kit's own click guard lasts.
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  const end = opts.back ? s : to;
+  if (opts.back) {
+    fireEvent.mouseMove(document, { clientX: end.x, clientY: end.y });
+    await settle();
+  }
+  fireEvent.pointerUp(opts.back ? source : document, { clientX: end.x, clientY: end.y });
+  fireEvent.mouseUp(opts.back ? source : document, { clientX: end.x, clientY: end.y });
+  if (opts.back) fireEvent.click(source);
+  for (let i = 0; i < 3; i++) await settle();
+  // dnd-kit swallows every click for 50ms after a drag ends, the next test's included.
+  await new Promise((r) => setTimeout(r, 60));
+  return { markerShown };
+}
+
+test("pointer: a tray chip dragged into the row lands where it was let go", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Lighting");
+    placeRects("l-light");
+    try {
+      // The row: Clock, Time, Item, Lighting. Let go on Lighting's left half: before it.
+      const lighting = document.querySelector('[data-cols="l-light"] [data-sort-id="r-light"]')!;
+      const r = lighting.getBoundingClientRect();
+      const { markerShown } = await carry(screen.getByRole("button", { name: "Add Band" }), { x: r.left + 10, y: r.top + 15 });
+      assert.equal(markerShown, true, "no drop marker while carrying");
+      await eventually(() => assert.deepEqual(s.layouts()[1].columnRoles, ["r-band", "r-light"]));
+      await eventually(() => assert.match(said(), /Added Band as role column 1 of 2\./));
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+  } finally {
+    s.restore();
+  }
+});
+
+test("pointer: a page that scrolls mid-drag does not move the drop off the pointer", async () => {
+  // dnd-kit's delta counts how far its scrollable ancestors have scrolled since the drag
+  // began, while the rects are read in the viewport. The page scrolls 300px under the
+  // drag, the rects move up with it, and the pointer follows the tray to where it now is.
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+        React.createElement(
+          "div",
+          { "data-scroller": true, style: { overflow: "auto", height: "600px" } },
+          React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
+        ),
+      ),
+    );
+    for (let i = 0; i < 5; i++) await settle();
+    await openCard("Audio");
+    placeRects("l-audio");
+    // The scroller is far larger than the pointer's travel, so dnd-kit's edge
+    // auto-scroll never starts.
+    const scroller = document.querySelector("[data-scroller]")!;
+    rects.set(scroller, { x: -2000, y: -2000, w: 5000, h: 5000 });
+    try {
+      const band = grip("the Band column");
+      const from = centre(band);
+      const tray = document.querySelector('[data-tray="l-audio"]')!;
+      const at = centre(tray);
+      fireEvent.mouseDown(band, { button: 0, clientX: from.x, clientY: from.y });
+      fireEvent.mouseMove(document, { clientX: from.x + 8, clientY: from.y + 8 });
+      await settle();
+      fireEvent.mouseMove(document, { clientX: at.x, clientY: at.y });
+      await settle();
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => 300 });
+      placeRects("l-audio", -300);
+      fireEvent.scroll(scroller);
+      await settle();
+      fireEvent.mouseMove(document, { clientX: at.x, clientY: at.y - 300 });
+      await settle();
+      fireEvent.mouseUp(document, { clientX: at.x, clientY: at.y - 300 });
+      for (let i = 0; i < 3; i++) await settle();
+      await new Promise((r) => setTimeout(r, 60));
+      await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"], `the drop missed the tray: "${said()}"`));
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+  } finally {
+    s.restore();
+  }
+});
+
+test("pointer: a layout card or a category let go where it was saves nothing", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await eventually(() => grip("the Lighting layout"));
+    placeStack("r-audio");
+    try {
+      // Lighting is second; let go on its own lower half.
+      await carry(grip("the Lighting layout"), { x: 400, y: 100 });
+      await eventually(() => assert.match(said(), /Lighting dropped where it was\. Nothing changed\./));
+      assert.equal(saves(s, "/api/servicecue/layouts"), 0, "a layout card let go in its own place saved");
+      // Sound is the second category of Audio; let go on its own right half.
+      await carry(grip("Sound in Audio"), { x: 160, y: 313 });
+      await eventually(() => assert.match(said(), /Sound dropped where it was\. Nothing changed\./));
+      assert.equal(saves(s, "/api/servicecue/roles"), 0, "a category let go in its own place saved");
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+  } finally {
+    s.restore();
+  }
+});
+
+test("pointer and keyboard: a drop where it already was saves nothing and says so", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    placeRects("l-audio");
+    try {
+      const band = document.querySelector('[data-cols="l-audio"] [data-sort-id="r-band"]')!;
+      const r = band.getBoundingClientRect();
+      await carry(grip("the Band column"), { x: r.left + r.width - 5, y: r.top + 15 });
+      await eventually(() => assert.match(said(), /Band dropped where it was\. Nothing changed\./));
+      assert.equal(saves(s, "/api/servicecue/layouts"), 0, "a drop on its own spot saved");
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+    const g = grip("the Audio column");
+    g.focus();
+    await press(g, " ", " ");
+    await eventually(() => assert.match(said(), /Dropped Audio at position 1 of 2\./));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(saves(s, "/api/servicecue/layouts"), 0, "picked up and put down in place, and saved");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a refused layout delete keeps the card, says what failed, and announces no delete", async () => {
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    override: (url, init) => (init?.method === "POST" && url.endsWith("/api/servicecue/layouts") ? reply(500, { error: "disk full" }) : undefined),
+  });
+  try {
+    await mount();
+    await openCard("Lighting");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Lighting" }));
+    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
+    await eventually(() => assert.match(alerts(), /disk full/));
+    // The announcer speaks 30ms after it is told: wait past that.
+    await new Promise((r) => setTimeout(r, 80));
+    assert.doesNotMatch(said(), /Deleted Lighting/, "a delete the server refused was announced");
+    assert.deepEqual(s.layouts().map((l) => l.id), ["l-audio", "l-light"]);
+  } finally {
+    s.restore();
+  }
+});
+
+test("pointer: a role column dragged onto the tray leaves the layout", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    placeRects("l-audio");
+    try {
+      const tray = document.querySelector('[data-tray="l-audio"]')!;
+      await carry(grip("the Band column"), centre(tray));
+      await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]));
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+  } finally {
+    s.restore();
+  }
+});
+
+test("pointer: Escape cancels, and letting go back on the tray chip does not add it", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Lighting");
+    placeRects("l-light");
+    try {
+      const row = document.querySelector('[data-cols="l-light"]')!;
+      await carry(screen.getByRole("button", { name: "Add Band" }), centre(row), { escape: true, back: true });
+      await eventually(() => assert.match(said(), /Move cancelled\. Nothing changed\./));
+      assert.equal(saves(s, "/api/servicecue/layouts"), 0, "a cancelled drag saved, or its release counted as a click on the chip");
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
   } finally {
     s.restore();
   }

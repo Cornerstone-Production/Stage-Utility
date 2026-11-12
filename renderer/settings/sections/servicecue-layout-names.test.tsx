@@ -80,6 +80,12 @@ async function openCard(name: string): Promise<void> {
   await settle();
 }
 
+/** Move a layout one place down by keyboard, as an operator would: its grip, Space, ArrowDown, Space. */
+function moveDown(name: string): void {
+  const grip = screen.getByRole("button", { name: `Move the ${name} layout. Press Space to pick up` });
+  grip.focus();
+  for (const key of [" ", "ArrowDown", " "]) fireEvent.keyDown(grip, { key });
+}
 const nameBox = (name: string) => screen.getByDisplayValue(name) as HTMLInputElement;
 
 test("typing a name saves nothing until the field is left", async () => {
@@ -131,7 +137,7 @@ test("a name the server refuses is shown, and the old name stays", async () => {
     await eventually(() => assert.match(document.body.textContent ?? "", /already a layout called "Video"/));
     assert.equal(box.value, "Audio");
     // The page did not keep it either: the next save carries the old name.
-    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]);
+    moveDown("Audio");
     await eventually(() => assert.equal(f.posts.length, 2));
     assert.deepEqual(f.posts[1].layouts.map((l) => l.name), ["Video", "Audio"], "the page kept a name the server refused");
   } finally {

@@ -1,6 +1,6 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { PlusIcon, Trash2Icon, XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon, XIcon, ChevronLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 
 import { Button, Checkbox, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
@@ -16,7 +16,20 @@ import { appZoneOf } from "./history-trends/trends";
 import { hostTimeZone } from "@main/services/app-timezone";
 import { uid } from "@renderer/lib/uid";
 import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-layout-card";
-import { columnPatch, deleteLayoutBody, duplicateLayout, newLayout, type Rich } from "./servicecue-layouts-model";
+import {
+  byOrder,
+  columnPatch,
+  deleteLayoutBody,
+  duplicateLayout,
+  FIXED_LABEL,
+  layoutRoles,
+  moveTo,
+  newLayout,
+  reorderLayouts,
+  type ColumnChange,
+  type Rich,
+} from "./servicecue-layouts-model";
+import { byData, Grip, LayoutsDnd, LiftedList, useAnnouncer, useCarried, useLifted, type DragItem, type DropHandlers } from "./servicecue-drag";
 
 /** The ServiceCue layouts page: the layouts, the category roles their columns come
  *  from, and the landing page and public link that offer them. */
@@ -135,7 +148,7 @@ export function ServiceCueSection() {
   // Layouts are global — one set across all service types. `typeId` only chooses
   // which type/plan to preview against (and which note categories are offered).
   const sortedLayouts = useMemo(
-    () => [...layouts].sort((a, b) => a.order - b.order),
+    () => byOrder(layouts),
     [layouts],
   );
 
@@ -180,10 +193,10 @@ export function ServiceCueSection() {
   useLayoutEffect(() => {
     const key = focusNext.current;
     if (!key) return;
-    const el = [...document.querySelectorAll<HTMLElement>("[data-focus-key]")].find((n) => n.dataset.focusKey === key);
-    if (!el) return;
+    // One render to find it: a key nothing answers to must not wait on and take the
+    // focus from wherever the operator has gone since.
     focusNext.current = null;
-    el.focus();
+    (byData("data-focus-key", key) as HTMLElement | null)?.focus();
   });
 
   function addLayout() {
@@ -192,7 +205,11 @@ export function ServiceCueSection() {
     setExpandedId(id);
     focusName.current = id;
     // Built from the list as it is when it saves: the first free "Layout N" then.
-    void persist((list) => [...list, newLayout(list, id)]);
+    void persist((list) => {
+      const made = newLayout(list, id);
+      announce(`Added ${made.name}. It starts with Clock, Time and Item; every role is in Not in this layout.`);
+      return [...list, made];
+    });
   }
 
   function duplicate(l: ServiceCueLayout) {
@@ -200,6 +217,7 @@ export function ServiceCueSection() {
     setExpandedId(id);
     focusName.current = id;
     void persist((list) => duplicateLayout(list, l.id, id));
+    announce(`Duplicated ${l.name}.`);
   }
 
   async function removeLayout(l: ServiceCueLayout) {
@@ -209,19 +227,85 @@ export function ServiceCueSection() {
       confirmLabel: "Delete layout",
       destructive: true,
     }))) return;
-    void persist((list) => list.filter((x) => x.id !== l.id));
+    // Focus goes to the card that takes its place: the next, else the one before, else New layout.
+    const i = sortedLayouts.findIndex((x) => x.id === l.id);
+    const near = sortedLayouts[i + 1] ?? sortedLayouts[i - 1];
+    focusNext.current = near ? `open:${near.id}` : "new-layout";
+    // Said once the server has it: a refused delete leaves the card where it was.
+    if (await persist((list) => list.filter((x) => x.id !== l.id))) announce(`Deleted ${l.name}.`);
   }
 
-  function moveLayout(l: ServiceCueLayout, dir: -1 | 1) {
-    void persist((list) => {
-      const arr = [...list].sort((a, b) => a.order - b.order);
-      const i = arr.findIndex((x) => x.id === l.id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= arr.length) return list;
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-      return arr.map((x, idx) => ({ ...x, order: idx }));
-    });
+  const { announce, region: announcer } = useAnnouncer();
+
+  /** A change to a layout's Columns row, from a click or a drop. */
+  function changeColumns(layoutId: string, change: ColumnChange, focus?: string) {
+    if (focus) focusNext.current = focus;
+    void update(layoutId, (cur) => columnPatch(cur, change));
   }
+
+  const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
+
+  /** What a click on a chip, or its X, says it did. */
+  function columnsSaid(change: ColumnChange): string {
+    if (change.kind === "remove-role") return `Removed ${roleName(change.roleId)}. It is in Not in this layout.`;
+    if (change.kind === "set-fixed") {
+      return change.on ? `Added ${FIXED_LABEL[change.key]}.` : `Removed ${FIXED_LABEL[change.key]}. It is in Not in this layout.`;
+    }
+    return `Added ${roleName(change.roleId)}.`;
+  }
+
+  const handlers: DropHandlers = {
+    onDrop(item, target) {
+      // Let go where it already was: nothing to save, and nothing moved to say.
+      const stayed = `${item.label} dropped where it was. Nothing changed.`;
+      if (item.kind === "layout" && target.kind === "index") {
+        const ids = sortedLayouts.map((l) => l.id);
+        if (ids.indexOf(item.id) === target.index) return stayed;
+        void persist((list) => reorderLayouts(list, moveTo(byOrder(list).map((l) => l.id), item.id, target.index)));
+        return `Moved ${item.label} to position ${target.index + 1} of ${ids.length}.`;
+      }
+      if (item.kind === "col") {
+        if (target.kind === "remove") {
+          changeColumns(item.ctx, { kind: "remove-role", roleId: item.id });
+          return `Removed ${item.label}. It is in Not in this layout.`;
+        }
+        if (target.kind === "index") {
+          const layout = layouts.find((l) => l.id === item.ctx);
+          const drawn = layout ? layoutRoles(layout, roles).map((r) => r.id) : [];
+          if (drawn.indexOf(item.id) === target.index) return stayed;
+          const n = (layout?.columnRoles ?? []).length;
+          changeColumns(item.ctx, { kind: "move-role", roleId: item.id, index: target.index });
+          return `Moved ${item.label} to column ${target.index + 1} of ${n} roles.`;
+        }
+      }
+      if (item.kind === "tray") {
+        if (target.kind === "fixed") {
+          changeColumns(item.ctx, { kind: "set-fixed", key: target.key, on: true });
+          return `Added ${item.label} in its fixed place.`;
+        }
+        if (target.kind === "index") {
+          const n = (layouts.find((l) => l.id === item.ctx)?.columnRoles ?? []).length + 1;
+          changeColumns(item.ctx, { kind: "add-role", roleId: item.id, index: target.index });
+          return `Added ${item.label} as role column ${target.index + 1} of ${n}.`;
+        }
+      }
+      if (item.kind === "member" && target.kind === "index") {
+        const role = roles.find((r) => r.id === item.ctx);
+        if (role) {
+          if (role.members.indexOf(item.id) === target.index) return stayed;
+          const members = moveTo(role.members, item.id, target.index);
+          void saveRoles(roles.map((r) => (r.id === role.id ? { ...r, members } : r)));
+          return `Moved ${item.label} to position ${target.index + 1} of ${members.length} in ${role.name}.`;
+        }
+      }
+      return `${item.label} dropped outside the list. Nothing changed.`;
+    },
+    onReorder(item, order) {
+      if (item.kind === "layout") void persist((list) => reorderLayouts(list, order));
+      else if (item.kind === "col") void update(item.ctx, { columnRoles: order });
+      else if (item.kind === "member") void saveRoles(roles.map((r) => (r.id === item.ctx ? { ...r, members: order } : r)));
+    },
+  };
 
   async function saveRoles(next: CategoryRole[]) {
     setRoles(next);
@@ -252,6 +336,8 @@ export function ServiceCueSection() {
         ? "Service types unavailable"
         : "Loading service types…";
 
+  const layoutIds = sortedLayouts.map((l) => l.id);
+
   // One page-wide choice, drawn inside whichever card is open.
   const preview: PreviewSource = {
     types,
@@ -277,6 +363,7 @@ export function ServiceCueSection() {
       </div>
       {error && <ErrorNote className="mt-3">{error}</ErrorNote>}
 
+      <LayoutsDnd handlers={handlers} announce={announce}>
       <section className="mt-7" aria-labelledby="sc-layouts-h">
         <SectionHead id="sc-layouts-h" title="Layouts">
           A layout is the set of columns a rundown shows. The landing page offers them in this order, then All columns; the first
@@ -303,35 +390,37 @@ export function ServiceCueSection() {
           <p className="text-caption1 text-fg-muted">
             Until there is one, every screen and the landing page show All columns: every role, plus any category in no role.
           </p>
-          <Button variant="accent" size="medium" onClick={addLayout}><PlusIcon className="size-[15px]" aria-hidden="true" />New layout</Button>
+          <Button variant="accent" size="medium" onClick={addLayout} data-focus-key="new-layout"><PlusIcon className="size-[15px]" aria-hidden="true" />New layout</Button>
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-2.5">
-            {sortedLayouts.map((l, li) => (
-              <LayoutCard
-                key={l.id}
-                layout={l}
-                roles={roles}
-                open={openId === l.id}
-                onToggle={() => setExpandedId(openId === l.id ? null : l.id)}
-                onRename={(name) => void rename(l.id, name)}
-                nameError={nameError?.id === l.id ? nameError.message : null}
-                onDuplicate={() => duplicate(l)}
-                onDelete={() => void removeLayout(l)}
-                onUpdate={(patch) => void update(l.id, patch)}
-                onColumns={(change, focus) => {
-                  if (focus) focusNext.current = focus;
-                  void update(l.id, (cur) => columnPatch(cur, change));
-                }}
-                preview={preview}
-                move={{ first: li === 0, last: li === sortedLayouts.length - 1, by: (dir) => moveLayout(l, dir) }}
-                nameRef={openId === l.id ? nameField : undefined}
-              />
-            ))}
+          <div className="flex flex-col gap-2.5" data-sort-list="layouts">
+            <LiftedList kind="layout" ctx="" items={sortedLayouts}>
+              {(l) => (
+                <LayoutCard
+                  key={l.id}
+                  layout={l}
+                  roles={roles}
+                  open={openId === l.id}
+                  onToggle={() => setExpandedId(openId === l.id ? null : l.id)}
+                  onRename={(name) => void rename(l.id, name)}
+                  nameError={nameError?.id === l.id ? nameError.message : null}
+                  onDuplicate={() => duplicate(l)}
+                  onDelete={() => void removeLayout(l)}
+                  onUpdate={(patch) => void update(l.id, patch)}
+                  onColumns={(change, focus) => {
+                    changeColumns(l.id, change, focus);
+                    announce(columnsSaid(change));
+                  }}
+                  preview={preview}
+                  layoutIds={layoutIds}
+                  nameRef={openId === l.id ? nameField : undefined}
+                />
+              )}
+            </LiftedList>
           </div>
           <div className="mt-2.5">
-            <Button variant="filled" size="medium" onClick={addLayout}><PlusIcon className="size-[15px]" aria-hidden="true" />New layout</Button>
+            <Button variant="filled" size="medium" onClick={addLayout} data-focus-key="new-layout"><PlusIcon className="size-[15px]" aria-hidden="true" />New layout</Button>
           </div>
         </>
       )}
@@ -351,6 +440,7 @@ export function ServiceCueSection() {
           <RolesPanel roles={roles} categories={noteCats} categoriesFailed={failed.has("noteCats")} onChange={saveRoles} />
         )}
       </section>
+      </LayoutsDnd>
 
       <section className="mt-7 flex flex-col gap-2" aria-label="Landing page and public link">
         <MoreRow
@@ -387,6 +477,7 @@ export function ServiceCueSection() {
           />
         </MoreRow>
       </section>
+      {announcer}
     </div>
   );
 }
@@ -460,6 +551,35 @@ function MoreRow({ title, summary, children }: { title: string; summary: ReactNo
  * remove the category, which PCO owns.
  */
 
+/** One of a role's categories: moved by its grip (first has priority), taken out by its X. */
+function MemberChip({ role, member, onRemove }: { role: CategoryRole; member: string; onRemove: () => void }) {
+  const item: DragItem = { kind: "member", ctx: role.id, id: member, label: member, within: role.name };
+  const carried = useCarried(item);
+  const lifted = useLifted(item);
+  return (
+    <span
+      role="listitem"
+      data-sort-id={member}
+      className={cn(
+        "inline-flex h-[26px] max-w-full select-none items-center gap-0.5 whitespace-nowrap rounded-md border border-line-strong bg-surface-raised pl-px pr-[3px] text-caption1 text-fg",
+        carried && "opacity-35",
+        lifted && "bg-popover shadow-[0_0_0_2px_var(--su-accent),var(--su-shadow-2)]",
+      )}
+    >
+      <Grip item={item} order={role.members} size="sm" />
+      {member}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${member} from ${role.name}`}
+        className="touch-target-y ml-0.5 inline-grid size-6 shrink-0 place-items-center rounded-[5px] text-fg-subtle transition-colors hover:bg-fill hover:text-danger-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <XIcon className="size-[13px]" aria-hidden="true" />
+      </button>
+    </span>
+  );
+}
+
 /**
  * Category roles — editable alias sets.
  *
@@ -499,14 +619,6 @@ function RolesPanel({
   const patch = (id: string, next: Partial<CategoryRole>) =>
     onChange(roles.map((r) => (r.id === id ? { ...r, ...next } : r)));
 
-  const moveMember = (r: CategoryRole, i: number, dir: -1 | 1) => {
-    const m = [...r.members];
-    const j = i + dir;
-    if (j < 0 || j >= m.length) return;
-    [m[i], m[j]] = [m[j], m[i]];
-    patch(r.id, { members: m });
-  };
-
   return (
     <div className="flex flex-col gap-3 pt-2">
       <span className="text-caption2 text-fg-muted">
@@ -534,21 +646,18 @@ function RolesPanel({
               <Trash2Icon className="size-3.5 text-red-10" />
             </Button>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {r.members.map((m, mi) => (
-              <span key={m} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-0.5 text-caption2 text-gray-12">
-                <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === 0} onClick={() => moveMember(r, mi, -1)} aria-label="Higher priority"><ChevronLeftIcon className="size-3" /></button>
-                {m}
-                <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === r.members.length - 1} onClick={() => moveMember(r, mi, 1)} aria-label="Lower priority"><ChevronRightIcon className="size-3" /></button>
-                <button className="touch-target-y text-gray-9 hover:text-red-10" onClick={() => patch(r.id, { members: r.members.filter((x) => x !== m) })} aria-label={`Remove ${m}`}><XIcon className="size-3" /></button>
-              </span>
-            ))}
+          <div className="flex flex-wrap items-center gap-1.5" data-members={r.id}>
+            <LiftedList kind="member" ctx={r.id} items={r.members.map((m) => ({ id: m }))}>
+              {({ id: m }) => (
+                <MemberChip key={m} role={r} member={m} onRemove={() => patch(r.id, { members: r.members.filter((x) => x !== m) })} />
+              )}
+            </LiftedList>
             {categories.some((c) => !r.members.some((m) => norm(m) === norm(c))) && (
               // Select renders a NATIVE <select>, so the label must be a placeholder
               // OPTION — a custom trigger child does not render and the browser would
               // show the first real option as though it were already a member.
               <Select value="" onValueChange={(v) => patch(r.id, { members: [...r.members, v] })}>
-                <SelectTrigger className="w-auto h-6 px-2 text-caption2" aria-label={`Add a category to ${r.name}`}>
+                <SelectTrigger className="w-auto h-6 px-2 text-caption2" aria-label={`Add a category to ${r.name}`} data-add-member>
                   <SelectValue placeholder="+ Add category" />
                 </SelectTrigger>
                 <SelectContent>

@@ -103,6 +103,12 @@ async function openCard(name: string): Promise<void> {
   await settle();
 }
 const serverNames = (s: ServiceCueLayout[]) => [...s].sort((a, b) => a.order - b.order).map((l) => l.name);
+/** Move a layout one place down by keyboard, as an operator would: its grip, Space, ArrowDown, Space. */
+function moveDown(name: string): void {
+  const grip = screen.getByRole("button", { name: `Move the ${name} layout. Press Space to pick up` });
+  grip.focus();
+  for (const key of [" ", "ArrowDown", " "]) fireEvent.keyDown(grip, { key });
+}
 const nameBox = (name: string) => screen.getByDisplayValue(name) as HTMLInputElement;
 
 const AUDIO_VIDEO: ServiceCueLayout[] = [
@@ -119,8 +125,9 @@ test("a refused rename, then a reorder clicked before the refusal arrives: the r
     fireEvent.change(box, { target: { value: "video" } });
     fireEvent.blur(box);
     await settle();
-    // The operator's next click lands while the rename is still on the wire.
-    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]);
+    // The operator's next move lands while the rename is still on the wire, and the
+    // page draws the name being saved.
+    moveDown("video");
     await eventually(() => assert.equal(server.posts.length, 2), 2000);
     await eventually(() => assert.deepEqual(serverNames(server.stored()), ["Video", "Audio"], "the reorder was lost"), 2000);
     await eventually(() => assert.deepEqual(pageNames(), serverNames(server.stored()), "the page holds a list the server does not"), 2000);
@@ -144,7 +151,7 @@ test("two quick clicks: the first answer does not undo the second on screen, or 
     const rowColor = screen.getByDisplayValue("From PCO") as HTMLSelectElement;
     fireEvent.change(rowColor, { target: { value: "none" } }); // click 1
     await settle();
-    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]); // click 2
+    moveDown("Audio"); // click 2
     await settle();
     assert.deepEqual(pageNames(), ["Video", "Audio"]);
 

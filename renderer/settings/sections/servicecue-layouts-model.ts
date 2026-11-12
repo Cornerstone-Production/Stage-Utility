@@ -43,6 +43,9 @@ export const toggleOn = (l: ServiceCueLayout, key: ToggleKey): boolean => l[key]
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/** Layouts in the landing page's order. */
+export const byOrder = <T extends { order: number }>(list: readonly T[]): T[] => [...list].sort((a, b) => a.order - b.order);
+
 /** "A", "A and B", "A, B and C". */
 export function listOf(items: readonly string[]): string {
   if (items.length <= 1) return items.join("");
@@ -117,7 +120,7 @@ export function columnPatch(l: ServiceCueLayout, c: ColumnChange): Partial<Servi
 export function reorderLayouts(list: readonly ServiceCueLayout[], ids: readonly string[]): ServiceCueLayout[] {
   const byId = new Map(list.map((l) => [l.id, l]));
   const placed = ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
-  const rest = [...list].filter((l) => !ids.includes(l.id)).sort((a, b) => a.order - b.order);
+  const rest = byOrder(list.filter((l) => !ids.includes(l.id)));
   return [...placed, ...rest].map((l, order) => ({ ...l, order }));
 }
 
@@ -144,7 +147,7 @@ export function copyName(name: string, list: readonly ServiceCueLayout[]): strin
 
 /** The list with a copy of layout `id` right after it, under a free name and its own address. */
 export function duplicateLayout(list: readonly ServiceCueLayout[], id: string, newId: string): ServiceCueLayout[] {
-  const sorted = [...list].sort((a, b) => a.order - b.order);
+  const sorted = byOrder(list);
   const i = sorted.findIndex((l) => l.id === id);
   if (i < 0) return [...list];
   const { slug: _slug, ...rest } = sorted[i];
@@ -182,7 +185,7 @@ const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven
 
 /** What deleting a role takes with it: the layouts it is a column in, those it tints, its categories. */
 export function deleteRoleBody(role: CategoryRole, layouts: readonly ServiceCueLayout[]): Rich {
-  const sorted = [...layouts].sort((a, b) => a.order - b.order);
+  const sorted = byOrder(layouts);
   const using = sorted.filter((l) => (l.columnRoles ?? []).includes(role.id)).map((l) => l.name);
   const tint = sorted.filter((l) => l.rowColor === "category" && l.accentRole === role.id).map((l) => l.name);
   const n = using.length;
