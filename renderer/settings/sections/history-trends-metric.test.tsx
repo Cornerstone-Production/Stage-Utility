@@ -248,6 +248,18 @@ describe("the Trends sound metric", () => {
     assert.ok(view.container.querySelector('[data-series-line="evening"]') === null, "a type with no reading drew a line");
   });
 
+  test("hiding the only type with readings says it is hidden, not that the range has no reading", async () => {
+    // Evening has no LCeq 2, so its line is ON and empty. Hiding Weekend left a
+    // line "shown", and the plot said "No LCeq 2 reading in this range" about a
+    // range whose readings were only switched off.
+    const view = await renderHistory();
+    await chooseMetric(view, "LCeq 2");
+    await act(async () => view.container.querySelector<HTMLButtonElement>('[data-series-toggle="weekend"]')!.click());
+    const text = view.container.textContent ?? "";
+    assert.match(text, /Weekend is hidden\. Turn it on in the legend\./);
+    assert.doesNotMatch(text, /No LCeq 2 reading in this range/);
+  });
+
   test("Sound holds its loading state, naming no metric, until the saved choice is heard", async () => {
     server.saved = "SPL Fast";
     let open!: () => void;

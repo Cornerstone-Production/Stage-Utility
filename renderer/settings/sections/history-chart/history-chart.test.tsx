@@ -596,6 +596,51 @@ describe("measuring its own width", () => {
   });
 });
 
+describe("an empty plot says WHY it is empty", () => {
+  // Every line switched off, with readings behind them, used to read "Nothing
+  // recorded yet — the chart fills in as the service runs" under a strip that
+  // was quoting those very readings.
+  const off = (over: Partial<ChartSeries> = {}) => series({ on: false, ...over });
+  const emptyText = () => document.querySelector("[data-history-strip]")?.parentElement?.textContent ?? "";
+
+  test("every line hidden says so and points at the legend, not 'nothing recorded'", () => {
+    render(chart({ series: [off(), off({ id: "entries", label: "Total entries", role: "secondary" })], onToggleSeries: () => {} }));
+    assert.match(emptyText(), /Every line is hidden\. Turn one on in the legend\./);
+    assert.ok(!/Nothing recorded yet/.test(emptyText()), emptyText());
+  });
+
+  test("names Customize when the section has one", () => {
+    render(chart({ series: [off()], customize: <span>customize</span>, onToggleSeries: () => {} }));
+    assert.match(emptyText(), /The line is hidden\. Turn it on in the legend or in Customize\./);
+  });
+
+  test("outranks the caller's own empty note, which is about a different emptiness", () => {
+    render(chart({ series: [off()], emptyNote: "No recordings in this range — try a longer one.", onToggleSeries: () => {} }));
+    assert.ok(!/No recordings in this range/.test(emptyText()), emptyText());
+    assert.match(emptyText(), /hidden/);
+  });
+
+  test("a chart with nothing recorded still says nothing is recorded", () => {
+    render(chart({ series: [series({ points: [] })] }));
+    assert.match(emptyText(), /Nothing recorded yet/);
+    cleanup();
+    render(chart({ series: [] , emptyNote: "Reading the recorded samples…" }));
+    assert.match(emptyText(), /Reading the recorded samples/);
+  });
+
+  test("a hidden series with no readings is not 'hidden', it is empty", () => {
+    render(chart({ series: [off({ points: [] })], onToggleSeries: () => {} }));
+    assert.match(emptyText(), /Nothing recorded yet/);
+  });
+
+  test("with an empty line still on, it names what is hidden rather than claiming every line is", () => {
+    // The Trends shape: a type with no reading is a line that is on and empty.
+    const emptyOn = series({ id: "evening", label: "Evening", points: [] });
+    render(chart({ series: [off({ id: "a", label: "Weekend" }), off({ id: "b", label: "Night" }), emptyOn], onToggleSeries: () => {} }));
+    assert.match(emptyText(), /Every line with readings is hidden\. Turn one on in the legend\./);
+  });
+});
+
 describe("the legend", () => {
   test("with a handler it is a row of toggles, each saying whether it is on", () => {
     const toggled: string[] = [];
