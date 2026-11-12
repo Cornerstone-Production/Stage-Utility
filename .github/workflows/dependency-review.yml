@@ -29,8 +29,9 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          # GPL-3.0 is copyleft, so a permissively-licensed dependency is always
-          # compatible; the reverse is not. These are the licences that would
-          # create an obligation this project cannot meet.
-          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later, LGPL-2.0-or-later, SSPL-1.0, BUSL-1.1
+          # GPL-3.0 is copyleft, so a permissive dependency is always compatible. LGPL is
+          # too: LGPL-3.0 is GPL-3.0 plus permissions, and LGPL-2.x-or-later can be taken
+          # under 3.0. So libvips (in sharp, LGPL-3.0-or-later) is allowed; sharp-libvips
+          # publishes its source. Listed: licences with an obligation this project cannot meet.
+          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later, SSPL-1.0, BUSL-1.1
           comment-summary-in-pr: on-failure
