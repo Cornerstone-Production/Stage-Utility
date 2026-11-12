@@ -4,7 +4,7 @@
 // document on stageplots:updated, so callers do not patch local state from
 // these answers: useStagePlots refetches on the broadcast.
 
-import type { BackgroundView, Plot, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotItem, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
 
 import { invoke } from "../../lib/api";
 
@@ -43,4 +43,6 @@ export const stageplotsApi = {
   duplicatePlot: (id: string) => invoke<Plot>("stageplots:duplicatePlot", { id }),
   updatePlot: (id: string, changes: PlotChanges) => invoke<Plot>("stageplots:updatePlot", { id, changes }),
   deletePlot: (id: string) => invoke<{ ok: true }>("stageplots:deletePlot", { id }),
+  /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
+  saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
 };

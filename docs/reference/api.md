@@ -678,8 +678,26 @@ nothing. A body that is not a JSON object is a `400`.
 | DELETE | `/api/stageplots/backgrounds/:id` | `409` with `{error, plots}` naming each plot that uses it as `"Venue · Plot"`; otherwise removed, and its files once nothing names them |
 | POST | `/api/stageplots/plots` | `{venueId, name, backgroundId?}`. A venue's first plot becomes its default. `201` with the plot; `400` past 20 plots in the venue |
 | POST | `/api/stageplots/plots/:id/duplicate` | An independent copy named `"<name> copy"`, placed after the original. `201` with the copy; `400` past 20 plots in the venue |
-| PATCH | `/api/stageplots/plots/:id` | Any of `{name, backgroundId, bgFade}`, `backgroundId` an existing background or `null`, `bgFade` 0 to 1. Bumps the plot's `version` |
+| PATCH | `/api/stageplots/plots/:id` | Any of `{name, backgroundId, bgFade}`, `backgroundId` an existing background or `null`, `bgFade` 0 to 1. Bumps the plot's `version`. A background that makes the plot shorter moves any item that no longer fits wholly on it up until it does (a cable's points below the new edge come up to it) |
 | DELETE | `/api/stageplots/plots/:id` | `409` while it is its venue's default |
+| PUT | `/api/stageplots/plots/:id/items` | `{version, items}`: the plot's whole item list, saved against the `version` it was loaded at. `200` with `{plot}`, its `version` one higher; an unchanged list saves nothing and keeps the version. `409` with `{error: "changed elsewhere", version}` when the plot changed since, storing nothing. `400` naming the first item that breaks a rule (see [Items](#stage-plot-items)), or a `version` that is not a whole number. Each refusal is logged on `[stageplots]` |
+
+#### Stage plot items
+
+An item is `{id, type, x, y, w, h, rotation, label, color, notes, inputs}` in plot
+units: the plot is 1000 wide and as high as its background's aspect ratio makes it
+(16:9 without one). `x`, `y` is the top-left of the unrotated box, inside the plot;
+`w` and `h` are 8 to 1000 (a cable's are its points' bounding box, from 0 to the
+plot's width and height); `rotation` is degrees in (-180, 180], about the centre.
+`type` is one of `box`, `circle`, `zone`, `cable`, `conn` (a connection point),
+`symbol` or `text`. A `symbol` carries `symbol`: `amp`, `camera`, `console`,
+`drumkit`, `keyboard`, `micstand`, `piano`, `speaker` or `wedge`. A `text` carries
+`textKind`: `label`, `callout` or `dimension`. A `cable` carries `points` (2 to 50
+`[x, y]` pairs inside the plot) and `dashed`; the server sets its box to its points'
+bounding box and its rotation to 0, whatever was sent.
+`color` is one of the patch sheet's ten swatches, or `null`. `label` is up to 60
+characters, `notes` up to 500, `inputs` up to 64 names of up to 40 characters. A
+plot holds up to 500 items, each `id` once. Any other field is dropped.
 
 ## Channels
 

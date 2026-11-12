@@ -18,11 +18,15 @@
 //   POST   /api/stageplots/plots/:id/duplicate      → 201 the copy, "<name> copy"
 //   PATCH  /api/stageplots/plots/:id                { name?, backgroundId?, bgFade? }
 //   DELETE /api/stageplots/plots/:id                409 while it is its venue's default
+//   PUT    /api/stageplots/plots/:id/items          { version, items } → { plot }, version + 1;
+//                                                   409 { error, version } when the plot
+//                                                   changed since that version
 //
 // Every change saves at once and broadcasts the whole document on
 // stageplots:updated, so a second browser follows without a reload. A change
-// that changes nothing (an empty PATCH) writes and broadcasts nothing. Every
-// refused upload is said on [stageplots], with why. A body
+// that changes nothing (an empty PATCH, an unchanged item list) writes and
+// broadcasts nothing. Every refused upload and item save is said on
+// [stageplots], with why. A body
 // that breaks a rule is a 400 that says which; an id that names nothing is a
 // 404. The store holds every write to checkStagePlotsDoc, so no route can
 // leave a plot pointing at a venue or background that is gone.
@@ -57,7 +61,17 @@ import {
   storeStagePlotOriginal,
   tidyStagePlotFiles,
 } from "../stageplots-files.js";
-import { STAGEPLOT_ID, limitProblem, nameProblem, stageplotsStore, validatePlotInput, validateVenueInput } from "../stageplots-store.js";
+import { plotHeight } from "../stageplots-doc.js";
+import {
+  STAGEPLOT_ID,
+  checkItems,
+  itemsWithin,
+  limitProblem,
+  nameProblem,
+  stageplotsStore,
+  validatePlotInput,
+  validateVenueInput,
+} from "../stageplots-store.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
 const PREFIX = "/api/stageplots";
@@ -292,20 +306,75 @@ async function updatePlot(c: RouteCtx, id: string): Promise<void> {
   if (!body) return;
   const problem = validatePlotInput(body, { partial: true });
   if (problem) return error(c.res, problem);
-  await mutate(
+  let moved = 0;
+  const saved = await mutate(
     c.res,
     (doc) => {
       const p = findPlot(doc, id);
+      const backgroundId = body.backgroundId !== undefined ? knownBackground(doc, body.backgroundId) : p.backgroundId;
+      // A background that makes the plot shorter would leave an item low on the
+      // old one below the bottom edge, out of sight and unsaveable: it comes up
+      // to the edge instead.
+      const within = itemsWithin(p.items, plotHeight(doc.backgrounds.find((b) => b.id === backgroundId)));
+      moved = within.moved;
       const next = replaceIn<Plot>(doc, "plots", {
         ...p,
         ...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
-        ...(body.backgroundId !== undefined ? { backgroundId: knownBackground(doc, body.backgroundId) } : {}),
+        backgroundId,
         ...(typeof body.bgFade === "number" ? { bgFade: body.bgFade } : {}),
+        items: within.items,
       });
       // A real change bumps the version; nothing to change leaves it alone.
       return next === doc ? doc : replaceIn<Plot>(next, "plots", { ...findPlot(next, id), version: p.version + 1 });
     },
     (doc) => findPlot(doc, id),
+  );
+  // Only once the move is saved: a refused change moved nothing.
+  if (saved && moved > 0) console.log(`[stageplots] plot ${scrub(id)}: ${scrub(moved)} items moved up onto the plot after its background changed`);
+}
+
+/** Why a PUT …/items body is refused, said on [stageplots] and answered. */
+function refuseItems(id: string, status: number, why: string, extra: Record<string, unknown> = {}): never {
+  console.warn(`[stageplots] items refused for plot ${scrub(id)}: ${scrub(why)}`);
+  throw new Refused(status, why, extra);
+}
+
+/**
+ * Save a plot's whole item list against the version the editor loaded. The
+ * version is checked inside the store's serialized update, so of two saves
+ * from one version exactly one lands and the other is 409. An item list equal
+ * to the stored one changes nothing: no write, no broadcast, no new version.
+ */
+async function saveItems(c: RouteCtx, id: string): Promise<void> {
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readObjectBody(c.req, c.res);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] items refused for plot ${scrub(id)}: ${scrub(err.message)}`);
+    throw err;
+  }
+  if (!body) {
+    console.warn(`[stageplots] items refused for plot ${scrub(id)}: the body is not a JSON object`);
+    return;
+  }
+  const version = body.version;
+  await mutate(
+    c.res,
+    (doc) => {
+      if (!doc.plots.some((x) => x.id === id)) refuseItems(id, 404, "no such plot");
+      const p = findPlot(doc, id);
+      if (typeof version !== "number" || !Number.isInteger(version) || version < 0) refuseItems(id, 400, "version must be a whole number");
+      let items;
+      try {
+        items = checkItems(body.items, plotHeight(doc.backgrounds.find((b) => b.id === p.backgroundId)), "the plot");
+      } catch (err) {
+        refuseItems(id, 400, errorMessage(err));
+      }
+      if (version !== p.version) refuseItems(id, 409, "changed elsewhere", { version: p.version });
+      if (JSON.stringify(items) === JSON.stringify(p.items)) return doc;
+      return replaceIn<Plot>(doc, "plots", { ...p, items, version: p.version + 1 });
+    },
+    (doc) => ({ plot: findPlot(doc, id) }),
   );
 }
 
@@ -565,6 +634,8 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (id && method === "POST") return setDefault(c, id);
   id = idIn(pathname, "plots", "duplicate");
   if (id && method === "POST") return duplicatePlot(c, id);
+  id = idIn(pathname, "plots", "items");
+  if (id && method === "PUT") return saveItems(c, id);
   id = idIn(pathname, "venues");
   if (id && method === "PATCH") return updateVenue(c, id);
   if (id && method === "DELETE") return deleteVenue(c, id);

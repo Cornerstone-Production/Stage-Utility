@@ -7,9 +7,10 @@ import * as path from "node:path";
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stageplots-store-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { checkStagePlotsDoc, validateVenueInput, validatePlotInput, limitProblem, stageplotsStore } = await import(
+const { checkStagePlotsDoc, validateVenueInput, validatePlotInput, validateItems, checkItems, limitProblem, stageplotsStore } = await import(
   "./stageplots-store.js"
 );
+const { SYMBOL_KINDS } = await import("../types/stageplots.js");
 const { restoreCheckFor } = await import("./store-registry.js");
 
 const HASH = "0123456789abcdef";
@@ -163,5 +164,124 @@ describe("stageplots store", () => {
     const onDisk = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
     assert.equal(onDisk.venues[0].name, "Main");
     assert.equal((await stageplotsStore.get()).venues.length, 1);
+  });
+});
+
+/** A valid item of each kind, on a 1000 x 562.5 plot. */
+function item(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: "i-1", type: "box", x: 100, y: 100, w: 80, h: 60, rotation: 0, label: "Riser", color: null, notes: "", inputs: [], ...over };
+}
+const H = 562.5;
+
+describe("stage plot items", () => {
+  test("a good item of every type and every symbol passes", () => {
+    const items = [
+      item({ id: "a", type: "box" }),
+      item({ id: "b", type: "circle", color: "#0091ff" }),
+      item({ id: "c", type: "zone", rotation: 180 }),
+      item({ id: "d", type: "cable", points: [[10, 10], [200, 300]], dashed: true, x: 10, y: 10, w: 190, h: 290 }),
+      item({ id: "e", type: "conn", inputs: ["Kick In", "Kick Out"] }),
+      item({ id: "f", type: "text", textKind: "callout" }),
+      ...SYMBOL_KINDS.map((k, i) => item({ id: `s${i}`, type: "symbol", symbol: k })),
+    ];
+    assert.equal(validateItems(items, H), null);
+  });
+
+  test("an unknown type, symbol, text kind or colour is refused", () => {
+    assert.match(validateItems([item({ type: "triangle" })], H) ?? "", /type/);
+    assert.match(validateItems([item({ type: "symbol", symbol: "harp" })], H) ?? "", /symbol/);
+    assert.match(validateItems([item({ type: "symbol" })], H) ?? "", /symbol/);
+    assert.match(validateItems([item({ type: "text", textKind: "banner" })], H) ?? "", /text kind/);
+    assert.match(validateItems([item({ color: "#123456" })], H) ?? "", /colou?r/);
+    assert.match(validateItems([item({ color: "red" })], H) ?? "", /colou?r/);
+  });
+
+  test("geometry must be finite and inside the plot", () => {
+    for (const [over, why] of [
+      [{ x: Number.NaN }, /x/],
+      [{ x: -1 }, /x/],
+      [{ x: 1000.5 }, /x/],
+      [{ y: H + 1 }, /y/],
+      [{ w: 7 }, /width/],
+      [{ h: 1001 }, /height/],
+      [{ rotation: -180 }, /rotation/],
+      [{ rotation: 181 }, /rotation/],
+      [{ rotation: Number.POSITIVE_INFINITY }, /rotation/],
+    ] as const) {
+      assert.match(validateItems([item(over)], H) ?? "", why, JSON.stringify(over));
+    }
+    assert.equal(validateItems([item({ x: 1000, y: H, rotation: 180 })], H), null);
+  });
+
+  test("text, inputs and counts are bounded", () => {
+    assert.match(validateItems([item({ label: "x".repeat(61) })], H) ?? "", /60/);
+    assert.match(validateItems([item({ notes: "x".repeat(501) })], H) ?? "", /500/);
+    assert.match(validateItems([item({ inputs: Array.from({ length: 65 }, () => "In") })], H) ?? "", /64/);
+    assert.match(validateItems([item({ inputs: ["x".repeat(41)] })], H) ?? "", /40/);
+    assert.match(validateItems([item({ inputs: [3] })], H) ?? "", /input/);
+    const many = Array.from({ length: 501 }, (_, i) => item({ id: `i-${i}` }));
+    assert.match(validateItems(many, H) ?? "", /500 items/);
+    assert.equal(validateItems(many.slice(0, 500), H), null);
+    assert.match(validateItems([item(), item()], H) ?? "", /more than once/);
+    assert.match(validateItems([item({ id: "a/b" })], H) ?? "", /id/);
+    assert.match(validateItems("items", H) ?? "", /list/);
+  });
+
+  test("a cable has 2 to 50 points, each inside the plot", () => {
+    const cable = (points: unknown) => item({ type: "cable", points, dashed: false });
+    assert.match(validateItems([cable([[1, 1]])], H) ?? "", /2 to 50 points/);
+    assert.match(validateItems([cable(Array.from({ length: 51 }, () => [1, 1]))], H) ?? "", /2 to 50 points/);
+    assert.match(validateItems([cable([[1, 1], [2, H + 5]])], H) ?? "", /point/);
+    assert.match(validateItems([cable([[1, 1], [2]])], H) ?? "", /point/);
+    assert.match(validateItems([item({ type: "cable", points: [[1, 1], [9, 9]] })], H) ?? "", /dashed/);
+  });
+
+  test("an item is rebuilt field by field: an unknown field is dropped, a type's own fields only on that type", () => {
+    const [box] = checkItems([item({ symbol: "piano", points: [[0, 0]], dashed: true, secret: "x" })], H, "the plot");
+    assert.deepEqual(Object.keys(box).sort(), ["color", "h", "id", "inputs", "label", "notes", "rotation", "type", "w", "x", "y"]);
+  });
+
+  test("a refusal states its bound rounded inward, never as the value it refused", () => {
+    // A 3:2 plot is 666.666… high: 666.7 is outside it and must not read as allowed.
+    assert.match(validateItems([item({ y: 666.7 })], 2000 / 3) ?? "", /from 0 to 666\.6$/);
+    assert.equal(validateItems([item({ y: 666.6 })], 2000 / 3), null);
+  });
+
+  test("checkItems' output passes checkItems again, a full-height cable on a 3:2 plot included", () => {
+    const H32 = 2000 / 3;
+    const items = [
+      item({ type: "cable", points: [[10, 0], [10, H32]], dashed: false, x: 10, y: 0, w: 0, h: H32 }),
+      item({ id: "i-2", type: "box", y: 600 }),
+    ];
+    const once = checkItems(items, H32, "the plot");
+    assert.ok(once[0].h <= H32, `the cable's box is ${once[0].h} high`);
+    assert.deepEqual(checkItems(once, H32, "the plot"), once);
+  });
+
+  test("a cable's client box is never checked, only derived: a box past the plot is not a refusal", () => {
+    const [cable] = checkItems([item({ type: "cable", points: [[10, 20], [300, 120]], dashed: true, x: -5, y: 9999, w: 5000, h: -3 })], H, "the plot");
+    assert.deepEqual([cable.x, cable.y, cable.w, cable.h], [10, 20, 290, 100]);
+  });
+
+  test("a cable's box and turn are its points', whatever the client sent", () => {
+    const [cable] = checkItems(
+      [item({ type: "cable", points: [[10, 20], [300, 120]], dashed: true, x: 900, y: 400, w: 5, h: 5, rotation: 45 })],
+      H,
+      "the plot",
+    );
+    assert.deepEqual([cable.x, cable.y, cable.w, cable.h, cable.rotation], [10, 20, 290, 100, 0]);
+  });
+
+  test("the restore check holds a plot's items to the same rules, against its own height", () => {
+    const doc = goodDoc();
+    (doc.plots[0] as { items: unknown[] }).items = [item({ y: 600 })];
+    // The background is 2400 x 1600: a plot 666.7 units high, so y 600 is inside.
+    assert.equal(checkStagePlotsDoc(doc).plots[0].items.length, 1);
+    doc.plots[0].backgroundId = null;
+    doc.backgrounds = [];
+    assert.match(refusal(doc), /y/);
+    const bad = goodDoc();
+    (bad.plots[0] as { items: unknown[] }).items = [item({ type: "triangle" })];
+    assert.match(refusal(bad), /plot "p-1".*type/);
   });
 });

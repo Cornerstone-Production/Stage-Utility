@@ -633,6 +633,7 @@ export type IpcChannel =
   | "stageplots:deleteVenue"
   | "stageplots:duplicatePlot"
   | "stageplots:get"
+  | "stageplots:saveItems"
   | "stageplots:setDefault"
   | "stageplots:updateBackground"
   | "stageplots:updatePlot"
@@ -838,6 +839,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "stageplots:deletePlot":
       return del<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}`);
+
+    // The whole item list, against the version it was loaded at: 409 when the
+    // plot changed since (the error carries status 409 and the current version).
+    case "stageplots:saveItems":
+      return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
 
     case "servicecue:rundown": {
       const id = p.serviceTypeId as string;

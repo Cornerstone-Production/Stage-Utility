@@ -51,8 +51,48 @@ export interface BackgroundView extends Background {
   sourceUrl: string;
 }
 
-/** A drawn item. PR 2 defines its shape; a plot carries none until then. */
-export type PlotItem = Record<string, unknown>;
+/** Every kind of item a plot can carry. */
+export const ITEM_TYPES = ["box", "circle", "zone", "cable", "conn", "symbol", "text"] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+/** The nine symbols, sorted. Their drawings are renderer/main/stageplots/symbols.ts. */
+export const SYMBOL_KINDS = ["amp", "camera", "console", "drumkit", "keyboard", "micstand", "piano", "speaker", "wedge"] as const;
+export type SymbolKind = (typeof SYMBOL_KINDS)[number];
+
+export const TEXT_KINDS = ["label", "callout", "dimension"] as const;
+export type TextKind = (typeof TEXT_KINDS)[number];
+
+/** One point of a cable, in plot units. */
+export type CablePoint = [number, number];
+
+/**
+ * One drawn item, in plot units. x and y are the top-left of the unrotated box
+ * and rotation turns it about its centre, in degrees within (-180, 180]. A
+ * cable is its points; its x, y, w and h are their bounding box and it does
+ * not rotate. `color` is one of PATCH_COLORS, or null for the plot's ink.
+ */
+export interface PlotItem {
+  id: string;
+  type: ItemType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  label: string;
+  color: string | null;
+  notes: string;
+  /** What plugs in here, in order: input names. */
+  inputs: string[];
+  /** Only on a symbol. */
+  symbol?: SymbolKind;
+  /** Only on text. */
+  textKind?: TextKind;
+  /** Only on a cable: 2 to 50 points. */
+  points?: CablePoint[];
+  /** Only on a cable. */
+  dashed?: boolean;
+}
 
 export interface Plot {
   id: string;
@@ -89,6 +129,15 @@ export const STAGEPLOT_LIMITS = {
   backgrounds: 50,
   nameChars: 60,
   notesChars: 500,
+  itemsPerPlot: 500,
+  inputsPerItem: 64,
+  labelChars: 60,
+  inputChars: 40,
+  cablePointsMin: 2,
+  cablePointsMax: 50,
+  /** An item's smallest and largest width and height, in plot units. */
+  itemMinSize: 8,
+  itemMaxSize: 1000,
 } as const;
 
 /** The plot canvas is this many units wide. */

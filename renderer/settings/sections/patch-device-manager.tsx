@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Trash2Icon, PlusIcon, ChevronRightIcon } from "lucide-react";
 
+import { PATCH_COLORS } from "@main/types/patch";
+
 import { Button, NumberInput, Input } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
@@ -16,9 +18,6 @@ const KINDS: { value: PatchDeviceKind; label: string }[] = [
   { value: "array", label: "Array" },
   { value: "other", label: "Other" },
 ];
-
-// A curated, dark-legible palette for tinting a device's channels.
-const PATCH_COLORS = ["#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0091ff", "#3e63dd", "#8e4ec6", "#e93d82", "#8b8d98"];
 
 /** One-line summary of a device's current connector labels, e.g. "B-1…B-12". */
 function labelSummary(labels: string[] | undefined): string | null {

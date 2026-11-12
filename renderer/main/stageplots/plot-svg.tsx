@@ -11,6 +11,7 @@ import type { Ref } from "react";
 import type { PanZoom } from "./use-pan-zoom";
 
 import { clamp } from "@main/services/clamp";
+import { plotHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type BackgroundView, type Plot } from "@main/types/stageplots";
 
 import { cn } from "../../lib/cn";
@@ -18,11 +19,7 @@ import { cn } from "../../lib/cn";
 /** Columns in the grid a plot with no background is drawn on. */
 const GRID_COLUMNS = 24;
 
-/** The plot's height in plot units. */
-export function plotHeight(background: Pick<BackgroundView, "converted"> | null): number {
-  if (!background || background.converted.width <= 0) return (PLOT_UNITS_WIDE * 9) / 16;
-  return (PLOT_UNITS_WIDE * background.converted.height) / background.converted.width;
-}
+export { plotHeight } from "@main/services/stageplots-doc";
 
 /** How opaque the background is drawn at a fade from 0 (as converted) to 1 (faintest). */
 export function backgroundOpacity(fade: number): number {
