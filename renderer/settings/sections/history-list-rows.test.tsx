@@ -321,7 +321,7 @@ describe("the All services day list", () => {
       for (const [i, record] of [ELEVEN, NINE].entries()) {
         const att = ATT.find((a) => a.serviceKey === record.serviceKey) ?? null;
         const spl = record === ELEVEN ? SPL : null;
-        const kpis = new Map(serviceKpis(record, att, spl).map((k) => [k.key, k]));
+        const kpis = new Map(serviceKpis(record, att, spl, { trends: null, chosen: null }).map((k) => [k.key, k]));
         const drawn = figuresOf(rows[i]);
         // The identity, figure by figure: each drawn value is the header's own.
         assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "Peak must be the header's");
@@ -329,7 +329,7 @@ describe("the All services day list", () => {
         assert.equal(drawn.level.value, kpis.get("level")!.value, "the peak level must be the header's");
         // And the row's own extra: versus plan, which the header carries as a
         // sub-line of Actual.
-        const vsPlan = serviceRowFigures(record, att, spl).figures.find((f) => f.key === "vs-plan");
+        const vsPlan = serviceRowFigures(record, att, spl, { trends: null, chosen: null }).figures.find((f) => f.key === "vs-plan");
         assert.equal(drawn["vs-plan"].value, vsPlan!.value, "vs plan must come from the same derivation");
         // The one figure that has been wrong before: attendance is people in the
         // ROOM, not the cumulative door count.
@@ -487,7 +487,7 @@ describe("the level figure on a row", () => {
   test("a service with no sound says WHY there is no number", async () => {
     // The row stripped the level's note, so a bare "—" sent an operator to look
     // at a meter that was fine. The note is the only thing that tells "nothing
-    // was recorded" from "you have this metric hidden in Sound".
+    // was recorded" from "a record with no metrics" or "the read failed".
     installFetch();
     const view = await renderList();
     const row = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!;
@@ -995,7 +995,7 @@ describe("a row's columns", () => {
     // And the number under those labels is the in-room one — the same figure
     // the service page's header quotes, not the door count beside it.
     const att = ATT.find((a) => a.serviceKey === NINE.serviceKey)!;
-    const kpis = new Map(serviceKpis(NINE, att, null).map((k) => [k.key, k]));
+    const kpis = new Map(serviceKpis(NINE, att, null, { trends: null, chosen: null }).map((k) => [k.key, k]));
     assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "the row and the page quote different numbers");
     // AND CALL IT THE SAME THING. One number with two names across two pages is
     // the confusion this column was relabelled to end; the service page said

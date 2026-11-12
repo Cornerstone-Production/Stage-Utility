@@ -29,7 +29,7 @@ const teardown = installRenderDom();
 
 const { render, screen, cleanup, act, fireEvent, within } = await import("@testing-library/react");
 const React = await import("react");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 async function flushReact(): Promise<void> {
   for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
@@ -103,14 +103,26 @@ function stubFetch(serverMetrics: string[] = []): typeof fetch {
 
 async function mount(detail: unknown = DETAIL): Promise<void> {
   render(
-    React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, { detail }),
+    React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric: null }),
   );
   // The chart's table is there once the series read has answered (here, 404),
   // and the seed read lands with it or just behind.
-  await eventually(() => assert.ok(screen.getByRole("table"), "the per-item table never drew"));
+  await eventually(() =>
+    assert.ok(
+      screen.queryByRole("table") || screen.queryByText("No table columns ticked."),
+      "the per-item table never drew",
+    ),
+  );
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+/** The Table columns group of the open Customize popover: a metric name is also
+ *  a Plot radio, so a bare getByText would find two. */
+function columns() {
+  const dialog = screen.getByLabelText("Customize sound", { selector: "[role='dialog']" });
+  return within(dialog.querySelector("[data-customize-group='metrics']") as HTMLElement);
 }
 
 const stored = () => JSON.parse(localStorage.getItem(STORE) ?? "null");
@@ -127,7 +139,7 @@ test("unticking a default metric removes THAT one, on a store with nothing in it
     assert.equal(table.queryAllByText("LAeq 1").length, 1);
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
@@ -153,7 +165,7 @@ test("the choice is written per browser, and nothing is POSTed to the server", a
   try {
     await mount();
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
@@ -200,7 +212,7 @@ test("an EMPTY choice stays empty — it does not spring the defaults back", asy
   try {
     await mount();
     fireEvent.click(screen.getByLabelText("Customize sound"));
-    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    const popover = columns();
     fireEvent.click(popover.getByText("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
@@ -213,16 +225,15 @@ test("an EMPTY choice stays empty — it does not spring the defaults back", asy
     cleanup();
     await flushReact();
 
-    // Reopened: still empty, and the chart says why rather than showing the
-    // "nothing recorded yet" sentence, which would be false.
+    // Reopened: still empty. The table says so, and the CHART is untouched: the
+    // columns are the table's alone, and the plotted metric is Plot's.
     await mount();
     assert.deepEqual(stored(), []);
-    assert.equal(document.querySelectorAll("[data-series-line]").length, 0);
-    // Two places say it: the empty plot and the strip. getByText would throw on
-    // finding both, which is a pass reported as a failure.
-    assert.ok(screen.queryAllByText(/No metric selected/).length >= 1, "the empty chart does not say why");
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
-    assert.ok(strip.textContent?.includes("No metric selected"), strip.textContent ?? "");
+    await eventually(() =>
+      assert.equal(document.querySelectorAll("[data-series-line]").length, 1, "unticking columns blanked the chart"),
+    );
+    assert.ok(screen.queryByText("No table columns ticked."), "the table does not say why it is empty");
+    assert.equal(screen.queryAllByText(/No metric selected/).length, 0);
     cleanup();
     await flushReact();
   } finally {
@@ -230,35 +241,20 @@ test("an EMPTY choice stays empty — it does not spring the defaults back", asy
   }
 });
 
-test("the legend lists EVERY metric, so one that is off can come back", async () => {
-  // The fallback built its series from the shown list with `on: true`, so a
-  // metric switched off vanished from the legend entirely and the only way back
-  // was Customize. Attendance has always listed the whole offering.
+test("the per-item legend names the one plotted metric and toggles nothing", async () => {
+  // It used to list every recorded metric and wire a click to the same handler as
+  // the table's columns, so one click changed the chart AND the table. Plot
+  // chooses the metric now; there is nothing for the legend to switch.
   const realFetch = globalThis.fetch;
   globalThis.fetch = stubFetch();
   try {
     await mount();
-    const toggle = (id: string) => document.querySelector(`[data-series-toggle='${id}']`) as HTMLButtonElement;
-    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true"));
-    await eventually(() => assert.equal(toggle("LAeq 1").getAttribute("aria-pressed"), "true"));
-
-    fireEvent.click(toggle("SPL A Fast"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await eventually(() => assert.ok(toggle("SPL A Fast"), "the off metric left the legend"));
-    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "false"));
+    assert.equal(document.querySelectorAll("[data-series-toggle]").length, 0, "a legend entry is a toggle again");
+    // SPL A Fast and LAeq 1 are both carried; LAeq 1 is the Trends default's
+    // LAeq 2/LAeq 1 rule, so it is the one plotted.
+    assert.equal(document.querySelectorAll("[data-series-line='LAeq 1']").length, 1);
     assert.equal(document.querySelectorAll("[data-series-line='SPL A Fast']").length, 0);
-
-    // And back on, from the legend alone.
-    fireEvent.click(toggle("SPL A Fast"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true"));
-    await eventually(() => assert.ok(document.querySelectorAll("[data-series-line='SPL A Fast']").length > 0));
-    assert.deepEqual(stored()?.slice().sort(), ["LAeq 1", "SPL A Fast"]);
-
+    assert.deepEqual(stored(), null, "reading the card wrote a column choice");
     cleanup();
     await flushReact();
   } finally {

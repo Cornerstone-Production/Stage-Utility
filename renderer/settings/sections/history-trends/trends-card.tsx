@@ -594,8 +594,7 @@ export function TrendsCard({
         {/* WHICH sound reading, only under Sound, and only where the choice can
             be saved. The organisation's choice, not this browser's: the booth
             and the tablet by the desk read one number. Offered whenever the
-            recordings carry any metric, even when none resolves (this browser's
-            Customize list hides every one), so there is always a way to pick.
+            recordings carry any metric, so there is always a way to pick.
             `Select` renders a NATIVE <select>; `appearance-none` strips the
             browser's own arrow so every browser draws the same one, the span
             after it. A saved metric nothing carries still shows, marked by
