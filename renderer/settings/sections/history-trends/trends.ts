@@ -24,9 +24,10 @@ export interface TrendRecording {
    *  recordings are not plotted: a service with no counter is not a service of
    *  zero people. */
   peakOccupancy: number | null;
-  /** The loudest reading of this recording on the operator's PRIMARY Smaart
-   *  metric. Null when nothing was recorded, or when this browser surfaces no
-   *  metric the recording carries — the same rule the day-list rows apply. */
+  /** The loudest reading of this recording on the Trends sound metric, one for
+   *  the whole card (see sound-metric.ts). Null when nothing was recorded, or
+   *  when the recording carries no reading on that metric: no point, rather
+   *  than another metric's figure. */
   peakDb: number | null;
   /**
    * The recording has ENDED.

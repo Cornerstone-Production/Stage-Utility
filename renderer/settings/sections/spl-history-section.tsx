@@ -10,7 +10,6 @@ import {
   addDefaultOnce,
   hasStoredChoice,
   peakInstant,
-  readStoredKeys,
   seedStoredKeys,
   serviceWindowOf,
   useStoredKeys,
@@ -18,6 +17,7 @@ import {
   type ChartSeries,
   type LaneItem,
 } from "./history-chart";
+import { peakFigureLabel, peakSeriesLabel, plottedFor, usePlotChoiceVersion } from "./sound-plot";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -56,23 +56,20 @@ function metricKeysOf(record: ServiceSplHistory): string[] {
 }
 
 /**
- * The PRIMARY metric this browser surfaces and what the service peaked at on it.
+ * The metric the Sound card plots for a record and what the service peaked on it.
  *
- * The primary is the first of the operator's chosen metrics that this record
- * actually carries — the same rule `SplDetail` uses for its peak marks and its
- * "Peak <metric>" figure, read from the same localStorage entry, so the header
- * and the section below it can never name different metrics.
+ * The metric is `plottedFor`'s: this browser's own Plot choice, else the Trends
+ * metric, else the first the record carries. The chart, its figure strip and
+ * this header figure all ask it, so they can never name different metrics. It
+ * is a function of the record and two preferences, so nothing here can come back
+ * as "hidden": a record that carries any metric always plots one.
  *
- * The four empty cases are told apart because they are four different
- * situations and only one of them is a fault in the recording. A single null
- * had the header saying "no metric recorded" at a service that recorded plenty
- * and whose operator had simply unticked every metric in Customize — which
- * sends whoever reads it to look at the meter.
+ * The empty cases are told apart because they are different situations and only
+ * one of them is a fault in the recording.
  *
- * Read rather than hooked: the caller needs one figure, not the whole
- * preference machinery, and `SplDetail` — rendered on the same page — owns the
- * seed from the server. A caller that must not go stale when the choice changes
- * subscribes with `useStoredKeysVersion(SPL_METRICS_STORAGE_KEY)`.
+ * Read rather than hooked: the caller needs one figure, not the preference
+ * machinery. A caller that must not go stale when the choice changes subscribes
+ * with `usePlotChoiceVersion()`.
  */
 export type ServicePeakLevel =
   | { kind: "level"; metric: string; db: number }
@@ -80,34 +77,17 @@ export type ServicePeakLevel =
   | { kind: "no-record" }
   /** A record carrying no Smaart metric keys — an empty or legacy capture. */
   | { kind: "no-metrics" }
-  /** The record HAS metrics; this browser's selection surfaces none of them. */
-  | { kind: "hidden"; available: string[] }
   /** The metric is chosen and present, but no item on it recorded a peak. */
   | { kind: "no-samples"; metric: string };
 
-/**
- * The first of this browser's chosen metrics that `available` actually carries,
- * or null when none of them is there.
- *
- * Exported because two surfaces read it and must agree: a service's peak level
- * (below) and the Trends chart's sound measure, which works from the SPL
- * SUMMARY rather than the full record and so cannot go through
- * `servicePeakLevel`. Two copies of this rule would be two rules the day one of
- * them was tightened, and the symptom would be a chart plotting LCeq under a
- * heading that says LAeq.
- */
-export function primaryMetricOf(available: readonly string[]): string | null {
-  if (!available.length) return null;
-  const chosen = readStoredKeys(SPL_METRICS_STORAGE_KEY, null, defaultVisible([...available]));
-  return chosen.find((k) => available.includes(k)) ?? null;
-}
-
-export function servicePeakLevel(record: ServiceSplHistory | null): ServicePeakLevel {
+/** `trendsSaved` is the Trends metric as the page resolved it — see
+ *  `plottedMetric`. */
+export function servicePeakLevel(record: ServiceSplHistory | null, trendsSaved: string | null): ServicePeakLevel {
   if (!record || !record.items.length) return { kind: "no-record" };
   const all = metricKeysOf(record);
-  if (!all.length) return { kind: "no-metrics" };
-  const primary = primaryMetricOf(all);
-  if (!primary) return { kind: "hidden", available: all };
+  const plotted = plottedFor(all, trendsSaved);
+  if (!plotted) return { kind: "no-metrics" };
+  const primary = plotted.metric;
   const maxes = record.items
     .map((it) => metricStat(it, primary, record)?.max)
     .filter((v): v is number => v != null);
@@ -171,9 +151,9 @@ const DEFAULT_SERIES = ["max", "avg", PEAK_MARKS_KEY];
 addDefaultOnce(SERIES_STORAGE_KEY, PEAK_MARKS_KEY);
 
 /**
- * Which Smaart metrics this browser surfaces — the table's columns, the
- * fallback chart's lines, and which one is the primary the peak marks and the
- * strip's figures read.
+ * Which Smaart metrics this browser surfaces as the table's columns, and nothing
+ * else. The metric the chart, the peak marks and the figures plot is a separate
+ * choice (`spl:plotMetric`, see sound-plot.ts).
  *
  * PER BROWSER, like every other preference in this module. It used to be
  * `settingsStore.splVisibleMetrics`, server-wide, so one person clicking a
@@ -274,8 +254,14 @@ export function SplDetail({
   detail,
   timeline,
   attendance,
+  trendsMetric,
 }: {
   detail: ServiceSplHistory;
+  /** The Trends sound metric as the page resolved it (null until the page's
+   *  recordings load). The plot's default, so it is the caller's to supply: the
+   *  page already holds it for the Trends card, and a second resolution here would
+   *  be a second copy that could disagree. */
+  trendsMetric: string | null;
   timeline?: ServiceTimeline | null;
   attendance?: ServiceAttendance | null;
 }) {
@@ -291,7 +277,14 @@ export function SplDetail({
   }
 
   const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
-
+  // The ONE metric this card plots. Read through `plottedFor`, the rule the
+  // service header uses, and recomputed when the choice is written anywhere in
+  // the tab.
+  const plotVersion = usePlotChoiceVersion();
+  const plotted = useMemo(() => {
+    void plotVersion;
+    return plottedFor(allKeys, trendsMetric);
+  }, [allKeys, trendsMetric, plotVersion]);
 
   /**
    * The metrics this browser shows.
@@ -315,8 +308,6 @@ export function SplDetail({
     () => storedMetrics.filter((k) => allKeys.includes(k)),
     [storedMetrics, allKeys],
   );
-  /** No metric chosen at all, as opposed to a record that recorded none. */
-  const noneChosen = storedMetrics.length === 0;
 
   // Take the server's list over, once, for a browser that has never chosen.
   // Before the first render, so the hook below reads the seeded value rather
@@ -377,7 +368,7 @@ export function SplDetail({
     return m;
   }, [timeline]);
 
-  const primaryKey = shownMetrics[0] ?? null;
+  const primaryKey = plotted?.metric ?? null;
   const live = detail.endedAt == null;
 
   // ── The raw series ──
@@ -491,7 +482,7 @@ export function SplDetail({
     ? [
       {
         id: "max",
-        label: `${raw.metric} peak`,
+        label: peakSeriesLabel(raw.metric),
         color: "var(--color-accent)",
         role: "primary",
         fill: true,
@@ -516,28 +507,24 @@ export function SplDetail({
     // real line, and stand in for an answer nobody got.
     : state.kind !== "none"
       ? []
-    // EVERY metric the record carries, each saying whether it is on — not just
-    // the shown ones. A pre-filtered list leaves the legend unable to name a
-    // metric the operator switched off, so it can never come back, which is the
-    // one thing a toggle has to be able to do. Attendance has always done this.
-    : allKeys.map((key, i) => {
-      const runs = stepRuns(items, detail, key);
-      const primary = key === primaryKey;
-      return {
-        id: key,
-        label: key,
-        color: primary ? "var(--color-accent)" : SECONDARY_COLORS[i % SECONDARY_COLORS.length],
-        role: primary ? ("primary" as const) : ("secondary" as const),
+    // ONE metric, the plotted one: Plot chooses it, so there is nothing for a
+    // legend entry to toggle. It used to draw every recorded metric and wire the
+    // legend to the same handler as the table's columns, so a legend click also
+    // added or removed columns.
+    : primaryKey
+      ? [{
+        id: primaryKey,
+        label: peakSeriesLabel(primaryKey),
+        color: "var(--color-accent)",
+        role: "primary" as const,
         // NO FILL, unlike attendance. A fill runs to the axis floor, and a dB
         // axis has no floor that means anything — the band is chosen to frame
         // the data, so the fill's depth would say only where the axis starts.
-        dashed: !primary,
-        on: shownMetrics.includes(key),
+        on: true,
         format: (v: number) => dB(v),
-        runs,
-        points: runs.flat(),
-      };
-    });
+        ...stepSeriesOf(stepRuns(items, detail, primaryKey)),
+      }]
+      : [];
 
   // Where each item was loudest, off the line the chart draws. Only the raw
   // peak line has an instant to give: the per-item fallback is one level per
@@ -561,21 +548,17 @@ export function SplDetail({
 
   /** What an empty plot MEANS here — "nothing recorded yet" is only one of four
    *  reasons it can be empty, and it is the wrong one for the other three. */
-  const emptyNote = noneChosen
-    ? "No metric selected — pick one in the legend or in Customize."
-    : state.kind === "asking"
-      ? "Reading the recorded samples…"
-      : state.kind === "unavailable"
-        ? "Sound samples unavailable — the recorded samples could not be read. The server log says why, on a [spl-series] line."
-        : undefined;
-
-  const figures = noneChosen
-    ? [{ key: "none", label: "Sound", value: "No metric selected" }]
+  const emptyNote = state.kind === "asking"
+    ? "Reading the recorded samples…"
     : state.kind === "unavailable"
+      ? "Sound samples unavailable — the recorded samples could not be read. The server log says why, on a [spl-series] line."
+      : undefined;
+
+  const figures = state.kind === "unavailable"
       ? [{ key: "unavailable", label: "Sound", value: "Samples unavailable" }]
       : SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
         key: f.key,
-        label: f.key === "peak" && primaryKey ? `Peak ${primaryKey}` : f.label,
+        label: f.key === "peak" && primaryKey ? peakFigureLabel(primaryKey) : f.label,
         value: figureValue(f.key, items, detail, primaryKey),
         color: f.key === "peak" ? "var(--color-accent)" : undefined,
       }));
@@ -598,16 +581,11 @@ export function SplDetail({
             ? "Recorded sound level across the service"
             : "Recorded sound level per plan item across the service"
         }
-        // An empty chart because nobody picked a metric is not an empty chart
-        // because nothing was recorded, and the default sentence says the
-        // second. The legend below still lists every metric, so the way out is
-        // one click away.
         emptyNote={emptyNote}
-        // The legend's meaning follows the mode, because the series do: with a
-        // raw series it toggles peak and average, and on the per-item fallback
-        // it toggles which Smaart metrics are drawn. Either way it is wired to
-        // the SAME handler the matching Customize group uses.
-        onToggleSeries={hasRaw ? toggleSeries : toggleMetric}
+        // With a raw series the legend toggles peak and Leq, wired to the SAME
+        // handler the Chart group uses. The per-item fallback draws the one
+        // plotted metric and has nothing to toggle, so its legend is a key only.
+        onToggleSeries={hasRaw ? toggleSeries : undefined}
         customize={
           <CustomizePopover
             label="Customize sound"
@@ -638,6 +616,9 @@ export function SplDetail({
           />
         }
       />
+      {shownMetrics.length === 0 ? (
+        <p className="text-caption1 text-fg-muted">No table columns ticked.</p>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-caption1">
           <thead className="text-fg-muted text-left border-b border-line">
@@ -672,13 +653,15 @@ export function SplDetail({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
 
-/** Colours for the second and later metrics on the per-item fallback.
- *  Neutral-to-warm, never purple. */
-const SECONDARY_COLORS = ["var(--color-fg-muted)", "var(--color-warn-11)", "var(--color-info-11)"];
+/** A step's runs, and the same runs flattened to the points the chart reads. */
+function stepSeriesOf(runs: ChartPoint[][]): { runs: ChartPoint[][]; points: ChartPoint[] } {
+  return { runs, points: runs.flat() };
+}
 
 /**
  * The per-item fallback: one metric as a step, ONE RUN PER ITEM.

@@ -101,6 +101,7 @@ describe("the shared /history link", () => {
             } as unknown as ServiceTimeline,
             attendance: null,
             spl: null,
+            trendsMetric: null,
             readOnly: true,
             meta: "Evening",
             onBack: () => {},

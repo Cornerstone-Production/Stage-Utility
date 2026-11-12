@@ -117,8 +117,7 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { ServiceHeader, serviceKpis } = await import("./history-service-header.js");
-const { SPL_METRICS_STORAGE_KEY } = await import("./spl-history-section.js");
-const { useStoredKeys } = await import("./history-chart/index.js");
+const { PLOT_STORAGE_KEY, writePlotChoice } = await import("./sound-plot.js");
 type ServiceHeaderProps = import("./history-service-header.js").ServiceHeaderProps;
 
 after(() => {
@@ -139,6 +138,7 @@ function mount(props: Partial<ServiceHeaderProps> = {}) {
         timeline: timeline(),
         attendance: attendance(),
         spl: spl(),
+        trendsMetric: null,
         meta: "Kickoff · The Gathering · Thu, Sep 17, 2026 · 8:15 PM",
         readOnly: false,
         onBack: noop,
@@ -166,7 +166,7 @@ describe("History service header", () => {
   });
 
   test("the six KPIs read off the record, signs and counts included", () => {
-    const kpis = serviceKpis(timeline(), attendance(), spl());
+    const kpis = serviceKpis(timeline(), attendance(), spl(), null);
     assert.deepEqual(
       kpis.map((k) => k.label),
       ["Started", "Planned", "Actual", "Avg overrun", "Peak in room", "Peak SPL LAeq"],
@@ -194,7 +194,7 @@ describe("History service header", () => {
   test("an early start says early", () => {
     const early = timeline();
     early.items[0].startedAt = iso("20:14:30");
-    const started = serviceKpis(early, null, null).find((k) => k.key === "started")!;
+    const started = serviceKpis(early, null, null, null).find((k) => k.key === "started")!;
     assert.equal(started.sub, "−0:30 early", "an early start must not read as late");
   });
 
@@ -205,7 +205,7 @@ describe("History service header", () => {
     // started showing the same sub-line.
     const punctual = timeline();
     punctual.items[0].startedAt = iso("20:15:00");
-    const started = serviceKpis(punctual, null, null).find((k) => k.key === "started")!;
+    const started = serviceKpis(punctual, null, null, null).find((k) => k.key === "started")!;
     assert.equal(started.sub, "on time");
     assert.equal(
       started.color,
@@ -215,25 +215,25 @@ describe("History service header", () => {
   });
 
   test("a record with no attendance or sound shows a dash, not a zero", () => {
-    const kpis = serviceKpis(timeline(), null, null);
+    const kpis = serviceKpis(timeline(), null, null, null);
     assert.equal(kpis.find((k) => k.key === "attendance")!.value, "—");
     assert.equal(kpis.find((k) => k.key === "level")!.value, "—");
   });
 
   test("an absent level says WHICH kind of absent it is", () => {
-    const level = (rec: ServiceSplHistory | null) => serviceKpis(timeline(), null, rec).find((k) => k.key === "level")!;
+    const level = (rec: ServiceSplHistory | null) => serviceKpis(timeline(), null, rec, null).find((k) => k.key === "level")!;
 
     // Nothing recorded.
     assert.equal(level(null).sub, "no sound recorded");
 
-    // A record that carries metrics, with every one of them unticked. This is
-    // the case the single note got wrong: the service recorded plenty and was
-    // told it had recorded nothing, sending whoever read it to the meter.
-    localStorage.setItem(SPL_METRICS_STORAGE_KEY, JSON.stringify([]));
-    const hidden = level(spl());
-    assert.equal(hidden.value, "—");
-    assert.equal(hidden.sub, "metric hidden in Sound", "an unticked metric is not an unrecorded one");
-    localStorage.removeItem(SPL_METRICS_STORAGE_KEY);
+    // A record that carries metrics always plots one, so it always has a level:
+    // the table's columns being unticked (the old "metric hidden" state) has no
+    // say in it.
+    localStorage.setItem("spl:visibleMetrics", JSON.stringify([]));
+    const plotted = level(spl());
+    assert.notEqual(plotted.value, "—", "unticking every table column must not blank the level");
+    assert.equal(plotted.sub, undefined);
+    localStorage.removeItem("spl:visibleMetrics");
 
     // A record whose items carry no metric block at all.
     const bare = spl();
@@ -249,46 +249,45 @@ describe("History service header", () => {
     for (const it of twoMetrics.items as unknown as { metrics: Record<string, unknown> }[]) {
       it.metrics["LCeq"] = { max: 108.4, avg: 99, leq: 100, count: 60 };
     }
-    localStorage.setItem(SPL_METRICS_STORAGE_KEY, JSON.stringify(["SPL LAeq"]));
-
-    // Stands in for the Sound card, which owns this preference. It uses the
-    // SAME hook the real Customize popover is wired to, so the change travels
-    // the real write-and-announce path rather than a test-only back door.
-    let toggle: ((key: string) => Error | null) | null = null;
-    function SoundCardStandIn() {
-      const [, t] = useStoredKeys(SPL_METRICS_STORAGE_KEY, null, []);
-      toggle = t;
-      return null;
-    }
-    const view = render(
+    // Built ONCE: the header memoises on these, and fresh objects each render
+    // would make it recompute every time and hide a missing dependency.
+    const tl = timeline();
+    const att = attendance();
+    const header = (trendsMetric: string | null) =>
       React.createElement(
         TooltipProvider,
         null,
         React.createElement(ServiceHeader, {
-          timeline: timeline(),
-          attendance: attendance(),
+          timeline: tl,
+          attendance: att,
           spl: twoMetrics,
+          trendsMetric,
           meta: "",
           onBack: noop, onEditTimes: noop, onCopyReport: noop, onMerge: noop,
           onRebuild: noop, onDelete: noop, onResetPacing: noop,
         }),
-        React.createElement(SoundCardStandIn),
-      ),
-    );
+      );
+    const view = render(header("SPL LAeq"));
     const label = () =>
       [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')]
         .map((d) => (d.children[0]?.textContent ?? "").trim())
         .find((l) => l.startsWith("Peak ") && l !== "Peak in room");
+    assert.equal(label(), "Peak SPL LAeq", "no browser choice: the Trends metric");
+
+    // The Sound card writes the choice through writePlotChoice, the same call
+    // its Customize popover makes, so the change travels the real
+    // write-and-announce path rather than a test-only back door.
+    act(() => void writePlotChoice("LCeq"));
+    assert.equal(label(), "Peak LCeq", "the header must follow the metric the Sound card is plotting");
+
+    // Forgetting the choice (Use the Trends metric) goes back to Trends.
+    act(() => void writePlotChoice(null));
     assert.equal(label(), "Peak SPL LAeq");
 
-    // Two acts, not two calls in one: `toggle` closes over the key list from
-    // the render it came from, so a second call inside the same act writes from
-    // the pre-toggle list and undoes the first — which is also true of two fast
-    // clicks in the real popover, and is the hook's behaviour, not this test's.
-    act(() => void toggle!("SPL LAeq")); // untick it, as a click in Customize does
-    act(() => void toggle!("LCeq")); // and tick the other
-    assert.equal(label(), "Peak LCeq", "the header must follow the metric the Sound card is showing");
-    localStorage.removeItem(SPL_METRICS_STORAGE_KEY);
+    // And the organisation's metric changing reaches it with no storage write.
+    view.rerender(header("LCeq"));
+    assert.equal(label(), "Peak LCeq", "the Trends metric is the default and must not be cached");
+    localStorage.removeItem(PLOT_STORAGE_KEY);
   });
 
   test("the recording pill is there only while the record is open", () => {

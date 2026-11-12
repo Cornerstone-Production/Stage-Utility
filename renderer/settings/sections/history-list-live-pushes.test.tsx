@@ -191,7 +191,7 @@ describe("a live push updates a row already on screen", () => {
     FakeEventSource.last!.push("spl:history", splRecording());
     await settle();
 
-    const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording()).map((k) => [k.key, k]));
+    const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording(), null).map((k) => [k.key, k]));
     await eventually(() => {
       const drawn = figuresOf(view.container.querySelector(`[data-history-row="${KEY}"]`)!);
       assert.equal(

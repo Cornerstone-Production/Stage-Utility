@@ -26,7 +26,7 @@ import { readStored, storeFailure, writeStored } from "../../../lib/safe-storage
 const listeners = new Map<string, Set<() => void>>();
 
 /** Tell everyone reading `storageKey` that it changed. */
-function notifyStoredKeys(storageKey: string): void {
+export function notifyStoredKeys(storageKey: string): void {
   for (const fn of listeners.get(storageKey) ?? []) fn();
 }
 

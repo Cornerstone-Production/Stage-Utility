@@ -10,8 +10,7 @@
 import { METRIC_KEY } from "@main/types/trends-prefs";
 
 /** The default when nobody has chosen, in order. The first one any recording
- *  carries wins; neither present falls through to the browser's own primary
- *  metric (the History SPL Customize list). */
+ *  carries wins; neither present falls through to the first metric offered. */
 export const DEFAULT_SOUND_METRICS = ["LAeq 2", "LAeq 1"] as const;
 
 /**
@@ -36,7 +35,8 @@ export function soundMetricOptions(keyLists: Iterable<readonly string[]>): strin
 
 /**
  * The metric the card plots: the saved choice, else the first of LAeq 2 and
- * LAeq 1 that `available` carries, else `fallback(available)`.
+ * LAeq 1 that `available` carries, else `fallback(available)` — by default the
+ * first metric `available` lists.
  *
  * A saved choice that nothing carries is KEPT, not substituted: the chart then
  * says there is no reading for it, which is true, where a quiet switch to a
@@ -46,7 +46,7 @@ export function soundMetricOptions(keyLists: Iterable<readonly string[]>): strin
 export function effectiveSoundMetric(
   saved: string | null,
   available: readonly string[],
-  fallback: (available: readonly string[]) => string | null,
+  fallback: (available: readonly string[]) => string | null = (a) => a[0] ?? null,
 ): string | null {
   if (saved) return saved;
   for (const m of DEFAULT_SOUND_METRICS) if (available.includes(m)) return m;

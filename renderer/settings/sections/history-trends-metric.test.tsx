@@ -290,15 +290,15 @@ describe("the Trends sound metric", () => {
     );
   });
 
-  test("with nothing saved and no LAeq 2 or LAeq 1, the browser's own Customize list decides", async () => {
+  test("with nothing saved and no LAeq 2 or LAeq 1, the first metric offered decides, not this browser's table columns", async () => {
     server.summaries = SPL.map((s) => ({
       ...s,
       metrics: Object.fromEntries(Object.entries(s.metrics).filter(([k]) => k !== "LAeq 2")),
     }));
     localStorage.setItem("spl:visibleMetrics", JSON.stringify(["SPL Fast"]));
     const view = await renderHistory();
-    assert.equal(select(view)?.value, "SPL Fast");
-    assert.equal(latest(view, "weekend"), "113.4 dB");
+    assert.equal(select(view)?.value, "LAeq 10", "a ticked table column moved the organisation's Trends metric");
+    assert.equal(latest(view, "weekend"), "92.0 dB");
   });
 
   test("with LAeq 2 present, a browser's Customize list does not move Trends", async () => {
@@ -331,15 +331,15 @@ describe("the Trends sound metric", () => {
     assert.equal(plot.querySelectorAll("circle").length, 0, "a per-point dot was drawn on a finished line");
   });
 
-  test("with every carried metric hidden by this browser's Customize list, the select is still offered, and saves", async () => {
+  test("with every table column unticked in this browser, the select is still offered, and saves", async () => {
     server.summaries = SPL.map((s) => ({
       ...s,
       metrics: Object.fromEntries(Object.entries(s.metrics).filter(([k]) => k !== "LAeq 2")),
     }));
-    localStorage.setItem("spl:visibleMetrics", JSON.stringify(["SPL Slow"]));
+    localStorage.setItem("spl:visibleMetrics", JSON.stringify([]));
     const view = await renderHistory();
-    assert.ok(select(view), "no metric resolved, and the select that would choose one was not offered");
-    assert.equal(select(view)!.value, "", "a native select with no value showed its first option as if chosen");
+    assert.ok(select(view), "the select that would choose a metric was not offered");
+    assert.equal(select(view)!.value, "LAeq 10");
     await chooseMetric(view, "LCeq 2");
     assert.deepEqual(server.posts, [{ soundMetric: "LCeq 2" }]);
     assert.equal(latest(view, "weekend"), "106.6 dB");

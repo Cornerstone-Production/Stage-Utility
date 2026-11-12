@@ -7,7 +7,7 @@ export interface TrendsPrefsState {
   rev: number;
   /** The Smaart metric the Sound measure plots, or null when nobody has chosen
    *  and the card falls back to its default (LAeq 2, else LAeq 1, else the
-   *  browser's own primary metric). */
+   *  first metric offered). */
   soundMetric: string | null;
 }
 

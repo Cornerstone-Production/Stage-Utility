@@ -87,6 +87,11 @@ describe("effectiveSoundMetric", () => {
   test("nothing available and nothing saved is null", () => {
     assert.equal(effectiveSoundMetric(null, [], firstOf), null);
   });
+
+  test("with no fallback given, the first metric available decides: the one default both callers use", () => {
+    assert.equal(effectiveSoundMetric(null, ["LCeq 2", "SPL Fast"]), "LCeq 2");
+    assert.equal(effectiveSoundMetric(null, []), null);
+  });
 });
 
 describe("peakOn", () => {
