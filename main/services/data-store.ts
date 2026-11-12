@@ -60,6 +60,9 @@ export class DataStore<T> {
   // views.json the moment a permission fix let a save through. secrets.bin
   // makes the same call: fix the file, then restart.
   private servedDefaults: StoreReadError | null = null;
+  // Set when a load found the file unparseable, whether or not the quarantine
+  // rename then worked; kept for the life of the process. See loadedFromCorrupt.
+  private corruptLoad = false;
   private filePath: string | null = null;
   // Serializes writes so concurrent saves/updates can't interleave (the file
   // write isn't atomic) or clobber each other's read-modify-write. Critical
@@ -229,6 +232,7 @@ export class DataStore<T> {
       //
       // Defaults are installed BEFORE the rename's await, for the reason above:
       // a save landing during the rename must win, not be overwritten after it.
+      this.corruptLoad = true;
       this.cache = this.defaultValue;
       try {
         await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`);
@@ -291,6 +295,16 @@ export class DataStore<T> {
    */
   unreadable(): StoreReadError | null {
     return this.readFailure;
+  }
+
+  /**
+   * Whether this process found the file unparseable and is serving defaults in
+   * its place. Set before the best-effort rename aside, so it holds when that
+   * rename failed and no `.corrupt-*` copy exists to say so. For a reader whose
+   * answer to an empty store would delete something (the stage-plot tidy).
+   */
+  get loadedFromCorrupt(): boolean {
+    return this.corruptLoad;
   }
 
   /**

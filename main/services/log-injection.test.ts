@@ -242,6 +242,9 @@ const REQUEST_FACING = [
   "settings-restore-check.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The tidy runs after DELETE /api/stageplots/backgrounds/:id and a clean-up
+  // PATCH; its lines name files on disk and error text, all scrubbed.
+  "stageplots-files.ts",
   // Its change line names a metric typed into POST /api/history/trends-prefs;
   // scrubbed, and the value must also match a fixed shape.
   "trends-prefs.ts",
@@ -584,6 +587,8 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "settings-restore-check.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // Run by the stage-plot delete and clean-up routes; logs file names and errors.
+    path.join(HERE, "stageplots-files.ts"),
     // Its change line names a metric typed into POST /api/history/trends-prefs.
     path.join(HERE, "trends-prefs.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this

@@ -44,9 +44,10 @@ import { logRoutes } from "./routes/log-routes.js";
 import { appIconRoutes } from "./routes/app-icon-routes.js";
 import { brandHtml } from "./install-metadata.js";
 
-import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
+import { LAYOUT_IMAGE_DIR, saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage, storedImageHeaders } from "./image-files.js";
+import { STAGEPLOT_IMAGE_DIR } from "./stageplots-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
@@ -112,6 +113,19 @@ import { trendsPrefs } from "./trends-prefs.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
 import { SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_MS } from "../types/sse.js";
+
+/**
+ * The folders of uploads served as they are stored, each with its reader. A
+ * folder not listed is never served: stage-plot PDF originals
+ * (stageplot-originals/) are kept for backups and deliberately absent.
+ * Branding images used to ride in stage:state as base64 and were 77% of every
+ * broadcast; layout images are read by their own store's stricter reader.
+ */
+const STORED_IMAGE_FOLDERS = new Map<string, (file: string) => Promise<{ data: Buffer; mime: string } | null>>([
+  [LAYOUT_IMAGE_DIR, readLayoutImage],
+  [BRANDING_IMAGE_DIR, (file) => readImage(BRANDING_IMAGE_DIR, file)],
+  [STAGEPLOT_IMAGE_DIR, (file) => readImage(STAGEPLOT_IMAGE_DIR, file)],
+]);
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -1068,30 +1082,14 @@ export class RemoteServer {
     _url: URL,
     method: string,
   ): Promise<void> {
-    // ── Uploaded custom-layout images ─────────────────────────────────────
-    // Served before static so the SPA fallback doesn't swallow /layout-images/*.
+    // ── Stored images (layout objects, branding, stage-plot backgrounds) ──
+    // Served before static so the SPA fallback doesn't swallow them. The name
+    // is a content hash, so the answer is immutable and cached forever.
     {
-      const imgMatch = pathname.match(/^\/layout-images\/([^/]+)$/);
-      if (method === "GET" && imgMatch) {
-        const img = await readLayoutImage(decodeURIComponent(imgMatch[1]));
-        if (!img) {
-          res.writeHead(404, { "Content-Type": "text/plain" });
-          res.end("Not found");
-          return;
-        }
-        // Content-hashed name → immutable, cache forever.
-        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
-        res.end(img.data);
-        return;
-      }
-    }
-    // ── Branding images (app logo, empty-slot logo, avatar) ───────────────
-    // Same content-hashed, cache-forever treatment. These used to ride in
-    // stage:state as base64 and were 77% of every broadcast.
-    {
-      const brandMatch = pathname.match(/^\/branding-images\/([^/]+)$/);
-      if (method === "GET" && brandMatch) {
-        const img = await readImage(BRANDING_IMAGE_DIR, decodeURIComponent(brandMatch[1]));
+      const stored = /^\/([a-z-]+)\/([^/]+)$/.exec(pathname);
+      const read = method === "GET" && stored ? STORED_IMAGE_FOLDERS.get(stored[1]) : undefined;
+      if (stored && read) {
+        const img = await read(decodeURIComponent(stored[2]));
         if (!img) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");

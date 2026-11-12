@@ -44,12 +44,12 @@ describe("reads", () => {
   // of the dispatcher, the page from the static or control-page arm, and the
   // event stream with headers of its own. A header added at any one of them
   // shows up here; one added at a writeHead not listed would not.
-  // The poll transport and the two image folders answer through writeHeads of
-  // their own, none of which the paths above reach. An image that is not stored
+  // The poll transport and the stored-image folders answer through writeHeads
+  // of their own, none of which the paths above reach. An image that is not stored
   // answers 404 through one more.
   for (const pathname of [
     "/api/log", "/api/version", "/api/no-such-route", "/",
-    "/api/events/poll?cid=x", "/layout-images/x", "/branding-images/x",
+    "/api/events/poll?cid=x", "/layout-images/x", "/branding-images/x", "/stageplot-images/x",
   ]) {
     test(`GET ${pathname} from another origin carries no Access-Control header`, async () => {
       const r = await server.send("GET", pathname, { headers: { Origin: FOREIGN } });
@@ -58,7 +58,7 @@ describe("reads", () => {
   }
 
   // The 200 arm builds its headers apart from the 404 above, so it is read too.
-  for (const dir of ["layout-images", "branding-images"] as const) {
+  for (const dir of ["layout-images", "branding-images", "stageplot-images"] as const) {
     test(`a stored image in /${dir} carries no Access-Control header`, async () => {
       const { saveImage } = await import("./image-files.js");
       const ref = await saveImage(dir, `data:image/png;base64,${PNG_1X1}`, { checkContent: false });

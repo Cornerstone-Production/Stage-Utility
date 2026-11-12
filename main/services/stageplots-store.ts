@@ -245,6 +245,10 @@ export const stageplotsStore = {
   get(): Promise<StagePlotsDoc> {
     return store.loadStrict();
   },
+  /** Whether the document is the empty one a damaged stageplots.json was replaced with. */
+  get loadedFromCorrupt(): boolean {
+    return store.loadedFromCorrupt;
+  },
   /**
    * Read-modify-write, serialized against every other write. The result is
    * held to checkStagePlotsDoc before it is saved, so no route can leave a
