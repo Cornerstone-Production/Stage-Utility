@@ -2089,3 +2089,16 @@ button.score-capsule:focus-visible {
   /* The dark plate under a key's small labels (ref, imported). */
   --su-companion-plate: #000;
 }
+
+/* Stage plots: the paper a plot is drawn on, and its grid. A converted background
+   is a light raster, so a plot sits on paper in both themes: dimmed in dark rather
+   than inverted, since inverting would turn a colour photo into a negative.
+   Strictly neutral (R=G=B). */
+:root {
+  --su-plot-paper: #ffffff;
+  --su-plot-grid: #ededed;
+}
+.dark {
+  --su-plot-paper: #d9d9d9;
+  --su-plot-grid: #cacaca;
+}

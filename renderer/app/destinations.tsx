@@ -12,6 +12,7 @@
 import type { FunctionComponent, ReactNode } from "react";
 import {
   CableIcon,
+  MapIcon,
   HouseIcon,
   ClockIcon,
   CalendarIcon,
@@ -28,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
+import { StagePlotsPage } from "../main/stageplots-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
@@ -119,6 +121,14 @@ export const DESTINATIONS: readonly Destination[] = [
     // The volunteer-facing read view, NOT the settings editor. These are
     // different surfaces; the editor is reached from within this one.
     Component: PatchView,
+  },
+  {
+    path: "/stageplots",
+    label: "Stage plots",
+    description: "Every venue's stage plots, read-only, for load-in and the desk.",
+    icon: <MapIcon className="size-4" />,
+    // Read-only, like /patch; the editor is /stageplots/edit, linked from here.
+    Component: StagePlotsPage,
   },
   {
     path: "/automation",
@@ -217,7 +227,7 @@ export const UNGROUPED_PATHS = ["/"];
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/servicecue/manage", "/patch"] },
+  { label: "Content", paths: ["/servicecue/manage", "/patch", "/stageplots"] },
   // Where it shows.
   { label: "Screens", paths: ["/screens", "/mic-slots", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.

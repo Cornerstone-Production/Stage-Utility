@@ -10,6 +10,7 @@ export const OPERATOR_PATHS = [
   "/history",
   "/baptism",
   "/patch",
+  "/stageplots",
   "/servicecue",
   "/automation",
   "/plan",
