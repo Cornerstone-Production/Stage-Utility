@@ -1093,3 +1093,74 @@ test("+ Add category offers every read type's categories, grouped, saying which 
     s.restore();
   }
 });
+
+// ── The notice ──────────────────────────────────────────────────────────────
+
+const notice = () => document.querySelector("[data-notice]")?.textContent ?? null;
+const SETUP_ROLES = [
+  { id: "r-audio", name: "Audio", members: ["Audio", "Sound"] },
+  { id: "r-video", name: "Video", members: ["Video", "Cameras"] },
+  { id: "r-light", name: "Lighting", members: ["Lighting", "Lights"] },
+  { id: "r-band", name: "Band", members: ["Band"] },
+  { id: "r-stage", name: "Stage", members: ["Stage", "Stage notes"] },
+];
+const SETUP_CATS = {
+  sun: ["Audio", "Video", "Lighting", "Band", "Stage", "Graphics"],
+  wed: ["Sound", "Lights", "Cameras", "Stage notes", "Livestream notes"],
+  yth: ["Audio", "Lighting", "Band", "Youth extra"],
+};
+
+test("the notice names each category in no role and its service type, and Make a role for each clears it", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: SETUP_ROLES, shown: ["sun", "wed"], types: TYPES, cats: SETUP_CATS });
+  try {
+    await mount();
+    await eventually(() =>
+      assert.equal(
+        notice(),
+        "Graphics from Sunday Morning and Livestream notes from Wednesday Night are in no role, so no layout can show them as a column. They still appear under All columns.",
+      ),
+    );
+    // Youth is not on the landing page, so its own category is not counted, even
+    // once it is previewed and its categories have been read.
+    await openCard("Audio");
+    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    await eventually(() => assert.equal(s.requests.some((r) => r.path === "/api/servicecue/note-categories" && r.method === "GET"), true));
+    for (let i = 0; i < 4; i++) await settle();
+    assert.doesNotMatch(notice() ?? "", /Youth/, "a type off the landing page was counted");
+    const bar = document.querySelector("[data-notice]")!.parentElement!;
+    fireEvent.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
+    await eventually(() => assert.equal(notice(), null));
+    assert.deepEqual(s.roles().slice(5).map((r) => r.name), ["Graphics", "Livestream notes"]);
+  } finally {
+    s.restore();
+  }
+});
+
+test("no notice on a first run, or when every category is in a role", async () => {
+  const first = serviceCueServer({ roles: [], shown: ["sun", "wed"], types: TYPES, cats: SETUP_CATS });
+  try {
+    await mount();
+    await eventually(() => assert.match(document.body.textContent ?? "", /Planning Center has \d+ note categories/));
+    assert.equal(notice(), null, "a first run lists the categories in the roles section, not in a notice");
+  } finally {
+    first.restore();
+  }
+  cleanup();
+  resetStageState();
+  resetReplayCache();
+  const covered = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: [...SETUP_ROLES, { id: "r-gfx", name: "Graphics", members: ["Graphics", "Livestream notes"] }],
+    shown: ["sun", "wed"],
+    types: TYPES,
+    cats: SETUP_CATS,
+  });
+  try {
+    await mount();
+    await eventually(() => assert.equal(roleNames().length, 6));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(notice(), null);
+  } finally {
+    covered.restore();
+  }
+});

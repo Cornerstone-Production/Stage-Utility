@@ -232,14 +232,16 @@ export function unassignedDistinct(groups: readonly { typeId: string; cats: stri
   return [...byKey.values()];
 }
 
-/** The top-of-page line naming the categories no layout can show. */
-export function noticeText(groups: readonly { typeName: string; cats: string[] }[]): { lead: string; rest: string } {
+/** The top-of-page line naming the categories no layout can show, in three parts: the
+ *  bold lead, the rest of the sentence, and the quieter reassurance after it. */
+export function noticeText(groups: readonly { typeName: string; cats: string[] }[]): { lead: string; rest: string; still: string } {
   const parts = groups.map((g) => `${listOf(g.cats)} from ${g.typeName}`);
   const n = groups.reduce((sum, g) => sum + g.cats.length, 0);
   const one = n === 1;
   return {
     lead: `${parts.join(groups.some((g) => g.cats.length > 1) ? ", and " : " and ")} ${one ? "is" : "are"} in no role`,
     rest: `, so no layout can show ${one ? "it" : "them"} as a column.`,
+    still: one ? "It still appears under All columns." : "They still appear under All columns.",
   };
 }
 

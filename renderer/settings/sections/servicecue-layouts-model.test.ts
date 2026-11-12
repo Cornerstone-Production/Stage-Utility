@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import { insertIndex, stackIndex, type Rect } from "./servicecue-drag.js";
-import { columnPatch, copyName, duplicateLayout, moveTo, reorderLayouts, trayItems } from "./servicecue-layouts-model.js";
+import { columnPatch, copyName, duplicateLayout, moveTo, noticeText, reorderLayouts, trayItems } from "./servicecue-layouts-model.js";
 
 const box = (left: number, top: number, w = 80, h = 30): Rect => ({ left, top, right: left + w, bottom: top + h });
 
@@ -73,5 +73,21 @@ describe("what a change saves", () => {
     const roles = [{ id: "r1", name: "Audio", members: [] }, { id: "r2", name: "Video", members: [] }];
     const l = layout("l", 0, { columnRoles: ["r2"], showLength: false });
     assert.deepEqual(trayItems(l, roles).map((t) => t.name), ["Time", "Audio", "Max SPL"]);
+  });
+});
+
+describe("the notice's words", () => {
+  test("one category: singular throughout", () => {
+    assert.deepEqual(noticeText([{ typeName: "Youth", cats: ["Graphics"] }]), {
+      lead: "Graphics from Youth is in no role",
+      rest: ", so no layout can show it as a column.",
+      still: "It still appears under All columns.",
+    });
+  });
+
+  test("several from one type join with 'and', and groups with ', and ' once any has more than one", () => {
+    const t = noticeText([{ typeName: "Sunday", cats: ["Graphics", "Lyrics", "Props"] }, { typeName: "Youth", cats: ["Games"] }]);
+    assert.equal(t.lead, "Graphics, Lyrics and Props from Sunday, and Games from Youth are in no role");
+    assert.equal(t.still, "They still appear under All columns.");
   });
 });

@@ -1,6 +1,6 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "lucide-react";
+import { AlertCircleIcon, PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 
 import { Button, Checkbox, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
@@ -28,6 +28,8 @@ import {
   layoutRoles,
   moveTo,
   newLayout,
+  noticeText,
+  unassignedByType,
   reorderLayouts,
   type ColumnChange,
   type Rich,
@@ -500,6 +502,8 @@ export function ServiceCueSection() {
         : "Loading service types…";
 
   const layoutIds = sortedLayouts.map((l) => l.id);
+  // Categories on the landing page's types that no role has, by type, for the notice.
+  const noticeGroups = unassignedByType(roles, shownIds, catsByType).map((g) => ({ typeName: typeName(g.typeId) ?? g.typeId, cats: g.cats }));
 
   // One page-wide choice, drawn inside whichever card is open.
   const preview: PreviewSource = {
@@ -524,6 +528,11 @@ export function ServiceCueSection() {
         <h1 className="mt-0.5 text-title3 font-semibold text-fg">ServiceCue layouts</h1>
       </div>
       {FAILURES.map((k) => failures[k] && <ErrorNote key={k} className="mt-3">{failures[k]}</ErrorNote>)}
+      {/* Not on a first run: with no roles, the roles section already lists every
+          category, with this same action. */}
+      {settingsRead && roles.length > 0 && noticeGroups.length > 0 && (
+        <Notice groups={noticeGroups} onMakeEach={() => void makeEach()} />
+      )}
 
       <LayoutsDnd handlers={handlers} announce={announce}>
       <section className="mt-7" aria-labelledby="sc-layouts-h">
@@ -679,6 +688,21 @@ function BackLink({ to, children }: { to: string; children: ReactNode }) {
       <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
       {children}
     </a>
+  );
+}
+
+/** The line at the top of the page naming the categories no layout can show. */
+function Notice({ groups, onMakeEach }: { groups: { typeName: string; cats: string[] }[]; onMakeEach: () => void }) {
+  const { lead, rest, still } = noticeText(groups);
+  return (
+    <div role="status" className="mt-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[10px] border border-line-strong bg-surface px-3 py-2.5 shadow-[var(--su-shadow-1)]">
+      <AlertCircleIcon className="mt-px size-4 shrink-0 self-start text-warn-11" aria-hidden="true" />
+      <p className="min-w-[200px] flex-1 text-footnote text-fg" data-notice>
+        <b className="font-semibold">{lead}</b>
+        {rest} <span className="text-fg-muted">{still}</span>
+      </p>
+      <Button variant="filled" size="medium" onClick={onMakeEach}>Make a role for each</Button>
+    </div>
   );
 }
 
