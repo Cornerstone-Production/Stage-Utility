@@ -25,7 +25,8 @@ const { render, renderHook, screen, cleanup, fireEvent, within, act } = await im
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
-const { useLayoutSaves } = await import("./use-layout-saves.js");
+const { useListSaves } = await import("../../lib/use-list-saves.js");
+const { LAYOUTS } = await import("./servicecue-section.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
@@ -217,7 +218,7 @@ test("New layout, then rename it: the address moves to the new name once, and th
 test("an edit that throws is refused, and the edit queued behind it still saves", async () => {
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 0 });
   try {
-    const { result } = renderHook(() => useLayoutSaves());
+    const { result } = renderHook(() => useListSaves(LAYOUTS));
     await act(async () => result.current.adopt(server.stored()));
     let broken: Promise<unknown> = Promise.resolve();
     let renamed: Promise<unknown> = Promise.resolve();
@@ -231,7 +232,7 @@ test("an edit that throws is refused, and the edit queued behind it still saves"
     ]);
     assert.deepEqual(outcomes, [{ ok: false, error: "a bug in an edit" }, { ok: true }], "the queue stopped at the edit that threw");
     assert.deepEqual(serverNames(server.stored()), ["Audio", "Lights"]);
-    assert.deepEqual(result.current.layouts.map((l) => l.name), ["Audio", "Lights"]);
+    assert.deepEqual(result.current.list.map((l) => l.name), ["Audio", "Lights"]);
   } finally {
     server.restore();
   }

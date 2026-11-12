@@ -558,6 +558,7 @@ export type IpcChannel =
   | "servicecue:rundown"
   | "servicecue:saveLayouts"
   | "servicecue:saveRoles"
+  | "servicecue:seedRoles"
   | "servicecue:setConfig"
   | "servicecue:setDeployCredentials"
   | "servicecue:setPublish"
@@ -739,7 +740,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/servicecue/roles", { roles: p.roles });
 
     // Adds a role for any category this service type defines that no role covers.
-    // Only ever adds — never merges, never removes.
+    // Only ever adds — never merges, never removes. Answers with every role.
+    case "servicecue:seedRoles":
+      return post<T>("/api/servicecue/roles/seed", { serviceTypeId: p.serviceTypeId });
+
     case "servicecue:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/servicecue/note-categories?serviceTypeId=${encodeURIComponent(id)}`);

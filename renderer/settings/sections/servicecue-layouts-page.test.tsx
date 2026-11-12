@@ -721,7 +721,7 @@ test("a refused layout delete keeps the card, says what failed, and announces no
     await openCard("Lighting");
     fireEvent.click(screen.getByRole("button", { name: "Delete Lighting" }));
     fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
-    await eventually(() => assert.match(alerts(), /disk full/));
+    await eventually(() => assert.match(alerts(), /Couldn.t save the layouts: disk full/));
     // The announcer speaks 30ms after it is told: wait past that.
     await new Promise((r) => setTimeout(r, 80));
     assert.doesNotMatch(said(), /Deleted Lighting/, "a delete the server refused was announced");
@@ -763,6 +763,332 @@ test("pointer: Escape cancels, and letting go back on the tray chip does not add
     } finally {
       Element.prototype.getBoundingClientRect = realRect;
     }
+  } finally {
+    s.restore();
+  }
+});
+
+// ── Category roles ──────────────────────────────────────────────────────────
+
+const roleNames = () => [...document.querySelectorAll('input[aria-label="Role name"]')].map((n) => (n as HTMLInputElement).value);
+const roleBox = (name: string) =>
+  [...document.querySelectorAll('input[aria-label="Role name"]')].find((n) => (n as HTMLInputElement).value === name) as HTMLInputElement;
+const noRoleChips = () =>
+  [...document.querySelectorAll('button[aria-label^="Make a role for "]')].map((b) => b.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+test("a role's name saves when it is left, not at each key", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    const box = await eventually(() => roleBox("Band"));
+    box.focus();
+    for (const v of ["M", "Mu", "Musicians"]) fireEvent.change(box, { target: { value: v } });
+    await settle();
+    assert.equal(saves(s, "/api/servicecue/roles"), 0, "a half-typed role name was saved");
+    fireEvent.keyDown(box, { key: "Enter" });
+    await eventually(() => assert.deepEqual(s.roles().map((r) => r.name), ["Audio", "Lighting", "Musicians"]));
+  } finally {
+    s.restore();
+  }
+});
+
+test("+ New role adds a role with an id of its own, named and ready to rename", async () => {
+  // Ids were built from the name and the count, so two roles made the same way, with
+  // one deleted between, could share one: role-keys-5.
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "New role" })));
+    await eventually(() => assert.equal(s.roles().length, 4));
+    fireEvent.click(screen.getByRole("button", { name: "New role" }));
+    await eventually(() => assert.equal(s.roles().length, 5));
+    const made = s.roles().slice(3);
+    assert.deepEqual(made.map((r) => r.name), ["New role", "New role"]);
+    assert.notEqual(made[0].id, made[1].id);
+    assert.equal(made.some((r) => /new-role/.test(r.id)), false, `an id built from the name: ${made.map((r) => r.id).join(", ")}`);
+    const field = roleBox("New role");
+    await eventually(() => assert.equal(document.activeElement?.getAttribute("aria-label"), "Role name"));
+    assert.equal(field.selectionEnd, "New role".length);
+  } finally {
+    s.restore();
+  }
+});
+
+test("deleting a role asks first, naming the layouts it leaves and tints, then takes it out of them", async () => {
+  const s = serviceCueServer({
+    layouts: [...LAYOUTS, { id: "l-sm", name: "Stage manager", order: 2, columnRoles: ["r-light", "r-audio"] }],
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+  });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Lighting" })));
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
+    assert.equal(
+      dialog.textContent,
+      "Delete the Lighting role?Lighting is a column in Lighting and Stage manager. Deleting it removes it from both. Rows in Lighting stop being tinted by it. Lighting and Lights go back to Categories in no role, and still appear under All columns.CancelDelete role",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await settle();
+    assert.equal(s.roles().length, 3, "Cancel deleted it");
+    fireEvent.click(screen.getByRole("button", { name: "Delete role Lighting" }));
+    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await eventually(() => assert.deepEqual(s.roles().map((r) => r.id), ["r-audio", "r-band"]));
+    const stored = s.layouts();
+    assert.deepEqual(stored.map((l) => l.columnRoles), [["r-audio", "r-band"], [], ["r-audio"]]);
+    assert.equal(stored[1].accentRole, null, "a layout still tints by the deleted role");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Categories in no role: every landing-page type's, each with where it comes from, one + each", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun", "wed"], types: TYPES, cats: CATS });
+  try {
+    await mount();
+    // Sunday's Graphics, and Wednesday has none left: Sound and Lights are in roles.
+    await eventually(() => assert.deepEqual(noRoleChips(), ["Graphics Sunday Morning"]));
+    fireEvent.click(screen.getByRole("button", { name: "Make a role for Graphics" }));
+    await eventually(() => assert.deepEqual(s.roles().at(-1)?.members, ["Graphics"]));
+    assert.equal(s.roles().at(-1)?.name, "Graphics");
+    await eventually(() => assert.deepEqual(noRoleChips(), []));
+  } finally {
+    s.restore();
+  }
+});
+
+test("Make a role for each seeds one landing-page type at a time, never two at once", async () => {
+  // Each seed reads the roles and writes them back whole: two at once would each
+  // write over the other's.
+  const held: (() => void)[] = [];
+  let inFlight = 0;
+  let most = 0;
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: [],
+    shown: ["sun", "wed"],
+    types: TYPES,
+    cats: { sun: ["Audio", "Video"], wed: ["Sound", "Audio"] },
+    override: (url, init) => {
+      if (init?.method === "POST" && url.includes("/roles/seed")) {
+        inFlight++;
+        most = Math.max(most, inFlight);
+        return new Promise<undefined>((r) => held.push(() => { inFlight--; r(undefined); }));
+      }
+      return undefined;
+    },
+  });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
+    for (let n = 0; n < 2; n++) {
+      await eventually(() => assert.equal(held.length, 1));
+      held.shift()!();
+      for (let i = 0; i < 4; i++) await settle();
+    }
+    await eventually(() => assert.deepEqual(s.roles().map((r) => r.name), ["Audio", "Video", "Sound"]));
+    assert.equal(most, 1, "two seeds were in flight at once");
+    assert.deepEqual(
+      s.requests.filter((r) => r.path === "/api/servicecue/roles/seed").map((r) => (r.body as { serviceTypeId: string }).serviceTypeId),
+      ["sun", "wed"],
+    );
+    await eventually(() => assert.match(said(), /Made 3 roles, one for each category\./));
+  } finally {
+    s.restore();
+  }
+});
+
+test("first run: the categories, with Make a role for each as the main action", async () => {
+  const s = serviceCueServer({ roles: [], shown: ["sun", "wed"], types: TYPES, cats: { sun: ["Audio", "Video"], wed: ["Audio", "Cameras"] } });
+  try {
+    await mount();
+    await eventually(() => assert.match(document.body.textContent ?? "", /Planning Center has 3 note categories on the landing page's service types\./));
+    const chips = [...document.querySelectorAll("[data-first-run] [data-category]")].map((c) => c.textContent?.replace(/\s+/g, " ").trim());
+    assert.deepEqual(chips, ["Audio Sunday Morning, Wednesday Night", "Video Sunday Morning", "Cameras Wednesday Night"]);
+    fireEvent.click(screen.getByRole("button", { name: "Make a role for each" }));
+    await eventually(() => assert.deepEqual(s.roles().map((r) => r.name), ["Audio", "Video", "Cameras"]));
+    await eventually(() => assert.deepEqual(roleNames(), ["Audio", "Video", "Cameras"]));
+  } finally {
+    s.restore();
+  }
+});
+
+test("a seed that fails for one type says which, and the other still seeds", async () => {
+  const s = serviceCueServer({
+    roles: [],
+    shown: ["sun", "wed"],
+    types: TYPES,
+    cats: { sun: ["Audio"], wed: ["Cameras"] },
+    override: (url, init) => {
+      if (init?.method === "POST" && url.includes("/roles/seed") && String(init.body).includes('"wed"')) throw new TypeError("fetch failed");
+      return undefined;
+    },
+  });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
+    await eventually(() => assert.match(alerts(), /Couldn't make roles for Wednesday Night/));
+    assert.deepEqual(s.roles().map((r) => r.name), ["Audio"]);
+  } finally {
+    s.restore();
+  }
+});
+
+test("opening + Add category reads every service type's categories, one type at a time, naming one that fails", async () => {
+  let releaseWed: () => void = () => {};
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    cats: { sun: ["Audio", "Graphics"], wed: ["Sound", "Cameras"], yth: ["Games"] },
+    override: (url) => {
+      if (url.includes("note-categories") && url.includes("serviceTypeId=wed")) return new Promise<undefined>((r) => { releaseWed = () => r(undefined); });
+      if (url.includes("note-categories") && url.includes("serviceTypeId=yth")) throw new TypeError("fetch failed");
+      return undefined;
+    },
+  });
+  const asked = () => s.requests.filter((r) => r.path === "/api/servicecue/note-categories").length;
+  try {
+    await mount();
+    const add = await eventually(() => screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement);
+    await eventually(() => assert.equal(asked(), 1, "only the landing page's type is read up front"));
+    fireEvent.focus(add);
+    await eventually(() => assert.equal(asked(), 2));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(asked(), 2, "Youth was asked for while Wednesday was still being read");
+    releaseWed();
+    await eventually(() => assert.match(alerts(), /Couldn't load the note categories for Youth/));
+    const groups = [...(screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement).querySelectorAll("optgroup")].map((g) => g.label);
+    assert.deepEqual(groups, ["Sunday Morning", "Wednesday Night"]);
+    fireEvent.focus(screen.getByRole("combobox", { name: "Add a category to Audio" }));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(asked(), 3, "the lists were read again on the next open");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a refused role save says the roles failed, and a layout save does not clear it", async () => {
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    override: (url, init) => (init?.method === "POST" && url.endsWith("/api/servicecue/roles") ? reply(500, { error: "disk full" }) : undefined),
+  });
+  try {
+    await mount();
+    const box = await eventually(() => roleBox("Band"));
+    fireEvent.change(box, { target: { value: "Musicians" } });
+    fireEvent.blur(box);
+    await eventually(() => assert.match(alerts(), /Couldn't save the category roles: disk full/));
+    await openCard("Audio");
+    fireEvent.click(screen.getByRole("button", { name: "BPM", pressed: true }));
+    await eventually(() => assert.equal(s.layouts()[0].showBpm, false));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.match(alerts(), /Couldn't save the category roles: disk full/, "a layout save cleared the roles' failure");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a role delete that takes the role out of the layouts and then fails says it is half done", async () => {
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    override: (url, init) => (init?.method === "POST" && url.endsWith("/api/servicecue/roles") ? reply(500, { error: "disk full" }) : undefined),
+  });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Band" })));
+    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await eventually(() =>
+      assert.match(alerts(), /Band was taken out of every layout, but the role itself could not be deleted: disk full\. It is still listed; delete it again to finish\./),
+    );
+    assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]);
+    assert.equal(s.roles().some((r) => r.id === "r-band"), true);
+    await new Promise((r) => setTimeout(r, 80));
+    assert.doesNotMatch(said(), /Deleted the Band role/);
+  } finally {
+    s.restore();
+  }
+});
+
+test("deleting the last role puts focus on New role", async () => {
+  const s = serviceCueServer({ roles: [{ id: "r-only", name: "Only", members: [] }], shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Only" })));
+    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await eventually(() => assert.equal(s.roles().length, 0));
+    await eventually(() => assert.equal(document.activeElement?.textContent?.trim(), "New role", `focus is on "${document.activeElement?.tagName}"`));
+  } finally {
+    s.restore();
+  }
+});
+
+test("Categories in no role counts the landing page's types, not one only previewed", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, cats: { sun: ["Audio", "Graphics"], yth: ["Games"] } });
+  try {
+    await mount();
+    await eventually(() => assert.deepEqual(noRoleChips(), ["Graphics Sunday Morning"]));
+    await openCard("Audio");
+    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    // Youth's categories are read for the preview, and its Games is in no role.
+    await eventually(() => assert.equal(s.requests.filter((r) => r.path === "/api/servicecue/note-categories").length, 2));
+    for (let i = 0; i < 5; i++) await settle();
+    assert.deepEqual(noRoleChips(), ["Graphics Sunday Morning"], "a type off the landing page was listed");
+  } finally {
+    s.restore();
+  }
+});
+
+test("no role can be added before the saved roles are read: none would survive the save", async () => {
+  let answer: () => void = () => {};
+  const s = serviceCueServer({
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    cats: CATS,
+    override: (url, init) =>
+      (init?.method ?? "GET") === "GET" && url.endsWith("/api/servicecue/roles")
+        ? new Promise<undefined>((r) => { answer = () => r(undefined); })
+        : undefined,
+  });
+  try {
+    await mount();
+    assert.equal(!!screen.queryByRole("button", { name: /New role|Make a role/ }), false, "a role action before the roles are read");
+    answer();
+    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "New role" }), true));
+    assert.equal(saves(s, "/api/servicecue/roles"), 0);
+  } finally {
+    s.restore();
+  }
+});
+
+test("+ Add category offers every read type's categories, grouped, saying which are in another role", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun", "wed"], types: TYPES, cats: CATS });
+  try {
+    await mount();
+    const add = await eventually(() => screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement);
+    await eventually(() => assert.equal(add.querySelectorAll("optgroup").length, 2));
+    const groups = [...add.querySelectorAll("optgroup")].map((g) => `${g.label}: ${[...g.querySelectorAll("option")].map((o) => o.textContent).join(", ")}`);
+    assert.deepEqual(groups, [
+      "Sunday Morning: Audio (in Audio), Lighting (in Lighting), Graphics",
+      "Wednesday Night: Sound (in Audio), Lights (in Lighting)",
+    ]);
+    const graphics = [...add.querySelectorAll("option")].find((o) => o.textContent === "Graphics") as HTMLOptionElement;
+    fireEvent.change(add, { target: { value: graphics.value } });
+    await eventually(() => assert.deepEqual(s.roles()[2].members, ["Band", "Graphics"]));
+    // A category in two roles makes the column ambiguous, and the page says so.
+    const again = screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement;
+    const sound = [...again.querySelectorAll("option")].find((o) => o.textContent === "Sound (in Audio)") as HTMLOptionElement;
+    fireEvent.change(again, { target: { value: sound.value } });
+    await eventually(() => assert.match(alerts(), /In more than one role, so which column shows its note is ambiguous: Sound \(Audio and Band\)\./));
   } finally {
     s.restore();
   }

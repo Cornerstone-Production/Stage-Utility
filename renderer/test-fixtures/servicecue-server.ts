@@ -24,7 +24,8 @@ export interface ServiceCueServerSetup {
   rundown?: (typeId: string) => unknown;
   views?: { id: string; name: string; serviceCueLayoutId?: string | null }[];
   pcoConfigured?: boolean;
-  /** Answer a route yourself: return undefined to fall through to the default. */
+  /** Answer a route yourself: return (or resolve to) undefined to fall through to the
+   *  default, which is how a test holds a request back and then lets it answer as usual. */
   override?: (url: string, init?: RequestInit) => unknown;
 }
 
@@ -57,7 +58,7 @@ export function serviceCueServer(setup: ServiceCueServerSetup = {}): {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     requests.push({ method, path: u.pathname, body });
-    const own = setup.override?.(url, init);
+    const own = await setup.override?.(url, init);
     if (own !== undefined) return own;
     const typeId = u.searchParams.get("serviceTypeId") ?? "";
     switch (`${method} ${u.pathname}`) {

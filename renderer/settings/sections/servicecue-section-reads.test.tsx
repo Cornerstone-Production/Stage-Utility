@@ -205,15 +205,15 @@ test("Planning Center not connected: the editor works, nothing alerts or logs, n
   }
 });
 
-test("a failed note-category read says so, above the previews and inside the roles panel", async () => {
+test("a failed note-category read says so, by service type, above the previews and inside the roles section", async () => {
   const f = stubFetch({ failing: "noteCats" });
   try {
     await mount();
-    await eventually(() => assert.match(alerts(), /Couldn't load this service type's note categories/i));
+    await eventually(() => assert.match(alerts(), /Couldn't load the note categories for Weekend, so its preview is missing them\./));
     assert.equal(
-      screen.queryAllByRole("alert").filter((n) => /note categories/i.test(n.textContent ?? "")).length,
+      screen.queryAllByRole("alert").filter((n) => /note categories for Weekend/.test(n.textContent ?? "")).length,
       2,
-      "the roles panel says it too: without it, no + Add category reads as a type with none",
+      "the roles section says it too: without it, no + Add category and no Categories in no role read as a type with none",
     );
     await eventually(() => assert.ok(logged(f.logs, /note categories/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
@@ -224,8 +224,11 @@ test("a failed note-category read says so, above the previews and inside the rol
 test("a slow failure for the type the operator left does not land on the type they chose", async () => {
   // Weekend's categories are still being read when the operator switches the
   // preview to Youth; Youth's answer, and only then Weekend's failure.
+  // Weekend is not on the landing page, so once it is not previewed either its
+  // categories are not needed.
   let failWeekend: (e: Error) => void = () => {};
   const f = stubFetch({
+    config: () => ok({ serviceTypeIds: [] }),
     noteCats: (typeId) => (typeId === "st1" ? new Promise((_, reject) => { failWeekend = reject; }) : ok(["Audio"])),
   });
   try {
@@ -237,6 +240,7 @@ test("a slow failure for the type the operator left does not land on the type th
     await act(async () => failWeekend(new TypeError("fetch failed")));
     await settle();
     assert.equal(alerts(), "", "Weekend's read no longer applies; its failure is not Youth's");
+    assert.equal(logged(f.logs, /service type st1/), false, `a read nothing needs any more was logged as failing: ${JSON.stringify(f.logs)}`);
   } finally {
     f.restore();
   }
@@ -245,7 +249,11 @@ test("a slow failure for the type the operator left does not land on the type th
 test("a note-category failure for the type the operator left goes with it", async () => {
   // Weekend's categories FAIL, promptly; the operator switches to Youth, whose
   // categories load. The note was Weekend's, and must not stay for Youth.
-  const f = stubFetch({ noteCats: (typeId) => (typeId === "st1" ? Promise.reject(new TypeError("fetch failed")) : ok(["Video"])) });
+  // Weekend is not on the landing page: previewed no longer, nothing needs its categories.
+  const f = stubFetch({
+    config: () => ok({ serviceTypeIds: [] }),
+    noteCats: (typeId) => (typeId === "st1" ? Promise.reject(new TypeError("fetch failed")) : ok(["Video"])),
+  });
   try {
     await mount();
     await eventually(() => assert.match(alerts(), /note categories/i));

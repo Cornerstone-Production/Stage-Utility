@@ -1917,13 +1917,26 @@ export class StageController {
    * removes (a role may cover a category from a different service type).
    */
   async seedServiceCueRoles(serviceTypeId: string): Promise<CategoryRole[]> {
-    const cats = await this.listServiceCueNoteCategories(serviceTypeId);
+    let cats: string[];
+    try {
+      cats = await this.listServiceCueNoteCategories(serviceTypeId);
+    } catch (err) {
+      console.log(`[servicecue] could not make roles for service type ${scrub(serviceTypeId)}: ${scrub(errorMessage(err))}`);
+      throw err;
+    }
     const roles = await serviceCueRolesStore.load();
     const covered = new Set(roles.flatMap((r) => r.members.map((m) => m.trim().toLowerCase())));
     const missing = cats.filter((c) => !covered.has(c.trim().toLowerCase()));
-    if (missing.length === 0) return roles;
-    const next = [...roles, ...seedRoles(missing)];
+    if (missing.length === 0) {
+      // Said, because "Make a role for each" doing nothing is otherwise silent: Planning
+      // Center not connected reads as no categories at all.
+      console.log(`[servicecue] made no roles for service type ${scrub(serviceTypeId)}: ${cats.length ? `all ${scrub(cats.length)} of its categories are in a role` : "Planning Center listed no categories for it"}`);
+      return roles;
+    }
+    const added = seedRoles(missing);
+    const next = [...roles, ...added];
     await serviceCueRolesStore.save(next);
+    console.log(`[servicecue] made ${scrub(added.length)} role(s) for service type ${scrub(serviceTypeId)}: ${added.map((r) => scrub(r.name)).join(", ")}`);
     this.broadcast();
     return next;
   }
