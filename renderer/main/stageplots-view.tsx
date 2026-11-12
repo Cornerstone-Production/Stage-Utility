@@ -3,15 +3,18 @@
 //
 // The venue list (home venues, then offsite) opens one venue: its plots as
 // tabs, the default selected and marked, the plot itself with pinch zoom and
-// pan, and the venue's notes. With exactly one home venue it opens that venue
+// pan, its legend, and the venue's notes. A tap on an item shows its label,
+// notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
+// on one landscape page. With exactly one home venue it opens that venue
 // straight away, and the browser remembers the last venue opened. Live: an edit
 // anywhere redraws it without a reload (useStagePlots).
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 
 import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type StagePlotsView, type Venue } from "@main/types/stageplots";
 import { plural } from "@main/services/plural";
+import { plotHeight } from "@main/services/stageplots-doc";
 
 import { usePageActions } from "../app/page-actions";
 import { Button } from "../components/ui/button";
@@ -19,9 +22,13 @@ import { EmptyState } from "../components/ui/empty-state";
 import { ErrorNote } from "../components/ui/error-note";
 import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
+import { useResyncOn } from "../lib/use-resync-on";
+import { PrintControl } from "./stageplots-print";
 import { backgroundOf, eyebrow, plotsOf, selectedPlot, tabClass, venueGroups } from "./stageplots/doc-helpers";
+import { ItemDetails, detailsPosition } from "./stageplots/item-details";
 import { Mono } from "./stageplots/mono";
-import { PlotSvg, plotHeight } from "./stageplots/plot-svg";
+import { PlotLegend } from "./stageplots/plot-legend";
+import { PlotSvg } from "./stageplots/plot-svg";
 import { usePanZoom } from "./stageplots/use-pan-zoom";
 import { useStagePlots } from "./stageplots/use-stageplots";
 
@@ -95,19 +102,76 @@ function VenueList({ doc, onOpen }: { doc: StagePlotsView; onOpen: (id: string) 
 const zoomButton =
   "touch-target inline-grid size-6 place-items-center rounded-md text-fg-muted transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&_svg]:size-3.5";
 
+/** How far, in screen pixels, a press may move and still be a tap rather than a pan. */
+const TAP_SLOP_PX = 6;
+
 function PlotFrame({ plot, background }: { plot: Plot; background: BackgroundView | null }) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const pz = usePanZoom(svgRef, PLOT_UNITS_WIDE, plotHeight(background));
+  // A tap is decided from the press and the release, not from click: after the
+  // plot captures the pointer, a click names the plot, not the item under it.
+  const press = useRef<{ id: string | null; pointerId: number; x: number; y: number } | null>(null);
+  const [tap, setTap] = useState<{ id: string; at: { left: number; top: number } | null } | null>(null);
+  // Panning or zooming moves the item from under its popover: close it.
+  useResyncOn([plot.id, pz.viewBox], () => setTap(null));
+  // Escape, or a press anywhere off the plot and off the details, closes them:
+  // on a phone the sheet covers the page's foot, and the legend is under it.
+  useEffect(() => {
+    if (!tap) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setTap(null);
+    const onDown = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.("[data-item-details]") && !svgRef.current?.contains(t)) setTap(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [tap]);
+  const tapped = tap ? (plot.items.find((it) => it.id === tap.id) ?? null) : null;
+
+  const gestures = {
+    ...pz.handlers,
+    onPointerDown: (e: PointerEvent<SVGSVGElement>) => {
+      const hit = (e.target as Element).closest?.("[data-id]");
+      // Text is read where it stands; it has nothing more to show.
+      const id = hit && hit.getAttribute("data-type") !== "text" ? hit.getAttribute("data-id") : null;
+      // A second finger is a pinch, never a tap.
+      press.current = press.current ? null : { id, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+      pz.handlers.onPointerDown(e);
+    },
+    // A cancelled press (the browser took the touch for a scroll) is no tap,
+    // and must not leave the next press looking like a second finger.
+    onPointerCancel: (e: PointerEvent<SVGSVGElement>) => {
+      press.current = null;
+      pz.handlers.onPointerCancel(e);
+    },
+    onPointerUp: (e: PointerEvent<SVGSVGElement>) => {
+      const p = press.current;
+      press.current = null;
+      pz.handlers.onPointerUp(e);
+      if (!p || p.pointerId !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) > TAP_SLOP_PX) return;
+      if (!p.id) return setTap(null);
+      const el = svgRef.current?.querySelector(`[data-id="${p.id}"]`);
+      const frame = frameRef.current?.getBoundingClientRect();
+      setTap({ id: p.id, at: el && frame && frame.width > 0 ? detailsPosition(el.getBoundingClientRect(), frame) : null });
+    },
+  };
+
   return (
-    <div className="relative">
+    <div className="relative" ref={frameRef}>
       <PlotSvg
         svgRef={svgRef}
         plot={plot}
         background={background}
         fade={plot.bgFade}
-        viewBox={pz.viewBox}
-        gestures={pz.handlers}
-        className="w-full touch-none rounded-[10px] border border-line sm:rounded-[0.875rem]"
+        view={pz.view}
+        gestures={gestures}
+        tappedId={tapped?.id ?? null}
+        className="w-full touch-none rounded-[10px] border border-line sm:rounded-[0.875rem] [&_[data-id]:not([data-type=text])]:cursor-pointer"
       />
       <div className="absolute top-2 right-2 flex flex-col gap-0.5 rounded-lg border border-line-strong bg-popover p-0.5 shadow-[var(--su-shadow-1)]">
         <button type="button" className={zoomButton} onClick={pz.zoomIn} aria-label="Zoom in">
@@ -120,6 +184,7 @@ function PlotFrame({ plot, background }: { plot: Plot; background: BackgroundVie
           <MaximizeIcon />
         </button>
       </div>
+      {tapped && <ItemDetails item={tapped} at={tap?.at ?? null} onClose={() => setTap(null)} />}
     </div>
   );
 }
@@ -128,6 +193,7 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
   const plots = plotsOf(doc, venue);
   const [picked, setPicked] = useState<{ venueId: string; plotId: string } | null>(null);
   const selected = selectedPlot(venue, plots, picked);
+  const background = backgroundOf(doc, selected);
   return (
     <div className="flex flex-col">
       <button
@@ -144,6 +210,17 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
           <span className="inline-flex h-[22px] items-center rounded-full bg-fill px-[9px] text-[11px] leading-[13px] font-medium text-fg-muted">
             Default
           </span>
+        )}
+        {selected && (
+          <PrintControl
+            className="ml-auto"
+            venueName={venue.name}
+            plotName={selected.name}
+            planLine={selected.id === venue.defaultPlotId ? "Default plot" : null}
+            items={selected.items}
+            background={background}
+            fade={selected.bgFade}
+          />
         )}
       </div>
       {plots.length === 0 || !selected ? (
@@ -167,8 +244,9 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
               </button>
             ))}
           </div>
-          <PlotFrame key={selected.id} plot={selected} background={backgroundOf(doc, selected)} />
-          <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan.</p>
+          <PlotFrame key={selected.id} plot={selected} background={background} />
+          <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan. Tap an item for its details.</p>
+          <PlotLegend items={selected.items} className="su-card mt-3 px-3.5 py-2.5" />
         </>
       )}
       {venue.notes && <p className="mt-2.5 text-caption1 whitespace-pre-line text-fg-muted">{venue.notes}</p>}

@@ -8,7 +8,7 @@
 
 import { useLayoutEffect, useRef, useState, type RefObject, type SVGProps } from "react";
 
-import type { PanZoom } from "./use-pan-zoom";
+import type { PanZoom, View } from "./use-pan-zoom";
 
 import { clamp } from "@main/services/clamp";
 import { plotHeight } from "@main/services/stageplots-doc";
@@ -20,7 +20,6 @@ import { PlotItems } from "./plot-items";
 /** Columns in the grid a plot with no background is drawn on. */
 const GRID_COLUMNS = 24;
 
-export { plotHeight } from "@main/services/stageplots-doc";
 
 /** How opaque the background is drawn at a fade from 0 (as converted) to 1 (faintest). */
 export function backgroundOpacity(fade: number): number {
@@ -69,8 +68,8 @@ export interface PlotSvgProps {
   background: BackgroundView | null;
   /** The background fade, 0 to 1. Separate from the plot so a slider can preview it. */
   fade: number;
-  /** What part of the plot to show, in plot units; the whole plot when absent. */
-  viewBox?: string;
+  /** What part of the plot to show, in plot units (usePanZoom's view); the whole plot when absent. */
+  view?: View;
   className?: string;
   svgRef?: RefObject<SVGSVGElement | null>;
   /** Thumbnails are decoration beside a name that says the same. */
@@ -95,7 +94,7 @@ export function PlotSvg({
   plot,
   background,
   fade,
-  viewBox,
+  view,
   className,
   svgRef,
   decorative,
@@ -111,12 +110,11 @@ export function PlotSvg({
   const ownRef = useRef<SVGSVGElement>(null);
   const ref = svgRef ?? ownRef;
   const measured = useSvgWidth(ref);
-  const viewWidth = Number((viewBox ?? "").split(/\s+/)[2]) || PLOT_UNITS_WIDE;
-  const k = viewWidth / (widthPx ?? (measured || UNMEASURED_PX));
+  const k = (view?.w ?? PLOT_UNITS_WIDE) / (widthPx ?? (measured || UNMEASURED_PX));
   return (
     <svg
       ref={ref}
-      viewBox={viewBox ?? `0 0 ${PLOT_UNITS_WIDE} ${height}`}
+      viewBox={view ? `${view.x} ${view.y} ${view.w} ${view.h}` : `0 0 ${PLOT_UNITS_WIDE} ${height}`}
       className={cn("block select-none bg-[var(--su-plot-paper)]", className)}
       style={{ aspectRatio: `${PLOT_UNITS_WIDE} / ${height}` }}
       {...gestures}

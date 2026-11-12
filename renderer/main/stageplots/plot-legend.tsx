@@ -63,7 +63,8 @@ export function PlotLegend({ items, layout = "wrap", emptyHint, className, child
   const list = layout === "wrap" ? "flex flex-wrap gap-x-[18px] gap-y-1.5" : "flex flex-col gap-[5px]";
   return (
     <div className={cn("flex flex-col gap-2", className)} aria-label="Legend" role="group" data-testid="legend">
-      <span className={eyebrow}>Legend</span>
+      {/* break-after-avoid: in print's columns a heading stays with what follows it. */}
+      <span className={cn(eyebrow, "break-after-avoid")}>Legend</span>
       {rows.length === 0 && callouts.length === 0 && emptyHint ? (
         <p className="text-caption1 text-fg-subtle">{emptyHint}</p>
       ) : (
@@ -81,7 +82,7 @@ export function PlotLegend({ items, layout = "wrap", emptyHint, className, child
       )}
       {callouts.length > 0 && (
         <>
-          <span className={eyebrow}>Callouts</span>
+          <span className={cn(eyebrow, "break-after-avoid")}>Callouts</span>
           <div className={list}>
             {callouts.map((c) => (
               <span key={c.n} className={rowClass} data-testid="callout-key">

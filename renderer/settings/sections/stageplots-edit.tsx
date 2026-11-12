@@ -2,7 +2,8 @@
 // plot editor.
 //
 // Venues and Backgrounds down the left; the selected venue's plots as tabs, a
-// toolbar (undo and redo, zoom, background, fade, print), and the work area:
+// toolbar (undo and redo, zoom, background, fade, print, which prints the
+// canvas as it stands, unsaved changes included), and the work area:
 // the palette, the canvas with its legend under it, and the inspector for the
 // selected item. Structural changes (venues, backgrounds, plots, a plot's
 // background and fade) save at once and broadcast to every open /stageplots;
@@ -18,7 +19,7 @@
 // changes asks first.
 
 import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch, type ReactNode } from "react";
-import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, PrinterIcon, Redo2Icon, Undo2Icon } from "lucide-react";
+import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotItem, type StagePlotsView, type Venue } from "@main/types/stageplots";
@@ -28,11 +29,13 @@ import { Button } from "../../components/ui/button";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorNote } from "../../components/ui/error-note";
+import { DialogContent, DialogDescription, DialogFooter, DialogRoot, DialogTitle } from "../../components/ui/dialog";
 import { UnsavedBanner } from "../../components/ui/unsaved-banner";
 import type { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import type { OpenPdf } from "../../lib/pdf-raster";
 import { uid } from "../../lib/uid";
+import { useElementSize } from "../../lib/use-element-size";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useRouterHandle } from "../../lib/use-search-param";
@@ -40,17 +43,21 @@ import { backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-h
 import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, type EditorAction, type EditorState } from "../../main/stageplots/editor-state";
 import { round1 } from "../../main/stageplots/geometry";
 import { PlotLegend } from "../../main/stageplots/plot-legend";
-import { plotHeight } from "../../main/stageplots/plot-svg";
+import { PrintControl } from "../../main/stageplots-print";
+import { plotHeight } from "@main/services/stageplots-doc";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
 import { StagePlotsCanvas } from "./stageplots-canvas";
 import { StagePlotsInspector } from "./stageplots-inspector";
-import { StagePlotsPalette } from "./stageplots-palette";
+import { PALETTE_ICONS_PX, PALETTE_PX, StagePlotsPalette } from "./stageplots-palette";
 import { PlotTabs } from "./stageplots-plot-tabs";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
 import { VenuesCard } from "./stageplots-venues-card";
+
+/** The narrowest the canvas may be before the palette gives up its names. */
+const MIN_CANVAS_PX = 600;
 
 /** How far each palette add lands from the last, and after how many it starts over. */
 const ADD_STAGGER = 20;
@@ -63,6 +70,8 @@ function PlotEditor({
   save,
   draft,
   dispatch,
+  dirty,
+  saveDraft,
 }: {
   doc: StagePlotsView;
   venue: Venue;
@@ -70,6 +79,8 @@ function PlotEditor({
   save: Save;
   draft: EditorState;
   dispatch: Dispatch<EditorAction>;
+  dirty: boolean;
+  saveDraft: () => Promise<boolean>;
 }) {
   const background: BackgroundView | null = backgroundOf(doc, plot);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -79,6 +90,17 @@ function PlotEditor({
   const [fade, setFade] = useState(plot.bgFade);
   useResyncOn([plot.id, plot.bgFade], () => setFade(plot.bgFade));
   const adds = useRef(0);
+  // The palette drops to icons when, with its names, it would leave the canvas
+  // under 600 px: the mockup's layout inside the app's own sidebar left about 480
+  // px at 1440, and labels crowded. Measured on the canvas column, not the window,
+  // and judged as if the palette had its names, so the choice does not flip back
+  // the moment it widens the canvas.
+  const canvasColumn = useRef<HTMLDivElement>(null);
+  const { w: canvasPx } = useElementSize(canvasColumn);
+  const [iconPalette, setIconPalette] = useState(false);
+  useResyncOn([canvasPx], () => {
+    if (canvasPx > 0) setIconPalette(canvasPx - (iconPalette ? PALETTE_PX - PALETTE_ICONS_PX : 0) < MIN_CANVAS_PX);
+  });
 
   const update = async (changes: { backgroundId?: string | null; bgFade?: number }) => {
     const r = await save(() => stageplotsApi.updatePlot(plot.id, changes));
@@ -96,9 +118,30 @@ function PlotEditor({
     void update({ bgFade: value });
   };
 
+  /**
+   * Another background. The server moves items below a shorter plot's edge up
+   * onto it, which a draft based on the old items could then never save (400
+   * for an item still below, then 409 for the server's own move). So with
+   * unsaved changes it asks first: save and switch, discard and switch, or not.
+   */
+  const [pendingBackground, setPendingBackground] = useState<{ id: string | null } | null>(null);
+  const pickBackground = (id: string | null) => {
+    if (id === plot.backgroundId) return;
+    if (dirty) setPendingBackground({ id });
+    else void update({ backgroundId: id });
+  };
+  const switchAfter = async (how: "save" | "discard") => {
+    const target = pendingBackground;
+    setPendingBackground(null);
+    if (!target) return;
+    if (how === "save" && !(await saveDraft())) return;
+    if (how === "discard") dispatch({ type: "discard" });
+    await update({ backgroundId: target.id });
+  };
+
   /** Add at the middle of what the canvas shows, each add a little further on. */
   const add = (kind: AddKind) => {
-    const [vx, vy, vw, vh] = pz.viewBox.split(/\s+/).map(Number);
+    const { x: vx, y: vy, w: vw, h: vh } = pz.view;
     const off = (adds.current++ % ADD_STAGGER_STEPS) * ADD_STAGGER;
     dispatch({ type: "add", kind, at: { x: round1(vx + vw / 2 + off), y: round1(vy + vh / 2 + off) }, id: uid("i") });
     svgRef.current?.focus({ preventScroll: true });
@@ -156,7 +199,7 @@ function PlotEditor({
           <select
             id="stageplots-background"
             value={plot.backgroundId ?? ""}
-            onChange={(e) => void update({ backgroundId: e.target.value || null })}
+            onChange={(e) => pickBackground(e.target.value || null)}
             className="h-7 max-w-[220px] rounded-md border border-line-strong bg-field px-1.5 text-caption1 text-fg focus:border-focus focus:ring-1 focus:ring-focus focus:outline-none"
           >
             {doc.backgrounds.map((b) => (
@@ -187,15 +230,25 @@ function PlotEditor({
           <span className="min-w-[34px] font-mono text-caption1 text-fg-soft tabular-nums">{Math.round(fade * 100)}%</span>
         </span>
         <span className="flex-1" />
-        <Button variant="filled" size="small" disabled title="Print arrives with the item editor">
-          <PrinterIcon className="size-3.5" />
-          Print
-        </Button>
+        {/* What the canvas shows, saved or not: it goes to paper, not to /stageplots. */}
+        <PrintControl
+          venueName={venue.name}
+          plotName={plot.name}
+          planLine={plot.id === venue.defaultPlotId ? "Default plot" : null}
+          items={draft.items}
+          background={background}
+          fade={fade}
+        />
       </div>
       <SaveError message={error} className="mb-2" />
-      <div className="grid grid-cols-[132px_minmax(0,1fr)] items-start gap-3 xl:grid-cols-[132px_minmax(0,1fr)_280px]">
-        <StagePlotsPalette onAdd={add} />
-        <div className="flex min-w-0 flex-col gap-3">
+      <div
+        className={cn(
+          "grid items-start gap-3",
+          iconPalette ? "grid-cols-[44px_minmax(0,1fr)] xl:grid-cols-[44px_minmax(0,1fr)_280px]" : "grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_280px]",
+        )}
+      >
+        <StagePlotsPalette onAdd={add} icons={iconPalette} />
+        <div className="flex min-w-0 flex-col gap-3" ref={canvasColumn}>
           <div className="su-card overflow-hidden p-0">
             <StagePlotsCanvas
               name={plot.name}
@@ -215,6 +268,26 @@ function PlotEditor({
         </div>
       </div>
       {venue.notes && <p className="mt-2.5 text-caption1 text-fg-muted">{venue.notes}</p>}
+      <DialogRoot open={pendingBackground !== null} onOpenChange={(open) => !open && setPendingBackground(null)}>
+          <DialogContent className="max-w-sm" data-testid="background-switch">
+            <DialogTitle>Change the background?</DialogTitle>
+            <DialogDescription>
+              {plot.name} has unsaved changes. Save them or discard them first; a shorter background moves items below its edge up onto
+              it.
+            </DialogDescription>
+            <DialogFooter>
+              <Button variant="transparent" size="small" onClick={() => setPendingBackground(null)}>
+                Cancel
+              </Button>
+              <Button variant="filled" size="small" onClick={() => void switchAfter("discard")}>
+                Discard and switch
+              </Button>
+              <Button variant="accent" size="small" onClick={() => void switchAfter("save")}>
+                Save and switch
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+      </DialogRoot>
     </>
   );
 }
@@ -366,6 +439,8 @@ function EditorBody({
     else if (!isDirty(draft)) {
       dispatch({ type: "load", items: plot.items, height });
       setBase(plot.version);
+      // Nothing unsaved is left to protect: a "changed elsewhere" banner no longer applies.
+      setConflict(false);
     }
     // Otherwise someone else saved over this draft's base: the version stays
     // where it was, and Save is refused with 409 rather than overwriting it.
@@ -388,18 +463,37 @@ function EditorBody({
     return ok;
   }, [draftRef, where]);
 
-  const saveDraft = async () => {
-    if (!plot) return;
+  /**
+   * Save the draft; true when it landed. A 409 reads the plot again first: if
+   * its items are still what this draft was based on (a rename, a fade or a
+   * background landed before its broadcast did), the save is sent once more on
+   * the new version; otherwise the banner says it changed elsewhere.
+   */
+  const saveDraft = async (): Promise<boolean> => {
+    if (!plot) return false;
     const sent = draft.items;
+    const based = draft.savedItems;
     setSaving(true);
-    try {
-      const r = await stageplotsApi.saveItems(plot.id, base, sent);
+    const send = async (version: number) => {
+      const r = await stageplotsApi.saveItems(plot.id, version, sent);
       dispatch({ type: "saved", sent, items: r.plot.items });
       setBase(r.plot.version);
       setSaveError(null);
+    };
+    try {
+      try {
+        await send(base);
+      } catch (err) {
+        if ((err as ApiError).status !== 409) throw err;
+        const fresh = (await stageplotsApi.get()).plots.find((p) => p.id === plot.id);
+        if (!fresh || !sameItems(fresh.items, based)) throw err;
+        await send(fresh.version);
+      }
+      return true;
     } catch (err) {
       if ((err as ApiError).status === 409) setConflict(true);
       else setSaveError(errorMessage(err));
+      return false;
     } finally {
       setSaving(false);
       void refresh();
@@ -435,8 +529,6 @@ function EditorBody({
               <b className="font-medium text-fg">This plot changed elsewhere.</b> Reload to see it; your changes here are not saved.
             </>
           }
-          onSave={() => {}}
-          onDiscard={() => {}}
           actions={
             <Button variant="accent" size="small" onClick={() => void reload()}>
               Reload
@@ -493,7 +585,17 @@ function EditorBody({
                 save={save}
               />
               {plot ? (
-                <PlotEditor key={plot.id} doc={doc} venue={venue} plot={plot} save={save} draft={draft} dispatch={dispatch} />
+                <PlotEditor
+                  key={plot.id}
+                  doc={doc}
+                  venue={venue}
+                  plot={plot}
+                  save={save}
+                  draft={draft}
+                  dispatch={dispatch}
+                  dirty={dirty}
+                  saveDraft={saveDraft}
+                />
               ) : (
                 <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with the + beside the tabs." />
               )}

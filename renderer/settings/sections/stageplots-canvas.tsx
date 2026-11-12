@@ -22,6 +22,7 @@ import { useRef, type KeyboardEvent, type PointerEvent, type RefObject, type SVG
 import type { BackgroundView, PlotItem } from "@main/types/stageplots";
 
 import { useLatestRef } from "../../lib/use-latest-ref";
+import { HANDLE_PAD } from "../../main/stageplots/plot-items";
 import { PlotSvg } from "../../main/stageplots/plot-svg";
 import type { EditorAction } from "../../main/stageplots/editor-state";
 import { angleTo } from "../../main/stageplots/geometry";
@@ -32,11 +33,18 @@ export const NUDGE = 4;
 export const NUDGE_FAR = 20;
 /** How far, in screen pixels, a press moves before it is a drag and not a click. */
 const DRAG_SLOP_PX = 2;
-/** The gap between an item and its selection handles, in screen pixels (plot-items.tsx). */
-const HANDLE_PAD_PX = 6;
 
 type Drag =
-  | { mode: "move" | "size" | "rot"; id: string; pointerId: number; start: { x: number; y: number }; startPx: { x: number; y: number }; moved: boolean }
+  | {
+      mode: "move" | "size" | "rot";
+      id: string;
+      pointerId: number;
+      start: { x: number; y: number };
+      startPx: { x: number; y: number };
+      moved: boolean;
+      /** A rotate handle drawn under the item (no room above): its drag turns the other way round. */
+      below?: boolean;
+    }
   | { mode: "pt"; id: string; index: number; pointerId: number; start: { x: number; y: number }; startPx: { x: number; y: number }; moved: boolean };
 
 /** A screen point as plot units under the current view, with plot units per pixel; null before layout. */
@@ -84,7 +92,9 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
         const base = { id, pointerId: e.pointerId, start: { x: p.x, y: p.y }, startPx: { x: e.clientX, y: e.clientY }, moved: false };
         const mode = handle?.getAttribute("data-hd");
         drag.current =
-          mode === "pt" ? { ...base, mode, index: Number(handle!.getAttribute("data-pi")) } : { ...base, mode: mode === "size" || mode === "rot" ? mode : "move" };
+          mode === "pt"
+            ? { ...base, mode, index: Number(handle!.getAttribute("data-pi")) }
+            : { ...base, mode: mode === "size" || mode === "rot" ? mode : "move", below: handle?.hasAttribute("data-below") };
         pz.claim(e.pointerId);
       } else if (id && id !== selectedId) dispatch({ type: "select", id });
     } else if (!handle && !hit && selectedId) dispatch({ type: "select", id: null });
@@ -99,10 +109,10 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
       const p = toPlot(e.currentTarget, e.clientX, e.clientY);
       if (p) {
         if (d.mode === "move") dispatch({ type: "move", id: d.id, dx: p.x - d.start.x, dy: p.y - d.start.y });
-        else if (d.mode === "size") dispatch({ type: "resize", id: d.id, point: p, pad: HANDLE_PAD_PX * p.k });
+        else if (d.mode === "size") dispatch({ type: "resize", id: d.id, point: p, pad: HANDLE_PAD * p.k });
         else if (d.mode === "rot") {
           const it = itemsRef.current.find((x) => x.id === d.id);
-          if (it) dispatch({ type: "rotate", id: d.id, angle: angleTo(it, p) });
+          if (it) dispatch({ type: "rotate", id: d.id, angle: angleTo(it, p) + (d.below ? 180 : 0) });
         } else if (d.mode === "pt") dispatch({ type: "movePoint", id: d.id, index: d.index, point: p });
       }
     }
@@ -134,7 +144,7 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
       plot={{ name, items }}
       background={background}
       fade={fade}
-      viewBox={pz.viewBox}
+      view={pz.view}
       selectedId={selectedId}
       gestures={{ onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp }}
       className="w-full touch-none rounded-[0.875rem] outline-none focus-visible:ring-2 focus-visible:ring-focus [&_[data-id]]:cursor-move"

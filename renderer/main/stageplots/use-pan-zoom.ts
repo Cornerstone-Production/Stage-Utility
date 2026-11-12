@@ -51,6 +51,8 @@ export function panView(view: View, full: { w: number; h: number }, dx: number, 
 }
 
 export interface PanZoom {
+  /** The part of the plot on screen, in plot units. */
+  view: View;
   viewBox: string;
   /** 1 is the whole plot. */
   zoom: number;
@@ -152,6 +154,7 @@ export function usePanZoom(svgRef: RefObject<SVGSVGElement | null>, fullW: numbe
 
   const center = () => ({ x: view.x + view.w / 2, y: view.y + view.h / 2 });
   return {
+    view,
     viewBox: `${view.x} ${view.y} ${view.w} ${view.h}`,
     zoom: fullW / view.w,
     zoomIn: () => setView(zoomView(view, { w: fullW, h: fullH }, ZOOM_STEP, center())),

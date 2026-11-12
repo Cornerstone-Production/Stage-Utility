@@ -14,6 +14,9 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { BackgroundView, Plot, StagePlotsView } from "@main/types/stageplots";
 
+import { plotHeight } from "@main/services/stageplots-doc";
+import { itemsWithin, validateItems } from "@main/services/stageplots-store";
+
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
@@ -53,6 +56,10 @@ function doc(): StagePlotsView {
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
   };
+}
+
+function heightOf(p: Plot): number {
+  return plotHeight(DOC.backgrounds.find((b) => b.id === p.backgroundId) ?? null);
 }
 
 function broadcast() {
@@ -97,9 +104,12 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     return { status: 200, json: venue(m[1]) };
   }
   if (method === "PUT" && (m = /^\/api\/stageplots\/plots\/([^/]+)\/items$/.exec(path))) {
-    // As the server does: the version decides, never a canned answer.
+    // As the server does, in its order: the items are held to the real rules on
+    // the plot's height, then the version decides; never a canned answer.
     const p = DOC.plots.find((x) => x.id === m![1])!;
     const b = body as { version: number; items: Plot["items"] };
+    const problem = validateItems(b.items, heightOf(p));
+    if (problem) return { status: 400, json: { error: problem } };
     if (b.version !== p.version) return { status: 409, json: { error: "changed elsewhere", version: p.version } };
     if (JSON.stringify(b.items) === JSON.stringify(p.items)) return { status: 200, json: { plot: p } };
     Object.assign(p, { items: b.items, version: p.version + 1 });
@@ -108,6 +118,8 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
     Object.assign(p, body, { version: p.version + 1 });
+    // The real move of items below a shorter background's edge, as the route makes it.
+    p.items = itemsWithin(p.items, heightOf(p)).items;
     return { status: 200, json: p };
   }
   return { status: 404, json: { error: `the fake has no ${method} ${path}` } };
@@ -374,6 +386,10 @@ describe("/stageplots/edit", () => {
 
 // ── The plot editor ────────────────────────────────────────────────────────
 //
+// The palette's drop to icons below a 600 px canvas is measured
+// (useElementSize), and jsdom measures everything as 0, so it is driven in a
+// browser at 1440 and 1920 px, not tested here.
+//
 // The canvas is driven with pointer events against a stubbed box: jsdom lays
 // nothing out, so the SVG is given a 1000 x 666.7 pixel box, one pixel per plot
 // unit at the whole-plot view (the background is 2400 x 1600). Pointer capture,
@@ -441,7 +457,7 @@ describe("the plot editor", () => {
     await click(screen.getByTestId("undo"));
     assert.deepEqual(at(id), before, "one undo did not put the drag back");
     await click(screen.getByTestId("undo"));
-    assert.equal(canvas().querySelector(`[data-id="${id}"]`), null, "the second undo is the add");
+    assert.ok(canvas().querySelector(`[data-id="${id}"]`) === null, "the second undo is the add");
   });
 
   test("the banner waits for a drag that began on a clean draft to end, so the canvas does not move under it", async () => {
@@ -489,7 +505,7 @@ describe("the plot editor", () => {
     await mount();
     const id = await addFromPalette("box");
     const before = at(id);
-    assert.equal(document.activeElement, canvas(), "adding does not focus the canvas");
+    assert.ok(document.activeElement === canvas(), "adding does not focus the canvas");
     await act(async () => {
       fireEvent.keyDown(canvas(), { key: "ArrowRight" });
       fireEvent.keyDown(canvas(), { key: "ArrowDown", shiftKey: true });
@@ -512,7 +528,7 @@ describe("the plot editor", () => {
     assert.ok(put, `no save: ${writes().join(", ")}`);
     assert.equal((put.body as { version: number }).version, 0);
     assert.equal((put.body as { items: unknown[] }).items.length, 1);
-    assert.equal(banner(), null);
+    assert.ok(banner() === null);
     assert.equal(DOC.plots[0].version, 1);
   });
 
@@ -531,9 +547,9 @@ describe("the plot editor", () => {
     assert.equal(DOC.plots[0].items[0].id, "theirs", "the other save was overwritten");
     await click(screen.getByRole("button", { name: "Reload" }));
     assert.ok(drawn("theirs"));
-    assert.equal(canvas().querySelector(`[data-id="${mine}"]`), null);
+    assert.ok(canvas().querySelector(`[data-id="${mine}"]`) === null);
     assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
-    assert.equal(banner(), null);
+    assert.ok(banner() === null);
   });
 
   test("Discard after a save from elsewhere shows that save, and the next Save is not a 409", async () => {
@@ -574,7 +590,7 @@ describe("the plot editor", () => {
     await act(async () => broadcast());
     await settle();
     assert.ok(drawn("theirs"));
-    assert.equal(banner(), null);
+    assert.ok(banner() === null);
   });
 
   test("Discard puts back what is saved", async () => {
@@ -583,7 +599,7 @@ describe("the plot editor", () => {
     await addFromPalette("circle");
     await click(screen.getByRole("button", { name: "Discard" }));
     assert.deepEqual([...canvas().querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id")), ["b"]);
-    assert.equal(banner(), null);
+    assert.ok(banner() === null);
   });
 
   test("switching plot with unsaved changes asks first", async () => {
@@ -598,7 +614,7 @@ describe("the plot editor", () => {
     await click(tabs()[1]);
     await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
     assert.equal(tabs()[1].getAttribute("aria-selected"), "true");
-    assert.equal(banner(), null);
+    assert.ok(banner() === null);
   });
 
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
@@ -620,5 +636,154 @@ describe("the plot editor", () => {
     }
     assert.deepEqual([...renders], [[target, 10]], "items other than the dragged one re-rendered, or it rendered more than once per move");
     assert.equal(at(target).x, start.x + 30);
+  });
+
+  test("Print prints the canvas as it stands, unsaved changes included", async () => {
+    let printed = 0;
+    (window as unknown as { print: () => void }).print = () => void printed++;
+    await mount();
+    const mine = await addFromPalette("conn");
+    await click(screen.getByRole("button", { name: "Print" }));
+    assert.equal(printed, 1);
+    const page = screen.getByTestId("print-page");
+    assert.ok(page.querySelector(`[data-id="${mine}"]`), "the unsaved item is not on the printed page");
+    assert.match(page.querySelector("h1")!.textContent!, /^Room One · Standard$/);
+  });
+
+  // ── A background change over unsaved work (the fake moves items as the route does) ──
+  const refusedOrConflict = () => /changed elsewhere|must be a number/.test(document.body.textContent!);
+  async function chooseBackground(value: string, choice: "Save and switch" | "Discard and switch" | "Cancel") {
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Background"), { target: { value } });
+    });
+    await settle();
+    const dialog = screen.queryByTestId("background-switch");
+    if (dialog) await click(within(dialog).getByRole("button", { name: choice }));
+    await settle();
+  }
+
+  test("Save and switch: a new item below the grid's edge saves, moves up, and the next Save lands (the 400 path)", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await dragItem(mine, 0, 600 - at(mine).y); // y 600, below the grid's 562.5
+    await chooseBackground("", "Save and switch");
+    const switching = writes().slice();
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(changed elsewhere|must be a number)[^.]*/)?.[0]}`);
+    assert.deepEqual(switching.slice(-2), ["PUT /api/stageplots/plots/p-1/items", "PATCH /api/stageplots/plots/p-1"]);
+    assert.ok(DOC.plots[0].items.every((it) => it.y <= 562.5));
+  });
+
+  test("Discard and switch: the saved item the server moves is taken, and editing it saves (the 409 path)", async () => {
+    DOC.plots[0].items = [item({ id: "b", y: 600, h: 60 })];
+    await mount();
+    await addFromPalette("circle");
+    await chooseBackground("", "Discard and switch");
+    stubBox();
+    const b = at("b");
+    await pointer("pointerDown", drawn("b").querySelector("rect")!, b.x + 5, b.y + 5);
+    await pointer("pointerUp", canvas(), b.x + 5, b.y + 5);
+    await act(async () => {
+      fireEvent.keyDown(canvas(), { key: "ArrowUp" });
+    });
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(changed elsewhere|must be a number)[^.]*/)?.[0]}`);
+    assert.equal(DOC.plots[0].items[0].y, 562.5 - 60 - 4);
+  });
+
+  test("Cancel keeps the background and the draft", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await chooseBackground("", "Cancel");
+    assert.ok(!writes().some((w) => w.startsWith("PATCH")), writes().join(", "));
+    assert.equal((screen.getByLabelText("Background") as HTMLSelectElement).value, "b-1");
+    assert.ok(drawn(mine));
+  });
+
+  test("a 409 that only a rename caused is sent again on the new version, not shown as changed elsewhere", async () => {
+    await mount();
+    await addFromPalette("box");
+    // A rename elsewhere lands; its broadcast has not arrived yet.
+    Object.assign(DOC.plots[0], { name: "Renamed", version: 1 });
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.equal(DOC.plots[0].version, 2);
+    assert.equal(DOC.plots[0].items.length, 1);
+  });
+
+  test("after a 409, undoing back to nothing unsaved clears the banner", async () => {
+    await mount();
+    await addFromPalette("box");
+    DOC.plots[0].items = [item({ id: "theirs", label: "Their riser" })];
+    DOC.plots[0].version = 1;
+    await act(async () => broadcast());
+    await settle();
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.match(document.body.textContent!, /changed elsewhere/);
+    await click(screen.getByTestId("undo"));
+    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/, "the banner stayed with nothing unsaved");
+    assert.ok(drawn("theirs"));
+  });
+
+  test("Delete asks about the plot first, so its Cancel never costs the draft", async () => {
+    await mount();
+    await click(tabs()[1]);
+    const mine = await addFromPalette("box");
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const first = screen.getByRole("alertdialog");
+    assert.match(first.textContent!, /Delete Special\?/);
+    await click(within(first).getByRole("button", { name: "Cancel" }));
+    assert.ok(drawn(mine), "cancelling the delete dropped the draft");
+  });
+
+  test("an item at the top edge turns by its handle underneath, the right way round", async () => {
+    DOC.plots[0].items = [item({ id: "t", y: 0, h: 40, w: 80 })];
+    await mount();
+    stubBox();
+    const t = at("t");
+    await pointer("pointerDown", drawn("t").querySelector("rect")!, t.x + 5, t.y + 5);
+    await pointer("pointerUp", canvas(), t.x + 5, t.y + 5);
+    const rot = drawn("t").querySelector('[data-hd="rot"]')!;
+    assert.ok(rot.hasAttribute("data-below"), "the rotate handle is not under the item");
+    // The handle sits straight under the centre (140, 20); drag it a little right of there.
+    const [cx, cy] = [140, 20 + 20 + 6 + 26];
+    await pointer("pointerDown", rot, cx, cy);
+    await pointer("pointerMove", canvas(), cx + 10, cy);
+    await pointer("pointerMove", canvas(), cx + 20, cy);
+    await pointer("pointerUp", canvas(), cx + 20, cy);
+    await settle();
+    const r = Number(drawn("t").getAttribute("data-rot"));
+    assert.ok(Math.abs(r) <= 45, `a small drag of the handle underneath turned the item ${r}°`);
+  });
+
+  // Another editor changes the background (the fake moves items as the route does) while this draft is unsaved.
+  async function backgroundChangedElsewhere() {
+    const p = DOC.plots[0];
+    Object.assign(p, { backgroundId: null, version: p.version + 1 });
+    p.items = itemsWithin(p.items, heightOf(p)).items;
+    await act(async () => broadcast());
+    await settle();
+  }
+
+  test("a shorter background from elsewhere under unsaved work: the draft is fitted, and Save lands when nothing saved moved", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await dragItem(mine, 0, 600 - at(mine).y);
+    await backgroundChangedElsewhere();
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.doesNotMatch(document.body.textContent!, /must be a number|changed elsewhere/);
+    assert.ok(DOC.plots[0].items[0].y <= 562.5, `saved at y ${DOC.plots[0].items[0].y}`);
+  });
+
+  test("a shorter background from elsewhere that moved saved items: Save shows changed elsewhere, not a refusal naming a y", async () => {
+    DOC.plots[0].items = [item({ id: "low", y: 600, h: 50 })];
+    await mount();
+    await addFromPalette("circle");
+    await backgroundChangedElsewhere();
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.doesNotMatch(document.body.textContent!, /must be a number/, "the save was refused for an item's y");
+    assert.match(document.body.textContent!, /This plot changed elsewhere/);
   });
 });
