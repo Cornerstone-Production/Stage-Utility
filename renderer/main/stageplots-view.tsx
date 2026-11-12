@@ -18,6 +18,8 @@ import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/empty-state";
 import { ErrorNote } from "../components/ui/error-note";
 import { cn } from "../lib/cn";
+import { readStored, removeStored, writeStored } from "../lib/safe-storage";
+import { backgroundOf, eyebrow, plotsOf, selectedPlot, tabClass, venueGroups } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
 import { PlotSvg, plotHeight } from "./stageplots/plot-svg";
 import { usePanZoom } from "./stageplots/use-pan-zoom";
@@ -26,43 +28,17 @@ import { useStagePlots } from "./stageplots/use-stageplots";
 /** Where the browser keeps the last venue opened. */
 export const LAST_VENUE_KEY = "stageplots:lastVenue";
 
+/** The last venue opened. Storage refused (a private window, a locked-down kiosk)
+ *  remembers nothing, and the list is shown, which is the answer without it. */
 function remembered(): string | null {
-  try {
-    return localStorage.getItem(LAST_VENUE_KEY);
-  } catch {
-    // Storage refused (a private window, a locked-down kiosk): nothing is
-    // remembered, and the list is shown, which is the answer without it.
-    return null;
-  }
+  return readStored(LAST_VENUE_KEY, (raw) => raw, null);
 }
 
+/** Remembering is a convenience: failing it changes nothing on screen. */
 function remember(id: string | null): void {
-  try {
-    if (id) localStorage.setItem(LAST_VENUE_KEY, id);
-    else localStorage.removeItem(LAST_VENUE_KEY);
-  } catch {
-    // As above: remembering is a convenience, and failing it changes nothing on screen.
-  }
+  if (id) writeStored(LAST_VENUE_KEY, id);
+  else removeStored(LAST_VENUE_KEY);
 }
-
-/** Home venues first, then offsite, each in the order they were added. */
-export function venueGroups(venues: readonly Venue[]): { label: string; venues: Venue[] }[] {
-  return [
-    { label: "Home", venues: venues.filter((v) => v.kind === "home") },
-    { label: "Offsite", venues: venues.filter((v) => v.kind === "offsite") },
-  ].filter((g) => g.venues.length > 0);
-}
-
-function backgroundOf(doc: StagePlotsView, plot: Plot | undefined): BackgroundView | null {
-  return plot?.backgroundId ? (doc.backgrounds.find((b) => b.id === plot.backgroundId) ?? null) : null;
-}
-
-function plotsOf(doc: StagePlotsView, venue: Venue): Plot[] {
-  const byId = new Map(doc.plots.map((p) => [p.id, p]));
-  return venue.plotIds.map((id) => byId.get(id)).filter((p): p is Plot => p !== undefined);
-}
-
-const eyebrow = "block text-[10px] leading-3 font-medium tracking-[0.06em] uppercase text-fg-subtle";
 
 function VenueCard({ doc, venue, onOpen }: { doc: StagePlotsView; venue: Venue; onOpen: () => void }) {
   const plots = plotsOf(doc, venue);
@@ -151,8 +127,7 @@ function PlotFrame({ plot, background }: { plot: Plot; background: BackgroundVie
 function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; onBack: () => void }) {
   const plots = plotsOf(doc, venue);
   const [picked, setPicked] = useState<{ venueId: string; plotId: string } | null>(null);
-  const selected =
-    plots.find((p) => picked?.venueId === venue.id && p.id === picked.plotId) ?? plots.find((p) => p.id === venue.defaultPlotId) ?? plots[0];
+  const selected = selectedPlot(venue, plots, picked);
   return (
     <div className="flex flex-col">
       <button
@@ -183,10 +158,7 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
                 role="tab"
                 aria-selected={p.id === selected.id}
                 onClick={() => setPicked({ venueId: venue.id, plotId: p.id })}
-                className={cn(
-                  "-mb-px inline-flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-footnote font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                  p.id === selected.id ? "border-accent text-fg" : "border-transparent text-fg-muted hover:text-fg",
-                )}
+                className={tabClass(p.id === selected.id)}
               >
                 {p.name}
                 {p.id === venue.defaultPlotId && (

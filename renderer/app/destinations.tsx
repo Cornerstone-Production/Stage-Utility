@@ -35,6 +35,7 @@ import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
+import { StagePlotsEdit } from "../settings/sections/stageplots-edit";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRouteSlot } from "./screens/kept-screens";
 import { ConsoleRoute } from "./console-route";
@@ -332,6 +333,8 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // ServiceCue, whose rail entry it lights.
   { path: "/servicecue/presets", Component: ServiceCueSection, parent: "/servicecue/manage" },
   { path: "/patch/edit", Component: PatchSection },
+  // The stage plots editor, reached from /stageplots. It draws its own heading.
+  { path: "/stageplots/edit", Component: StagePlotsEdit },
   // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.

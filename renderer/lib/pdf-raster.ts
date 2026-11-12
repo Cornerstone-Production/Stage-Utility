@@ -74,9 +74,27 @@ export async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<
   }
 }
 
+/** A page PNG over this is sent as a JPEG instead: a 2400 px RGBA scan can come
+ *  close to the 12 MB upload cap as a PNG, and the server takes either. */
+export const PNG_RASTER_MAX_BYTES = 10 * 1024 * 1024;
+/** The JPEG quality such a page is re-encoded at. */
+export const JPEG_RASTER_QUALITY = 0.92;
+
+/** Whether a page whose PNG is `pngBytes` long goes up as a JPEG instead. */
+export function sendAsJpeg(pngBytes: number): boolean {
+  return pngBytes > PNG_RASTER_MAX_BYTES;
+}
+
+function toBlob(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg", quality?: number): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error(`the page could not be encoded as ${type}`))), type, quality),
+  );
+}
+
 export interface OpenPdf {
   pages: number;
-  /** Page `page` (1-based) as a PNG whose long edge is `longEdgePx`. */
+  /** Page `page` (1-based) as a PNG whose long edge is `longEdgePx`, or a JPEG
+   *  when the PNG would be over PNG_RASTER_MAX_BYTES. */
   renderPage: (page: number, longEdgePx: number) => Promise<Blob>;
   /** Release the document and its worker. */
   destroy: () => void;
@@ -87,8 +105,8 @@ export interface OpenPdf {
  * buffer it is handed to its worker, which empties it here, so it is given a
  * copy: `bytes` stays readable for the caller.
  */
-export async function loadPdf(bytes: ArrayBuffer): Promise<OpenPdf> {
-  const pdfjs = await loadPdfjs();
+export async function loadPdf(bytes: ArrayBuffer, load: () => Promise<Pick<typeof import("pdfjs-dist"), "getDocument">> = loadPdfjs): Promise<OpenPdf> {
+  const pdfjs = await load();
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)) });
   let doc: PdfDoc;
   try {
@@ -101,9 +119,8 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<OpenPdf> {
     pages: doc.numPages,
     async renderPage(page, longEdgePx) {
       const canvas = await renderToCanvas(doc, page, (base) => sizeForLongEdge(base, longEdgePx));
-      return new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("the page could not be encoded as a PNG"))), "image/png"),
-      );
+      const png = await toBlob(canvas, "image/png");
+      return sendAsJpeg(png.size) ? toBlob(canvas, "image/jpeg", JPEG_RASTER_QUALITY) : png;
     },
     destroy() {
       void loadingTask.destroy();
