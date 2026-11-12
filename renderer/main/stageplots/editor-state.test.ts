@@ -6,7 +6,7 @@ import { describe, test } from "node:test";
 
 import type { PlotItem } from "@main/types/stageplots";
 
-import { validateItems } from "@main/services/stageplots-store";
+import { itemsWithin, validateItems } from "@main/services/stageplots-store";
 
 import { editorReducer, initialEditorState, isDirty, type EditorAction, type EditorState } from "./editor-state";
 import { resizeInFrame, snapRotation } from "./geometry";
@@ -206,5 +206,37 @@ describe("geometry", () => {
     assert.equal(snapRotation(-180), 180);
     assert.equal(snapRotation(-178), 180);
     assert.equal(snapRotation(-177), -175);
+  });
+});
+
+describe("a height change", () => {
+  const H32 = 2000 / 3;
+  const GRID = 562.5;
+
+  test("fits the undo and redo steps too, so undoing past it brings back nothing below the edge", () => {
+    let s = run(initialEditorState([box({ id: "low", y: 600, h: 50 })], H32), { type: "nudge", id: "low", dx: 10, dy: 0 }, { type: "nudge", id: "low", dx: 10, dy: 0 }, { type: "undo" });
+    s = run(s, { type: "height", height: GRID }, { type: "undo" });
+    assert.equal(validateItems(s.items, GRID), null, `undoing past the height change brought back ${JSON.stringify(s.items)}`);
+    s = run(s, { type: "redo" }, { type: "redo" });
+    assert.equal(validateItems(s.items, GRID), null, `redo brought back ${JSON.stringify(s.items)}`);
+  });
+
+  test("fits the draft exactly as the server moves the saved items: one rule, wholly inside", () => {
+    const items = [
+      box({ id: "below", y: 600, h: 50 }), // its top below the new edge
+      box({ id: "straddles", y: 540, h: 50 }), // top inside, bottom outside
+      box({ id: "inside", y: 100, h: 50 }),
+      box({ id: "cable", type: "cable", points: [[10, 10], [300, 640]], dashed: true, x: 10, y: 10, w: 290, h: 630 }),
+    ];
+    // A dirty draft (one unrelated change) so the reducer fits it.
+    let s = run(initialEditorState(items, H32), { type: "patch", id: "inside", fields: { label: "Riser" } });
+    s = run(s, { type: "height", height: GRID });
+    const server = itemsWithin(items, GRID).items;
+    assert.deepEqual(
+      s.items.map((it) => (it.id === "inside" ? { ...it, label: "" } : it)),
+      server,
+      "the draft and the server fitted the same items differently",
+    );
+    assert.equal(validateItems(server, GRID), null);
   });
 });

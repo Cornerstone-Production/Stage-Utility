@@ -6,7 +6,7 @@
 // background's aspect ratio, or 16:9 with a plain grid when there is none.
 // Items are drawn in those units, in the empty layer below.
 
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject, type SVGProps } from "react";
 
 import type { PanZoom } from "./use-pan-zoom";
 
@@ -87,6 +87,8 @@ export interface PlotSvgProps {
   widthPx?: number;
   /** False draws items without labels: a thumbnail. */
   labels?: boolean;
+  /** More attributes for the SVG itself (the editor's focusable canvas); they win over the defaults. */
+  svgProps?: SVGProps<SVGSVGElement>;
 }
 
 export function PlotSvg({
@@ -103,6 +105,7 @@ export function PlotSvg({
   labelPx = 12,
   widthPx,
   labels = true,
+  svgProps,
 }: PlotSvgProps) {
   const height = plotHeight(background);
   const ownRef = useRef<SVGSVGElement>(null);
@@ -118,6 +121,7 @@ export function PlotSvg({
       style={{ aspectRatio: `${PLOT_UNITS_WIDE} / ${height}` }}
       {...gestures}
       {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": `Stage plot ${plot.name}` })}
+      {...svgProps}
     >
       <rect width={PLOT_UNITS_WIDE} height={height} fill="var(--su-plot-paper)" />
       {background ? (

@@ -96,6 +96,15 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     venue(m[1]).defaultPlotId = (body as { plotId: string }).plotId;
     return { status: 200, json: venue(m[1]) };
   }
+  if (method === "PUT" && (m = /^\/api\/stageplots\/plots\/([^/]+)\/items$/.exec(path))) {
+    // As the server does: the version decides, never a canned answer.
+    const p = DOC.plots.find((x) => x.id === m![1])!;
+    const b = body as { version: number; items: Plot["items"] };
+    if (b.version !== p.version) return { status: 409, json: { error: "changed elsewhere", version: p.version } };
+    if (JSON.stringify(b.items) === JSON.stringify(p.items)) return { status: 200, json: { plot: p } };
+    Object.assign(p, { items: b.items, version: p.version + 1 });
+    return { status: 200, json: { plot: p } };
+  }
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
     Object.assign(p, body, { version: p.version + 1 });
@@ -129,6 +138,8 @@ const { render, cleanup, screen, fireEvent, within } = await import("@testing-li
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { StagePlotsEdit } = await import("./stageplots-edit.js");
+const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
+const { itemRenderProbe } = await import("../../main/stageplots/plot-items.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 /** A PDF as the page picker sees it: three pages, each rendered to a labelled blob. */
@@ -151,7 +162,7 @@ const fakePdf = async () => {
 
 async function mount() {
   await act(async () => {
-    render(React.createElement(StagePlotsEdit, { openPdf: fakePdf }));
+    render(React.createElement(React.Fragment, null, React.createElement(StagePlotsEdit, { openPdf: fakePdf }), React.createElement(ConfirmHost)));
   });
   await settle();
   await settle();
@@ -358,5 +369,256 @@ describe("/stageplots/edit", () => {
     await settle();
     assert.deepEqual(writes(), ["PATCH /api/stageplots/plots/p-1"]);
     assert.deepEqual(sent[0].body, { backgroundId: null });
+  });
+});
+
+// ── The plot editor ────────────────────────────────────────────────────────
+//
+// The canvas is driven with pointer events against a stubbed box: jsdom lays
+// nothing out, so the SVG is given a 1000 x 666.7 pixel box, one pixel per plot
+// unit at the whole-plot view (the background is 2400 x 1600). Pointer capture,
+// pinch and the measured label size are driven in a browser.
+
+function item(over: Partial<Plot["items"][number]> & { id: string }): Plot["items"][number] {
+  return { type: "box", x: 100, y: 100, w: 80, h: 60, rotation: 0, label: "", color: null, notes: "", inputs: [], ...over };
+}
+
+const canvas = () => screen.getByTestId("canvas") as unknown as SVGSVGElement;
+function stubBox() {
+  const svg = canvas();
+  svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 2000 / 3, width: 1000, height: 2000 / 3, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+}
+const drawn = (id: string) => canvas().querySelector(`[data-id="${id}"]`)!;
+const at = (id: string) => ({ x: Number(drawn(id).getAttribute("data-x")), y: Number(drawn(id).getAttribute("data-y")) });
+const banner = () => screen.queryByText(/Unsaved changes to/);
+
+async function pointer(kind: "pointerDown" | "pointerMove" | "pointerUp", target: Element, x: number, y: number) {
+  await act(async () => {
+    fireEvent[kind](target, { pointerId: 1, clientX: x, clientY: y, button: 0, isPrimary: true });
+  });
+}
+
+/** Press on `id` at its top-left plus 5, drag by (dx, dy) in `steps` moves, let go. */
+async function dragItem(id: string, dx: number, dy: number, steps = 4) {
+  stubBox();
+  const start = at(id);
+  const [x0, y0] = [start.x + 5, start.y + 5];
+  await pointer("pointerDown", drawn(id).querySelector("rect, ellipse, polyline, circle, g")!, x0, y0);
+  for (let i = 1; i <= steps; i++) await pointer("pointerMove", canvas(), x0 + (dx * i) / steps, y0 + (dy * i) / steps);
+  await pointer("pointerUp", canvas(), x0 + dx, y0 + dy);
+  await settle();
+}
+
+async function addFromPalette(testId: string): Promise<string> {
+  const before = new Set([...canvas().querySelectorAll("[data-id]")].map((g) => g.getAttribute("data-id")));
+  await click(screen.getByTestId(`add-${testId}`));
+  const added = [...canvas().querySelectorAll("[data-id]")].map((g) => g.getAttribute("data-id")!).find((id) => !before.has(id));
+  assert.ok(added, `adding ${testId} drew nothing`);
+  return added;
+}
+
+describe("the plot editor", () => {
+  test("clicking Drum kit in the palette adds a selected drum kit", async () => {
+    await mount();
+    const id = await addFromPalette("drumkit");
+    assert.equal(drawn(id).querySelector("[data-symbol]")?.getAttribute("data-symbol"), "drumkit");
+    assert.ok(drawn(id).querySelector('[data-hd="size"]'), "the new item is not selected");
+    assert.match(screen.getByTestId("inspector").textContent!, /Symbol · Drum kit/);
+    assert.ok(banner(), "no unsaved banner");
+    assert.deepEqual(writes(), [], "adding saved something");
+  });
+
+  test("dragging moves it and one undo puts it back, without panning the zoomed plot", async () => {
+    await mount();
+    const id = await addFromPalette("box");
+    await click(screen.getByRole("button", { name: "Zoom in" }));
+    const view = canvas().getAttribute("viewBox");
+    const before = at(id);
+    await dragItem(id, 80, 40);
+    // Zoomed in 1.25x: 80 screen pixels are 64 plot units.
+    assert.deepEqual(at(id), { x: before.x + 64, y: before.y + 32 });
+    assert.equal(canvas().getAttribute("viewBox"), view, "dragging an item panned the plot");
+    await click(screen.getByTestId("undo"));
+    assert.deepEqual(at(id), before, "one undo did not put the drag back");
+    await click(screen.getByTestId("undo"));
+    assert.equal(canvas().querySelector(`[data-id="${id}"]`), null, "the second undo is the add");
+  });
+
+  test("the banner waits for a drag that began on a clean draft to end, so the canvas does not move under it", async () => {
+    DOC.plots[0].items = [item({ id: "b" })];
+    await mount();
+    stubBox();
+    const start = at("b");
+    await pointer("pointerDown", drawn("b").querySelector("rect")!, start.x + 5, start.y + 5);
+    await pointer("pointerMove", canvas(), start.x + 25, start.y + 5);
+    await pointer("pointerMove", canvas(), start.x + 45, start.y + 5);
+    assert.ok(banner() === null, "the banner appeared mid-drag");
+    await pointer("pointerUp", canvas(), start.x + 45, start.y + 5);
+    await settle();
+    assert.ok(banner() !== null, "no banner after the drag");
+    assert.equal(at("b").x, start.x + 40);
+  });
+
+  test("typing RF filters suggestions to RF antenna and Enter sets the label", async () => {
+    DOC.plots[1].items = [item({ id: "x1", type: "symbol", symbol: "amp", label: "RF antenna" })];
+    await mount();
+    const id = await addFromPalette("box");
+    const field = screen.getByTestId("f-label") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.focus(field);
+    });
+    const list = () => screen.getByTestId("suggestions");
+    assert.match(list().textContent!, /In this venueRF antennaStarter gearDrum kit/, "focus shows the whole list");
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "RF" } });
+    });
+    assert.deepEqual(within(list()).getAllByRole("option").map((o) => o.textContent), ["RF antenna"]);
+    assert.equal(list().querySelector("mark")?.textContent, "RF");
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "ArrowDown" });
+    });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    await settle();
+    assert.equal((screen.getByTestId("f-label") as HTMLInputElement).value, "RF antenna");
+    assert.ok([...drawn(id).querySelectorAll("text")].some((t) => t.textContent === "RF antenna"), "the canvas does not show the label");
+  });
+
+  test("arrow keys nudge only while the canvas has focus", async () => {
+    await mount();
+    const id = await addFromPalette("box");
+    const before = at(id);
+    assert.equal(document.activeElement, canvas(), "adding does not focus the canvas");
+    await act(async () => {
+      fireEvent.keyDown(canvas(), { key: "ArrowRight" });
+      fireEvent.keyDown(canvas(), { key: "ArrowDown", shiftKey: true });
+    });
+    assert.deepEqual(at(id), { x: before.x + 4, y: before.y + 20 });
+    const field = screen.getByTestId("f-label");
+    await act(async () => {
+      field.focus();
+      fireEvent.keyDown(field, { key: "ArrowRight" });
+      fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    });
+    assert.deepEqual(at(id), { x: before.x + 4, y: before.y + 20 }, "an arrow key moved the item from outside the canvas");
+  });
+
+  test("Save sends the version and clears the banner", async () => {
+    await mount();
+    await addFromPalette("conn");
+    await click(screen.getByRole("button", { name: "Save" }));
+    const put = sent.find((w) => w.what === "PUT /api/stageplots/plots/p-1/items")!;
+    assert.ok(put, `no save: ${writes().join(", ")}`);
+    assert.equal((put.body as { version: number }).version, 0);
+    assert.equal((put.body as { items: unknown[] }).items.length, 1);
+    assert.equal(banner(), null);
+    assert.equal(DOC.plots[0].version, 1);
+  });
+
+  test("a 409 shows Reload and keeps the draft", async () => {
+    await mount();
+    const mine = await addFromPalette("drumkit");
+    // Another browser saves this plot first; its broadcast arrives here.
+    DOC.plots[0].items = [item({ id: "theirs", label: "Their riser" })];
+    DOC.plots[0].version = 1;
+    await act(async () => broadcast());
+    await settle();
+    assert.ok(drawn(mine), "a change elsewhere replaced the draft");
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.match(document.body.textContent!, /This plot changed elsewhere/);
+    assert.ok(drawn(mine), "the draft was dropped");
+    assert.equal(DOC.plots[0].items[0].id, "theirs", "the other save was overwritten");
+    await click(screen.getByRole("button", { name: "Reload" }));
+    assert.ok(drawn("theirs"));
+    assert.equal(canvas().querySelector(`[data-id="${mine}"]`), null);
+    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.equal(banner(), null);
+  });
+
+  test("Discard after a save from elsewhere shows that save, and the next Save is not a 409", async () => {
+    await mount();
+    await addFromPalette("box");
+    DOC.plots[0].items = [item({ id: "theirs", label: "Their riser" })];
+    DOC.plots[0].version = 1;
+    await act(async () => broadcast());
+    await settle();
+    await click(screen.getByRole("button", { name: "Discard" }));
+    assert.ok(canvas().querySelector('[data-id="theirs"]') !== null, "Discard went back to the plot as it was before the other save");
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.equal(DOC.plots[0].version, 2);
+  });
+
+  test("a fade or background change while unsaved does not make my own Save a 409", async () => {
+    await mount();
+    await addFromPalette("box");
+    const slider = screen.getByLabelText("Fade");
+    await act(async () => {
+      fireEvent.change(slider, { target: { value: "70" } });
+      fireEvent.pointerUp(slider);
+    });
+    await settle();
+    assert.equal(DOC.plots[0].version, 1, "the fade did not bump the version");
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/, "my own fade made my Save a 409");
+    assert.equal((sent.at(-1)!.body as { version: number }).version, 1);
+    assert.equal(DOC.plots[0].items.length, 1);
+  });
+
+  test("a change elsewhere to a clean draft is taken", async () => {
+    await mount();
+    DOC.plots[0].items = [item({ id: "theirs", label: "Their riser" })];
+    DOC.plots[0].version = 1;
+    await act(async () => broadcast());
+    await settle();
+    assert.ok(drawn("theirs"));
+    assert.equal(banner(), null);
+  });
+
+  test("Discard puts back what is saved", async () => {
+    DOC.plots[0].items = [item({ id: "b" })];
+    await mount();
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Discard" }));
+    assert.deepEqual([...canvas().querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id")), ["b"]);
+    assert.equal(banner(), null);
+  });
+
+  test("switching plot with unsaved changes asks first", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await click(tabs()[1]);
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /Room One · Standard are not saved/);
+    await click(within(dialog).getByRole("button", { name: "Cancel" }));
+    assert.equal(tabs()[0].getAttribute("aria-selected"), "true", "Cancel left the plot");
+    assert.ok(drawn(mine), "Cancel dropped the draft");
+    await click(tabs()[1]);
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
+    assert.equal(tabs()[1].getAttribute("aria-selected"), "true");
+    assert.equal(banner(), null);
+  });
+
+  test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
+    DOC.plots[0].items = Array.from({ length: 500 }, (_, i) => item({ id: `i-${i}`, x: (i % 25) * 38, y: Math.floor(i / 25) * 30, w: 30, h: 20 }));
+    await mount();
+    stubBox();
+    const target = "i-260";
+    const start = at(target);
+    await pointer("pointerDown", drawn(target).querySelector("rect")!, start.x + 5, start.y + 5);
+    await settle();
+    const renders = new Map<string, number>();
+    itemRenderProbe.current = (id) => renders.set(id, (renders.get(id) ?? 0) + 1);
+    try {
+      for (let i = 1; i <= 10; i++) await pointer("pointerMove", canvas(), start.x + 5 + i * 3, start.y + 5);
+      await pointer("pointerUp", canvas(), start.x + 35, start.y + 5);
+      await settle();
+    } finally {
+      itemRenderProbe.current = null;
+    }
+    assert.deepEqual([...renders], [[target, 10]], "items other than the dragged one re-rendered, or it rendered more than once per move");
+    assert.equal(at(target).x, start.x + 30);
   });
 });

@@ -16,6 +16,7 @@
 // Every changed item goes through fitItem, so the draft is always something
 // the server will accept.
 
+import { fitToHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type CablePoint, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
 
 import { clampPoint, fitItem, resizeInFrame, round1, snapRotation, withCableBox } from "./geometry";
@@ -97,7 +98,9 @@ export type EditorAction =
   | { type: "saved"; sent: PlotItem[]; items: PlotItem[] }
   | { type: "discard" }
   /** The server's items replace the draft and its history (a reload, or a change from elsewhere to a clean draft). */
-  | { type: "load"; items: PlotItem[]; height: number };
+  | { type: "load"; items: PlotItem[]; height: number }
+  /** The plot's height changed (its background did); later changes are kept inside the new one. */
+  | { type: "height"; height: number };
 
 export function initialEditorState(items: PlotItem[], height: number): EditorState {
   return { items, selectedId: null, undo: [], redo: [], savedItems: items, height, gesture: null };
@@ -280,6 +283,30 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         gesture: null,
         selectedId: state.savedItems.some((it) => it.id === state.selectedId) ? state.selectedId : null,
       };
+    case "height": {
+      if (state.height === action.height) return state;
+      // Fitted by the server's own rule (fitToHeight), so nothing can come back
+      // below the new edge: every undo and redo step always, and the draft under
+      // unsaved work (a background changed elsewhere), so a Save reaches the
+      // version check rather than being refused for an item's y. A clean draft
+      // is replaced by the server's items instead.
+      const fit = (items: PlotItem[]) => {
+        const next = items.map((it) => fitToHeight(it, action.height));
+        return next.every((it, i) => it === items[i]) ? items : next;
+      };
+      const snap = (s: Snapshot) => {
+        const items = fit(s.items);
+        return items === s.items ? s : { ...s, items };
+      };
+      return {
+        ...state,
+        height: action.height,
+        items: isDirty(state) ? fit(state.items) : state.items,
+        undo: state.undo.map(snap),
+        redo: state.redo.map(snap),
+        gesture: state.gesture && snap(state.gesture),
+      };
+    }
     case "load":
       return {
         ...initialEditorState(action.items, action.height),
