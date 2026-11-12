@@ -1165,3 +1165,25 @@ test("no notice on a first run, or when every category is in a role", async () =
     covered.restore();
   }
 });
+
+test("seeding a category a role was made for once, and then lost, makes a role with an id of its own", async () => {
+  // Seeded ids come from the name. A role made by seeding keeps its id when its
+  // category is taken out of it, so seeding that category again built the same id.
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: [...SETUP_ROLES, { id: "role-graphics", name: "Visuals", members: [] }],
+    shown: ["sun"],
+    types: TYPES,
+    cats: { sun: ["Audio", "Graphics"] },
+  });
+  try {
+    await mount();
+    const bar = await eventually(() => document.querySelector("[data-notice]")!.parentElement!);
+    fireEvent.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
+    await eventually(() => assert.equal(s.roles().length, 7));
+    const ids = s.roles().map((r) => r.id);
+    assert.equal(new Set(ids).size, ids.length, `two roles share an id: ${ids.join(", ")}`);
+  } finally {
+    s.restore();
+  }
+});

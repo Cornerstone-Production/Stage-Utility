@@ -22,7 +22,7 @@ export function migrateLayouts(
     if (!key) return null;
     const existing = byName.get(key);
     if (existing) return existing.id;
-    const [created] = seedRoles([name]);
+    const [created] = seedRoles([name], nextRoles.map((r) => r.id));
     byName.set(key, created);
     nextRoles.push(created);
     return created.id;

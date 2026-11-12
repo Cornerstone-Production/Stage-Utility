@@ -79,7 +79,7 @@ export function serviceCueServer(setup: ServiceCueServerSetup = {}): {
       case "POST /api/servicecue/roles/seed": {
         const covered = new Set(roles.flatMap((r) => r.members.map((m) => m.trim().toLowerCase())));
         const missing = (cats[(body as { serviceTypeId: string }).serviceTypeId] ?? []).filter((c) => !covered.has(c.trim().toLowerCase()));
-        roles = [...roles, ...seedRoles(missing)];
+        roles = [...roles, ...seedRoles(missing, roles.map((r) => r.id))];
         return ok(roles);
       }
       case "GET /api/servicecue/config":

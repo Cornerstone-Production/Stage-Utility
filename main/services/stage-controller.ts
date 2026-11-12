@@ -1933,7 +1933,7 @@ export class StageController {
       console.log(`[servicecue] made no roles for service type ${scrub(serviceTypeId)}: ${cats.length ? `all ${scrub(cats.length)} of its categories are in a role` : "Planning Center listed no categories for it"}`);
       return roles;
     }
-    const added = seedRoles(missing);
+    const added = seedRoles(missing, roles.map((r) => r.id));
     const next = [...roles, ...added];
     await serviceCueRolesStore.save(next);
     console.log(`[servicecue] made ${scrub(added.length)} role(s) for service type ${scrub(serviceTypeId)}: ${added.map((r) => scrub(r.name)).join(", ")}`);

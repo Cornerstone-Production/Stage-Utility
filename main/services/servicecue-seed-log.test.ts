@@ -65,3 +65,11 @@ test("a Planning Center read that fails is said, and still fails the seed", asyn
   assert.match(String(error), /502/, "the failure was swallowed");
   assert.deepEqual(lines, ["[servicecue] could not make roles for service type st1: Planning Center answered 502"]);
 });
+
+test("a seeded role never takes an id another role already has", async () => {
+  // "role-lights" was seeded once, then renamed and emptied; Lights comes back to be seeded.
+  await serviceCueRolesStore.save([{ id: "role-lights", name: "Stage lighting", members: [] }]);
+  mock.method(stageController, "listServiceCueNoteCategories", async () => ["Lights"]);
+  const roles = await stageController.seedServiceCueRoles("st1");
+  assert.deepEqual(roles.map((r) => r.id), ["role-lights", "role-lights-2"]);
+});
