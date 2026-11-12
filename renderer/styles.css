@@ -2090,15 +2090,21 @@ button.score-capsule:focus-visible {
   --su-companion-plate: #000;
 }
 
-/* Stage plots: the paper a plot is drawn on, and its grid. A converted background
-   is a light raster, so a plot sits on paper in both themes: dimmed in dark rather
-   than inverted, since inverting would turn a colour photo into a negative.
-   Strictly neutral (R=G=B). */
+/* Stage plots: the paper a plot is drawn on, its grid, the ink of an item with no
+   colour of its own and the ink of its label. A converted background is a light
+   raster, so a plot sits on paper in both themes: dimmed in dark rather than
+   inverted, since inverting would turn a colour photo into a negative. A printed
+   plot is white paper in either theme (.stageplots-paper). Strictly neutral
+   (R=G=B). An item's own colour is data: one of the patch sheet's swatches. */
 :root {
   --su-plot-paper: #ffffff;
   --su-plot-grid: #ededed;
+  --su-plot-ink: #3b3b3b;
+  --su-plot-label: #1c1c1c;
 }
 .dark {
   --su-plot-paper: #d9d9d9;
   --su-plot-grid: #cacaca;
+  --su-plot-ink: #303030;
+  --su-plot-label: #141414;
 }

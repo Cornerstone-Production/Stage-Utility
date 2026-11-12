@@ -132,7 +132,7 @@ describe("/stageplots", () => {
     assert.equal(image.getAttribute("href"), background.url);
     assert.equal(image.getAttribute("opacity"), "0.66");
     assert.equal(plot().getAttribute("viewBox"), "0 0 1000 666.6666666666666");
-    assert.ok(plot().querySelector("[data-items]"), "the items layer PR 2 draws into");
+    assert.ok(plot().querySelector("[data-items]"), "no items layer");
   });
 
   test("a stageplots:updated event redraws without a reload", async () => {

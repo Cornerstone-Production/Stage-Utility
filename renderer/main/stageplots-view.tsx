@@ -52,7 +52,7 @@ function VenueCard({ doc, venue, onOpen }: { doc: StagePlotsView; venue: Venue; 
       className="grid w-full grid-cols-[84px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-line bg-surface p-2 text-left shadow-[var(--su-shadow-1)] transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:grid-cols-[96px_minmax(0,1fr)]"
     >
       <span className="block h-14 w-[84px] overflow-hidden rounded-md border border-line bg-[var(--su-plot-paper)] sm:h-16 sm:w-24">
-        {shown && <PlotSvg plot={shown} background={background} fade={shown.bgFade} decorative className="h-full w-full" />}
+        {shown && <PlotSvg plot={shown} background={background} fade={shown.bgFade} decorative labels={false} className="h-full w-full" />}
       </span>
       <span className="min-w-0">
         <b className="block truncate text-[14px] leading-[19px] font-semibold text-fg">{venue.name}</b>
