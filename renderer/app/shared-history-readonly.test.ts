@@ -14,6 +14,10 @@
 // Asserted on the ROUTING, not on markup: the defect was which component a path
 // resolves to and with what prop, and a markup assertion would break on every
 // restyle while missing exactly this.
+//
+// What readOnly hides is asserted where each control lives: the header's
+// actions below, the Trends card's sound-metric select (an organisation
+// setting) in settings/sections/history-trends-metric.test.tsx.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

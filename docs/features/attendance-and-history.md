@@ -112,10 +112,11 @@ in the card's subtitle.
 ![The Trends card: attendance per service type over 16 weeks, with series milestones](../images/history-trends.png)
 
 The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
-records three figures every Sunday and the tile shows one, captioned *latest day
-total* — or *latest day peak* under the sound measure — with the date of that day
-beside it, so a type that has not recorded for three weeks does not read as this
-week:
+records three figures every Sunday and the tile shows one. The tile's first line
+is the service type and the date of that day, so a type that has not recorded for
+three weeks does not read as this week; the second says what the figure is,
+*latest day total* or, under the sound measure, *latest day peak* and the metric
+(*latest day peak LAeq 2*):
 
 | | |
 |---|---|
@@ -219,13 +220,37 @@ The switch at the top right chooses what is plotted:
 | | |
 |---|---|
 | **Attendance** | peak people in the room, the default |
-| **Sound** | the loudest reading on your primary Smaart metric — the same metric a day-list row names, chosen the same way |
+| **Sound** | the loudest reading on one Smaart metric, which you choose (below) |
 
 Everything below follows the switch: the tiles read decibels, the axis becomes a
 dB band framed on the levels rather than anchored at 0, and a day is the loudest
 recording on it rather than the sum. A service type that recorded attendance and
-no sound keeps its tile and says *no sound recorded* rather than disappearing
-when you switch. The choice is remembered per browser.
+no sound keeps its tile and says so (*no LAeq 2 reading*) rather than
+disappearing when you switch. The Attendance / Sound choice is remembered per
+browser.
+
+Under **Sound** a **metric** select appears between the switch and the range. It
+lists every metric the loaded recordings carry, in one stable order (*LAeq 2*
+before *LAeq 10*). A name the server would refuse as a choice is left out (see
+`POST /api/history/trends-prefs` in the [API reference](../reference/api.md)). The
+choice is an **organisation** setting, not a browser one: it is saved on the
+server, shared by every browser, carried in a configuration backup, and a change
+in one browser reaches the others without a reload. Until somebody chooses, the
+card plots *LAeq 2* if any recording carries it, else *LAeq 1*, else the first of
+this browser's own History SPL metric list that a recording carries; choosing
+*LAeq 2* is choosing that default. Once a choice is made it stays until somebody
+picks another: there is no option to go back to "nobody has chosen", and a saved
+metric that the recordings stop carrying is kept, not swapped for a neighbour.
+It still shows in the select, marked *not found*.
+
+The subtitle (*Peak LAeq 2 per service type*), each tile's second line, and the
+chart's accessible label all name the metric. A recording that lacks the chosen
+metric adds no point for it, rather than another metric's figure; a service type
+none of whose recordings carry it keeps its tile and its legend entry, noted *no
+LCeq 2 reading*. The shared read-only `/history` link plots the organisation's
+choice and shows no select. This setting is Trends's own: the History SPL
+section's Customize list, and the *Peak* its rows and service header name, keep
+following each browser's own choice.
 
 A recording with no figure under the current measure is skipped rather than
 counted as zero, so a Sunday where two of three services had a counter running
@@ -274,7 +299,7 @@ tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
 and the readout together; its legend entry stays, dimmed, and clicking it brings
 the type back. The choice is remembered per browser.
 
-The sound measure reads each recording's peak from the **SPL summary**, which
+The sound measure reads each recording's peak on the chosen metric from the **SPL summary**, which
 this page already loads — not from the per-item records. Recordings made before
 per-metric stats existed are included: the summary reports them under the metric
 name the record itself carries. The chart plots one

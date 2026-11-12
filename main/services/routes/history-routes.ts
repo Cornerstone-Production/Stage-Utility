@@ -30,6 +30,7 @@ import {
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
+import { trendsPrefs, TrendsPrefsRefused } from "../trends-prefs.js";
 import { sampleArchive } from "../archive/sample-archive.js";
 import { readBaptismRows } from "../archive/rebuild-baptism.js";
 import { baptismLaneSpans, type BaptismSpan } from "../archive/baptism-lane.js";
@@ -229,6 +230,23 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       // indistinguishable from a complete one.
       const outcome = await mergeServiceRecords(body.sourceKey, body.targetKey);
       json(res, { ok: true, ...outcome });
+      return;
+    }
+    // ── Trends settings: which Smaart metric the Sound measure plots ──
+    if (method === "GET" && pathname === "/api/history/trends-prefs") {
+      json(res, trendsPrefs.state());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/trends-prefs") {
+      const body = await readBodyOrEmpty(req);
+      try {
+        json(res, await trendsPrefs.setSoundMetric(body.soundMetric));
+      } catch (err) {
+        // A write that failed is left to the server's handler (500): a choice
+        // that did not save must not read as one that did.
+        if (!(err instanceof TrendsPrefsRefused)) throw err;
+        error(res, err.message);
+      }
       return;
     }
     // ── Milestones: the operator's own dates marked under the Trends chart ──

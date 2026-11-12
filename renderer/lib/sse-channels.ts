@@ -73,6 +73,9 @@ export const HYDRATED_CHANNELS = [
   // not an instruction: a frame that is not the next one says a change was
   // missed, and the page re-reads every board.
   "boards:changed",
+  // The metric the Trends card plots under Sound: chosen once and standing, so
+  // a card opened after the last change must still show it.
+  "trends:prefs",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

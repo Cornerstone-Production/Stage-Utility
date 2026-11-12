@@ -337,7 +337,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw: `{metrics}`, server-wide; `POST` takes `{metrics: string[]}` |
-| GET / POST | `/api/spl/trend` | A stored `{shown, metric}` preference for an SPL line on an attendance trend. Nothing in the app reads it; the Recent services widget keeps its own `showSpl` and `splMetric` settings |
+| GET / POST | `/api/spl/trend` | A stored `{shown, metric}` preference for an SPL line on an attendance trend. Nothing in the app reads it; the Trends card's metric is `/api/history/trends-prefs`, and the Recent services widget keeps its own `showSpl` and `splMetric` settings |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
@@ -417,6 +417,8 @@ thing.
 | GET | `/api/history/milestones` | The operator's dated marks for the Trends chart |
 | POST | `/api/history/milestones` | Add or replace one. `{ date, label, serviceTypeId? }`, plus `id` to replace. `400` with the reason for a `date` that is not a real `YYYY-MM-DD` day, a blank or over-60-character `label`, or a `serviceTypeId` nothing has recorded — each would store a mark nobody would ever see. Answers the whole list |
 | DELETE | `/api/history/milestones/:id` | Remove one. Answers the whole list, or `404` when there is no such id |
+| GET | `/api/history/trends-prefs` | The Trends card's organisation setting, the snapshot `trends:prefs` also carries: `{rev, soundMetric}`. `soundMetric` is the Smaart metric the Sound measure plots (`"LAeq 2"`), or null when nobody has chosen and the card uses its default |
+| POST | `/api/history/trends-prefs` | Choose it: `{soundMetric}`, a metric name of 1-48 letters, digits, spaces and `. _ + ( ) / -` that starts with a letter or digit, or `null` to go back to the default. `400` with the reason for anything else, including a body with no `soundMetric`. Shared by every browser, and part of a configuration backup. A choice already in force writes and broadcasts nothing |
 | POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
 Two things to know:
@@ -741,7 +743,7 @@ something to change:
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
 `wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
-`video:probe` · `messages:state` · `home:snoozes` · `boards:changed` (the last
+`video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
 [Network traffic](../ops/network-traffic.md#slot-boards))
 

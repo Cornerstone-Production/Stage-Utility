@@ -128,6 +128,8 @@ const EXPECTED_CONFIG = [
   "servicecue-roles.json",
   "settings.json",
   "slots.json",
+  // Which Smaart metric the History Trends card plots under Sound.
+  "trends-prefs.json",
   "video-feeds.json",
   "views.json",
   "wireless-connections.json",

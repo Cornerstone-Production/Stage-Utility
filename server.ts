@@ -72,6 +72,7 @@ import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
 import { homeSnoozes } from "./main/services/home-snoozes.js";
+import { trendsPrefs } from "./main/services/trends-prefs.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { configSnapshot } from "./main/services/config-snapshot.js";
@@ -144,6 +145,8 @@ for (const { what, error } of await messagesService.start()) {
 }
 // Home's snoozed problems: load them, and watch pco:live for a service starting.
 await homeSnoozes.start();
+// The History Trends card's chosen sound metric: loaded so the hello burst can serve it.
+await trendsPrefs.start();
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 

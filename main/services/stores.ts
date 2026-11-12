@@ -45,6 +45,7 @@ import "./kiosk-devices-store.js";
 import "./settings-store.js";
 import "./signal-store.js";
 import "./update-notices-store.js";
+import "./trends-prefs.js";
 import "./slots-store.js";
 import "./spl-history-store.js";
 import "./video/feed-store.js";

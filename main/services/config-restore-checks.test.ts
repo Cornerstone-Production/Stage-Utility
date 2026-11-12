@@ -86,6 +86,7 @@ const GOOD: Record<string, unknown> = {
     wirelessMeterRateMs: 250,
   },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
+  "trends-prefs.json": { soundMetric: "LAeq 2" },
   "video-feeds.json": {
     feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } }],
     ports: DEFAULT_VIDEO_PORTS,
@@ -123,6 +124,7 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "servicecue-roles.json": { value: { roles: [] }, says: "list" },
   "settings.json": { value: { ...(GOOD["settings.json"] as object), accentColor: "red" }, says: "accentColor" },
   "slots.json": { value: { version: 3, defaults: { v1: { "123": "s1" } }, overrides: {} }, says: "slots" },
+  "trends-prefs.json": { value: { soundMetric: "LAeq 2\nforged" }, says: "soundMetric" },
   "video-feeds.json": {
     value: { feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "file:/etc/passwd", username: "" } }] },
     says: "protocol",
