@@ -20,6 +20,7 @@ import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-l
 import {
   byOrder,
   columnPatch,
+  copyName,
   deleteLayoutBody,
   deleteRoleBody,
   listOf,
@@ -278,11 +279,9 @@ export function ServiceCueSection() {
     setExpandedId(id);
     setNameLayoutId(id);
     // Built from the list as it is when it saves: the first free "Layout N" then.
-    void persist((list) => {
-      const made = newLayout(list, id);
-      announce(`Added ${made.name}. It starts with Clock, Time and Item; every role is in Not in this layout.`);
-      return [...list, made];
-    });
+    void persist((list) => [...list, newLayout(list, id)]);
+    // Said from here, not from the edit: a queued edit is replayed at every redraw.
+    announce(`Added ${newLayout(layouts, id).name}. It starts with Clock, Time and Item; every role is in Not in this layout.`);
   }
 
   function duplicate(l: ServiceCueLayout) {
@@ -290,7 +289,7 @@ export function ServiceCueSection() {
     setExpandedId(id);
     setNameLayoutId(id);
     void persist((list) => duplicateLayout(list, l.id, id));
-    announce(`Duplicated ${l.name}.`);
+    announce(`Duplicated as ${copyName(l.name, layouts)}.`);
   }
 
   async function removeLayout(l: ServiceCueLayout) {

@@ -226,6 +226,7 @@ test("Duplicate puts '<name> copy' right after it, under its own address, open t
     assert.notEqual(copy.id, "l-audio");
     assert.equal(copy.slug, "audio-copy-2", "the copy took the original's address");
     await eventually(() => assert.deepEqual(openCards(), ["Audio copy 2"]));
+    await eventually(() => assert.match(said(), /Duplicated as Audio copy 2\./));
     // Named by the page, not the operator: its first rename moves its address, as a new layout's does.
     const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
     fireEvent.change(box, { target: { value: "Monitors" } });
