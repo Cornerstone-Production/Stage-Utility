@@ -355,7 +355,6 @@ function placeRects() {
       cols.set(col, [...(cols.get(col) ?? []), el]);
     });
     let x = 0;
-    let gaps = 0;
     for (const [col, els] of cols) {
       rects.set(col, { x, y: y0, w: 100, h: 400 });
       const bar = col.querySelector("[data-mic-column-bar]");
@@ -367,12 +366,10 @@ function placeRects() {
         if (zone) rects.set(zone, { x: r.x, y: r.y + 45, w: 100, h: 45 });
       });
       x += 110;
-      gaps++;
     }
     sec.querySelectorAll("[data-mic-gap]").forEach((g, gi) => {
       rects.set(g, { x: gi * 110 - 15, y: y0, w: 10, h: 400 });
     });
-    void gaps;
   });
 }
 const centre = (el: Element) => {

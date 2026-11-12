@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
 import { useStatusChannel } from "./use-status-channel";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "@main/types/devices";
+
+/** Module-level: it closes over nothing, so it is the same function every render. */
+function readStatuses(): Promise<DeviceStatus[]> {
+  return invoke<DeviceStatus[]>("wireless:channelStatuses");
+}
 
 /** Stable identity, so a hook with nothing yet does not hand a new array out per render. */
 const NO_CHANNELS: DeviceStatus[] = [];
@@ -44,19 +49,18 @@ export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
 export function useWirelessTelemetryStatus(enabled = true): { channels: DeviceStatus[]; known: boolean; failed: boolean } {
   // Adding or removing a connection changes which channels exist at all, which
   // no telemetry broadcast will report — a removed receiver simply stops
-  // sending. Bumping this re-identifies `read`, which is what useStatusChannel
-  // treats as a fresh window: it re-subscribes and re-reads, ordering intact.
+  // sending. Bumping this is passed as `resubscribeKey`, which useStatusChannel
+  // treats as a fresh window: it re-subscribes and re-reads, ordering intact. It
+  // is NOT read inside `read`: the React Compiler drops a `void rev` dependency
+  // and hoists `read`, so nothing would ever re-subscribe.
   const [connectionsRev, setConnectionsRev] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     return onNotification("wireless:connections-changed", () => setConnectionsRev((n) => n + 1));
   }, [enabled]);
 
-  const read = useCallback(() => {
-    void connectionsRev;
-    return invoke<DeviceStatus[]>("wireless:channelStatuses");
-  }, [connectionsRev]);
-
-  const { value: channels, known, failed } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
+  const { value: channels, known, failed } = useStatusChannel<DeviceStatus[]>(readStatuses, WIRELESS_STATUS_CHANNEL, enabled, {
+    resubscribeKey: connectionsRev,
+  });
   return { channels: Array.isArray(channels) ? channels : NO_CHANNELS, known, failed };
 }

@@ -43,9 +43,9 @@ export const thisParam = () => withThis.send("fixture:this" as IpcChannel); // s
 // Core no-redeclare does not know TypeScript overloads.
 function overloaded(c: IpcChannel): Promise<unknown>;
 // eslint-disable-next-line no-redeclare
-function overloaded(c: IpcChannel, n: number): Promise<unknown>;
+function overloaded(c: IpcChannel, _n: number): Promise<unknown>;
 // eslint-disable-next-line no-redeclare
-function overloaded(c: IpcChannel, n?: number) { void n; return invoke(c); }
+function overloaded(c: IpcChannel, _n?: number) { return invoke(c); }
 export const overload = () => overloaded("fixture:overload" as IpcChannel); // sends: fixture:overload
 
 class Direct { constructor(c: IpcChannel) { void invoke(c); } }
@@ -87,7 +87,7 @@ export const slotted = () => slot.send("fixture:slot" as IpcChannel);
 function callback(c: IpcChannel) { return invoke(c); } // flags: a forwarder nothing calls directly
 export const viaCallback = () => ["fixture:callback" as IpcChannel].forEach(callback); // flags: callback used as a value
 
-function keyed(k: string, c: IpcChannel) { void k; return invoke(c); }
+function keyed(_k: string, c: IpcChannel) { return invoke(c); }
 const pair = ["k", "fixture:spread" as IpcChannel] as const;
 export const spread = () => keyed(...pair); // flags: a spread over the channel argument
 
@@ -160,7 +160,7 @@ const maybeTable = flag ? table : undefined;
 export const viaOptional = () => { registry.run = maybeTable?.send; }; // flags: maybeTable?.send used as a value
 
 // Where a value can be handed on, and what the walk reads.
-function Panel(props: { api: unknown }) { void props; return null; }
+function Panel(_props: { api: unknown }) { return null; }
 export const rendered = () => <Panel api={holder} />; // flags: holder carries a forwarder
 export const spreadRendered = () => <Panel api={null} {...holder} />; // flags: holder carries a forwarder
 export const copied = { ...holder }; // flags: holder carries a forwarder

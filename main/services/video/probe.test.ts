@@ -511,7 +511,7 @@ test("a bracketed IPv6 HLS address is reachable, and the reason still shows it b
 });
 
 test("an RTSP camera that floods without ever finishing a reply is a quick failure, not a wait for the timeout", async () => {
-  const cam = await fakeCamera(() => "silent");
+  await fakeCamera(() => "silent");
   // Replace the silent behaviour with a flood on connect.
   const flood = net.createServer((socket) => {
     openSockets.add(socket);
@@ -524,7 +524,6 @@ test("an RTSP camera that floods without ever finishing a reply is a quick failu
   });
   servers.push(flood);
   await new Promise<void>((resolve) => flood.listen(0, "127.0.0.1", resolve));
-  void cam;
   const started = Date.now();
   const result = await probeFeed(target((flood.address() as net.AddressInfo).port), 3000);
   assert.deepEqual(result, { state: "failed", reason: "127.0.0.1 answered with more than a camera should · check the address" });

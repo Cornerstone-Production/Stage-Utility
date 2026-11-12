@@ -395,9 +395,8 @@ let answerStatus = 200;
 test("an in-place fix (Start recording) presses its command and does not navigate", async () => {
   const posted: unknown[] = [];
   const orig = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init?: { body?: string }) => {
+  globalThis.fetch = (async (url: string) => {
     if (String(url).includes("/api/cues/")) posted.push(String(url).slice(String(url).lastIndexOf("/") + 1));
-    void init;
     return new Response(JSON.stringify(answer), { status: answerStatus, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
@@ -417,9 +416,8 @@ test("an in-place fix (Start recording) presses its command and does not navigat
 test("a Start recording that Simulate stops says so on the card", async () => {
   const posted: unknown[] = [];
   const orig = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init?: { body?: string }) => {
+  globalThis.fetch = (async (url: string) => {
     if (String(url).includes("/api/cues/")) posted.push(String(url).slice(String(url).lastIndexOf("/") + 1));
-    void init;
     return new Response(JSON.stringify(answer), { status: answerStatus, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   answer = { ok: true, detail: "would send record", simulated: true };
