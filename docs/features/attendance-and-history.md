@@ -533,7 +533,9 @@ and 20:30.
 Time before and after the service proper is hatched at 45°, with a hairline at
 each boundary, so the arrival ramp and the emptying-room taper are visibly not
 the service. Both charts take that window from the same place: the first plan
-item that is not pre-service, and the attendance record's own end.
+item that is not pre-service, and the attendance record's own end (or, with no
+attendance end, the last plan item to finish). While the service is live it has
+no end yet, so nothing after the live edge is hatched.
 
 A line breaks wherever more than three minutes of **sampling** is missing, since
 that means the counter was unreachable rather than that the room emptied. A line

@@ -15,7 +15,7 @@
 /** Both records as much of them as this needs — narrow, so a caller with only
  *  one of the two does not have to invent the other. */
 export interface ServiceWindowSources {
-  timeline?: { items?: { startedAt: string; endedAt: string | null; preService?: boolean }[] } | null;
+  timeline?: { endedAt?: string | null; items?: { startedAt: string; endedAt: string | null; preService?: boolean }[] } | null;
   attendance?: { serviceStartedAt?: string | null; endedAt?: string | null } | null;
 }
 
@@ -38,10 +38,14 @@ export function serviceWindowOf({ timeline, attendance }: ServiceWindowSources):
 
   // The END is the attendance record's, when there is one: it is the taper
   // boundary the recorder wrote, and the post-service samples run past it. With
-  // no attendance record, the last item to have ENDED is the best available —
-  // never an item still live, which would put the boundary at the live edge and
-  // hatch nothing.
-  const lastEnded = items.reduce<string | null>(
+  // no attendance end, the last item to have ENDED stands in, but only once no
+  // in-service item is still running. While one is, the service has no end yet:
+  // the last ENDED item is the one before the live one, and taking it hatched
+  // the live item, the message mid-service, as "after the service". A record
+  // that has closed is not live, whatever item it left open: its last ended
+  // item still marks the taper.
+  const stillLive = !timeline?.endedAt && items.some((it) => !it.preService && it.startedAt && !it.endedAt);
+  const lastEnded = stillLive ? null : items.reduce<string | null>(
     (best, it) => (it.endedAt && (!best || it.endedAt > best) ? it.endedAt : best),
     null,
   );

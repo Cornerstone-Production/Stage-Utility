@@ -35,9 +35,27 @@ describe("serviceWindowOf", () => {
     assert.equal(w.endedAt, at("21:32"));
   });
 
-  test("an item still live is never the end — that would hatch nothing", () => {
+  test("a service with an item still live has no end yet, so nothing is hatched as after it", () => {
+    // The last item to have ENDED is the one before the live one, so taking it
+    // as the end hatched the whole live item (the message, mid-service) as
+    // "after the service".
     const live = { items: [...TIMELINE.items.slice(0, 3), { startedAt: at("20:36"), endedAt: null, preService: false }] };
-    assert.equal(serviceWindowOf({ timeline: live }).endedAt, at("20:36"));
+    assert.equal(serviceWindowOf({ timeline: live }).endedAt, null);
+    // A live attendance record (endedAt still null) must not fall back to the items.
+    assert.equal(serviceWindowOf({ timeline: live, attendance: { serviceStartedAt: at("20:20"), endedAt: null } }).endedAt, null);
+  });
+
+  test("a closed record with an item left open still ends at its last ended item", () => {
+    // A recorder that never closed the last item is not a live service: once the
+    // record itself has ended, the taper is still hatched.
+    const items = [...TIMELINE.items.slice(0, 3), { startedAt: at("20:36"), endedAt: null, preService: false }];
+    assert.equal(serviceWindowOf({ timeline: { endedAt: at("21:40"), items } }).endedAt, at("20:36"));
+  });
+
+  test("a live pre-service item does not hold back a finished service's end", () => {
+    // Only an IN-service item still running means the service is still on.
+    const items = [...TIMELINE.items, { startedAt: at("21:32"), endedAt: null, preService: true }];
+    assert.equal(serviceWindowOf({ timeline: { items } }).endedAt, at("21:32"));
   });
 
   test("attendance alone still gives a start, for a service whose timeline has not opened", () => {
