@@ -48,6 +48,7 @@ import { LAYOUT_IMAGE_DIR, saveLayoutImage, readLayoutImage } from "./layout-ima
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage, storedImageHeaders } from "./image-files.js";
 import { STAGEPLOT_IMAGE_DIR } from "./stageplots-files.js";
+import { stageplotsRoutes } from "./routes/stageplots-routes.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
@@ -164,6 +165,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   messagesRoutes,
   homeRoutes,
   hostNameRoutes,
+  stageplotsRoutes,
 ] as const;
 
 /**

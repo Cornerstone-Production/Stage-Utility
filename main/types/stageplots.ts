@@ -44,9 +44,11 @@ export interface Background {
   pdfPages: number | null;
 }
 
-/** A background as the API serves it: with the URL of its converted image. */
+/** A background as the API serves it: with the URLs of its converted image
+ *  and of the source raster it was converted from (the editor's Before). */
 export interface BackgroundView extends Background {
   url: string;
+  sourceUrl: string;
 }
 
 /** A drawn item. PR 2 defines its shape; a plot carries none until then. */

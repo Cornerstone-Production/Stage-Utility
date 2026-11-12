@@ -209,6 +209,9 @@ const REQUEST_FACING = [
   // hands them to servicecue-publisher.ts, whose lines are below.
   "routes/servicecue-publish-routes.ts",
   "routes/servicecue-routes.ts",
+  // Its lines name a background's name, which arrives on the upload's query
+  // string, and ids off the path; every one is scrubbed.
+  "routes/stageplots-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
