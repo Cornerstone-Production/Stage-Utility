@@ -178,7 +178,7 @@ export function ExportPlanDialog({
               </Line>
               <Line
                 label="ServiceCue layouts"
-                sub="the column presets these views use"
+                sub="the layouts these views use"
                 tag={`${data.serviceCueLayouts}`}
               />
             </div>

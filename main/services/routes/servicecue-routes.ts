@@ -1,6 +1,6 @@
 // servicecue-routes.ts — ServiceCue
 //
-// ServiceCue: the rundown pages and their per-service-type column layouts.
+// ServiceCue: the rundown pages and their layouts, which every service type shares.
 //
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.

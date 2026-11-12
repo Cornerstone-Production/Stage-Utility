@@ -1,5 +1,5 @@
 // view-detail-columns.test.tsx — a ServiceCue view's Columns picker, when the
-// column sets fail to load.
+// ServiceCue layouts fail to load.
 //
 // The read used to `.catch(() => setServiceCueLayouts([]))`. The picker then
 // offered only "All columns", and labelled the view's own saved set
@@ -79,7 +79,7 @@ test("a failed column-set read says so in the picker's place, and reaches the lo
   const f = stubFetch(true);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the saved column sets/i);
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
     assert.equal(
       !!screen.queryByRole("combobox", { name: "Columns" }),
       false,
@@ -87,8 +87,8 @@ test("a failed column-set read says so in the picker's place, and reaches the lo
     );
     assert.equal(!!screen.queryByText(/not found/i), false, "the view's column set was not deleted — the read failed");
     assert.ok(
-      f.logs.some((l) => l.tag === "servicecue" && /column sets/i.test(l.message)),
-      `expected a [servicecue] line naming the column sets — got ${JSON.stringify(f.logs)}`,
+      f.logs.some((l) => l.tag === "servicecue" && /the ServiceCue layouts for a view/.test(l.message)),
+      `expected a [servicecue] line naming the layouts — got ${JSON.stringify(f.logs)}`,
     );
   } finally {
     f.restore();
@@ -126,7 +126,7 @@ test("a slow failure from before a kind change does not replace the picker", asy
 });
 
 test("a read that works after a failed one brings the picker back", async () => {
-  // Script fails; Stage, then Script again, reads the column sets.
+  // Script fails; Stage, then Script again, reads the layouts.
   let reads = 0;
   const f = stubFetchWithLog((url) => {
     if (!url.includes("/api/servicecue/layouts")) return ok({});
@@ -139,20 +139,20 @@ test("a read that works after a failed one brings the picker back", async () => 
     const view = render(el("script"));
     await settle();
     await settle();
-    assert.match(alerts(), /Couldn't load the saved column sets/i);
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
     view.rerender(el("stage"));
     await settle();
     view.rerender(el("script"));
     await settle();
     await settle();
-    assert.equal(alerts(), "", "the column sets loaded; the note must go with the failure");
+    assert.equal(alerts(), "", "the layouts loaded; the note must go with the failure");
     assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), true);
   } finally {
     f.restore();
   }
 });
 
-test("control: the column sets load, the picker offers them, nothing alerts", async () => {
+test("control: the layouts load, the picker offers them, nothing alerts", async () => {
   const f = stubFetch(false);
   try {
     await mount();

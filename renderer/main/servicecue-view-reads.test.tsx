@@ -1,5 +1,5 @@
 // servicecue-view-reads.test.tsx — the Script display (a View on a stage monitor),
-// when its column layouts or roles cannot be read.
+// when its layouts or roles cannot be read.
 //
 // Both reads ride the rundown's one-minute timer and "keep the last good list"
 // when one fails. Before the first success there is no good list: the layouts
@@ -96,8 +96,8 @@ test("layouts that never loaded say the display fell back to all columns", async
   const f = stubFetch(["layouts"]);
   try {
     await mount();
-    await eventually(() => assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i));
-    await eventually(() => assert.ok(logged(f.logs, /column layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
+    await eventually(() => assert.match(alerts(), /Couldn't load the layouts, so all columns are shown/i));
+    await eventually(() => assert.ok(logged(f.logs, /the layouts for a ServiceCue view/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -142,9 +142,9 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
     }
     // The failures reach /log once the retries have been answered; "once" is
     // read after that, since it is about what the second tick did NOT add.
-    await eventually(() => assert.ok(lines(f.logs, /column layouts/i) > 0 && lines(f.logs, /category roles/i) > 0, "the failures never reached /log"));
+    await eventually(() => assert.ok(lines(f.logs, /the layouts for a ServiceCue view/i) > 0 && lines(f.logs, /category roles/i) > 0, "the failures never reached /log"));
     assert.equal(alerts(), "", "the last good lists are still the right ones");
-    assert.equal(lines(f.logs, /column layouts/i), 1, "the layouts failure is on /log, once");
+    assert.equal(lines(f.logs, /the layouts for a ServiceCue view/i), 1, "the layouts failure is on /log, once");
     assert.equal(lines(f.logs, /category roles/i), 1, "the roles failure is on /log, once");
   } finally {
     f.restore();

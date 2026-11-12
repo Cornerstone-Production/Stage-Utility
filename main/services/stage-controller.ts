@@ -4015,7 +4015,7 @@ export class StageController {
     return known.some((l) => l.id === serviceCueLayoutId) ? null : `no ServiceCue layout ${serviceCueLayoutId}`;
   }
 
-  /** Pick which saved ServiceCue column preset a "script" View renders. */
+  /** Pick which saved ServiceCue layout a "script" View renders. */
   async setViewServiceCueLayout(id: string, serviceCueLayoutId: string | null): Promise<StageState> {
     this.requireView(id, "views:setServiceCueLayout");
     const refused = await this.serviceCueLayoutRefusal(serviceCueLayoutId);

@@ -156,7 +156,7 @@ test("a failed layouts read is not reported as a missing layout", async () => {
   const f = stubFetch("layouts", PINNED);
   try {
     await mount("audio");
-    assert.match(page(), /Couldn't load the column layouts/);
+    assert.match(page(), /Couldn't load the layouts/);
     assert.doesNotMatch(page(), /not found/);
   } finally {
     f.restore();

@@ -295,7 +295,7 @@ export interface View {
    */
   showLiveControls?: boolean;
   /**
-   * Which saved ServiceCue column preset a "script" View renders; null/absent =
+   * Which saved ServiceCue layout a "script" View renders; null/absent =
    * all columns. The same presets the /servicecue pages use, so a department's
    * column set is defined once and a display and a browser tab cannot disagree
    * about it.

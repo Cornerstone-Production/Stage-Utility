@@ -214,7 +214,7 @@ export function ServiceCueSection() {
   }, [typeId, pcoConfigured, fail]);
 
   // Layouts are global — one set across all service types. `typeId` only chooses
-  // which type/plan to preview against (and which note categories are offered).
+  // which type's plan the preview draws against.
   const sortedLayouts = useMemo(
     () => byOrder(layouts),
     [layouts],

@@ -13,12 +13,12 @@ import type { View } from "../types/views.js";
 /** The log tag the migrations speak under. */
 export const SERVICECUE_LOG_TAG = "servicecue";
 
-/** The field a View used to carry for its column preset. */
+/** The field a View used to carry for its ServiceCue layout. */
 const LEGACY_LAYOUT_FIELD = "scriptViewLayoutId";
 
 /**
  * Views as today's build reads them: a view an older build saved carries its
- * column preset as `scriptViewLayoutId`, and comes back carrying
+ * ServiceCue layout as `scriptViewLayoutId`, and comes back carrying
  * `serviceCueLayoutId`. The next save writes the new field; nothing is written
  * here.
  *
@@ -39,7 +39,7 @@ export function adoptLegacyViewFields<V>(views: V): V {
 }
 
 /**
- * The column presets a view bundle carries: `serviceCueLayouts`, or the key an
+ * The ServiceCue layouts a view bundle carries: `serviceCueLayouts`, or the key an
  * export from before the rename used. The new key wins when both are present.
  */
 export function bundledServiceCueLayouts(sideData: unknown): ServiceCueLayout[] {

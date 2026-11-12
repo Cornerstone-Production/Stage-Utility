@@ -250,7 +250,7 @@ describe("the landing page", () => {
     await eventually(() => assert.ok(screen.getByText("Weekend")));
     const open = await eventually(() => screen.getByRole("link", { name: "Open Weekend" }));
     assert.equal(open.getAttribute("href"), "/servicecue/weekend/audio?from=%2Fservicecue");
-    assert.equal(linkNamed("Edit column presets"), null, "the public page links to the editor");
+    assert.equal(linkNamed("Edit layouts"), null, "the public page links to the editor");
     assert.equal(document.querySelector('a[href*="presets"], a[href*="manage"]'), null, "a link into the operator's pages");
   });
 
@@ -258,7 +258,7 @@ describe("the landing page", () => {
     await onTheChurchsOwnPage(async () => {
       await load("/servicecue", { socket: false });
       await eventually(() => assert.ok(screen.getByText("Weekend")));
-      assert.equal(linkNamed("Edit column presets")?.getAttribute("href"), "/servicecue/presets");
+      assert.equal(linkNamed("Edit layouts")?.getAttribute("href"), "/servicecue/presets");
     });
   });
 });

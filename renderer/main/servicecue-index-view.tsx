@@ -135,7 +135,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ServiceCue page, under Shown on the landing page.</p>
+            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ServiceCue layouts page, under Landing page.</p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
@@ -166,13 +166,13 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
               );
             })
           )}
-          {/* Editing stays in the building: the public page has no presets page to go to. */}
+          {/* Editing stays in the building: the public page has no layouts page to go to. */}
           {!isPublicMode() && (
             <a
               href="/servicecue/presets"
               className="mt-2 self-start text-caption1 text-accent hover:underline"
             >
-              Edit column presets
+              Edit layouts
             </a>
           )}
         </div>

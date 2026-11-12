@@ -1,4 +1,4 @@
-// servicecue-public-link.tsx — the "Public link" card on the ServiceCue presets page.
+// servicecue-public-link.tsx — the "Public link" card on the ServiceCue layouts page.
 //
 // ServiceCue on the web: the server sends what ServiceCue shows out to a page the
 // operator deployed, and volunteers open that page instead of the app. This card is

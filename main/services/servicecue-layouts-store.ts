@@ -1,4 +1,4 @@
-// Persists ServiceCue layouts — named column presets for the rundown pages. A flat
+// Persists ServiceCue layouts — named sets of columns for the rundown pages. A flat
 // list shared across every service type; columns reference category ROLES so one
 // layout resolves correctly whatever a given service type calls a department (see
 // servicecue-roles-store.ts).
