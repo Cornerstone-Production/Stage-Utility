@@ -60,7 +60,10 @@ if (isMain(import.meta.url, process.argv[1])) {
   const OUTFILE = path.resolve(ROOT, argOut > -1 ? process.argv[argOut + 1] : "build/server.mjs");
   const result = await build({ ...bundleOptions(OUTFILE), metafile: true });
 
-  const bytes = fs.statSync(OUTFILE).size;
+  // Read once: the size and the text checked below are the same bytes, not a
+  // stat and a later read that something could change between.
+  const buf = fs.readFileSync(OUTFILE);
+  const bytes = buf.length;
   const inputs = Object.keys(result.metafile.inputs).length;
   console.log(
     `[bundle] ${path.relative(ROOT, OUTFILE)} — ${(bytes / 1024).toFixed(0)} KB from ${inputs} modules`,
@@ -68,7 +71,7 @@ if (isMain(import.meta.url, process.argv[1])) {
 
   // A bundle that silently dropped the server would still be a valid file. These
   // are the shapes whose absence would only show up when a display failed to load.
-  const src = fs.readFileSync(OUTFILE, "utf8");
+  const src = buf.toString("utf8");
   const required = ["createServer", "STAGE_UTILITY_DATA"];
   const missing = required.filter((s) => !src.includes(s));
   if (missing.length) {
