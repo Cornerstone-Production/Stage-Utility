@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { addLogLine, getLevelCounts, getLogLines, getLogSince } from "./log-buffer.js";
+import { addLogLine, getLevelCounts, getLogLines, getLogSince, initLogCapture } from "./log-buffer.js";
 
 /** The buffer's own cap, restated so the eviction test can actually reach it. */
 const MAX = 10_000;
@@ -135,5 +135,16 @@ describe("a cursor from before a restart", () => {
       slice.lines.some((l) => l.msg === "the failure the operator opened /log to read"),
       "a line written after the restart was invisible to a tab that was already open",
     );
+  });
+});
+
+describe("console capture", () => {
+  // If log persistence fails to start, /log is the only place left to see why.
+  test("records console lines when no sink is installed", () => {
+    initLogCapture();
+    console.warn("[log-buffer-test] captured with no sink");
+    const found = getLogLines().filter((l) => l.msg === "[log-buffer-test] captured with no sink");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].level, "warn");
   });
 });
