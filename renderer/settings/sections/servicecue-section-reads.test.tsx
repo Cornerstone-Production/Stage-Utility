@@ -364,6 +364,21 @@ test("a failure from before the state said not connected gives way to the connec
   }
 });
 
+test("a failed settings read still says so once the state says Planning Center is not connected", async () => {
+  // Not connected clears Planning Center's failures, which it explains; the settings
+  // are this app's own, and clearing theirs left a skeleton where the failure was.
+  const f = stubFetch({ failing: "layouts" });
+  try {
+    await mount();
+    await eventually(() => assert.match(alerts(), /Couldn't load the ServiceCue layouts/i));
+    await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: false }));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i, "the failure gave way to a skeleton that never loads");
+  } finally {
+    f.restore();
+  }
+});
+
 test("a stage state that cannot be read does not leave the page waiting for ever", async () => {
   const f = stubFetch({ failing: "state" });
   try {

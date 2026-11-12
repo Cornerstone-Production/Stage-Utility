@@ -105,7 +105,9 @@ export function ServiceCueSection() {
   // Planning Center is not connected. Once the state says so, that is what the
   // page shows, not an error.
   useResyncOn([pcoConfigured], () => {
-    if (pcoConfigured === false) clear();
+    // Planning Center's reads only: the settings are this app's own, and a failure
+    // to read them still has to say so.
+    if (pcoConfigured === false) clear("types", "rundown", ...[...failed].filter((k): k is CatsRead => k.startsWith("cats:")));
   });
 
   // This app's own settings: the layouts, which types the landing page shows,
