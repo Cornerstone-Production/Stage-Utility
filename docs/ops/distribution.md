@@ -151,13 +151,19 @@ and on every Windows kiosk with `$env:STAGE_REPLACE_SIGNING_KEY = '1'` set first
 then they stay on the version they have.
 
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a
-build toolchain — installed or to update. About 35 MB compressed, 115 MB on disk, of
-which the runtime is nearly all.
+build toolchain — installed or to update. About 45 to 55 MB compressed and 150 MB on
+disk, most of it the runtime.
 
-This is possible because the server's entire third-party surface is three pure-JS
-packages (`fflate`, `read-excel-file`, `write-excel-file`) and no native modules. The
-rest of `dependencies` is interface code, compiled into `build/` by Vite. There is no
-compilation step per platform.
+The server is bundled into one file, `server.mjs`, with its pure-JavaScript
+packages (`fflate`, `read-excel-file`, `write-excel-file`) inside it. One package
+cannot be: `sharp`, which converts stage-plot backgrounds, loads a compiled image
+library for the machine it runs on. The bundle leaves it as an import, and each
+archive carries a `node_modules/` beside `server.mjs` holding `sharp`, its JavaScript
+dependencies and that platform's build of the library (Linux builds are for glibc),
+about 8 MB compressed. `scripts/stage-native-modules.ts` takes each package at the
+exact version, address and hash `package-lock.json` pins, so a release cannot ship a
+build the lockfile does not name. The rest of `dependencies` is interface code,
+compiled into `build/` by Vite. Nothing is compiled per platform.
 
 ## The release app
 

@@ -4,32 +4,41 @@
 // node_modules as it goes. A packaged install ships neither, so the backend is
 // bundled ahead of time into a single ESM file that needs only a Node binary.
 //
-// This is cheap because the server imports exactly three third-party packages —
-// fflate, read-excel-file, write-excel-file — all pure JavaScript. Everything
-// else in `dependencies` is interface code that Vite compiles into build/, and
-// there are no native modules on this path, so there is nothing to compile per
-// platform.
+// Every third-party package the server imports is bundled in — fflate,
+// read-excel-file, write-excel-file, all pure JavaScript — except one. sharp
+// (stage-plot backgrounds) loads a compiled libvips build for the machine it runs
+// on, so it cannot be inlined: it stays an `import("sharp")`, and each archive
+// carries a node_modules/ beside server.mjs holding sharp, its JavaScript
+// dependencies and that platform's native build, staged from package-lock.json by
+// stage-native-modules.ts. Everything else in `dependencies` is interface code
+// that Vite compiles into build/.
 //
 // Usage: node scripts/bundle-server.ts [--outfile build/server.mjs]
 
-import { build } from "esbuild";
+import { build, type BuildOptions } from "esbuild";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isMain } from "./is-main.ts";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const argOut = process.argv.indexOf("--outfile");
-const OUTFILE = path.resolve(ROOT, argOut > -1 ? process.argv[argOut + 1] : "build/server.mjs");
 
 // Node's version floor, so esbuild leaves syntax the runtime already supports
 // rather than downlevelling it.
 const TARGET = "node24";
 
-const result = await build({
+/** Packages left out of the bundle, because they load native code; the archive
+ *  ships them in node_modules/ instead. */
+export const EXTERNAL_PACKAGES = ["sharp"];
+
+/** The bundle's esbuild options. Exported so a test can build it in memory. */
+export const bundleOptions = (outfile: string): BuildOptions => ({
   absWorkingDir: ROOT,
   entryPoints: [path.join(ROOT, "server.ts")],
-  outfile: OUTFILE,
+  outfile,
   bundle: true,
+  external: EXTERNAL_PACKAGES,
   platform: "node",
   format: "esm",
   target: TARGET,
@@ -46,22 +55,28 @@ const result = await build({
   },
 });
 
-const bytes = fs.statSync(OUTFILE).size;
-const inputs = Object.keys(result.metafile.inputs).length;
-console.log(
-  `[bundle] ${path.relative(ROOT, OUTFILE)} — ${(bytes / 1024).toFixed(0)} KB from ${inputs} modules`,
-);
+if (isMain(import.meta.url, process.argv[1])) {
+  const argOut = process.argv.indexOf("--outfile");
+  const OUTFILE = path.resolve(ROOT, argOut > -1 ? process.argv[argOut + 1] : "build/server.mjs");
+  const result = await build({ ...bundleOptions(OUTFILE), metafile: true });
 
-// A bundle that silently dropped the server would still be a valid file. These
-// are the shapes whose absence would only show up when a display failed to load.
-const src = fs.readFileSync(OUTFILE, "utf8");
-const required = ["createServer", "STAGE_UTILITY_DATA"];
-const missing = required.filter((s) => !src.includes(s));
-if (missing.length) {
-  console.error(`[bundle] FAILED — bundle is missing: ${missing.join(", ")}`);
-  process.exit(1);
-}
-if (bytes < 100_000) {
-  console.error(`[bundle] FAILED — ${bytes} bytes is too small to be the server`);
-  process.exit(1);
+  const bytes = fs.statSync(OUTFILE).size;
+  const inputs = Object.keys(result.metafile.inputs).length;
+  console.log(
+    `[bundle] ${path.relative(ROOT, OUTFILE)} — ${(bytes / 1024).toFixed(0)} KB from ${inputs} modules`,
+  );
+
+  // A bundle that silently dropped the server would still be a valid file. These
+  // are the shapes whose absence would only show up when a display failed to load.
+  const src = fs.readFileSync(OUTFILE, "utf8");
+  const required = ["createServer", "STAGE_UTILITY_DATA"];
+  const missing = required.filter((s) => !src.includes(s));
+  if (missing.length) {
+    console.error(`[bundle] FAILED — bundle is missing: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+  if (bytes < 100_000) {
+    console.error(`[bundle] FAILED — ${bytes} bytes is too small to be the server`);
+    process.exit(1);
+  }
 }

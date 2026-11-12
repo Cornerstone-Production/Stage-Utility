@@ -7,8 +7,11 @@
 # npm, no build toolchain, not to install and not to update.
 #
 # Every platform is built HERE, on one runner, because there is nothing to
-# cross-compile: the server's only third-party dependencies are pure JavaScript,
-# so the per-platform part is just which Node binary gets copied in.
+# cross-compile. The per-platform part is which Node binary gets copied in, and
+# which prebuilt sharp (stage-plot backgrounds) goes into the node_modules/ beside
+# server.mjs: sharp and its JavaScript dependencies, plus that platform's libvips
+# build, each the exact version and hash package-lock.json pins
+# (stage-native-modules.ts). The rest of the server is bundled pure JavaScript.
 #
 #   Usage: scripts/build-artifacts.sh <version> [outdir]
 #
@@ -72,6 +75,8 @@ for entry in "${PLATFORMS[@]}"; do
   cp -R scripts/kiosk "$stage/scripts/kiosk"
   cp LICENSE "$stage/"
   printf '%s\n' "$VERSION" > "$stage/VERSION"
+  # sharp is left out of the bundle (it loads native code), so it ships here.
+  node scripts/stage-native-modules.ts "$plat" "$stage"
 
   # Just the runtime. npm, corepack and the headers are build tooling that a
   # packaged install never invokes.
