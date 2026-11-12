@@ -147,7 +147,7 @@ let TOKEN = "";
  * custom-variable read being answered with the whole export document.
  */
 function installCompanionStub(): void {
-  companionDeps.fetch = async (input, init) => {
+  companionDeps.fetch = async (input) => {
     const url = String(input);
     if (url.includes("/press")) {
       presses.push(url);
@@ -175,7 +175,6 @@ function installCompanionStub(): void {
         ? new Response("Not found", { status: 404 })
         : new Response(value, { status: 200 });
     }
-    void init;
     return Response.json(companionExportFixture());
   };
 }
@@ -755,7 +754,7 @@ describe("confirmRequired", () => {
     // deliberately the same 202-with-a-new-token as any other unconfirmed call:
     // 409 would tell a caller which of its two problems it has, and there is
     // nothing useful it could do differently.
-    const id = await withCue({ confirmRequired: true, cooldownSec: 0 });
+    await withCue({ confirmRequired: true, cooldownSec: 0 });
     const first = await automationEngine.callByName("projectors_on", { caller: "test", now: 1_000 });
     assert.equal(first.status, 202);
     const token = (first.body as { confirm: string }).confirm;
@@ -776,7 +775,6 @@ describe("confirmRequired", () => {
     assert.equal(replay.status, 202, "a spent confirmation ran the cue again");
     assert.notEqual((replay.body as { confirm: string }).confirm, token, "the same token came back");
     assert.equal(presses.length, 1, "a replayed confirmation pressed a second time");
-    void id;
   });
 
   test("a confirmation EXPIRES after 30 seconds", async () => {
