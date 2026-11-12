@@ -11,6 +11,11 @@
 // the first item that is not pre-service, which is what the operator marked. The
 // attendance record's own `serviceStartedAt` is the fallback, because a service
 // whose timeline has not opened yet still has an attendance curve to hatch.
+//
+// No end is drawn while the timeline has an in-service item running, whatever
+// the attendance record says. The recorders close their records the moment the
+// live mode drops and reopen them on the next item, and a page can hold one
+// record's close frame after another's reopen: the running item is the answer.
 
 /** Both records as much of them as this needs — narrow, so a caller with only
  *  one of the two does not have to invent the other. */
@@ -36,16 +41,18 @@ export function serviceWindowOf({ timeline, attendance }: ServiceWindowSources):
   const firstInService = items.find((it) => !it.preService && it.startedAt);
   const startedAt = firstInService?.startedAt ?? attendance?.serviceStartedAt ?? null;
 
+  // While an in-service item is running on an open timeline the service has no
+  // end (see the header). Taking the last ENDED item then hatched the live
+  // item, the message mid-service, as "after the service". A record that has
+  // closed is not live, whatever item it left open: its last ended item still
+  // marks the taper.
+  const running = !timeline?.endedAt && items.some((it) => !it.preService && it.startedAt && !it.endedAt);
+  if (running) return { startedAt, endedAt: null };
+
   // The END is the attendance record's, when there is one: it is the taper
   // boundary the recorder wrote, and the post-service samples run past it. With
-  // no attendance end, the last item to have ENDED stands in, but only once no
-  // in-service item is still running. While one is, the service has no end yet:
-  // the last ENDED item is the one before the live one, and taking it hatched
-  // the live item, the message mid-service, as "after the service". A record
-  // that has closed is not live, whatever item it left open: its last ended
-  // item still marks the taper.
-  const stillLive = !timeline?.endedAt && items.some((it) => !it.preService && it.startedAt && !it.endedAt);
-  const lastEnded = stillLive ? null : items.reduce<string | null>(
+  // no attendance end, the last item to have ENDED stands in.
+  const lastEnded = items.reduce<string | null>(
     (best, it) => (it.endedAt && (!best || it.endedAt > best) ? it.endedAt : best),
     null,
   );
