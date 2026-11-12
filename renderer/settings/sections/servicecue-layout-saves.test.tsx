@@ -25,7 +25,8 @@ const { render, renderHook, screen, cleanup, fireEvent, within, act } = await im
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
-const { useLayoutSaves } = await import("./use-layout-saves.js");
+const { useListSaves } = await import("../../lib/use-list-saves.js");
+const { LAYOUTS } = await import("./servicecue-section.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
@@ -91,10 +92,24 @@ async function mount(): Promise<void> {
   for (let i = 0; i < 4; i++) await settle();
 }
 
-/** The layout names in the order the page draws them. */
+/** The layout names in the order the page draws them: a shut card's title, the open one's field. */
 const pageNames = () =>
-  [...document.querySelectorAll('input[aria-label="Layout name"]')].map((n) => (n as HTMLInputElement).value);
+  [...document.querySelectorAll("[data-layout-card]")].map((card) => {
+    const field = card.querySelector('input[aria-label="Layout name"]') as HTMLInputElement | null;
+    return field ? field.value : (card.querySelector("[data-layout-name]")?.textContent ?? "");
+  });
+/** Open a layout's card; its name field is in the open card only. */
+async function openCard(name: string): Promise<void> {
+  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await settle();
+}
 const serverNames = (s: ServiceCueLayout[]) => [...s].sort((a, b) => a.order - b.order).map((l) => l.name);
+/** Move a layout one place down by keyboard, as an operator would: its grip, Space, ArrowDown, Space. */
+function moveDown(name: string): void {
+  const grip = screen.getByRole("button", { name: `Move the ${name} layout. Press Space to pick up` });
+  grip.focus();
+  for (const key of [" ", "ArrowDown", " "]) fireEvent.keyDown(grip, { key });
+}
 const nameBox = (name: string) => screen.getByDisplayValue(name) as HTMLInputElement;
 
 const AUDIO_VIDEO: ServiceCueLayout[] = [
@@ -106,12 +121,14 @@ test("a refused rename, then a reorder clicked before the refusal arrives: the r
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 60 });
   try {
     await mount();
+    await openCard("Audio");
     const box = nameBox("Audio");
     fireEvent.change(box, { target: { value: "video" } });
     fireEvent.blur(box);
     await settle();
-    // The operator's next click lands while the rename is still on the wire.
-    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]);
+    // The operator's next move lands while the rename is still on the wire, and the
+    // page draws the name being saved.
+    moveDown("video");
     await eventually(() => assert.equal(server.posts.length, 2), 2000);
     await eventually(() => assert.deepEqual(serverNames(server.stored()), ["Video", "Audio"], "the reorder was lost"), 2000);
     await eventually(() => assert.deepEqual(pageNames(), serverNames(server.stored()), "the page holds a list the server does not"), 2000);
@@ -131,12 +148,11 @@ test("two quick clicks: the first answer does not undo the second on screen, or 
   const server = fakeServer(AUDIO_VIDEO);
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Expand" })[0]);
-    await settle();
+    await openCard("Audio");
     const rowColor = screen.getByDisplayValue("From PCO") as HTMLSelectElement;
     fireEvent.change(rowColor, { target: { value: "none" } }); // click 1
     await settle();
-    fireEvent.click(screen.getAllByRole("button", { name: "Move down" })[0]); // click 2
+    moveDown("Audio"); // click 2
     await settle();
     assert.deepEqual(pageNames(), ["Video", "Audio"]);
 
@@ -154,7 +170,7 @@ test("two quick clicks: the first answer does not undo the second on screen, or 
   }
 });
 
-test("Add layout after a delete picks a name no layout has", async () => {
+test("New layout after a delete picks a name no layout has", async () => {
   const server = fakeServer([
     { id: "a", name: "Layout 1", order: 0, columnRoles: [] },
     { id: "b", name: "Layout 2", order: 1, columnRoles: [] },
@@ -162,11 +178,12 @@ test("Add layout after a delete picks a name no layout has", async () => {
   ], { delayMs: 0 });
   try {
     await mount();
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    await openCard("Layout 2");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Layout 2" }));
     const dialog = await eventually(() => screen.getByRole("alertdialog"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete layout" }));
     await eventually(() => assert.deepEqual(serverNames(server.stored()), ["Layout 1", "Layout 3"]));
-    fireEvent.click(screen.getByRole("button", { name: /Add layout/ }));
+    fireEvent.click(screen.getByRole("button", { name: /New layout/ }));
     await eventually(() => assert.equal(server.stored().length, 3, "the new layout was refused"));
     assert.deepEqual(serverNames(server.stored()), ["Layout 1", "Layout 3", "Layout 4"]);
     assert.deepEqual(pageNames(), ["Layout 1", "Layout 3", "Layout 4"]);
@@ -175,11 +192,11 @@ test("Add layout after a delete picks a name no layout has", async () => {
   }
 });
 
-test("Add layout, then rename it: the address moves to the new name once, and then stays", async () => {
+test("New layout, then rename it: the address moves to the new name once, and then stays", async () => {
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 0 });
   try {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: /Add layout/ }));
+    fireEvent.click(screen.getByRole("button", { name: /New layout/ }));
     await eventually(() => assert.equal(server.stored().length, 3));
     const slugOf = (name: string) => server.stored().find((l) => l.name === name)?.slug;
     assert.equal(slugOf("Layout 3"), "layout-3");
@@ -201,7 +218,7 @@ test("Add layout, then rename it: the address moves to the new name once, and th
 test("an edit that throws is refused, and the edit queued behind it still saves", async () => {
   const server = fakeServer(AUDIO_VIDEO, { delayMs: 0 });
   try {
-    const { result } = renderHook(() => useLayoutSaves());
+    const { result } = renderHook(() => useListSaves(LAYOUTS));
     await act(async () => result.current.adopt(server.stored()));
     let broken: Promise<unknown> = Promise.resolve();
     let renamed: Promise<unknown> = Promise.resolve();
@@ -215,7 +232,7 @@ test("an edit that throws is refused, and the edit queued behind it still saves"
     ]);
     assert.deepEqual(outcomes, [{ ok: false, error: "a bug in an edit" }, { ok: true }], "the queue stopped at the edit that threw");
     assert.deepEqual(serverNames(server.stored()), ["Audio", "Lights"]);
-    assert.deepEqual(result.current.layouts.map((l) => l.name), ["Audio", "Lights"]);
+    assert.deepEqual(result.current.list.map((l) => l.name), ["Audio", "Lights"]);
   } finally {
     server.restore();
   }

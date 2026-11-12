@@ -26,6 +26,7 @@ const { MOVED_PAGE_ROUTE_PATTERNS, MOVED_ROUTES } = await import("./redirects.js
 const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, resolvePage } =
   await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
+const { ALL_DESTINATIONS } = await import("./destinations.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 
 after(() => {
@@ -259,6 +260,44 @@ describe("exact versus prefix", () => {
     assert.equal(active?.page.label, "ServiceCue");
     assert.equal(active?.exact, true);
     assert.equal(resolvePage("/servicecue/manage", CONSOLES)?.page.path, "/servicecue/manage");
+  });
+
+  test("every page that shows the rail lights a row in it", () => {
+    // The layouts editor is /servicecue/presets and ServiceCue's rail row is
+    // /servicecue/manage, so a prefix match landed on the tablet's /servicecue,
+    // which has no row, and nothing in the rail was lit while editing layouts.
+    // Every registered route that shows the chrome, paired with the row it lights.
+    const rail = new Set([...ALL_DESTINATIONS.map((d) => d.path), ...CONSOLES.map((c) => c.path)]);
+    const lit = REGISTERED.filter((p) => !REDIRECTS.has(p) && !hidesChrome(fill(p), VIEWS))
+      .map((p) => {
+        const path = resolvePage(fill(p), CONSOLES)?.page.path ?? "nothing";
+        return `${p} -> ${rail.has(path) ? path : `${path} (no rail row)`}`;
+      })
+      .sort();
+    assert.deepEqual(lit, [
+      "/ -> /",
+      "/automation -> /automation",
+      "/automation/$tab -> /automation",
+      "/baptism -> /baptism",
+      `/consoles/$viewId -> /consoles/${CONSOLE_ID}`,
+      "/history/manage -> /history/manage",
+      "/mic-slots -> /mic-slots",
+      "/patch -> /patch",
+      "/patch/edit -> /patch",
+      "/plan -> /plan",
+      "/screens -> /screens",
+      "/screens/$viewId/edit -> /screens",
+      "/servicecue/manage -> /servicecue/manage",
+      "/servicecue/presets -> /servicecue/manage",
+      "/settings/advanced -> /settings/advanced",
+      "/settings/advanced/$tab -> /settings/advanced",
+      "/settings/branding -> /settings/branding",
+      "/settings/integrations -> /settings/integrations",
+      "/settings/messages -> /settings/messages",
+      "/video-feeds -> /video-feeds",
+    ]);
+    // A child, not the page itself: the editor draws its own heading.
+    assert.equal(resolvePage("/servicecue/presets", CONSOLES)?.exact, false);
   });
 
   test("an unrouted URL claims nothing, so Home does not swallow a 404", () => {

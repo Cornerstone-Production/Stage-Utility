@@ -21,6 +21,16 @@ describe("migrateLayouts", () => {
     for (const r of roles) assert.equal(r.members.length, 1);
   });
 
+  test("a role it makes never takes an id another role already has", () => {
+    // "role-band" is an existing role renamed to "Musicians", so no role is named Band
+    // and the migration makes one; it must not get role-band too.
+    const existing = [{ id: "role-band", name: "Musicians", members: ["Players"] }];
+    const { roles, layouts } = migrateLayouts(legacy, existing);
+    const ids = roles.map((r) => r.id);
+    assert.equal(new Set(ids).size, ids.length, `two roles share an id: ${ids.join(", ")}`);
+    assert.deepEqual(layouts[0].columnRoles, ["role-band-2", "role-vocals"]);
+  });
+
   test("column ORDER is preserved — a layout must look identical afterwards", () => {
     const { layouts, roles } = migrateLayouts(legacy, []);
     const nameOf = (id: string) => roles.find((r) => r.id === id)!.name;

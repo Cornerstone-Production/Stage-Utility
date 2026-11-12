@@ -113,7 +113,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           setLayouts(l);
           clear("layouts");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts", err); });
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the ServiceCue layouts", err); });
       invoke<CategoryRole[]>("servicecue:listRoles")
         .then((r) => {
           if (cancelled) return;
@@ -323,7 +323,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               showing every department's notes; that is worth the same weight as a read
               that failed. */}
           {layoutMissing && <ErrorNote>Layout "{layoutParam}" not found. Showing All columns.</ErrorNote>}
-          {failed.has("layouts") && <ErrorNote>Couldn't load the column layouts, so all columns are shown.</ErrorNote>}
+          {failed.has("layouts") && <ErrorNote>Couldn't load the layouts, so all columns are shown.</ErrorNote>}
           {failed.has("roles") && <ErrorNote>Couldn't load the category roles, so no note columns are shown.</ErrorNote>}
           {failed.has("plans") && <ErrorNote>Couldn't load the plan list, so the plan arrows and menu have no plans to offer.</ErrorNote>}
         </div>

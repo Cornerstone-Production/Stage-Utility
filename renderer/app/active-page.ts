@@ -204,6 +204,12 @@ export function resolvePage(
   pathname: string,
   consoles: readonly PageIdentity[] = [],
 ): ActivePage | null {
+  // A page that names its destination is that destination's child, whatever its
+  // path would prefix-match. Never exact: the page draws its own heading.
+  const parent = NESTED_ROUTES.find((r) => r.parent && r.path === pathname)?.parent;
+  const owner = parent ? ALL_DESTINATIONS.find((d) => d.path === parent) : undefined;
+  if (owner) return { page: { path: owner.path, label: owner.label, description: owner.description }, exact: false };
+
   const page = [
     ...ALL_DESTINATIONS.map((d) => ({
       path: d.path,

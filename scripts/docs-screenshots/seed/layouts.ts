@@ -108,7 +108,7 @@ function stageConsole() {
 }
 
 /** ServiceCue: the service types on its landing page, the roles its columns use,
- *  and three column presets, one per department. */
+ *  and three layouts, one per department. */
 async function seedServiceCue(api: Api) {
   await api.post("/api/servicecue/config", { serviceTypeIds: SERVICE_TYPES.map((t) => t.id) });
   await api.post("/api/servicecue/roles/seed", { serviceTypeId: SERVICE_TYPES[0].id });

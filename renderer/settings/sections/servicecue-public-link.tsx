@@ -1,4 +1,4 @@
-// servicecue-public-link.tsx — the "Public link" card on the ServiceCue presets page.
+// servicecue-public-link.tsx — the "Public link" card on the ServiceCue layouts page.
 //
 // ServiceCue on the web: the server sends what ServiceCue shows out to a page the
 // operator deployed, and volunteers open that page instead of the app. This card is
@@ -183,11 +183,41 @@ function viewOf(dto: PublishSettingsDTO | undefined): View {
   return dto.status.sourceProblem ? "source" : "publishing";
 }
 
+/** The publishing settings and how it is going, read every `pollMs` while anything
+ *  that shows them is mounted. One cache entry, so the card and its row's summary make
+ *  one request between them. */
+function usePublishQuery(pollMs: number) {
+  return useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
+    refetchInterval: pollMs,
+  });
+}
+
+/**
+ * The card's state in its pill's word, for a summary drawn while the card is shut.
+ * Polled like the card, so a shut row still says when publishing stops reaching the page.
+ */
+export function usePublishSummary(pollMs = POLL_MS): string {
+  const { data, error } = usePublishQuery(pollMs);
+  if (data) return pill[viewOf(data)].word;
+  return error ? "Couldn't load" : "Loading…";
+}
+
+/** The card on a page of its own, and inside a row that already frames and titles it. */
+const CARD_LOOK = {
+  failed: "mb-5",
+  card: "mb-5 flex flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4",
+  title: "text-subheadline font-semibold text-fg",
+};
+const EMBEDDED_LOOK = { failed: undefined, card: "flex flex-col gap-3", title: "sr-only" };
+
 export function PublicLinkCard({
   typeNames,
   layoutNames,
   timeZone,
   pollMs = POLL_MS,
+  embedded = false,
 }: {
   typeNames: string[];
   layoutNames: string[];
@@ -195,13 +225,13 @@ export function PublicLinkCard({
   timeZone?: string;
   /** How often it asks how it is going. A seam for the test that watches it change. */
   pollMs?: number;
+  /** Inside a row that already says "Public link" and draws the border: no card frame
+   *  and no visible title of its own. */
+  embedded?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { data: dto, error: readError, dataUpdatedAt } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
-    refetchInterval: pollMs,
-  });
+  const { data: dto, error: readError, dataUpdatedAt } = usePublishQuery(pollMs);
+  const look = embedded ? EMBEDDED_LOOK : CARD_LOOK;
   const branch = useUpdateStatus().data?.branch ?? null;
   // The clock now. The age is read off the SERVER's stamps and the browser's own time
   // since the answer arrived, so a browser whose clock is wrong still says how long ago.
@@ -244,7 +274,7 @@ export function PublicLinkCard({
 
   if (failed.has("publish") && !dto) {
     return (
-      <section aria-labelledby="pub-title" className="mb-5">
+      <section aria-labelledby="pub-title" className={look.failed}>
         <h2 id="pub-title" className="sr-only">Public link</h2>
         <ErrorNote>Couldn't load the public link settings.</ErrorNote>
       </section>
@@ -368,10 +398,10 @@ export function PublicLinkCard({
     <section
       aria-labelledby="pub-title"
       data-state={dto ? view : "loading"}
-      className="mb-5 flex flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4"
+      className={look.card}
     >
       <div className="flex items-center gap-2.5">
-        <h2 id="pub-title" className="text-subheadline font-semibold text-fg">Public link</h2>
+        <h2 id="pub-title" className={look.title}>Public link</h2>
         {dto && (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-0.5 text-caption1 font-medium", pill[view].tone)}>
             <span aria-hidden="true" className="size-[7px] rounded-full bg-current" />
@@ -496,10 +526,10 @@ export function PublicLinkCard({
           <ul className="flex list-disc flex-col gap-[3px] pl-[18px] text-footnote">
             <li>
               {typeNames.length > 0 ? typeNames.join(", ") : "No service types yet"}{" "}
-              <span className="text-fg-muted">· follows "Shown on the landing page" above</span>
+              <span className="text-fg-muted">· follows Landing page</span>
             </li>
             <li>
-              {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every layout below</span>
+              {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every layout above</span>
             </li>
             <li>
               The live item, countdown and clock <span className="text-fg-muted">· as they change</span>

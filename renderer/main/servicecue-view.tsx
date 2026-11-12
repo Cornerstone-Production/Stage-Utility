@@ -15,7 +15,7 @@ import { DEFAULT_TEXT_SIZE } from "./servicecue-text-size";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 interface ServiceCueProps {
-  /** Which saved ServiceCue column preset to render; null = all columns. */
+  /** Which saved ServiceCue layout to render; null = all columns. */
   serviceCueLayoutId?: string | null;
   /** The header bar (plan title, countdown, clock). On for a display of its own;
    *  a layout embedding this usually has its own header and clock already. */
@@ -36,15 +36,14 @@ interface ServiceCueProps {
  * The ServiceCue rundown on a display.
  *
  * This IS the /servicecue page — same body, same header, same columns from the
- * same saved presets — pointed at the app's ACTIVE plan rather than at a service
+ * same saved layouts — pointed at the app's ACTIVE plan rather than at a service
  * type chosen in the URL. Before, it was a third rundown with hardcoded columns
  * of its own, which meant the thing an operator configured on the page and the
  * thing that appeared on a monitor were different tables that happened to look
  * similar.
  *
- * The Max-SPL column it used to carry is not lost: `spl-rundown` is a whole
- * View-kind for exactly that, and duplicating it here is what made this one drift
- * in the first place.
+ * A layout with Max SPL in its columns draws that column here as it does on the
+ * page: ServiceCueBody reads the SPL history for every surface alike.
  *
  * Sizes to `h-full`, never to the viewport. The caller owns the box: a kiosk
  * route wraps it in the full screen and the safe-area insets, a layout object
@@ -97,7 +96,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
   // Items change rarely; refetch on a slow timer. The live position arrives
   // separately over SSE, so a stale rundown still highlights the right row.
   //
-  // The presets and roles ride the same timer rather than being fetched once at
+  // The layouts and roles ride the same timer rather than being fetched once at
   // mount. Fetched once, a transient failure at boot left `layouts` empty for
   // the life of the page, and an empty list resolves to ALL columns — a display
   // configured for one department silently showing every other department's
@@ -115,7 +114,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
           setLayouts(l);
           clear("layouts");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts for a ServiceCue view", err); });
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the layouts for a ServiceCue view", err); });
       invoke<CategoryRole[]>("servicecue:listRoles")
         .then((r) => {
           if (cancelled) return;
@@ -151,7 +150,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
   );
   const shownRoles = useMemo(() => roles ?? [], [roles]);
   const render = useServiceCueRender(rundown, layout, roles, pcoLive, now);
-  // Only a display set to a column set is wrong without the layouts; one on
+  // Only a display set to a layout is wrong without the layouts; one on
   // All columns shows every column either way.
   const layoutsMissing = failed.has("layouts") && layouts === null && !!serviceCueLayoutId;
   const rolesMissing = failed.has("roles") && roles === null;
@@ -193,7 +192,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
 
       {(layoutsMissing || rolesMissing) && (
         <div className="flex flex-col gap-1.5 px-4 pt-2">
-          {layoutsMissing && <ErrorNote>Couldn't load the column layouts, so all columns are shown.</ErrorNote>}
+          {layoutsMissing && <ErrorNote>Couldn't load the layouts, so all columns are shown.</ErrorNote>}
           {rolesMissing && <ErrorNote>Couldn't load the category roles, so no note columns are shown.</ErrorNote>}
         </div>
       )}

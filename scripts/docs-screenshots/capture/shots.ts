@@ -144,7 +144,7 @@ export const SHOTS: Shot[] = [
   {
     name: "servicecue-picker",
     phase: "week",
-    shows: "ServiceCue landing page: a service type and a column preset to open its rundown.",
+    shows: "ServiceCue landing page: a service type and a layout to open its rundown.",
     async run({ session, page }) {
       await session.goto(page, "/servicecue");
       await session.shoot(page, "servicecue-picker", { clip: { x: 400, y: 340, width: 640, height: 280 } });
@@ -262,7 +262,7 @@ export const SHOTS: Shot[] = [
   {
     name: "servicecue-rundown",
     phase: "live",
-    shows: "The ServiceCue page in the app for the Weekend plan with the Audio preset, the live item highlighted.",
+    shows: "The ServiceCue page in the app for the Weekend plan with the Audio layout, the live item highlighted.",
     async run({ session, page }) {
       await session.goto(page, `/servicecue/${SERVICE_TYPES[0].id}/layout-audio`, { settle: 3500 });
       await session.shoot(page, "servicecue-rundown");

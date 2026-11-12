@@ -112,6 +112,9 @@ export function Select({
 }) {
   let triggerClassName: string | undefined;
   let ariaLabel: string | undefined;
+  // What else the trigger carries onto the <select>: data attributes, and the focus
+  // and press handlers a caller needs to know the list is being opened.
+  let passed: Record<string, unknown> = {};
   let placeholder: React.ReactNode = null;
   let contentChildren: React.ReactNode = null;
 
@@ -121,6 +124,9 @@ export function Select({
       const p = child.props as { className?: string; "aria-label"?: string; children?: React.ReactNode };
       triggerClassName = p.className;
       ariaLabel = p["aria-label"];
+      passed = Object.fromEntries(
+        Object.entries(p).filter(([k]) => k.startsWith("data-") || k === "onFocus" || k === "onPointerDown" || k === "onMouseDown"),
+      );
       React.Children.forEach(p.children, (t) => {
         if (React.isValidElement(t) && t.type === SelectValue) placeholder = (t.props as { placeholder?: React.ReactNode }).placeholder;
       });
@@ -206,6 +212,7 @@ export function Select({
 
   return (
     <select
+      {...passed}
       value={value}
       defaultValue={value === undefined ? defaultValue : undefined}
       onChange={(e) => onValueChange?.(e.target.value)}

@@ -70,11 +70,11 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ServiceCue column presets, for a "script" View's Columns picker. Fetched
-  // here rather than threaded through SectionProps: only this branch needs them,
-  // and they change when someone edits a preset in the ServiceCue section.
+  // The ServiceCue layouts, for a "script" View's Columns picker. Fetched here
+  // rather than threaded through SectionProps: only this branch needs them, and
+  // they change when someone edits a layout on the ServiceCue layouts page.
   const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
-  // A failed read is not "no column sets". Drawn as one, the picker offered only
+  // A failed read is not "no layouts". Drawn as one, the picker offered only
   // All columns and labelled this view's own set "not found".
   const { failed, fail, clear } = useFailedReads<"layouts">("servicecue");
   useEffect(() => {
@@ -89,7 +89,7 @@ export function ViewDetail({
         clear("layouts");
       })
       .catch((err: unknown) => {
-        if (!cancelled) fail("layouts", "the column sets for a ServiceCue view", err);
+        if (!cancelled) fail("layouts", "the ServiceCue layouts for a view", err);
       });
     return () => {
       cancelled = true;
@@ -279,7 +279,7 @@ export function ViewDetail({
             <div className="flex flex-col">
               <span className="text-caption1 text-fg">Columns</span>
               <span className="text-caption2 text-fg-muted">
-                The same saved column sets the ServiceCue pages use, so a department's columns are
+                The same layouts the ServiceCue pages use, so a department's columns are
                 defined once and a display and a browser tab cannot disagree about them.
               </span>
             </div>
@@ -287,7 +287,7 @@ export function ViewDetail({
               // In the picker's place, not beside it: with no list to choose from
               // it could only offer All columns, and switching to that by
               // accident would overwrite the view's real choice.
-              <ErrorNote>Couldn't load the saved column sets, so this view's columns can't be changed right now.</ErrorNote>
+              <ErrorNote>Couldn't load the ServiceCue layouts, so this view's columns can't be changed right now.</ErrorNote>
             ) : (
               <Select
                 value={view.serviceCueLayoutId ?? ALL_COLUMNS}
@@ -310,8 +310,8 @@ export function ViewDetail({
           </div>
           <p className="text-caption2 text-fg-muted">
             The ServiceCue view renders the active plan's rundown — the same table as the ServiceCue
-            pages, following whichever plan the app is set to. Max SPL per item lives on the
-            SPL rundown view.
+            pages, following whichever plan the app is set to. A layout with Max SPL in its columns
+            shows each item's loudest reading.
           </p>
         </>
       ) : view.kind === "calendar" ? (

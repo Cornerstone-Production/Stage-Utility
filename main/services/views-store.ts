@@ -58,7 +58,7 @@ const restoreCheck = checked((raw) => {
  */
 export const viewsStore = new DataStore<View[]>("views.json", [], "config", {
   restoreCheck,
-  // A view saved before ServiceCue was renamed names its column preset with the old
+  // A view saved before ServiceCue was renamed names its layout with the old
   // field; it is read as the new one and written as the new one on the next save.
   normalize: adoptLegacyViewFields,
 });

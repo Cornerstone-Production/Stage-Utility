@@ -110,7 +110,7 @@ export interface PlanItemsDTO {
   noteCategories: string[];
 }
 
-/** A saved ServiceCue layout — a named column preset. GLOBAL: one set of layouts applies across every service type.
+/** A saved ServiceCue layout — a named set of columns. GLOBAL: one set of layouts applies across every service type.
  *  Columns reference category ROLES, not names. Names are defined per service type and
  *  vary between them, so a name-based column rendered empty wherever that service type
  *  used a different word for the same thing. A role whose members are all absent is
