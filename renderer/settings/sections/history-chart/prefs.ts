@@ -41,20 +41,6 @@ export function subscribeStoredKeys(storageKey: string, fn: () => void): () => v
 }
 
 /**
- * A counter that increments whenever `storageKey` is written.
- *
- * For a reader that does not own the choice and only needs to recompute when it
- * changes — the service header's peak-level figure reads the metric list
- * through a plain function, not through `useStoredKeys`, and needs something to
- * put in a `useMemo` dependency list.
- */
-export function useStoredKeysVersion(storageKey: string): number {
-  const [n, setN] = useState(0);
-  useEffect(() => subscribeStoredKeys(storageKey, () => setN((v) => v + 1)), [storageKey]);
-  return n;
-}
-
-/**
  * Store a key list and tell this tab's other readers. Returns the failure.
  *
  * Announces only a write that LANDED: a reader woken by a refused write re-reads
