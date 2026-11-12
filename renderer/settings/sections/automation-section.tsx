@@ -426,7 +426,10 @@ function RuleRow({
 
   return (
     <div data-rule-row={rule.id} className="border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-fill">
-      <div className="flex items-center gap-2">
+      {/* A grid, so the switch and Run centre on the name lines and the Used on
+          and result lines run beneath them, under the name. Centring Run on the
+          whole stack put it half a line below the chips beside the name. */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2">
         {/* The one control on the row that is NOT the editor: arming a rule is
             a thing an operator does down a list, and it writes at once — except
             turning ON a rule that still needs setup, which this refuses without
@@ -453,7 +456,6 @@ function RuleRow({
             onChanged();
           }}
         />
-        <div className="min-w-0 flex-1">
         <button type="button" className="block w-full min-w-0 text-left" onClick={onOpen}>
           <div className="flex min-w-0 items-baseline gap-2">
             <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
@@ -499,10 +501,13 @@ function RuleRow({
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
         </button>
-        {isCue && <UsedOn uses={uses} />}
-        {lastRun && <RunResultLine result={lastRun} />}
-        </div>
         <RunButton rule={rule} label="Run" disarmed={disarmed} onRan={onRan} />
+        {((isCue && uses) || lastRun) && (
+          <div className="col-span-2 col-start-2 min-w-0">
+            {isCue && <UsedOn uses={uses} />}
+            {lastRun && <RunResultLine result={lastRun} />}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -560,11 +565,13 @@ function PairRow({
   const spoken = [on, off].some((r) => String(r.trigger.params.says ?? "").trim() !== "");
   return (
     <div className="border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-fill" data-cue-pair-row={base}>
+      {/* Run centres on the name lines, beside the chips, and Used on and the
+          result lines run beneath. Centring Run on the whole stack put it half
+          a line below the chips. */}
       <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
         <button
           type="button"
-          className="flex w-full min-w-0 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
           onClick={onOpen}
           aria-label={`${name} pair`}
         >
@@ -588,10 +595,6 @@ function PairRow({
           <ServiceGuardBadge guarded={guarded} />
           {cueState && <CuePairState base={base} state={cueState} />}
         </button>
-        <UsedOn uses={uses} />
-        {onResult && <RunResultLine result={onResult} half="On" />}
-        {offResult && <RunResultLine result={offResult} half="Off" />}
-        </div>
         {/* One Run per half: a pair is two rules, and each is run, confirmed
             and disarmed on its own. Stacked on a phone, where two buttons
             beside the name would crush it. */}
@@ -600,6 +603,9 @@ function PairRow({
           <RunButton rule={off} label="Run off" disarmed={disarmed} onRan={onRan} />
         </div>
       </div>
+      <UsedOn uses={uses} />
+      {onResult && <RunResultLine result={onResult} half="On" />}
+      {offResult && <RunResultLine result={offResult} half="Off" />}
     </div>
   );
 }
