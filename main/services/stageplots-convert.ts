@@ -121,6 +121,25 @@ async function convert(source: Buffer, cleanup: boolean): Promise<Converted> {
   return { webp: last.data, width: last.info.width, height: last.info.height };
 }
 
+/** The JPEG quality a stored source is re-encoded at. */
+const SOURCE_JPEG_QUALITY = 90;
+
+/**
+ * The source a background keeps: the upload turned upright and brought down to
+ * 2400 px on its long edge (never enlarged), in its own format, with every
+ * metadata block dropped (EXIF with its GPS and device, XMP, and any ICC
+ * profile, the pixels converted to sRGB). What clean-up re-converts from.
+ */
+async function storableSource(input: Buffer, kind: "png" | "jpeg"): Promise<Buffer> {
+  const sharp = await loadSharp();
+  const pipe = sharp(input, INPUT)
+    .rotate()
+    .resize({ width: CONVERTED_LONG_EDGE, height: CONVERTED_LONG_EDGE, fit: "inside", withoutEnlargement: true })
+    .toColourspace("srgb");
+  // sharp writes no metadata unless told to keep it.
+  return kind === "png" ? pipe.png({ compressionLevel: 9 }).toBuffer() : pipe.jpeg({ quality: SOURCE_JPEG_QUALITY }).toBuffer();
+}
+
 /** Conversions run one at a time: each holds a decoded image in memory. */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -145,16 +164,39 @@ async function counted<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+export interface Prepared {
+  /** What is stored as the background's source (see storableSource). */
+  source: Buffer;
+  converted: Converted;
+}
+
 /**
- * Convert a PNG or JPEG source into the WebP a plot draws. Same input and
- * setting, same bytes. Throws with a sentence when it cannot.
+ * An upload made into what a background stores: its source at 2400 px without
+ * metadata, and the WebP converted from that source, so a later clean-up
+ * switch gives exactly what the upload did. One job on the conversion queue.
  */
-export function convertBackground(source: Buffer, opts: { cleanup: boolean }): Promise<Converted> {
+export function prepareBackground(input: Buffer, opts: { kind: "png" | "jpeg"; cleanup: boolean }): Promise<Prepared> {
+  return enqueue(async () => {
+    const source = await storableSource(input, opts.kind);
+    return { source, converted: await convert(source, opts.cleanup) };
+  });
+}
+
+/** Run `job` on the conversion queue, counted, its failure a sentence. */
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
   const run = queue.then(() =>
-    counted(() => convert(source, opts.cleanup)).catch((err: unknown) => {
+    counted(job).catch((err: unknown) => {
       throw new Error(`could not convert the background: ${errorMessage(err)}`, { cause: err });
     }),
   );
   queue = run.catch(() => undefined);
   return run;
+}
+
+/**
+ * Convert a PNG or JPEG source into the WebP a plot draws. Same input and
+ * setting, same bytes. Throws with a sentence when it cannot.
+ */
+export function convertBackground(source: Buffer, opts: { cleanup: boolean }): Promise<Converted> {
+  return enqueue(() => convert(source, opts.cleanup));
 }

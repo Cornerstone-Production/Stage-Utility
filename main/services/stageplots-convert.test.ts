@@ -4,7 +4,7 @@ import { crc32, deflateSync } from "node:zlib";
 
 import sharp from "sharp";
 
-import { conversionPeak, convertBackground, isPdf, sniffUpload } from "./stageplots-convert.js";
+import { conversionPeak, convertBackground, isPdf, prepareBackground, sniffUpload } from "./stageplots-convert.js";
 
 /** A noisy image, generated here: nothing real goes in a fixture. */
 function noise(width: number, height: number) {
@@ -168,5 +168,54 @@ describe("convertBackground", () => {
   test("a failed conversion does not stop the next one", async () => {
     await assert.rejects(() => convertBackground(Buffer.from("not an image"), { cleanup: false }), /could not convert the background/);
     assert.equal((await convertBackground(await drawing(400, 300), { cleanup: false })).width, 400);
+  });
+});
+
+describe("prepareBackground: the stored source", () => {
+  test("a 4000x3000 JPEG with EXIF GPS is stored at most 2400 px on its long edge, as a JPEG, with no EXIF", async () => {
+    const jpeg = await (await photoLike(4000, 3000).then((b) => sharp(b)))
+      .withExif({ IFD0: { Make: "Phone" }, IFD3: { GPSLatitudeRef: "N", GPSLatitude: "41/1 35/1 0/1" } })
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    assert.ok((await sharp(jpeg).metadata()).exif, "the fixture carries no EXIF; the test is not testing that");
+    const out = await prepareBackground(jpeg, { kind: "jpeg", cleanup: true });
+    const meta = await sharp(out.source).metadata();
+    assert.equal(meta.format, "jpeg");
+    assert.deepEqual([meta.width, meta.height], [2400, 1800]);
+    assert.equal(meta.exif, undefined, "the stored source kept its EXIF");
+    assert.ok(out.source.length < jpeg.length, `${out.source.length} bytes is not smaller than the ${jpeg.length}-byte upload`);
+    assert.deepEqual([out.converted.width, out.converted.height], [2400, 1800]);
+  });
+
+  test("a 1200 px PNG is not enlarged and stays a PNG", async () => {
+    const out = await prepareBackground(await drawing(1200, 800), { kind: "png", cleanup: false });
+    const meta = await sharp(out.source).metadata();
+    assert.equal(meta.format, "png");
+    assert.deepEqual([meta.width, meta.height], [1200, 800]);
+  });
+
+  test("an EXIF rotation is applied to the stored source, not kept as a tag", async () => {
+    const jpeg = await noise(300, 200).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+    const meta = await sharp((await prepareBackground(jpeg, { kind: "jpeg", cleanup: false })).source).metadata();
+    assert.deepEqual([meta.width, meta.height, meta.orientation], [200, 300, undefined]);
+  });
+
+  test("re-converting from the stored source still works, and gives what the upload gave", async () => {
+    // A JPEG, so the stored source differs from the upload: the WebP must be
+    // converted from the source, or a clean-up switch later changes the picture.
+    const out = await prepareBackground(await photoLike(3000, 2000), { kind: "jpeg", cleanup: true });
+    const again = await convertBackground(out.source, { cleanup: true });
+    assert.ok(again.webp.equals(out.converted.webp));
+  });
+
+  test("the queue holds one conversion at a time across the resize too", async () => {
+    const png = await drawing(1600, 1200);
+    conversionPeak(true);
+    await Promise.all([
+      prepareBackground(png, { kind: "png", cleanup: true }),
+      prepareBackground(png, { kind: "png", cleanup: false }),
+      convertBackground(png, { cleanup: true }),
+    ]);
+    assert.equal(conversionPeak(), 1, "more than one conversion ran at once");
   });
 });

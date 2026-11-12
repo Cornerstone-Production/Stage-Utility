@@ -45,7 +45,7 @@ import { broadcast } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
-import { CONVERTED_MAX_BYTES, convertBackground, sniffUpload } from "../stageplots-convert.js";
+import { CONVERTED_MAX_BYTES, convertBackground, prepareBackground, sniffUpload } from "../stageplots-convert.js";
 import { plotsUsing } from "../stageplots-doc.js";
 import {
   MAX_PENDING_ORIGINALS,
@@ -438,21 +438,23 @@ async function uploadImage(c: RouteCtx): Promise<void> {
     if (pdf && originalBytes === null) refuseUpload(name, bytes.length, "the PDF this page came from is not on the server; upload it again");
 
     const ext = sniffed.kind === "png" ? "png" : "jpg";
-    let converted;
+    let prepared;
     try {
-      converted = await convertBackground(bytes, { cleanup: true });
+      prepared = await prepareBackground(bytes, { kind: sniffed.kind, cleanup: true });
     } catch (err) {
       console.warn(`[stageplots] conversion failed for "${scrub(name)}": ${scrub(errorMessage(err))}`);
       throw new Refused(400, errorMessage(err));
     }
-    const sourceHash = await storeStagePlotImage(bytes, ext);
+    const { source, converted } = prepared;
+    // The source as stored, 2400 px and no metadata, is a PNG or JPEG upload's original too.
+    const sourceHash = await storeStagePlotImage(source, ext);
     const convertedHash = await storeStagePlotImage(converted.webp, "webp");
     const background: Background = {
       id: newId("b"),
       name,
       original: pdf
         ? { hash: pdf.hash, mime: "application/pdf", bytes: originalBytes ?? 0 }
-        : { hash: sourceHash, mime: ext === "png" ? "image/png" : "image/jpeg", bytes: bytes.length },
+        : { hash: sourceHash, mime: ext === "png" ? "image/png" : "image/jpeg", bytes: source.length },
       source: { hash: sourceHash, ext },
       converted: { hash: convertedHash, width: converted.width, height: converted.height, bytes: converted.webp.length },
       cleanup: true,
@@ -471,7 +473,7 @@ async function uploadImage(c: RouteCtx): Promise<void> {
     if (!doc) return;
     const from = pdf ? `PDF page ${pdf.page} of ${pdf.pages}` : sniffed.kind.toUpperCase();
     console.log(
-      `[stageplots] background "${scrub(name)}" accepted: ${scrub(from)}, ${scrub(kb(bytes.length))} -> ${scrub(converted.width)}x${scrub(converted.height)} WebP ${scrub(kb(converted.webp.length))}`,
+      `[stageplots] background "${scrub(name)}" accepted: ${scrub(from)}, ${scrub(kb(bytes.length))} -> ${scrub(converted.width)}x${scrub(converted.height)} WebP ${scrub(kb(converted.webp.length))}, source kept at ${scrub(kb(source.length))}`,
     );
     if (converted.webp.length >= CONVERTED_MAX_BYTES) {
       console.warn(`[stageplots] background "${scrub(name)}" is ${scrub(kb(converted.webp.length))} even at the lowest quality; kept`);

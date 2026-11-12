@@ -39,6 +39,14 @@ pixels on its long edge (never enlarged), and saved as a WebP under 1 MB, steppi
 the quality down from 80 to 40 until it fits. An image that does not fit even then
 is kept and the log says so.
 
+**The source.** What a background keeps to convert from again is the upload (or the
+rendered PDF page) turned the right way up and brought down to 2400 pixels on its
+long edge, never enlarged, in its own format (a JPEG at quality 90, a PNG at full
+compression), with every piece of metadata dropped: the camera, the location a
+phone records, and any colour profile, the pixels converted to sRGB. A photo's
+source is typically 1 to 3 MB; for a PNG or JPEG upload it is also what the detail
+calls the original. An uploaded PDF is kept as it was.
+
 **Clean-up** turns the background into a quiet drawing for items to sit on:
 greyscale, contrast evened out, then faded 40% toward white. It is on for a new
 upload. Switching it converts again from the kept source, so it can be switched
@@ -68,7 +76,7 @@ contents:
 
 | Folder | Holds | Served |
 |---|---|---|
-| `stageplot-images/` | the converted WebP, and the PNG or JPEG it was converted from | yes, cached forever |
+| `stageplot-images/` | the converted WebP, and the 2400-pixel PNG or JPEG source it was converted from | yes, cached forever |
 | `stageplot-originals/` | an uploaded PDF | never |
 
 Converting runs one image at a time, so a Raspberry Pi converting a 12-megapixel
@@ -116,13 +124,15 @@ page goes back to what is saved.
 ## Backups
 
 A config backup carries `stageplots.json`, both folders of background files and
-every PDF original, and a restore brings them all back. Every background carries
-its source as uploaded (up to 12 MB) beside its WebP, and one made from a PDF
-carries the PDF too (up to 25 MB), so backgrounds make backups large.
+every PDF original, and a restore brings them all back. A photo background is
+about 1 to 3 MB of source plus at most 1 MB of WebP. One made from a PDF carries
+the PDF as uploaded too (up to 25 MB), beside its page's source, which for a
+scanned or detailed page can be a few MB as a PNG.
 
 A backup restored from a downloaded file is limited to 64 MB, about 48 MB of
-files. Four photos straight off a phone at 12 MB each already reach it, and a
-server holding them cannot be restored from the file. Saved snapshots, recalled on
+files. Photos rarely reach that: twenty photo backgrounds come to about 40 MB.
+PDFs do: two 20 MB plan sets, with their pages, already pass it, and a server
+holding them cannot be restored from the file. Saved snapshots, recalled on
 the server itself, have no such limit. Taking a backup past it logs a
 `[config-snapshot]` warning with the total. See
 [Reliability and data](../ops/reliability.md).
@@ -130,7 +140,7 @@ the server itself, have no such limit. Taking a backup past it logs a
 ## Log
 
 Lines tagged `[stageplots]`: every upload refused and why, a PDF kept, a
-background accepted with its size before and after, a conversion that failed, a
+background accepted with its size before and after and the source kept, a conversion that failed, a
 background over 1 MB at the lowest quality, a clean-up re-conversion or one refused
 because its source is missing, a venue or background deleted, files tidied away or
 left behind, the tidy skipped and why, image processing unavailable because sharp

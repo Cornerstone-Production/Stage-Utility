@@ -666,7 +666,7 @@ nothing. A body that is not a JSON object is a `400`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/stageplots` | `{venues, backgrounds, plots}`; each background carries `url` (its converted WebP) and `sourceUrl` (the raster it was converted from) |
+| GET | `/api/stageplots` | `{venues, backgrounds, plots}`; each background carries `url` (its converted WebP) and `sourceUrl` (the source it was converted from: the upload, or the rendered PDF page, at most 2400 px on its long edge with its metadata dropped) |
 | POST | `/api/stageplots/venues` | `{name, kind, notes?}`, `kind` `home` or `offsite`. `201` with the venue; `400` past 50 venues |
 | PATCH | `/api/stageplots/venues/:id` | Any of `{name, kind, notes}` |
 | DELETE | `/api/stageplots/venues/:id` | The venue and its plots |

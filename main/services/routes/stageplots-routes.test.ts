@@ -177,6 +177,24 @@ describe("stage plot routes", () => {
     assert.equal(served.headers["content-type"], "image/webp");
   });
 
+  test("the source served for a phone photo is 2400 px with no EXIF, and the original is that source", async () => {
+    const photo = await sharp({ create: { width: 4000, height: 3000, channels: 3, background: { r: 90, g: 120, b: 150 } } })
+      .withExif({ IFD0: { Make: "Phone" }, IFD3: { GPSLatitudeRef: "N", GPSLatitude: "41/1 35/1 0/1" } })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    const bg = (await upload("/api/stageplots/backgrounds?name=Photo.jpg", photo)).json as View["backgrounds"][number];
+    const served = await fetch(`http://${server.host}${bg.sourceUrl}`);
+    assert.equal(served.status, 200);
+    const bytes = Buffer.from(await served.arrayBuffer());
+    const meta = await sharp(bytes).metadata();
+    assert.deepEqual([meta.format, meta.width, meta.height, meta.exif], ["jpeg", 2400, 1800, undefined]);
+    assert.deepEqual(bg.original, { hash: bg.source.hash, mime: "image/jpeg", bytes: bytes.length });
+    // Clean-up re-converts from that stored source.
+    const r = await call("PATCH", `/api/stageplots/backgrounds/${bg.id}`, { cleanup: false });
+    assert.equal(r.status, 200, r.body);
+    assert.deepEqual([(r.json as View["backgrounds"][number]).converted.width, (r.json as View["backgrounds"][number]).converted.height], [2400, 1800]);
+  });
+
   test("a zip renamed .png is 400 and stores nothing", async () => {
     const zip = Buffer.concat([Buffer.from("PK\x03\x04", "latin1"), Buffer.alloc(400)]);
     const r = await upload("/api/stageplots/backgrounds?name=plan.png", zip);
