@@ -63,7 +63,7 @@ class RecordingEventSource {
 
 // No SharedWorker in jsdom and no ?transport=poll, so this is the direct
 // EventSource path — the one a display runs on.
-const { onNotification } = await import("./api.js");
+const { onNotification, getStreamStatus } = await import("./api.js");
 
 after(() => teardown());
 
@@ -207,5 +207,50 @@ describe("onNotification on the EventSource path", () => {
         resolve();
       });
     });
+  });
+});
+
+// Whether the stream is delivering, which a Screens-card preview reports to its
+// card (preview-messages.ts). A display on this path must say so on its own
+// stream's open and error, and after SSE_SILENCE_MS of hearing nothing: a stream
+// that is open but quiet (a frozen server) must not pass for live.
+describe("the direct stream's status", () => {
+  test("up on open, down after the silence deadline, back on a heartbeat, down with a time on error", async (t) => {
+    const { SSE_HEARTBEAT_EVENT, SSE_SILENCE_MS } = await import("../../main/types/sse.js");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const off = onNotification("status:probe", () => {});
+    const es = stream();
+    es.onopen?.();
+    assert.deepEqual(getStreamStatus(), { up: true, downSince: null }, "opened and not up");
+    t.mock.timers.tick(SSE_SILENCE_MS - 1);
+    es.emit(SSE_HEARTBEAT_EVENT, {});
+    t.mock.timers.tick(SSE_SILENCE_MS - 1);
+    assert.equal(getStreamStatus().up, true, "a heartbeat did not re-arm the silence deadline");
+    t.mock.timers.tick(1);
+    assert.equal(getStreamStatus().up, false, "a silent stream still read as up");
+    es.emit(SSE_HEARTBEAT_EVENT, {});
+    assert.equal(getStreamStatus().up, true, "a heartbeat after the silence did not bring it back");
+    es.onerror?.();
+    assert.equal(getStreamStatus().up, false, "errored and still up");
+    assert.equal(typeof getStreamStatus().downSince, "number", "down without saying since when");
+    off();
+  });
+});
+
+describe("the direct stream after a stall", () => {
+  test("is reopened once at the deadline, and an unreachable server does not make it loop", async (t) => {
+    const { SSE_SILENCE_MS } = await import("../../main/types/sse.js");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const off = onNotification("stall:probe", () => {});
+    const before = RecordingEventSource.instances.length;
+    const stalled = RecordingEventSource.instances.at(-1)!;
+    stalled.onopen?.();
+    t.mock.timers.tick(SSE_SILENCE_MS);
+    assert.equal(stalled.readyState, RecordingEventSource.CLOSED, "the silent stream was left open");
+    assert.equal(RecordingEventSource.instances.length, before + 1, "the silent stream was not replaced");
+    assert.ok(RecordingEventSource.instances.at(-1)!.count("stall:probe") > 0, "the replacement lost the page's listeners");
+    t.mock.timers.tick(SSE_SILENCE_MS * 3);
+    assert.equal(RecordingEventSource.instances.length, before + 1, "a stream that never opened was reopened again and again");
+    off();
   });
 });

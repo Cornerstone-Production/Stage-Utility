@@ -22,16 +22,36 @@ import {
   type ReactNode,
 } from "react";
 
+/** Whose actions these are: the hook instance that set them. */
+interface Owned {
+  owner: symbol;
+  node: ReactNode;
+}
+
 interface PageActionsValue {
   actions: ReactNode;
-  setActions: (node: ReactNode) => void;
+  setActions: (owner: symbol, node: ReactNode) => void;
+  clearActions: (owner: symbol) => void;
 }
 
 const PageActionsContext = createContext<PageActionsValue | null>(null);
 
 export function PageActionsProvider({ children }: { children: ReactNode }) {
-  const [actions, setActions] = useState<ReactNode>(null);
-  const value = useMemo(() => ({ actions, setActions }), [actions]);
+  const [owned, setOwned] = useState<Owned | null>(null);
+  // Stable, so a page's effect does not re-run because another page's actions moved.
+  const setters = useMemo(
+    () => ({
+      setActions: (owner: symbol, node: ReactNode) => setOwned({ owner, node }),
+      // Only the page that set them may take them away. Two pages can be mounted
+      // across one navigation: the kept Screens page (kept-screens.tsx) comes back
+      // in the commit the address changes, while the router takes the page being
+      // left down a commit later. An unconditional clear there wiped the actions
+      // Screens had just put up, and its Settings button was gone on every return.
+      clearActions: (owner: symbol) => setOwned((cur) => (cur?.owner === owner ? null : cur)),
+    }),
+    [],
+  );
+  const value = useMemo(() => ({ actions: owned?.node ?? null, ...setters }), [owned, setters]);
   return <PageActionsContext.Provider value={value}>{children}</PageActionsContext.Provider>;
 }
 
@@ -65,10 +85,12 @@ export function PageActionsSlot() {
 export function usePageActions(node: ReactNode, deps: readonly unknown[]): void {
   const ctx = useContext(PageActionsContext);
   const set = ctx?.setActions;
+  const clear = ctx?.clearActions;
+  const [owner] = useState(() => Symbol("page-actions"));
   useEffect(() => {
-    if (!set) return;
-    set(node);
-    return () => set(null);
+    if (!set || !clear) return;
+    set(owner, node);
+    return () => clear(owner);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set, ...deps]);
+  }, [set, clear, owner, ...deps]);
 }

@@ -13,7 +13,7 @@
 // sidebar sat expanded on a phone with no way to dismiss it.
 
 import { useMemo } from "react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
 import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
@@ -33,6 +33,7 @@ import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
+import { ShellOutlet } from "./screens/kept-screens";
 
 export function Shell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -149,11 +150,11 @@ export function Shell() {
         !fullBleed && "sm:pt-4",
       )}
     >
-      {/* Keyed so re-selecting the active rail item remounts the route,
-          returning it to its top view. */}
-      <div key={resetKey} className="contents">
-        <Outlet />
-      </div>
+      {/* The route, and beside it the Screens page, which is drawn here rather
+          than by its route so that leaving it hides the page instead of unmounting
+          it, and its live previews survive the trip away and back. See
+          kept-screens.tsx. */}
+      <ShellOutlet pathname={pathname} resetKey={resetKey} />
     </main>
   );
 

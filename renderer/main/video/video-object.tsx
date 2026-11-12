@@ -16,6 +16,7 @@ import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
 import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
+import { usePreviewHidden } from "../preview-messages";
 import { ListenControl } from "./listen-control";
 import { claimListen, listenPathOf, listenView, releaseListen, useListenOwner } from "./listen";
 import { registerPlayback } from "./playback-reports";
@@ -124,8 +125,11 @@ function VideoObjectBody({
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
 
   const [previewPaused, setPreviewPaused] = useState(isPreviewRoute);
+  // A preview on the kept Screens page while the operator is elsewhere: off screen,
+  // whether or not this engine's IntersectionObserver says so. See preview-messages.ts.
+  const previewHidden = usePreviewHidden();
   const onLog = useCallback((reason: string) => logToServer("video", reason), []);
-  const active = onScreen && !previewPaused;
+  const active = onScreen && !previewPaused && !previewHidden;
 
   // One control per page holds the sound, and only a relay feed has audio the server can describe.
   const listenId = useId();
