@@ -234,13 +234,16 @@ export class DataStore<T> {
       // a save landing during the rename must win, not be overwritten after it.
       this.corruptLoad = true;
       this.cache = this.defaultValue;
+      let movedAside = true;
       try {
         await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`);
       } catch {
-        /* best-effort backup */
+        movedAside = false; // best-effort backup; the log below says it failed
       }
       console.error(
-        `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`,
+        movedAside
+          ? `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`
+          : `[data-store] ${this.filename} could not be parsed (corrupt) and could not be moved aside; starting fresh — copy ${this.filename} somewhere safe before the next save replaces it.`,
         err,
       );
       // A save's whole write-plus-rename can complete between the defaults being
