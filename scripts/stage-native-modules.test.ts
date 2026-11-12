@@ -3,10 +3,13 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { gzipSync } from "node:zlib";
 import { describe, test } from "node:test";
 
-import { integrityProblem, nativePackages, type LockEntry } from "./stage-native-modules.ts";
+import { integrityProblem, nativePackages, unpackInto, unsafeEntries, type LockEntry } from "./stage-native-modules.ts";
 
 const lock = (JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")) as { packages: Record<string, LockEntry> }).packages;
 const keys = (platform: string) => nativePackages(lock, platform).map((p) => p.key);
@@ -57,5 +60,58 @@ describe("integrityProblem", () => {
     assert.equal(integrityProblem(bytes, integrity), null);
     assert.match(integrityProblem(Buffer.from("another tarball"), integrity) ?? "", /integrity mismatch/);
     assert.match(integrityProblem(bytes, "sha1-abc") ?? "", /unsupported/);
+  });
+});
+
+describe("unpacking a tarball from memory", () => {
+  /** A one-file ustar archive, gzipped, whose entry is named exactly `name`. */
+  function tgzWith(name: string, body: string): Buffer {
+    const header = Buffer.alloc(512);
+    header.write(name, 0, 100, "utf8");
+    header.write("0000644\0", 100, 8, "ascii");
+    header.write("0000000\0", 108, 8, "ascii");
+    header.write("0000000\0", 116, 8, "ascii");
+    header.write(`${Buffer.byteLength(body).toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
+    header.write("00000000000\0", 136, 12, "ascii");
+    header.write("        ", 148, 8, "ascii");
+    header.write("0", 156, 1, "ascii");
+    header.write("ustar\u000000", 257, 8, "binary");
+    let sum = 0;
+    for (const b of header) sum += b;
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    const data = Buffer.alloc(Math.ceil(Buffer.byteLength(body) / 512) * 512);
+    data.write(body, 0, "utf8");
+    return gzipSync(Buffer.concat([header, data, Buffer.alloc(1024)]));
+  }
+
+  test("unsafeEntries names absolute paths and .. segments, and nothing else", () => {
+    assert.deepEqual(unsafeEntries(["package/a.js", "package/lib/b.js", "package/..x/c", "/etc/passwd", "package/../../evil", "C:/x", "a\\..\\b"]), [
+      "/etc/passwd",
+      "package/../../evil",
+      "C:/x",
+      "a\\..\\b",
+    ]);
+  });
+
+  test("a good tarball unpacks into its folder, package/ dropped", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "unpack-good-"));
+    try {
+      unpackInto(tgzWith("package/index.js", "module.exports = 1;\n"), path.join(dir, "pkg"));
+      assert.equal(readFileSync(path.join(dir, "pkg", "index.js"), "utf8"), "module.exports = 1;\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a tarball with an entry outside its folder is refused, and nothing is written", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "unpack-evil-"));
+    try {
+      const target = path.join(dir, "a", "b", "pkg");
+      assert.throws(() => unpackInto(tgzWith("package/../../evil.txt", "owned\n"), target), /outside its folder/);
+      assert.equal(existsSync(path.join(dir, "a", "evil.txt")), false, "the entry escaped");
+      assert.equal(existsSync(target), false, "something was unpacked before the refusal");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

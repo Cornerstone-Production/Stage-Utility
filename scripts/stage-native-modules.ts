@@ -20,7 +20,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -99,29 +98,50 @@ export function integrityProblem(bytes: Buffer, integrity: string): string | nul
   return actual === expected ? null : `integrity mismatch: the lockfile says sha512-${expected.slice(0, 16)}…, the download is sha512-${actual.slice(0, 16)}…`;
 }
 
+/** The entry names in `list` that could land outside the directory they are
+ *  unpacked into: an absolute path, or one with a `..` segment. */
+export function unsafeEntries(list: readonly string[]): string[] {
+  return list.filter((name) => name.startsWith("/") || /^[A-Za-z]:/.test(name) || name.split(/[\\/]/).includes(".."));
+}
+
+/** The entries of a .tgz held in memory, listed by tar from stdin. */
+export function tarEntries(tgz: Buffer): string[] {
+  const listed = spawnSync("tar", ["-tzf", "-"], { input: tgz, maxBuffer: 64 * 1024 * 1024 });
+  if (listed.status !== 0) throw new Error(`tar could not list the archive: ${String(listed.stderr).trim()}`);
+  return String(listed.stdout).split("\n").filter(Boolean);
+}
+
+/**
+ * Unpack a verified .tgz from memory into `dir`, dropping npm's `package/`
+ * prefix. Nothing touches the disk before tar does, and an archive with an
+ * entry that could escape `dir` is refused before anything is written.
+ */
+export function unpackInto(tgz: Buffer, dir: string): void {
+  const unsafe = unsafeEntries(tarEntries(tgz));
+  if (unsafe.length > 0) throw new Error(`the archive has entries outside its folder: ${unsafe.slice(0, 3).join(", ")}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const tar = spawnSync("tar", ["-xzf", "-", "-C", dir, "--strip-components=1"], { input: tgz, stdio: ["pipe", "inherit", "inherit"] });
+  if (tar.status !== 0) throw new Error("tar could not unpack the archive");
+}
+
 async function stage(platform: string, dest: string): Promise<void> {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const lock = (JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8")) as { packages: Record<string, LockEntry> }).packages;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "stage-native-"));
-  try {
-    for (const pkg of nativePackages(lock, platform)) {
-      const res = await fetch(pkg.resolved);
-      if (!res.ok) throw new Error(`${pkg.resolved} answered ${res.status}`);
-      const bytes = Buffer.from(await res.arrayBuffer());
-      const problem = integrityProblem(bytes, pkg.integrity);
-      if (problem) throw new Error(`${pkg.key}@${pkg.version}: ${problem}`);
-      const tgz = path.join(tmp, "pkg.tgz");
-      fs.writeFileSync(tgz, bytes);
-      const dir = path.join(dest, pkg.key);
-      fs.mkdirSync(dir, { recursive: true });
-      const tar = spawnSync("tar", ["-xzf", tgz, "-C", dir, "--strip-components=1"], { stdio: "inherit" });
-      if (tar.status !== 0) throw new Error(`could not unpack ${pkg.key}`);
-      const version = (JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as { version?: string }).version;
-      if (version !== pkg.version) throw new Error(`${pkg.key}: unpacked ${version}, the lockfile says ${pkg.version}`);
-      console.log(`    ${pkg.key.replace(/^node_modules\//, "")}@${pkg.version}`);
+  for (const pkg of nativePackages(lock, platform)) {
+    const res = await fetch(pkg.resolved);
+    if (!res.ok) throw new Error(`${pkg.resolved} answered ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const problem = integrityProblem(bytes, pkg.integrity);
+    if (problem) throw new Error(`${pkg.key}@${pkg.version}: ${problem}`);
+    const dir = path.join(dest, pkg.key);
+    try {
+      unpackInto(bytes, dir);
+    } catch (err) {
+      throw new Error(`${pkg.key}: ${(err as Error).message}`, { cause: err });
     }
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    const version = (JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as { version?: string }).version;
+    if (version !== pkg.version) throw new Error(`${pkg.key}: unpacked ${version}, the lockfile says ${pkg.version}`);
+    console.log(`    ${pkg.key.replace(/^node_modules\//, "")}@${pkg.version}`);
   }
 }
 
