@@ -4,6 +4,7 @@
 // docs/patch-sheet/DESIGN.md.
 
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
+import { broadcast } from "./broadcaster.js";
 import { DataStore } from "./data-store.js";
 import { asArray, asObject, checked } from "./restore-check.js";
 
@@ -66,10 +67,16 @@ class PatchStore {
     return migrate(await this.store.load());
   }
 
-  /** Replace the whole patch file, stamping updatedAt. Returns the saved file. */
+  /**
+   * Replace the whole patch file, stamping updatedAt, and broadcast it on patch:updated.
+   * Returns the saved file. The broadcast is here and not in a route because every saver
+   * owes it: /patch, the editor and the stage plots publisher all follow the patch on it,
+   * and a view import that saved variants without one left them all on the old patch.
+   */
   async save(file: PatchFile): Promise<PatchFile> {
     const next: PatchFile = { ...file, updatedAt: new Date().toISOString() };
     await this.store.update(() => next);
+    broadcast("patch:updated", next);
     return next;
   }
 }
