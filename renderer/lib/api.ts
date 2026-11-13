@@ -633,6 +633,7 @@ export type IpcChannel =
   | "stageplots:deleteVenue"
   | "stageplots:duplicatePlot"
   | "stageplots:get"
+  | "stageplots:patch"
   | "stageplots:publish"
   | "stageplots:publishNow"
   | "stageplots:regenerate"
@@ -800,6 +801,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // ── Stage plots ─────────────────────────────────────────────────────
     case "stageplots:get":
       return apiFetch<T>("/api/stageplots");
+
+    case "stageplots:patch":
+      return apiFetch<T>("/api/stageplots/patch");
 
     case "stageplots:createVenue":
       return post<T>("/api/stageplots/venues", p.venue);

@@ -15,6 +15,17 @@ export const PATCH_COLORS = ["#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a59
 /** What each swatch is called, in PATCH_COLORS order. */
 export const PATCH_COLOR_NAMES = ["Red", "Orange", "Amber", "Green", "Teal", "Blue", "Indigo", "Purple", "Pink", "Grey"] as const;
 export type PatchDeviceKind = "rack" | "snake" | "drop-snake" | "pocket" | "wireless" | "array" | "other";
+/** What each kind is called, in the order the device editor offers them. The stage plots
+ *  patch device picker names devices with the same words. */
+export const PATCH_KIND_LABELS: Record<PatchDeviceKind, string> = {
+  rack: "Input Rack",
+  snake: "Snake",
+  "drop-snake": "Drop snake",
+  pocket: "Floor pocket",
+  wireless: "Wireless / RF",
+  array: "Array",
+  other: "Other",
+};
 
 /** A physical device that carries channels (SD rack, snake, pocket, RF bank, …). */
 export interface PatchDevice {

@@ -5,7 +5,7 @@
 
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
-import { DataStore } from "./data-store.js";
+import { DataStore, StoreReadError } from "./data-store.js";
 import { asArray, asObject, checked } from "./restore-check.js";
 
 const emptyAssignments = () => ({ byServiceType: {}, byPlan: {} });
@@ -65,6 +65,18 @@ class PatchStore {
   /** The full patch file (all sheets), migrated to the current shape. */
   async load(): Promise<PatchFile> {
     return migrate(await this.store.load());
+  }
+
+  /**
+   * load(), for a reader that must not take the seed sheets for the patch (a stage plot link
+   * would read "device removed" for every device): throws a StoreReadError (503) while
+   * patch.json cannot be read, and while a damaged one has been set aside and nothing has
+   * been saved over it since.
+   */
+  async loadStrict(): Promise<PatchFile> {
+    const raw = await this.store.loadStrict();
+    if (this.store.loadedFromCorrupt && raw === EMPTY) throw new StoreReadError("patch.json", null, "was damaged and set aside, and nothing has been saved since");
+    return migrate(raw);
   }
 
   /**

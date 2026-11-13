@@ -4,6 +4,7 @@
 // document on stageplots:updated, so callers do not patch local state from
 // these answers: useStagePlots refetches on the broadcast.
 
+import type { PatchFile } from "@main/types/patch";
 import type { BackgroundView, Plot, PlotItem, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
 
 import { invoke } from "../../lib/api";
@@ -32,6 +33,8 @@ export type PublishAnswer = Venue & { notice?: string };
 
 export const stageplotsApi = {
   get: () => invoke<StagePlotsView>("stageplots:get"),
+  /** The patch, for linked connection points. Rejects (503) when it cannot be read, rather than answering the seed sheets. */
+  patch: () => invoke<PatchFile>("stageplots:patch"),
   createVenue: (venue: VenueInput) => invoke<Venue>("stageplots:createVenue", { venue }),
   updateVenue: (id: string, changes: Partial<VenueInput>) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
   /** `notice`: the venue was published and its link could not be removed yet (it is queued). */

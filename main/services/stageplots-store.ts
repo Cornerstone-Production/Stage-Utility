@@ -21,6 +21,7 @@ import {
   type BackgroundSourceExt,
   type CablePoint,
   type ItemType,
+  type PatchLink,
   type Plot,
   type PlotItem,
   type PendingReason,
@@ -315,9 +316,35 @@ function checkPoint(raw: unknown, height: number, what: string): CablePoint {
   return [within(raw[0], 0, PLOT_UNITS_WIDE, `${what}'s x`), within(raw[1], 0, height, `${what}'s y`)];
 }
 
+/** A text id from the patch sheet: never checked against the patch, which may change under it. */
+function patchId(v: unknown, what: string): string {
+  if (typeof v !== "string" || v.length === 0 || v.length > L.patchIdChars || [...v].some((ch) => ch.charCodeAt(0) < 0x20)) {
+    refuse(`${what} must be 1 to ${L.patchIdChars} characters, none of them a control character`);
+  }
+  return v;
+}
+
+/**
+ * A connection point's patch link, rebuilt. Held only to its own shape: a link to a device
+ * the patch no longer has still saves, and reads "unlinked" with its last name and colour.
+ */
+function checkPatchLink(raw: unknown, named: string): PatchLink {
+  const link = asObject(raw, `${named}'s patch link`);
+  const lastColor = link.lastColor;
+  if (lastColor !== null && !PATCH_COLORS.includes(lastColor as (typeof PATCH_COLORS)[number])) {
+    refuse(`${named}'s patch link's last colour must be one of the patch sheet's ten swatches, or none`);
+  }
+  return {
+    sheetId: patchId(link.sheetId, `${named}'s patch sheet id`),
+    deviceId: patchId(link.deviceId, `${named}'s patch device id`),
+    lastName: text(link.lastName, L.labelChars, `${named}'s patch link's last name`),
+    lastColor: lastColor as string | null,
+  };
+}
+
 /**
  * One item, rebuilt field by field: a field the item does not have is dropped,
- * and a type's own fields (symbol, textKind, points, dashed) appear only on
+ * and a type's own fields (symbol, textKind, points, dashed, patchLink) appear only on
  * that type. So the same item always comes out the same, and an unchanged save
  * compares equal to what is stored.
  */
@@ -351,6 +378,10 @@ function checkItem(raw: unknown, height: number, what: string): PlotItem {
     notes: text(it.notes, L.notesChars, `${named}'s notes`),
     inputs: inputs.map((v, j) => text(v, L.inputChars, `${named}'s input ${j + 1}`)),
   };
+  if (it.patchLink !== undefined) {
+    if (type !== "conn") refuse(`${named} is not a connection point, so it cannot link to a patch device`);
+    item.patchLink = checkPatchLink(it.patchLink, named);
+  }
   if (type === "symbol") {
     if (!SYMBOL_KINDS.includes(it.symbol as SymbolKind)) refuse(`${named}'s symbol must be one of ${SYMBOL_KINDS.join(", ")}`);
     item.symbol = it.symbol as SymbolKind;

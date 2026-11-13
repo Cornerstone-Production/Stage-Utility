@@ -3,6 +3,8 @@
 // Every route must finish responding before it returns (see RouteCtx).
 //
 //   GET    /api/stageplots                          the whole document, backgrounds with URLs
+//   GET    /api/stageplots/patch                    the patch file, for linked connection points;
+//                                                   503 when it cannot be read, never the seed sheets
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
 //   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
 //   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
@@ -68,6 +70,7 @@ import {
   type VenueKind,
 } from "../../types/stageplots.js";
 import { broadcast } from "../broadcaster.js";
+import { patchStore } from "../patch-store.js";
 import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
@@ -748,6 +751,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (pathname !== PREFIX && !pathname.startsWith(`${PREFIX}/`)) return;
 
   if (pathname === PREFIX && method === "GET") return json(c.res, toView(await stageplotsStore.get()));
+  if (pathname === `${PREFIX}/patch` && method === "GET") return json(c.res, await patchStore.loadStrict());
   if (pathname === `${PREFIX}/venues` && method === "POST") return createVenue(c);
   if (pathname === `${PREFIX}/plots` && method === "POST") return createPlot(c);
   if (pathname === `${PREFIX}/backgrounds` && method === "POST") return uploadImage(c);
