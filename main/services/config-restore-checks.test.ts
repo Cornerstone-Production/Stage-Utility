@@ -88,6 +88,15 @@ const GOOD: Record<string, unknown> = {
     wirelessMeterRateMs: 250,
   },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
+  "stageplots.json": {
+    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    backgrounds: [],
+    plots: [
+      { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+      { id: "p-2", venueId: "v-1", name: "Baptism", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+    ],
+    overrides: [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }],
+  },
   "trends-prefs.json": { soundMetric: "LAeq 2" },
   "video-feeds.json": {
     feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } }],
@@ -126,6 +135,10 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "servicecue-roles.json": { value: { roles: [] }, says: "list" },
   "settings.json": { value: { ...(GOOD["settings.json"] as object), accentColor: "red" }, says: "accentColor" },
   "slots.json": { value: { version: 3, defaults: { v1: { "123": "s1" } }, overrides: {} }, says: "slots" },
+  "stageplots.json": {
+    value: { venues: [], backgrounds: [], plots: [{ id: "p-1", venueId: "v-gone", name: "Standard", backgroundId: null, bgFade: 0, items: [], version: 0 }] },
+    says: "venue",
+  },
   "trends-prefs.json": { value: { soundMetric: "LAeq 2\nforged" }, says: "soundMetric" },
   "video-feeds.json": {
     value: { feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "file:/etc/passwd", username: "" } }] },

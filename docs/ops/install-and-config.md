@@ -394,10 +394,22 @@ Greenwich — 19:00 in Chicago, 16:00 in Los Angeles.
 
 The setting shows what the host clock reads plus a live clock in the zone you
 pick, so a wrong one is obvious immediately. It governs which day a service is
-filed under, the date in the name of every downloaded file (config, archive, view
-and patch exports), the scheduled update window, and the day-of-week and
-time-of-day automation conditions. It does not govern whether a live service is recorded —
-that is deliberately independent of the clock.
+filed under, the scheduled update window, and the day-of-week and time-of-day
+automation conditions.
+
+It also governs the dates the app writes for you to read:
+
+- the date in the name of every downloaded file: config, archive, view, patch and
+  Video feeds exports
+- the plan dates in the editor's plan switcher and its pill, and in the Mic slots
+  **Copy from** dialog
+- the clock in the ServiceCue header, and the plan dates in the ServiceCue page's
+  plan list, which reads Planning Center's own zone for the plan first when it has
+  one
+
+Left unset, each of these follows the server's clock, never the zone of the
+browser viewing it. The setting does not govern whether a live service is
+recorded: that is deliberately independent of the clock.
 
 Setting the host's own zone (`timedatectl set-timezone America/Chicago`) also
 works and is worth doing for sane log timestamps, but the app no longer depends on

@@ -323,6 +323,20 @@ function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }
 
+/** How long an upload may take: a 25 MB PDF over a slow LAN, or a 12 MP photo a
+ *  Raspberry Pi converts, takes longer than an ordinary request. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** A POST whose body is the bytes of a file, not JSON. */
+function rawUpload<T>(path: string, bytes: Blob): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    body: bytes,
+    headers: { "Content-Type": bytes.type || "application/octet-stream" },
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+  });
+}
+
 /** A DELETE that carries a body: deleting a board says what its screens show next. */
 function delWithBody<T>(path: string, body: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE", body: JSON.stringify(body) });
@@ -612,6 +626,21 @@ export type IpcChannel =
   | "stage:setPublicUrl"
   | "stage:setServiceType"
   | "stage:setShowQr"
+  | "stageplots:createPlot"
+  | "stageplots:createVenue"
+  | "stageplots:deleteBackground"
+  | "stageplots:deletePlot"
+  | "stageplots:deleteVenue"
+  | "stageplots:duplicatePlot"
+  | "stageplots:get"
+  | "stageplots:saveItems"
+  | "stageplots:setDefault"
+  | "stageplots:setOverride"
+  | "stageplots:updateBackground"
+  | "stageplots:updatePlot"
+  | "stageplots:updateVenue"
+  | "stageplots:uploadImage"
+  | "stageplots:uploadPdf"
   | "update:apply"
   | "update:check"
   | "update:dismissNotice"
@@ -762,6 +791,63 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "patch:parseXlsx":
       return post<T>("/api/patch/parse-xlsx", { xlsx: p.xlsx });
+
+    // ── Stage plots ─────────────────────────────────────────────────────
+    case "stageplots:get":
+      return apiFetch<T>("/api/stageplots");
+
+    case "stageplots:createVenue":
+      return post<T>("/api/stageplots/venues", p.venue);
+
+    case "stageplots:updateVenue":
+      return patch<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deleteVenue":
+      return del<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}`);
+
+    case "stageplots:setDefault":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.venueId as string)}/default`, { plotId: p.plotId });
+
+    case "stageplots:setOverride":
+      return put<T>("/api/stageplots/overrides", { planId: p.planId, venueId: p.venueId, plotId: p.plotId, planDate: p.planDate });
+
+    case "stageplots:uploadImage": {
+      // The bytes are the body. A page rendered from a PDF names that PDF, kept
+      // by stageplots:uploadPdf, and which of its pages this is.
+      const q = new URLSearchParams({ name: String(p.name) });
+      if (p.original !== undefined) {
+        q.set("original", String(p.original));
+        q.set("page", String(p.page));
+        q.set("pages", String(p.pages));
+      }
+      return rawUpload<T>(`/api/stageplots/backgrounds?${q}`, p.bytes as Blob);
+    }
+
+    case "stageplots:uploadPdf":
+      return rawUpload<T>(`/api/stageplots/backgrounds/pdf?${new URLSearchParams({ name: String(p.name) })}`, p.bytes as Blob);
+
+    case "stageplots:updateBackground":
+      return patch<T>(`/api/stageplots/backgrounds/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deleteBackground":
+      return del<T>(`/api/stageplots/backgrounds/${encodeURIComponent(p.id as string)}`);
+
+    case "stageplots:createPlot":
+      return post<T>("/api/stageplots/plots", p.plot);
+
+    case "stageplots:duplicatePlot":
+      return post<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/duplicate`);
+
+    case "stageplots:updatePlot":
+      return patch<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deletePlot":
+      return del<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}`);
+
+    // The whole item list, against the version it was loaded at: 409 when the
+    // plot changed since (the error carries status 409 and the current version).
+    case "stageplots:saveItems":
+      return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
 
     case "servicecue:rundown": {
       const id = p.serviceTypeId as string;

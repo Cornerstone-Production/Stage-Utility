@@ -94,8 +94,10 @@ function looksLike(mime: string, bytes: Buffer): boolean {
   }
 }
 
-/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the extension. */
-function contentName(bytes: Buffer, ext: string): string {
+/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the
+ *  extension. Exported for a folder of content-addressed files that are not
+ *  images (stage-plot PDF originals), so the naming rule lives in one place. */
+export function contentName(bytes: Buffer, ext: string): string {
   return `${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
 }
 
@@ -149,16 +151,26 @@ export async function saveImage(dirName: string, dataUrl: string, rule: ContentR
   if (!m) throw new Error("expected a base64 data:image/… URL");
   const ext = EXT_BY_MIME[m[1].toLowerCase()];
   if (!ext) throw new Error(`unsupported image type: ${m[1]}`);
-  const bytes = Buffer.from(m[2], "base64");
+  return `/${dirName}/${await saveImageBytes(dirName, Buffer.from(m[2], "base64"), ext, rule)}`;
+}
+
+/**
+ * Persist image bytes into `<data>/<dirName>/` under a content hash, for an
+ * upload that arrives as bytes rather than a data URL. `ext` is one saveImage
+ * writes. Returns the file name, `<hash>.<ext>`.
+ */
+export async function saveImageBytes(dirName: string, bytes: Buffer, ext: string, rule: ContentRule = { checkContent: true }): Promise<string> {
+  const mime = SAVED_EXTS.has(ext) ? MIME_BY_EXT[ext] : undefined;
+  if (!mime) throw new Error(`unsupported image type: ${ext}`);
   if (bytes.length === 0) throw new Error("empty image");
   if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
-  if (rule.checkContent && !looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
+  if (rule.checkContent && !looksLike(mime, bytes)) throw new Error(`not a valid ${mime} image`);
 
   const file = contentName(bytes, ext);
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
   await atomicWrite(path.join(d, file), bytes);
-  return `/${dirName}/${file}`;
+  return file;
 }
 
 /** Read a stored image for serving. `file` is untrusted — anything with a path

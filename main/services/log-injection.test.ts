@@ -209,6 +209,9 @@ const REQUEST_FACING = [
   // hands them to servicecue-publisher.ts, whose lines are below.
   "routes/servicecue-publish-routes.ts",
   "routes/servicecue-routes.ts",
+  // Its lines name a background's name, which arrives on the upload's query
+  // string, and ids off the path; every one is scrubbed.
+  "routes/stageplots-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
@@ -242,6 +245,9 @@ const REQUEST_FACING = [
   "settings-restore-check.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The tidy runs after DELETE /api/stageplots/backgrounds/:id and a clean-up
+  // PATCH; its lines name files on disk and error text, all scrubbed.
+  "stageplots-files.ts",
   // Its change line names a metric typed into POST /api/history/trends-prefs;
   // scrubbed, and the value must also match a fixed shape.
   "trends-prefs.ts",
@@ -376,6 +382,11 @@ const NOT_SCANNED = new Map<string, string>([
   ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
+  [
+    "stageplots-store.ts",
+    "logs one fixed sentence when stageplots.json's overrides are not a list, naming nothing the file " +
+      "or a request carries. Audited, not just excused.",
+  ],
   [
     "store-file-adoption.ts",
     "logs two fixed sentences about file names that are literals in the store " +
@@ -584,6 +595,8 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "settings-restore-check.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // Run by the stage-plot delete and clean-up routes; logs file names and errors.
+    path.join(HERE, "stageplots-files.ts"),
     // Its change line names a metric typed into POST /api/history/trends-prefs.
     path.join(HERE, "trends-prefs.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this

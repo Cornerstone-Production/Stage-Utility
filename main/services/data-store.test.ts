@@ -167,6 +167,32 @@ describe("DataStore", () => {
     );
   });
 
+  test(
+    "a corrupt file that cannot be moved aside says so, not that it was backed up",
+    { skip: process.getuid?.() === 0 && "mode bits do not stop root" },
+    async () => {
+      const { store, file } = freshStore();
+      await store.save({ count: 7, items: ["kept"] });
+      await fs.writeFile(file, '{"count": 7, "ite', "utf8");
+      const reread = new DataStore<Doc>(path.basename(file), DEFAULTS, "runtime");
+      const said: string[] = [];
+      const real = console.error;
+      console.error = (...args: unknown[]) => void said.push(String(args[0]));
+      await fs.chmod(DATA_DIR, 0o555);
+      try {
+        assert.deepEqual(await reread.load(), DEFAULTS);
+      } finally {
+        await fs.chmod(DATA_DIR, 0o755);
+        console.error = real;
+      }
+      assert.equal(reread.loadedFromCorrupt, true);
+      const line = said.find((l) => l.includes("could not be parsed")) ?? "";
+      assert.match(line, /could not be moved aside/);
+      assert.doesNotMatch(line, /Backed up/);
+      await fs.rm(file, { force: true });
+    },
+  );
+
   // Only a missing file means "first run". Anything else is data that is there
   // and could not be read: served as the defaults so the server keeps running,
   // but flagged, never cached, and never saved over by this process.

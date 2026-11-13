@@ -161,6 +161,8 @@ describe("every registered route resolves a title", () => {
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
+        "/stageplots",
+        "/stageplots/edit",
         "/video-feeds",
         "/views",
       ],
@@ -197,6 +199,8 @@ describe("every registered route resolves a title", () => {
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
+        "/stageplots",
+        "/stageplots/edit",
         "/video-feeds",
       ],
       "a route's title status changed; update this list deliberately",
@@ -294,6 +298,8 @@ describe("exact versus prefix", () => {
       "/settings/branding -> /settings/branding",
       "/settings/integrations -> /settings/integrations",
       "/settings/messages -> /settings/messages",
+      "/stageplots -> /stageplots",
+      "/stageplots/edit -> /stageplots",
       "/video-feeds -> /video-feeds",
     ]);
     // A child, not the page itself: the editor draws its own heading.

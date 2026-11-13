@@ -153,6 +153,7 @@ describe("what is in the bundle", () => {
   test("of renderer/lib, exactly these: a shared helper joins the public page only on purpose", () => {
     assert.deepEqual(within("renderer/lib"), [
       "renderer/lib/api.ts",
+      "renderer/lib/app-zone.ts",
       "renderer/lib/apply-accent.ts",
       "renderer/lib/apply-device-telemetry.ts",
       "renderer/lib/apply-favicon.ts",
@@ -211,6 +212,9 @@ describe("what is in the bundle", () => {
 
   test("of main, only what the renderer already shares with it", () => {
     assert.deepEqual(within("main"), [
+      // The browser's own zone, the last answer the page's plan dates fall back to:
+      // Intl and nothing else.
+      "main/services/app-timezone.ts",
       "main/services/clamp.ts",
       "main/services/errors.ts",
       // The address a layout is found under, shared with the server that assigns it.

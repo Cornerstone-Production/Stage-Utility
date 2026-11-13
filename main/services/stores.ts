@@ -48,6 +48,7 @@ import "./update-notices-store.js";
 import "./trends-prefs.js";
 import "./slots-store.js";
 import "./spl-history-store.js";
+import "./stageplots-store.js";
 import "./video/feed-store.js";
 import "./video/ffmpeg-path-store.js";
 import "./video/seen-store.js";

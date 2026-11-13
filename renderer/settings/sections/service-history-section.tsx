@@ -7,7 +7,6 @@ import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { hostTimeZone } from "@main/services/app-timezone";
 import { useStageState } from "../../main/use-stage-state";
 import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-react";
 
@@ -34,7 +33,8 @@ import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-
 import { reloadOnBaptismChange } from "./baptisms/reload-on-baptism-change";
 import { TrendsCard } from "./history-trends/trends-card";
 import { useHistoryShown, type RowSpl } from "./history-shown";
-import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
+import { trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
+import { appZoneOf } from "../../lib/app-zone";
 import {
   summarize,
   fmtDur,
@@ -955,7 +955,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * This browser's zone is the last resort, for the render before state lands.
    */
   const { state: stageState } = useStageState();
-  const zone = appZoneOf(stageState, hostTimeZone());
+  const zone = appZoneOf(stageState);
   /** Rebuilt on every tick the page already takes, so "still to come" stops
    *  being true the moment the day's last service time passes. */
   const clock = useMemo<TrendClock>(

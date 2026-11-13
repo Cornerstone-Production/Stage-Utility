@@ -128,6 +128,8 @@ const EXPECTED_CONFIG = [
   "servicecue-roles.json",
   "settings.json",
   "slots.json",
+  // Venues, their stage plots, and the backgrounds those plots draw on.
+  "stageplots.json",
   // Which Smaart metric the History Trends card plots under Sound.
   "trends-prefs.json",
   "video-feeds.json",

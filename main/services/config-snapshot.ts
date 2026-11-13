@@ -22,11 +22,21 @@ import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage, storedImageProblem, type ContentRule } from "./image-files.js";
 import { LAYOUT_IMAGE_DIR, LAYOUT_IMAGE_RULE } from "./layout-image-store.js";
+import {
+  STAGEPLOT_IMAGE_DIR,
+  STAGEPLOT_IMAGE_RULE,
+  STAGEPLOT_ORIGINAL_DIR,
+  listStagePlotOriginals,
+  readStagePlotOriginal,
+  restoreStagePlotOriginal,
+  storedOriginalProblem,
+} from "./stageplots-files.js";
 import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
 import { StoreReadError } from "./data-store.js";
+import { MAX_CONFIG_BODY_BYTES } from "./routes/context.js";
 import { errorMessage, isNotFound } from "./errors.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
@@ -58,7 +68,7 @@ export function runtimeFiles(): string[] {
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
-const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR] as const;
+const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR, STAGEPLOT_IMAGE_DIR] as const;
 
 /** What saving an image into each folder checks, which is what a restore holds
  *  that folder's images to: branding uploads check content, layout uploads never
@@ -66,7 +76,13 @@ const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR] as const;
 const IMAGE_RULES: Record<(typeof IMAGE_DIRS)[number], ContentRule> = {
   [BRANDING_IMAGE_DIR]: { checkContent: true },
   [LAYOUT_IMAGE_DIR]: LAYOUT_IMAGE_RULE,
+  [STAGEPLOT_IMAGE_DIR]: STAGEPLOT_IMAGE_RULE,
 };
+
+/** Folders of uploaded originals that are not images (stage-plot PDFs), carried
+ *  in a snapshot's `originals` beside its images. Kept apart so the image rules
+ *  (types, the 12 MB cap) never widen to them. */
+const ORIGINAL_DIRS = [STAGEPLOT_ORIGINAL_DIR] as const;
 
 /**
  * Fields stripped from a snapshot, by file.
@@ -142,6 +158,7 @@ interface RestoredImage {
 interface CheckedBundle {
   files: Map<string, NonNullable<unknown>>;
   images: RestoredImage[];
+  originals: RestoredImage[];
 }
 
 /** The most images a restore takes. Deliberately a cap no real install meets:
@@ -152,6 +169,67 @@ const MAX_RESTORE_IMAGES = 2000;
  *  a backup from a newer build lists stores this one lacks, which are ignored,
  *  so the cap is not tied to how many stores this build keeps. */
 const MAX_RESTORE_FILES = 500;
+
+/** The most originals a restore takes: twice the 50 backgrounds an install can
+ *  hold, for originals a delete has not yet tidied away. */
+const MAX_RESTORE_ORIGINALS = 100;
+
+/** A folder a snapshot carries files from. */
+interface FileSource {
+  dir: string;
+  list: () => Promise<string[]>;
+  read: (file: string) => Promise<Buffer | null>;
+}
+
+const IMAGE_SOURCES: readonly FileSource[] = IMAGE_DIRS.map((dir) => ({
+  dir,
+  list: () => listImages(dir),
+  read: async (file: string) => (await readImage(dir, file))?.data ?? null,
+}));
+
+const ORIGINAL_SOURCES: readonly FileSource[] = [
+  { dir: STAGEPLOT_ORIGINAL_DIR, list: listStagePlotOriginals, read: readStagePlotOriginal },
+];
+
+/** How a restore checks one of a bundle's two kinds of file, and names it. */
+interface FileKind {
+  label: string;
+  things: string;
+  unit: string;
+  folders: string;
+  max: number;
+  /** Each folder this build keeps, and the rule a file there is held to. */
+  problemFor: ReadonlyMap<string, (file: string, bytes: Buffer) => string | null>;
+}
+
+const IMAGES: FileKind = {
+  label: "images",
+  things: "images",
+  unit: "image",
+  folders: "the image folders",
+  max: MAX_RESTORE_IMAGES,
+  problemFor: new Map(IMAGE_DIRS.map((dir) => [dir, (file: string, bytes: Buffer) => storedImageProblem(file, bytes, IMAGE_RULES[dir])])),
+};
+
+const ORIGINALS: FileKind = {
+  label: "originals",
+  things: "files",
+  unit: "original",
+  folders: "the folders of originals",
+  max: MAX_RESTORE_ORIGINALS,
+  problemFor: new Map(ORIGINAL_DIRS.map((dir) => [dir, storedOriginalProblem])),
+};
+
+/**
+ * What to say when a snapshot's images and originals, base64'd as they travel,
+ * pass what POST /api/config/import reads (MAX_CONFIG_BODY_BYTES): restoring
+ * that backup from a downloaded file would be refused. Null when it fits.
+ */
+export function restoreCeilingNote(base64Bytes: number): string | null {
+  if (base64Bytes <= MAX_CONFIG_BODY_BYTES) return null;
+  const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `this backup carries ${mb(base64Bytes)} of uploaded images and originals as it travels, past the ${mb(MAX_CONFIG_BODY_BYTES)} a downloaded backup can restore: restoring it from the file will be refused (a saved snapshot recalled on this server is not limited)`;
+}
 
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
@@ -174,6 +252,10 @@ export interface ConfigSnapshot {
    *  files would have quietly dropped them from every backup. Layout images were
    *  never captured at all — this fixes that too. Absent on older snapshots. */
   images?: Record<string, string>;
+  /** `<dir>/<file>` → base64 bytes, for uploaded originals kept but never
+   *  served: a stage-plot background's PDF. Absent when there are none, and
+   *  on snapshots from before StagePlots. */
+  originals?: Record<string, string>;
 }
 
 /** Lightweight metadata for listing saved snapshots (no file contents). */
@@ -492,19 +574,21 @@ class ConfigSnapshotService {
     }
   }
 
-  /** Every uploaded image, as `<dir>/<file>` → base64. */
-  private async readImages(): Promise<Record<string, string>> {
+  /**
+   * Every file `sources` list, as `<dir>/<file>` → base64. A listing or a read
+   * that fails is named and fails the backup, the same way a store file does:
+   * the backup must not succeed without it.
+   */
+  private async readFiles(sources: readonly FileSource[]): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    // Named in the failure, and failed the same way as a store file: the
-    // backup must not succeed without it.
     const orFail = <R>(name: string, read: Promise<R>) =>
       read.catch((err: unknown) => {
         throw new StoreReadError(name, err, "could not be read for the backup");
       });
-    for (const dir of IMAGE_DIRS) {
-      for (const file of await orFail(dir, listImages(dir))) {
-        const img = await orFail(`${dir}/${file}`, readImage(dir, file));
-        if (img) out[`${dir}/${file}`] = img.data.toString("base64");
+    for (const { dir, list, read } of sources) {
+      for (const file of await orFail(dir, list())) {
+        const bytes = await orFail(`${dir}/${file}`, read(file));
+        if (bytes) out[`${dir}/${file}`] = bytes.toString("base64");
       }
     }
     return out;
@@ -526,9 +610,13 @@ class ConfigSnapshotService {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = redactForExport(f, v);
     }
-    const images = await this.readImages();
+    const images = await this.readFiles(IMAGE_SOURCES);
+    const originals = await this.readFiles(ORIGINAL_SOURCES);
+    const note = restoreCeilingNote(Object.values({ ...images, ...originals }).reduce((n, b64) => n + b64.length, 0));
+    if (note) console.warn(`[config-snapshot] ${note}`);
     return {
       ...(Object.keys(images).length ? { images } : {}),
+      ...(Object.keys(originals).length ? { originals } : {}),
       kind: SNAPSHOT_KIND,
       version: SNAPSHOT_VERSION,
       appVersion: appVersion(),
@@ -627,9 +715,10 @@ class ConfigSnapshotService {
       if (!result.ok) failures.push(`${name}: ${result.reason}`);
       else files.set(name, result.value);
     }
-    const images = this.checkImages(bundle.images, failures);
+    const images = this.checkFiles(bundle.images, IMAGES, failures);
+    const originals = this.checkFiles(bundle.originals, ORIGINALS, failures);
     if (failures.length > 0) return this.refuse(failures);
-    return { files, images };
+    return { files, images, originals };
   }
 
   /**
@@ -646,17 +735,20 @@ class ConfigSnapshotService {
     return { ok: true, value: result.value };
   }
 
-  /** The bundle's images, each decoded and checked, by directory and file. A
-   *  directory this build does not keep images in is skipped, and said so. */
-  private checkImages(images: unknown, failures: string[]): RestoredImage[] {
-    if (images === undefined) return [];
-    if (images === null || typeof images !== "object" || Array.isArray(images)) {
-      failures.push("images: must be an object of images");
+  /**
+   * A bundle's images or originals, each decoded and held to what storing one
+   * checks. A folder this build does not keep is skipped, and said so: a backup
+   * from a newer build still restores the rest.
+   */
+  private checkFiles(raw: unknown, kind: FileKind, failures: string[]): RestoredImage[] {
+    if (raw === undefined) return [];
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      failures.push(`${kind.label}: must be an object of ${kind.things}`);
       return [];
     }
-    const entries = Object.entries(images);
-    if (entries.length > MAX_RESTORE_IMAGES) {
-      failures.push(`images: the backup lists ${entries.length}; a restore takes at most ${MAX_RESTORE_IMAGES}`);
+    const entries = Object.entries(raw);
+    if (entries.length > kind.max) {
+      failures.push(`${kind.label}: the backup lists ${entries.length}; a restore takes at most ${kind.max}`);
       return [];
     }
     const out: RestoredImage[] = [];
@@ -665,7 +757,8 @@ class ConfigSnapshotService {
       const slash = ref.indexOf("/");
       const dir = slash > 0 ? ref.slice(0, slash) : "";
       const file = slash > 0 ? ref.slice(slash + 1) : "";
-      if (!(IMAGE_DIRS as readonly string[]).includes(dir)) {
+      const problemFor = kind.problemFor.get(dir);
+      if (!problemFor) {
         skipped.push(ref);
         continue;
       }
@@ -678,12 +771,12 @@ class ConfigSnapshotService {
         failures.push(`${ref}: is not base64`);
         continue;
       }
-      const problem = storedImageProblem(file, bytes, IMAGE_RULES[dir as (typeof IMAGE_DIRS)[number]]);
+      const problem = problemFor(file, bytes);
       if (problem) failures.push(`${ref}: ${problem}`);
       else out.push({ dir, file, bytes });
     }
     if (skipped.length > 0) {
-      console.warn(`[config-snapshot] restore: skipped ${skipped.length} image(s) outside the image folders: ${scrub(skipped.join(", "), 400)}`);
+      console.warn(`[config-snapshot] restore: skipped ${skipped.length} ${kind.unit}(s) outside ${kind.folders}: ${scrub(skipped.join(", "), 400)}`);
     }
     return out;
   }
@@ -768,6 +861,10 @@ class ConfigSnapshotService {
     // Uploaded images, under the content-hashed names checkImages confirmed.
     for (const { dir, file, bytes } of checked.images) {
       if (await restoreImage(dir, file, bytes)) applied.push(`${dir}/${file}`);
+    }
+    for (const { dir, file, bytes } of checked.originals) {
+      await restoreStagePlotOriginal(file, bytes);
+      applied.push(`${dir}/${file}`);
     }
     return applied;
   }

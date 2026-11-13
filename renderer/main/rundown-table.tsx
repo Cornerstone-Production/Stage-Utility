@@ -23,7 +23,7 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 
 // Department → accent hue for row tinting. Keyword-matched (categories are named
 // freely per org) with a NEUTRAL fallback, drawn from the same palette the patch
-// sheet offers (patch-device-manager PATCH_COLORS) so departments and devices read
+// sheet offers (PATCH_COLORS in main/types/patch.ts) so departments and devices read
 // as one system. Hues are spread amber/green/blue/teal/red for separation at the
 // 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
 // Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
