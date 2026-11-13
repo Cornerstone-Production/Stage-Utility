@@ -46,7 +46,7 @@ import { createPushClient, type PushClient, type PushFailure, type PushResult } 
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";
-import { publishedItems, type PatchContext, type PatchRead } from "./stageplots-patch-link.js";
+import { publishedItems, type PatchContext, type PatchRead, type UnresolvedLink } from "./stageplots-patch-link.js";
 import {
   PUBLISH_MAX_BODY_BYTES,
   STAGEPLOTS_IMAGE_TYPE,
@@ -55,7 +55,7 @@ import {
   stagePlotsPlotKey,
 } from "../types/servicecue-publish.js";
 import type { PatchFile } from "../types/patch.js";
-import { STAGEPLOT_LIMITS, type Background, type PendingReason, type PendingRemoval, type Plot, type PublishedPlot, type PublishedVenue, type StagePlotsDoc, type Venue, type VenuePublish } from "../types/stageplots.js";
+import { STAGEPLOT_LIMITS, type Background, type PendingReason, type PendingRemoval, type Plot, type PublishedItem, type PublishedPlot, type PublishedVenue, type StagePlotsDoc, type Venue, type VenuePublish } from "../types/stageplots.js";
 
 /** A new secret: 32 random bytes, base64url, 43 characters. Made here and nowhere else. */
 export function newPublishSecret(): string {
@@ -171,15 +171,15 @@ const patchContext = (plan: PublishPlan): PatchContext => ({ serviceTypeId: plan
 
 /**
  * One plot as the page gets it. The background's hash only once the page holds the image: a plot
- * never names one it would draw broken. Its items through publishedItems: a linked point as its
+ * never names one it would draw broken. `items` are publishedItems': a linked point as its
  * device resolves, never the link.
  */
-export function publishedPlot(plot: Plot, background: Background | null, held: boolean, patch: PatchRead, plan: PublishPlan): PublishedPlot {
+export function publishedPlot(plot: Plot, background: Background | null, held: boolean, items: PublishedItem[]): PublishedPlot {
   return {
     id: plot.id,
     name: plot.name,
     bgFade: plot.bgFade,
-    items: publishedItems(plot.items, patch, patchContext(plan)).items,
+    items,
     background: background ? { hash: held ? background.converted.hash : null, width: background.converted.width, height: background.converted.height } : null,
   };
 }
@@ -224,6 +224,8 @@ interface SendOptions {
   required: readonly string[];
   /** The backgrounds the page holds under this secret already. */
   held: readonly string[];
+  /** The patch, read once by the action or republish this send is part of, so its fingerprint and its send agree. */
+  patch: PatchRead;
 }
 
 type Sent = Extract<SendResult, { ok: true }>;
@@ -262,9 +264,6 @@ export class StagePlotsPublisher {
   /** Resolves timerDone: called when the wait's republish finishes, or by cancelWait. */
   private fireTimer: (() => void) | null = null;
   private planKey: string | null = null;
-  /** The patch as last read, for linked connection points: read again before every send and
-   *  republish, so a fingerprint and the send it is checked against see the same patch. */
-  private patchRead: PatchRead = { ok: false };
   /** The patch could not be read last time: said once until it can. */
   private patchDown = false;
   private started = false;
@@ -347,15 +346,15 @@ export class StagePlotsPublisher {
   /** Read the patch for linked connection points. A failure publishes them unlinked, said on [stageplots] once until it reads again. */
   private async readPatch(): Promise<PatchRead> {
     try {
-      this.patchRead = { ok: true, file: await this.deps.patch() };
+      const file = await this.deps.patch();
       if (this.patchDown) say("log", [], "the patch sheet can be read again; linked connection points are published with their devices");
       this.patchDown = false;
+      return { ok: true, file };
     } catch (err) {
       if (!this.patchDown) say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours: ${errorMessage(err)}`);
       this.patchDown = true;
-      this.patchRead = { ok: false };
+      return { ok: false };
     }
-    return this.patchRead;
   }
 
   private heard(channel: string): void {
@@ -447,7 +446,8 @@ export class StagePlotsPublisher {
       const { doc, venue, target, client, host } = found;
       const queueFull = this.queueFull(doc, "Publish", venue.name);
       if (queueFull) return queueFull;
-      const fresh = await this.sendFresh(client, target, doc, venue, []);
+      const patch = await this.readPatch();
+      const fresh = await this.sendFresh(client, target, doc, venue, [], patch);
       if (!fresh.ok) {
         say("warn", [fresh.secret], `"${venue.name}" was not published: ${fresh.message}`);
         return { ok: false, status: fresh.status, error: hide(fresh.message, [fresh.secret]) };
@@ -465,7 +465,7 @@ export class StagePlotsPublisher {
         await this.takeBack(client, secret, target.origin, venue.name);
         return { ok: false, status: 404, error: "no such venue" };
       }
-      this.attempted.set(venueId, this.fingerprint(doc, venue));
+      this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
       say("log", [secret], `"${venue.name}" published to ${host}: ${plural(plotsOf(doc, venue).length, "plot")} and ${plural(r.held.length, "background")}${missingNote(r)}`);
       return { ok: true, venue: saved };
     });
@@ -481,7 +481,8 @@ export class StagePlotsPublisher {
       // that cannot.
       const queueFull = this.queueFull(doc, "Regenerate", venue.name);
       if (queueFull) return queueFull;
-      const fresh = await this.sendFresh(client, target, doc, venue, pub.publishedImages);
+      const patch = await this.readPatch();
+      const fresh = await this.sendFresh(client, target, doc, venue, pub.publishedImages, patch);
       const all = [fresh.secret, pub.secret];
       if (!fresh.ok) {
         const message = `The link was not changed: ${fresh.message}`;
@@ -505,7 +506,7 @@ export class StagePlotsPublisher {
         await this.takeBack(client, secret, target.origin, venue.name);
         return { ok: false, status: 404, error: "no such venue" };
       }
-      this.attempted.set(venueId, this.fingerprint(doc, venue));
+      this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
       const drained = await this.drainQueued(false);
       const old = !drained.ok
         ? `the old one stays queued: ${drained.message}`
@@ -587,10 +588,11 @@ export class StagePlotsPublisher {
       const pub = venue.publish!;
       const drained = await this.drainQueued(false);
       let result: PublishOutcome;
-      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now");
+      const patch = await this.readPatch();
+      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now", patch);
       else {
-        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [] });
-        this.attempted.set(venueId, this.fingerprint(doc, venue));
+        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [], patch });
+        this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
         result = await this.finish(venueId, venue, r, host, [pub.secret], "published again");
       }
       // The old links it was asked to remove too: a list that could not be read is said beside the venue, never taken for done.
@@ -621,8 +623,8 @@ export class StagePlotsPublisher {
     const venue = doc.venues.find((v) => v.id === venueId);
     const pub = venue?.publish;
     if (!venue || !pub) return;
-    await this.readPatch();
-    const print = this.fingerprint(doc, venue);
+    const patch = await this.readPatch();
+    const print = this.fingerprint(doc, venue, patch);
     if (this.attempted.get(venueId) === print) return;
     this.attempted.set(venueId, print);
     const target = await this.deps.target();
@@ -633,11 +635,11 @@ export class StagePlotsPublisher {
       return;
     }
     if (pub.origin !== target.origin) {
-      await this.move(venue, doc, target, "A change");
+      await this.move(venue, doc, target, "A change", patch);
       return;
     }
     const host = hostOf(target.origin);
-    const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages });
+    const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages, patch });
     if (r.ok && r.sent === 0 && sameList(r.held, pub.publishedImages) && sameList(r.unpublished.map((u) => u.hash).sort(), pub.unpublishedImages) && r.warnings.length === 0) {
       return;
     }
@@ -650,10 +652,10 @@ export class StagePlotsPublisher {
    * new link because the address changes anyway, and so one secret never lives on two pages.
    * When the new page will not take it, the venue stays where it was and says why.
    */
-  private async move(venue: Venue, doc: StagePlotsDoc, target: Target, why: string): Promise<PublishOutcome> {
+  private async move(venue: Venue, doc: StagePlotsDoc, target: Target, why: string, patch: PatchRead): Promise<PublishOutcome> {
     const pub = venue.publish!;
     const host = hostOf(target.origin);
-    const fresh = await this.sendFresh(this.client(target), target, doc, venue, []);
+    const fresh = await this.sendFresh(this.client(target), target, doc, venue, [], patch);
     const all = [fresh.secret, pub.secret];
     if (!fresh.ok) {
       const message = `Not moved to ${host}: ${fresh.message} The link on ${hostOf(pub.origin)} stays as it is.`;
@@ -680,7 +682,7 @@ export class StagePlotsPublisher {
       await this.takeBack(this.client(target), fresh.secret, target.origin, venue.name);
       return { ok: false, status: 404, error: "no such venue" };
     }
-    this.attempted.set(venue.id, this.fingerprint(doc, venue));
+    this.attempted.set(venue.id, this.fingerprint(doc, venue, patch));
     say("log", all, `"${venue.name}" moved to ${host} under a new link (${why}); its old link on ${hostOf(pub.origin)} is queued for removal`);
     return { ok: true, venue: saved };
   }
@@ -779,7 +781,7 @@ export class StagePlotsPublisher {
       if (!venue.publish || venue.publish.origin === target.origin) continue;
       await this.serial(venue.id, async () => {
         const now = await this.venueNow(venue.id);
-        if (now?.publish && now.publish.origin !== target.origin) await this.move(now, await this.deps.store.get(), target, "the page address changed");
+        if (now?.publish && now.publish.origin !== target.origin) await this.move(now, await this.deps.store.get(), target, "the page address changed", await this.readPatch());
       }).catch((err: unknown) => this.venueFailed(venue, `Not moved to ${hostOf(target.origin)}: ${errorMessage(err)}`));
     }
   }
@@ -888,10 +890,11 @@ export class StagePlotsPublisher {
     doc: StagePlotsDoc,
     venue: Venue,
     required: readonly string[],
+    patch: PatchRead,
   ): Promise<{ ok: true; secret: string; r: Sent } | { ok: false; secret: string; status: 400 | 502; message: string }> {
     const secret = newPublishSecret();
     await this.queue([{ secret, origin: target.origin, since: this.at(), reason: "publishing" }]);
-    const r = await this.sendVenue(client, hostOf(target.origin), secret, doc, venue, { force: true, required, held: [] });
+    const r = await this.sendVenue(client, hostOf(target.origin), secret, doc, venue, { force: true, required, held: [], patch });
     if (r.ok) return { ok: true, secret, r };
     if (r.sent > 0) await this.takeBack(client, secret, target.origin, venue.name);
     else await this.unqueue((e) => e.secret === secret && e.origin === target.origin);
@@ -1081,14 +1084,15 @@ export class StagePlotsPublisher {
   }
 
   /** What a republish is built from, to tell a change to what is published from one to anything else. */
-  private fingerprint(doc: StagePlotsDoc, venue: Venue): string {
+  private fingerprint(doc: StagePlotsDoc, venue: Venue, patch: PatchRead): string {
     const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
     const plan = this.deps.plan();
-    // Each plot as the page gets it (linked points resolved against the patch last read), and
-    // its background whole, so a re-conversion counts as a change whether or not it is held.
+    // Each plot as the page gets it (linked points resolved against `patch`, and nothing else of
+    // the patch), and its background whole, so a re-conversion counts as a change whether or not
+    // it is held. A patch save that changes nothing published leaves this as it was.
     const plots = plotsOf(doc, venue).map((p) => {
       const bg = p.backgroundId ? (byId.get(p.backgroundId) ?? null) : null;
-      return [publishedPlot(p, bg, true, this.patchRead, plan), bg?.converted ?? null];
+      return [publishedPlot(p, bg, true, publishedItems(p.items, patch, patchContext(plan)).items), bg?.converted ?? null];
     });
     return docHash(JSON.stringify([publishedVenue(doc, venue, plan, this.deps.timeZone()), plots]));
   }
@@ -1100,13 +1104,22 @@ export class StagePlotsPublisher {
    */
   private async sendVenue(client: PushClient, host: string, secret: string, doc: StagePlotsDoc, venue: Venue, opts: SendOptions): Promise<SendResult> {
     const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
-    const plots = plotsOf(doc, venue).map((plot) => ({ plot, bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null }));
-    const patch = await this.readPatch();
     const plan = this.deps.plan();
-    for (const { plot, bg } of plots) {
-      const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true, patch, plan)));
+    // Each plot's items as the page gets them, built once for the size check, the send and the log.
+    const plots = plotsOf(doc, venue).map((plot) => ({
+      plot,
+      bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null,
+      ...publishedItems(plot.items, opts.patch, patchContext(plan)),
+    }));
+    for (const { plot, bg, items } of plots) {
+      const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true, items)));
       if (bytes > PUBLISH_MAX_BODY_BYTES) {
-        return { ok: false, status: 400, sent: 0, message: `Plot "${plot.name}" is too large to publish (${mb(bytes)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB). Remove items or inputs from it.` };
+        return {
+          ok: false,
+          status: 400,
+          sent: 0,
+          message: `Plot "${plot.name}" is too large to publish (${mb(bytes)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB). Remove items or inputs from it, or unlink connection points that list many patch channels.`,
+        };
       }
     }
     const index = JSON.stringify(publishedVenue(doc, venue, plan, this.deps.timeZone()));
@@ -1158,11 +1171,11 @@ export class StagePlotsPublisher {
       if (r.ok) sent.set(key, h);
       return r;
     };
-    for (const { plot, bg } of plots) {
-      const r = await put(stagePlotsPlotKey(plot.id)!, JSON.stringify(publishedPlot(plot, bg, bg !== null && held.has(bg.converted.hash), patch, plan)));
+    for (const { plot, bg, items, unresolved } of plots) {
+      const r = await put(stagePlotsPlotKey(plot.id)!, JSON.stringify(publishedPlot(plot, bg, bg !== null && held.has(bg.converted.hash), items)));
       if (r && !r.ok) return fail(r);
       // Said when the plot actually went out, so once per change and not on every check.
-      if (r) unlinkedNote(secret, venue, plot, patch, plan);
+      if (r) unlinkedNote(secret, venue, plot, unresolved);
     }
     const ir = await put(STAGEPLOTS_INDEX_KEY, index);
     if (ir && !ir.ok) return fail(ir);
@@ -1197,15 +1210,14 @@ function stateAfterSend(secret: string, origin: string, at: string, r: Sent, sec
   return { secret, origin, publishedAt: at, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort() };
 }
 
-/** "; 1 background not yet published (why)", or nothing. */
 /** A [stageplots] line for a plot just sent with linked points that went out unlinked, naming each and why. */
-function unlinkedNote(secret: string, venue: Venue, plot: Plot, patch: PatchRead, plan: PublishPlan): void {
-  const { unresolved } = publishedItems(plot.items, patch, patchContext(plan));
+function unlinkedNote(secret: string, venue: Venue, plot: Plot, unresolved: readonly UnresolvedLink[]): void {
   if (unresolved.length === 0) return;
   const each = unresolved.map((u) => `"${u.label || "unlabelled"}" (${u.reason === "removed" ? "its patch device is gone" : "the patch sheet cannot be read"})`).join(", ");
   say("warn", [secret], `"${venue.name}" · "${plot.name}": ${plural(unresolved.length, "connection point")} published unlinked, showing the last name and colour: ${each}`);
 }
 
+/** "; 1 background not yet published (why)", or nothing. */
 function missingNote(r: Sent): string {
   return r.unpublished.length > 0 ? `; ${plural(r.unpublished.length, "background")} not yet published (${r.unpublished[0]!.why})` : "";
 }
