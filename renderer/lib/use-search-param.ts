@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 
 interface RouterHandle {
   state: { location: { pathname: string; search: Record<string, unknown> } };
-  navigate: (opts: { to: string; search: Record<string, unknown>; replace?: boolean; hash?: true }) => unknown;
+  navigate: (opts: { to: string; search: Record<string, unknown>; replace?: boolean; hash?: true; state?: Record<string, unknown> }) => unknown;
   subscribe: (event: "onResolved", fn: () => void) => () => void;
 }
 

@@ -41,7 +41,7 @@ import { useElementSize } from "../../lib/use-element-size";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useRouterHandle } from "../../lib/use-search-param";
-import { backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
+import { VENUE_PARAM, backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
 import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, type EditorAction, type EditorState } from "../../main/stageplots/editor-state";
 import { round1 } from "../../main/stageplots/geometry";
 import { PlotLegend } from "../../main/stageplots/plot-legend";
@@ -52,6 +52,7 @@ import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
 import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-patch";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
+import { useSearchParam } from "../../lib/use-search-param";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
 import { StagePlotsCanvas } from "./stageplots-canvas";
 import { StagePlotsInspector } from "./stageplots-inspector";
@@ -334,6 +335,8 @@ export interface StagePlotsEditProps {
 
 export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   const { doc, loading, error, refresh } = useStagePlots();
+  // `/stageplots/edit?venue=<id>` opens on that venue; a pick in the page wins after.
+  const [asked] = useSearchParam(VENUE_PARAM);
   const [venueId, setVenueId] = useState<string | null>(null);
   const [plotPick, setPlotPick] = useState<{ venueId: string; plotId: string } | null>(null);
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
@@ -376,7 +379,7 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
     );
   }
 
-  const venue = doc.venues.find((v) => v.id === venueId) ?? doc.venues[0] ?? null;
+  const venue = doc.venues.find((v) => v.id === venueId) ?? doc.venues.find((v) => v.id === asked) ?? doc.venues[0] ?? null;
   const plots = venue ? plotsOf(doc, venue) : [];
   const plot = selectedPlot(venue, plots, plotPick);
   return (

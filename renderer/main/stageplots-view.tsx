@@ -6,7 +6,10 @@
 // pan, its legend, and the venue's notes. A tap on an item shows its label,
 // notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
 // on one landscape page. With exactly one home venue it opens that venue
-// straight away, and the browser remembers the last venue opened. Live: an edit
+// straight away, and the browser remembers the last venue opened. A venue has
+// its own address, /stageplots/<id>, which opening or leaving one keeps current
+// (as a replace) and which wins over the remembered venue; an id that names no
+// venue shows the list and leaves the address as it was typed. Live: an edit
 // anywhere redraws it without a reload (useStagePlots).
 //
 // It follows the live or next Planning Center plan the way /patch does
@@ -19,7 +22,8 @@
 // a tap lists the patch channels through it for the followed plan; while the
 // patch cannot be read it shows its last name and colour and lists its inputs.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 
 import type { PlotOverride, StagePlotsView, Venue } from "@main/types/stageplots";
@@ -33,6 +37,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { ErrorNote } from "../components/ui/error-note";
 import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
+import { useRouterHandle } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
 import { backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
@@ -41,6 +46,11 @@ import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following"
 import { usePatchContext, useStagePlotsPatch } from "./stageplots/use-patch";
 import { useStagePlots } from "./stageplots/use-stageplots";
 import { BackLink, VenuePlots, type ChannelsOf } from "./stageplots/venue-plots";
+
+/** A venue's own address. */
+export function venuePath(id: string): string {
+  return `/stageplots/${encodeURIComponent(id)}`;
+}
 
 /** Where the browser keeps the last venue opened. */
 export const LAST_VENUE_KEY = "stageplots:lastVenue";
@@ -115,9 +125,11 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
       {venueGroups(doc.venues).map((g) => (
         <div key={g.label} className="flex flex-col gap-2">
           <span className={cn(eyebrow, "mt-2")}>{g.label}</span>
-          {g.venues.map((v) => (
-            <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
-          ))}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-2">
+            {g.venues.map((v) => (
+              <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
+            ))}
+          </div>
         </div>
       ))}
     </div>
@@ -137,6 +149,11 @@ function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsVi
       planDay={plan.label}
       backgroundOf={(p) => backgroundOf(doc, p)}
       channelsOf={channelsOf}
+      emptyAction={
+        <Button asChild variant="filled" size="small">
+          <a href={`/stageplots/edit?venue=${encodeURIComponent(venue.id)}`}>Add a plot</a>
+        </Button>
+      }
       before={<BackLink onClick={onBack} />}
       actions={(shown) => (
         <PrintControl
@@ -167,7 +184,7 @@ const NO_OVERRIDES: readonly PlotOverride[] = [];
 
 const NO_LINKS = new Map<string, Map<string, LinkResolution>>();
 
-export function StagePlotsPage() {
+export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
   const { doc: stored, loading, error } = useStagePlots();
   const plan = useFollowedPlan(stored?.overrides ?? NO_OVERRIDES);
   // Every plot drawn with its linked points resolved: the cards, the plot, its legend and print.
@@ -179,10 +196,25 @@ export function StagePlotsPage() {
     return { doc: r.plots === stored.plots ? stored : { ...stored, plots: r.plots }, links: r.links };
   }, [stored, patch, patchContext]);
   const channelsOf: ChannelsOf = (plot, itemId) => tapChannels(links.get(plot.id)?.get(itemId));
+  // The address names the venue shown, however it was opened. /stageplots and
+  // /stageplots/<id> are two routes, so moving between them mounts the page afresh.
+  const router = useRouterHandle();
+  const goTo = (path: string, state?: Record<string, unknown>) => void router?.navigate({ to: path, search: {}, replace: true, ...(state ? { state } : {}) });
   const [open, setOpen] = useState<Open>(() => {
+    // The back link asks for the list in the history entry it writes, so the page that
+    // mounts there skips the only-home-venue auto-open; a browser Back to that entry asks again.
+    if ((router?.state.location as { state?: { list?: boolean } } | undefined)?.state?.list) return { kind: "list" };
     const id = remembered();
     return id ? { kind: "venue", id } : { kind: "auto" };
   });
+  // The address names whatever venue is shown, however it was opened (a card, the only
+  // home venue, the remembered one): that is the link to copy or make a QR code of.
+  const shownId = doc ? (venueId ? (doc.venues.find((v) => v.id === venueId) ?? null) : openVenue(doc, open))?.id : undefined;
+  useEffect(() => {
+    if (shownId && shownId !== venueId) goTo(venuePath(shownId));
+    // goTo changes every render; the address only needs to follow the venue shown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownId, venueId]);
   usePageActions(
     <Button asChild variant="filled" size="small">
       <a href="/stageplots/edit">Edit</a>
@@ -199,9 +231,10 @@ export function StagePlotsPage() {
       </div>
     );
   }
-  const venue = openVenue(doc, open);
+  // An address that names a venue wins over the remembered one; an unknown id shows the list.
+  const venue = venueId ? (doc.venues.find((v) => v.id === venueId) ?? null) : openVenue(doc, open);
   return (
-    <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3 sm:max-w-[1100px]">
+    <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3">
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
       {plan.unreachable && <UnreachableNotice />}
       {venue ? (
@@ -213,20 +246,26 @@ export function StagePlotsPage() {
           onBack={() => {
             remember(null);
             setOpen({ kind: "list" });
+            goTo("/stageplots", { list: true });
           }}
         />
       ) : (
-        <div className="sm:max-w-[380px]">
-          <VenueList
-            doc={doc}
-            plan={plan}
-            onOpen={(id) => {
-              remember(id);
-              setOpen({ kind: "venue", id });
-            }}
-          />
-        </div>
+        <VenueList
+          doc={doc}
+          plan={plan}
+          onOpen={(id) => {
+            remember(id);
+            setOpen({ kind: "venue", id });
+            goTo(venuePath(id));
+          }}
+        />
       )}
     </div>
   );
+}
+
+/** `/stageplots/<venue id>`: the page with that venue open. */
+export function StagePlotsVenueRoute() {
+  const { venueId } = useParams({ strict: false }) as { venueId?: string };
+  return <StagePlotsPage {...(venueId ? { venueId } : {})} />;
 }

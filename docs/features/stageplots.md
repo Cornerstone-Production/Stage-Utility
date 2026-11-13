@@ -84,12 +84,23 @@ photo does not hold two in memory.
 
 ## /stageplots
 
-Read-only. The venues as cards, home then offsite, each with a thumbnail of the
+Read-only, and as wide as the page. The venues as cards in a grid, home then offsite, each with a thumbnail of the
 plot it shows this week and a line saying which: "3 plots · Baptism for this
 plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
 selected, the plot itself, its legend, and the venue's notes.
 
 - With exactly one home venue, `/stageplots` opens it directly.
+- A venue has its own address, `/stageplots/<venue id>`, on the server's local
+  address (`http://<server>:8788/stageplots/<venue id>`, or port 80 where the
+  friendly port is set up). Opening a venue puts it in the address bar and leaving
+  it goes back to `/stageplots`, so the bar can be copied or made into a QR code,
+  and the address opens that venue on a fresh load. It wins over the remembered
+  venue; an id that names no venue shows the list.
+- A venue with no plots offers **Add a plot**, which opens
+  `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
+  named in `?venue=` when it exists.
+- The plot is drawn as large as fits: never taller than the screen, centred in the
+  column on a wide display.
 - The browser remembers the last venue opened and opens it next time; **Stage
   plots** above the venue's name goes back to the list and forgets it.
 - Pinch or Ctrl/Cmd-scroll to zoom, drag to pan, and the buttons in the plot's

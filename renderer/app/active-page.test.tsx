@@ -55,6 +55,7 @@ const PARAMS: Record<string, string> = {
   $serviceType: "weekend-gathering",
   $layout: "audio",
   $tab: "network",
+  $venueId: "v-abc",
 };
 
 function fill(pattern: string): string {
@@ -93,7 +94,7 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly five dynamic routes", () => {
+  test("there are exactly six dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
@@ -104,6 +105,7 @@ describe("the route table", () => {
       "/screens/$viewId/edit",
       "/servicecue/$serviceType/$layout",
       "/settings/advanced/$tab",
+      "/stageplots/$venueId",
     ]);
   });
 });
@@ -162,6 +164,7 @@ describe("every registered route resolves a title", () => {
         "/settings/integrations",
         "/settings/messages",
         "/stageplots",
+        "/stageplots/$venueId",
         "/stageplots/edit",
         "/video-feeds",
         "/views",
@@ -200,6 +203,7 @@ describe("every registered route resolves a title", () => {
         "/settings/integrations",
         "/settings/messages",
         "/stageplots",
+        "/stageplots/$venueId",
         "/stageplots/edit",
         "/video-feeds",
       ],
@@ -233,6 +237,18 @@ describe("a console is named after its View", () => {
   });
 });
 
+describe("/stageplots/<venue id>", () => {
+  // The router, not the chrome resolver: the static editor route must win the
+  // parameter, or the editor would open as a venue called "edit".
+  const matched = (path: string) => (router.matchRoutes(path) as unknown as { routeId: string }[]).map((m) => m.routeId).pop();
+
+  test("a venue id matches the venue route and /stageplots/edit still matches the editor", () => {
+    assert.equal(matched("/stageplots/v-abc"), "/stageplots/$venueId");
+    assert.equal(matched("/stageplots/edit"), "/stageplots/edit");
+    assert.equal(matched("/stageplots"), "/stageplots");
+  });
+});
+
 describe("exact versus prefix", () => {
   test("a child route takes the section's name but not its heading", () => {
     // The layout editor and a ServiceCue plan each draw their own heading, so
@@ -244,6 +260,7 @@ describe("exact versus prefix", () => {
       ["/patch/edit", "Patch"],
       ["/settings/advanced/$tab", "Advanced"],
       ["/automation/$tab", "Automation"],
+      ["/stageplots/$venueId", "Stage plots"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
       assert.equal(active?.page.label, section, `${pattern} lost its section name`);
@@ -299,6 +316,7 @@ describe("exact versus prefix", () => {
       "/settings/integrations -> /settings/integrations",
       "/settings/messages -> /settings/messages",
       "/stageplots -> /stageplots",
+      "/stageplots/$venueId -> /stageplots",
       "/stageplots/edit -> /stageplots",
       "/video-feeds -> /video-feeds",
     ]);
