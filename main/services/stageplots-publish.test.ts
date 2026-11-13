@@ -120,7 +120,10 @@ async function assertNoUnknownLinks(): Promise<void> {
   }
 }
 
-async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown } = {}): Promise<Harness> {
+async function harness(
+  doc: StagePlotsDoc = venueDoc(),
+  opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown; patchRetry?: { firstMs: number; maxMs: number } } = {},
+): Promise<Harness> {
   const page = await startPage();
   const parsed = parsePublishUrl(page.origin);
   assert.ok(parsed.ok);
@@ -150,6 +153,7 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
     listen: (cb) => (listener = cb),
     debounceMs: 30,
     ...(opts.client ? { client: opts.client as never } : {}),
+    ...(opts.patchRetry ? { patchRetry: opts.patchRetry } : {}),
   });
   publisher.start();
   const h: Harness = {
@@ -1595,7 +1599,7 @@ describe("linked connection points on the public page", () => {
   });
 
   /** v-1 links SB-1 and a device that is gone; v-2 links FP-3. Both published. */
-  async function twoVenues() {
+  async function twoVenues(opts: Parameters<typeof harness>[1] = {}) {
     const doc = venueDoc(1, 1, () => [
       item("box-1"),
       // Every type's own fields too: publishedItems names each field, so one it forgot is gone from the page.
@@ -1607,7 +1611,7 @@ describe("linked connection points on the public page", () => {
     ]);
     doc.venues.push({ id: "v-2", name: "Chapel", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
     doc.plots.push({ id: "p-9", venueId: "v-2", name: "Chapel plot", backgroundId: null, bgFade: 0, items: [item("c-fp3", { type: "conn", label: "FP-3", color: "#12a594", patchLink: linked("fp3-SENTINEL-ID", "FP-3", "#12a594") })], version: 1 });
-    const h = await harness(doc);
+    const h = await harness(doc, opts);
     h.patch.file = patchWithSentinels();
     assert.ok((await h.publisher.publish("v-1")).ok);
     assert.ok((await h.publisher.publish("v-2")).ok);
@@ -1764,5 +1768,90 @@ describe("linked connection points on the public page", () => {
       for (const sp of spies) sp.mock.restore();
     }
     assert.ok(lines.some((l) => l.startsWith("[stageplots]") && l.includes('"Lost box" (its patch device is gone)')), lines.join(" / "));
+  });
+});
+
+describe("a patch that could not be read, read again", () => {
+  const link = (deviceId: string, lastName: string) => ({ sheetId: "main", deviceId, lastName, lastColor: null });
+  const patchFile = (): PatchFile => ({
+    updatedAt: "",
+    sheets: [
+      {
+        id: "main",
+        name: "Main patch",
+        kind: "analog",
+        devices: [
+          { id: "rack", name: "Rack A", kind: "rack", inputs: 8, outputs: 0 },
+          { id: "sb1", name: "SB-1", kind: "snake", inputs: 8, outputs: 0, color: "#0091ff" },
+        ],
+        endpoints: [{ rackId: "rack", dir: "in", index: 1, consoleChannel: "1", label: "Kick In", path: [{ deviceId: "sb1", connector: "1" }] }],
+        variants: [],
+        assignments: { byServiceType: {}, byPlan: {} },
+      },
+    ],
+  });
+  const linkedDoc = () => venueDoc(1, 1, () => [item("c-sb1", { type: "conn", label: "Old SB", patchLink: link("sb1", "Old SB") })]);
+  const sb1 = async (h: Harness) => {
+    const secret = (await h.venue()).publish!.secret;
+    return (JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).items.find((it) => it.id === "c-sb1")!;
+  };
+  const RETRY = { firstMs: 20, maxMs: 80 };
+  /** Until `check` holds, or a failure naming `what` after five seconds. */
+  async function until(check: () => Promise<boolean>, what: string): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (!(await check())) {
+      if (Date.now() > deadline) throw new Error(`still waiting after 5000 ms for ${what}`);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }
+
+  test("is retried on a backoff with no event at all; once it reads, said once, and the venue that links it is sent again", async () => {
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      const h = await harness(linkedDoc(), { patchRetry: RETRY });
+      h.patch.file = null;
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      await h.publisher.settle();
+      assert.equal((await sb1(h)).patch, undefined);
+      // Fails a few times on the backoff, then reads: nothing is saved or broadcast.
+      await new Promise((r) => setTimeout(r, 120));
+      h.patch.file = patchFile();
+      await until(async () => (await sb1(h)).patch !== undefined, "the page to follow the patch again");
+      const healed = await sb1(h);
+      assert.deepEqual([healed.label, healed.patch?.channels.map((c) => c.path)], ["SB-1", ["SB-1/1"]]);
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const ours = lines.filter((l) => l.startsWith("[stageplots]"));
+    assert.equal(ours.filter((l) => l.includes("could not read the patch sheet")).length, 1, ours.join(" / "));
+    assert.equal(ours.filter((l) => l.includes("the patch sheet can be read again")).length, 1, ours.join(" / "));
+  });
+
+  test("a start that reads the patch sends the venues that link it again, so a page published unlinked before it follows", async () => {
+    const h = await harness(linkedDoc());
+    h.patch.file = null;
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    await h.publisher.stop();
+    assert.equal((await sb1(h)).patch, undefined);
+    const origin = parsePublishUrl(h.page.origin);
+    assert.ok(origin.ok);
+    const restarted = new StagePlotsPublisher({
+      target: async () => ({ ok: true, origin: origin.origin, token: TOKEN }),
+      store: stageplotsStore,
+      image: async (k) => h.images.get(k) ?? null,
+      plan: () => h.plan,
+      patch: async () => patchFile(),
+      timeZone: () => "America/Chicago",
+      onSaved: () => undefined,
+      debounceMs: 30,
+    });
+    try {
+      restarted.start();
+      await until(async () => (await sb1(h)).patch !== undefined, "the restarted publisher to send the linked venue");
+    } finally {
+      await restarted.stop();
+    }
   });
 });

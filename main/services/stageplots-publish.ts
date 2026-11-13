@@ -96,6 +96,8 @@ export interface StagePlotsPublishDeps {
   client?: (target: { origin: PublishOrigin; token: string }) => PushClient;
   /** How long a change waits for more before it is published. */
   debounceMs?: number;
+  /** How long after a failed patch read it is tried again, doubling up to `maxMs`. A seam for a test. */
+  patchRetry?: { firstMs: number; maxMs: number };
   now?: () => number;
 }
 
@@ -113,6 +115,9 @@ function leftOn(host: string): string {
 
 /** The host of an origin, for every sentence that names a page. */
 const hostOf = (origin: string) => new URL(origin).host;
+
+/** A patch that cannot be read is read again after a minute, then two, four… up to fifteen. */
+export const PATCH_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
 
 /** How long a change waits for the next before it is published. */
 export const REPUBLISH_WAIT_MS = 2000;
@@ -266,6 +271,9 @@ export class StagePlotsPublisher {
   private planKey: string | null = null;
   /** The patch could not be read last time: said once until it can. */
   private patchDown = false;
+  /** The next read of a patch that could not be read, and how long the one after it waits. */
+  private patchRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private patchRetryMs = 0;
   private started = false;
   private stopped = false;
   private paused = false;
@@ -284,12 +292,19 @@ export class StagePlotsPublisher {
     this.planKey = this.currentPlanKey();
     this.deps.listen?.((channel) => this.heard(channel));
     void this.drainQueued(true);
+    // What the page holds was sent before this start, maybe against a patch that could not be
+    // read then: once it reads, the venues that link it are sent again (only what differs from
+    // what this process has sent goes, which after a start is their plots). Unreadable now, it
+    // is tried again on the backoff until it reads.
+    void this.readPatch().then((p) => (p.ok ? this.republishLinked() : undefined));
   }
 
   /** Shutdown: no more republishing, and whatever is running finishes. */
   async stop(): Promise<void> {
     this.stopped = true;
     this.cancelWait();
+    if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
+    this.patchRetryTimer = null;
     await Promise.all([...this.chains.values()]);
   }
 
@@ -347,13 +362,62 @@ export class StagePlotsPublisher {
   private async readPatch(): Promise<PatchRead> {
     try {
       const file = await this.deps.patch();
-      if (this.patchDown) say("log", [], "the patch sheet can be read again; linked connection points are published with their devices");
-      this.patchDown = false;
+      if (this.patchDown) this.patchHealed();
       return { ok: true, file };
     } catch (err) {
-      if (!this.patchDown) say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours: ${errorMessage(err)}`);
-      this.patchDown = true;
+      if (!this.patchDown) {
+        say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours, and it is read again until it can be: ${errorMessage(err)}`);
+        this.patchDown = true;
+        this.patchRetryMs = (this.deps.patchRetry ?? PATCH_RETRY).firstMs;
+        this.retryPatchLater();
+      }
       return { ok: false };
+    }
+  }
+
+  /** Read the patch again after the backoff, while it cannot be read. Nothing waits on it, so it never holds a run or settle(). */
+  private retryPatchLater(): void {
+    if (this.stopped || this.patchRetryTimer) return;
+    this.patchRetryTimer = setTimeout(() => {
+      this.patchRetryTimer = null;
+      if (this.stopped || !this.patchDown) return;
+      if (this.paused) return this.retryPatchLater();
+      void this.deps.patch().then(
+        () => this.patchDown && this.patchHealed(),
+        () => {
+          this.patchRetryMs = Math.min(this.patchRetryMs * 2, (this.deps.patchRetry ?? PATCH_RETRY).maxMs);
+          this.retryPatchLater();
+        },
+      );
+    }, this.patchRetryMs);
+    this.patchRetryTimer.unref?.();
+  }
+
+  /** The patch reads again: said once, and every venue that links it is sent what that changes. */
+  private patchHealed(): void {
+    this.patchDown = false;
+    if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
+    this.patchRetryTimer = null;
+    say("log", [], "the patch sheet can be read again; linked connection points are published with their devices");
+    void this.republishLinked();
+  }
+
+  /** Republish each published venue with a connection point linked to the patch. The fingerprint sends nothing where nothing changed. */
+  private async republishLinked(): Promise<void> {
+    if (this.stopped || this.paused) return;
+    let doc: StagePlotsDoc;
+    try {
+      doc = await this.deps.store.get();
+    } catch (err) {
+      say("error", [], `could not read the stage plots to republish their linked connection points: ${errorMessage(err)}`);
+      return;
+    }
+    for (const venue of doc.venues) {
+      const pub = venue.publish;
+      if (!pub || !plotsOf(doc, venue).some((p) => p.items.some((it) => it.patchLink))) continue;
+      void this.serial(venue.id, () => this.republish(venue.id)).catch((err: unknown) => {
+        say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
+      });
     }
   }
 
