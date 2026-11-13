@@ -96,8 +96,9 @@ selected, the plot itself, its legend, and the venue's notes.
   corner zoom in, out and back to the whole plot. An ordinary scroll pans only
   once the plot is zoomed in, so the page still scrolls past it.
 - Tap an item for its label, kind, notes and numbered inputs: beside the item on a
-  desk, as a sheet along the bottom on a phone. A tap on the empty plot, anywhere
-  off the plot, or Escape closes it; text has no details.
+  desk, as a sheet along the bottom on a phone. A connection point linked to the
+  patch lists its patch channels instead (see [Patch link](#patch-link)). A tap on
+  the empty plot, anywhere off the plot, or Escape closes it; text has no details.
 - **Print** beside the venue's name prints the plot (see [Printing](#printing)).
 - A saved edit anywhere shows without a reload.
 
@@ -263,6 +264,36 @@ characters each, typically on a connection point. **Add input** adds a row and p
 the cursor in it. The inputs show, numbered, when someone taps the item on
 `/stageplots`, and printed beside the plot for each connection point.
 
+### Patch link
+
+A connection point can follow a device on the [patch sheet](../patch-sheet/README.md).
+At the foot of its inspector, **Link to patch device** opens a picker: choose the sheet,
+then the device (each listed with its colour, name, kind and connector counts), and
+**Link**. The point takes the device's name and colour, and both are locked while it is
+linked: "Name and color follow the patch device." The inspector shows the device with
+its kind, sheet and connectors, and **Unlink**, which keeps the name and colour the point
+showed and makes them its own again. Linking and unlinking are draft edits, saved with
+**Save**. Nothing here writes to the patch sheet.
+
+A linked point follows its device. Rename or recolour the device on the patch sheet and
+the point shows the new name and colour in the editor and on `/stageplots` at once, with
+nothing to save; the next **Save** of the plot keeps them as its last. A device colour
+that is not one of the ten swatches takes the nearest one.
+
+A tap on a linked point on `/stageplots` lists **Patch channels · *sheet***: each channel
+whose path runs through the device (for a rack, each channel set on it), inputs then
+outputs, as its console channel, its source or destination, and its connector on the
+device, such as `Ch 3 · Snare Top · SB-1/3`. Unused channels are left out. They are the
+patch as the followed plan has it, its variant and that week's tweaks included, the way
+`/patch` shows it (see [Following the plan](#following-the-plan)). A linked point with no
+channels through it lists its own inputs.
+
+When the device is no longer on the sheet the point reads **unlinked · device removed**;
+when the patch sheet cannot be read, **unlinked · patch sheet unavailable**. Either way it
+shows the name and colour it last saved, a tap lists its own inputs, and the plot still
+saves. An unavailable sheet is followed again once it can be read; a removed device needs
+**Unlink**, and a new link if one is wanted.
+
 ### The legend
 
 Under the plot, in the editor and on `/stageplots`: one row per label and colour,
@@ -295,7 +326,9 @@ editor and no print. The page reads the venue again when it comes back into view
 fails keeps the copy it had and says it could not refresh, and one that has never loaded
 says so rather than drawing an empty stage.
 
-**Anyone with the link can see that venue's plots, item notes and inputs included.** The
+**Anyone with the link can see that venue's plots, item notes and inputs included,** and
+for each [linked connection point](#patch-link) the patch sheet's name and the channels a
+tap lists. The
 link is 43 random characters, so it cannot be guessed, and nothing on the page lists
 venues; but whoever is sent it can send it on. A link that was never published, one that
 was regenerated or unpublished, and a mistyped one all answer exactly as an address the
@@ -344,6 +377,15 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 The page shows the plot each venue had for the followed plan when it was last published,
 and republishes when the plan moves, so it follows the week as `/stageplots` does. Dates
 are in the app's time zone.
+
+A [linked connection point](#patch-link) is published as its device's name and colour and
+the channels a tap lists, resolved when it is sent. Of the patch the page gets only that:
+the sheet's name, and for each channel its console channel, its source or destination, and
+the device's name with its connector. Never the link's ids, the other devices on a
+channel's path, mics, notes, owners or anything else on the sheet. A patch save that
+changes what a published point shows republishes that venue, and only that venue; one that
+changes nothing a published point shows sends nothing. While the patch cannot be read,
+linked points are published with their last name and colour and no channels.
 
 Saving a new page address under **Public link** moves each published venue to the new
 page straight away, under a new link (the address changes anyway, and so one link never
@@ -407,7 +449,8 @@ in the [publishing protocol](../reference/servicecue-publishing.md#stageplots).
 50 venues, 20 plots a venue, 50 backgrounds, names of 60 characters and notes of
 500, and 2000 plan overrides across every venue, past plans included. A plot
 holds up to 500 items; an item's label is up to 60 characters, its notes 500,
-and its inputs up to 64 of 40 characters each.
+and its inputs up to 64 of 40 characters each. A tap on a linked connection point
+lists up to 128 patch channels.
 
 ## Backups
 
@@ -446,8 +489,11 @@ that failed and why, every one refused before anything was sent (an unknown venu
 published or not, no page set up, too many old links waiting), each old link queued for
 removal, removed, failing (once) or waiting for its page (once), what went up before a
 failure that could not be taken back, and each venue moved to a new page. The secret is
-never logged.
-A page that cannot read the plots logs that too, so does a print whose
+never logged. A publish that cannot read the patch sheet says so once (linked points go
+out unlinked) and again when it can, and each plot sent with linked points that went out
+unlinked names them and why (the device is gone, or the sheet cannot be read).
+A page that cannot read the plots logs that too, so does one that cannot read the patch
+sheet for its linked points, so does a print whose
 background did not load, and so does a page that finds Planning Center
 unreachable and falls back to each venue's default, and again when it can be
 read once more. See [Updates and logs](../ops/updates-and-logs.md).
