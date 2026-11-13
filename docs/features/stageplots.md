@@ -291,7 +291,8 @@ channels through it lists its own inputs.
 When the device is no longer on the sheet the point reads **unlinked · device removed**;
 when the patch sheet cannot be read, **unlinked · patch sheet unavailable**. Either way it
 shows the name and colour it last saved, a tap lists its own inputs, and the plot still
-saves. An unavailable sheet is followed again once it can be read; a removed device needs
+saves. An unavailable sheet is followed again once it can be read (an open page reads it
+again on a backoff, from a minute up to fifteen, and at once on any patch save); a removed device needs
 **Unlink**, and a new link if one is wanted.
 
 ### The legend
@@ -326,11 +327,10 @@ editor and no print. The page reads the venue again when it comes back into view
 fails keeps the copy it had and says it could not refresh, and one that has never loaded
 says so rather than drawing an empty stage.
 
-**Anyone with the link can see that venue's plots, item notes and inputs included,** and
-for each [linked connection point](#patch-link) the patch sheet's name and the channels a
-tap lists. The
-link is 43 random characters, so it cannot be guessed, and nothing on the page lists
-venues; but whoever is sent it can send it on. A link that was never published, one that
+**Anyone with the link can see that venue's plots, item notes and inputs included.** For each
+[linked connection point](#patch-link) that includes the patch sheet's name and the channels a
+tap lists. The link is 43 random characters, so it cannot be guessed, and nothing on the page
+lists venues; but whoever is sent it can send it on. A link that was never published, one that
 was regenerated or unpublished, and a mistyped one all answer exactly as an address the
 page does not know.
 
@@ -385,7 +385,10 @@ the device's name with its connector. Never the link's ids, the other devices on
 channel's path, mics, notes, owners or anything else on the sheet. A patch save that
 changes what a published point shows republishes that venue, and only that venue; one that
 changes nothing a published point shows sends nothing. While the patch cannot be read,
-linked points are published with their last name and colour and no channels.
+linked points are published with their last name and colour and no channels; the server
+reads it again every minute or so (backing off to every fifteen), and once it can, sends
+each venue that links it again. After a restart it does the same once, so a page published
+unlinked before it follows the patch again.
 
 Saving a new page address under **Public link** moves each published venue to the new
 page straight away, under a new link (the address changes anyway, and so one link never

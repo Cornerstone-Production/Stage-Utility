@@ -149,7 +149,7 @@ of unpadded base64url. Under a secret there are three kinds of key:
 | Key | Holds |
 |---|---|
 | `index` | the venue: its name and notes, its plots in tab order, its default, and which plot it showed when it was published |
-| `plot/<id>` | one plot: its items, its background fade and its background's size. A connection point linked to the patch carries its device's name and colour as its label and colour, and `patch: {sheet, channels: [{channel, label, path}]}`, never the link itself. `<id>` is 1 to 80 of letters, digits, `-` and `_` |
+| `plot/<id>` | one plot: its items, its background fade and its background's size. A connection point linked to the patch carries its device's name and colour as its label and colour, never the link itself; `patch: {sheet, channels: [{channel, label, path}]}` is present only on a linked point with channels to list. `<id>` is 1 to 80 of letters, digits, `-` and `_` |
 | `image/<hash>` | one converted background, `image/webp`. `<hash>` is 16 lower-case hex digits |
 
 None of it is a doc or an asset: it is in a table of its own, so the manifest never
