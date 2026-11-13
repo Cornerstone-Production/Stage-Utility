@@ -577,32 +577,32 @@ function mergeIdFloors(contents: object, live: Record<string, unknown> | null, f
  * and a static import of the controller here would make that a cycle.
  */
 async function pauseBackgroundWriters(): Promise<() => void> {
-  // Logged, not swallowed: if either stop is ever renamed this would otherwise
-  // proceed with the writers running and still report the restore as clean.
-  const failed = (what: string) => (err: unknown) => {
-    console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
-    return null;
-  };
   // Awaited, where these used to be fire-and-forget. The imports are lazy to
   // break a cycle, not because the timing is unimportant: not waiting meant the
   // writes below could begin before the poller had actually stopped, which is
   // the race the stop exists to remove.
-  const undos = await Promise.all([
-    import("./live-poller.js")
-      .then((m) => m.livePoller.pause())
-      .catch(failed("the live poller")),
-    import("./stage-controller.js")
-      .then((m) => m.stageController.pauseBackgroundWork())
-      .catch(failed("the stage controller")),
+  const writers = [
+    ["the live poller", () => import("./live-poller.js").then((m) => m.livePoller.pause())],
+    ["the stage controller", () => import("./stage-controller.js").then((m) => m.stageController.pauseBackgroundWork())],
     // Waits for any publish in flight, then holds every stage plots write until a refused
     // restore resumes it: a debounced republish must not write over the restored file.
-    import("./stageplots-publish-instance.js")
-      .then((m) => m.stageplotsPublisher.pause())
-      .catch(failed("the stage plots publisher")),
-  ]);
-  return () => {
-    for (const undo of undos) undo?.();
+    ["the stage plots publisher", () => import("./stageplots-publish-instance.js").then((m) => m.stageplotsPublisher.pause())],
+  ] as const;
+  const settled = await Promise.allSettled(writers.map(([, pause]) => pause()));
+  const undos = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  const resume = () => {
+    for (const undo of undos) undo();
   };
+  // One that could not be quieted would write over the restored file and the restore would still
+  // report itself clean: refused instead, with what was paused resumed and the box as it was.
+  const failed = settled.flatMap((r, i) => (r.status === "rejected" ? [`${writers[i]![0]} (${errorMessage(r.reason)})`] : []));
+  if (failed.length > 0) {
+    resume();
+    const message = `The restore was refused: ${failed.join(" and ")} could not be paused, and would have written over the restored files. Nothing was changed.`;
+    console.error(`[config-snapshot] ${scrub(message, 600)}`);
+    throw new Error(message);
+  }
+  return resume;
 }
 
 class ConfigSnapshotService {

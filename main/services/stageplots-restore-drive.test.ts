@@ -202,6 +202,34 @@ describe("a restore never revives a revoked link, and never strands a live one",
   });
 });
 
+describe("a restore that cannot quiet a background writer", () => {
+  for (const which of ["the live poller", "the stage controller", "the stage plots publisher"] as const) {
+    test(`is refused when ${which} cannot be paused, with nothing written and the others resumed`, async () => {
+      await box(OWN);
+      const before = await fs.readFile(path.join(TMP, "stageplots.json"), "utf8");
+      const resumed: string[] = [];
+      const pausing = (name: string) => async () => {
+        if (name === which) throw new Error("it would not stop");
+        return () => void resumed.push(name);
+      };
+      const spies = [
+        mock.method(livePoller, "pause", pausing("the live poller")),
+        mock.method(stageController, "pauseBackgroundWork", pausing("the stage controller")),
+        mock.method(instance, "pause", pausing("the stage plots publisher")),
+      ];
+      const quietLog = mock.method(console, "error", () => undefined);
+      try {
+        await assert.rejects(configSnapshot.apply(await bundle(OWN)), new RegExp(`^Error: The restore was refused: ${which} \\(it would not stop\\) could not be paused`));
+      } finally {
+        for (const sp of spies) sp.mock.restore();
+        quietLog.mock.restore();
+      }
+      assert.equal(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"), before, "a refused restore wrote");
+      assert.deepEqual(resumed.sort(), ["the live poller", "the stage controller", "the stage plots publisher"].filter((n) => n !== which));
+    });
+  }
+});
+
 describe("the restore holds the publisher", () => {
   test("configSnapshot.apply pauses the app's publisher before it writes, and a refused restore resumes it", async () => {
     await box(OWN);

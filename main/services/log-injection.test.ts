@@ -754,7 +754,6 @@ const FORMAT_STRING_ALLOWED = new Map<string, string>([
   ["app-paths.ts", "two paths built from constants"],
   ["branding-image-store.ts", "`key`, iterated out of the constant BRANDING_IMAGE_KEYS"],
   ["broadcaster.ts", "`channel`, a member of the fixed channel union"],
-  ["config-snapshot.ts", "`what`, an internal label for the thing being quieted"],
   ["data-store.ts", "`this.filename`, the store's own constant"],
   ["live-poller.ts", "`who`, the internal name of the caller that ticked"],
   ["osc-manager.ts", "a port number"],

@@ -353,7 +353,10 @@ says, as a branding upload is checked, while a layout image is held to only what
 a layout upload checks, which has never included its contents. If any file or
 image breaks a rule, the whole restore is refused with each one and the reason,
 and nothing on the machine changes: nothing is written, no stored credential is
-cleared, and nothing that runs in the background is paused.
+cleared, and nothing that runs in the background is paused. Once the files pass, the
+live poller, the stage controller's timers and the stage plots publisher are paused
+before anything is written; if any of them cannot be, the restore is refused, the
+others are resumed, nothing is written, and `[config-snapshot]` names which.
 
 - A restore never writes `secrets.bin` or `encryption.key`. A credential found
   inside a config file (a wireless password, an integration's API key) is dropped
