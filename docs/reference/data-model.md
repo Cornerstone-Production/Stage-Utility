@@ -437,6 +437,7 @@ class means for backups.
 | `signals.json` | runtime | The values the Companion module reads |
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
+| `stageplots.json` | config | [Stage plot](../features/stageplots.md) venues, plots and the backgrounds they draw on |
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `trends-prefs.json` | config | Which Smaart metric the Trends card plots under Sound |
 | `update-notices.json` | runtime | Which release has been announced, the after-update notice until it is dismissed, and the running release's notes kept for What's new |
@@ -449,8 +450,10 @@ class means for backups.
 The three recordings are keyed stores: the name in the table is the legacy
 single-document file a pre-split install may still hold, and the live data is the
 folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
-Uploaded logos and layout images are files in `branding-images/` and
-`layout-images/`, named by content hash and carried by a config snapshot.
+Uploaded logos, layout images and stage-plot backgrounds are files in
+`branding-images/`, `layout-images/` and `stageplot-images/`, named by content hash
+and carried by a config snapshot. Uploaded stage-plot PDFs are in
+`stageplot-originals/`, carried by a snapshot and never served.
 
 The custom tab and home-screen icon is nine `settings.json` fields: `appIcon`
 (the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`

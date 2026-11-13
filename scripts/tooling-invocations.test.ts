@@ -125,6 +125,7 @@ describe("how the scripts are started", () => {
       "publish/servicecue/package.json deploy: node scripts/deploy.ts",
       "scripts/build-artifacts.sh: node --import tsx scripts/servicecue-bundle.ts",
       "scripts/build-artifacts.sh: node scripts/bundle-server.ts",
+      "scripts/build-artifacts.sh: node scripts/stage-native-modules.ts",
       "scripts/update.ps1: node --no-warnings scripts/build-inputs.ts",
       "scripts/update.ps1: node --no-warnings scripts/manifest-changed.ts",
       "scripts/update.sh: node --no-warnings scripts/build-inputs.ts",

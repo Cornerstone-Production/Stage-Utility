@@ -750,6 +750,16 @@ jobs:
           echo "  reported version: $got"
           [ "$got" = "$V" ] \
             || { echo "::error::version reported as $got"; exit 1; }
+          # sharp is the one package the bundle cannot carry: it ships in the
+          # archive's node_modules/. Upload a PNG as the editor does (the raw bytes,
+          # the name on the query) and require a converted background back.
+          echo 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==' | base64 -d > /tmp/smoke.png
+          code=$(curl -s -o /tmp/smoke-upload.json -w '%{http_code}' --max-time 30 -X POST \
+            -H 'Content-Type: image/png' --data-binary @/tmp/smoke.png \
+            'http://localhost:8912/api/stageplots/backgrounds?name=smoke.png')
+          echo "  stage-plot upload -> $code"
+          [ "$code" = "201" ] || { echo "::error::stage-plot upload returned $code"; cat /tmp/smoke-upload.json; tail -40 /tmp/smoke.log; exit 1; }
+          node -e 'const b = JSON.parse(require("fs").readFileSync("/tmp/smoke-upload.json", "utf8")); if (!/^\/stageplot-images\/[0-9a-f]{16}\.webp$/.test(b.url) || !(b.converted?.bytes > 0)) { console.log("::error::no converted background in", JSON.stringify(b)); process.exit(1); }'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -761,9 +771,9 @@ jobs:
   # Downloadable installs, attached to the release the job above just published.
   #
   # Every platform is built on this one runner because there is nothing to
-  # cross-compile: the server's only third-party dependencies are pure JavaScript
-  # and there are no native modules, so the per-platform part is which Node binary
-  # gets copied in. Five archives take about twenty seconds.
+  # cross-compile: the per-platform part is which Node binary gets copied in and
+  # which prebuilt sharp goes into the archive's node_modules/, both downloaded and
+  # checked against their published hashes. Five archives take about half a minute.
   artifacts:
     # `helper` is a need so its zips can go into the release in the one create
     # call. It cannot stop the release, since the `always()` below runs this job

@@ -94,7 +94,9 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
-| `branding-images/`, `layout-images/` | uploaded images, named by content hash |
+| `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots and backgrounds |
+| `branding-images/`, `layout-images/`, `stageplot-images/` | uploaded images, named by content hash |
+| `stageplot-originals/` | uploaded stage-plot PDFs, kept but never served |
 
 **What it observed** — deliberately not restored, because it describes this
 machine's history rather than how you set it up:

@@ -97,6 +97,10 @@ export default defineConfig({
         target: API_TARGET,
         changeOrigin: true,
       },
+      "/stageplot-images": {
+        target: API_TARGET,
+        changeOrigin: true,
+      },
       // The manifest carries the operator's app name, which only the Node server
       // knows; left to the dev server it would be a static "Stage Utility". The icon
       // paths are NOT proxied: with no custom icon the Node server serves them from

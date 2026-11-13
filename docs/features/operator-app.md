@@ -27,7 +27,7 @@ done. Dismiss it and it stays dismissed.
 | Group | Pages |
 |---|---|
 | — | **Home** |
-| Content | **ServiceCue**, **Patch** |
+| Content | **ServiceCue**, **Patch**, **Stage plots** |
 | Screens | **Screens**, **Mic slots**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
@@ -748,4 +748,5 @@ what surrounds it.
 
 The operator's own versions are in the sidebar: **History** (which is
 `/history/manage`, and keeps Edit times, Merge, Rebuild from raw and Delete in
-a service's header) and **Patch**, whose editor is at `/patch/edit`.
+a service's header), **Patch**, whose editor is at `/patch/edit`, and **Stage
+plots**, whose editor is at `/stageplots/edit`.

@@ -9,6 +9,7 @@ import * as http from "http";
 import * as zlib from "node:zlib";
 
 import { errorMessage } from "../errors.js";
+import { isRecord } from "../is-record.js";
 import { PcoUrlRefused } from "../pco-path.js";
 import { scrub } from "../scrub.js";
 
@@ -268,6 +269,32 @@ export async function readBodyOrEmpty(
     if (err instanceof BodyTooLargeError) throw err;
     return {};
   }
+}
+
+/**
+ * A JSON body that must be an object. Null, having answered 400 with the
+ * reason, for a body that is not JSON or is JSON but not an object (an array,
+ * a string, null). A body over `limit` still throws BodyTooLargeError, which
+ * the server answers 413: too large to read is not the same as unreadable.
+ */
+export async function readObjectBody(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  limit = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown> | null> {
+  let body: unknown;
+  try {
+    body = await readBody(req, limit);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) throw err;
+    error(res, errorMessage(err));
+    return null;
+  }
+  if (!isRecord(body)) {
+    error(res, "the body must be a JSON object");
+    return null;
+  }
+  return body;
 }
 
 /** Narrow an untrusted body value to a ViewKind. Lives with the type, so a

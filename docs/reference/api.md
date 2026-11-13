@@ -56,7 +56,8 @@ Put it behind your own network. Do not expose it to the internet.
 Request bodies are capped and a body over the limit is refused with `413` rather
 than being read into memory. The cap depends on what the route carries: 16 KB for
 `/api/events/subscribe`, 8 MB for ordinary JSON, 24 MB where the body is an image (`/api/branding`,
-`/api/layout-images`), 64 MB for a bundle (`/api/config/import`,
+`/api/layout-images`), the file's own cap where the body is a raw file (12 MB for a
+stage-plot image, 25 MB for a stage-plot PDF), 64 MB for a bundle (`/api/config/import`,
 `/api/views/import`, `/api/video/import`, `/api/video/import/preview`), and 128 MB for an archive upload (`/api/archive/inspect`,
 `/api/archive/import`).
 
@@ -654,6 +655,32 @@ starts, before it has been given the feed.
 | POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes. `400` for a `cid` that is empty or over 128 characters, more than 128 channels, or a channel name over 64 characters. A report waits for the stream or poll client with its `cid`. One still unclaimed after a minute is dropped by the next report to arrive, and at most 256 wait at once; a client whose report was dropped is sent every channel |
 | GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
+### Stage plots
+
+Venues, their plots and the backgrounds plots draw on. See
+[StagePlots](../features/stageplots.md). Ids in a path are the ones these routes
+issue; an unknown one is a `404`. A create or an edit answers with the thing it
+made or changed, a delete with `{ok: true}`, and each broadcasts the whole document
+on `stageplots:updated`. An edit that changes nothing writes and broadcasts
+nothing. A body that is not a JSON object is a `400`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/stageplots` | `{venues, backgrounds, plots}`; each background carries `url` (its converted WebP) and `sourceUrl` (the source it was converted from: the upload, or the rendered PDF page, at most 2400 px on its long edge with its metadata dropped) |
+| POST | `/api/stageplots/venues` | `{name, kind, notes?}`, `kind` `home` or `offsite`. `201` with the venue; `400` past 50 venues |
+| PATCH | `/api/stageplots/venues/:id` | Any of `{name, kind, notes}` |
+| DELETE | `/api/stageplots/venues/:id` | The venue and its plots |
+| POST | `/api/stageplots/venues/:id/default` | `{plotId}`, one of the venue's plots, becomes its default |
+| POST | `/api/stageplots/backgrounds?name=` | The body is a PNG or JPEG, raw (12 MB, 50 megapixels). Converted, then `201` with the background. `400` naming why for anything else, including a PDF, before any conversion; `400` past 50 backgrounds |
+| POST | `/api/stageplots/backgrounds/pdf?name=` | The body is a PDF, raw (25 MB). Kept, never served; `201` with `{originalHash, bytes}`. `409` while five PDFs already wait for their page |
+| POST | `/api/stageplots/backgrounds?name=&original=&page=&pages=` | The body is a PNG of page `page` of `pages` of the PDF `original` names, as the browser rendered it. `201` with a background whose original is that PDF; `400` when the server does not have it |
+| PATCH | `/api/stageplots/backgrounds/:id` | Any of `{name, cleanup}`; a change to `cleanup` converts again from the kept source, `409` when that source is missing |
+| DELETE | `/api/stageplots/backgrounds/:id` | `409` with `{error, plots}` naming each plot that uses it as `"Venue · Plot"`; otherwise removed, and its files once nothing names them |
+| POST | `/api/stageplots/plots` | `{venueId, name, backgroundId?}`. A venue's first plot becomes its default. `201` with the plot; `400` past 20 plots in the venue |
+| POST | `/api/stageplots/plots/:id/duplicate` | An independent copy named `"<name> copy"`, placed after the original. `201` with the copy; `400` past 20 plots in the venue |
+| PATCH | `/api/stageplots/plots/:id` | Any of `{name, backgroundId, bgFade}`, `backgroundId` an existing background or `null`, `bgFade` 0 to 1. Bumps the plot's `version` |
+| DELETE | `/api/stageplots/plots/:id` | `409` while it is its venue's default |
+
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
@@ -759,7 +786,7 @@ write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
-`automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
+`automation:settings` · `automation:log` · `patch:updated` · `stageplots:updated` (the whole stage plots document, as `GET /api/stageplots` answers) · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt` ·
 `update:notice` · `propresenter:status:<id>` · `security:host-names`
 
@@ -819,7 +846,7 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/kiosk/StageUtilityOutput-arm64.zip.sha256` \| `StageUtilityOutput-x86_64.zip.sha256` | That zip's SHA-256, one `shasum` line (`<hex>  <zip name>`) built from the release's digest and cached per version; the release has no such file. The installer verifies the zip against it. Same `404` and `502` as the zip's for a release that cannot give the digest |
 | GET | `/kiosk/StageUtilityOutput-arm64.zip.sig` \| `StageUtilityOutput-x86_64.zip.sig` \| `kiosk-windows.ps1.sig` | The release's [signature](../kiosk-devices.md#signed-updates) of that payload (RSA-3072, PKCS#1 v1.5, SHA-256, 384 bytes), which an updater verifies against the key it was installed with. Fetched once from the release matching this server's version, checked against the SHA-256 the releases API lists for it, cached beside the zips and served as it is. `404` with the reason when the release lists no signature or cannot be reached; `502` for any other answer, a mismatched digest or a file over 16 KiB |
 | GET | `/kiosk/release-signing.pub.pem` \| `release-signing.pub.xml` | The public key release payloads are signed with, from `scripts/kiosk/release-signing.pub.pem` in this build: as PEM for a Mac, and as .NET's `<RSAKeyValue>` for Windows. The installers write it beside the updater they install. `500` when this build's file is not an RSA-3072 public key |
-| GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable, with a `Content-Security-Policy` that sandboxes the file and allows no script: an SVG opened directly runs nothing |
+| GET | `/layout-images/:name` \| `/branding-images/:name` \| `/stageplot-images/:name` | Uploaded images, content-addressed and served immutable, with a `Content-Security-Policy` that sandboxes the file and allows no script: an SVG opened directly runs nothing |
 | GET | `/manifest.webmanifest` | The web app manifest, built per request: `name` and `short_name` are the app name, so renaming the app renames the home-screen label on Android. `no-cache` |
 | GET | `/apple-touch-icon.png` \| `/icon-192.png` \| `/icon-512.png` \| `/icon-maskable-512.png` | The home-screen icons the pages and the manifest name. The operator's own [tab and home-screen icon](../features/operator-app.md#branding) when one is set, else the built-in file, and the built-in file too when the stored one is missing. A query string is ignored. `no-cache`, so a new icon reaches the next install. The operator's icon carries the uploaded images' `Content-Security-Policy` |
 | POST | `/api/layout-images` | Store an image and return its URL |
