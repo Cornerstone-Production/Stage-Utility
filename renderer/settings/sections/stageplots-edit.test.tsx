@@ -17,6 +17,7 @@ import type { BackgroundView, Plot, StagePlotsView } from "@main/types/stageplot
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@main/services/stageplots-store";
 import type { UpcomingPlansDTO } from "@main/types/pco";
+import type { PatchFile } from "@main/types/patch";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
@@ -33,6 +34,39 @@ let ids = 0;
 /** What GET /api/state answers: {} (Planning Center not connected) unless a test sets it. */
 let STATE: unknown = {};
 let UPCOMING: UpcomingPlansDTO = { plans: [], cacheAgeMs: 0 };
+/** What GET /api/stageplots/patch answers, or a 503 while PATCH_DOWN. */
+let PATCH: PatchFile;
+let PATCH_DOWN = false;
+
+function patchFile(): PatchFile {
+  return {
+    updatedAt: "",
+    sheets: [
+      { id: "empty", name: "Offsite kit", kind: "analog", devices: [], endpoints: [], variants: [], assignments: { byServiceType: {}, byPlan: {} } },
+      {
+        id: "main",
+        name: "Main patch",
+        kind: "analog",
+        devices: [
+          { id: "rack-a", name: "Rack A", kind: "rack", inputs: 32, outputs: 16 },
+          { id: "sb1", name: "SB-1", kind: "snake", inputs: 16, outputs: 4, color: "#0091ff" },
+          { id: "fp3", name: "FP-3", kind: "pocket", inputs: 4, outputs: 0, color: "#12a594" },
+        ],
+        endpoints: [
+          { rackId: "rack-a", dir: "in", index: 1, consoleChannel: "1", label: "Kick In", path: [{ deviceId: "sb1", connector: "1" }] },
+          { rackId: "rack-a", dir: "in", index: 2, consoleChannel: "2", label: "Kick Out", path: [{ deviceId: "sb1", connector: "2" }] },
+        ],
+        variants: [],
+        assignments: { byServiceType: {}, byPlan: {} },
+      },
+    ],
+  };
+}
+
+/** Tell the open pages the patch was saved, as patchStore.save does. */
+function patchSaved() {
+  FakeEventSource.last?.push("patch:updated", PATCH);
+}
 
 function bg(id: string, name: string, extra: Partial<BackgroundView> = {}): BackgroundView {
   return {
@@ -156,6 +190,10 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const method = init?.method ?? "GET";
   let status = 200;
   let json: unknown = DOC;
+  if (u.pathname === "/api/stageplots/patch") {
+    const [st, body] = PATCH_DOWN ? [503, { error: "patch.json could not be read (EIO)" }] : [200, PATCH];
+    return { ok: st < 300, status: st, statusText: String(st), json: async () => body, text: async () => JSON.stringify(body) };
+  }
   if (!u.pathname.startsWith("/api/stageplots")) {
     const other = u.pathname === "/api/state" ? STATE : u.pathname === "/api/plans/upcoming" ? UPCOMING : {};
     return { ok: true, status: 200, statusText: "OK", json: async () => other, text: async () => JSON.stringify(other) };
@@ -244,6 +282,8 @@ const writes = () => sent.map((s) => s.what);
 
 beforeEach(() => {
   DOC = doc();
+  PATCH = patchFile();
+  PATCH_DOWN = false;
   STATE = {};
   UPCOMING = { plans: [], cacheAgeMs: 0 };
   localStorage.clear();
@@ -1017,3 +1057,121 @@ describe("the This week card", () => {
   });
 });
 
+
+describe("linking a connection point to the patch", () => {
+  const inspector = () => screen.getByTestId("inspector");
+  const label = () => screen.getByTestId("f-label") as HTMLInputElement;
+  const devices = () => within(within(inspector()).getByRole("listbox", { name: "Devices" }));
+  const savedItem = (id: string) => {
+    const put = [...sent].reverse().find((w) => w.what === "PUT /api/stageplots/plots/p-1/items");
+    assert.ok(put, `no save: ${writes().join(", ")}`);
+    return (put.body as { items: Plot["items"] }).items.find((it) => it.id === id)!;
+  };
+  async function linkedOnServer() {
+    DOC.plots[0].items = [item({ id: "c1", type: "conn", w: 25, h: 25, label: "SB-1", color: "#0091ff", patchLink: { sheetId: "main", deviceId: "sb1", lastName: "SB-1", lastColor: "#0091ff" } })];
+    await mount();
+    await act(async () => {
+      fireEvent.pointerDown(drawn("c1"), { pointerId: 1, clientX: 0, clientY: 0, button: 0, isPrimary: true });
+      fireEvent.pointerUp(drawn("c1"), { pointerId: 1, clientX: 0, clientY: 0, button: 0, isPrimary: true });
+    });
+    await settle();
+  }
+
+  test("pick a sheet, then a device, and Link: the point takes its name and colour, locked, and Save stores them as its last", async () => {
+    await mount();
+    const id = await addFromPalette("conn");
+    await click(within(inspector()).getByRole("button", { name: "Link to patch device" }));
+    const sheet = within(inspector()).getByLabelText("Patch sheet") as HTMLSelectElement;
+    assert.equal(sheet.value, "main", "the first sheet with devices is offered first");
+    assert.deepEqual(
+      devices().getAllByRole("option").map((o) => o.textContent),
+      ["Rack AInput Rack32 in · 16 out", "SB-1Snake16 in · 4 out", "FP-3Floor pocket4 in"],
+    );
+    assert.ok((within(inspector()).getByRole("button", { name: "Link" }) as HTMLButtonElement).disabled, "Link before a device is picked");
+    await click(devices().getByRole("option", { name: /SB-1/ }));
+    await click(within(inspector()).getByRole("button", { name: "Link" }));
+
+    assert.match(screen.getByTestId("link-on").textContent!, /SB-1Snake · Main patch · 16 in · 4 out/);
+    assert.equal(label().value, "SB-1");
+    assert.ok(label().disabled, "the label is editable on a linked point");
+    assert.match(inspector().textContent!, /Name and color follow the patch device\./);
+    assert.ok(within(inspector()).getAllByRole("button", { name: /Blue|No color/ }).every((b) => (b as HTMLButtonElement).disabled));
+    assert.match(drawn(id).textContent!, /SB-1/);
+
+    await click(screen.getByRole("button", { name: "Save" }));
+    const saved = savedItem(id);
+    assert.deepEqual(saved.patchLink, { sheetId: "main", deviceId: "sb1", lastName: "SB-1", lastColor: "#0091ff" });
+    assert.deepEqual([saved.label, saved.color], ["SB-1", "#0091ff"]);
+    assert.ok(banner() === null);
+  });
+
+  test("Cancel closes the picker and links nothing", async () => {
+    await mount();
+    await addFromPalette("conn");
+    await click(within(inspector()).getByRole("button", { name: "Link to patch device" }));
+    await click(devices().getByRole("option", { name: /FP-3/ }));
+    await click(within(inspector()).getByRole("button", { name: "Cancel" }));
+    assert.equal(screen.queryByTestId("link-pick"), null);
+    assert.equal(label().disabled, false);
+    assert.ok(within(inspector()).getByRole("button", { name: "Link to patch device" }));
+  });
+
+  test("a device renamed and recoloured in the patch: the point follows on the next render, unsaved, and the next Save stores it", async () => {
+    await linkedOnServer();
+    PATCH.sheets[1]!.devices[1] = { ...PATCH.sheets[1]!.devices[1]!, name: "SB-1 Left", color: "#46a758" };
+    await act(async () => patchSaved());
+    await settle();
+    assert.equal(label().value, "SB-1 Left");
+    assert.match(drawn("c1").textContent!, /SB-1 Left/);
+    assert.ok(banner() === null, "following the patch is not an unsaved change");
+    await click(within(inspector()).getByRole("button", { name: "Add input" }));
+    await click(screen.getByRole("button", { name: "Save" }));
+    const saved = savedItem("c1");
+    assert.deepEqual([saved.label, saved.color, saved.patchLink?.lastName, saved.patchLink?.lastColor], ["SB-1 Left", "#46a758", "SB-1 Left", "#46a758"]);
+  });
+
+  test("a device deleted: the point reads device removed, keeps its last name, and still saves", async () => {
+    await linkedOnServer();
+    PATCH.sheets[1]!.devices.splice(1, 1);
+    await act(async () => patchSaved());
+    await settle();
+    assert.match(screen.getByTestId("link-lost").textContent!, /SB-1unlinked · device removed/);
+    assert.equal(label().value, "SB-1");
+    await click(within(inspector()).getByRole("button", { name: "Add input" }));
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.equal(savedItem("c1").patchLink?.deviceId, "sb1", "the dangling link was dropped");
+    assert.doesNotMatch(document.body.textContent!, /must|refused/);
+    assert.ok(banner() === null);
+  });
+
+  test("the patch sheet unreadable: unlinked, patch sheet unavailable, with the last name and colour", async () => {
+    PATCH_DOWN = true;
+    await linkedOnServer();
+    assert.match(screen.getByTestId("link-lost").textContent!, /SB-1unlinked · patch sheet unavailable/);
+    assert.match(inspector().textContent!, /It follows the device again once the patch sheet can be read\./);
+    assert.match(inspector().textContent!, /A tap lists the point's own inputs, without patch channels, until the sheet is back\./);
+    // Back: a save of the patch answers it.
+    PATCH_DOWN = false;
+    await act(async () => patchSaved());
+    await settle();
+    assert.ok(screen.getByTestId("link-on"));
+  });
+
+  test("Unlink makes the name and colour the point's own again", async () => {
+    await linkedOnServer();
+    await click(within(inspector()).getByRole("button", { name: "Unlink" }));
+    assert.equal(label().disabled, false);
+    assert.equal(label().value, "SB-1");
+    assert.ok(within(inspector()).getByRole("button", { name: "Link to patch device" }));
+    await click(screen.getByRole("button", { name: "Save" }));
+    const saved = savedItem("c1");
+    assert.equal(saved.patchLink, undefined);
+    assert.deepEqual([saved.label, saved.color], ["SB-1", "#0091ff"]);
+  });
+
+  test("only a connection point offers a patch device", async () => {
+    await mount();
+    await addFromPalette("box");
+    assert.equal(within(inspector()).queryByRole("button", { name: "Link to patch device" }), null);
+  });
+});

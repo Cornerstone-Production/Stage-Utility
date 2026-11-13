@@ -47,8 +47,10 @@ import { round1 } from "../../main/stageplots/geometry";
 import { PlotLegend } from "../../main/stageplots/plot-legend";
 import { PrintControl } from "../../main/stageplots-print";
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
+import { resolveItems, stampLinks, type PatchRead, type ResolvedItems } from "@main/services/stageplots-patch-link";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
+import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-patch";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
 import { StagePlotsCanvas } from "./stageplots-canvas";
@@ -78,6 +80,8 @@ function PlotEditor({
   dispatch,
   dirty,
   saveDraft,
+  shown,
+  patch,
 }: {
   doc: StagePlotsView;
   venue: Venue;
@@ -87,6 +91,9 @@ function PlotEditor({
   dispatch: Dispatch<EditorAction>;
   dirty: boolean;
   saveDraft: () => Promise<boolean>;
+  /** The draft as drawn: linked points with their devices' names and colours. */
+  shown: ResolvedItems;
+  patch: PatchRead | null;
 }) {
   const background: BackgroundView | null = backgroundOf(doc, plot);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -153,9 +160,9 @@ function PlotEditor({
     svgRef.current?.focus({ preventScroll: true });
   };
 
-  const selected = draft.items.find((it) => it.id === draft.selectedId) ?? null;
+  const selected = shown.items.find((it) => it.id === draft.selectedId) ?? null;
   // The label field suggests what this venue already uses: the draft, then its other plots.
-  const labelSources: PlotItem[][] = [draft.items, ...plotsOf(doc, venue).filter((p) => p.id !== plot.id).map((p) => p.items)];
+  const labelSources: PlotItem[][] = [shown.items, ...plotsOf(doc, venue).filter((p) => p.id !== plot.id).map((p) => p.items)];
 
   return (
     <>
@@ -241,7 +248,7 @@ function PlotEditor({
           venueName={venue.name}
           plotName={plot.name}
           planLine={plot.id === venue.defaultPlotId ? "Default plot" : null}
-          items={draft.items}
+          items={shown.items}
           background={background}
           fade={fade}
         />
@@ -258,7 +265,7 @@ function PlotEditor({
           <div className="su-card overflow-hidden p-0">
             <StagePlotsCanvas
               name={plot.name}
-              items={draft.items}
+              items={shown.items}
               selectedId={draft.selectedId}
               background={background}
               fade={fade}
@@ -267,10 +274,16 @@ function PlotEditor({
               dispatch={dispatch}
             />
           </div>
-          <PlotLegend items={draft.items} emptyHint="Labelled items are listed here." className="su-card px-3.5 py-2.5" />
+          <PlotLegend items={shown.items} emptyHint="Labelled items are listed here." className="su-card px-3.5 py-2.5" />
         </div>
         <div className="col-span-2 xl:col-span-1">
-          <StagePlotsInspector item={selected} labelSources={labelSources} dispatch={dispatch} />
+          <StagePlotsInspector
+            item={selected}
+            labelSources={labelSources}
+            dispatch={dispatch}
+            link={selected ? shown.links.get(selected.id) : undefined}
+            patch={patch}
+          />
         </div>
       </div>
       {venue.notes && <p className="mt-2.5 text-caption1 text-fg-muted">{venue.notes}</p>}
@@ -420,6 +433,10 @@ function EditorBody({
   const plan = useCurrentPlan(doc.overrides);
   const planName = useMemo(() => planNamer(plan.plans, plan.timeZone, doc.overrides), [plan.plans, plan.timeZone, doc.overrides]);
   const [draft, dispatch] = useReducer(editorReducer, null, () => initialEditorState(plot?.items ?? [], height));
+  // Linked connection points follow their patch devices as drawn, saved or not; Save stores what they showed.
+  const patch = useStagePlotsPatch();
+  const patchContext = usePatchContext(plan.planId);
+  const shown = useMemo(() => resolveItems(draft.items, patch, patchContext), [draft.items, patch, patchContext]);
   /** The version of the plot the draft was loaded at: what Save sends. */
   const [base, setBase] = useState(plot?.version ?? 0);
   const [conflict, setConflict] = useState(false);
@@ -483,9 +500,12 @@ function EditorBody({
     if (!plot) return false;
     const sent = draft.items;
     const based = draft.savedItems;
+    // Each linked point saves the name and colour it shows now. `sent` stays the draft's own
+    // list, so the saved reducer still knows the draft is the one that was saved.
+    const stamped = stampLinks(sent, shown.links);
     setSaving(true);
     const send = async (version: number) => {
-      const r = await stageplotsApi.saveItems(plot.id, version, sent);
+      const r = await stageplotsApi.saveItems(plot.id, version, stamped);
       dispatch({ type: "saved", sent, items: r.plot.items });
       setBase(r.plot.version);
       setSaveError(null);
@@ -612,6 +632,8 @@ function EditorBody({
                   dispatch={dispatch}
                   dirty={dirty}
                   saveDraft={saveDraft}
+                  shown={shown}
+                  patch={patch}
                 />
               ) : (
                 <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with the + beside the tabs." />

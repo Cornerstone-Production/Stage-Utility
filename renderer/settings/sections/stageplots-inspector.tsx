@@ -1,13 +1,16 @@
 // stageplots-inspector.tsx — the selected item's fields: its label (with
 // suggestions), text kind, colour, size and rotation or a cable's dash, notes,
-// and the inputs that plug in there. Every field edits the draft; typing in
-// one is a single undo step, committed when the field settles.
+// and the inputs that plug in there, and on a connection point its patch device
+// (stageplots-patch-link.tsx). Every field edits the draft; typing in one is a
+// single undo step, committed when the field settles. A linked point's label and
+// colour follow its device, so both are locked while the link holds.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CopyIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 
 import { PATCH_COLORS, PATCH_COLOR_NAMES } from "@main/types/patch";
 import { STAGEPLOT_LIMITS, type PlotItem, type TextKind } from "@main/types/stageplots";
+import type { LinkResolution, PatchRead } from "@main/services/stageplots-patch-link";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -20,6 +23,7 @@ import { labelSuggestions, venueLabels } from "../../main/stageplots/label-sugge
 import { Mono } from "../../main/stageplots/mono";
 import { TYPE_NAMES, iconKeyOf, itemTypeName } from "../../main/stageplots/symbols";
 import { ItemIcon } from "./stageplots-palette";
+import { PatchDeviceField } from "./stageplots-patch-link";
 import { Num, Segmented, eyebrow, iconButton, textareaClass } from "./stageplots-shared";
 
 const TEXT_KINDS: readonly { value: TextKind; label: string }[] = (["label", "callout", "dimension"] as const).map((value) => ({
@@ -40,7 +44,20 @@ function Marked({ text, q }: { text: string; q: string }) {
   );
 }
 
-function LabelField({ item, labelSources, dispatch }: { item: PlotItem; labelSources: readonly (readonly PlotItem[])[]; dispatch: (a: EditorAction) => void }) {
+/** Under a linked point's label and colour, which follow its patch device. */
+const FOLLOWS = "Name and color follow the patch device.";
+
+function LabelField({
+  item,
+  labelSources,
+  dispatch,
+  locked,
+}: {
+  item: PlotItem;
+  labelSources: readonly (readonly PlotItem[])[];
+  dispatch: (a: EditorAction) => void;
+  locked: boolean;
+}) {
   const [open, setOpen] = useState(false);
   /** The full list on focus; filtered once something is typed. */
   const [typed, setTyped] = useState(false);
@@ -108,6 +125,7 @@ function LabelField({ item, labelSources, dispatch }: { item: PlotItem; labelSou
           aria-expanded={open}
           aria-controls="stageplots-label-suggestions"
           placeholder="Type or pick a label"
+          disabled={locked}
           onFocus={() => {
             setTyped(false);
             setHighlight(-1);
@@ -125,7 +143,7 @@ function LabelField({ item, labelSources, dispatch }: { item: PlotItem; labelSou
           }}
           onKeyDown={onKeyDown}
         />
-        {open && (
+        {open && !locked && (
           <div
             id="stageplots-label-suggestions"
             role="listbox"
@@ -140,11 +158,12 @@ function LabelField({ item, labelSources, dispatch }: { item: PlotItem; labelSou
           </div>
         )}
       </div>
+      {locked && <p className="text-caption1 text-fg-subtle">{FOLLOWS}</p>}
     </div>
   );
 }
 
-function Swatches({ item, dispatch }: { item: PlotItem; dispatch: (a: EditorAction) => void }) {
+function Swatches({ item, dispatch, locked }: { item: PlotItem; dispatch: (a: EditorAction) => void; locked: boolean }) {
   const ring = "aria-pressed:shadow-[0_0_0_2px_var(--su-bg),0_0_0_4px_var(--su-fg)]";
   const set = (color: string | null) => item.color !== color && dispatch({ type: "patch", id: item.id, fields: { color } });
   return (
@@ -156,9 +175,10 @@ function Swatches({ item, dispatch }: { item: PlotItem; dispatch: (a: EditorActi
           title="No color"
           aria-label="No color"
           aria-pressed={item.color === null}
+          disabled={locked}
           onClick={() => set(null)}
           className={cn(
-            "relative size-5 overflow-hidden rounded-full border border-line-strong bg-transparent transition-transform hover:scale-110 after:absolute after:top-[-2px] after:bottom-[-2px] after:left-1/2 after:w-px after:rotate-45 after:bg-fg-subtle",
+            "relative size-5 overflow-hidden rounded-full border border-line-strong bg-transparent transition-transform enabled:hover:scale-110 disabled:opacity-45 after:absolute after:top-[-2px] after:bottom-[-2px] after:left-1/2 after:w-px after:rotate-45 after:bg-fg-subtle",
             ring,
           )}
         />
@@ -169,10 +189,11 @@ function Swatches({ item, dispatch }: { item: PlotItem; dispatch: (a: EditorActi
             title={PATCH_COLOR_NAMES[i]}
             aria-label={PATCH_COLOR_NAMES[i]}
             aria-pressed={item.color === c}
+            disabled={locked}
             onClick={() => set(c)}
             // The swatch's colour is data, one of the patch sheet's ten.
             style={{ background: c }}
-            className={cn("size-5 rounded-full transition-transform hover:scale-110", ring)}
+            className={cn("size-5 rounded-full transition-transform enabled:hover:scale-110 disabled:opacity-45 disabled:aria-pressed:opacity-100", ring)}
           />
         ))}
       </div>
@@ -239,11 +260,18 @@ export function StagePlotsInspector({
   item,
   labelSources,
   dispatch,
+  link,
+  patch,
 }: {
+  /** The selected item as shown: a linked point's label and colour as its device has them. */
   item: PlotItem | null;
   /** The item lists whose labels the label field suggests: the draft, then the venue's other plots. */
   labelSources: readonly (readonly PlotItem[])[];
   dispatch: (a: EditorAction) => void;
+  /** The selected point's link, resolved; undefined when it has none or the patch has not answered. */
+  link?: LinkResolution;
+  /** The patch, for the device picker; null until it has answered. */
+  patch: PatchRead | null;
 }) {
   if (!item) {
     return (
@@ -256,6 +284,7 @@ export function StagePlotsInspector({
     );
   }
   const live = (fields: Partial<PlotItem>) => dispatch({ type: "patch", id: item.id, fields, live: true });
+  const locked = !!item.patchLink;
   const settle = () => dispatch({ type: "commitGesture" });
   return (
     <aside aria-label="Inspector" className="su-card flex flex-col gap-3 p-3" data-testid="inspector">
@@ -272,14 +301,14 @@ export function StagePlotsInspector({
           <Trash2Icon className="size-4" />
         </button>
       </div>
-      <LabelField item={item} labelSources={labelSources} dispatch={dispatch} />
+      <LabelField item={item} labelSources={labelSources} dispatch={dispatch} locked={locked} />
       {item.type === "text" && (
         <div className="flex flex-col gap-[5px]">
           <span className={eyebrow}>Kind</span>
           <Segmented label="Text kind" value={item.textKind ?? "label"} options={TEXT_KINDS} onChange={(textKind) => dispatch({ type: "patch", id: item.id, fields: { textKind } })} />
         </div>
       )}
-      <Swatches item={item} dispatch={dispatch} />
+      <Swatches item={item} dispatch={dispatch} locked={locked} />
       {item.type === "cable" ? (
         <div className="flex items-center gap-2.5">
           <span className="min-w-0 flex-1">
@@ -326,6 +355,7 @@ export function StagePlotsInspector({
         />
       </div>
       <Inputs item={item} dispatch={dispatch} />
+      {item.type === "conn" && <PatchDeviceField key={item.id} item={item} link={link} patch={patch} dispatch={dispatch} />}
     </aside>
   );
 }
