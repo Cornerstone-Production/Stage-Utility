@@ -27,6 +27,12 @@ export const UPCOMING_CACHE_MS = 5 * 60 * 1000;
  *  being absent from the switcher for the whole of UPCOMING_CACHE_MS. */
 export const UPCOMING_PARTIAL_CACHE_MS = 30 * 1000;
 
+/** How long an unavailable answer is held before Planning Center is asked
+ *  again. Every open page asks for the list, so while Planning Center is down
+ *  an answer held for no time at all became a read per page per minute, the
+ *  traffic that keeps a 429 episode going. */
+export const UPCOMING_OUTAGE_CACHE_MS = 30 * 1000;
+
 /** Default and maximum lookahead, in days. */
 export const UPCOMING_DEFAULT_DAYS = 60;
 export const UPCOMING_MAX_DAYS = 365;

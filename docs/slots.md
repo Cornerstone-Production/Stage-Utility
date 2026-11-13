@@ -380,7 +380,9 @@ listed plan rather than on the top of the week.
 The list covers the last seven days and the next sixty, refreshed from Planning
 Center at most every five minutes. When Planning Center cannot be reached the
 switcher shows the plan the screens are following, disables the arrows and says
-"Planning Center unreachable"; the boards on screen are still editable.
+"Planning Center unreachable"; the boards on screen are still editable. That answer
+is held for thirty seconds, so however many pages are open, Planning Center is asked
+again at most twice a minute while it is down.
 
 Switching with unsaved edits asks first, the same question leaving the page asks. A
 new tab, or a reload, always opens on the plan the screens are following: where the

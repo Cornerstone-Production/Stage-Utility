@@ -58,6 +58,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { isStringList } from "./is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
@@ -69,6 +70,7 @@ import {
   switcherTypes,
   toUpcoming,
   UPCOMING_CACHE_MS,
+  UPCOMING_OUTAGE_CACHE_MS,
   UPCOMING_PARTIAL_CACHE_MS,
 } from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
@@ -429,6 +431,9 @@ export function writeIconEntry(
   return { ...next };
 }
 
+/** A service type and its nearest upcoming plan, as auto mode weighs them. */
+type Candidate = { type: ServiceTypeDTO; plan: PlanDTO };
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -557,6 +562,12 @@ export class StageController {
      *  recent plans): reused for a shorter time, and named to the caller. */
     incomplete: string[];
   } | null = null;
+  /** The last unavailable answer, held for UPCOMING_OUTAGE_CACHE_MS under the
+   *  window and allowlist it was asked for. Cleared by a good read. */
+  private upcomingOutage: { at: number; days: number; allowed: string[]; reason: string } | null = null;
+  /** Upcoming-list reads in flight, by window and allowlist, shared by every
+   *  caller that asks while one runs. */
+  private readonly upcomingInFlight = new Map<string, Promise<UpcomingPlansDTO>>();
   /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
    *  said again every time its cache expires. */
   private lastRefreshLine = "";
@@ -1337,6 +1348,9 @@ export class StageController {
    * good list is returned with `unavailable` set, and an empty list with
    * `unavailable` when there was no cache — the editor can still edit the plan
    * the machine is already on, and the switcher says why it cannot offer more.
+   * That answer is held for thirty seconds, and callers who ask while a read is
+   * in flight share it: every open page asks, and each asking Planning Center
+   * on its own kept a 429 episode going.
    *
    * A type that fails on its own does NOT fail the list: its plans are missing
    * and the failure is logged, because one unreachable service type is not
@@ -1345,6 +1359,20 @@ export class StageController {
    * keeps its own copy must not take their absent plans for deleted ones.
    */
   async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
+    // Every open page asks: one that asks while a read runs waits for that read
+    // instead of starting its own.
+    // Read once: the read, its key, its cache entry and a held outage are all for
+    // this allowlist, whatever the operator sets while it runs.
+    const allowed = [...this.state.allowedServiceTypeIds];
+    const key = `${days}|${allowed.join(",")}`;
+    const running = this.upcomingInFlight.get(key);
+    if (running) return running;
+    const read = this.readUpcomingPlanList(days, allowed).finally(() => this.upcomingInFlight.delete(key));
+    this.upcomingInFlight.set(key, read);
+    return read;
+  }
+
+  private async readUpcomingPlanList(days: number, allowed: string[]): Promise<UpcomingPlansDTO> {
     const now = Date.now();
     const cached = this.upcomingCache;
     // Keyed on the ALLOWLIST as well as the window. The list is built from it, so
@@ -1355,17 +1383,26 @@ export class StageController {
     if (
       cached &&
       cached.days === days &&
-      sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
+      sameIds(cached.allowed, allowed) &&
       now - cached.at < (cached.incomplete.length > 0 ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
       return { plans: cached.plans, cacheAgeMs: now - cached.at, ...incompleteOf(cached.incomplete) };
     }
+    const outage = this.upcomingOutage;
+    if (
+      outage &&
+      outage.days === days &&
+      sameIds(outage.allowed, allowed) &&
+      now - outage.at < UPCOMING_OUTAGE_CACHE_MS
+    ) {
+      return this.unavailableAnswer(outage.reason, now);
+    }
 
     let types: ServiceTypeDTO[];
     try {
-      types = switcherTypes(await this.listServiceTypes(), this.state.allowedServiceTypeIds);
+      types = switcherTypes(await this.listServiceTypes(), allowed);
     } catch (err) {
-      return this.upcomingUnavailable(errorMessage(err), now);
+      return this.upcomingUnavailable(errorMessage(err), days, allowed, now);
     }
 
     const w = planWindow(now, days);
@@ -1406,16 +1443,17 @@ export class StageController {
     );
 
     if (types.length > 0 && failures.length === types.length) {
-      return this.upcomingUnavailable(failures[0]!, now);
+      return this.upcomingUnavailable(failures[0]!, days, allowed, now);
     }
 
+    this.upcomingOutage = null;
     const back = this.plansOutage.ok("upcoming", now);
     if (back.log) console.log(`[plans] upcoming list available again${scrub(back.note)}`);
     const plans = sortUpcoming(perType.flat());
     this.upcomingCache = {
       at: now,
       days,
-      allowed: [...this.state.allowedServiceTypeIds],
+      allowed,
       plans,
       incomplete,
     };
@@ -1429,12 +1467,23 @@ export class StageController {
     return { plans, cacheAgeMs: 0, ...incompleteOf(incomplete) };
   }
 
-  /** The unavailable answer: the last good list when there is one, else nothing.
-   *  Logged once per outage: nothing unavailable is cached, so while Planning
-   *  Center is down every request lands here. */
-  private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
+  /** The unavailable answer, held for UPCOMING_OUTAGE_CACHE_MS. Logged once per
+   *  outage: the hold ends every thirty seconds, so a long outage lands here
+   *  again and again. */
+  private upcomingUnavailable(reason: string, days: number, allowed: string[], now: number): UpcomingPlansDTO {
+    // Held briefly: while Planning Center is down every open page asks.
+    this.upcomingOutage = { at: now, days, allowed, reason };
     const decision = this.plansOutage.fail("upcoming", reason, now);
-    if (decision.log) console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}${scrub(decision.note)}`);
+    if (decision.log) {
+      console.warn(
+        `[plans] upcoming list unavailable: ${scrub(reason)}; the answer is held ${scrub(UPCOMING_OUTAGE_CACHE_MS / 1000)} s before Planning Center is asked again${scrub(decision.note)}`,
+      );
+    }
+    return this.unavailableAnswer(reason, now);
+  }
+
+  /** The last good list with `unavailable` set, or an empty one. */
+  private unavailableAnswer(reason: string, now: number): UpcomingPlansDTO {
     const cached = this.upcomingCache;
     if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
     return { plans: [], cacheAgeMs: 0, unavailable: reason };
@@ -1545,7 +1594,12 @@ export class StageController {
       this.liveStale = true;
       throw err;
     }
-    if (this.liveStale) console.log("[pco] live state known again");
+    if (this.liveStale) {
+      console.log("[pco] live state known again");
+      // Planning Center answers again: a rollover waiting out its backoff tries
+      // on the next tick rather than up to fifteen minutes later.
+      this.rolloverRetry = null;
+    }
     this.liveStale = false;
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;
@@ -2114,6 +2168,14 @@ export class StageController {
   private autoAdvancedFromPlanId: string | null = null;
   /** Grace period after a plan's service end before auto-mode rolls to the next. */
   private static readonly ROLLOVER_GRACE_MS = 60 * 60 * 1000;
+  /** First wait before a rollover that moved nothing is tried again, doubling to
+   *  ROLLOVER_RETRY_MAX_MS. The live poller ticks every second. */
+  private static readonly ROLLOVER_RETRY_MS = 60 * 1000;
+  private static readonly ROLLOVER_RETRY_MAX_MS = 15 * 60 * 1000;
+  /** The plan the "auto rollover waits" line was last said for. */
+  private rolloverWaitSaidFor: string | null = null;
+  /** A rollover from `planId` that moved nothing, and when to try it again. */
+  private rolloverRetry: { planId: string; at: number; delayMs: number } | null = null;
 
   /**
    * Auto mode only: once the current plan's service has ended (+1h grace), roll
@@ -2125,7 +2187,8 @@ export class StageController {
     if (!this.pcoAppId || !this.pcoSecret) return;
     if (!this.state.serviceTypeId || !this.state.planId) return;
     if (this.autoAdvancedFromPlanId === this.state.planId) return;
-
+    const retry = this.rolloverRetry?.planId === this.state.planId ? this.rolloverRetry : null;
+    if (retry && Date.now() < retry.at) return;
     const endIso = await pcoService
       .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId)
       .catch(() => null);
@@ -2134,13 +2197,57 @@ export class StageController {
     if (!Number.isFinite(end)) return;
     if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
 
+    // A service Planning Center still reports running is not over, however long
+    // past its planned end it runs: nothing time-based may stop it. No time limit,
+    // as the recorders have none, so it is said once per plan instead.
+    if (this.followedPlanLive()) {
+      if (this.rolloverWaitSaidFor !== this.state.planId) {
+        this.rolloverWaitSaidFor = this.state.planId;
+        const live = this.lastLive!;
+        const item = live.currentItemTitle ?? live.label ?? live.currentItemId;
+        console.log(
+          `[stage-controller] auto rollover waits: plan ${scrub(this.state.planId)} ended ${scrub(Math.round((Date.now() - end) / 60_000))} min ago, Planning Center still reports it live (item ${scrub(item)})`,
+        );
+      }
+      return;
+    }
+
     console.log(
       `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
     );
-    this.autoAdvancedFromPlanId = this.state.planId;
+    const from = this.state.planId;
+    this.autoAdvancedFromPlanId = from;
     await this.selectGlobalNextPlan().catch((err) =>
       console.error("[stage-controller] auto rollover error:", scrubError(err)),
     );
+    // A retry is keyed to its plan, so one left behind by a plan that moved is
+    // never read again: nothing to clear here.
+    if (this.state.planId !== from) return;
+    // Nothing moved: Planning Center could not be read, so the rollover is not
+    // spent. Tried again after a wait that doubles, not on the next 1 s tick.
+    this.autoAdvancedFromPlanId = null;
+    const delayMs = retry ? Math.min(retry.delayMs * 2, StageController.ROLLOVER_RETRY_MAX_MS) : StageController.ROLLOVER_RETRY_MS;
+    this.rolloverRetry = { planId: from, at: Date.now() + delayMs, delayMs };
+    console.warn(`[stage-controller] auto rollover — still on plan ${scrub(from)}; trying again in ${scrub(Math.round(delayMs / 1000))} s`);
+  }
+
+  /** Whether Planning Center reports the followed plan live: in one of its
+   *  items, from a current reading, or from a stale one while its service is near
+   *  now (a failing read is not evidence the service stopped). */
+  private followedPlanLive(): boolean {
+    return this.lastLive !== null && serviceRunning(this.lastLive, { stale: this.liveStale });
+  }
+
+  /** Whether the followed plan's service ended more than the rollover grace ago.
+   *  An end that cannot be read is not over: the plan is not dropped on a guess. */
+  private async followedPlanOver(): Promise<boolean> {
+    if (!this.state.serviceTypeId || !this.state.planId) return false;
+    if (this.followedPlanLive()) return false;
+    const endIso = await pcoService
+      .getServiceEnd(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId, this.state.planId)
+      .catch(() => null);
+    const end = endIso ? Date.parse(endIso) : NaN;
+    return Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS;
   }
 
   async setPlan(id: string): Promise<StageState> {
@@ -2203,7 +2310,7 @@ export class StageController {
    * allowed service types and switches to it. Empty allowedServiceTypeIds = all
    * service types are candidates.
    */
-  async selectGlobalNextPlan(): Promise<StageState> {
+  async selectGlobalNextPlan(opts: { surfaceHold?: boolean } = {}): Promise<StageState> {
     this.assertPco();
     console.log("[stage-controller] selectGlobalNextPlan — scanning allowed service types");
 
@@ -2219,12 +2326,20 @@ export class StageController {
     );
 
     // For each candidate, fetch its nearest upcoming plan.
-    type Candidate = { type: ServiceTypeDTO; plan: PlanDTO };
     let best: Candidate | null = null;
+    let failed = 0;
+    // Every type's nearest plan, for the hold below, and why each type that
+    // failed did.
+    const answered: Candidate[] = [];
+    const failures = new Map<string, string>();
 
     for (const type of candidates) {
       try {
         const plans = await pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, type.id);
+        const recovered = this.plansOutage.ok(`hold:${type.id}`, Date.now());
+        if (recovered.log) {
+          console.log(`[plans] ${scrub(type.name)}'s plans can be read again; auto mode follows the nearest plan again${scrub(recovered.note)}`);
+        }
         if (plans.length === 0) continue;
 
         // PCO's `filter=future` keeps a plan in the list for the WHOLE service day,
@@ -2245,7 +2360,10 @@ export class StageController {
             .catch(() => null);
           if (endIso) {
             const end = Date.parse(endIso);
-            if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
+            // Never the followed plan while Planning Center reports it live: a
+            // service running long is not finished, whatever its planned end.
+            const liveNow = p.id === this.state.planId && type.id === this.state.serviceTypeId && this.followedPlanLive();
+            if (!liveNow && Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
               continue; // finished plan still lingering in filter=future — skip it
             }
           }
@@ -2253,6 +2371,7 @@ export class StageController {
           break;
         }
         if (!nearest) continue; // every future plan for this type has already ended
+        answered.push({ type, plan: nearest });
 
         if (
           best === null ||
@@ -2262,6 +2381,8 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
+        failed++;
+        failures.set(type.id, errorMessage(err));
         // The type id stays OUT of the format string. It comes from PCO, and a
         // `%s` in the first argument would eat the error standing beside it —
         // the operator told that fetching failed and not told why.
@@ -2271,6 +2392,31 @@ export class StageController {
           scrubError(err),
         );
       }
+    }
+
+    // No plan found while any type failed to read is a failed read, not an
+    // empty week: the type that failed may be the one whose plan the screens
+    // follow. The plan stays, as it does when the service types themselves
+    // cannot be read (that throws above). Clearing it here flipped every
+    // plan-following page (/patch, /stageplots, the slot boards) to its default
+    // on one failed poll, and back on the next good one. The caller logs the throw.
+    // Not for a plan already over: keeping it would hold last Sunday on screen
+    // until every type answered. That one clears, as an empty week does.
+    if (!best && failed > 0 && !(await this.followedPlanOverSaid())) {
+      throw new Error(`could not read the upcoming plans of ${failed} of ${candidates.length} service types; keeping the current plan`);
+    }
+
+    // The followed plan's own type failed and another answered with a plan. That
+    // answer says nothing about the followed plan, which may well be sooner: the
+    // plan holds, and moves only to one another type reports live now.
+    const heldReason = this.state.planId && this.state.serviceTypeId ? failures.get(this.state.serviceTypeId) : undefined;
+    if (best && heldReason !== undefined && !(await this.followedPlanOverSaid())) {
+      const live = await this.liveElsewhere(answered);
+      if (!live.candidate) return this.holdFollowedPlan(candidates, heldReason, live.why, opts.surfaceHold === true);
+      console.log(
+        `[plans] following ${scrub(live.candidate.type.name)}'s plan ${scrub(live.candidate.plan.id)} (${scrub(live.candidate.plan.title)}), live in Planning Center, while the followed plan's service type cannot be read`,
+      );
+      best = live.candidate;
     }
 
     if (!best) {
@@ -2324,6 +2470,61 @@ export class StageController {
     return this.state;
   }
 
+  /**
+   * While the followed plan's service type cannot be read: the plan another type
+   * reports live now, if any, or why there is none. The followed plan being live
+   * itself settles it without asking: switching away from a running service would
+   * stop its recording. Asked only on that path, never on a normal poll.
+   */
+  private async liveElsewhere(answered: Candidate[]): Promise<{ candidate: Candidate | null; why: string }> {
+    // A stale reading counts while its service is near now: the followed type
+    // failing is exactly when its live read fails too.
+    if (this.followedPlanLive()) {
+      return { candidate: null, why: "it is live, so it stays" };
+    }
+    const unread: string[] = [];
+    const bySoonest = [...answered].sort((a, b) => (a.plan.sortDate ?? "\uffff").localeCompare(b.plan.sortDate ?? "\uffff"));
+    for (const c of bySoonest) {
+      try {
+        const live = await pcoService.getLive(this.pcoAppId!, this.pcoSecret!, c.type.id, c.plan.id, this.pcoCountdownTarget);
+        // What a recorder would start on: in an item, and near now. Stepping
+        // through next week's plan in Planning Center Live is not a service.
+        if (serviceRunning(live) && shouldRecordLive(live, false)) return { candidate: c, why: "" };
+      } catch (err) {
+        // No reading is no positive information: the plan holds, and the line
+        // that says so names what could not be read.
+        unread.push(`${c.type.name}: ${errorMessage(err)}`);
+      }
+    }
+    const tail = unread.length > 0 ? `; live state unread for ${unread.join("; ")}` : "";
+    return { candidate: null, why: `auto mode moves only to a plan another type reports live${tail}` };
+  }
+
+  /** followedPlanOver, said when it decides not to keep the plan. */
+  private async followedPlanOverSaid(): Promise<boolean> {
+    const over = await this.followedPlanOver();
+    if (over) {
+      console.log(`[plans] the followed plan ${scrub(this.state.planId)} (${scrub(this.state.planTitle)}) is over; not keeping it while Planning Center cannot be read in full`);
+    }
+    return over;
+  }
+
+  /** Keep the followed plan, said once per outage of its service type. With
+   *  `surface`, an explicit refresh, the hold is also the caller's failure. */
+  private holdFollowedPlan(candidates: ServiceTypeDTO[], reason: string, why: string, surface: boolean): StageState {
+    const typeId = this.state.serviceTypeId!;
+    const typeName = candidates.find((t) => t.id === typeId)?.name ?? this.state.serviceTypeName ?? typeId;
+    // The kind carries `why`, so a live read that starts failing mid-hold is news.
+    const decision = this.plansOutage.fail(`hold:${typeId}`, `${reason}|${why}`, Date.now());
+    if (decision.log) {
+      console.warn(
+        `[plans] holding the followed plan ${scrub(this.state.planId)} (${scrub(this.state.planTitle)}): ${scrub(typeName)}'s plans could not be read — ${scrub(reason)}; ${scrub(why)}${scrub(decision.note)}`,
+      );
+    }
+    if (surface) throw new Error(`holding the followed plan: ${typeName} could not be read — ${reason}`);
+    return this.state;
+  }
+
   async setAllowedServiceTypes(ids: string[]): Promise<StageState> {
     console.log(`[stage-controller] setAllowedServiceTypes → [${scrub(ids.join(", "))}]`);
     this.state = { ...this.state, allowedServiceTypeIds: ids };
@@ -2335,6 +2536,7 @@ export class StageController {
     // onto one of its plans wrote a real override for a service type the operator
     // had turned off, under an ordinary success toast.
     this.upcomingCache = null;
+    this.upcomingOutage = null;
     this.broadcast();
 
     // Returns NOW. The re-selection sweep used to be awaited here, which froze the
@@ -5417,7 +5619,9 @@ export class StageController {
     void this.refreshServiceWindows(); // keep reconnect windows current with PCO
 
     if (this.state.planMode === "auto") {
-      await this.selectGlobalNextPlan();
+      // An operator's Refresh now is told about a hold; the unattended tick is not,
+      // or it would log the hold on every interval.
+      await this.selectGlobalNextPlan({ surfaceHold: full });
       return this.state;
     }
 
