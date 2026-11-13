@@ -335,10 +335,12 @@ page, and goes away by itself when updates resume.
 
 A visitor may leave the page open for hours, across a deploy. The build stamps
 `servicecue.html` with an id, `<meta name="servicecue-build" content="…">` in its head:
-12 lower-case hex digits, the SHA-256 of the document as the build wrote it. The
+12 lower-case hex digits, the SHA-256 of the two documents as the build wrote them,
+`servicecue.html` and then the [stage plots page](#stageplots)'s `stageplots.html`. Each
 document names its script and style by names that carry their own content hash, so it
-is a different document whenever either is. (An icon or a manifest that changes alone
-is not a new build.)
+is a different document whenever either is, and a change to either page is a new build:
+a change to the stage plots page alone also reloads an open ServiceCue page once. (An
+icon or a manifest that changes alone is not a new build.)
 
 The Worker reads the id out of the document it serves and gives it to the status answer
 (`build`), puts it on the heartbeat it

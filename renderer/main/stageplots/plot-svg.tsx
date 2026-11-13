@@ -12,7 +12,7 @@ import type { PanZoom, View } from "./use-pan-zoom";
 
 import { clamp } from "@main/services/clamp";
 import { plotHeight } from "@main/services/stageplots-doc";
-import { PLOT_UNITS_WIDE, type BackgroundView, type Plot } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type Plot, type PlotBackground } from "@main/types/stageplots";
 
 import { cn } from "../../lib/cn";
 import { PlotItems } from "./plot-items";
@@ -65,7 +65,8 @@ function useSvgWidth(ref: RefObject<SVGSVGElement | null>): number {
 
 export interface PlotSvgProps {
   plot: Pick<Plot, "name" | "items">;
-  background: BackgroundView | null;
+  /** Its url "" draws no image on the paper, at the background's size: one the published page does not hold yet. */
+  background: PlotBackground | null;
   /** The background fade, 0 to 1. Separate from the plot so a slider can preview it. */
   fade: number;
   /** What part of the plot to show, in plot units (usePanZoom's view); the whole plot when absent. */
@@ -123,14 +124,16 @@ export function PlotSvg({
     >
       <rect width={PLOT_UNITS_WIDE} height={height} fill="var(--su-plot-paper)" />
       {background ? (
-        <image
-          data-testid="plot-background"
-          href={background.url}
-          width={PLOT_UNITS_WIDE}
-          height={height}
-          opacity={backgroundOpacity(fade)}
-          preserveAspectRatio="none"
-        />
+        background.url ? (
+          <image
+            data-testid="plot-background"
+            href={background.url}
+            width={PLOT_UNITS_WIDE}
+            height={height}
+            opacity={backgroundOpacity(fade)}
+            preserveAspectRatio="none"
+          />
+        ) : null
       ) : (
         <PlotGrid height={height} />
       )}

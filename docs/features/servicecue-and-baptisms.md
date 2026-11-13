@@ -476,6 +476,11 @@ to drop what this server sent it. If it cannot be asked, or this server has no t
 for it any more, the card says the page may still show the last rundown it was sent.
 Restarting the server leaves the page's copy alone.
 
+Published [stage plots](stageplots.md#publishing) are not part of that copy: they stay
+on the page, each under its venue's link, until the venue is unpublished in the stage
+plots editor, and switching the card off or moving it does not touch them. Stage plots
+keep using the saved address and token whether or not the switch is on.
+
 Each of these is on [`/log`](../ops/updates-and-logs.md) as a `[publish]` line.
 
 ## On different screens

@@ -291,7 +291,9 @@ behind a secret link, for a crew who are not on the building's network:
 read-only: its plots as tabs, the one it showed when it was published selected and marked
 **Default** or **For this plan · Sun 16 Nov**, pinch zoom and pan, a tap on an item for its
 label, notes and inputs, the legend and the venue's notes. There is no venue list, no
-editor and no print.
+editor and no print. The page reads the venue again when it comes back into view; a plot whose read
+fails keeps the copy it had and says it could not refresh, and one that has never loaded
+says so rather than drawing an empty stage.
 
 **Anyone with the link can see that venue's plots, item notes and inputs included.** The
 link is 43 random characters, so it cannot be guessed, and nothing on the page lists

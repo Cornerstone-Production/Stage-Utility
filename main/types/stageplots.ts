@@ -76,6 +76,10 @@ export interface BackgroundView extends Background {
   sourceUrl: string;
 }
 
+/** What drawing a plot needs of its background: the image's URL ("" for one not to draw)
+ *  and its size. A BackgroundView is one; the published page makes its own. */
+export type PlotBackground = Pick<BackgroundView, "url" | "converted">;
+
 /** Every kind of item a plot can carry. */
 export const ITEM_TYPES = ["box", "circle", "zone", "cable", "conn", "symbol", "text"] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
