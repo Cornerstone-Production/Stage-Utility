@@ -6,7 +6,9 @@
 // pan, its legend, and the venue's notes. A tap on an item shows its label,
 // notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
 // on one landscape page. With exactly one home venue it opens that venue
-// straight away, and the browser remembers the last venue opened. Live: an edit
+// straight away, and the browser remembers the last venue opened. A venue has
+// its own address, /stageplots?venue=<id>, which opening or leaving one keeps
+// current and which wins over the remembered venue. Live: an edit
 // anywhere redraws it without a reload (useStagePlots).
 //
 // It follows the live or next Planning Center plan the way /patch does
@@ -19,7 +21,7 @@
 // a tap lists the patch channels through it for the followed plan; while the
 // patch cannot be read it shows its last name and colour and lists its inputs.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import type { PlotOverride, StagePlotsView, Venue } from "@main/types/stageplots";
@@ -33,8 +35,9 @@ import { EmptyState } from "../components/ui/empty-state";
 import { ErrorNote } from "../components/ui/error-note";
 import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
+import { useSearchParam } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
-import { backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
+import { VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
@@ -115,9 +118,11 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
       {venueGroups(doc.venues).map((g) => (
         <div key={g.label} className="flex flex-col gap-2">
           <span className={cn(eyebrow, "mt-2")}>{g.label}</span>
-          {g.venues.map((v) => (
-            <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
-          ))}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-2">
+            {g.venues.map((v) => (
+              <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
+            ))}
+          </div>
         </div>
       ))}
     </div>
@@ -137,6 +142,11 @@ function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsVi
       planDay={plan.label}
       backgroundOf={(p) => backgroundOf(doc, p)}
       channelsOf={channelsOf}
+      emptyAction={
+        <Button asChild variant="filled" size="small">
+          <a href={`/stageplots/edit?venue=${encodeURIComponent(venue.id)}`}>Add a plot</a>
+        </Button>
+      }
       before={<BackLink onClick={onBack} />}
       actions={(shown) => (
         <PrintControl
@@ -179,10 +189,18 @@ export function StagePlotsPage() {
     return { doc: r.plots === stored.plots ? stored : { ...stored, plots: r.plots }, links: r.links };
   }, [stored, patch, patchContext]);
   const channelsOf: ChannelsOf = (plot, itemId) => tapChannels(links.get(plot.id)?.get(itemId));
+  // The address names a venue when it can: opening one writes `?venue=`, leaving it drops it.
+  const [asked, setAsked] = useSearchParam(VENUE_PARAM);
   const [open, setOpen] = useState<Open>(() => {
     const id = remembered();
     return id ? { kind: "venue", id } : { kind: "auto" };
   });
+  // The address names whatever venue is shown, however it was opened (a card, the only
+  // home venue, the remembered one): that is the link to copy or make a QR code of.
+  const shownId = doc ? (asked ? (doc.venues.find((v) => v.id === asked) ?? null) : openVenue(doc, open))?.id : undefined;
+  useEffect(() => {
+    if (shownId && shownId !== asked) setAsked(shownId, { replace: true });
+  }, [shownId, asked, setAsked]);
   usePageActions(
     <Button asChild variant="filled" size="small">
       <a href="/stageplots/edit">Edit</a>
@@ -199,9 +217,10 @@ export function StagePlotsPage() {
       </div>
     );
   }
-  const venue = openVenue(doc, open);
+  // An address that names a venue wins over the remembered one; an unknown id shows the list.
+  const venue = asked ? (doc.venues.find((v) => v.id === asked) ?? null) : openVenue(doc, open);
   return (
-    <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3 sm:max-w-[1100px]">
+    <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3">
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
       {plan.unreachable && <UnreachableNotice />}
       {venue ? (
@@ -212,20 +231,20 @@ export function StagePlotsPage() {
           channelsOf={channelsOf}
           onBack={() => {
             remember(null);
+            setAsked(null, { replace: true });
             setOpen({ kind: "list" });
           }}
         />
       ) : (
-        <div className="sm:max-w-[380px]">
-          <VenueList
-            doc={doc}
-            plan={plan}
-            onOpen={(id) => {
-              remember(id);
-              setOpen({ kind: "venue", id });
-            }}
-          />
-        </div>
+        <VenueList
+          doc={doc}
+          plan={plan}
+          onOpen={(id) => {
+            remember(id);
+            setAsked(id, { replace: true });
+            setOpen({ kind: "venue", id });
+          }}
+        />
       )}
     </div>
   );

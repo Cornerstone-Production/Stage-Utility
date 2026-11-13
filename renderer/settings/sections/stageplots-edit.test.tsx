@@ -307,6 +307,30 @@ afterEach(async () => {
 after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("/stageplots/edit", () => {
+  test("a venue picked after opening with ?venue= wins over the parameter", async () => {
+    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
+    try {
+      await mount();
+      assert.ok(within(card("Publish")).getByRole("button", { name: "Publish Room Two" }));
+      await click(within(card("Venues")).getByRole("button", { name: /Room One/ }));
+      assert.ok(within(card("Publish")).getByRole("button", { name: "Publish Room One" }));
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  test("?venue= opens the editor on that venue", async () => {
+    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
+    try {
+      await mount();
+      assert.ok(within(card("Publish")).getByRole("button", { name: "Publish Room Two" }));
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   test("the Publish card sits last in the left column, for the selected venue", async () => {
     await mount();
     const publish = card("Publish");

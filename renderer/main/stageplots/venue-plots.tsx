@@ -5,7 +5,7 @@
 // Each page brings what only it has (a back link, a print control) as `before` and
 // `actions`; nothing here reads the API, the stage state or the router.
 
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 
 import { PLOT_UNITS_WIDE, type PatchChannels, type Plot, type PlotBackground } from "@main/types/stageplots";
@@ -159,9 +159,11 @@ export interface VenuePlotsProps {
   plotState?: (plot: Plot) => "ok" | "stale" | "failed";
   /** What a tap on a linked connection point lists: resolved here on /stageplots, read from the published plot on the public page. */
   channelsOf?: ChannelsOf;
+  /** What a venue with no plots offers: /stageplots links to the editor. Absent on the published page, which has no editor. */
+  emptyAction?: ReactNode;
 }
 
-export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf }: VenuePlotsProps) {
+export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf, emptyAction }: VenuePlotsProps) {
   // A tab picked by hand holds only while the plan's plot is the one it was
   // picked over: when the plan moves on (or Planning Center drops), the new
   // plan's plot is selected again rather than hidden behind an old pick.
@@ -194,7 +196,7 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
         {selected && actions?.({ plot: selected, background, planLine: forPlan ? planLabel : selected.id === defaultPlotId ? "Default plot" : null })}
       </div>
       {plots.length === 0 || !selected ? (
-        <EmptyState className="mt-3" title="No plots yet" hint="Add one in the editor." />
+        <EmptyState className="mt-3 py-12" title="No plots yet" {...(emptyAction ? { hint: "Add a plot to draw this stage.", action: emptyAction } : {})} />
       ) : (
         <>
           <div role="tablist" aria-label={`Plots in ${name}`} className="mt-2.5 mb-3 flex gap-0.5 overflow-x-auto border-b border-line">
@@ -225,7 +227,14 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
                   Could not refresh this plot; showing the last copy.
                 </p>
               )}
-              <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} />
+              {/* Never taller than the screen: on a desk the width is capped to what the viewport height holds at this plot's shape, never below 24rem so a short landscape phone keeps a usable plot.
+                  Not unit-tested (jsdom has no layout); driven in a browser. */}
+              <div
+                className="mx-auto w-full sm:max-w-[max(24rem,calc((100svh_-_15rem)*var(--plot-aspect)))]"
+                style={{ "--plot-aspect": PLOT_UNITS_WIDE / plotHeight(background) } as CSSProperties}
+              >
+                <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} />
+              </div>
               <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan. Tap an item for its details.</p>
               <PlotLegend items={selected.items} className="su-card mt-3 px-3.5 py-2.5" />
             </>

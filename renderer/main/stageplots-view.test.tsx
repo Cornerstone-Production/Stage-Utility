@@ -48,6 +48,7 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/ap
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
 const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 
 const background = {
   id: "b-1",
@@ -99,6 +100,7 @@ beforeEach(() => {
   TIMEZONE = null;
   HOST_TIMEZONE = "UTC";
   localStorage.clear();
+  window.history.replaceState(null, "", "/stageplots");
 });
 afterEach(async () => {
   cleanup();
@@ -108,6 +110,49 @@ afterEach(async () => {
   resetStageState();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
+
+/** The page under a real router, so the address it writes can be read back. */
+async function mountAt(url: string) {
+  const root = createRootRoute({});
+  const route = createRoute({ getParentRoute: () => root, path: "/stageplots", component: StagePlotsPage });
+  const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: [url] }) });
+  await act(async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+  });
+  for (let i = 0; i < 4; i++) await settle();
+  return router;
+}
+const venueInAddress = (router: Awaited<ReturnType<typeof mountAt>>) => (router.state.location.search as { venue?: unknown }).venue;
+
+describe("/stageplots: the venue's address", () => {
+  test("opening a venue from its card writes ?venue=, and the back link removes it", async () => {
+    const router = await mountAt("/stageplots");
+    assert.equal(venueInAddress(router), undefined);
+    fireEvent.click(screen.getByText("Hall Away"));
+    await settle();
+    await settle();
+    assert.equal(venueInAddress(router), "v-off");
+    fireEvent.click(screen.getByRole("button", { name: "Stage plots" }));
+    await settle();
+    await settle();
+    assert.ok(screen.getByTestId("venue-list"));
+    assert.equal(venueInAddress(router), undefined);
+  });
+
+  test("a venue opened on its own, as the only home venue, writes ?venue=", async () => {
+    DOC.venues = DOC.venues.filter((v) => v.id !== "v-small");
+    const router = await mountAt("/stageplots");
+    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Room One");
+    assert.equal(venueInAddress(router), "v-main");
+  });
+
+  test("the remembered venue, once opened, writes ?venue=", async () => {
+    localStorage.setItem(LAST_VENUE_KEY, "v-off");
+    const router = await mountAt("/stageplots");
+    assert.equal(venueInAddress(router), "v-off");
+  });
+});
 
 describe("/stageplots", () => {
   test("lists home venues before offsite, under their headings", async () => {
@@ -217,6 +262,28 @@ describe("/stageplots", () => {
 
   test("a remembered venue that is gone shows the list", async () => {
     localStorage.setItem(LAST_VENUE_KEY, "v-deleted");
+    await mount();
+    assert.ok(screen.getByTestId("venue-list"));
+  });
+
+  test("an empty venue offers Add a plot, to the editor on that venue", async () => {
+    await mount();
+    fireEvent.click(screen.getByText("Room Two"));
+    await settle();
+    assert.ok(screen.getByText("No plots yet"));
+    const add = screen.getByRole("link", { name: "Add a plot" });
+    assert.equal(add.getAttribute("href"), "/stageplots/edit?venue=v-small");
+  });
+
+  test("?venue= opens that venue over the remembered one", async () => {
+    localStorage.setItem(LAST_VENUE_KEY, "v-main");
+    window.history.replaceState(null, "", "/stageplots?venue=v-off");
+    await mount();
+    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Hall Away");
+  });
+
+  test("?venue= naming no venue shows the list", async () => {
+    window.history.replaceState(null, "", "/stageplots?venue=v-gone");
     await mount();
     assert.ok(screen.getByTestId("venue-list"));
   });
