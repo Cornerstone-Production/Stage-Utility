@@ -16,7 +16,6 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { PrinterIcon } from "lucide-react";
 
-import { hostTimeZone } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
 import type { BackgroundView, PlotItem } from "@main/types/stageplots";
 
@@ -28,8 +27,8 @@ import { connectionInputs, calloutKey, legendRows } from "./stageplots/legend";
 import { Mono } from "./stageplots/mono";
 import { PlotLegend } from "./stageplots/plot-legend";
 import { zonedDayLabel } from "../settings/sections/plan-date-label";
+import { useAppZone } from "./stageplots/plan-following";
 import { PlotSvg } from "./stageplots/plot-svg";
-import { useStageState } from "./use-stage-state";
 
 /** "Thu 12 Nov 2026" for the instant `ms`, on the calendar of `timeZone`: the
  *  plan badge's day (zonedDayLabel), with the year. */
@@ -104,7 +103,7 @@ function ConnectionPoints({ items }: { items: readonly PlotItem[] }) {
 }
 
 export function PrintSheet({ venueName, plotName, planLine, items, background, fade, now }: PrintSheetProps) {
-  const timeZone = useStageState().state?.timezone ?? hostTimeZone();
+  const timeZone = useAppZone();
   const [printedAt] = useState(() => now ?? Date.now());
   const { columns, secondPage } = printLayout(legendLines(items));
   const legend = (
