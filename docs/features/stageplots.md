@@ -84,9 +84,25 @@ photo does not hold two in memory.
 
 ## /stageplots
 
-Read-only. The venues as cards, home then offsite, each with a thumbnail of its
-default plot. A venue opens to its plots as tabs with the default selected, the plot
-itself, its legend, and the venue's notes.
+Read-only. The venues as cards, home then offsite, each with a thumbnail of the
+plot it shows this week and a line saying which: "3 plots · Baptism for this
+plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
+selected, the plot itself, its legend, and the venue's notes.
+
+The page follows the live or next Planning Center plan, the plan
+[/patch](../patch-sheet/README.md) follows. A venue shows that plan's override if it has
+one (see [Default and this week](#default-and-this-week)), labelled **For this
+plan · Sun 15 Nov**, and otherwise its default plot, labelled **Default**. When
+the stage moves on to the next plan, every open page follows without a reload;
+a tab picked by hand gives way to the new plan's plot. The date is the plan's,
+in the [app time zone](../ops/install-and-config.md#time-zone).
+
+- With no plan live or coming up, or Planning Center not connected, each venue
+  shows its default and no notice.
+- When Planning Center cannot be read, each venue shows its default under
+  "Planning Center is unreachable, showing the default plot." The page asks
+  every minute while it is open; one failed answer after a good one changes
+  nothing, two in a row put up the notice, and the next good one takes it down.
 
 - With exactly one home venue, `/stageplots` opens it directly.
 - The browser remembers the last venue opened and opens it next time; **Stage

@@ -41,6 +41,7 @@ const { __resetForTests: resetStageState } = await import("./use-stage-state.js"
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
 const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
 const background = {
   id: "b-1",
@@ -74,7 +75,9 @@ function doc(): StagePlotsView {
 
 async function mount() {
   await act(async () => {
-    render(React.createElement(StagePlotsPage));
+    // The page reads the upcoming plans through react-query, as in the app.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(StagePlotsPage)));
   });
   await settle();
   await settle();

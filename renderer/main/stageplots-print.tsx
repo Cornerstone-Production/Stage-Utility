@@ -27,14 +27,14 @@ import { eyebrow } from "./stageplots/doc-helpers";
 import { connectionInputs, calloutKey, legendRows } from "./stageplots/legend";
 import { Mono } from "./stageplots/mono";
 import { PlotLegend } from "./stageplots/plot-legend";
+import { zonedDayLabel } from "../settings/sections/plan-date-label";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useStageState } from "./use-stage-state";
 
-/** "Thu 12 Nov 2026" for the instant `ms`, on the calendar of `timeZone`. */
+/** "Thu 12 Nov 2026" for the instant `ms`, on the calendar of `timeZone`: the
+ *  plan badge's day (zonedDayLabel), with the year. */
 export function printedDate(ms: number, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone }).formatToParts(ms);
-  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("weekday")} ${get("day")} ${get("month")} ${get("year")}`;
+  return zonedDayLabel(ms, timeZone, { year: true });
 }
 
 /** Legend lines that fit one column beside the plot on a landscape page. */
@@ -74,7 +74,7 @@ export function printLayout(lines: number): { columns: number; secondPage: boole
 export interface PrintSheetProps {
   venueName: string;
   plotName: string;
-  /** "Default plot", or the plan this plot is for (PR 3). */
+  /** "Default plot", "For this plan · Sun 15 Nov", or null for neither. */
   planLine: string | null;
   items: readonly PlotItem[];
   background: BackgroundView | null;
@@ -130,7 +130,7 @@ export function PrintSheet({ venueName, plotName, planLine, items, background, f
           <p className="text-right text-caption1 text-[var(--su-print-muted)]">
             {planLine && (
               <>
-                {planLine}
+                <Mono text={planLine} />
                 <br />
               </>
             )}

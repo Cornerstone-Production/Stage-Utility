@@ -45,18 +45,28 @@ export const UPCOMING_PLANS_QUERY = "plans:upcoming";
  * while an operator moves between editors does not re-ask for a list the server
  * would answer from memory anyway.
  */
-export function useUpcomingPlans({ enabled = true }: { enabled?: boolean } = {}) {
-  const { data, error } = useQuery({
+export function useUpcomingPlans({ enabled = true, refetchMs }: { enabled?: boolean; refetchMs?: number } = {}) {
+  const { data, error, dataUpdatedAt, errorUpdatedAt } = useQuery({
     queryKey: [UPCOMING_PLANS_QUERY, UPCOMING_DAYS],
     queryFn: () => ipc<UpcomingPlansDTO>("plans:upcoming", { days: UPCOMING_DAYS }),
     staleTime: 5 * 60 * 1000,
     // Off while Planning Center is not connected: the list would only come back
     // empty or unavailable, which is a state, not something to ask for.
     enabled,
+    // A page that shows whether Planning Center can be read asks again while
+    // it is open (/stageplots). The server answers from its own five-minute
+    // cache, so this costs Planning Center nothing until that runs out, or
+    // one read per thirty seconds while Planning Center is down.
+    ...(refetchMs ? { refetchInterval: refetchMs } : {}),
   });
   return {
     plans: data?.plans ?? [],
     unavailable: data?.unavailable ?? null,
+    /** When the last answer landed, ms; moves on every answer, even one equal
+     *  to the last. 0 before the first. */
+    readAt: dataUpdatedAt,
+    /** When the last read failed, ms; 0 before any did. */
+    errorAt: errorUpdatedAt,
     /** Undefined until the first answer lands; the arrows stay inert until then. */
     loaded: data !== undefined,
     /** The read itself failed (as opposed to `unavailable`, which is a 200 saying

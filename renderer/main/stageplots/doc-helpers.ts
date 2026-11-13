@@ -18,11 +18,24 @@ export function tabClass(selected: boolean): string {
   );
 }
 
-/** The plot to show: the one picked in this venue, else its default, else its first. */
-export function selectedPlot(venue: Venue | null, plots: readonly Plot[], pick: { venueId: string; plotId: string } | null): Plot | null {
+/**
+ * The plot to show: the one picked in this venue, else `preferId` (on
+ * /stageplots, the plot the followed plan resolves to), else its default,
+ * else its first.
+ */
+export function selectedPlot(
+  venue: Venue | null,
+  plots: readonly Plot[],
+  pick: { venueId: string; plotId: string } | null,
+  preferId: string | null = null,
+): Plot | null {
   if (!venue) return null;
   return (
-    plots.find((p) => pick?.venueId === venue.id && p.id === pick.plotId) ?? plots.find((p) => p.id === venue.defaultPlotId) ?? plots[0] ?? null
+    plots.find((p) => pick?.venueId === venue.id && p.id === pick.plotId) ??
+    plots.find((p) => p.id === preferId) ??
+    plots.find((p) => p.id === venue.defaultPlotId) ??
+    plots[0] ??
+    null
   );
 }
 
