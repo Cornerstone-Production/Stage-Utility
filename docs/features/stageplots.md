@@ -89,21 +89,6 @@ plot it shows this week and a line saying which: "3 plots · Baptism for this
 plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
 selected, the plot itself, its legend, and the venue's notes.
 
-The page follows the live or next Planning Center plan, the plan
-[/patch](../patch-sheet/README.md) follows. A venue shows that plan's override if it has
-one (see [Default and this week](#default-and-this-week)), labelled **For this
-plan · Sun 15 Nov**, and otherwise its default plot, labelled **Default**. When
-the stage moves on to the next plan, every open page follows without a reload;
-a tab picked by hand gives way to the new plan's plot. The date is the plan's,
-in the [app time zone](../ops/install-and-config.md#time-zone).
-
-- With no plan live or coming up, or Planning Center not connected, each venue
-  shows its default and no notice.
-- When Planning Center cannot be read, each venue shows its default under
-  "Planning Center is unreachable, showing the default plot." The page asks
-  every minute while it is open; one failed answer after a good one changes
-  nothing, two in a row put up the notice, and the next good one takes it down.
-
 - With exactly one home venue, `/stageplots` opens it directly.
 - The browser remembers the last venue opened and opens it next time; **Stage
   plots** above the venue's name goes back to the list and forgets it.
@@ -117,6 +102,26 @@ in the [app time zone](../ops/install-and-config.md#time-zone).
 - A saved edit anywhere shows without a reload.
 
 **Edit** in the bar opens the editor.
+
+### Following the plan
+
+The page follows the live or next Planning Center plan, the plan
+[/patch](../patch-sheet/README.md) follows. A venue shows that plan's override
+if it has one (see [Default and this week](#default-and-this-week)), labelled
+**For this plan · Sun 15 Nov**, and otherwise its default plot, labelled
+**Default**. When the stage moves on to the next plan, every open page follows
+without a reload; a tab picked by hand gives way to the new plan's plot. The
+date is the plan's, in the [app time zone](../ops/install-and-config.md#time-zone).
+
+- With no plan live or coming up, or Planning Center not connected, each venue
+  shows its default and no notice.
+- When Planning Center cannot be read, each venue shows its default under
+  "Planning Center is unreachable, showing the default plot." The page asks
+  every minute while it is open. A read that fails, or answers that Planning
+  Center cannot be reached, counts the same: one after a good answer changes
+  nothing, two in a row put up the notice, and the next good one takes it down.
+- On opening, the page waits up to two seconds for the plan list before it
+  draws; once drawn it never blanks while a later read is slow.
 
 ## /stageplots/edit
 
@@ -163,11 +168,13 @@ The **This week** card, for the selected venue:
   `/patch` follow). It saves when chosen.
 - **Upcoming plans with an override**: each later plan given a plot, by date,
   with **×** to hand it back to the default.
-- **Another plan…** lists the upcoming plans the slot editor's plan switcher
-  lists (the next two months, every service type the Plan tab enables); pick
-  one, then its plot.
+- **Another plan…** lists the plans still to come from the list the slot
+  editor's plan switcher walks (the next two months, every service type the
+  Plan tab enables); pick one, then its plot. Two plans on one day are told
+  apart by their time, "Sun 22 Nov 9:00".
 
-With Planning Center not connected the card says so and offers no plan.
+With Planning Center not connected the card says so and offers no plan; with
+it unreachable, the card says other plans can't be listed.
 
 Deleting a plot that plans use hands those plans back to the default, and the
 confirm names them first. Deleting a venue takes its plans' overrides with it.
@@ -279,8 +286,9 @@ In the editor, Print shows the plot as it stands, unsaved changes included.
 ## Limits
 
 50 venues, 20 plots a venue, 50 backgrounds, names of 60 characters and notes of
-500, and 2000 plan overrides across every venue, past plans included. A plot holds up to 500 items; an item's label is up to 60 characters, its
-notes 500, and its inputs up to 64 of 40 characters each.
+500, and 2000 plan overrides across every venue, past plans included. A plot
+holds up to 500 items; an item's label is up to 60 characters, its notes 500,
+and its inputs up to 64 of 40 characters each.
 
 ## Backups
 
@@ -310,10 +318,13 @@ did not load, a save that failed, every item save refused and why (a body that i
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
 version that is not a whole number, "changed elsewhere"), how many items moved
 up onto a plot once its background change is saved, every plan override set or
-handed back to the default, every override refused and why, and the plan
-overrides cleared with a deleted plot.
-A page that cannot read the plots logs that too, and so does a print whose
-background did not load. See [Updates and logs](../ops/updates-and-logs.md).
+handed back to the default, every override refused and why, the plan
+overrides cleared with a deleted plot, and plan overrides in `stageplots.json`
+that were not a list and were read as none.
+A page that cannot read the plots logs that too, so does a print whose
+background did not load, and so does a page that finds Planning Center
+unreachable and falls back to each venue's default, and again when it can be
+read once more. See [Updates and logs](../ops/updates-and-logs.md).
 
 ## API
 
