@@ -1178,6 +1178,9 @@ describe("linking a connection point to the patch", () => {
     assert.ok(screen.getByTestId("link-on"));
   });
 
+  // This runs use-patch uncompiled. The build's React Compiler memoises its read callback by
+  // what the callback reads, so a dependency the callback does not use is dropped there and
+  // nowhere here: that case is checked by driving the built app in a browser (see use-patch.ts).
   test("an unreadable patch is read again on its own, with no save, and the point follows it once it answers", async () => {
     const was = { ...PATCH_REREAD };
     Object.assign(PATCH_REREAD, { firstMs: 20, maxMs: 40 });

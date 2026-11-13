@@ -25,15 +25,20 @@ import { stageplotsApi } from "./stageplots-api";
 export const PATCH_REREAD = { firstMs: 60_000, maxMs: 15 * 60_000 };
 
 export function useStagePlotsPatch(): PatchRead | null {
-  // Each read again is a new attempt: a new read, which useStatusChannel answers afresh.
+  // Each read again is a new attempt: a new read, which useStatusChannel answers afresh. The
+  // read must USE `attempt`: the build's React Compiler memoises this callback by what it reads,
+  // and a read that only listed it (`void attempt`) was compiled to one static function, so no
+  // read again ever went out in the browser while the jsdom suite, which is not compiled,
+  // passed. Driven in a browser for that reason; the log line names the read again.
   const [attempt, setAttempt] = useState(0);
-  const read = useCallback(() => {
-    void attempt;
-    return stageplotsApi.patch().catch((err: unknown) => {
-      logReadFailure("stageplots", "the patch sheet for linked connection points", err);
-      throw err;
-    });
-  }, [attempt]);
+  const read = useCallback(
+    () =>
+      stageplotsApi.patch().catch((err: unknown) => {
+        logReadFailure("stageplots", attempt === 0 ? "the patch sheet for linked connection points" : `the patch sheet for linked connection points (read again, attempt ${attempt})`, err);
+        throw err;
+      }),
+    [attempt],
+  );
   const { value, known, failed } = useStatusChannel<PatchFile>(read, "patch:updated", true, { clearOnReadFailure: true });
   const settled = useMemo<PatchRead | null>(() => (!known ? null : failed || !value ? { ok: false } : { ok: true, file: value }), [known, failed, value]);
 
