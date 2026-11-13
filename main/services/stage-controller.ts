@@ -70,6 +70,7 @@ import {
   switcherTypes,
   toUpcoming,
   UPCOMING_CACHE_MS,
+  UPCOMING_OUTAGE_CACHE_MS,
   UPCOMING_PARTIAL_CACHE_MS,
 } from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
@@ -561,6 +562,12 @@ export class StageController {
      *  recent plans): reused for a shorter time, and named to the caller. */
     incomplete: string[];
   } | null = null;
+  /** The last unavailable answer, held for UPCOMING_OUTAGE_CACHE_MS under the
+   *  window and allowlist it was asked for. Cleared by a good read. */
+  private upcomingOutage: { at: number; days: number; allowed: string[]; reason: string } | null = null;
+  /** Upcoming-list reads in flight, by window and allowlist, shared by every
+   *  caller that asks while one runs. */
+  private readonly upcomingInFlight = new Map<string, Promise<UpcomingPlansDTO>>();
   /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
    *  said again every time its cache expires. */
   private lastRefreshLine = "";
@@ -1341,6 +1348,9 @@ export class StageController {
    * good list is returned with `unavailable` set, and an empty list with
    * `unavailable` when there was no cache — the editor can still edit the plan
    * the machine is already on, and the switcher says why it cannot offer more.
+   * That answer is held for thirty seconds, and callers who ask while a read is
+   * in flight share it: every open page asks, and each asking Planning Center
+   * on its own kept a 429 episode going.
    *
    * A type that fails on its own does NOT fail the list: its plans are missing
    * and the failure is logged, because one unreachable service type is not
@@ -1349,6 +1359,20 @@ export class StageController {
    * keeps its own copy must not take their absent plans for deleted ones.
    */
   async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
+    // Every open page asks: one that asks while a read runs waits for that read
+    // instead of starting its own.
+    // Read once: the read, its key, its cache entry and a held outage are all for
+    // this allowlist, whatever the operator sets while it runs.
+    const allowed = [...this.state.allowedServiceTypeIds];
+    const key = `${days}|${allowed.join(",")}`;
+    const running = this.upcomingInFlight.get(key);
+    if (running) return running;
+    const read = this.readUpcomingPlanList(days, allowed).finally(() => this.upcomingInFlight.delete(key));
+    this.upcomingInFlight.set(key, read);
+    return read;
+  }
+
+  private async readUpcomingPlanList(days: number, allowed: string[]): Promise<UpcomingPlansDTO> {
     const now = Date.now();
     const cached = this.upcomingCache;
     // Keyed on the ALLOWLIST as well as the window. The list is built from it, so
@@ -1359,17 +1383,26 @@ export class StageController {
     if (
       cached &&
       cached.days === days &&
-      sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
+      sameIds(cached.allowed, allowed) &&
       now - cached.at < (cached.incomplete.length > 0 ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
       return { plans: cached.plans, cacheAgeMs: now - cached.at, ...incompleteOf(cached.incomplete) };
     }
+    const outage = this.upcomingOutage;
+    if (
+      outage &&
+      outage.days === days &&
+      sameIds(outage.allowed, allowed) &&
+      now - outage.at < UPCOMING_OUTAGE_CACHE_MS
+    ) {
+      return this.unavailableAnswer(outage.reason, now);
+    }
 
     let types: ServiceTypeDTO[];
     try {
-      types = switcherTypes(await this.listServiceTypes(), this.state.allowedServiceTypeIds);
+      types = switcherTypes(await this.listServiceTypes(), allowed);
     } catch (err) {
-      return this.upcomingUnavailable(errorMessage(err), now);
+      return this.upcomingUnavailable(errorMessage(err), days, allowed, now);
     }
 
     const w = planWindow(now, days);
@@ -1410,16 +1443,17 @@ export class StageController {
     );
 
     if (types.length > 0 && failures.length === types.length) {
-      return this.upcomingUnavailable(failures[0]!, now);
+      return this.upcomingUnavailable(failures[0]!, days, allowed, now);
     }
 
+    this.upcomingOutage = null;
     const back = this.plansOutage.ok("upcoming", now);
     if (back.log) console.log(`[plans] upcoming list available again${scrub(back.note)}`);
     const plans = sortUpcoming(perType.flat());
     this.upcomingCache = {
       at: now,
       days,
-      allowed: [...this.state.allowedServiceTypeIds],
+      allowed,
       plans,
       incomplete,
     };
@@ -1433,12 +1467,23 @@ export class StageController {
     return { plans, cacheAgeMs: 0, ...incompleteOf(incomplete) };
   }
 
-  /** The unavailable answer: the last good list when there is one, else nothing.
-   *  Logged once per outage: nothing unavailable is cached, so while Planning
-   *  Center is down every request lands here. */
-  private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
+  /** The unavailable answer, held for UPCOMING_OUTAGE_CACHE_MS. Logged once per
+   *  outage: the hold ends every thirty seconds, so a long outage lands here
+   *  again and again. */
+  private upcomingUnavailable(reason: string, days: number, allowed: string[], now: number): UpcomingPlansDTO {
+    // Held briefly: while Planning Center is down every open page asks.
+    this.upcomingOutage = { at: now, days, allowed, reason };
     const decision = this.plansOutage.fail("upcoming", reason, now);
-    if (decision.log) console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}${scrub(decision.note)}`);
+    if (decision.log) {
+      console.warn(
+        `[plans] upcoming list unavailable: ${scrub(reason)}; the answer is held ${scrub(UPCOMING_OUTAGE_CACHE_MS / 1000)} s before Planning Center is asked again${scrub(decision.note)}`,
+      );
+    }
+    return this.unavailableAnswer(reason, now);
+  }
+
+  /** The last good list with `unavailable` set, or an empty one. */
+  private unavailableAnswer(reason: string, now: number): UpcomingPlansDTO {
     const cached = this.upcomingCache;
     if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
     return { plans: [], cacheAgeMs: 0, unavailable: reason };
@@ -2464,6 +2509,7 @@ export class StageController {
     // onto one of its plans wrote a real override for a service type the operator
     // had turned off, under an ordinary success toast.
     this.upcomingCache = null;
+    this.upcomingOutage = null;
     this.broadcast();
 
     // Returns NOW. The re-selection sweep used to be awaited here, which froze the
