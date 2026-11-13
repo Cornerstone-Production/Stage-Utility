@@ -782,6 +782,137 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     assert.equal(lines.filter((l) => l.includes("elsewhere.example") && l.includes("waits")).length, 1, lines.join(" / "));
   });
 
+  /** The real store, with one read made to fail when `failNext` is set. */
+  const flaky = () => {
+    const f = {
+      failNext: false,
+      afterUpdate: (_d: StagePlotsDoc) => undefined as void,
+      get: async () => {
+        if (f.failNext) {
+          f.failNext = false;
+          throw new Error("disk went away");
+        }
+        return stageplotsStore.get();
+      },
+      update: async (fn: (d: StagePlotsDoc) => StagePlotsDoc) => {
+        const d = await stageplotsStore.update(fn);
+        f.afterUpdate(d);
+        return d;
+      },
+    };
+    return f;
+  };
+  const errors = () => {
+    const lines: string[] = [];
+    const spy = mock.method(console, "error", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+    return { lines, restore: () => spy.mock.restore() };
+  };
+
+  test("Remove now with the queue unreadable answers why, never that the links went", async () => {
+    const h = await harness();
+    const store = flaky();
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: fakeSecret(4), origin: originOf(h), since: "2026-11-12T10:00:00.000Z", reason: "regenerated" }] }));
+    const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
+    const p = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store, image: async () => null, plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    const log = errors();
+    let r: Awaited<ReturnType<typeof p.removePending>>;
+    try {
+      store.failNext = true;
+      r = await p.removePending();
+    } finally {
+      log.restore();
+    }
+    assert.deepEqual(r, { status: 503, error: "The old links waiting to be removed could not be read or saved: disk went away" });
+    assert.equal((await pending()).length, 1, "the entry left the queue");
+    assert.ok(log.lines.some((l) => l.startsWith("[stageplots] The old links waiting to be removed could not be read")), log.lines.join(" / "));
+  });
+
+  test("a regenerate whose drain cannot read the queue says the old link stays queued, not that it is removed", async () => {
+    const page = await startPage();
+    const o = parsePublishUrl(page.origin);
+    assert.ok(o.ok);
+    await stageplotsStore.update(() => checkStagePlotsDoc(venueDoc()));
+    const store = flaky();
+    const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
+    const p = new P({ target: async () => ({ ok: true, origin: o.origin, token: TOKEN }), store, image: async () => webp(), plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    assert.ok((await p.publish("v-1")).ok);
+    const old = (await stageplotsStore.get()).venues[0]!.publish!.secret;
+    // The write that queues the old link is the last before the drain reads the queue.
+    store.afterUpdate = (d) => void (d.pendingRemovals.some((e) => e.secret === old) && (store.failNext = true));
+    const lines: string[] = [];
+    const spies = (["log", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      assert.ok((await p.regenerate("v-1")).ok);
+    } finally {
+      for (const s of spies) s.mock.restore();
+    }
+    await p.stop();
+    assert.equal(lines.some((l) => l.includes("the old one is removed")), false, lines.join(" / "));
+    assert.ok(lines.some((l) => l.includes("the old one stays queued: The old links waiting to be removed could not be read")), lines.join(" / "));
+    assert.deepEqual((await pending()).map((e) => [e.secret === old, e.reason]), [[true, "regenerated"]]);
+  });
+
+  test("a drain at start whose page settings cannot be read says so, and nothing escapes unhandled", async () => {
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: fakeSecret(5), origin: "https://elsewhere.example", since: "2026-11-12T10:00:00.000Z", reason: "regenerated" }] }));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (r: unknown) => void unhandled.push(r);
+    process.on("unhandledRejection", onUnhandled);
+    const log = errors();
+    const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
+    const p = new P({
+      target: async () => {
+        throw new Error("secrets store unreadable");
+      },
+      store: stageplotsStore,
+      image: async () => null,
+      plan: () => ({ planId: null, planDates: null }),
+      timeZone: () => "UTC",
+      onSaved: () => undefined,
+    });
+    try {
+      p.start();
+      await p.settle();
+      await new Promise((r) => setImmediate(r));
+    } finally {
+      log.restore();
+      process.off("unhandledRejection", onUnhandled);
+      await p.stop();
+    }
+    assert.deepEqual(unhandled.map(String), []);
+    assert.ok(log.lines.some((l) => l.includes("[stageplots] The old links waiting to be removed could not be read or saved: secrets store unreadable")), log.lines.join(" / "));
+  });
+
+  test("a queue that is not a list is never read as empty: Remove now and Publish say why", async () => {
+    const page = await startPage();
+    const o = parsePublishUrl(page.origin);
+    assert.ok(o.ok);
+    const damaged = { ...venueDoc(), pendingRemovals: "lost" } as unknown as StagePlotsDoc;
+    const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
+    const p = new P({
+      target: async () => ({ ok: true, origin: o.origin, token: TOKEN }),
+      store: { get: async () => damaged, update: async () => Promise.reject(new Error("refused")) },
+      image: async () => null,
+      plan: () => ({ planId: null, planDates: null }),
+      timeZone: () => "UTC",
+      onSaved: () => undefined,
+    });
+    const log = errors();
+    const warn = mock.method(console, "warn", () => undefined);
+    let removed: Awaited<ReturnType<typeof p.removePending>>;
+    let published: Awaited<ReturnType<typeof p.publish>>;
+    try {
+      removed = await p.removePending();
+      published = await p.publish("v-1");
+    } finally {
+      log.restore();
+      warn.mock.restore();
+    }
+    assert.deepEqual(removed, { status: 503, error: "The old links waiting to be removed could not be read or saved: stageplots.json's pending removals are not a list, so the old links waiting to be removed cannot be read." });
+    assert.equal(published.ok, false);
+    assert.match(published.ok ? "" : published.error, /pending removals are not a list/);
+    assert.equal(page.requests.length, 0, "a publish went out with the queue unreadable");
+  });
+
   test("a full queue refuses a regenerate before anything is sent, so the old link is never left unknown", async () => {
     const h = await harness();
     assert.ok((await h.publisher.publish("v-1")).ok);

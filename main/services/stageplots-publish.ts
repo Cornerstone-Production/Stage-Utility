@@ -206,6 +206,12 @@ type Target = { origin: PublishOrigin; token: string };
 /** The chain the queue of pending removals is drained on, beside the venues' own. */
 const PENDING_CHAIN = "\u0000pending";
 
+/** What a drain answers: the queue after it, how many went, and the page it drained against; or why it could not. */
+type Drained = { ok: true; left: PendingRemoval[]; removed: number; page: string | null } | { ok: false; message: string };
+
+/** Said when stageplots.json's pending removals are not a list (stageplots-store.ts leaves them so). */
+const DAMAGED_QUEUE = "stageplots.json's pending removals are not a list, so the old links waiting to be removed cannot be read.";
+
 /** The chain a saved page address is handled on. */
 const ADDRESS_CHAIN = "\u0000address";
 
@@ -350,7 +356,7 @@ export class StagePlotsPublisher {
         say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
       });
     }
-    if (doc.pendingRemovals.length > 0) void this.drainQueued(false);
+    if (!Array.isArray(doc.pendingRemovals) || doc.pendingRemovals.length > 0) void this.drainQueued(false);
   }
 
   /** Run `fn` after whatever `key` (a venue, or the queue) is already running. */
@@ -430,9 +436,15 @@ export class StagePlotsPublisher {
         return { ok: false, status: 404, error: "no such venue" };
       }
       this.attempted.set(venueId, this.fingerprint(doc, venue));
-      const left = await this.drainQueued(false);
-      const oldGone = !left.some((e) => e.secret === pub.secret);
-      say("log", all, `"${venue.name}" has a new link on ${host}; ${oldGone ? "the old one is removed" : pub.origin === target.origin ? "the old one could not be removed yet and stays queued" : `the old one stays queued: ${leftOn(hostOf(pub.origin))}`}`);
+      const drained = await this.drainQueued(false);
+      const old = !drained.ok
+        ? `the old one stays queued: ${drained.message}`
+        : !drained.left.some((e) => e.secret === pub.secret)
+          ? "the old one is removed"
+          : pub.origin === target.origin
+            ? "the old one could not be removed yet and stays queued"
+            : `the old one stays queued: ${leftOn(hostOf(pub.origin))}`;
+      say("log", all, `"${venue.name}" has a new link on ${host}; ${old}`);
       return { ok: true, venue: (await this.venueNow(venueId)) ?? saved };
     });
   }
@@ -511,14 +523,13 @@ export class StagePlotsPublisher {
     });
   }
 
-  /** Remove now: drain the queue against the page set up. Answers what is left of it. */
+  /** Remove now: drain the queue against the page set up. Answers what is left of it, or why it could not be read. */
   async removePending(): Promise<{ removed: number; left: number; waiting: number } | { error: string; status: 503 }> {
     if (this.paused) return { status: 503, error: "A config restore is under way." };
-    const before = (await this.deps.store.get()).pendingRemovals.length;
-    const left = await this.drainQueued(false);
-    const target = await this.deps.target();
-    const waiting = left.filter((e) => !target.ok || e.origin !== target.origin).length;
-    return { removed: before - left.length, left: left.length - waiting, waiting };
+    const drained = await this.drainQueued(false);
+    if (!drained.ok) return { status: 503, error: drained.message };
+    const waiting = drained.left.filter((e) => e.origin !== drained.page).length;
+    return { removed: drained.removed, left: drained.left.length - waiting, waiting };
   }
 
   /** A change: send what differs from what was last sent. Nothing at all when nothing published changed. */
@@ -645,8 +656,11 @@ export class StagePlotsPublisher {
 
   /** A refusal when the queue is at what an action may add to, checked before anything is sent. */
   private queueFull(doc: StagePlotsDoc, action: string, name: string): { ok: false; status: 409; error: string } | null {
-    if (doc.pendingRemovals.length < STAGEPLOT_LIMITS.pendingRemovalsQueue) return null;
-    const error = `${doc.pendingRemovals.length} old links are still waiting to be removed from a page. Remove them (Remove now, once their page is set up) before this ${action.toLowerCase()}.`;
+    const queued = doc.pendingRemovals;
+    if (Array.isArray(queued) && queued.length < STAGEPLOT_LIMITS.pendingRemovalsQueue) return null;
+    const error = Array.isArray(queued)
+      ? `${queued.length} old links are still waiting to be removed from a page. Remove them (Remove now, once their page is set up) before this ${action.toLowerCase()}.`
+      : `${DAMAGED_QUEUE} Fix the file before this ${action.toLowerCase()}.`;
     say("warn", [], `${action} refused for "${name}": ${error}`);
     return { ok: false, status: 409, error };
   }
@@ -720,54 +734,61 @@ export class StagePlotsPublisher {
    * address-change path hands in the old one with its token). Writes only what went; a drop that
    * fails writes nothing (so it cannot loop through its own broadcast) and is said once. At
    * start, a publish left in flight by a crash that cannot be dropped becomes visible. Answers
-   * the queue as it is after.
+   * the queue as it is after, how many went, and the page it was drained against; or, said on
+   * [stageplots], why the queue could not be read or written, which is never "empty".
    */
-  private drainQueued(atStart: boolean, via?: Target): Promise<PendingRemoval[]> {
-    return this.serial(PENDING_CHAIN, async () => {
-      let doc: StagePlotsDoc;
+  private drainQueued(atStart: boolean, via?: Target): Promise<Drained> {
+    return this.serial(PENDING_CHAIN, async (): Promise<Drained> => {
       try {
-        doc = await this.deps.store.get();
+        return await this.drain(atStart, via);
       } catch (err) {
-        say("error", [], `could not read the stage plots to remove old links: ${errorMessage(err)}`);
-        return [];
+        const message = `The old links waiting to be removed could not be read or saved: ${errorMessage(err)}`;
+        say("error", [], message);
+        return { ok: false, message };
       }
-      if (this.paused || doc.pendingRemovals.length === 0) return doc.pendingRemovals;
-      const set = via ?? (await this.deps.target().then((t) => (t.ok ? t : null)));
-      const gone: PendingRemoval[] = [];
-      const stuckInFlight: PendingRemoval[] = [];
-      for (const e of doc.pendingRemovals) {
-        // A publish in flight is the action's own until it finishes; only a stale one (at start) is drained.
-        if (e.reason === "publishing" && !atStart) continue;
-        if (!set || e.origin !== set.origin) {
-          if (!this.saidStuck.has(`${e.secret} wait`)) {
-            this.saidStuck.add(`${e.secret} wait`);
-            say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) waits: ${set ? "this server is set up for another page" : "no page is set up here"}; it is removed once ${hostOf(e.origin)} is set up again`);
-          }
-          if (e.reason === "publishing") stuckInFlight.push(e);
-          continue;
-        }
-        const r = await this.client(set).dropStagePlots(e.secret);
-        if (r.ok) {
-          this.forget(e.secret);
-          gone.push(e);
-          say("log", [e.secret], `an old link on ${hostOf(e.origin)} is removed (${e.reason})`);
-        } else {
-          if (e.reason === "publishing") stuckInFlight.push(e);
-          if (!this.saidStuck.has(e.secret)) {
-            this.saidStuck.add(e.secret);
-            say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) could not be removed yet: ${sentence(r, hostOf(e.origin))} It is tried again on every change, Publish now and Remove now.`);
-          }
-        }
-      }
-      if (gone.length === 0 && stuckInFlight.length === 0) return doc.pendingRemovals;
-      const isGone = (e: PendingRemoval) => gone.some((g) => g.secret === e.secret && g.origin === e.origin);
-      const isStuck = (e: PendingRemoval) => stuckInFlight.some((g) => g.secret === e.secret && g.origin === e.origin);
-      const after = await this.update((d) => ({
-        ...d,
-        pendingRemovals: d.pendingRemovals.filter((e) => !isGone(e)).map((e) => (isStuck(e) ? { ...e, reason: "not taken back" as PendingReason } : e)),
-      }));
-      return after.pendingRemovals;
     });
+  }
+
+  private async drain(atStart: boolean, via: Target | undefined): Promise<Drained> {
+    const doc = await this.deps.store.get();
+    if (!Array.isArray(doc.pendingRemovals)) throw new Error(DAMAGED_QUEUE);
+    if (this.paused || doc.pendingRemovals.length === 0) return { ok: true, left: doc.pendingRemovals, removed: 0, page: null };
+    const set = via ?? (await this.deps.target().then((t) => (t.ok ? t : null)));
+    const page = set?.origin ?? null;
+    const gone: PendingRemoval[] = [];
+    const stuckInFlight: PendingRemoval[] = [];
+    for (const e of doc.pendingRemovals) {
+      // A publish in flight is the action's own until it finishes; only a stale one (at start) is drained.
+      if (e.reason === "publishing" && !atStart) continue;
+      if (!set || e.origin !== set.origin) {
+        if (!this.saidStuck.has(`${e.secret} wait`)) {
+          this.saidStuck.add(`${e.secret} wait`);
+          say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) waits: ${set ? "this server is set up for another page" : "no page is set up here"}; it is removed once ${hostOf(e.origin)} is set up again`);
+        }
+        if (e.reason === "publishing") stuckInFlight.push(e);
+        continue;
+      }
+      const r = await this.client(set).dropStagePlots(e.secret);
+      if (r.ok) {
+        this.forget(e.secret);
+        gone.push(e);
+        say("log", [e.secret], `an old link on ${hostOf(e.origin)} is removed (${e.reason})`);
+      } else {
+        if (e.reason === "publishing") stuckInFlight.push(e);
+        if (!this.saidStuck.has(e.secret)) {
+          this.saidStuck.add(e.secret);
+          say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) could not be removed yet: ${sentence(r, hostOf(e.origin))} It is tried again on every change, Publish now and Remove now.`);
+        }
+      }
+    }
+    if (gone.length === 0 && stuckInFlight.length === 0) return { ok: true, left: doc.pendingRemovals, removed: 0, page };
+    const isGone = (e: PendingRemoval) => gone.some((g) => g.secret === e.secret && g.origin === e.origin);
+    const isStuck = (e: PendingRemoval) => stuckInFlight.some((g) => g.secret === e.secret && g.origin === e.origin);
+    const after = await this.update((d) => ({
+      ...d,
+      pendingRemovals: d.pendingRemovals.filter((e) => !isGone(e)).map((e) => (isStuck(e) ? { ...e, reason: "not taken back" as PendingReason } : e)),
+    }));
+    return { ok: true, left: after.pendingRemovals, removed: gone.length, page };
   }
 
   /** Add to the queue. */
