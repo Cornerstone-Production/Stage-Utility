@@ -76,7 +76,7 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 | POST | `/api/plan` | Set the active plan: `{id}` (`400` without one). Answers the state |
 | POST | `/api/plan/next` | Jump to the next plan (auto mode) |
 | POST | `/api/plan/mode` | `{mode: "auto" \| "manual"}`; anything else is `400`. Answers the state |
-| POST | `/api/refresh` | Re-fetch from Planning Center |
+| POST | `/api/refresh` | Re-fetch from Planning Center. Answers the state. In auto plan mode, while the followed plan is held because its service type cannot be read, a `500` whose error reads `holding the followed plan: <type> could not be read — <reason>` ([Which plan the screens follow](../integrations/planning-center.md#which-plan-the-screens-follow)) |
 | POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer). Answers `{ok: true}` |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |

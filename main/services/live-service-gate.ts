@@ -57,6 +57,13 @@ export function isServiceNearNow(live: PcoLiveDTO, nowMs: number = Date.now()): 
   return Math.abs(nowMs - anchor) <= SERVICE_START_WINDOW_MS;
 }
 
+/** Planning Center is in one of this plan's items: the reading of "live" every
+ *  recorder trusts. `preservice` is not it: every plan with a service time gets
+ *  that countdown, days ahead. */
+export function inLiveItem(live: PcoLiveDTO): boolean {
+  return live.mode === "item" && !!live.currentItemId;
+}
+
 /**
  * The gate every recorder asks.
  *
@@ -69,7 +76,7 @@ export function shouldRecordLive(
   hasOpenRecord: boolean,
   nowMs: number = Date.now(),
 ): boolean {
-  if (live.mode !== "item" || !live.currentItemId) return false;
+  if (!inLiveItem(live)) return false;
   if (hasOpenRecord) return true; // rule 1 — nothing time-based may end a live recording
   return isServiceNearNow(live, nowMs); // rule 2
 }
