@@ -85,3 +85,24 @@ export function overridesOfPlot(doc: { overrides: readonly PlotOverride[] }, plo
   return doc.overrides.filter((o) => o.plotId === plotId);
 }
 
+/**
+ * `doc` with every venue's publish state taken off: what a restore writes when it keeps this
+ * server's own id, so the venues come back unpublished and two servers never publish one
+ * link. Null-safe on any shape, since a restore hands over what the bundle held; how many
+ * venues it unpublished comes back for the log.
+ */
+export function withoutPublishState(doc: unknown): { doc: unknown; dropped: number } {
+  if (!isObject(doc) || !Array.isArray(doc.venues)) return { doc, dropped: 0 };
+  let dropped = 0;
+  const venues = doc.venues.map((v: unknown) => {
+    if (!isObject(v) || v.publish === undefined) return v;
+    dropped++;
+    const { publish: _publish, ...rest } = v;
+    return rest;
+  });
+  return dropped === 0 ? { doc, dropped } : { doc: { ...doc, venues }, dropped };
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}

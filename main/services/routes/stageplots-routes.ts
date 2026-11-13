@@ -26,6 +26,14 @@
 //   PUT    /api/stageplots/overrides               { planId, venueId, plotId | null, planDate? }
 //                                                   → the document; null removes the
 //                                                   plan's override for that venue
+//   POST   /api/stageplots/venues/:id/publish       → the venue, published behind a new secret link
+//   POST   /api/stageplots/venues/:id/regenerate    → the venue under a new link; the old one is deleted
+//   POST   /api/stageplots/venues/:id/unpublish     → the venue, its link deleted from the page
+//   POST   /api/stageplots/venues/:id/publish-now   → the venue, everything sent again
+//                                                   Each: 409 when the venue is (not) published or no
+//                                                   page is set up, 502 { error } when the page
+//                                                   refused or did not answer, 400 for a plot too
+//                                                   large to publish (stageplots-publish.ts)
 //
 // Every change saves at once and broadcasts the whole document on
 // stageplots:updated, so a second browser follows without a reload. A change
@@ -43,10 +51,8 @@ import {
   STAGEPLOT_LIMITS,
   STAGEPLOTS_CHANNEL,
   type Background,
-  type BackgroundView,
   type Plot,
   type StagePlotsDoc,
-  type StagePlotsView,
   type Venue,
   type VenueKind,
 } from "../../types/stageplots.js";
@@ -60,12 +66,14 @@ import {
   MAX_PENDING_ORIGINALS,
   pendingOriginals,
   readStagePlotSource,
-  stagePlotImageUrl,
   stagePlotOriginalBytes,
+  backgroundView,
   storeStagePlotImage,
   storeStagePlotOriginal,
+  stagePlotsView as toView,
   tidyStagePlotFiles,
 } from "../stageplots-files.js";
+import { stageplotsPublisher } from "../stageplots-publish-instance.js";
 import { plotHeight } from "../stageplots-doc.js";
 import {
   STAGEPLOT_ID,
@@ -98,13 +106,6 @@ function newId(prefix: "v" | "p" | "b"): string {
   return `${prefix}-${randomBytes(6).toString("hex")}`;
 }
 
-function toView(doc: StagePlotsDoc): StagePlotsView {
-  return { venues: doc.venues, plots: doc.plots, backgrounds: doc.backgrounds.map(backgroundView), overrides: doc.overrides };
-}
-
-function backgroundView(b: Background): BackgroundView {
-  return { ...b, url: stagePlotImageUrl(b.converted.hash, "webp"), sourceUrl: stagePlotImageUrl(b.source.hash, b.source.ext) };
-}
 
 function kb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
@@ -224,7 +225,9 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
   const doc = await mutate(
     c.res,
     (d) => {
-      findVenue(d, id);
+      const v = findVenue(d, id);
+      // Its link would stay live with nothing left here that could take it down.
+      if (v.publish) throw new Refused(409, `unpublish ${v.name} before deleting it: its link still works`);
       return {
         ...d,
         venues: d.venues.filter((v) => v.id !== id),
@@ -679,6 +682,24 @@ async function deleteBackground(c: RouteCtx, id: string): Promise<void> {
   await tidyStagePlotFiles(stageplotsStore);
 }
 
+// ── Publishing ───────────────────────────────────────────────────────────
+
+const PUBLISH_ACTIONS = new Map([
+  ["publish", (id: string) => stageplotsPublisher.publish(id)],
+  ["regenerate", (id: string) => stageplotsPublisher.regenerate(id)],
+  ["unpublish", (id: string) => stageplotsPublisher.unpublish(id)],
+  ["publish-now", (id: string) => stageplotsPublisher.publishNow(id)],
+]);
+
+/** One publish action on a venue. What it said and logged is the publisher's; this answers it. */
+async function publishAction(c: RouteCtx, id: string, run: (id: string) => ReturnType<typeof stageplotsPublisher.publish>): Promise<void> {
+  const r = await run(id);
+  // A notice rides beside the venue: something done that the operator should know about (a copy
+  // left on a page this server can no longer reach).
+  if (r.ok) json(c.res, r.notice ? { ...r.venue, notice: r.notice } : r.venue);
+  else json(c.res, { error: r.error }, r.status);
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────
 
 /** The id in `/api/stageplots/<kind>/<id>[/<action>]`, or null. */
@@ -702,6 +723,10 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);
+  for (const [action, run] of PUBLISH_ACTIONS) {
+    const venueId = idIn(pathname, "venues", action);
+    if (venueId && method === "POST") return publishAction(c, venueId, run);
+  }
   id = idIn(pathname, "plots", "duplicate");
   if (id && method === "POST") return duplicatePlot(c, id);
   id = idIn(pathname, "plots", "items");

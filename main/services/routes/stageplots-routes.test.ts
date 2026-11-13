@@ -866,3 +866,77 @@ describe("per-plan overrides", () => {
   });
 });
 
+
+describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () => {
+  // The page is the Worker's own request handler over HTTP (fixtures/publish-receiver.ts); the
+  // address and token are saved where the ServiceCue Public link card saves them.
+  const TOKEN = "p".repeat(40);
+  const venueWithPlot = async () => {
+    const v = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" });
+    return v.id;
+  };
+
+  test("with no page set up, every action is a 409 that says where to set it up", async () => {
+    const { servicecuePublishStore, forgetPublishToken } = await import("../servicecue-publish-store.js");
+    await servicecuePublishStore.save({ enabled: false, url: "" });
+    await forgetPublishToken();
+    const id = await venueWithPlot();
+    const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
+    assert.equal(r.status, 409);
+    assert.match((r.json as { error: string }).error, /^Set up the public link first/);
+    for (const action of ["regenerate", "unpublish", "publish-now"]) {
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/${action}`)).status, 409, action);
+    }
+    assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
+  });
+
+  test("publishes to the page, refuses to delete the venue while it is, and unpublishes", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+
+      const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      const secret = (r.json as { publish: { secret: string } }).publish.secret;
+      assert.deepEqual(page.hub.stagePlotKeys(secret).sort().map((k) => k.split("/")[0]), ["index", "plot"]);
+      assert.equal((frames.at(-1) as View).venues[0]!.publish?.secret, secret, "the published venue was not broadcast");
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 409, "published twice");
+
+      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
+      assert.equal(del.status, 409);
+      assert.match((del.json as { error: string }).error, /^unpublish Main room before deleting it/);
+      assert.ok((await stageplotsStore.get()).venues.some((v) => v.id === id), "the published venue was deleted");
+
+      // A saved change reaches the page through the app's own broadcaster and the publisher's
+      // real listener, once, and then nothing more is sent.
+      const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+      stageplotsPublisher.start();
+      const plotId = (await stageplotsStore.get()).venues.find((v) => v.id === id)!.plotIds[0]!;
+      assert.equal((await call("PATCH", `/api/stageplots/plots/${plotId}`, { name: "Renamed" })).status, 200);
+      await stageplotsPublisher.settle();
+      const got = await page.worker({ method: "GET", path: `/stageplots/${secret}/plot/${plotId}`, headers: {}, body: "", bytes: Buffer.alloc(0), at: 0 });
+      assert.equal(JSON.parse(got.body ?? "{}").name, "Renamed", "the saved change never reached the page");
+      const settled = page.requests.length;
+      await stageplotsPublisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(page.requests.length, settled, "the publisher kept sending after the change was published");
+
+      const off = await call("POST", `/api/stageplots/venues/${id}/unpublish`);
+      assert.equal(off.status, 200);
+      assert.equal((off.json as { publish?: unknown }).publish, undefined);
+      assert.equal(page.hub.stagePlotKeys(secret).length, 0);
+      assert.equal((await call("DELETE", `/api/stageplots/venues/${id}`)).status, 200);
+    } finally {
+      await page.close();
+    }
+  });
+});

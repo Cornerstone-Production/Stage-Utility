@@ -388,6 +388,12 @@ cleared, and nothing that runs in the background is paused.
   setting up again.", including for a config with no server id, which asks
   nothing else; with the box ticked, only when the config brings no bindings. A bundle with no `settings.json` changes no screens, and leaves
   this server's bindings as they are.
+- **Stage plots links follow the id too.** A published venue's secret link is in
+  `stageplots.json`. A restore whose id is taken (this server's own config, or
+  ticked) keeps it; one that keeps this server's id, or a bundle with no
+  `settings.json`, brings every venue back unpublished, so two servers never publish
+  one link. The links stay live on the public page, owned by the server they came
+  from. Logged on `[config-snapshot]` with how many venues.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.

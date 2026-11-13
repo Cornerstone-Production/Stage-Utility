@@ -18,6 +18,31 @@ export interface Venue {
   plotIds: string[];
   /** One of plotIds, or null only while the venue has no plots. */
   defaultPlotId: string | null;
+  /** Present while the venue is published to the public page. */
+  publish?: VenuePublish;
+}
+
+/**
+ * A venue published behind a secret link: `<origin>/stageplots/<secret>`. The secret is
+ * made on the server (32 random bytes, base64url) and is never logged. It rides in config
+ * backups; a restore that keeps this server's own id drops it, so two servers never
+ * publish one link (see docs/features/stageplots.md#publishing).
+ */
+export interface VenuePublish {
+  /** 43 characters of base64url. */
+  secret: string;
+  /** The page it was published to, as an origin ("https://host"). */
+  origin: string;
+  /** When a publish last went through, as an ISO instant. */
+  publishedAt: string;
+  /** The last failure, said in the operator's words and never naming the secret; null once one goes through. */
+  lastError: { at: string; message: string } | null;
+  /** Converted backgrounds (by hash) the page holds under this secret. Sorted. */
+  publishedImages: string[];
+  /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
+  unpublishedImages: string[];
+  /** Earlier secrets of this venue (after a regenerate) whose removal from the page has not gone through yet. */
+  retired: string[];
 }
 
 export type BackgroundOriginalMime = "image/png" | "image/jpeg" | "application/pdf";
@@ -138,6 +163,31 @@ export interface StagePlotsView {
   backgrounds: BackgroundView[];
   plots: Plot[];
   overrides: PlotOverride[];
+}
+
+/** A venue's `index` on the public page, as the server publishes it. */
+export interface PublishedVenue {
+  name: string;
+  notes: string;
+  /** Its plots, in tab order. */
+  plots: { id: string; name: string }[];
+  defaultPlotId: string | null;
+  /** The plot it showed when it was published, and why: the plan's override, or the default. */
+  shown: { plotId: string | null; reason: "plan" | "default" };
+  /** The plan the shown plot is for, when it is the plan's: its ISO date and Planning Center's own words. */
+  plan: { date: string | null; dates: string | null } | null;
+  /** The zone dates are shown in. */
+  timeZone: string;
+}
+
+/** One `plot/<id>` on the public page. */
+export interface PublishedPlot {
+  id: string;
+  name: string;
+  bgFade: number;
+  items: PlotItem[];
+  /** Its background's size, and its hash once the page holds the image (null until then). */
+  background: { hash: string | null; width: number; height: number } | null;
 }
 
 export const STAGEPLOT_LIMITS = {

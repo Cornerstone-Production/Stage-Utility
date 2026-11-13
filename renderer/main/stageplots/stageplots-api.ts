@@ -50,4 +50,12 @@ export const stageplotsApi = {
   deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[] }>("stageplots:deletePlot", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
+  /** Put a venue on the public page behind a new secret link. */
+  publish: (id: string) => invoke<Venue>("stageplots:publish", { id }),
+  /** Move a published venue to a new link; the old one stops working once the new one is up. */
+  regenerate: (id: string) => invoke<Venue>("stageplots:regenerate", { id }),
+  /** Take a venue off the public page; its link stops working. */
+  unpublish: (id: string) => invoke<Venue>("stageplots:unpublish", { id }),
+  /** Send a published venue again, the backgrounds not yet published included. */
+  publishNow: (id: string) => invoke<Venue>("stageplots:publishNow", { id }),
 };

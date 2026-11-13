@@ -127,6 +127,14 @@ export interface PushClient {
   heartbeat(at: number, version: string): Promise<PushResult>;
   putManifest(docs: readonly string[], assets: readonly string[]): Promise<PushResult>;
   status(): Promise<StatusResult>;
+  // A venue's stage plots, under its secret (STAGEPLOTS in the contract). Each is about one
+  // thing the page holds, so a 4xx is `refused`; a 404 there is a Worker from before StagePlots.
+  putStagePlot(secret: string, key: string, body: string | Uint8Array, contentType: string): Promise<PushResult>;
+  deleteStagePlot(secret: string, key: string): Promise<PushResult>;
+  /** Every key under the secret not named is deleted. */
+  keepStagePlots(secret: string, keys: readonly string[]): Promise<PushResult>;
+  /** Everything under the secret is deleted. */
+  dropStagePlots(secret: string): Promise<PushResult>;
 }
 
 export interface PushClientOptions {
@@ -316,6 +324,22 @@ export function createPushClient(opts: PushClientOptions): PushClient {
       // The answer says what the page deleted. One that cannot be read is a manifest that was accepted all the same.
       const removed = await readJson(res).then(parseRemoved, () => undefined);
       return removed ? { ok: true, removed } : { ok: true };
+    },
+
+    async putStagePlot(secret, key, body, contentType) {
+      return statusOnly(await request("PUT", `/stageplots/${secret}/${key}`, { data: body, contentType }), "item");
+    },
+
+    async deleteStagePlot(secret, key) {
+      return statusOnly(await request("DELETE", `/stageplots/${secret}/${key}`), "item");
+    },
+
+    async keepStagePlots(secret, keys) {
+      return statusOnly(await request("PUT", `/stageplots/${secret}`, json(JSON.stringify({ keys }))), "item");
+    },
+
+    async dropStagePlots(secret) {
+      return statusOnly(await request("DELETE", `/stageplots/${secret}`), "item");
     },
 
     async status() {

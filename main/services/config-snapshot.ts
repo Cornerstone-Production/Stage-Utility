@@ -34,6 +34,8 @@ import {
 import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
+import { plural } from "./plural.js";
+import { withoutPublishState } from "./stageplots-doc.js";
 import { atomicWrite } from "./write-queue.js";
 import { StoreReadError } from "./data-store.js";
 import { MAX_CONFIG_BODY_BYTES } from "./routes/context.js";
@@ -353,6 +355,9 @@ const KEEP_OWN_ID: RestoreOptions = { replacesOriginal: false };
 /** The screen bindings a restore may leave as they are. Bindings are to a server
  *  id: they go wherever the config's id goes. */
 const BINDINGS_FILE = "kiosk-devices.json";
+
+/** The stage plots store, whose venues' publish links follow the server id (see writeSnapshot). */
+const STAGEPLOTS_FILE = "stageplots.json";
 
 /**
  * Whether a restore takes the config's server id, and with it the config's screen
@@ -837,6 +842,19 @@ class ConfigSnapshotService {
       // bindings of its to write, but its screens still replace this server's,
       // so this server's bindings name screens that are no longer theirs.
       await releaseBindings(toRestore);
+    }
+    // A published venue's secret link goes with the server id too. Two servers publishing one
+    // secret would overwrite each other's plots under one link, so a restore that keeps this
+    // server's own id (or has no settings.json to say whose config it is) brings the venues
+    // back unpublished; one that takes the config's id is that server, and keeps its links.
+    if (!take && toRestore.has(STAGEPLOTS_FILE)) {
+      const { doc, dropped } = withoutPublishState(toRestore.get(STAGEPLOTS_FILE));
+      if (dropped > 0) {
+        toRestore.set(STAGEPLOTS_FILE, doc as NonNullable<unknown>);
+        console.log(
+          `[config-snapshot] restore: ${plural(dropped, "stage plots venue comes", "stage plots venues come")} back unpublished; their links stay with the server the config came from`,
+        );
+      }
     }
     // A bundle carries addresses and no secrets, so a stored credential would
     // follow whatever address it names. Cleared before anything is written: a

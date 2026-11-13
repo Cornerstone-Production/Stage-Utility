@@ -93,6 +93,7 @@ import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 import { videoService } from "./main/services/video/video-service.js";
 import { servicecuePublisher } from "./main/services/servicecue-publisher-instance.js";
+import { stageplotsPublisher } from "./main/services/stageplots-publish-instance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -178,6 +179,8 @@ livePoller.start();
 // for the settings and the token, which are files, and for no request: a page that is
 // down must not hold the server back, and its first request is a timer away.
 await servicecuePublisher.start();
+// A venue's published stage plots follow its changes, and the plan, from here on. It makes no request until one changes.
+stageplotsPublisher.start();
 
 // Keep the photo + attachment disk caches from growing unbounded over months.
 cacheMaintenance.start();
@@ -195,6 +198,7 @@ async function shutdown(signal: string): Promise<void> {
   livePoller.stop();
   // The public page keeps what it holds: a restart is not a reason to blank it.
   servicecuePublisher.stop();
+  void stageplotsPublisher.stop();
   cacheMaintenance.stop();
   propresenterService.stop();
   resiService.stop();

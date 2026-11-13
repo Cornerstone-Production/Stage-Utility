@@ -8,6 +8,7 @@
 // plots, and its default is one of them.
 
 import { PATCH_COLORS } from "../types/patch.js";
+import { STAGEPLOTS_HASH, STAGEPLOTS_ID, isStagePlotsSecret } from "../types/servicecue-publish.js";
 import {
   ITEM_TYPES,
   PLOT_UNITS_WIDE,
@@ -27,6 +28,7 @@ import {
   type TextKind,
   type Venue,
   type VenueKind,
+  type VenuePublish,
 } from "../types/stageplots.js";
 import { DataStore } from "./data-store.js";
 import { errorMessage } from "./errors.js";
@@ -36,10 +38,11 @@ import { fitToHeight, plotHeight, withCableBox } from "./stageplots-doc.js";
 
 const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [] };
 
-/** Ids the server mints and routes put in a URL: letters, digits, `-` and `_`. */
-export const STAGEPLOT_ID = /^[A-Za-z0-9_-]{1,80}$/;
+/** Ids the server mints and routes put in a URL: letters, digits, `-` and `_`. The
+ *  publish contract's, so a plot id is always one the public page can carry. */
+export const STAGEPLOT_ID = STAGEPLOTS_ID;
 /** A content name's hash: the first 16 hex of a SHA-256 (image-files.ts). */
-export const STAGEPLOT_HASH = /^[0-9a-f]{16}$/;
+export const STAGEPLOT_HASH = STAGEPLOTS_HASH;
 
 const KINDS: readonly VenueKind[] = ["home", "offsite"];
 const ORIGINAL_MIMES: readonly BackgroundOriginalMime[] = ["image/png", "image/jpeg", "application/pdf"];
@@ -164,6 +167,59 @@ function pageOrNull(v: unknown, what: string): number | null {
   return v;
 }
 
+/** The longest last-error sentence kept. */
+const PUBLISH_ERROR_CHARS = 600;
+/** The most earlier secrets a venue keeps waiting to be removed. */
+const PUBLISH_RETIRED_MAX = 20;
+
+function isoInstant(v: unknown, what: string): string {
+  const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
+  if (!Number.isFinite(at)) refuse(`${what} must be an ISO date and time`);
+  return new Date(at).toISOString();
+}
+
+/** A list of `what`, each passing `ok`, at most `max`, sorted and without repeats. */
+function sortedSet(v: unknown, max: number, ok: (x: unknown) => boolean, what: string): string[] {
+  const list = asArray(v, what);
+  if (list.length > max) refuse(`${what} has more than ${max} entries`);
+  if (!list.every(ok)) refuse(`${what} has an entry of the wrong shape`);
+  return [...new Set(list as string[])].sort();
+}
+
+/** `v` when it is an http or https origin written as URL writes one, else null. */
+function httpOrigin(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 200 || !URL.canParse(v)) return null;
+  const u = new URL(v);
+  return (u.protocol === "https:" || u.protocol === "http:") && u.origin === v ? u.origin : null;
+}
+
+/**
+ * A venue's publish state, rebuilt field by field so the same state always comes out the
+ * same. The secret is the publish contract's shape and nothing else; the origin is an http
+ * or https origin, as the page address is saved.
+ */
+function checkPublish(raw: unknown, what: string): VenuePublish {
+  const p = asObject(raw, `${what}'s publish state`);
+  if (!isStagePlotsSecret(p.secret)) refuse(`${what}'s publish secret is not one this server makes`);
+  const origin = httpOrigin(p.origin);
+  if (origin === null) refuse(`${what}'s publish origin must be an http or https origin`);
+  let lastError: VenuePublish["lastError"] = null;
+  if (p.lastError !== null) {
+    const e = asObject(p.lastError, `${what}'s last publish error`);
+    lastError = { at: isoInstant(e.at, `${what}'s last publish error time`), message: text(e.message, PUBLISH_ERROR_CHARS, `${what}'s last publish error`) };
+  }
+  const isHash = (x: unknown) => typeof x === "string" && STAGEPLOT_HASH.test(x);
+  return {
+    secret: p.secret,
+    origin,
+    publishedAt: isoInstant(p.publishedAt, `${what}'s publish time`),
+    lastError,
+    publishedImages: sortedSet(p.publishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s published backgrounds`),
+    unpublishedImages: sortedSet(p.unpublishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s backgrounds not yet published`),
+    retired: sortedSet(p.retired, PUBLISH_RETIRED_MAX, isStagePlotsSecret, `${what}'s earlier links`),
+  };
+}
+
 function checkVenue(raw: unknown, i: number): Venue {
   const v = asObject(raw, `venue ${i + 1}`);
   const id = checkId(v.id, `venue ${i + 1}`);
@@ -173,7 +229,7 @@ function checkVenue(raw: unknown, i: number): Venue {
   orRefuse(notesProblem(v.notes, what));
   const plotIds = textList(v.plotIds, `${what}'s plots`);
   if (v.defaultPlotId !== null && typeof v.defaultPlotId !== "string") refuse(`${what}'s default plot must be a plot id or null`);
-  return {
+  const venue: Venue = {
     id,
     name: v.name as string,
     kind: v.kind as VenueKind,
@@ -181,6 +237,8 @@ function checkVenue(raw: unknown, i: number): Venue {
     plotIds,
     defaultPlotId: v.defaultPlotId as string | null,
   };
+  if (v.publish !== undefined) venue.publish = checkPublish(v.publish, what);
+  return venue;
 }
 
 function checkBackground(raw: unknown, i: number): Background {

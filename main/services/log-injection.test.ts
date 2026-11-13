@@ -248,6 +248,9 @@ const REQUEST_FACING = [
   // The tidy runs after DELETE /api/stageplots/backgrounds/:id and a clean-up
   // PATCH; its lines name files on disk and error text, all scrubbed.
   "stageplots-files.ts",
+  // Run by POST /api/stageplots/venues/:id/publish and the rest: its lines name a venue's
+  // name, the page's host and whatever the page or the network said back. Never the secret.
+  "stageplots-publish.ts",
   // Its change line names a metric typed into POST /api/history/trends-prefs;
   // scrubbed, and the value must also match a fixed shape.
   "trends-prefs.ts",
@@ -597,6 +600,8 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "stage-controller.ts"),
     // Run by the stage-plot delete and clean-up routes; logs file names and errors.
     path.join(HERE, "stageplots-files.ts"),
+    // Its lines name a venue typed into the editor and what the page said back; see REQUEST_FACING.
+    path.join(HERE, "stageplots-publish.ts"),
     // Its change line names a metric typed into POST /api/history/trends-prefs.
     path.join(HERE, "trends-prefs.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
