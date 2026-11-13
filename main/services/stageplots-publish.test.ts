@@ -583,6 +583,92 @@ describe("taking back what went up", () => {
   });
 });
 
+describe("a venue deleted while it is being sent", () => {
+  // The delete route unpublishes on the venue's chain first, so a venue can only vanish under a
+  // send that began after that: a publish, a regenerate or a move. Its new secret is still
+  // queued, so the standing check after each test cannot see a take-back that never happened;
+  // each asserts the page holds nothing under the new secret, and the queue no trace of it.
+  /** On the index PUT under any secret but `keep`, delete the venue first, as the route's write would. */
+  const deleteOnIndex = (page: Receiver, keep: string | null = null, queueOld?: { origin: string }) =>
+    (page.respond = async (req) => {
+      const m = SP.exec(req.path);
+      if (m && m[1] !== keep && m[2] === "index" && req.method === "PUT") {
+        await stageplotsStore.update((d) => ({
+          ...d,
+          venues: [],
+          plots: [],
+          overrides: [],
+          // The old link of a published venue goes to the queue with it, as retireForDelete does.
+          pendingRemovals: keep && queueOld ? [...d.pendingRemovals, { secret: keep, origin: queueOld.origin, since: "2026-11-13T10:00:00.000Z", reason: "venue deleted" as const }] : d.pendingRemovals,
+        }));
+      }
+      return page.worker(req);
+    });
+  const newSecrets = (page: Receiver, old: string | null) => [...new Set(spRequests(page).map((q) => q.secret))].filter((s) => s !== old);
+  const assertTakenBack = async (page: Receiver, old: string | null) => {
+    const fresh = newSecrets(page, old);
+    assert.equal(fresh.length, 1);
+    assert.deepEqual(page.hub.stagePlotKeys(fresh[0]!), [], "what went up under the new secret was left on the page");
+    assert.equal((await pending()).some((e) => e.secret === fresh[0]), false, "the new secret is still queued");
+  };
+
+  test("a publish takes back what it put up", async () => {
+    const h = await harness();
+    deleteOnIndex(h.page);
+    const r = await h.publisher.publish("v-1");
+    assert.deepEqual(r, { ok: false, status: 404, error: "no such venue" });
+    await assertTakenBack(h.page, null);
+  });
+
+  test("a regenerate takes back what it put up under the new secret", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const old = (await h.venue()).publish!.secret;
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    deleteOnIndex(h.page, old, { origin: o.origin });
+    const r = await h.publisher.regenerate("v-1");
+    assert.deepEqual(r, { ok: false, status: 404, error: "no such venue" });
+    await assertTakenBack(h.page, old);
+  });
+
+  test("a move to a new page takes back what it put up there", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const old = (await h.venue()).publish!.secret;
+    const oldOrigin = parsePublishUrl(h.page.origin);
+    const other = await startPage();
+    const parsed = parsePublishUrl(other.origin);
+    assert.ok(parsed.ok && oldOrigin.ok);
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: parsed.origin, token: TOKEN });
+    deleteOnIndex(other, old, { origin: oldOrigin.origin });
+    const r = await h.publisher.publishNow("v-1");
+    assert.deepEqual(r, { ok: false, status: 404, error: "no such venue" });
+    await assertTakenBack(other, null);
+  });
+});
+
+describe("the log", () => {
+  test("a venue name with a line break in it never breaks a [stageplots] line, and is still legible", async () => {
+    const doc = venueDoc();
+    doc.venues[0]!.name = "Main room\n[updater] update installed";
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      const h = await harness(doc);
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      h.page.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : h.page.worker(req));
+      await h.publisher.unpublish("v-1");
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const ours = lines.filter((l) => l.startsWith("[stageplots]"));
+    assert.ok(ours.length >= 2, lines.join(" / "));
+    for (const l of ours) assert.doesNotMatch(l, /[\n\r]/, `a [stageplots] line was broken in two: ${JSON.stringify(l)}`);
+    assert.ok(ours.some((l) => l.includes("Main room\\n[updater] update installed")), `the name is not legible: ${ours.join(" / ")}`);
+  });
+});
+
 describe("the page's own words", () => {
   test("a failure that names the request's path never reaches a log line, an answer or a stored error with the secret in it", async () => {
     const { createPushClient } = await import("./servicecue-publish-client.js");
@@ -664,12 +750,79 @@ describe("after the page address changes", () => {
     (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: parsed.origin, token: TOKEN });
     return { h, other, oldHost: host(h.page) };
   }
+  /** A secret live on `page` and queued against it, as an old link waiting to be removed. */
+  async function queuedOn(page: Receiver, origin: string, i: number): Promise<string> {
+    const secret = `${i.toString(36).padStart(42, "A")}E`;
+    await page.worker({ method: "PUT", path: `/_publish/v1/stageplots/${secret}/index`, headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: "{}", bytes: Buffer.from("{}"), at: 0 });
+    assert.equal(page.hub.stagePlotKeys(secret).length, 1);
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [...d.pendingRemovals, { secret, origin, since: "2026-11-13T10:00:00.000Z", reason: "regenerated" }] }));
+    return secret;
+  }
   const leftOnRe = (oldHost: string) => new RegExp(`left on ${oldHost.replace(/\./g, "\\.")}`);
   const capture = () => {
     const lines: string[] = [];
     const spies = (["log", "warn"] as const).map((level) => mock.method(console, level, (...args: unknown[]) => void lines.push(args.map(String).join(" "))));
     return { lines, restore: () => spies.forEach((s) => s.mock.restore()) };
   };
+
+  test("following a page address whose settings cannot be read says so on the venue's card, and still drains the old page with its token", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const stale = await queuedOn(h.page, o.origin, 11);
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => {
+      throw new Error("secrets store unreadable");
+    };
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, "https://elsewhere.example");
+      await h.publisher.settle();
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.match((await h.venue()).publish?.lastError?.message ?? "", /^The page address was saved, but the published stage plots could not follow it: the page settings could not be read: secrets store unreadable$/);
+    assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
+    assert.equal((await pending()).some((e) => e.secret === stale), false);
+  });
+
+  test("a move that throws is on that venue's card, and the old page is still drained with its token", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const first = (await h.venue()).publish!.secret;
+    const o = parsePublishUrl(h.page.origin);
+    const other = await startPage();
+    const parsed = parsePublishUrl(other.origin);
+    assert.ok(o.ok && parsed.ok);
+    const stale = await queuedOn(h.page, o.origin, 12);
+    const deps = (h.publisher as unknown as { deps: { target: () => Promise<unknown>; store: unknown } }).deps;
+    deps.target = async () => ({ ok: true, origin: parsed.origin, token: TOKEN });
+    // The write that queues the new secret before its first request fails, once.
+    let fail = true;
+    deps.store = {
+      get: () => stageplotsStore.get(),
+      update: (fn: (d: StagePlotsDoc) => StagePlotsDoc) =>
+        stageplotsStore.update((d) => {
+          const next = fn(d);
+          if (fail && next.pendingRemovals.some((e) => e.reason === "publishing")) {
+            fail = false;
+            throw new Error("disk full");
+          }
+          return next;
+        }),
+    };
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, parsed.origin);
+      await h.publisher.settle();
+    } finally {
+      quiet.mock.restore();
+    }
+    const pub = (await h.venue()).publish!;
+    assert.deepEqual([pub.origin, pub.secret], [o.origin, first], "the venue left a page that still serves it");
+    assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: disk full$/);
+    assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
+  });
 
   test("Unpublish names the old page whose copy it cannot reach, and never claims it is gone", async () => {
     const { h, other, oldHost } = await moved();

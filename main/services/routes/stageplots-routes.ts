@@ -226,7 +226,14 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
 async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
   // A published venue is unpublished first, by the publisher: its link removed from the page, or
   // queued for removal when the page cannot take it, so no link is left that nothing knows of.
-  const { notice } = await stageplotsPublisher.retireForDelete(id);
+  const retired = await stageplotsPublisher.retireForDelete(id);
+  // Refused while a config restore lands: deleting the venue then would leave its link live and unknown.
+  if (!retired.ok) {
+    console.warn(`[stageplots] venue ${scrub(id)} not deleted: ${scrub(retired.error)}`);
+    json(c.res, { error: retired.error }, retired.status);
+    return;
+  }
+  const notice = retired.notice;
   const doc = await mutate(
     c.res,
     (d) => {

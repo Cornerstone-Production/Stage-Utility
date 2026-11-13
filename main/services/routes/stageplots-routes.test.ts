@@ -974,6 +974,27 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
   });
 });
 
+describe("a restore landing", () => {
+  test("refuses a venue's delete: deleting it then would leave its link live with nothing knowing it", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const id = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    const secret = "A".repeat(42) + "E";
+    await stageplotsStore.update((d) => ({
+      ...d,
+      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] } } : v)),
+    }));
+    const resume = await stageplotsPublisher.pause();
+    try {
+      const del = await call("DELETE", `/api/stageplots/venues/${id.id}`);
+      assert.deepEqual([del.status, /restore is under way/.test((del.json as { error: string }).error)], [503, true]);
+      const after = (await stageplotsStore.get()).venues.find((v) => v.id === id.id);
+      assert.equal(after?.publish?.secret, secret, "the venue went, and its link with nothing to remove it");
+    } finally {
+      resume();
+    }
+  });
+});
+
 describe("the page address changing under published venues", () => {
   // Two pages, each the Worker's own handler. The venue is published to A; the Public link card
   // then saves B's address and token through its own route, which still holds A's token.

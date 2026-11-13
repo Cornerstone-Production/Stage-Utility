@@ -368,11 +368,11 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
 
   // Published stage plots follow the page: each venue moves to a new address, and what is left on
   // the old one is removed with its token, which only this request still holds. In the
-  // background: a move uploads every background, and the card follows it on stageplots:updated.
+  // background, since a move uploads every background and would hold this answer past the card's
+  // wait; the publisher hands the old token on to every step, never rejects, and leaves each
+  // failure on the StagePlots card as the venue's last error (stageplots-publish.ts pageSaved).
   const oldPage = beforeParsed.ok && hadToken ? { origin: beforeParsed.origin, token: beforeToken } : null;
-  void stageplotsPublisher.pageSaved(oldPage, target.ok ? target.origin : null).catch((err: unknown) => {
-    console.error(`[stageplots] the stage plots could not follow the page address: ${scrub(errorMessage(err))}`);
-  });
+  void stageplotsPublisher.pageSaved(oldPage, target.ok ? target.origin : null);
 
   const { dropped } = await servicecuePublisher.apply({ dropCopy: before.enabled && !enabled });
   json(res, await settingsDto(dropped, dropDeploy));
