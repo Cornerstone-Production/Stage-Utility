@@ -23,9 +23,14 @@
 //                  A page that refuses the drop leaves the venue published, and says so.
 //   Publish now    everything again, every background included, and the queue drained. A venue
 //                  on a page other than the one set up moves to it under a new secret.
-//   A change       to the document, or to the plan it follows: each published venue is sent
-//                  what changed, after a short wait, one run at a time per venue. A change that
-//                  alters nothing published (the publish state this writes, say) sends nothing.
+//   A change       to the document, to the plan it follows, or to the patch (linked connection
+//                  points): each published venue is sent what changed, after a short wait, one
+//                  run at a time per venue. A change that alters nothing published (the publish
+//                  state this writes, a patch channel no published point lists) sends nothing.
+//
+// A linked connection point goes out as the device's name and colour and the channels through
+// it, resolved here at publish time (stageplots-patch-link.ts), never as the link itself. While
+// the patch cannot be read it goes out unlinked, with its last name and colour and no channels.
 //
 // THE SECRET IS NEVER LOGGED, never in an error sent back, never in a stored error: every
 // sentence goes through `say` or `errorAt`, which hide it. It is in the store, which a LAN
@@ -41,6 +46,7 @@ import { createPushClient, type PushClient, type PushFailure, type PushResult } 
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";
+import { publishedItems, type PatchContext, type PatchRead } from "./stageplots-patch-link.js";
 import {
   PUBLISH_MAX_BODY_BYTES,
   STAGEPLOTS_IMAGE_TYPE,
@@ -48,11 +54,19 @@ import {
   stagePlotsImageKey,
   stagePlotsPlotKey,
 } from "../types/servicecue-publish.js";
+import type { PatchFile } from "../types/patch.js";
 import { STAGEPLOT_LIMITS, type Background, type PendingReason, type PendingRemoval, type Plot, type PublishedPlot, type PublishedVenue, type StagePlotsDoc, type Venue, type VenuePublish } from "../types/stageplots.js";
 
 /** A new secret: 32 random bytes, base64url, 43 characters. Made here and nowhere else. */
 export function newPublishSecret(): string {
   return randomBytes(32).toString("base64url");
+}
+
+/** The plan a venue is published for. */
+export interface PublishPlan {
+  planId: string | null;
+  planDates: string | null;
+  serviceTypeId: string | null;
 }
 
 /** Where to publish: the ServiceCue page's address and token, or why there is none. */
@@ -68,8 +82,10 @@ export interface StagePlotsPublishDeps {
   store: StagePlotsStoreLike;
   /** A converted background's WebP bytes, by hash, or null when the file is not there. */
   image(hash: string): Promise<Uint8Array | null>;
-  /** The plan the app follows (live or next), or nulls with none or no Planning Center. */
-  plan(): { planId: string | null; planDates: string | null };
+  /** The plan the app follows (live or next) and its service type, or nulls with none or no Planning Center. */
+  plan(): PublishPlan;
+  /** The patch, which linked connection points resolve against. Throws when it cannot be read. */
+  patch(): Promise<PatchFile>;
   /** The zone the page shows dates in: the app's. */
   timeZone(): string;
   /** Told after every write of a venue's publish state: the routes broadcast it. */
@@ -150,19 +166,26 @@ function plotsOf(doc: StagePlotsDoc, venue: Venue): Plot[] {
   return venue.plotIds.map((id) => byId.get(id)).filter((p): p is Plot => p !== undefined);
 }
 
-/** One plot as the page gets it. The background's hash only once the page holds the image: a plot never names one it would draw broken. */
-export function publishedPlot(plot: Plot, background: Background | null, held: boolean): PublishedPlot {
+/** The plan a link lists channels for: the one published. */
+const patchContext = (plan: PublishPlan): PatchContext => ({ serviceTypeId: plan.serviceTypeId, planId: plan.planId });
+
+/**
+ * One plot as the page gets it. The background's hash only once the page holds the image: a plot
+ * never names one it would draw broken. Its items through publishedItems: a linked point as its
+ * device resolves, never the link.
+ */
+export function publishedPlot(plot: Plot, background: Background | null, held: boolean, patch: PatchRead, plan: PublishPlan): PublishedPlot {
   return {
     id: plot.id,
     name: plot.name,
     bgFade: plot.bgFade,
-    items: plot.items,
+    items: publishedItems(plot.items, patch, patchContext(plan)).items,
     background: background ? { hash: held ? background.converted.hash : null, width: background.converted.width, height: background.converted.height } : null,
   };
 }
 
 /** A venue's index as the page gets it: what it shows for the followed plan, at this moment. */
-export function publishedVenue(doc: StagePlotsDoc, venue: Venue, plan: { planId: string | null; planDates: string | null }, timeZone: string): PublishedVenue {
+export function publishedVenue(doc: StagePlotsDoc, venue: Venue, plan: Pick<PublishPlan, "planId" | "planDates">, timeZone: string): PublishedVenue {
   const shown = resolvePlot(doc, venue.id, plan.planId);
   const override = shown.reason === "plan" ? doc.overrides.find((o) => o.planId === plan.planId && o.venueId === venue.id) : undefined;
   return {
@@ -239,6 +262,11 @@ export class StagePlotsPublisher {
   /** Resolves timerDone: called when the wait's republish finishes, or by cancelWait. */
   private fireTimer: (() => void) | null = null;
   private planKey: string | null = null;
+  /** The patch as last read, for linked connection points: read again before every send and
+   *  republish, so a fingerprint and the send it is checked against see the same patch. */
+  private patchRead: PatchRead = { ok: false };
+  /** The patch could not be read last time: said once until it can. */
+  private patchDown = false;
   private started = false;
   private stopped = false;
   private paused = false;
@@ -313,12 +341,28 @@ export class StagePlotsPublisher {
 
   private currentPlanKey(): string {
     const p = this.deps.plan();
-    return JSON.stringify([p.planId, p.planDates]);
+    return JSON.stringify([p.planId, p.planDates, p.serviceTypeId]);
+  }
+
+  /** Read the patch for linked connection points. A failure publishes them unlinked, said on [stageplots] once until it reads again. */
+  private async readPatch(): Promise<PatchRead> {
+    try {
+      this.patchRead = { ok: true, file: await this.deps.patch() };
+      if (this.patchDown) say("log", [], "the patch sheet can be read again; linked connection points are published with their devices");
+      this.patchDown = false;
+    } catch (err) {
+      if (!this.patchDown) say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours: ${errorMessage(err)}`);
+      this.patchDown = true;
+      this.patchRead = { ok: false };
+    }
+    return this.patchRead;
   }
 
   private heard(channel: string): void {
     if (this.stopped || this.paused) return;
-    if (channel === "stageplots:updated") return this.changed();
+    // A patch save may rename, recolour or re-patch a device a published point links to. The
+    // fingerprint tells whether it did: a venue that shows nothing of it is sent nothing.
+    if (channel === "stageplots:updated" || channel === "patch:updated") return this.changed();
     // The state is broadcast often; only the plan it follows moving is a change to what is published.
     if (channel === "stage:state-changed") {
       const key = this.currentPlanKey();
@@ -577,6 +621,7 @@ export class StagePlotsPublisher {
     const venue = doc.venues.find((v) => v.id === venueId);
     const pub = venue?.publish;
     if (!venue || !pub) return;
+    await this.readPatch();
     const print = this.fingerprint(doc, venue);
     if (this.attempted.get(venueId) === print) return;
     this.attempted.set(venueId, print);
@@ -1038,8 +1083,14 @@ export class StagePlotsPublisher {
   /** What a republish is built from, to tell a change to what is published from one to anything else. */
   private fingerprint(doc: StagePlotsDoc, venue: Venue): string {
     const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
-    const plots = plotsOf(doc, venue).map((p) => [p, p.backgroundId ? (byId.get(p.backgroundId)?.converted ?? null) : null]);
-    return docHash(JSON.stringify([publishedVenue(doc, venue, this.deps.plan(), this.deps.timeZone()), plots]));
+    const plan = this.deps.plan();
+    // Each plot as the page gets it (linked points resolved against the patch last read), and
+    // its background whole, so a re-conversion counts as a change whether or not it is held.
+    const plots = plotsOf(doc, venue).map((p) => {
+      const bg = p.backgroundId ? (byId.get(p.backgroundId) ?? null) : null;
+      return [publishedPlot(p, bg, true, this.patchRead, plan), bg?.converted ?? null];
+    });
+    return docHash(JSON.stringify([publishedVenue(doc, venue, plan, this.deps.timeZone()), plots]));
   }
 
   /**
@@ -1050,13 +1101,15 @@ export class StagePlotsPublisher {
   private async sendVenue(client: PushClient, host: string, secret: string, doc: StagePlotsDoc, venue: Venue, opts: SendOptions): Promise<SendResult> {
     const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
     const plots = plotsOf(doc, venue).map((plot) => ({ plot, bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null }));
+    const patch = await this.readPatch();
+    const plan = this.deps.plan();
     for (const { plot, bg } of plots) {
-      const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true)));
+      const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true, patch, plan)));
       if (bytes > PUBLISH_MAX_BODY_BYTES) {
         return { ok: false, status: 400, sent: 0, message: `Plot "${plot.name}" is too large to publish (${mb(bytes)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB). Remove items or inputs from it.` };
       }
     }
-    const index = JSON.stringify(publishedVenue(doc, venue, this.deps.plan(), this.deps.timeZone()));
+    const index = JSON.stringify(publishedVenue(doc, venue, plan, this.deps.timeZone()));
 
     const sent = opts.force ? new Map<string, string>() : (this.sent.get(secret) ?? new Map<string, string>());
     this.sent.set(secret, sent);
@@ -1106,8 +1159,10 @@ export class StagePlotsPublisher {
       return r;
     };
     for (const { plot, bg } of plots) {
-      const r = await put(stagePlotsPlotKey(plot.id)!, JSON.stringify(publishedPlot(plot, bg, bg !== null && held.has(bg.converted.hash))));
+      const r = await put(stagePlotsPlotKey(plot.id)!, JSON.stringify(publishedPlot(plot, bg, bg !== null && held.has(bg.converted.hash), patch, plan)));
       if (r && !r.ok) return fail(r);
+      // Said when the plot actually went out, so once per change and not on every check.
+      if (r) unlinkedNote(secret, venue, plot, patch, plan);
     }
     const ir = await put(STAGEPLOTS_INDEX_KEY, index);
     if (ir && !ir.ok) return fail(ir);
@@ -1143,6 +1198,14 @@ function stateAfterSend(secret: string, origin: string, at: string, r: Sent, sec
 }
 
 /** "; 1 background not yet published (why)", or nothing. */
+/** A [stageplots] line for a plot just sent with linked points that went out unlinked, naming each and why. */
+function unlinkedNote(secret: string, venue: Venue, plot: Plot, patch: PatchRead, plan: PublishPlan): void {
+  const { unresolved } = publishedItems(plot.items, patch, patchContext(plan));
+  if (unresolved.length === 0) return;
+  const each = unresolved.map((u) => `"${u.label || "unlabelled"}" (${u.reason === "removed" ? "its patch device is gone" : "the patch sheet cannot be read"})`).join(", ");
+  say("warn", [secret], `"${venue.name}" · "${plot.name}": ${plural(unresolved.length, "connection point")} published unlinked, showing the last name and colour: ${each}`);
+}
+
 function missingNote(r: Sent): string {
   return r.unpublished.length > 0 ? `; ${plural(r.unpublished.length, "background")} not yet published (${r.unpublished[0]!.why})` : "";
 }

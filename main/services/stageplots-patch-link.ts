@@ -177,6 +177,27 @@ export function resolveItems(items: readonly PlotItem[], patch: PatchRead | null
 }
 
 /**
+ * Every plot with its items as shown (resolveItems), and each plot's link resolutions by plot
+ * id. A plot with nothing to resolve is the same object, and the list the same list.
+ */
+export function resolvePlots<P extends { id: string; items: PlotItem[] }>(
+  plots: readonly P[],
+  patch: PatchRead | null,
+  ctx: PatchContext,
+): { plots: P[]; links: Map<string, Map<string, LinkResolution>> } {
+  const links = new Map<string, Map<string, LinkResolution>>();
+  let changed = false;
+  const out = plots.map((p) => {
+    const r = resolveItems(p.items, patch, ctx);
+    if (r.links.size > 0) links.set(p.id, r.links);
+    if (r.items === p.items) return p;
+    changed = true;
+    return { ...p, items: r.items };
+  });
+  return { plots: changed ? out : (plots as P[]), links };
+}
+
+/**
  * Items to save: each linked point whose device resolves takes its name and colour as its
  * label, colour, lastName and lastColor, so what is stored is what was last shown. An unlinked
  * one is left as it is. The same list when nothing changes.

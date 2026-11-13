@@ -16,6 +16,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { StagePlotsView } from "@main/types/stageplots";
+import type { PatchFile } from "@main/types/patch";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
@@ -28,9 +29,12 @@ let DOC: StagePlotsView;
 let TIMEZONE: string | null = null;
 /** The server's own clock's zone, as GET /api/state reports it. */
 let HOST_TIMEZONE = "UTC";
+/** What GET /api/stageplots/patch answers; null is a 503, the patch unreadable. */
+let PATCH: PatchFile | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const path = String(url).split("?")[0];
-  const body = path === "/api/stageplots" ? DOC : path === "/api/state" ? { timezone: TIMEZONE, hostTimezone: HOST_TIMEZONE } : null;
+  if (path === "/api/stageplots/patch" && PATCH === null) return { ok: false, status: 503, statusText: "Service Unavailable", json: async () => ({ error: "patch.json could not be read (EIO)" }), text: async () => "" };
+  const body = path === "/api/stageplots" ? DOC : path === "/api/stageplots/patch" ? PATCH : path === "/api/state" ? { timezone: TIMEZONE, hostTimezone: HOST_TIMEZONE } : null;
   return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
 };
 
@@ -91,6 +95,7 @@ const tabs = () => screen.getAllByRole("tab");
 
 beforeEach(() => {
   DOC = doc();
+  PATCH = { updatedAt: "", sheets: [] };
   TIMEZONE = null;
   HOST_TIMEZONE = "UTC";
   localStorage.clear();
@@ -373,5 +378,84 @@ describe("/stageplots: an item's details, the legend and print", () => {
     const six = [...boxes, ...[4, 5, 6].map((n) => ({ ...boxes[0], id: `sb${n}`, label: `SB-${n}` }))];
     assert.equal(printLayout(legendLines(six)).secondPage, true, "six 30-input stage boxes still fit beside the plot");
     assert.equal(legendLines([item({ id: "p", type: "conn", label: "FP-3", inputs: ["Keys L"] })]), 2 + 3);
+  });
+});
+
+describe("/stageplots: a connection point linked to the patch", () => {
+  type Item = StagePlotsView["plots"][number]["items"][number];
+  const sb1 = (): Item => ({
+    id: "sb1",
+    type: "conn",
+    x: 100,
+    y: 100,
+    w: 25,
+    h: 25,
+    rotation: 0,
+    label: "Old SB",
+    color: null,
+    notes: "Stage box.",
+    inputs: ["Own input"],
+    patchLink: { sheetId: "main", deviceId: "dev-sb1", lastName: "Old SB", lastColor: null },
+  });
+  const patchFile = (): PatchFile => ({
+    updatedAt: "",
+    sheets: [
+      {
+        id: "main",
+        name: "Main patch",
+        kind: "analog",
+        devices: [
+          { id: "rack", name: "Rack A", kind: "rack", inputs: 32, outputs: 0 },
+          { id: "dev-sb1", name: "SB-1", kind: "snake", inputs: 16, outputs: 4, color: "#0091ff" },
+        ],
+        endpoints: [
+          { rackId: "rack", dir: "in", index: 1, consoleChannel: "1", label: "Kick In", path: [{ deviceId: "dev-sb1", connector: "1" }] },
+          { rackId: "rack", dir: "in", index: 2, consoleChannel: "2", label: "Kick Out", path: [{ deviceId: "dev-sb1", connector: "2" }] },
+        ],
+        variants: [],
+        assignments: { byServiceType: {}, byPlan: {} },
+      },
+    ],
+  });
+  const plotSvg = () => screen.getByRole("img", { name: /Stage plot/ });
+  async function tapSb1() {
+    const target = plotSvg().querySelector('[data-id="sb1"] rect')!;
+    await act(async () => {
+      fireEvent.pointerDown(target, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+      fireEvent.pointerUp(target, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+    });
+    await settle();
+    return screen.getByTestId("item-details");
+  }
+  async function open() {
+    DOC.plots[1].items = [sb1()];
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+  }
+
+  test("tapping a linked point lists its channels, under the device's name and colour", async () => {
+    PATCH = patchFile();
+    await open();
+    const details = await tapSb1();
+    assert.match(details.textContent!, /^SB-1Connection pointStage box\.Patch channels · Main patch/);
+    assert.deepEqual([...within(details).getAllByRole("listitem")].map((li) => li.textContent), ["Ch 1Kick InSB-1/1", "Ch 2Kick OutSB-1/2"]);
+    assert.equal(screen.queryByTestId("item-inputs"), null, "the point's own inputs were listed beside its patch channels");
+    assert.deepEqual([...screen.getByTestId("legend").querySelectorAll('[data-testid="legend-row"]')].map((r) => r.textContent), ["SB-1"]);
+    // A rename in the patch reaches the page on its broadcast.
+    const next = patchFile();
+    next.sheets[0]!.devices[1]!.name = "SB-1 Left";
+    await act(async () => FakeEventSource.last?.push("patch:updated", next));
+    await settle();
+    assert.match(screen.getByTestId("item-details").textContent!, /^SB-1 Left/);
+  });
+
+  test("an unlinked point lists its inputs: the patch unreadable keeps its last name", async () => {
+    PATCH = null;
+    await open();
+    const details = await tapSb1();
+    assert.match(details.textContent!, /^Old SBConnection point/);
+    assert.deepEqual([...within(details).getAllByRole("listitem")].map((li) => li.textContent), ["1Own input"]);
+    assert.equal(screen.queryByTestId("patch-channels"), null);
   });
 });

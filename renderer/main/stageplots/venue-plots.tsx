@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 
-import { PLOT_UNITS_WIDE, type Plot, type PlotBackground } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type PatchChannels, type Plot, type PlotBackground } from "@main/types/stageplots";
 import { plotHeight, type PlotReason } from "@main/services/stageplots-doc";
 
 import { EmptyState } from "../../components/ui/empty-state";
@@ -27,7 +27,10 @@ const zoomButton =
 /** How far, in screen pixels, a press may move and still be a tap rather than a pan. */
 const TAP_SLOP_PX = 6;
 
-export function PlotFrame({ plot, background }: { plot: Plot; background: PlotBackground | null }) {
+/** A linked point's patch channels on a plot, or null to list its inputs. */
+export type ChannelsOf = (plot: Plot, itemId: string) => PatchChannels | null;
+
+export function PlotFrame({ plot, background, channelsOf }: { plot: Plot; background: PlotBackground | null; channelsOf?: ChannelsOf }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const pz = usePanZoom(svgRef, PLOT_UNITS_WIDE, plotHeight(background));
@@ -106,7 +109,7 @@ export function PlotFrame({ plot, background }: { plot: Plot; background: PlotBa
           <MaximizeIcon />
         </button>
       </div>
-      {tapped && <ItemDetails item={tapped} at={tap?.at ?? null} onClose={() => setTap(null)} />}
+      {tapped && <ItemDetails item={tapped} at={tap?.at ?? null} onClose={() => setTap(null)} channels={channelsOf?.(plot, tapped.id) ?? null} />}
     </div>
   );
 }
@@ -154,9 +157,11 @@ export interface VenuePlotsProps {
   actions?: (shown: ShownPlot) => ReactNode;
   /** Whether a plot's data is current, an older copy kept after a failed read, or not had at all (the published page). Current when absent. */
   plotState?: (plot: Plot) => "ok" | "stale" | "failed";
+  /** What a tap on a linked connection point lists: resolved here on /stageplots, read from the published plot on the public page. */
+  channelsOf?: ChannelsOf;
 }
 
-export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState }: VenuePlotsProps) {
+export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf }: VenuePlotsProps) {
   // A tab picked by hand holds only while the plan's plot is the one it was
   // picked over: when the plan moves on (or Planning Center drops), the new
   // plan's plot is selected again rather than hidden behind an old pick.
@@ -220,7 +225,7 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
                   Could not refresh this plot; showing the last copy.
                 </p>
               )}
-              <PlotFrame key={selected.id} plot={selected} background={background} />
+              <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} />
               <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan. Tap an item for its details.</p>
               <PlotLegend items={selected.items} className="su-card mt-3 px-3.5 py-2.5" />
             </>

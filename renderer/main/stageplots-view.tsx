@@ -14,13 +14,18 @@
 // its default, and says which ("For this plan · Sun 15 Nov" or "Default").
 // While Planning Center cannot be read, every venue shows its default under a
 // notice saying so.
+//
+// A connection point linked to the patch shows its device's name and colour, and
+// a tap lists the patch channels through it for the followed plan; while the
+// patch cannot be read it shows its last name and colour and lists its inputs.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import type { PlotOverride, StagePlotsView, Venue } from "@main/types/stageplots";
 import { plural } from "@main/services/plural";
 import { resolvePlot } from "@main/services/stageplots-doc";
+import { resolvePlots, tapChannels, type LinkResolution } from "@main/services/stageplots-patch-link";
 
 import { usePageActions } from "../app/page-actions";
 import { Button } from "../components/ui/button";
@@ -33,8 +38,9 @@ import { backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-he
 import { Mono } from "./stageplots/mono";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
+import { usePatchContext, useStagePlotsPatch } from "./stageplots/use-patch";
 import { useStagePlots } from "./stageplots/use-stageplots";
-import { BackLink, VenuePlots } from "./stageplots/venue-plots";
+import { BackLink, VenuePlots, type ChannelsOf } from "./stageplots/venue-plots";
 
 /** Where the browser keeps the last venue opened. */
 export const LAST_VENUE_KEY = "stageplots:lastVenue";
@@ -118,7 +124,7 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
   );
 }
 
-function VenuePage({ doc, venue, plan, onBack }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void }) {
+function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void; channelsOf: ChannelsOf }) {
   return (
     <VenuePlots
       key={venue.id}
@@ -130,6 +136,7 @@ function VenuePage({ doc, venue, plan, onBack }: { doc: StagePlotsView; venue: V
       resolved={resolvePlot(doc, venue.id, plan.resolvedPlanId)}
       planDay={plan.label}
       backgroundOf={(p) => backgroundOf(doc, p)}
+      channelsOf={channelsOf}
       before={<BackLink onClick={onBack} />}
       actions={(shown) => (
         <PrintControl
@@ -158,9 +165,20 @@ export function openVenue(doc: StagePlotsView, open: Open): Venue | null {
 
 const NO_OVERRIDES: readonly PlotOverride[] = [];
 
+const NO_LINKS = new Map<string, Map<string, LinkResolution>>();
+
 export function StagePlotsPage() {
-  const { doc, loading, error } = useStagePlots();
-  const plan = useFollowedPlan(doc?.overrides ?? NO_OVERRIDES);
+  const { doc: stored, loading, error } = useStagePlots();
+  const plan = useFollowedPlan(stored?.overrides ?? NO_OVERRIDES);
+  // Every plot drawn with its linked points resolved: the cards, the plot, its legend and print.
+  const patch = useStagePlotsPatch();
+  const patchContext = usePatchContext(plan.resolvedPlanId);
+  const { doc, links } = useMemo(() => {
+    if (!stored) return { doc: null, links: NO_LINKS };
+    const r = resolvePlots(stored.plots, patch, patchContext);
+    return { doc: r.plots === stored.plots ? stored : { ...stored, plots: r.plots }, links: r.links };
+  }, [stored, patch, patchContext]);
+  const channelsOf: ChannelsOf = (plot, itemId) => tapChannels(links.get(plot.id)?.get(itemId));
   const [open, setOpen] = useState<Open>(() => {
     const id = remembered();
     return id ? { kind: "venue", id } : { kind: "auto" };
@@ -191,6 +209,7 @@ export function StagePlotsPage() {
           doc={doc}
           venue={venue}
           plan={plan}
+          channelsOf={channelsOf}
           onBack={() => {
             remember(null);
             setOpen({ kind: "list" });
