@@ -31,6 +31,7 @@ import { invoke as ipc } from "../../lib/api";
 import { planLabel } from "../../settings/sections/slots-target-pill";
 import { useUpcomingPlans } from "../../settings/sections/plan-switcher";
 import { useStageState } from "../../main/use-stage-state";
+import { appZoneOf } from "../../lib/app-zone";
 import { plural } from "@main/services/plural";
 import type { ShowTarget } from "./use-mic-slots";
 
@@ -457,7 +458,7 @@ export function CopyFromDialog({
       ? boards.map((b) => ({ value: b.id, label: b.name }))
       : kind === "type"
         ? types.map(([id, name]) => ({ value: id, label: `${name} default` }))
-        : plans.map((p) => ({ value: p.planId, label: `${planLabel(p.sortDate, p.dates, state?.timezone ?? null)} · ${p.serviceTypeName}` }));
+        : plans.map((p) => ({ value: p.planId, label: `${planLabel(p.sortDate, p.dates, appZoneOf(state))} · ${p.serviceTypeName}` }));
   const chosen = options.some((o) => o.value === pick) ? pick : (options[0]?.value ?? null);
 
   function source(): CopySource | null {

@@ -13,8 +13,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useListSaves, type ListEdit, type ListIo, type ListSaveResult } from "../../lib/use-list-saves";
 import { CategoryRoles, type RoleActions } from "./servicecue-roles-section";
 import { PublicLinkCard, usePublishSummary } from "./servicecue-public-link";
-import { appZoneOf } from "./history-trends/trends";
-import { hostTimeZone } from "@main/services/app-timezone";
+import { appZoneOf } from "../../lib/app-zone";
 import { uid } from "@renderer/lib/uid";
 import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-layout-card";
 import {
@@ -659,7 +658,7 @@ export function ServiceCueSection() {
           <PublicLinkCard
             typeNames={shownNames}
             layoutNames={sortedLayouts.map((l) => l.name)}
-            timeZone={appZoneOf(stage.state, hostTimeZone())}
+            timeZone={appZoneOf(stage.state)}
             embedded
           />
         </MoreRow>
