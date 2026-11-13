@@ -130,6 +130,8 @@ plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
   notes save when you leave the field; Home or Offsite saves at once.
 - **Backgrounds**: **Upload**, the list, and the selected background's detail with
   its **Clean-up** switch and **Delete background…**.
+- **This week**: which plot the selected venue shows for the live or next plan,
+  and for other upcoming plans (see [Default and this week](#default-and-this-week)).
 - **Plots**: a tab per plot, **+** for a new one (it starts on the selected plot's
   background), and **⋯** on the selected tab for **Rename**, **Duplicate** (an
   independent copy named "… copy", which opens), **Set as default** and
@@ -144,6 +146,33 @@ new edge up to it. That changes the plot's items: switching back does not
 put them where they were. The log says how many moved. With unsaved changes on the
 plot, picking another background asks first: **Save and switch**, **Discard and
 switch**, or **Cancel**; it never switches under unsaved work.
+
+### Default and this week
+
+Each venue has a default plot, the starred tab, set from a plot's **⋯** with
+**Set as default**. Any Planning Center plan can show a different plot in that
+venue instead, for that plan only; [/stageplots](#stageplots) shows it while
+that plan is live or next, then goes back to the default. The patch sheet's
+standing per-service-type layer has no equivalent here: a plan's plot is the
+default unless that plan says otherwise.
+
+The **This week** card, for the selected venue:
+
+- **Plan · Sun 15 Nov** and a list: **Default (Standard)** or another of the
+  venue's plots, for the live or next plan (the plan `/stageplots` and
+  `/patch` follow). It saves when chosen.
+- **Upcoming plans with an override**: each later plan given a plot, by date,
+  with **×** to hand it back to the default.
+- **Another plan…** lists the upcoming plans the slot editor's plan switcher
+  lists (the next two months, every service type the Plan tab enables); pick
+  one, then its plot.
+
+With Planning Center not connected the card says so and offers no plan.
+
+Deleting a plot that plans use hands those plans back to the default, and the
+confirm names them first. Deleting a venue takes its plans' overrides with it.
+An override for a plan that has happened is kept, as a record of what the
+room looked like; it no longer shows in the list.
 
 ### Editing a plot
 

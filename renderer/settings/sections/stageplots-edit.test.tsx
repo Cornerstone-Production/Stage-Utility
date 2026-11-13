@@ -14,8 +14,9 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { BackgroundView, Plot, StagePlotsView } from "@main/types/stageplots";
 
-import { plotHeight } from "@main/services/stageplots-doc";
-import { itemsWithin, validateItems } from "@main/services/stageplots-store";
+import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
+import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@main/services/stageplots-store";
+import type { UpcomingPlansDTO } from "@main/types/pco";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
@@ -29,6 +30,9 @@ let sent: { what: string; body: unknown }[] = [];
 /** When set, the next write with this "METHOD path" prefix answers 400 with this error. */
 let refuse: { what: string; error: string } | null = null;
 let ids = 0;
+/** What GET /api/state answers: {} (Planning Center not connected) unless a test sets it. */
+let STATE: unknown = {};
+let UPCOMING: UpcomingPlansDTO = { plans: [], cacheAgeMs: 0 };
 
 function bg(id: string, name: string, extra: Partial<BackgroundView> = {}): BackgroundView {
   return {
@@ -116,6 +120,26 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     Object.assign(p, { items: b.items, version: p.version + 1 });
     return { status: 200, json: { plot: p } };
   }
+  if (method === "PUT" && path === "/api/stageplots/overrides") {
+    // The server's own reading of the body and its own rule, never a canned answer.
+    const change = readOverrideChange(body);
+    if ("problem" in change) return { status: 400, json: { error: change.problem } };
+    const next = applyOverride({ ...DOC, backgrounds: [] }, change);
+    if ("problem" in next) return { status: next.status, json: { error: next.problem } };
+    DOC.overrides = next.doc.overrides;
+    return { status: 200, json: DOC };
+  }
+  if (method === "DELETE" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
+    const p = DOC.plots.find((x) => x.id === m![1])!;
+    const v = venue(p.venueId);
+    if (v.defaultPlotId === p.id) return { status: 409, json: { error: "this is the venue's default plot" } };
+    // As the route does: the plot, its place in its venue, and the overrides naming it.
+    const clearedPlans = overridesOfPlot(DOC, p.id).map((o) => o.planId);
+    DOC.plots = DOC.plots.filter((x) => x.id !== p.id);
+    v.plotIds = v.plotIds.filter((x) => x !== p.id);
+    DOC.overrides = DOC.overrides.filter((o) => o.plotId !== p.id);
+    return { status: 200, json: { ok: true, clearedPlans } };
+  }
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
     Object.assign(p, body, { version: p.version + 1 });
@@ -131,7 +155,10 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const method = init?.method ?? "GET";
   let status = 200;
   let json: unknown = DOC;
-  if (!u.pathname.startsWith("/api/stageplots")) return { ok: true, status: 200, statusText: "OK", json: async () => ({}), text: async () => "{}" };
+  if (!u.pathname.startsWith("/api/stageplots")) {
+    const other = u.pathname === "/api/state" ? STATE : u.pathname === "/api/plans/upcoming" ? UPCOMING : {};
+    return { ok: true, status: 200, statusText: "OK", json: async () => other, text: async () => JSON.stringify(other) };
+  }
   if (method !== "GET") {
     const raw = init?.body;
     const body = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -154,6 +181,10 @@ const { StagePlotsEdit } = await import("./stageplots-edit.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { itemRenderProbe } = await import("../../main/stageplots/plot-items.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
+const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
+const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 
 /** A PDF as the page picker sees it: three pages, each rendered to a labelled blob. */
 const rendered: string[] = [];
@@ -173,12 +204,21 @@ const fakePdf = async () => {
   };
 };
 
-async function mount() {
+/** The edit page, and with `viewer` an open /stageplots beside it, as two browsers would have. */
+async function mount({ viewer = false }: { viewer?: boolean } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
-    render(React.createElement(React.Fragment, null, React.createElement(StagePlotsEdit, { openPdf: fakePdf }), React.createElement(ConfirmHost)));
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client },
+        React.createElement(StagePlotsEdit, { openPdf: fakePdf }),
+        React.createElement(ConfirmHost),
+        viewer ? React.createElement("div", { "data-testid": "viewer" }, React.createElement(StagePlotsPage)) : null,
+      ),
+    );
   });
-  await settle();
-  await settle();
+  for (let i = 0; i < 4; i++) await settle();
 }
 
 async function click(el: Element) {
@@ -203,6 +243,9 @@ const writes = () => sent.map((s) => s.what);
 
 beforeEach(() => {
   DOC = doc();
+  STATE = {};
+  UPCOMING = { plans: [], cacheAgeMs: 0 };
+  localStorage.clear();
   sent = [];
   refuse = null;
   rendered.length = 0;
@@ -213,6 +256,7 @@ afterEach(async () => {
   cleanup();
   await settle();
   resetReplayCache();
+  resetStageState();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 
@@ -788,3 +832,179 @@ describe("the plot editor", () => {
     assert.match(document.body.textContent!, /This plot changed elsewhere/);
   });
 });
+
+describe("the This week card", () => {
+  // Dates far ahead, so "upcoming" holds whatever day the suite runs on;
+  // 15, 22 and 29 Nov 2099 are Sundays.
+  const LIVE = "2099-11-15T15:00:00Z";
+  const upcoming = (planId: string, sortDate: string) => ({ serviceTypeId: "st-1", serviceTypeName: "Service One", planId, title: "Week", sortDate, dates: null, isCurrent: false });
+
+  function connected() {
+    STATE = { ...DEFAULT_STAGE_STATE, pcoConfigured: true, serviceTypeId: "st-1", planId: "plan-15", planDates: "November 15, 2099", timezone: "America/Chicago" };
+    UPCOMING = { plans: [upcoming("plan-15", LIVE), upcoming("plan-22", "2099-11-22T15:00:00Z"), upcoming("plan-29", "2099-11-29T15:00:00Z")], cacheAgeMs: 0 };
+    DOC.venues[0].plotIds.push("p-3");
+    DOC.plots.push(plot("p-3", "v-1", "Baptism"));
+    // Another venue's plots must never be offered here.
+    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    DOC.plots.push(plot("p-9", "v-2", "Elsewhere"));
+  }
+  const thisWeek = () => card("This week");
+  const planSelect = () => within(thisWeek()).getByLabelText("Plot for this plan") as HTMLSelectElement;
+  const options = (el: HTMLSelectElement) => [...el.options].map((o) => o.textContent);
+  const rows = () =>
+    within(thisWeek())
+      .queryAllByRole("listitem")
+      .map((li) => li.textContent);
+  async function choose(el: HTMLSelectElement, value: string) {
+    await act(async () => {
+      fireEvent.change(el, { target: { value } });
+    });
+    for (let i = 0; i < 3; i++) await settle();
+  }
+
+  test("choosing Baptism for the live plan saves the override and the viewer badge changes", async () => {
+    connected();
+    localStorage.setItem(LAST_VENUE_KEY, "v-1");
+    await mount({ viewer: true });
+    const viewer = screen.getByTestId("viewer");
+    assert.equal(within(viewer).getByTestId("plan-badge").textContent, "Default");
+    assert.match(within(thisWeek()).getByText(/^Plan/).textContent!, /Plan · Sun 15 Nov/);
+    assert.equal(planSelect().value, "");
+    await choose(planSelect(), "p-3");
+    assert.deepEqual(sent.at(-1), { what: "PUT /api/stageplots/overrides", body: { planId: "plan-15", venueId: "v-1", plotId: "p-3", planDate: LIVE } });
+    assert.deepEqual(DOC.overrides, [{ planId: "plan-15", venueId: "v-1", plotId: "p-3", planDate: "2099-11-15T15:00:00.000Z" }]);
+    assert.equal(planSelect().value, "p-3");
+    assert.equal(within(viewer).getByTestId("plan-badge").textContent, "For this plan · Sun 15 Nov");
+    assert.equal(within(viewer).getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent, "Baptism");
+    // And back.
+    await choose(planSelect(), "");
+    assert.deepEqual((sent.at(-1)?.body as { plotId: unknown }).plotId, null);
+    assert.deepEqual(DOC.overrides, []);
+    assert.equal(within(viewer).getByTestId("plan-badge").textContent, "Default");
+  });
+
+  test("the select lists only this venue's plots, the default as Default", async () => {
+    connected();
+    await mount();
+    assert.deepEqual(options(planSelect()), ["Default (Standard)", "Special", "Baptism"]);
+  });
+
+  test("× removes an override", async () => {
+    connected();
+    DOC.overrides = [{ planId: "plan-22", venueId: "v-1", plotId: "p-2", planDate: "2099-11-22T15:00:00.000Z" }];
+    await mount();
+    assert.deepEqual(rows(), ["Sun 22 NovSpecial"]);
+    await click(within(thisWeek()).getByRole("button", { name: "Use the default for Sun 22 Nov" }));
+    assert.deepEqual(sent.at(-1), { what: "PUT /api/stageplots/overrides", body: { planId: "plan-22", venueId: "v-1", plotId: null, planDate: null } });
+    assert.deepEqual(DOC.overrides, []);
+    assert.deepEqual(rows(), []);
+    assert.ok(within(thisWeek()).getByText("None."));
+  });
+
+  test("the list holds this venue's upcoming overrides, the live plan aside (it is the select): no past plan, none of another venue's, an undated one named from the plan list", async () => {
+    connected();
+    DOC.overrides = [
+      { planId: "plan-15", venueId: "v-1", plotId: "p-3", planDate: LIVE },
+      { planId: "plan-old", venueId: "v-1", plotId: "p-2", planDate: "2000-01-02T15:00:00.000Z" },
+      { planId: "plan-22", venueId: "v-2", plotId: "p-9", planDate: "2099-11-22T15:00:00.000Z" },
+      { planId: "plan-29", venueId: "v-1", plotId: "p-3", planDate: null },
+      { planId: "plan-22", venueId: "v-1", plotId: "p-2", planDate: "2099-11-22T15:00:00.000Z" },
+    ];
+    await mount();
+    // plan-29 has no stored date: the upcoming list names it.
+    assert.deepEqual(rows(), ["Sun 22 NovSpecial", "Sun 29 NovBaptism"]);
+    assert.equal(planSelect().value, "p-3");
+  });
+
+  test("another upcoming plan can be given its own plot", async () => {
+    connected();
+    await mount();
+    const another = within(thisWeek()).getByLabelText("Give another plan its own plot") as HTMLSelectElement;
+    // The live plan is the select above, not a choice here.
+    assert.deepEqual(options(another).slice(1), ["Sun 22 Nov · Service One", "Sun 29 Nov · Service One"]);
+    await choose(another, "plan-29");
+    const plotFor = within(thisWeek()).getByLabelText("Plot for the plan being added") as HTMLSelectElement;
+    assert.deepEqual(options(plotFor).slice(1), ["Special", "Baptism"]);
+    await choose(plotFor, "p-2");
+    assert.deepEqual(sent.at(-1), { what: "PUT /api/stageplots/overrides", body: { planId: "plan-29", venueId: "v-1", plotId: "p-2", planDate: "2099-11-29T15:00:00Z" } });
+    assert.deepEqual(rows(), ["Sun 29 NovSpecial"]);
+  });
+
+  test("Another plan offers upcoming plans only, never one from the last few days", async () => {
+    connected();
+    UPCOMING = { ...UPCOMING, plans: [upcoming("plan-old", "2000-01-02T15:00:00Z"), ...UPCOMING.plans] };
+    await mount();
+    const another = within(thisWeek()).getByLabelText("Give another plan its own plot") as HTMLSelectElement;
+    assert.deepEqual(options(another).slice(1), ["Sun 22 Nov · Service One", "Sun 29 Nov · Service One"]);
+  });
+
+  test("two plans on one day are told apart by their time, in the card and in the delete confirm", async () => {
+    connected();
+    UPCOMING = {
+      ...UPCOMING,
+      plans: [upcoming("plan-15", LIVE), upcoming("plan-22a", "2099-11-22T15:00:00Z"), upcoming("plan-22b", "2099-11-22T17:00:00Z")],
+    };
+    DOC.overrides = [{ planId: "plan-22a", venueId: "v-1", plotId: "p-2", planDate: "2099-11-22T15:00:00.000Z" }];
+    await mount();
+    // 15:00 and 17:00 UTC are 9:00 and 11:00 in Chicago.
+    assert.deepEqual(rows(), ["Sun 22 Nov 9:00Special"]);
+    const another = within(thisWeek()).getByLabelText("Give another plan its own plot") as HTMLSelectElement;
+    assert.deepEqual(options(another).slice(1), ["Sun 22 Nov 11:00 · Service One"]);
+    await click(tabs()[1]);
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    assert.match(screen.getByRole("alertdialog").textContent!, /go back to the default plot: Sun 22 Nov 9:00\./);
+  });
+
+  test("with the plan list unavailable the card says why other plans are not offered", async () => {
+    connected();
+    UPCOMING = { ...UPCOMING, unavailable: "Planning Center returned 503" };
+    await mount();
+    assert.ok(within(thisWeek()).getByText("Planning Center is unreachable; other plans can't be listed."));
+    assert.equal(within(thisWeek()).queryByLabelText("Give another plan its own plot"), null);
+  });
+
+  test("deleting a plot clears its overrides, and the confirm names the plans", async () => {
+    connected();
+    DOC.overrides = [
+      { planId: "plan-15", venueId: "v-1", plotId: "p-2", planDate: LIVE },
+      { planId: "plan-22", venueId: "v-1", plotId: "p-2", planDate: "2099-11-22T15:00:00.000Z" },
+      { planId: "plan-29", venueId: "v-1", plotId: "p-3", planDate: null },
+    ];
+    await mount();
+    await click(tabs()[1]);
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /The 2 plans using it go back to the default plot: Sun 15 Nov, Sun 22 Nov\./);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.ok(writes().includes("DELETE /api/stageplots/plots/p-2"));
+    assert.deepEqual(
+      DOC.overrides.map((o) => o.planId),
+      ["plan-29"],
+    );
+  });
+
+  test("a plot no plan uses deletes with the plain confirm", async () => {
+    connected();
+    await mount();
+    await click(tabs()[1]);
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    assert.doesNotMatch(screen.getByRole("alertdialog").textContent!, /plan/);
+  });
+
+  test("with Planning Center not connected it says so, and offers no plan", async () => {
+    await mount();
+    assert.ok(within(thisWeek()).getByText("Connect Planning Center to give a plan its own plot."));
+    assert.equal(within(thisWeek()).queryByLabelText("Plot for this plan"), null);
+  });
+
+  test("with no plan live or next it says so", async () => {
+    connected();
+    STATE = { ...(STATE as object), planId: null, planDates: null };
+    await mount();
+    assert.ok(within(thisWeek()).getByText("No plan is live or coming up."));
+  });
+});
+

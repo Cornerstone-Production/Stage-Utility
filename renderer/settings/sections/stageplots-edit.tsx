@@ -1,11 +1,12 @@
 // stageplots-edit.tsx — /stageplots/edit: venues, backgrounds, plots and the
 // plot editor.
 //
-// Venues and Backgrounds down the left; the selected venue's plots as tabs, a
-// toolbar (undo and redo, zoom, background, fade, print, which prints the
-// canvas as it stands, unsaved changes included), and the work area:
-// the palette, the canvas with its legend under it, and the inspector for the
-// selected item. Structural changes (venues, backgrounds, plots, a plot's
+// Venues, Backgrounds and This week (the plot the live plan, and any other
+// upcoming plan, shows instead of the default) down the left; the selected
+// venue's plots as tabs, a toolbar (undo and redo, zoom, background, fade,
+// print, which prints the canvas as it stands, unsaved changes included), and
+// the work area: the palette, the canvas with its legend under it, and the
+// inspector for the selected item. Structural changes (venues, backgrounds, plots, a plot's
 // background and fade) save at once and broadcast to every open /stageplots;
 // a failed save says so beside the control that made it.
 //
@@ -18,7 +19,7 @@
 // the version is. Leaving the page, or switching plot or venue, with unsaved
 // changes asks first.
 
-import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
@@ -44,7 +45,7 @@ import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, ty
 import { round1 } from "../../main/stageplots/geometry";
 import { PlotLegend } from "../../main/stageplots/plot-legend";
 import { PrintControl } from "../../main/stageplots-print";
-import { plotHeight } from "@main/services/stageplots-doc";
+import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
@@ -54,6 +55,9 @@ import { StagePlotsInspector } from "./stageplots-inspector";
 import { PALETTE_ICONS_PX, PALETTE_PX, StagePlotsPalette } from "./stageplots-palette";
 import { PlotTabs } from "./stageplots-plot-tabs";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
+import { useCurrentPlan } from "../../main/stageplots/plan-following";
+import { planNamer } from "./plan-date-label";
+import { ThisWeekCard } from "./stageplots-this-week-card";
 import { VenuesCard } from "./stageplots-venues-card";
 
 /** The narrowest the canvas may be before the palette gives up its names. */
@@ -409,6 +413,10 @@ function EditorBody({
   openPdf?: (bytes: ArrayBuffer) => Promise<OpenPdf>;
 }) {
   const height = plotHeight(backgroundOf(doc, plot));
+  // The plan and the names plans go by, once, for the This week card and the
+  // plot delete confirm alike.
+  const plan = useCurrentPlan(doc.overrides);
+  const planName = useMemo(() => planNamer(plan.plans, plan.timeZone, doc.overrides), [plan.plans, plan.timeZone, doc.overrides]);
   const [draft, dispatch] = useReducer(editorReducer, null, () => initialEditorState(plot?.items ?? [], height));
   /** The version of the plot the draft was loaded at: what Save sends. */
   const [base, setBase] = useState(plot?.version ?? 0);
@@ -567,6 +575,7 @@ function EditorBody({
             save={save}
           />
           <BackgroundsCard doc={doc} selectedId={backgroundId} onSelect={onBackground} save={save} {...(openPdf ? { openPdf } : {})} />
+          {venue && <ThisWeekCard doc={doc} venue={venue} plan={plan} nameOf={planName} save={save} />}
         </aside>
         <div className="min-w-0">
           {!venue ? (
@@ -578,6 +587,7 @@ function EditorBody({
                 plots={plots}
                 selected={plot}
                 beforeSwitch={confirmLeave}
+                plansUsing={(plotId) => overridesOfPlot(doc, plotId).map(planName)}
                 onSelect={(plotId) => {
                   if (plotId === plot?.id) return;
                   void confirmLeave().then((ok) => ok && onPlot({ venueId: venue.id, plotId }));
