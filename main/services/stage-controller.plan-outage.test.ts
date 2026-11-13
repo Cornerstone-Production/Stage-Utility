@@ -41,6 +41,7 @@ const ctl = stageController as unknown as {
   plansOutage: InstanceType<typeof OutageLog>;
   autoAdvancedFromPlanId: string | null;
   rolloverRetry: unknown;
+  rolloverWaitSaidFor: string | null;
 };
 const pco = pcoService as unknown as Record<string, unknown>;
 const real = {
@@ -71,6 +72,7 @@ beforeEach(() => {
   ctl.state = { ...ctl.state, allowedServiceTypeIds: [], serviceTypeId: "1", planId: "p-held", planTitle: "Held plan", planDates: "Nov 16", planMode: "auto" };
   ctl.autoAdvancedFromPlanId = null;
   ctl.rolloverRetry = null;
+  ctl.rolloverWaitSaidFor = null;
   ctl.lastLive = null;
   ctl.liveStale = false;
   // Settles at once, so a recovery is said on the first good read.
@@ -179,6 +181,17 @@ describe("selectGlobalNextPlan during an outage", () => {
     await stageController.selectGlobalNextPlan();
     assert.equal(ctl.state.planId, "p-wed", "a plan live now on another type did not displace the held plan");
     assert.equal(ctl.state.serviceTypeId, "2");
+  });
+
+  it("holds when another type's plan is parked past its SERVICE END", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    pco.listUpcomingPlans = async (_a: string, _s: string, typeId: string) => {
+      if (typeId === "1") throw new Error("Planning Center returned 503");
+      return [WED];
+    };
+    pco.getLive = async () => ({ ...liveReading("item"), serviceEnded: true });
+    await stageController.selectGlobalNextPlan();
+    assert.equal(ctl.state.planId, "p-held", "a service already over on another type displaced the held plan");
   });
 
   it("holds when another type's plan is in an item but its service is days away", async (t) => {
@@ -415,6 +428,82 @@ describe("a rollover that cannot move", () => {
     clock.now += 1000;
     await stageController.maybeAutoAdvance();
     assert.equal(ctl.state.planId, "p-wed", "the rollover waited out its backoff after Planning Center answered again");
+  });
+});
+
+// While Planning Center reports a service live, nothing time-based may stop it
+// (CLAUDE.md). The rollover and the scan both judged "over" by the planned end
+// plus an hour, so a service running long was switched away from mid-service.
+describe("a service running past its planned end", () => {
+  const LONG_END = () => new Date(Date.now() - 90 * 60_000).toISOString();
+  const STARTED = () => new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+  const HELD = { id: "p-held", title: "Held plan", seriesTitle: null, sortDate: "2026-11-16T00:00:00Z", dates: "Nov 16" };
+
+  beforeEach(() => {
+    pco.getServiceEnd = async (_a: string, _s: string, _t: string, planId: string) => (planId === "p-held" ? LONG_END() : null);
+    pco.listUpcomingPlans = async (_a: string, _s: string, typeId: string) => (typeId === "1" ? [HELD] : [WED]);
+  });
+
+  it("is not rolled over from while Planning Center reports it live, and is once it ends", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    let typeReads = 0;
+    pco.listServiceTypes = async () => {
+      typeReads++;
+      return [{ id: "1", name: "Sunday" }, { id: "2", name: "Wednesday" }];
+    };
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.planId, "p-held", "a service still live ninety minutes past its planned end was rolled over from");
+    assert.equal(typeReads, 0, "a rollover was attempted from a service Planning Center reports live");
+    ctl.lastLive = liveReading("none", STARTED());
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.planId, "p-wed", "the service ended and the rollover never came");
+  });
+
+  it("is rolled over from once parked past its SERVICE END, though still in an item", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    // The normal end of a service: the operator parks on the trailing buffer
+    // item below SERVICE END and Planning Center Live stays in it.
+    ctl.lastLive = { ...liveReading("item", STARTED()), serviceEnded: true };
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.planId, "p-wed", "a service parked past its SERVICE END kept the screens on it");
+  });
+
+  it("says once, not every tick, that the rollover waits on a live service", async (t) => {
+    const lines = captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = { ...liveReading("item", STARTED()), currentItemTitle: "Benediction" };
+    await stageController.maybeAutoAdvance();
+    await stageController.maybeAutoAdvance();
+    await stageController.maybeAutoAdvance();
+    const said = lines.filter((l) => l.includes("[stage-controller] auto rollover waits: plan p-held ended"));
+    assert.equal(said.length, 1, `the wait was said ${said.length} times over three ticks: ${JSON.stringify(said)}`);
+    assert.match(said[0]!, /ended 90 min ago, Planning Center still reports it live \(item Benediction\)/);
+  });
+
+  it("is not rolled over from on a stale live reading still near now", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    ctl.liveStale = true;
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.planId, "p-held", "a stale reading of a live service let the clock roll it over");
+  });
+
+  it("is not passed over by a refresh while it is live", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    await stageController.refresh(false);
+    assert.equal(ctl.state.planId, "p-held", "the refresh skipped a live service as ended and followed the next plan");
+  });
+
+  it("is held, not treated as over, while its type cannot be read", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    pco.listUpcomingPlans = async (_a: string, _s: string, typeId: string) => {
+      if (typeId === "1") throw new Error("Planning Center returned 503");
+      return [WED];
+    };
+    await stageController.selectGlobalNextPlan();
+    assert.equal(ctl.state.planId, "p-held", "a live service was treated as over because its planned end had passed");
   });
 });
 

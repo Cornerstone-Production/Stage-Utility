@@ -65,6 +65,15 @@ nearest one, skipping a plan whose service ended more than an hour ago. The live
 tick does not choose a plan: asking every other type whether it is live would be a
 Planning Center read per type per second.
 
+A plan whose service Planning Center still reports running, in one of its items
+and not parked past its SERVICE END header, is never treated as over: neither the
+rollover nor a refresh moves off it, however far past its planned end the service
+runs. That holds on a stale live reading too, while its service is within 12 hours
+of now. It is the same test the recorders use. The rollover comes once Live leaves
+the plan's items or reaches SERVICE END, with no time limit; while it waits, it
+says so once per plan: `[stage-controller] auto rollover waits: plan <id> ended
+<N> min ago, Planning Center still reports it live (item <title>)`.
+
 A read that fails does not move the plan:
 
 - When no type can be read, or the types that answered have no plans while one

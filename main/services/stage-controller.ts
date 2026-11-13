@@ -58,7 +58,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
-import { inLiveItem, isServiceNearNow, shouldRecordLive } from "./live-service-gate.js";
+import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { isStringList } from "./is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
@@ -2172,6 +2172,8 @@ export class StageController {
    *  ROLLOVER_RETRY_MAX_MS. The live poller ticks every second. */
   private static readonly ROLLOVER_RETRY_MS = 60 * 1000;
   private static readonly ROLLOVER_RETRY_MAX_MS = 15 * 60 * 1000;
+  /** The plan the "auto rollover waits" line was last said for. */
+  private rolloverWaitSaidFor: string | null = null;
   /** A rollover from `planId` that moved nothing, and when to try it again. */
   private rolloverRetry: { planId: string; at: number; delayMs: number } | null = null;
 
@@ -2187,7 +2189,6 @@ export class StageController {
     if (this.autoAdvancedFromPlanId === this.state.planId) return;
     const retry = this.rolloverRetry?.planId === this.state.planId ? this.rolloverRetry : null;
     if (retry && Date.now() < retry.at) return;
-
     const endIso = await pcoService
       .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId)
       .catch(() => null);
@@ -2195,6 +2196,21 @@ export class StageController {
     const end = Date.parse(endIso);
     if (!Number.isFinite(end)) return;
     if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
+
+    // A service Planning Center still reports running is not over, however long
+    // past its planned end it runs: nothing time-based may stop it. No time limit,
+    // as the recorders have none, so it is said once per plan instead.
+    if (this.followedPlanLive()) {
+      if (this.rolloverWaitSaidFor !== this.state.planId) {
+        this.rolloverWaitSaidFor = this.state.planId;
+        const live = this.lastLive!;
+        const item = live.currentItemTitle ?? live.label ?? live.currentItemId;
+        console.log(
+          `[stage-controller] auto rollover waits: plan ${scrub(this.state.planId)} ended ${scrub(Math.round((Date.now() - end) / 60_000))} min ago, Planning Center still reports it live (item ${scrub(item)})`,
+        );
+      }
+      return;
+    }
 
     console.log(
       `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
@@ -2215,10 +2231,18 @@ export class StageController {
     console.warn(`[stage-controller] auto rollover — still on plan ${scrub(from)}; trying again in ${scrub(Math.round(delayMs / 1000))} s`);
   }
 
+  /** Whether Planning Center reports the followed plan live: in one of its
+   *  items, from a current reading, or from a stale one while its service is near
+   *  now (a failing read is not evidence the service stopped). */
+  private followedPlanLive(): boolean {
+    return this.lastLive !== null && serviceRunning(this.lastLive, { stale: this.liveStale });
+  }
+
   /** Whether the followed plan's service ended more than the rollover grace ago.
    *  An end that cannot be read is not over: the plan is not dropped on a guess. */
   private async followedPlanOver(): Promise<boolean> {
     if (!this.state.serviceTypeId || !this.state.planId) return false;
+    if (this.followedPlanLive()) return false;
     const endIso = await pcoService
       .getServiceEnd(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId, this.state.planId)
       .catch(() => null);
@@ -2336,7 +2360,10 @@ export class StageController {
             .catch(() => null);
           if (endIso) {
             const end = Date.parse(endIso);
-            if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
+            // Never the followed plan while Planning Center reports it live: a
+            // service running long is not finished, whatever its planned end.
+            const liveNow = p.id === this.state.planId && type.id === this.state.serviceTypeId && this.followedPlanLive();
+            if (!liveNow && Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
               continue; // finished plan still lingering in filter=future — skip it
             }
           }
@@ -2452,7 +2479,7 @@ export class StageController {
   private async liveElsewhere(answered: Candidate[]): Promise<{ candidate: Candidate | null; why: string }> {
     // A stale reading counts while its service is near now: the followed type
     // failing is exactly when its live read fails too.
-    if (this.lastLive && inLiveItem(this.lastLive) && (!this.liveStale || isServiceNearNow(this.lastLive))) {
+    if (this.followedPlanLive()) {
       return { candidate: null, why: "it is live, so it stays" };
     }
     const unread: string[] = [];
@@ -2462,7 +2489,7 @@ export class StageController {
         const live = await pcoService.getLive(this.pcoAppId!, this.pcoSecret!, c.type.id, c.plan.id, this.pcoCountdownTarget);
         // What a recorder would start on: in an item, and near now. Stepping
         // through next week's plan in Planning Center Live is not a service.
-        if (shouldRecordLive(live, false)) return { candidate: c, why: "" };
+        if (serviceRunning(live) && shouldRecordLive(live, false)) return { candidate: c, why: "" };
       } catch (err) {
         // No reading is no positive information: the plan holds, and the line
         // that says so names what could not be read.
