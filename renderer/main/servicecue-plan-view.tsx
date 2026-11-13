@@ -18,6 +18,7 @@ import { rundownKey } from "@main/types/servicecue-publish";
 import { RUNDOWN_NOT_SENT, SERVICES_NOT_SENT, notPublishedYet } from "../lib/public-mode";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
+import { appZoneOf } from "../lib/app-zone";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
@@ -268,7 +269,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         appLogo={state?.appLogo}
         appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
-        timeZone={state?.timezone}
+        // The same zone as the plan list beside it, so the page reads one zone.
+        timeZone={appZoneOf(state)}
         afterIdentity={
           resolvedTypeId && pcoConfigured ? (
             <ServiceCuePlanNav
@@ -280,7 +282,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               followedPlanId={followedPlanId}
               following={following}
               fallbackLabel={[rundown?.planTitle ?? rundown?.planSeriesTitle, rundown?.planDates].filter(Boolean).join(" · ") || null}
-              timeZone={rundown?.timeZone ?? state?.timezone ?? null}
+              timeZone={rundown?.timeZone ?? appZoneOf(state)}
               onSelect={(id) => setPlanParam(id)}
               onOpenElsewhere={(typeId, typeName, planId) =>
                 navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout ? layoutSlug(layout) : undefined), { plan: planId }, { keepSearch: true })

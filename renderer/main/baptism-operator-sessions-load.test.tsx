@@ -162,7 +162,7 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
   };
   let sessionCalls = 0;
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+  globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
@@ -171,7 +171,6 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
     }
     if (url.includes("/api/history/live")) return ok({ live: false });
     if (url.includes("/api/baptism/rebuild")) {
-      void init;
       return ok({ rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: ["bap-past-1"] });
     }
     return ok({});

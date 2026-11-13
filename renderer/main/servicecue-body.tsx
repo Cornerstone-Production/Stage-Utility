@@ -206,7 +206,7 @@ export function ServiceCueHeader({
    *  Defaults true so a caller that does not know about it looks unchanged. */
   appLogoMonochrome?: boolean;
   now: number;
-  /** The zone the clock reads in: the app's own, unset = the viewer's. */
+  /** The zone the clock reads in: the app's own (`appZoneOf`), unset = the viewer's. */
   timeZone?: string | null;
   nav?: ReactNode;
   /** Right after the plan's title block: the page's plan switcher. */

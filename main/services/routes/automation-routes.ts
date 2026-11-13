@@ -3,6 +3,7 @@
 // Every route must finish responding before it returns (see RouteCtx).
 
 import { errorMessage } from "../errors.js";
+import { isRecord } from "../is-record.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
 import { invokeAction } from "../action-invoke.js";
@@ -50,6 +51,86 @@ function issuesFor(rule: RuleStepsLike): RuleIssue[] {
   return ruleIssues(rule, specLookup);
 }
 
+/** One trigger, condition or action as the engine reads it: a string `id` and a
+ *  params object. A missing `params` is `{}`; anything else wrong is the sentence. */
+function stepOf(field: string, v: unknown): { id: string; params: Record<string, unknown> } | string {
+  if (!isRecord(v) || typeof v.id !== "string" || v.id === "") {
+    return `body.${field} must be an object with a string id`;
+  }
+  if (v.params === undefined) return { ...v, id: v.id, params: {} };
+  if (!isRecord(v.params)) return `body.${field}.params must be an object`;
+  return { ...v, id: v.id, params: v.params };
+}
+
+/**
+ * The steps of a rule body, checked and normalised BEFORE anything reads them:
+ * the engine, ruleIssues and the validators all assume trigger and action are
+ * objects and conditions an array, so a body that is not is the caller's
+ * mistake, a 400 here, not a TypeError out of them.
+ *
+ * Only the keys the body carries are judged, so a PATCH is held to what it
+ * changes. `conditions` is optional on a create, per docs/automation.md ("zero or
+ * more"): `forCreate` saves a missing one as [].
+ *
+ * One of the two places a rule's step shape is checked: rulesRestoreCheck in
+ * automation-store.ts is the other, for a restored file. Change one, change both.
+ */
+function normalizeSteps(
+  body: Record<string, unknown>,
+  forCreate: boolean,
+): { body: Record<string, unknown> } | { problem: string } {
+  const out = { ...body };
+  for (const key of ["trigger", "action"] as const) {
+    if (!(key in body)) continue;
+    const step = stepOf(key, body[key]);
+    if (typeof step === "string") return { problem: step };
+    out[key] = step;
+  }
+  if ("conditions" in body) {
+    if (!Array.isArray(body.conditions)) return { problem: "body.conditions must be an array" };
+    const steps = [];
+    for (const [i, c] of body.conditions.entries()) {
+      const step = stepOf(`conditions[${i}]`, c);
+      if (typeof step === "string") return { problem: step };
+      steps.push(step);
+    }
+    out.conditions = steps;
+  } else if (forCreate) {
+    out.conditions = [];
+  }
+  return { body: out };
+}
+
+/**
+ * A request body that must be a JSON object, or null after answering 400. Every
+ * route here reads fields off it, and `5` or `null` is valid JSON that throws on
+ * the first read.
+ */
+async function readObjectBody(req: RouteCtx["req"], res: RouteCtx["res"]): Promise<Record<string, unknown> | null> {
+  const body = await readBody(req);
+  if (!isRecord(body)) {
+    error(res, "body must be a JSON object");
+    return null;
+  }
+  return body;
+}
+
+/** A rule body read, object-checked and step-checked in one: null after a 400. */
+async function readRuleBody(
+  req: RouteCtx["req"],
+  res: RouteCtx["res"],
+  forCreate: boolean,
+): Promise<Record<string, unknown> | null> {
+  const raw = await readObjectBody(req, res);
+  if (!raw) return null;
+  const checked = normalizeSteps(raw, forCreate);
+  if ("problem" in checked) {
+    error(res, checked.problem);
+    return null;
+  }
+  return checked.body;
+}
+
 /** POST and PATCH share this: a body with unresolved issues is force-saved OFF
  *  rather than as asked, per docs/automation.md — "saved turned off, it runs
  *  once these are fixed". */
@@ -87,7 +168,8 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       }
       console.log(`[cues] action/invoke by ${scrub(caller.label)}`);
     }
-    const body = await readBody(req) as Record<string, unknown>;
+    const body = await readObjectBody(req, res);
+    if (!body) return;
     if (typeof body.actionId !== "string") {
       error(res, "body.actionId (string) required");
       return;
@@ -198,7 +280,8 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/automation/rules") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readRuleBody(req, res, true);
+    if (!body) return;
     if (typeof body.name !== "string" || !body.trigger || !body.action) {
       error(res, "body.name, body.trigger and body.action are required");
       return;
@@ -233,7 +316,8 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
 
   const idMatch = pathname.match(/^\/api\/automation\/rules\/([^/]+)$/);
   if (method === "PATCH" && idMatch) {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readRuleBody(req, res, false);
+    if (!body) return;
     const existing = automationEngine.listRules().find((r) => r.id === idMatch[1]);
     if (!existing) {
       error(res, `Automation: unknown rule ${idMatch[1]}`, 400);
@@ -305,7 +389,8 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       }
       caller = token.label;
     }
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readObjectBody(req, res);
+    if (!body) return;
     const result = await automationEngine.runNow(runMatch[1], { caller, confirmed: body.confirmed === true });
     if (result.status === 200) json(res, result.body);
     else error(res, result.body.error, result.status);
@@ -317,7 +402,8 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     return;
   }
   if (method === "POST" && pathname === "/api/automation/settings") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readObjectBody(req, res);
+    if (!body) return;
     const patch: Record<string, boolean> = {};
     if (typeof body.simulate === "boolean") patch.simulate = body.simulate;
     if (typeof body.disarmed === "boolean") patch.disarmed = body.disarmed;

@@ -59,6 +59,11 @@ import { useResyncOn } from "../lib/use-resync-on";
  *              so each caller writes its own invoke call, with its channel and
  *              the type it answers, in one place.
  * @param pushChannel  SSE channel carrying the live frames.
+ * @param options.resubscribeKey  bump it to open a fresh window: re-subscribe and
+ *   re-read, ordering intact. For a caller whose read has no argument to change
+ *   when the answer's scope does (wireless: connections added or removed). A real
+ *   input, not a `void rev` inside `read`: the React Compiler drops that and
+ *   hoists `read`, so nothing would ever re-run this.
  * @param options.clearOnReadFailure  drop back to null when the hydrate fails,
  *   instead of keeping whatever was already there. OFF by default, which is what
  *   every integration status wants: a value that was true a moment ago is better
@@ -111,12 +116,13 @@ export function useStatusChannel<T extends object>(
   read: () => Promise<T | null | undefined>,
   pushChannel: string,
   enabled = true,
-  options: { clearOnReadFailure?: boolean } = {},
+  options: { clearOnReadFailure?: boolean; resubscribeKey?: number } = {},
 ): StatusChannelResult<T> {
   // Destructured, not carried as an object: an options literal is a new object
   // every render, and as an effect dependency that re-subscribes and re-hydrates
   // on every one.
   const clearOnReadFailure = options.clearOnReadFailure ?? false;
+  const resubscribeKey = options.resubscribeKey;
   const [value, setValue] = useState<T | null>(null);
   const [known, setKnown] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -134,7 +140,7 @@ export function useStatusChannel<T extends object>(
   // claim made on a read that had not happened. The two refs below are reset in
   // the effect because only the effect reads them. Every caller memoises `read`,
   // so this does not resync on every render.
-  useResyncOn([enabled, pushChannel, read, clearOnReadFailure], () => {
+  useResyncOn([enabled, pushChannel, read, clearOnReadFailure, resubscribeKey], () => {
     setKnown(false);
     setFailed(false);
   });
@@ -223,7 +229,7 @@ export function useStatusChannel<T extends object>(
     // useCallback). An unmemoised one would re-subscribe and re-hydrate on every
     // render — wasteful, but not wrong: the ordering rule still holds, because a
     // fresh window resets the counter above.
-  }, [enabled, pushChannel, read, clearOnReadFailure]);
+  }, [enabled, pushChannel, read, clearOnReadFailure, resubscribeKey]);
 
   // A disabled hook neither reads nor subscribes, so what it holds from an
   // earlier enabled window is a snapshot nothing is keeping current. Reporting

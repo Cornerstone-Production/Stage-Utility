@@ -14,6 +14,9 @@
 /** An IANA zone name (e.g. "America/Chicago"). */
 export type TimeZone = string;
 
+/** The zone of the clock this code runs on. On the server that is the server's
+ *  clock; in a browser it is the BROWSER's, never the server's. A page wanting
+ *  the server's clock reads `state.hostTimezone` (see renderer/lib/app-zone.ts). */
 export function hostTimeZone(): TimeZone {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";

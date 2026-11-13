@@ -32,7 +32,7 @@ import { errorMessage } from "@main/services/errors";
 
 import { logToServer } from "../../lib/client-log";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { appZoneOf } from "../../settings/sections/history-trends/trends";
+import { appZoneOf } from "../../lib/app-zone";
 import { planDateLabel } from "../../settings/sections/plan-date-label";
 import { useUpcomingPlans } from "../../settings/sections/plan-switcher";
 import { pcoConnected, useStageState } from "../use-stage-state";

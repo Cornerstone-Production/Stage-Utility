@@ -346,3 +346,33 @@ describe("useStatusChannel while disabled", () => {
     assert.equal((seen.value as Dto | null)?.connected, true);
   });
 });
+
+describe("useStatusChannel resubscribeKey", () => {
+  test("a bump opens a fresh window: known resets until the new read answers", async () => {
+    // The old shape re-identified `read`, which reset `known`; a key bump must do
+    // the same, or a caller that gates a claim on `known` (Home's Needs attention,
+    // Mic slots) keeps asserting on the previous window's answer.
+    const second = deferred<Dto | null>();
+    let reads = 0;
+    const read = () => (++reads === 1 ? Promise.resolve({ connected: true, recording: false, rev: 1 }) : second.promise);
+    let bump!: () => void;
+    const seen = { known: false };
+    function Probe(): React.ReactElement {
+      const [key, setKey] = React.useState(0);
+      bump = () => setKey((k) => k + 1);
+      seen.known = useStatusChannel<Dto>(read, "obs:status", true, { resubscribeKey: key }).known;
+      return React.createElement("output", null, String(key));
+    }
+    render(React.createElement(Probe));
+    await settle();
+    assert.equal(seen.known, true, "the first read answered");
+
+    await act(async () => bump());
+    assert.equal(reads, 2, "a bump reads again");
+    assert.equal(seen.known, false, "the new window has not answered yet");
+
+    await act(async () => second.resolve({ connected: true, recording: true, rev: 2 }));
+    await settle();
+    assert.equal(seen.known, true);
+  });
+});
