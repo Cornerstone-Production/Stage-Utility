@@ -188,3 +188,21 @@ describe("spl-recorder: a re-run item gets its own entry", () => {
     assert.ok(second.endedAt, "the live run was left open forever");
   });
 });
+
+// Parking on the trailing buffer item below SERVICE END is how a service ends:
+// Planning Center Live stays in an item, and only serviceEnded says it is over.
+describe("spl-recorder: a reading parked past SERVICE END", () => {
+  it("ends the open record, though Planning Center is still in an item", async () => {
+    const rec = splRecorder as unknown as Held;
+    const now = new Date().toISOString();
+    rec.current = { serviceKey: "st1:plan:svc", serviceDate: now.slice(0, 10), meterId: null, metricKey: null, startedAt: now, endedAt: null, items: [] };
+    rec.currentKey = "st1:plan:svc";
+    rec.lastItemId = "item-9";
+    await splRecorder.onLiveTick({
+      mode: "item", currentItemId: "item-10", label: "Stream buffer", itemType: null, lengthSec: 90,
+      liveStartAt: null, targetAt: null, serverNow: now, currentItemTitle: null, nextItemTitle: null,
+      serviceTimeId: null, serviceTimeStartsAt: now, beforeServiceStart: false, serviceEnded: true,
+    } as never);
+    assert.ok(rec.current?.endedAt, "a reading parked past SERVICE END kept the record open");
+  });
+});

@@ -15,7 +15,7 @@
 import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcastTimeline } from "./history-item-times.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
-import { shouldRecordLive } from "./live-service-gate.js";
+import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub } from "./scrub.js";
 import {
   ServiceRecorder,
@@ -72,7 +72,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
       // `currentItemId` is re-tested here purely so TypeScript narrows it; the
       // recording policy itself lives entirely in shouldRecordLive.
       const open = this.current != null && this.current.endedAt == null;
-      if (live.currentItemId && !live.serviceEnded && shouldRecordLive(live, open)) {
+      if (live.currentItemId && serviceRunning(live) && shouldRecordLive(live, open)) {
         const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
         this.lastLiveAt = Date.now();
         await this.ensureRecord(live, gapSinceLive);

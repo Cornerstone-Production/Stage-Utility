@@ -266,3 +266,18 @@ describe("service-timeline-recorder: what it broadcasts", () => {
     );
   });
 });
+
+// Parking on the trailing buffer item below SERVICE END is how a service ends:
+// Planning Center Live stays in an item, and only serviceEnded says it is over.
+describe("service-timeline-recorder: a reading parked past SERVICE END", () => {
+  it("ends the open record, though Planning Center is still in an item", async () => {
+    const rec = serviceTimelineRecorder as unknown as Held;
+    const now = new Date().toISOString();
+    rec.current = { serviceKey: "st1:plan:svc", startedAt: now, endedAt: null, items: [] };
+    rec.lastItemId = "item-9";
+    await serviceTimelineRecorder.onLiveTick(
+      baseLive({ currentItemId: "item-10", label: "Stream buffer", serviceEnded: true, serviceTimeStartsAt: now }) as never,
+    );
+    assert.ok(rec.current?.endedAt, "a reading parked past SERVICE END kept the record open");
+  });
+});
