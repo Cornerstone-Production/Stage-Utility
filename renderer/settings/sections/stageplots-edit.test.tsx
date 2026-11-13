@@ -37,6 +37,8 @@ let UPCOMING: UpcomingPlansDTO = { plans: [], cacheAgeMs: 0 };
 /** What GET /api/stageplots/patch answers, or a 503 while PATCH_DOWN. */
 let PATCH: PatchFile;
 let PATCH_DOWN = false;
+/** While set, GET /api/stageplots/patch waits for it: a patch that has not answered yet. */
+let PATCH_HOLD: Promise<void> | null = null;
 
 function patchFile(): PatchFile {
   return {
@@ -191,6 +193,7 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   let status = 200;
   let json: unknown = DOC;
   if (u.pathname === "/api/stageplots/patch") {
+    if (PATCH_HOLD) await PATCH_HOLD;
     const [st, body] = PATCH_DOWN ? [503, { error: "patch.json could not be read (EIO)" }] : [200, PATCH];
     return { ok: st < 300, status: st, statusText: String(st), json: async () => body, text: async () => JSON.stringify(body) };
   }
@@ -284,6 +287,7 @@ beforeEach(() => {
   DOC = doc();
   PATCH = patchFile();
   PATCH_DOWN = false;
+  PATCH_HOLD = null;
   STATE = {};
   UPCOMING = { plans: [], cacheAgeMs: 0 };
   localStorage.clear();
@@ -1103,6 +1107,22 @@ describe("linking a connection point to the patch", () => {
     assert.deepEqual(saved.patchLink, { sheetId: "main", deviceId: "sb1", lastName: "SB-1", lastColor: "#0091ff" });
     assert.deepEqual([saved.label, saved.color], ["SB-1", "#0091ff"]);
     assert.ok(banner() === null);
+  });
+
+  test("a picker opened before the patch answers offers the first sheet with devices once it does", async () => {
+    let answer!: () => void;
+    PATCH_HOLD = new Promise((resolve) => (answer = resolve));
+    await mount();
+    await addFromPalette("conn");
+    await click(within(inspector()).getByRole("button", { name: "Link to patch device" }));
+    assert.match(screen.getByTestId("link-pick").textContent!, /Reading the patch sheet…/);
+    await act(async () => answer());
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal((within(inspector()).getByLabelText("Patch sheet") as HTMLSelectElement).value, "main");
+    assert.deepEqual(
+      devices().getAllByRole("option").map((o) => o.textContent),
+      ["Rack AInput Rack32 in · 16 out", "SB-1Snake16 in · 4 out", "FP-3Floor pocket4 in"],
+    );
   });
 
   test("Cancel closes the picker and links nothing", async () => {

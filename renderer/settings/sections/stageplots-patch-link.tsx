@@ -10,10 +10,11 @@
 import { useState } from "react";
 import { LinkIcon } from "lucide-react";
 
-import { PATCH_KIND_LABELS, type PatchDevice, type PatchDeviceKind } from "@main/types/patch";
+import type { PatchDevice } from "@main/types/patch";
 import type { PlotItem } from "@main/types/stageplots";
-import { labelOf, swatchOf, type LinkResolution, type PatchRead } from "@main/services/stageplots-patch-link";
+import { kindLabel, labelOf, patchSheets, swatchOf, type LinkResolution, type PatchRead } from "@main/services/stageplots-patch-link";
 
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../../components/ui";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/cn";
 import type { EditorAction } from "../../main/stageplots/editor-state";
@@ -21,11 +22,10 @@ import { Mono } from "../../main/stageplots/mono";
 import { eyebrow } from "./stageplots-shared";
 
 /** "16 in · 4 out", leaving out a side the device has none of. */
-export function ioText(d: { inputs: number; outputs: number }): string {
+function ioText(d: { inputs: number; outputs: number }): string {
   return [d.inputs > 0 ? `${d.inputs} in` : null, d.outputs > 0 ? `${d.outputs} out` : null].filter(Boolean).join(" · ");
 }
 
-const kindName = (kind: PatchDeviceKind) => PATCH_KIND_LABELS[kind] ?? kind;
 
 /** A link struck through, as the approved mockup draws Unlink: lucide's own unlink breaks the
  *  chain instead, which reads as a different control beside the Link button's chain. */
@@ -51,10 +51,14 @@ function Dot({ color, lost = false }: { color: string | null; lost?: boolean }) 
 const rowClass = "flex items-center gap-2 rounded-lg border border-line bg-surface-raised px-[9px] py-[7px] text-caption1";
 
 function Picker({ item, patch, dispatch, onDone }: { item: PlotItem; patch: PatchRead | null; dispatch: (a: EditorAction) => void; onDone: () => void }) {
-  const sheets = patch?.ok ? patch.file.sheets : [];
-  const [sheetId, setSheetId] = useState(() => (sheets.find((s) => s.devices.length > 0) ?? sheets[0])?.id ?? "");
+  // Read through the same reader the resolver uses: a patch POST /api/patch took may lack
+  // devices or carry a kind that is no kind at all, and the picker must still draw.
+  const sheets = patch?.ok ? patchSheets(patch.file) : [];
+  // The sheet picked, else the first with devices. Derived, not seeded once: a picker opened
+  // before the patch answered has no sheets yet, and must offer the right one when it does.
+  const [sheetId, setSheetId] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const sheet = sheets.find((s) => s.id === sheetId) ?? null;
+  const sheet = sheets.find((s) => s.id === sheetId) ?? sheets.find((s) => s.devices.length > 0) ?? sheets[0] ?? null;
   const device = sheet?.devices.find((d) => d.id === deviceId) ?? null;
 
   const link = (d: PatchDevice) => {
@@ -70,21 +74,22 @@ function Picker({ item, patch, dispatch, onDone }: { item: PlotItem; patch: Patc
   else {
     body = (
       <>
-        <select
-          aria-label="Patch sheet"
-          value={sheetId}
-          onChange={(e) => {
-            setSheetId(e.target.value);
+        <Select
+          value={sheet?.id ?? ""}
+          onValueChange={(v) => {
+            setSheetId(v);
             setDeviceId(null);
           }}
-          className="h-7 w-full rounded-md border border-line-strong bg-field px-1.5 text-footnote text-fg focus:border-focus focus:ring-1 focus:ring-focus focus:outline-none"
         >
-          {sheets.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger aria-label="Patch sheet" className="w-full" />
+          <SelectContent>
+            {sheets.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {sheet && sheet.devices.length > 0 ? (
           <div role="listbox" aria-label="Devices" className="flex max-h-[220px] flex-col gap-px overflow-auto">
             {sheet.devices.map((d) => (
@@ -100,7 +105,7 @@ function Picker({ item, patch, dispatch, onDone }: { item: PlotItem; patch: Patc
                 <Dot color={swatchOf(d.color)} />
                 <span className="min-w-0 truncate">
                   <Mono text={d.name} />
-                  <span className="ml-1.5 text-caption1 text-fg-muted">{kindName(d.kind)}</span>
+                  <span className="ml-1.5 text-caption1 text-fg-muted">{kindLabel(d.kind)}</span>
                 </span>
                 <small className="text-[11px] text-fg-subtle">
                   <Mono text={ioText(d)} />
@@ -164,7 +169,7 @@ export function PatchDeviceField({
 }) {
   const [picking, setPicking] = useState(false);
   if (!item.patchLink) {
-    if (picking) return <Picker key={item.id} item={item} patch={patch} dispatch={dispatch} onDone={() => setPicking(false)} />;
+    if (picking) return <Picker item={item} patch={patch} dispatch={dispatch} onDone={() => setPicking(false)} />;
     return (
       <div className="flex flex-col gap-[5px]">
         <span className={eyebrow}>Patch device</span>
@@ -216,7 +221,7 @@ export function PatchDeviceField({
             <Mono text={item.label || "Unlabelled"} />
           </b>
           <small className="block text-[11px] leading-[14px] text-fg-subtle">
-            {link ? <Mono text={[kindName(link.device.kind), link.sheet, ioText(link.device)].filter(Boolean).join(" · ")} /> : "Reading the patch sheet…"}
+            {link ? <Mono text={[kindLabel(link.device.kind), link.sheet, ioText(link.device)].filter(Boolean).join(" · ")} /> : "Reading the patch sheet…"}
           </small>
         </span>
         {unlink}

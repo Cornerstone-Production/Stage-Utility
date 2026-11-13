@@ -10,7 +10,7 @@
 // depend on the plan. A patch that cannot be read, or a sheet or device that is gone, leaves
 // the point "unlinked" with the name and colour it last saved. Pure: no I/O, no React.
 
-import { PATCH_COLORS, type PatchDevice, type PatchDeviceKind, type PatchEndpoint, type PatchFile, type PatchSheet } from "../types/patch.js";
+import { PATCH_COLORS, PATCH_KIND_LABELS, type PatchDevice, type PatchDeviceKind, type PatchEndpoint, type PatchFile, type PatchSheet } from "../types/patch.js";
 import {
   STAGEPLOT_LIMITS,
   type PatchChannelRow,
@@ -19,6 +19,7 @@ import {
   type PlotItem,
   type PublishedItem,
 } from "../types/stageplots.js";
+import { isRecord } from "./is-record.js";
 import { resolvePatch } from "./patch-resolve.js";
 
 /** The patch as read: the file, or that it could not be read (a 503, a damaged patch.json). */
@@ -78,15 +79,71 @@ export function swatchOf(color: unknown): string | null {
   return best;
 }
 
-// POST /api/patch and a restore hold the patch to little more than "a list of sheets", so
-// what is read here is read defensively: a number where text belongs is text, anything else
-// nothing, and a list that is not one is empty. A malformed patch reads as fewer channels,
-// never as a page that cannot draw or a venue that cannot be published.
+// POST /api/patch and a restore hold the patch to little more than "a list of sheets", so it
+// is read through patchSheets: a number where text belongs is text, anything else nothing, a
+// list that is not one is empty, and a kind it does not know is "other". A malformed patch
+// reads as fewer channels, never as a picker, a page or a publish that throws.
 const asText = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "");
-const asList = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const asCount = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
-const asRecord = <T>(v: unknown): Record<string, T> => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, T>) : {});
-const KINDS = ["rack", "snake", "drop-snake", "pocket", "wireless", "array", "other"] as const;
+
+/** A device kind from the patch, one of PATCH_KIND_LABELS's own keys, else "other". Never a
+ *  lookup that could land on Object.prototype ("__proto__", "constructor"). */
+function patchKind(v: unknown): PatchDeviceKind {
+  return typeof v === "string" && Object.hasOwn(PATCH_KIND_LABELS, v) ? (v as PatchDeviceKind) : "other";
+}
+
+/** What a device kind is called, by the patch sheet's own words. */
+export function kindLabel(kind: unknown): string {
+  return PATCH_KIND_LABELS[patchKind(kind)];
+}
+
+function readDevice(d: Record<string, unknown>): PatchDevice {
+  return {
+    id: asText(d.id),
+    name: asText(d.name),
+    kind: patchKind(d.kind),
+    inputs: asCount(d.inputs),
+    outputs: asCount(d.outputs),
+    inLabels: asList(d.inLabels).map(asText),
+    outLabels: asList(d.outLabels).map(asText),
+    ...(typeof d.color === "string" ? { color: d.color } : {}),
+  };
+}
+
+function readSheet(s: Record<string, unknown>): PatchSheet {
+  const assignments = (isRecord(s.assignments) ? s.assignments : {});
+  return {
+    id: asText(s.id),
+    name: asText(s.name),
+    kind: asText(s.kind) as PatchSheet["kind"],
+    devices: asList(s.devices).filter(isRecord).map(readDevice),
+    // Endpoints and overrides are left as they are: channelsThrough reads each field defensively.
+    endpoints: asList(s.endpoints).filter(isRecord) as unknown as PatchEndpoint[],
+    variants: asList(s.variants)
+      .filter(isRecord)
+      .map((v) => ({ id: asText(v.id), name: asText(v.name), overrides: (isRecord(v.overrides) ? v.overrides : {}) as PatchSheet["variants"][number]["overrides"] })),
+    assignments: {
+      byServiceType: (isRecord(assignments.byServiceType) ? assignments.byServiceType : {}) as PatchSheet["assignments"]["byServiceType"],
+      byPlan: (isRecord(assignments.byPlan) ? assignments.byPlan : {}) as PatchSheet["assignments"]["byPlan"],
+    },
+  };
+}
+
+const sheetsRead = new WeakMap<object, PatchSheet[]>();
+
+/**
+ * The one reader of a patch file for stage plots: the picker and the resolver both take its
+ * sheets from here. Read once per file object, so resolving five hundred items reads it once.
+ */
+export function patchSheets(file: unknown): PatchSheet[] {
+  if (!isRecord(file)) return [];
+  const cached = sheetsRead.get(file);
+  if (cached) return cached;
+  const sheets = asList(file.sheets).filter(isRecord).map(readSheet);
+  sheetsRead.set(file, sheets);
+  return sheets;
+}
 
 /** A device name as a point's label can carry it: trimmed, at most labelChars long. */
 export function labelOf(name: unknown): string {
@@ -103,7 +160,7 @@ function channelName(cc: unknown): string {
 
 /** The connector an endpoint uses on its own rack: the rack's label for it, else its number. */
 function rackConnector(rack: PatchDevice, e: PatchEndpoint): string {
-  const labels = asList<unknown>(e.dir === "in" ? rack.inLabels : rack.outLabels);
+  const labels = (e.dir === "in" ? rack.inLabels : rack.outLabels) ?? [];
   return asText(labels[e.index - 1]) || String(e.index);
 }
 
@@ -118,8 +175,8 @@ function channelsThrough(device: PatchDevice, devices: readonly PatchDevice[], e
   const rows: { e: PatchEndpoint; connector: string }[] = [];
   for (const e of endpoints) {
     if (!e || typeof e !== "object" || e.unused) continue;
-    const path = asList<{ deviceId: unknown; connector: unknown } | null>(e.path);
-    const hop = path.find((h) => h && h.deviceId === device.id);
+    const path = asList(e.path).filter(isRecord);
+    const hop = path.find((h) => h.deviceId === device.id);
     if (hop) rows.push({ e, connector: asText(hop.connector) });
     else if (e.rackId === device.id && (e.label || e.consoleChannel || path.length)) rows.push({ e, connector: rackConnector(device, e) });
   }
@@ -140,28 +197,18 @@ function channelsThrough(device: PatchDevice, devices: readonly PatchDevice[], e
 /** What a link shows: the device as the patch now has it, or the last name and colour, unlinked. */
 export function resolvePatchLink(link: PatchLink, patch: PatchRead, ctx: PatchContext): LinkResolution {
   const last = { name: link.lastName, color: link.lastColor };
-  if (!patch.ok || !Array.isArray(patch.file?.sheets)) return { state: "unlinked", reason: "unavailable", ...last };
-  const sheet = asList<PatchSheet | null>(patch.file.sheets).find((s) => s?.id === link.sheetId);
-  const devices = asList<PatchDevice | null>(sheet?.devices).filter((d): d is PatchDevice => !!d && typeof d === "object");
-  const device = devices.find((d) => d.id === link.deviceId);
+  if (!patch.ok || !isRecord(patch.file) || !Array.isArray(patch.file.sheets)) return { state: "unlinked", reason: "unavailable", ...last };
+  const sheet = patchSheets(patch.file).find((s) => s.id === link.sheetId);
+  const device = sheet?.devices.find((d) => d.id === link.deviceId);
   if (!sheet || !device) return { state: "unlinked", reason: "removed", ...last };
-  const assignments = asRecord<unknown>(sheet.assignments);
-  const { endpoints } = resolvePatch(
-    {
-      ...sheet,
-      endpoints: asList<PatchEndpoint | null>(sheet.endpoints).filter((e): e is PatchEndpoint => !!e && typeof e === "object"),
-      variants: asList<PatchSheet["variants"][number]>(sheet.variants).filter((v) => v && typeof v === "object").map((v) => ({ ...v, overrides: asRecord(v.overrides) })),
-      assignments: { byServiceType: asRecord(assignments.byServiceType), byPlan: asRecord(assignments.byPlan) },
-    },
-    ctx,
-  );
+  const { endpoints } = resolvePatch(sheet, ctx);
   return {
     state: "linked",
     name: labelOf(device.name),
     color: swatchOf(device.color),
     sheet: clip(sheet.name, SHEET_CHARS),
-    device: { kind: (KINDS as readonly unknown[]).includes(device.kind) ? device.kind : "other", inputs: asCount(device.inputs), outputs: asCount(device.outputs) },
-    channels: channelsThrough(device, devices, endpoints),
+    device: { kind: device.kind, inputs: device.inputs, outputs: device.outputs },
+    channels: channelsThrough(device, sheet.devices, endpoints),
   };
 }
 

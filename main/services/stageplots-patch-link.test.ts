@@ -126,6 +126,9 @@ describe("resolving a patch link", () => {
     assert.deepEqual([r.name, r.color, r.sheet, r.device], ["101", null, "7", { kind: "other", inputs: 0, outputs: 0 }]);
     assert.deepEqual(r.channels, [{ channel: "Ch 3", label: "9", path: "101/4" }]);
     assert.equal(resolvePatchLink(link(), { ok: true, file: { updatedAt: "" } as unknown as PatchFile }, NO_PLAN).state, "unlinked");
+    const proto = { ...odd, devices: [{ id: "sb1", name: "Box", kind: "__proto__", inputs: 1, outputs: 0 }] } as unknown as PatchSheet;
+    const viaProto = resolvePatchLink(link(), read([proto]), NO_PLAN);
+    assert.ok(viaProto.state === "linked" && viaProto.device.kind === "other");
     assert.equal(resolvePatchLink(link(), read([{ id: "main", devices: "x" } as unknown as PatchSheet]), NO_PLAN).state, "unlinked");
   });
 
