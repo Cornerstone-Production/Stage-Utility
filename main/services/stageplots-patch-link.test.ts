@@ -112,6 +112,23 @@ describe("resolving a patch link", () => {
     assert.equal(r.name, "N".repeat(60));
   });
 
+  test("a malformed patch (numbers for text, nulls, lists that are not lists) reads, never throws", () => {
+    const odd = {
+      id: "main",
+      name: 7,
+      kind: "analog",
+      devices: [null, { id: "sb1", name: 101, kind: { not: "a kind" }, inputs: "16", outputs: -2, color: 42, inLabels: "A1" }],
+      endpoints: [null, { rackId: "r", dir: "in", index: 1, consoleChannel: 3, label: 9, path: [null, { deviceId: "sb1", connector: 4 }] }, { rackId: "r", dir: "in", index: 2, path: "sb1" }],
+      variants: "none",
+    } as unknown as PatchSheet;
+    const r = resolvePatchLink(link(), read([odd]), { serviceTypeId: "st", planId: "p" });
+    assert.ok(r.state === "linked");
+    assert.deepEqual([r.name, r.color, r.sheet, r.device], ["101", null, "7", { kind: "other", inputs: 0, outputs: 0 }]);
+    assert.deepEqual(r.channels, [{ channel: "Ch 3", label: "9", path: "101/4" }]);
+    assert.equal(resolvePatchLink(link(), { ok: true, file: { updatedAt: "" } as unknown as PatchFile }, NO_PLAN).state, "unlinked");
+    assert.equal(resolvePatchLink(link(), read([{ id: "main", devices: "x" } as unknown as PatchSheet]), NO_PLAN).state, "unlinked");
+  });
+
   test("a linked device with no channels lists the point's inputs: tapChannels is null", () => {
     const r = resolvePatchLink(link({ deviceId: "rack-a" }), read([sheet({ endpoints: [] })]), NO_PLAN);
     assert.equal(tapChannels(r), null);

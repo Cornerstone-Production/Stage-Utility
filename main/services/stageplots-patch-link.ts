@@ -10,7 +10,7 @@
 // depend on the plan. A patch that cannot be read, or a sheet or device that is gone, leaves
 // the point "unlinked" with the name and colour it last saved. Pure: no I/O, no React.
 
-import { PATCH_COLORS, type PatchDevice, type PatchDeviceKind, type PatchEndpoint, type PatchFile } from "../types/patch.js";
+import { PATCH_COLORS, type PatchDevice, type PatchDeviceKind, type PatchEndpoint, type PatchFile, type PatchSheet } from "../types/patch.js";
 import {
   STAGEPLOT_LIMITS,
   type PatchChannelRow,
@@ -59,8 +59,8 @@ function rgb(hex: string): [number, number, number] | null {
  * that takes the nearest swatch, so the point still reads in about the patch's colour and
  * the item still saves. Anything that is not a colour is none.
  */
-export function swatchOf(color: string | undefined | null): string | null {
-  if (!color) return null;
+export function swatchOf(color: unknown): string | null {
+  if (typeof color !== "string" || !color) return null;
   const lower = color.toLowerCase();
   if ((PATCH_COLORS as readonly string[]).includes(lower)) return lower;
   const c = rgb(lower);
@@ -78,23 +78,33 @@ export function swatchOf(color: string | undefined | null): string | null {
   return best;
 }
 
+// POST /api/patch and a restore hold the patch to little more than "a list of sheets", so
+// what is read here is read defensively: a number where text belongs is text, anything else
+// nothing, and a list that is not one is empty. A malformed patch reads as fewer channels,
+// never as a page that cannot draw or a venue that cannot be published.
+const asText = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "");
+const asList = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+const asCount = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+const asRecord = <T>(v: unknown): Record<string, T> => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, T>) : {});
+const KINDS = ["rack", "snake", "drop-snake", "pocket", "wireless", "array", "other"] as const;
+
 /** A device name as a point's label can carry it: trimmed, at most labelChars long. */
-export function labelOf(name: string | undefined | null): string {
-  return (name ?? "").trim().slice(0, L.labelChars);
+export function labelOf(name: unknown): string {
+  return asText(name).trim().slice(0, L.labelChars);
 }
 
-const clip = (text: string | undefined, max: number) => (text ?? "").trim().slice(0, max);
+const clip = (text: unknown, max: number) => asText(text).trim().slice(0, max);
 
 /** "Ch 3" for a numbered console channel; the console's own name for one that is not. */
-function channelName(cc: string | undefined): string {
+function channelName(cc: unknown): string {
   const t = clip(cc, CHANNEL_CHARS);
   return /^\d+$/.test(t) ? `Ch ${t}` : t;
 }
 
 /** The connector an endpoint uses on its own rack: the rack's label for it, else its number. */
 function rackConnector(rack: PatchDevice, e: PatchEndpoint): string {
-  const labels = e.dir === "in" ? rack.inLabels : rack.outLabels;
-  return labels?.[e.index - 1] || String(e.index);
+  const labels = asList<unknown>(e.dir === "in" ? rack.inLabels : rack.outLabels);
+  return asText(labels[e.index - 1]) || String(e.index);
 }
 
 /**
@@ -107,10 +117,11 @@ function channelsThrough(device: PatchDevice, devices: readonly PatchDevice[], e
   const rackOrder = new Map(devices.map((d, i) => [d.id, i]));
   const rows: { e: PatchEndpoint; connector: string }[] = [];
   for (const e of endpoints) {
-    if (e.unused) continue;
-    const hop = e.path?.find((h) => h.deviceId === device.id);
-    if (hop) rows.push({ e, connector: hop.connector });
-    else if (e.rackId === device.id && (e.label || e.consoleChannel || e.path?.length)) rows.push({ e, connector: rackConnector(device, e) });
+    if (!e || typeof e !== "object" || e.unused) continue;
+    const path = asList<{ deviceId: unknown; connector: unknown } | null>(e.path);
+    const hop = path.find((h) => h && h.deviceId === device.id);
+    if (hop) rows.push({ e, connector: asText(hop.connector) });
+    else if (e.rackId === device.id && (e.label || e.consoleChannel || path.length)) rows.push({ e, connector: rackConnector(device, e) });
   }
   rows.sort(
     (a, b) =>
@@ -129,18 +140,28 @@ function channelsThrough(device: PatchDevice, devices: readonly PatchDevice[], e
 /** What a link shows: the device as the patch now has it, or the last name and colour, unlinked. */
 export function resolvePatchLink(link: PatchLink, patch: PatchRead, ctx: PatchContext): LinkResolution {
   const last = { name: link.lastName, color: link.lastColor };
-  if (!patch.ok) return { state: "unlinked", reason: "unavailable", ...last };
-  const sheet = patch.file.sheets.find((s) => s.id === link.sheetId);
-  const device = sheet?.devices.find((d) => d.id === link.deviceId);
+  if (!patch.ok || !Array.isArray(patch.file?.sheets)) return { state: "unlinked", reason: "unavailable", ...last };
+  const sheet = asList<PatchSheet | null>(patch.file.sheets).find((s) => s?.id === link.sheetId);
+  const devices = asList<PatchDevice | null>(sheet?.devices).filter((d): d is PatchDevice => !!d && typeof d === "object");
+  const device = devices.find((d) => d.id === link.deviceId);
   if (!sheet || !device) return { state: "unlinked", reason: "removed", ...last };
-  const { endpoints } = resolvePatch(sheet, ctx);
+  const assignments = asRecord<unknown>(sheet.assignments);
+  const { endpoints } = resolvePatch(
+    {
+      ...sheet,
+      endpoints: asList<PatchEndpoint | null>(sheet.endpoints).filter((e): e is PatchEndpoint => !!e && typeof e === "object"),
+      variants: asList<PatchSheet["variants"][number]>(sheet.variants).filter((v) => v && typeof v === "object").map((v) => ({ ...v, overrides: asRecord(v.overrides) })),
+      assignments: { byServiceType: asRecord(assignments.byServiceType), byPlan: asRecord(assignments.byPlan) },
+    },
+    ctx,
+  );
   return {
     state: "linked",
     name: labelOf(device.name),
     color: swatchOf(device.color),
     sheet: clip(sheet.name, SHEET_CHARS),
-    device: { kind: device.kind, inputs: device.inputs, outputs: device.outputs },
-    channels: channelsThrough(device, sheet.devices, endpoints),
+    device: { kind: (KINDS as readonly unknown[]).includes(device.kind) ? device.kind : "other", inputs: asCount(device.inputs), outputs: asCount(device.outputs) },
+    channels: channelsThrough(device, devices, endpoints),
   };
 }
 
