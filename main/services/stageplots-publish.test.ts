@@ -1073,7 +1073,7 @@ describe("after the page address changes", () => {
     assert.equal(h.page.hub.stageplots.size, 0, "a link is left on a page whose token is gone");
     assert.equal((await h.venue()).publish, undefined);
     assert.deepEqual(await pending(), []);
-    void stale;
+    assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
     assert.match(h.publisher.notice()?.message ?? "", /^The page address was saved, but the page settings could not be read: secrets store unreadable\. The published plots on 127\.0\.0\.1:\d+ were taken down with its token/);
     assert.ok(h.saved.length > saves, "the card was never told");
   });
@@ -1180,7 +1180,7 @@ describe("after the page address changes", () => {
     } finally {
       log.restore();
     }
-    void other;
+    assert.equal(other.hub.stageplots.size, 0, "unpublish sent something to the page set up, where this venue never was");
   });
 
   test("Regenerate says the old link's copy is left on the old page, not that it is removed", async () => {
@@ -1199,7 +1199,7 @@ describe("after the page address changes", () => {
     } finally {
       log.restore();
     }
-    void other;
+    assert.ok(other.hub.stageplots.size > 0, "the regenerated link never reached the page set up");
   });
 });
 
