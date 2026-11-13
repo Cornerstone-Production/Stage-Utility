@@ -1588,6 +1588,10 @@ describe("linked connection points on the public page", () => {
   async function twoVenues() {
     const doc = venueDoc(1, 1, () => [
       item("box-1"),
+      // Every type's own fields too: publishedItems names each field, so one it forgot is gone from the page.
+      item("sym-1", { type: "symbol", symbol: "wedge", label: "Floor wedge" }),
+      item("txt-1", { type: "text", textKind: "callout", label: "Riser skirt" }),
+      item("cab-1", { type: "cable", points: [[10, 10], [200, 120]], dashed: true, label: "" }),
       item("c-sb1", { type: "conn", label: "Old SB", color: null, patchLink: linked("sb1-SENTINEL-ID", "Old SB") }),
       item("c-gone", { type: "conn", label: "Lost box", color: "#46a758", inputs: ["Spare"], patchLink: linked("gone-SENTINEL-ID", "Lost box", "#46a758") }),
     ]);
@@ -1625,6 +1629,7 @@ describe("linked connection points on the public page", () => {
       "id",
       "items",
       "items[].color",
+      "items[].dashed",
       "items[].h",
       "items[].id",
       "items[].inputs",
@@ -1636,7 +1641,10 @@ describe("linked connection points on the public page", () => {
       "items[].patch.channels[].label",
       "items[].patch.channels[].path",
       "items[].patch.sheet",
+      "items[].points",
       "items[].rotation",
+      "items[].symbol",
+      "items[].textKind",
       "items[].type",
       "items[].w",
       "items[].x",
@@ -1652,6 +1660,9 @@ describe("linked connection points on the public page", () => {
         { channel: "Ch 2", label: "Snare", path: "SB-1/A2" },
       ],
     });
+    assert.equal(plot.items.find((it) => it.id === "sym-1")!.symbol, "wedge");
+    assert.equal(plot.items.find((it) => it.id === "txt-1")!.textKind, "callout");
+    assert.deepEqual(plot.items.find((it) => it.id === "cab-1")!.points, [[10, 10], [200, 120]]);
     const gone = plot.items.find((it) => it.id === "c-gone")!;
     assert.deepEqual([gone.label, gone.color, gone.patch, gone.inputs], ["Lost box", "#46a758", undefined, ["Spare"]]);
   });
