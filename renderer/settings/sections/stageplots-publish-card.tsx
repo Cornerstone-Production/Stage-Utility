@@ -109,18 +109,34 @@ function PendingLinks({ pending, save }: { pending: readonly PendingRemovalView[
   );
 }
 
-/** The Publish card with no venue selected: only the old links still live, so a deleted venue's are never out of sight. */
-export function PendingLinksCard({ pending, save }: { pending: readonly PendingRemovalView[]; save: Save }) {
-  if (pending.length === 0) return null;
+/** What following the last Public link save could not do (the server keeps it until the next save). */
+type FollowNoticeView = { at: string; message: string };
+
+function FollowNotice({ notice, timeZone }: { notice: FollowNoticeView | undefined; timeZone: string }) {
+  if (!notice) return null;
+  return (
+    <p className={cn(statusLine, "text-danger-11")} role="alert" data-testid="follow-notice">
+      <CircleXIcon aria-hidden />
+      <span>
+        <Mono text={`Page address saved ${formatClock(Date.parse(notice.at), { timeZone })}: ${notice.message}`} />
+      </span>
+    </p>
+  );
+}
+
+/** The Publish card with no venue selected: only the old links still live, so a deleted venue's are never out of sight, and what following a page address could not do. */
+export function PendingLinksCard({ pending, save, notice, timeZone }: { pending: readonly PendingRemovalView[]; save: Save; notice?: FollowNoticeView | undefined; timeZone: string }) {
+  if (pending.length === 0 && !notice) return null;
   return (
     <section className="su-card flex flex-col gap-2.5 px-3.5 py-3" aria-label="Publish">
       <CardHeader title="Publish" />
+      <FollowNotice notice={notice} timeZone={timeZone} />
       <PendingLinks pending={pending} save={save} />
     </section>
   );
 }
 
-export function PublishCard({ venue, pending, save, timeZone }: { venue: Venue; pending: readonly PendingRemovalView[]; save: Save; timeZone: string }) {
+export function PublishCard({ venue, pending, save, timeZone, follow }: { venue: Venue; pending: readonly PendingRemovalView[]; save: Save; timeZone: string; follow?: FollowNoticeView | undefined }) {
   const pub = venue.publish ?? null;
   // The Public link card's address, for the host and whether there is a page to publish to.
   const target = usePublishTarget();
@@ -303,6 +319,7 @@ export function PublishCard({ venue, pending, save, timeZone }: { venue: Venue; 
           {needsPublishNow && notYet === 0 && <p className="text-caption1 text-accent">{publishNow}</p>}
         </>
       )}
+      <FollowNotice notice={follow} timeZone={timeZone} />
       <PendingLinks pending={pending} save={save} />
       {notice && (
         <p className={cn(statusLine, "text-warn-11")} role="status">

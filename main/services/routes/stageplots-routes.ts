@@ -41,8 +41,10 @@
 //                                                   full, 502 { error } when the page refused or did
 //                                                   not answer, 400 for a plot too large to publish.
 //                                                   Each of the five: 503 while a config restore is
-//                                                   landing; Remove now also when the queue cannot be
-//                                                   read (stageplots-publish.ts)
+//                                                   landing (said on [stageplots] here); Remove now
+//                                                   also when the queue cannot be read, and an action
+//                                                   whose new link could not be saved, and was taken
+//                                                   back (stageplots-publish.ts)
 //
 // Every change saves at once and broadcasts the whole document on
 // stageplots:updated, so a second browser follows without a reload. A change
@@ -79,7 +81,7 @@ import {
   backgroundView,
   storeStagePlotImage,
   storeStagePlotOriginal,
-  stagePlotsView as toView,
+  stagePlotsView,
   tidyStagePlotFiles,
 } from "../stageplots-files.js";
 import { stageplotsPublisher } from "../stageplots-publish-instance.js";
@@ -97,6 +99,9 @@ import {
   validateVenueInput,
 } from "../stageplots-store.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
+
+/** The document as browsers get it: secrets left out, and the publisher's follow notice beside it. */
+const toView = (doc: StagePlotsDoc) => stagePlotsView(doc, stageplotsPublisher.notice());
 
 const PREFIX = "/api/stageplots";
 
@@ -709,8 +714,10 @@ const PUBLISH_ACTIONS = new Map([
 ]);
 
 /** One publish action on a venue. What it said and logged is the publisher's; this answers it. */
-async function publishAction(c: RouteCtx, id: string, run: (id: string) => ReturnType<typeof stageplotsPublisher.publish>): Promise<void> {
+async function publishAction(c: RouteCtx, action: string, id: string, run: (id: string) => ReturnType<typeof stageplotsPublisher.publish>): Promise<void> {
   const r = await run(id);
+  // Every other refusal is said by the publisher; this one, a restore landing, is said here.
+  if (!r.ok && r.status === 503) console.warn(`[stageplots] ${scrub(action)} refused for venue ${scrub(id)}: ${scrub(r.error)}`);
   // A notice rides beside the venue: something done that the operator should know about (a copy
   // left on a page this server can no longer reach).
   if (r.ok) json(c.res, r.notice ? { ...r.venue, notice: r.notice } : r.venue);
@@ -720,8 +727,10 @@ async function publishAction(c: RouteCtx, id: string, run: (id: string) => Retur
 /** Remove now: every old link queued against the page set up is dropped from it. Answers how many went, failed and wait for another page. */
 async function removePending(c: RouteCtx): Promise<void> {
   const r = await stageplotsPublisher.removePending();
-  if ("error" in r) json(c.res, { error: r.error }, r.status);
-  else json(c.res, r);
+  if ("error" in r) {
+    console.warn(`[stageplots] Remove now refused: ${scrub(r.error)}`);
+    json(c.res, { error: r.error }, r.status);
+  } else json(c.res, r);
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -750,7 +759,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (id && method === "POST") return setDefault(c, id);
   for (const [action, run] of PUBLISH_ACTIONS) {
     const venueId = idIn(pathname, "venues", action);
-    if (venueId && method === "POST") return publishAction(c, venueId, run);
+    if (venueId && method === "POST") return publishAction(c, action, venueId, run);
   }
   id = idIn(pathname, "plots", "duplicate");
   if (id && method === "POST") return duplicatePlot(c, id);

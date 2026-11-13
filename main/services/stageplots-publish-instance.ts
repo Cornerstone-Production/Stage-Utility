@@ -37,6 +37,7 @@ export const stageplotsPublisher = new StagePlotsPublisher({
     return state.pcoConfigured ? { planId: state.planId, planDates: state.planDates } : { planId: null, planDates: null };
   },
   timeZone: appTimeZone,
-  onSaved: (doc) => broadcast(STAGEPLOTS_CHANNEL, stagePlotsView(doc)),
+  // The follow's notice rides on every broadcast, so the Publish card keeps it until the next save clears it.
+  onSaved: (doc) => broadcast(STAGEPLOTS_CHANNEL, stagePlotsView(doc, stageplotsPublisher.notice())),
   listen: (cb) => addBroadcastListener((channel) => cb(channel)),
 });

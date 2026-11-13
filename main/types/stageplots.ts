@@ -193,6 +193,8 @@ export interface StagePlotsView {
   overrides: PlotOverride[];
   /** The pending removals' pages, ages and reasons; the in-flight ("publishing") ones and every secret left out. */
   pendingRemovals: PendingRemovalView[];
+  /** What following the last Public link save could not do (stageplots-publish.ts), for the Publish card. Absent when it did it all. */
+  notice?: { at: string; message: string };
 }
 
 /** A venue's `index` on the public page, as the server publishes it. */

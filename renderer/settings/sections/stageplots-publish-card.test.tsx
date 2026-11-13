@@ -31,6 +31,8 @@ let sent: string[] = [];
 let refuse: { status: number; error: string } | null = null;
 /** A notice the next successful call carries beside the venue. */
 let notice: string | null = null;
+/** What the server says following the last Public link save could not do (StagePlotsView.notice). */
+let FOLLOW: { at: string; message: string } | undefined;
 
 function published(extra: Partial<VenuePublish> = {}): VenuePublish {
   return {
@@ -93,7 +95,9 @@ async function mount() {
     React.createElement(
       QueryClientProvider,
       { client },
-      VENUE.id === "none" ? React.createElement(PendingLinksCard, { pending: PENDING, save }) : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago" }),
+      VENUE.id === "none"
+        ? React.createElement(PendingLinksCard, { pending: PENDING, save, notice: FOLLOW, timeZone: "America/Chicago" })
+        : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW }),
       React.createElement(ConfirmHost),
     );
   let rerender!: (ui: React.ReactElement) => void;
@@ -121,6 +125,7 @@ beforeEach(() => {
   refuse = null;
   notice = null;
   PENDING = [];
+  FOLLOW = undefined;
   setDisplayHourCycle("24h");
 });
 afterEach(async () => {
@@ -286,5 +291,30 @@ describe("old links still live", () => {
     await mount();
     assert.match(text(), /1 old link still live on plots\.example\.workers\.dev\./);
     assert.ok(screen.getByRole("button", { name: "Remove now" }));
+  });
+});
+
+describe("what following a page address could not do", () => {
+  const FAILED = { at: "2026-11-13T15:04:00.000Z", message: "The old links on old.example.workers.dev could not be removed with its token." };
+
+  test("shows on the card with a venue selected, never read as success", async () => {
+    VENUE.publish = published();
+    FOLLOW = FAILED;
+    await mount();
+    assert.match(screen.getByTestId("follow-notice").textContent ?? "", /^Page address saved 09:04: The old links on old\.example\.workers\.dev could not be removed with its token\.$/);
+  });
+
+  test("shows with no venue selected, even with no old links waiting", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    FOLLOW = FAILED;
+    await mount();
+    assert.ok(card());
+    assert.match(screen.getByTestId("follow-notice").textContent ?? "", /could not be removed with its token/);
+  });
+
+  test("is not shown when the follow did all of it", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    await mount();
+    assert.equal(screen.queryByTestId("follow-notice"), null);
   });
 });

@@ -357,11 +357,19 @@ and removes what waits on that page. Saving another address with no token for it
 clearing the address, leaves nothing here that could reach the old page afterwards: each
 venue on it is unpublished and its link removed with the old token, or kept as an old
 link on that page if it will not go. Clearing only the token on the same address takes
-nothing down; the token can be entered again. All of this runs after the save answers,
-since a move uploads every background; anything in it that fails (the page settings or
-the stage plots unreadable, a move that cannot be saved) is said on `/log` and shown as
-the last error of each venue it concerns, and never stops the old page's links being
-removed with its token.
+nothing down; the token can be entered again. If the page settings cannot be read when
+another address is saved, the venues on the old page are taken down with its token the
+same way, since nothing here could reach it afterwards. A first publish still on its way
+to the old page when the address is saved is waited for, and follows like the rest.
+
+All of this runs after the save answers, since a move uploads every background. Anything
+in it that fails is said on `/log` and never stops the old page's links being removed with
+its token: a failure about one venue (a move that cannot be saved) is that venue's last
+error, and what concerns the save as a whole (the settings unreadable, or old links that
+could not be removed with the old token) is shown at the top of the Publish card, with or
+without a venue selected, until the next save of the Public link. While a config restore
+is landing, the Public link is not saved at all (`503`), so its old token is never
+replaced before the stage plots can use it.
 
 ### Old links
 
@@ -373,7 +381,9 @@ new link is written there before its first request goes out, and moves onto its 
 once the page holds it all, so not even a crash halfway through a publish loses one.
 
 The server removes what waits whenever it can reach the page: at start-up, on **Publish
-now** and **Remove now**, and on every change. A removal that fails is tried again then,
+now** and **Remove now**, and on every change. When the list itself cannot be read,
+**Remove now** says so instead of reporting anything removed, and **Publish now** says it
+beside the venue. A removal that fails is tried again then,
 and said once on `/log`. Only the page a link was published to can remove it, with that
 page's token: one on another page waits until that page is set up here again. The list
 never leaves the server with its links in it; the card is told only each page, when and

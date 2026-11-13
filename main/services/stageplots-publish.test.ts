@@ -648,6 +648,102 @@ describe("a venue deleted while it is being sent", () => {
   });
 });
 
+describe("a restore landing behind a run in flight", () => {
+  test("an action queued behind it answers 503, and sends nothing", async () => {
+    const h = await harness();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    h.page.respond = async (req) => {
+      if (SP.exec(req.path)?.[2] === "index" && req.method === "PUT") await held;
+      return h.page.worker(req);
+    };
+    const first = h.publisher.publish("v-1");
+    await waitFor(() => spRequests(h.page).some((q) => q.key === "index"), "the publish to reach its index");
+    const queued = h.publisher.publishNow("v-1");
+    const pausing = h.publisher.pause();
+    release();
+    assert.ok((await first).ok);
+    const sent = h.page.requests.length;
+    const r = await queued;
+    const resume = await pausing;
+    resume();
+    assert.deepEqual(r.ok ? null : [r.status, /restore is under way/.test(r.error)], [503, true]);
+    assert.equal(h.page.requests.length, sent, "the queued action ran with the restore landing");
+  });
+});
+
+describe("the write that lands a send failing", () => {
+  // The page took everything; the write that puts the new link on the venue then fails. Without a
+  // take-back the new secret stays live under a "publishing" entry the card hides until a restart.
+  /** The publisher's store, with the next write that moves a publishing secret onto a venue failing. */
+  function failLanding(h: Harness) {
+    (h.publisher as unknown as { deps: { store: unknown } }).deps.store = {
+      get: () => stageplotsStore.get(),
+      update: (fn: (d: StagePlotsDoc) => StagePlotsDoc) =>
+        stageplotsStore.update((d) => {
+          const next = fn(d);
+          const inFlight = new Set(d.pendingRemovals.filter((e) => e.reason === "publishing").map((e) => e.secret));
+          if (next.venues.some((v) => v.publish && inFlight.has(v.publish.secret))) throw new Error("disk full");
+          return next;
+        }),
+    };
+  }
+  const freshOn = (page: Receiver, old: string | null) => [...new Set(spRequests(page).map((q) => q.secret))].filter((x) => x !== old);
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "error", () => undefined), mock.method(console, "warn", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+
+  test("a publish takes the new link back and says why", async () => {
+    const h = await harness();
+    failLanding(h);
+    const r = await quietly(() => h.publisher.publish("v-1"));
+    assert.deepEqual(r.ok ? null : [r.status, r.error.startsWith("What went up could not be saved here (disk full)")], [503, true]);
+    const [fresh] = freshOn(h.page, null);
+    assert.deepEqual(h.page.hub.stagePlotKeys(fresh!), [], "the new link is still live");
+    assert.deepEqual(await pending(), []);
+    assert.equal((await h.venue()).publish, undefined);
+  });
+
+  test("a regenerate takes the new link back, keeps the old, and the card says why", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const old = (await h.venue()).publish!.secret;
+    failLanding(h);
+    const r = await quietly(() => h.publisher.regenerate("v-1"));
+    assert.equal(r.ok ? 0 : r.status, 503);
+    const [fresh] = freshOn(h.page, old);
+    assert.deepEqual(h.page.hub.stagePlotKeys(fresh!), [], "the new link is still live");
+    const pub = (await h.venue()).publish!;
+    assert.equal(pub.secret, old);
+    assert.match(pub.lastError?.message ?? "", /^The link was not changed: What went up could not be saved here \(disk full\)/);
+    assert.equal((await visit(h.page, old, "index")).status, 200);
+  });
+
+  test("a move takes the new link back from the new page, and the venue stays where it was", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const old = (await h.venue()).publish!.secret;
+    const o = parsePublishUrl(h.page.origin);
+    const other = await startPage();
+    const parsed = parsePublishUrl(other.origin);
+    assert.ok(o.ok && parsed.ok);
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: parsed.origin, token: TOKEN });
+    failLanding(h);
+    const r = await quietly(() => h.publisher.publishNow("v-1"));
+    assert.equal(r.ok ? 0 : r.status, 503);
+    const [fresh] = freshOn(other, null);
+    assert.deepEqual(other.hub.stagePlotKeys(fresh!), [], "the new link is still live on the new page");
+    const pub = (await h.venue()).publish!;
+    assert.deepEqual([pub.origin, pub.secret], [o.origin, old]);
+    assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: What went up could not be saved here \(disk full\)/);
+  });
+});
+
 describe("the log", () => {
   test("a venue name with a line break in it never breaks a [stageplots] line, and is still legible", async () => {
     const doc = venueDoc();
@@ -765,7 +861,7 @@ describe("after the page address changes", () => {
     return { lines, restore: () => spies.forEach((s) => s.mock.restore()) };
   };
 
-  test("following a page address whose settings cannot be read says so on the venue's card, and still drains the old page with its token", async () => {
+  test("following the same page address with its settings unreadable says so on the venue's card, and still drains the page with its token", async () => {
     const h = await harness();
     assert.ok((await h.publisher.publish("v-1")).ok);
     const o = parsePublishUrl(h.page.origin);
@@ -776,7 +872,7 @@ describe("after the page address changes", () => {
     };
     const quiet = mock.method(console, "error", () => undefined);
     try {
-      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, "https://elsewhere.example");
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, o.origin);
       await h.publisher.settle();
     } finally {
       quiet.mock.restore();
@@ -826,11 +922,12 @@ describe("after the page address changes", () => {
 
   /** The publisher's store, with the next read or the next unpublishing write made to fail once. */
   function failing(h: Harness) {
-    const f = { get: false, unpublish: false };
+    const f = { get: false, unpublish: false, gets: 0 };
     (h.publisher as unknown as { deps: { store: unknown } }).deps.store = {
       get: () => {
-        if (f.get) {
+        if (f.get || f.gets > 0) {
           f.get = false;
+          f.gets = Math.max(0, f.gets - 1);
           return Promise.reject(new Error("disk went away"));
         }
         return stageplotsStore.get();
@@ -894,6 +991,157 @@ describe("after the page address changes", () => {
     }
     assert.match((await h.venue()).publish?.lastError?.message ?? "", /^The page address changed, and taking its link down from 127\.0\.0\.1:\d+ failed part way: disk full$/);
     assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
+  });
+
+  const setTarget = (h: Harness, t: () => Promise<unknown>) => ((h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = t);
+  /** Hold every index PUT `page` gets until the answer is released. */
+  const holdIndex = (page: Receiver) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    page.respond = async (req) => {
+      if (SP.exec(req.path)?.[2] === "index" && req.method === "PUT") await held;
+      return page.worker(req);
+    };
+    return release;
+  };
+
+  for (const [what, moving] of [
+    ["moves it to the new page", true],
+    ["takes it down with no new page", false],
+  ] as const) {
+    test(`a first publish still in flight to the old page when the address is saved: the follow waits for it, and ${what}`, async () => {
+      const h = await harness();
+      const o = parsePublishUrl(h.page.origin);
+      const other = await startPage();
+      const parsed = parsePublishUrl(other.origin);
+      assert.ok(o.ok && parsed.ok);
+      const release = holdIndex(h.page);
+      const first = h.publisher.publish("v-1");
+      await waitFor(() => spRequests(h.page).some((q) => q.key === "index"), "the publish to reach its index");
+      setTarget(h, async () => (moving ? { ok: true, origin: parsed.origin, token: TOKEN } : { ok: false, message: "Set up the public link first." }));
+      const follow = h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, moving ? parsed.origin : null);
+      release();
+      assert.ok((await first).ok);
+      await follow;
+      await h.publisher.settle();
+      assert.equal(h.page.hub.stageplots.size, 0, "the publish landed on the old page after its token was gone");
+      assert.equal((await h.venue()).publish?.origin, moving ? parsed.origin : undefined);
+      assert.deepEqual(await pending(), []);
+    });
+  }
+
+  test("a page address saved with its settings unreadable takes the old page's links down with its token, and the card says so", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const stale = await queuedOn(h.page, o.origin, 15);
+    setTarget(h, async () => {
+      throw new Error("secrets store unreadable");
+    });
+    const saves = h.saved.length;
+    const quiet = [mock.method(console, "error", () => undefined), mock.method(console, "warn", () => undefined)];
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, "https://elsewhere.example");
+      await h.publisher.settle();
+    } finally {
+      for (const q of quiet) q.mock.restore();
+    }
+    assert.equal(h.page.hub.stageplots.size, 0, "a link is left on a page whose token is gone");
+    assert.equal((await h.venue()).publish, undefined);
+    assert.deepEqual(await pending(), []);
+    void stale;
+    assert.match(h.publisher.notice()?.message ?? "", /^The page address was saved, but the page settings could not be read: secrets store unreadable\. The published plots on 127\.0\.0\.1:\d+ were taken down with its token/);
+    assert.ok(h.saved.length > saves, "the card was never told");
+  });
+
+  test("the same, with the old page refusing the take-down: the link is queued against it, in sight", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    h.page.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : h.page.worker(req));
+    setTarget(h, async () => {
+      throw new Error("secrets store unreadable");
+    });
+    const quiet = [mock.method(console, "error", () => undefined), mock.method(console, "warn", () => undefined)];
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, "https://elsewhere.example");
+      await h.publisher.settle();
+    } finally {
+      for (const q of quiet) q.mock.restore();
+    }
+    assert.equal((await h.venue()).publish, undefined);
+    assert.deepEqual((await pending()).map((e) => [e.origin, e.reason]), [[o.origin, "address changed"]]);
+  });
+
+  test("a follow whose drain with the old token cannot read the queue says so on the card", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const f = failing(h);
+    setTarget(h, async () => {
+      f.get = true;
+      return { ok: true, origin: o.origin, token: TOKEN };
+    });
+    const saves = h.saved.length;
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, o.origin);
+      await h.publisher.settle();
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.match(h.publisher.notice()?.message ?? "", /^The old links on 127\.0\.0\.1:\d+ could not be removed with its token, and cannot be from here once it is replaced: The old links waiting to be removed could not be read or saved: disk went away$/);
+    assert.ok(h.saved.length > saves, "the card was never told");
+    // The next follow that does it all clears it.
+    setTarget(h, async () => ({ ok: true, origin: o.origin, token: TOKEN }));
+    await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, o.origin);
+    await h.publisher.settle();
+    assert.equal(h.publisher.notice(), null);
+  });
+
+  test("both drains of a follow failing alike say it once on the card", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const f = failing(h);
+    setTarget(h, async () => {
+      f.gets = 2;
+      return { ok: true, origin: o.origin, token: TOKEN };
+    });
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, o.origin);
+      await h.publisher.settle();
+    } finally {
+      quiet.mock.restore();
+    }
+    const said = h.publisher.notice()?.message ?? "";
+    assert.equal(said.split("disk went away").length - 1, 1, said);
+  });
+
+  test("Publish now whose drain cannot read the queue says so beside the venue, never as done", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const f = failing(h);
+    setTarget(h, async () => {
+      f.get = true;
+      return { ok: true, origin: o.origin, token: TOKEN };
+    });
+    const quiet = mock.method(console, "error", () => undefined);
+    let r: Awaited<ReturnType<typeof h.publisher.publishNow>>;
+    try {
+      r = await h.publisher.publishNow("v-1");
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.ok(r.ok);
+    assert.equal(r.ok ? r.notice : null, "The old links waiting to be removed could not be read or saved: disk went away");
   });
 
   test("Unpublish names the old page whose copy it cannot reach, and never claims it is gone", async () => {
@@ -1257,6 +1505,13 @@ describe("the publish state in the store", () => {
     // And the document still reads: GET /api/stageplots and every broadcast go through the view.
     const { stagePlotsView } = await import("./stageplots-files.js");
     assert.deepEqual(stagePlotsView(out as StagePlotsDoc).pendingRemovals, []);
+  });
+
+  test("the view carries what following the Public link could not do, and no field when there is nothing", async () => {
+    const { stagePlotsView } = await import("./stageplots-files.js");
+    const notice = { at: "2026-11-13T15:04:00.000Z", message: "The old links could not be removed." };
+    assert.deepEqual(stagePlotsView(venueDoc(), notice).notice, notice);
+    assert.equal(Object.hasOwn(stagePlotsView(venueDoc()), "notice"), false);
   });
 
   test("refuses a secret, an image or an origin of the wrong shape", async () => {

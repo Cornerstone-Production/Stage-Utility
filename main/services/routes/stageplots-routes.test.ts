@@ -55,8 +55,8 @@ function tinyPdf(tag = ""): Buffer {
   return Buffer.from(`%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n%${tag}\n`, "latin1");
 }
 
-/** Every [stageplots] warning `run` logs. */
-async function warnings(run: () => Promise<unknown>): Promise<string[]> {
+/** Every warning `run` logs under `tag` ([stageplots] unless said). */
+async function warnings(run: () => Promise<unknown>, tag = "[stageplots]"): Promise<string[]> {
   const seen: string[] = [];
   const real = console.warn;
   console.warn = (...a: unknown[]) => void seen.push(a.join(" "));
@@ -65,7 +65,7 @@ async function warnings(run: () => Promise<unknown>): Promise<string[]> {
   } finally {
     console.warn = real;
   }
-  return seen.filter((w) => w.startsWith("[stageplots]"));
+  return seen.filter((w) => w.startsWith(tag));
 }
 
 async function aged(dir: string, file: string): Promise<void> {
@@ -992,6 +992,50 @@ describe("a restore landing", () => {
     } finally {
       resume();
     }
+  });
+
+  test("refuses the Public link save, before its token is replaced, and says so", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
+    const { servicecuePublishStore, savePublishToken, readPublishToken } = await import("../servicecue-publish-store.js");
+    await servicecuePublishStore.save({ enabled: false, url: "https://old.example" });
+    await savePublishToken("https://old.example" as Parameters<typeof savePublishToken>[0], "o".repeat(40));
+    const resume = await stageplotsPublisher.pause();
+    let said: string[];
+    try {
+      said = await warnings(async () => {
+        const r = await callRoute(serviceCuePublishRoutes, "/api/servicecue/publish", { method: "POST", body: { url: "https://new.example", token: "n".repeat(40) } });
+        assert.deepEqual([r.status, /restore is under way/.test((r.json as { error: string }).error)], [503, true]);
+      }, "[publish]");
+    } finally {
+      resume();
+    }
+    assert.equal((await servicecuePublishStore.load()).url, "https://old.example");
+    assert.equal((await readPublishToken("https://old.example" as Parameters<typeof readPublishToken>[0])).trim(), "o".repeat(40), "the old token was replaced with the stage plots unable to use it");
+    assert.ok(said.some((l) => l.startsWith("[publish] the Public link was not saved: A config restore is under way")), said.join(" / "));
+  });
+
+  test("every publishing action and Remove now refused for it is said on [stageplots]", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const id = ((await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string }).id;
+    const resume = await stageplotsPublisher.pause();
+    let said: string[];
+    try {
+      said = await warnings(async () => {
+        for (const action of ["publish", "regenerate", "unpublish", "publish-now"]) assert.equal((await call("POST", `/api/stageplots/venues/${id}/${action}`)).status, 503, action);
+        assert.equal((await call("POST", "/api/stageplots/pending/remove")).status, 503);
+      });
+    } finally {
+      resume();
+    }
+    const why = "A config restore is under way; try again once the server is back.";
+    assert.deepEqual(said, [
+      `[stageplots] publish refused for venue ${id}: ${why}`,
+      `[stageplots] regenerate refused for venue ${id}: ${why}`,
+      `[stageplots] unpublish refused for venue ${id}: ${why}`,
+      `[stageplots] publish-now refused for venue ${id}: ${why}`,
+      `[stageplots] Remove now refused: ${why}`,
+    ]);
   });
 });
 

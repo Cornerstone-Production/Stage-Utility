@@ -342,6 +342,15 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     return;
   }
 
+  // Refused while a config restore lands: the stage plots publisher is paused then, and could not
+  // take the old page's links down with the token this save is about to replace.
+  if (stageplotsPublisher.restoring) {
+    const message = "A config restore is under way; try again once the server is back.";
+    console.warn(`[publish] the Public link was not saved: ${scrub(message)}`);
+    json(res, { error: message }, 503);
+    return;
+  }
+
   // The token and its address in one write, then the settings. If the second fails the first is put back, so a token
   // is never left beside an address it was not saved for; and a token read back for any address but its own reads as none.
   const previous = await secretsStore.getSecrets(PUBLISH_SECRET_SLOT);

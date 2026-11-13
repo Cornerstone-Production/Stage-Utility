@@ -579,9 +579,9 @@ function EditorBody({
           <BackgroundsCard doc={doc} selectedId={backgroundId} onSelect={onBackground} save={save} {...(openPdf ? { openPdf } : {})} />
           {venue && <ThisWeekCard doc={doc} venue={venue} plan={plan} nameOf={planName} save={save} />}
           {venue ? (
-            <PublishCard venue={venue} pending={doc.pendingRemovals} save={save} timeZone={plan.timeZone} />
+            <PublishCard venue={venue} pending={doc.pendingRemovals} save={save} timeZone={plan.timeZone} follow={doc.notice} />
           ) : (
-            <PendingLinksCard pending={doc.pendingRemovals} save={save} />
+            <PendingLinksCard pending={doc.pendingRemovals} save={save} notice={doc.notice} timeZone={plan.timeZone} />
           )}
         </aside>
         <div className="min-w-0">

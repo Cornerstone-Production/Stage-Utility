@@ -242,6 +242,8 @@ export class StagePlotsPublisher {
   private started = false;
   private stopped = false;
   private paused = false;
+  /** What the last page-address follow could not do, for the Publish card. In memory: a restart clears it. */
+  private followNote: { at: string; message: string } | null = null;
 
   constructor(deps: StagePlotsPublishDeps) {
     this.deps = deps;
@@ -276,6 +278,16 @@ export class StagePlotsPublisher {
     return () => {
       this.paused = false;
     };
+  }
+
+  /** Whether a config restore holds the publisher: the Public link save refuses then (servicecue-publish-routes.ts). */
+  get restoring(): boolean {
+    return this.paused;
+  }
+
+  /** What the last page-address follow could not do, shown on the Publish card; null when it did it all. */
+  notice(): { at: string; message: string } | null {
+    return this.followNote;
   }
 
   /** Every pending wait has fired and every run it queued has finished. For tests and the drive. */
@@ -398,7 +410,12 @@ export class StagePlotsPublisher {
       }
       const { secret, r } = fresh;
       const at = this.at();
-      const saved = await this.promote(venueId, secret, target.origin, stateAfterSend(secret, target.origin, at, r, [secret]), null);
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, [secret]), null);
+      if (!landed.ok) {
+        say("error", [secret], `"${venue.name}" was not published: ${landed.message}`);
+        return { ok: false, status: 503, error: hide(landed.message, [secret]) };
+      }
+      const saved = landed.venue;
       if (!saved) {
         // Deleted while it was being published: the secret is still queued, so take it back now.
         await this.takeBack(client, secret, target.origin, venue.name);
@@ -433,7 +450,13 @@ export class StagePlotsPublisher {
       const at = this.at();
       // One write: the new link onto the venue and the old one into the queue, so a crash after it
       // leaves the old secret queued for removal rather than nowhere.
-      const saved = await this.promote(venueId, secret, target.origin, stateAfterSend(secret, target.origin, at, r, all), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, all), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
+      if (!landed.ok) {
+        const message = `The link was not changed: ${landed.message}`;
+        await this.venueFailed(venue, message);
+        return { ok: false, status: 503, error: hide(message, all) };
+      }
+      const saved = landed.venue;
       if (!saved) {
         await this.takeBack(client, secret, target.origin, venue.name);
         return { ok: false, status: 404, error: "no such venue" };
@@ -518,11 +541,17 @@ export class StagePlotsPublisher {
       if (!found.ok) return found;
       const { doc, venue, target, client, host } = found;
       const pub = venue.publish!;
-      await this.drainQueued(false);
-      if (pub.origin !== target.origin) return this.move(venue, doc, target, "Publish now");
-      const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [] });
-      this.attempted.set(venueId, this.fingerprint(doc, venue));
-      return this.finish(venueId, venue, r, host, [pub.secret], "published again");
+      const drained = await this.drainQueued(false);
+      let result: PublishOutcome;
+      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now");
+      else {
+        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [] });
+        this.attempted.set(venueId, this.fingerprint(doc, venue));
+        result = await this.finish(venueId, venue, r, host, [pub.secret], "published again");
+      }
+      // The old links it was asked to remove too: a list that could not be read is said beside the venue, never taken for done.
+      if (drained.ok || !result.ok) return result;
+      return { ...result, notice: result.notice ? `${result.notice} ${drained.message}` : drained.message };
     });
   }
 
@@ -589,12 +618,18 @@ export class StagePlotsPublisher {
       return { ok: false, status: fresh.status, error: hide(message, all) };
     }
     const at = this.at();
-    const saved = await this.promote(venue.id, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, fresh.r, all), {
+    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, fresh.r, all), {
       secret: pub.secret,
       origin: pub.origin,
       since: at,
       reason: "address changed",
     });
+    if (!landed.ok) {
+      const message = `Not moved to ${host}: ${landed.message} The link on ${hostOf(pub.origin)} stays as it is.`;
+      await this.venueFailed(venue, message);
+      return { ok: false, status: 503, error: hide(message, all) };
+    }
+    const saved = landed.venue;
     if (!saved) {
       // Deleted while it was being moved: the new secret is still queued, so take it back now.
       await this.takeBack(this.client(target), fresh.secret, target.origin, venue.name);
@@ -626,24 +661,69 @@ export class StagePlotsPublisher {
   }
 
   private async afterPageSaved(old: Target | null, saved: string | null): Promise<void> {
-    if (this.paused) return;
+    if (this.paused) {
+      // The save refuses while a restore lands (servicecue-publish-routes.ts); one that got in first is said.
+      say("warn", [], "the page address was saved as a config restore began, so the published stage plots do not follow it");
+      return;
+    }
     const away = old !== null && old.origin !== saved;
+    const hadNote = this.followNote !== null;
+    this.followNote = null;
+    const notes: string[] = [];
     let target: PublishTarget | null = null;
     try {
       target = await this.deps.target();
     } catch (err) {
-      await this.followFailed(old, `the page settings could not be read: ${errorMessage(err)}`);
+      const why = `the page settings could not be read: ${errorMessage(err)}`;
+      if (away) {
+        // Whether the new page has a token cannot be known, and the old one's is being replaced:
+        // after this nothing here could reach the old page, so its links come down now, with it.
+        const message = `The page address was saved, but ${why}. The published plots on ${hostOf(old!.origin)} were taken down with its token, since nothing here could reach that page afterwards: publish them again once the new page is set up.`;
+        say("error", [], message);
+        notes.push(message);
+        await this.takeDownOldPage(old!);
+      } else await this.followFailed(old, why);
     }
     if (target?.ok && (old === null || away)) await this.moveAll(target, old);
     // The address changed (or was cleared) with no token for the new one: after this request
     // nothing here can reach the old page, so its links come down now, with its token.
     else if (target && !target.ok && away) await this.takeDownOldPage(old!);
-    if (away) await this.drainQueued(false, old!);
-    if (target?.ok) await this.drainQueued(false);
+    // With the old token, whenever the save held one: the address may be the same and the token
+    // cleared, and this is then the last moment anything here can remove what waits on that page.
+    if (old) {
+      const d = await this.drainQueued(false, old);
+      if (!d.ok) notes.push(`The old links on ${hostOf(old.origin)} could not be removed with its token, and cannot be from here once it is replaced: ${d.message}`);
+    }
+    if (target?.ok) {
+      const d = await this.drainQueued(false);
+      // Said once: the same failure under the old token already names it.
+      if (!d.ok && !notes.some((n) => n.includes(d.message))) notes.push(d.message);
+    }
+    if (notes.length > 0) this.followNote = { at: this.at(), message: notes.join(" ") };
+    if (hadNote || this.followNote) await this.tellCard();
+  }
+
+  /** Broadcast the document again, so the Publish card shows (or drops) the follow's notice. */
+  private async tellCard(): Promise<void> {
+    try {
+      this.deps.onSaved(await this.deps.store.get());
+    } catch (err) {
+      say("error", [], `the Publish card could not be told what following the page address left undone: ${errorMessage(err)}`);
+    }
+  }
+
+  /**
+   * Wait for every venue's run in flight (a first publish to the old page, say), so the venues the
+   * follow reads include what that run is about to save. Not the follow's own chain, which is the
+   * one running this, nor the queue's.
+   */
+  private async venueRunsDone(): Promise<void> {
+    await Promise.all([...this.chains].filter(([k]) => k !== ADDRESS_CHAIN && k !== PENDING_CHAIN).map(([, run]) => run));
   }
 
   /** The venues on any page but `target`'s, each moved to it on its own chain. */
   private async moveAll(target: Target, old: Target | null): Promise<void> {
+    await this.venueRunsDone();
     let venues: Venue[];
     try {
       venues = (await this.deps.store.get()).venues;
@@ -666,6 +746,7 @@ export class StagePlotsPublisher {
    */
   private async takeDownOldPage(old: Target): Promise<void> {
     const host = hostOf(old.origin);
+    await this.venueRunsDone();
     let venues: Venue[];
     try {
       venues = (await this.deps.store.get()).venues;
@@ -770,6 +851,24 @@ export class StagePlotsPublisher {
     if (r.sent > 0) await this.takeBack(client, secret, target.origin, venue.name);
     else await this.unqueue((e) => e.secret === secret && e.origin === target.origin);
     return { ok: false, secret, status: r.status, message: r.message };
+  }
+
+  /**
+   * promote(), and when that write fails after the page took everything: the new secret taken back
+   * from the page (left queued, and shown, when the page will not drop it), and why, for the caller
+   * to say and answer. Without it the secret stays live under a "publishing" entry the card hides.
+   */
+  private async land(client: PushClient, venueId: string, name: string, secret: string, origin: string, state: VenuePublish, old: PendingRemoval | null): Promise<{ ok: true; venue: Venue | null } | { ok: false; message: string }> {
+    try {
+      return { ok: true, venue: await this.promote(venueId, secret, origin, state, old) };
+    } catch (err) {
+      try {
+        await this.takeBack(client, secret, origin, name);
+      } catch (e) {
+        say("error", [secret], `a link that could not be saved could not be taken back either (${errorMessage(e)}); it stays queued for removal`);
+      }
+      return { ok: false, message: `What went up could not be saved here (${errorMessage(err)}), so it is taken back from ${hostOf(origin)}.` };
+    }
   }
 
   /**
