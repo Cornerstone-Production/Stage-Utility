@@ -55,6 +55,7 @@ function doc(): StagePlotsView {
     venues: [{ id: "v-1", name: "Room One", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
+    overrides: [],
   };
 }
 

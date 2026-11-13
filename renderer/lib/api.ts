@@ -635,6 +635,7 @@ export type IpcChannel =
   | "stageplots:get"
   | "stageplots:saveItems"
   | "stageplots:setDefault"
+  | "stageplots:setOverride"
   | "stageplots:updateBackground"
   | "stageplots:updatePlot"
   | "stageplots:updateVenue"
@@ -806,6 +807,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "stageplots:setDefault":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.venueId as string)}/default`, { plotId: p.plotId });
+
+    case "stageplots:setOverride":
+      return put<T>("/api/stageplots/overrides", { planId: p.planId, venueId: p.venueId, plotId: p.plotId, planDate: p.planDate });
 
     case "stageplots:uploadImage": {
       // The bytes are the body. A page rendered from a PDF names that PDF, kept

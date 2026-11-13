@@ -234,12 +234,13 @@ In the editor, Print shows the plot as it stands, unsaved changes included.
 ## Limits
 
 50 venues, 20 plots a venue, 50 backgrounds, names of 60 characters and notes of
-500. A plot holds up to 500 items; an item's label is up to 60 characters, its
+500, and 2000 plan overrides across every venue, past plans included. A plot holds up to 500 items; an item's label is up to 60 characters, its
 notes 500, and its inputs up to 64 of 40 characters each.
 
 ## Backups
 
-A config backup carries `stageplots.json`, both folders of background files and
+A config backup carries `stageplots.json` (venues, plots, backgrounds and every
+plan's override), both folders of background files and
 every PDF original, and a restore brings them all back. A photo background is
 about 1 to 3 MB of source plus at most 1 MB of WebP. One made from a PDF carries
 the PDF as uploaded too (up to 25 MB), beside its page's source, which for a
@@ -262,8 +263,10 @@ because its source is missing, a venue or background deleted, files tidied away 
 left behind, the tidy skipped and why, image processing unavailable because sharp
 did not load, a save that failed, every item save refused and why (a body that is
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
-version that is not a whole number, "changed elsewhere"), and how many items moved
-up onto a plot once its background change is saved.
+version that is not a whole number, "changed elsewhere"), how many items moved
+up onto a plot once its background change is saved, every plan override set or
+handed back to the default, every override refused and why, and the plan
+overrides cleared with a deleted plot.
 A page that cannot read the plots logs that too, and so does a print whose
 background did not load. See [Updates and logs](../ops/updates-and-logs.md).
 

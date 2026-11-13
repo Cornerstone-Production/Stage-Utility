@@ -106,10 +106,30 @@ export interface Plot {
   version: number;
 }
 
+/**
+ * One Planning Center plan given a plot other than its venue's default, for
+ * that plan only. Kept after the plan has happened: it is the operator's
+ * record. Removed with its plot or its venue.
+ */
+export interface PlotOverride {
+  planId: string;
+  venueId: string;
+  /** One of the venue's plots. */
+  plotId: string;
+  /** The plan's date as Planning Center sorts it, as an ISO instant, so the
+   *  override can be named ("Sun 16 Nov") when the plan is past, further out
+   *  than the upcoming list, or Planning Center cannot be read. Null when it
+   *  was not known at the time. */
+  planDate: string | null;
+}
+
 export interface StagePlotsDoc {
   venues: Venue[];
   backgrounds: Background[];
   plots: Plot[];
+  /** Sorted by planId, then venueId; one per plan and venue. A document
+   *  saved before overrides existed reads as []. */
+  overrides: PlotOverride[];
 }
 
 /** GET /api/stageplots, and every stageplots:updated frame. */
@@ -117,6 +137,7 @@ export interface StagePlotsView {
   venues: Venue[];
   backgrounds: BackgroundView[];
   plots: Plot[];
+  overrides: PlotOverride[];
 }
 
 export const STAGEPLOT_LIMITS = {
@@ -138,6 +159,8 @@ export const STAGEPLOT_LIMITS = {
   /** An item's smallest and largest width and height, in plot units. */
   itemMinSize: 8,
   itemMaxSize: 1000,
+  /** Overrides across every venue and plan, past ones included. */
+  overrides: 2000,
 } as const;
 
 /** The plot canvas is this many units wide. */

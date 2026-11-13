@@ -5,7 +5,7 @@
 //   GET    /api/stageplots                          the whole document, backgrounds with URLs
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
 //   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
-//   DELETE /api/stageplots/venues/:id               the venue and its plots
+//   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides
 //   POST   /api/stageplots/venues/:id/default       { plotId }
 //   POST   /api/stageplots/backgrounds?name=        raw PNG or JPEG (12 MB) → 201 background
 //   POST   /api/stageplots/backgrounds/pdf?name=    raw PDF (25 MB) → 201 { originalHash, bytes };
@@ -17,10 +17,15 @@
 //   POST   /api/stageplots/plots                    { venueId, name, backgroundId? } → 201 plot
 //   POST   /api/stageplots/plots/:id/duplicate      → 201 the copy, "<name> copy"
 //   PATCH  /api/stageplots/plots/:id                { name?, backgroundId?, bgFade? }
-//   DELETE /api/stageplots/plots/:id                409 while it is its venue's default
+//   DELETE /api/stageplots/plots/:id                409 while it is its venue's default;
+//                                                   → { ok, clearedPlans }, the plans whose
+//                                                   override named it, which go with it
 //   PUT    /api/stageplots/plots/:id/items          { version, items } → { plot }, version + 1;
 //                                                   409 { error, version } when the plot
 //                                                   changed since that version
+//   PUT    /api/stageplots/overrides               { planId, venueId, plotId | null, planDate? }
+//                                                   → the document; null removes the
+//                                                   plan's override for that venue
 //
 // Every change saves at once and broadcasts the whole document on
 // stageplots:updated, so a second browser follows without a reload. A change
@@ -50,7 +55,7 @@ import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
 import { CONVERTED_MAX_BYTES, convertBackground, prepareBackground, sniffUpload } from "../stageplots-convert.js";
-import { plotsUsing } from "../stageplots-doc.js";
+import { overridesOfPlot, plotsUsing } from "../stageplots-doc.js";
 import {
   MAX_PENDING_ORIGINALS,
   pendingOriginals,
@@ -64,10 +69,12 @@ import {
 import { plotHeight } from "../stageplots-doc.js";
 import {
   STAGEPLOT_ID,
+  applyOverride,
   checkItems,
   itemsWithin,
   limitProblem,
   nameProblem,
+  readOverrideChange,
   stageplotsStore,
   validatePlotInput,
   validateVenueInput,
@@ -92,7 +99,7 @@ function newId(prefix: "v" | "p" | "b"): string {
 }
 
 function toView(doc: StagePlotsDoc): StagePlotsView {
-  return { venues: doc.venues, plots: doc.plots, backgrounds: doc.backgrounds.map(backgroundView) };
+  return { venues: doc.venues, plots: doc.plots, backgrounds: doc.backgrounds.map(backgroundView), overrides: doc.overrides };
 }
 
 function backgroundView(b: Background): BackgroundView {
@@ -218,11 +225,16 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
     c.res,
     (d) => {
       findVenue(d, id);
-      return { ...d, venues: d.venues.filter((v) => v.id !== id), plots: d.plots.filter((p) => p.venueId !== id) };
+      return {
+        ...d,
+        venues: d.venues.filter((v) => v.id !== id),
+        plots: d.plots.filter((p) => p.venueId !== id),
+        overrides: d.overrides.filter((o) => o.venueId !== id),
+      };
     },
     () => ({ ok: true }),
   );
-  if (doc) console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots`);
+  if (doc) console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides`);
 }
 
 async function setDefault(c: RouteCtx, id: string): Promise<void> {
@@ -378,21 +390,78 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
   );
 }
 
+/**
+ * Delete a plot, and the overrides that named it: a plan whose override is
+ * gone shows its venue's default. The answer lists those plans, and the log
+ * says how many (the editor's confirm named them before the delete was sent).
+ */
 async function deletePlot(c: RouteCtx, id: string): Promise<void> {
-  await mutate(
+  let cleared: string[] = [];
+  const saved = await mutate(
     c.res,
     (doc) => {
       const p = findPlot(doc, id);
       const venue = findVenue(doc, p.venueId);
       if (venue.defaultPlotId === id) throw new Refused(409, "this is the venue's default plot; make another plot the default before deleting it");
+      cleared = overridesOfPlot(doc, id).map((o) => o.planId);
       return {
         ...doc,
         plots: doc.plots.filter((x) => x.id !== id),
         venues: doc.venues.map((v) => (v.id === venue.id ? { ...v, plotIds: v.plotIds.filter((x) => x !== id) } : v)),
+        overrides: doc.overrides.filter((o) => o.plotId !== id),
       };
     },
-    () => ({ ok: true }),
+    () => ({ ok: true, clearedPlans: cleared }),
   );
+  if (saved && cleared.length > 0) {
+    console.log(`[stageplots] plot ${scrub(id)} deleted; ${scrub(cleared.length)} plan overrides cleared (plans ${scrub(cleared.join(", "))}), which show the default now`);
+  }
+}
+
+// ── Overrides ────────────────────────────────────────────────────────────
+
+/**
+ * Give one plan a plot other than its venue's default, or (plotId null) hand
+ * it back to the default. The same plot again, or removing an override that
+ * is not there, writes and broadcasts nothing. A real change is said on
+ * [stageplots], since it changes what /stageplots shows that week; every
+ * refusal is said there too, with why.
+ */
+async function saveOverride(c: RouteCtx): Promise<void> {
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readObjectBody(c.req, c.res);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] override refused: ${scrub(err.message)}`);
+    throw err;
+  }
+  if (!body) {
+    console.warn("[stageplots] override refused: the body is not a JSON object");
+    return;
+  }
+  const change = readOverrideChange(body);
+  if ("problem" in change) {
+    console.warn(`[stageplots] override refused: ${scrub(change.problem)}`);
+    return error(c.res, change.problem);
+  }
+  let names: { venueName: string; plotName: string | null } | null = null;
+  const saved = await mutate(
+    c.res,
+    (doc) => {
+      const next = applyOverride(doc, change);
+      if ("problem" in next) {
+        console.warn(`[stageplots] override refused for plan ${scrub(change.planId)}, venue ${scrub(change.venueId)}: ${scrub(next.problem)}`);
+        throw new Refused(next.status, next.problem);
+      }
+      names = next;
+      return next.doc;
+    },
+    toView,
+  );
+  if (!saved || !names) return;
+  const { venueName, plotName } = names as { venueName: string; plotName: string | null };
+  if (plotName === null) console.log(`[stageplots] plan ${scrub(change.planId)}: ${scrub(venueName)} back to its default plot`);
+  else console.log(`[stageplots] plan ${scrub(change.planId)}: ${scrub(venueName)} shows "${scrub(plotName)}" for that plan`);
 }
 
 // ── Backgrounds ──────────────────────────────────────────────────────────
@@ -629,6 +698,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (pathname === `${PREFIX}/plots` && method === "POST") return createPlot(c);
   if (pathname === `${PREFIX}/backgrounds` && method === "POST") return uploadImage(c);
   if (pathname === `${PREFIX}/backgrounds/pdf` && method === "POST") return uploadPdf(c);
+  if (pathname === `${PREFIX}/overrides` && method === "PUT") return saveOverride(c);
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);

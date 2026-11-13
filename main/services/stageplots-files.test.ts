@@ -35,7 +35,7 @@ async function png(seed: number): Promise<Buffer> {
   return sharp({ create: { width: 40, height: 30, channels: 3, background: { r: seed, g: 90, b: 40 } } }).png().toBuffer();
 }
 
-const EMPTY_DOC = { venues: [], backgrounds: [], plots: [] };
+const EMPTY_DOC = { venues: [], backgrounds: [], plots: [], overrides: [] };
 
 /** A tidy source over `get`, not standing in for a damaged file. */
 function source(get: () => Promise<typeof EMPTY_DOC>) {
@@ -67,6 +67,7 @@ async function damagedStore(): Promise<string[]> {
   await stageplotsStore.update(() => ({
     venues: [],
     plots: [],
+    overrides: [],
     backgrounds: [
       {
         id: "b-kept",
@@ -164,6 +165,7 @@ describe("stage-plot files", () => {
     const doc = {
       venues: [],
       plots: [],
+      overrides: [],
       backgrounds: [
         {
           id: "b-1",
@@ -283,7 +285,7 @@ describe("stage-plot files", () => {
     const sourceHash = await files.storeStagePlotImage(source, "png");
     const pdfHash = await files.storeStagePlotOriginal(pdf);
     await stageplotsStore.update(() => ({
-      venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "Side door", plotIds: ["p-1"], defaultPlotId: "p-1" }],
+      venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "Side door", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
       backgrounds: [
         {
           id: "b-1",
@@ -296,7 +298,11 @@ describe("stage-plot files", () => {
           pdfPages: 1,
         },
       ],
-      plots: [{ id: "p-1", venueId: "v-1", name: "Standard", backgroundId: "b-1", bgFade: 0.4, items: [], version: 1 }],
+      plots: [
+        { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: "b-1", bgFade: 0.4, items: [], version: 1 },
+        { id: "p-2", venueId: "v-1", name: "Baptism", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+      ],
+      overrides: [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }],
     }));
     const bundle = JSON.parse(JSON.stringify(await configSnapshot.build()));
     assert.ok(bundle.files["stageplots.json"], "the backup has no stageplots.json");
@@ -314,6 +320,7 @@ describe("stage-plot files", () => {
 
     const restored = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
     assert.equal(restored.venues[0].name, "Main room");
+    assert.deepEqual(restored.overrides, [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }], "a plan's override did not come back");
     const bg = restored.backgrounds[0];
     assert.equal(restored.plots[0].backgroundId, bg.id, "the plot's background no longer resolves");
     assert.deepEqual(await fs.readFile(path.join(TMP, files.STAGEPLOT_IMAGE_DIR, `${bg.converted.hash}.webp`)), converted);

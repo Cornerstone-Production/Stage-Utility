@@ -68,6 +68,7 @@ function doc(): StagePlotsView {
       { id: "p-alt", venueId: "v-main", name: "Special", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
       { id: "p-hall", venueId: "v-off", name: "Setup", backgroundId: "b-1", bgFade: 0.2, items: [], version: 0 },
     ],
+    overrides: [],
   };
 }
 

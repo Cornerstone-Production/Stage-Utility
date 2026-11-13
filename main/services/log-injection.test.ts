@@ -383,6 +383,11 @@ const NOT_SCANNED = new Map<string, string>([
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   [
+    "stageplots-store.ts",
+    "logs one fixed sentence when stageplots.json's overrides are not a list, naming nothing the file " +
+      "or a request carries. Audited, not just excused.",
+  ],
+  [
     "store-file-adoption.ts",
     "logs two fixed sentences about file names that are literals in the store " +
       "declarations, never anything an HTTP request carries, plus an OS error message " +
