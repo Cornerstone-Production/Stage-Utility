@@ -279,6 +279,33 @@ describe("a venue's stage plots", () => {
     assert.equal((await fetch(`${base}/stageplots/${b}/plot/p-b`)).status, 200);
   });
 
+  // Venues share keys: two venues drawing the same background both hold image/<its hash>, and
+  // plot ids can repeat across servers. Every delete is scoped by the secret as well as the key.
+  test("two secrets holding the same key: deleting it under one leaves the other's", async () => {
+    const a = secret();
+    const b = secret();
+    for (const s of [a, b]) {
+      assert.equal((await sp("PUT", s, "image/0123456789abcdef", webp(2048), "image/webp")).status, 204);
+      assert.equal((await sp("PUT", s, "plot/p-1", { plot: s === a ? "A" : "B" })).status, 204);
+    }
+    assert.equal((await sp("DELETE", a, "image/0123456789abcdef")).status, 204);
+    assert.equal((await fetch(`${base}/stageplots/${a}/image/0123456789abcdef`)).status, 404);
+    assert.equal((await fetch(`${base}/stageplots/${b}/image/0123456789abcdef`)).status, 200, "deleting A's image took B's");
+  });
+
+  test("two secrets holding the same key: keeping less under one leaves the other's", async () => {
+    const a = secret();
+    const b = secret();
+    for (const s of [a, b]) {
+      assert.equal((await sp("PUT", s, "index", { venue: s === a ? "A" : "B" })).status, 204);
+      assert.equal((await sp("PUT", s, "image/0123456789abcdef", webp(2048), "image/webp")).status, 204);
+    }
+    const keep = await sp("PUT", a, "", { keys: ["index"] });
+    assert.deepEqual((await keep.json()).removed, ["image/0123456789abcdef"]);
+    assert.equal((await fetch(`${base}/stageplots/${a}/image/0123456789abcdef`)).status, 404);
+    assert.equal((await fetch(`${base}/stageplots/${b}/image/0123456789abcdef`)).status, 200, "A's keep removed B's image");
+  });
+
   test("one secret holds at most 100 keys, counted in the database", async () => {
     const s = secret();
     for (let i = 0; i < 100; i++) assert.equal((await sp("PUT", s, `plot/p-${i}`, {})).status, 204);
