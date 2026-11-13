@@ -82,11 +82,10 @@ describe("describePortHolder", () => {
   // fallback text even when the probe answers, this assertion goes red.
   // Confirmed red in-session, not shipped.
   test("falls back to the raw lsof/ss text when the holder is not recognisable JSON", async () => {
-    const server = net.createServer((socket) => {
+    const server = net.createServer((_socket) => {
       // Accepts the connection and never responds. A malformed-but-present HTTP
       // response would surface as a parse error immediately and never reach the
       // probe's own timeout — this exercises that timeout for real.
-      void socket;
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as net.AddressInfo).port;

@@ -560,7 +560,10 @@ each boundary, so the arrival ramp and the emptying-room taper are visibly not
 the service. Both charts take that window from the same place: the first plan
 item that is not pre-service, and the attendance record's own end (or, with no
 attendance end, the last plan item to finish). While the service is live it has
-no end yet, so nothing after the live edge is hatched.
+no end yet, so nothing after the live edge is hatched: while an in-service plan
+item is running on the service's timeline, no attendance end is drawn. A moment
+when Planning Center has no item live is drawn as an end until the next item
+goes live, when the hatch clears.
 
 A line breaks wherever more than three minutes of **sampling** is missing, since
 that means the counter was unreachable rather than that the room emptied. A line

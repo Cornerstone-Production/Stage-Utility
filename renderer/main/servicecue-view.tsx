@@ -11,6 +11,7 @@ import { useResyncOn } from "../lib/use-resync-on";
 import { ServiceCueBody, ServiceCueHeader, useServiceCueRender } from "./servicecue-body";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
+import { appZoneOf } from "../lib/app-zone";
 import { DEFAULT_TEXT_SIZE } from "./servicecue-text-size";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
@@ -179,7 +180,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
         appLogo={state.appLogo}
         appLogoMonochrome={state.appLogoMonochrome}
         now={now}
-        timeZone={state.timezone}
+        timeZone={appZoneOf(state)}
         trailing={
           state.showQr && state.remoteUrl ? (
             <a href="/settings" target="_blank" rel="noopener noreferrer" className="rounded hover:opacity-70 transition-opacity">

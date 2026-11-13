@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { confirm, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
+import { appZoneOf } from "../../lib/app-zone";
 import { useEditingTarget } from "./editing-target";
 
 /** Which board the editor is showing. Not the wire shape — see `SlotsTarget`. */
@@ -147,7 +148,7 @@ export function useSlotsTarget(boardId: string) {
   const label = planLabel(
     targets?.planSortDate ?? null,
     targets?.planDates ?? (editing.onLive ? (state?.planDates ?? null) : null),
-    state?.timezone ?? null,
+    appZoneOf(state),
   );
 
   /**
