@@ -460,6 +460,35 @@ describe("republishing on a change", () => {
     assert.deepEqual(index.plan, { date: "2026-11-15T15:00:00.000Z", dates: "November 15, 2026" });
   });
 
+  // A wait that is replaced or cancelled must still let settle() return: a settle that never
+  // returns hangs whatever awaits it (the route suite once never finished on this). Raced
+  // against a deadline, so a regression is a failure here, not a hang.
+  const settles = async (p: InstanceType<typeof StagePlotsPublisher>, what: string) => {
+    let timer!: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`settle() never returned after ${what}`)), 2000)));
+    try {
+      await Promise.race([p.settle(), deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  for (const [what, then] of [
+    ["a second change replaced the wait", (p: InstanceType<typeof StagePlotsPublisher>) => p.changed()],
+    ["a pause cancelled the wait", (p: InstanceType<typeof StagePlotsPublisher>) => void p.pause()],
+    ["a stop cancelled the wait", (p: InstanceType<typeof StagePlotsPublisher>) => void p.stop()],
+  ] as const) {
+    test(`settle() returns when ${what} it was waiting on`, async () => {
+      const h = await harness();
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      await h.publisher.settle();
+      h.publisher.changed();
+      const waiting = settles(h.publisher, what);
+      then(h.publisher);
+      await waiting;
+    });
+  }
+
   test("a plot deleted from the venue, and the background only it drew, leave the page", async () => {
     const h = await harness(venueDoc(2, 2));
     assert.ok((await h.publisher.publish("v-1")).ok);

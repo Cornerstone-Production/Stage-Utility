@@ -225,7 +225,10 @@ export class StagePlotsPublisher {
   /** Pending removals whose failure has been said: said once, not on every change. */
   private readonly saidStuck = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Resolved once the pending wait has fired and its republish has finished, or the wait is cancelled. */
   private timerDone: Promise<void> = Promise.resolve();
+  /** Resolves timerDone: called when the wait's republish finishes, or by cancelWait. */
+  private fireTimer: (() => void) | null = null;
   private planKey: string | null = null;
   private started = false;
   private stopped = false;
@@ -248,8 +251,7 @@ export class StagePlotsPublisher {
   /** Shutdown: no more republishing, and whatever is running finishes. */
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+    this.cancelWait();
     await Promise.all([...this.chains.values()]);
   }
 
@@ -260,8 +262,7 @@ export class StagePlotsPublisher {
    */
   async pause(): Promise<() => void> {
     this.paused = true;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+    this.cancelWait();
     await Promise.all([...this.chains.values()]);
     return () => {
       this.paused = false;
@@ -309,14 +310,27 @@ export class StagePlotsPublisher {
   /** Something published may have changed: republish each published venue after the wait. */
   changed(): void {
     if (this.stopped || this.paused) return;
-    if (this.timer) clearTimeout(this.timer);
+    this.cancelWait();
     let fire!: () => void;
     this.timerDone = new Promise((resolve) => (fire = resolve));
+    this.fireTimer = fire;
     this.timer = setTimeout(() => {
       this.timer = null;
+      this.fireTimer = null;
       void this.republishAll().finally(fire);
     }, this.waitMs);
     this.timer.unref?.();
+  }
+
+  /**
+   * Drop the pending wait, and resolve what settle() is awaiting on it: a wait cleared and never
+   * resolved leaves settle() waiting for ever (and every test or drive that settles, with it).
+   */
+  private cancelWait(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.fireTimer?.();
+    this.fireTimer = null;
   }
 
   private async republishAll(): Promise<void> {
