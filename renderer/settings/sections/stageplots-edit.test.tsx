@@ -220,6 +220,7 @@ const { render, cleanup, screen, fireEvent, within } = await import("@testing-li
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { StagePlotsEdit } = await import("./stageplots-edit.js");
+const { PATCH_REREAD } = await import("../../main/stageplots/use-patch.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { itemRenderProbe } = await import("../../main/stageplots/plot-items.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
@@ -1175,6 +1176,32 @@ describe("linking a connection point to the patch", () => {
     await act(async () => patchSaved());
     await settle();
     assert.ok(screen.getByTestId("link-on"));
+  });
+
+  test("an unreadable patch is read again on its own, with no save, and the point follows it once it answers", async () => {
+    const was = { ...PATCH_REREAD };
+    Object.assign(PATCH_REREAD, { firstMs: 20, maxMs: 40 });
+    try {
+      PATCH_DOWN = true;
+      await linkedOnServer();
+      assert.match(screen.getByTestId("link-lost").textContent!, /patch sheet unavailable/);
+      // Failed reads again, on the backoff, still unavailable and never blank.
+      await act(async () => new Promise((r) => setTimeout(r, 90)));
+      assert.match(screen.getByTestId("link-lost").textContent!, /patch sheet unavailable/);
+      // A read again still on its way shows the last answer, not "Reading the patch sheet…".
+      let answer!: () => void;
+      PATCH_HOLD = new Promise((resolve) => (answer = resolve));
+      await act(async () => new Promise((r) => setTimeout(r, 90)));
+      assert.match(screen.getByTestId("link-lost").textContent!, /patch sheet unavailable/, "a read again in flight blanked the last answer");
+      PATCH_DOWN = false;
+      PATCH_HOLD = null;
+      answer();
+      await act(async () => new Promise((r) => setTimeout(r, 120)));
+      await settle();
+      assert.ok(screen.getByTestId("link-on"), "the point did not follow the patch once it could be read");
+    } finally {
+      Object.assign(PATCH_REREAD, was);
+    }
   });
 
   test("Unlink makes the name and colour the point's own again", async () => {
