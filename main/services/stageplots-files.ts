@@ -68,8 +68,10 @@ export function stagePlotsView(doc: StagePlotsDoc): StagePlotsView {
     plots: doc.plots,
     backgrounds: doc.backgrounds.map(backgroundView),
     overrides: doc.overrides,
-    // Never the secrets; and not a publish in flight, which is not yet anything to remove.
-    pendingRemovals: doc.pendingRemovals.filter((e) => e.reason !== "publishing").map(({ origin, since, reason }) => ({ origin, since, reason })),
+    // Never the secrets; and not a publish in flight, which is not yet anything to remove. A list
+    // that is not one (a damaged file, left as it is so every save is refused, and said on load
+    // by normalizeStagePlots) shows as none rather than failing the whole document.
+    pendingRemovals: Array.isArray(doc.pendingRemovals) ? doc.pendingRemovals.filter((e) => e.reason !== "publishing").map(({ origin, since, reason }) => ({ origin, since, reason })) : [],
   };
 }
 

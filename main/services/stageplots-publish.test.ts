@@ -1182,6 +1182,9 @@ describe("the publish state in the store", () => {
     assert.equal((out as { pendingRemovals: unknown }).pendingRemovals, "lost", "a damaged list was replaced, forgetting what it held");
     assert.ok(lines.some((l) => l.includes("pending removals are not a list")));
     assert.throws(() => checkStagePlotsDoc(out), Error, "a save would go through and write over it");
+    // And the document still reads: GET /api/stageplots and every broadcast go through the view.
+    const { stagePlotsView } = await import("./stageplots-files.js");
+    assert.deepEqual(stagePlotsView(out as StagePlotsDoc).pendingRemovals, []);
   });
 
   test("refuses a secret, an image or an origin of the wrong shape", async () => {
