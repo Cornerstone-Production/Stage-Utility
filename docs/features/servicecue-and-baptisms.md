@@ -478,8 +478,10 @@ Restarting the server leaves the page's copy alone.
 
 Published [stage plots](stageplots.md#publishing) are not part of that copy: they stay
 on the page, each under its venue's link, until the venue is unpublished in the stage
-plots editor, and switching the card off or moving it does not touch them. Stage plots
-keep using the saved address and token whether or not the switch is on.
+plots editor, and switching the card off does not touch them. Moving the card to another
+address moves them too, each under a new link, and removes them from the old page with
+its token. Stage plots keep using the saved address and token whether or not the switch
+is on.
 
 Each of these is on [`/log`](../ops/updates-and-logs.md) as a `[publish]` line.
 

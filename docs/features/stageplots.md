@@ -345,11 +345,15 @@ The page shows the plot each venue had for the followed plan when it was last pu
 and republishes when the plan moves, so it follows the week as `/stageplots` does. Dates
 are in the app's time zone.
 
-Changing the page address under **Public link** moves each published venue to the new
-page under a new link on its next change or **Publish now**. Its old link waits as an old
-link on the old page, removed once that page is set up here again (or take it down on the
-old page itself, by deleting its Worker). If the new page will not take a venue, it stays
-on the old page and the card says why.
+Saving a new page address under **Public link** moves each published venue to the new
+page straight away, under a new link (the address changes anyway, and so one link never
+lives on two pages), then removes the old links from the old page with its token, which
+the save still holds. An old link the old page will not take down waits as an
+[old link](#old-links) on that page, removed once it is set up here again (or take it down
+there, by deleting its Worker). If the new page will not take a venue (one deployed before
+StagePlots, say), the venue stays on the old page with its link working, and the card says
+why; **Publish now** tries the move again. A new token for the same address moves nothing,
+and removes what waits on that page.
 
 ### Old links
 

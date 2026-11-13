@@ -206,6 +206,9 @@ type Target = { origin: PublishOrigin; token: string };
 /** The chain the queue of pending removals is drained on, beside the venues' own. */
 const PENDING_CHAIN = "\u0000pending";
 
+/** The chain a saved page address is handled on. */
+const ADDRESS_CHAIN = "\u0000address";
+
 // ── The publisher ────────────────────────────────────────────────────────────
 
 export class StagePlotsPublisher {
@@ -570,6 +573,37 @@ export class StagePlotsPublisher {
     return { ok: true, venue: saved };
   }
 
+
+  /**
+   * The Public link was saved. `old` is the page it was set up for before, with its token read
+   * before the save replaced it (null when there was none). When the address changed, every
+   * venue on the old page moves to the new one, and while the old token is still in hand,
+   * everything queued against the old page (the moved venues' old links among it) is removed
+   * with it; what will not go stays queued, against the old page. Then the queue is drained for
+   * the page set up now, which a new token may have just made reachable. On a chain of its own,
+   * so settle() and stop() cover it.
+   */
+  pageSaved(old: Target | null): Promise<void> {
+    return this.serial(ADDRESS_CHAIN, () => this.afterPageSaved(old));
+  }
+
+  private async afterPageSaved(old: Target | null): Promise<void> {
+    if (this.paused) return;
+    const target = await this.deps.target();
+    if (!target.ok) return;
+    if (!old || old.origin !== target.origin) {
+      const doc = await this.deps.store.get();
+      for (const venue of doc.venues) {
+        if (!venue.publish || venue.publish.origin === target.origin) continue;
+        await this.serial(venue.id, async () => {
+          const now = await this.venueNow(venue.id);
+          if (now?.publish && now.publish.origin !== target.origin) await this.move(now, await this.deps.store.get(), target, "the page address changed");
+        });
+      }
+      if (old) await this.drainQueued(false, old);
+    }
+    await this.drainQueued(false);
+  }
 
   // ── The parts ──────────────────────────────────────────────────────────────
 

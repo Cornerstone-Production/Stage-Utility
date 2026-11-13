@@ -30,6 +30,7 @@ import {
   servicecuePublishStore,
 } from "../servicecue-publish-store.js";
 import { servicecueDeployer, servicecuePublisher } from "../servicecue-publisher-instance.js";
+import { stageplotsPublisher } from "../stageplots-publish-instance.js";
 import {
   checkAccountId,
   checkDeployToken,
@@ -298,7 +299,8 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
   const { res } = c;
   const before = await servicecuePublishStore.load();
   const beforeParsed = parsePublishUrl(before.url);
-  const hadToken = beforeParsed.ok && hasSecretValue(await readPublishToken(beforeParsed.origin));
+  const beforeToken = beforeParsed.ok ? (await readPublishToken(beforeParsed.origin)).trim() : "";
+  const hadToken = beforeParsed.ok && hasSecretValue(beforeToken);
 
   let url = before.url;
   if (typeof body.url === "string") {
@@ -363,6 +365,14 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     );
     await servicecueDeployer.credentialsChanged();
   }
+
+  // Published stage plots follow the page: each venue moves to a new address, and what is left on
+  // the old one is removed with its token, which only this request still holds. In the
+  // background: a move uploads every background, and the card follows it on stageplots:updated.
+  const oldPage = beforeParsed.ok && hadToken ? { origin: beforeParsed.origin, token: beforeToken } : null;
+  void stageplotsPublisher.pageSaved(oldPage).catch((err: unknown) => {
+    console.error(`[stageplots] the stage plots could not follow the page address: ${scrub(errorMessage(err))}`);
+  });
 
   const { dropped } = await servicecuePublisher.apply({ dropCopy: before.enabled && !enabled });
   json(res, await settingsDto(dropped, dropDeploy));

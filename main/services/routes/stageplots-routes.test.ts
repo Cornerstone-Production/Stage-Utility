@@ -973,3 +973,79 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
     }
   });
 });
+
+describe("the page address changing under published venues", () => {
+  // Two pages, each the Worker's own handler. The venue is published to A; the Public link card
+  // then saves B's address and token through its own route, which still holds A's token.
+  const TOKEN = "q".repeat(40);
+  async function twoPages() {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const a = await FakeReceiver.start();
+    const b = await FakeReceiver.start();
+    a.token = TOKEN;
+    b.token = TOKEN;
+    const pa = parsePublishUrl(a.origin);
+    const pb = parsePublishUrl(b.origin);
+    assert.ok(pa.ok && pb.ok);
+    await servicecuePublishStore.save({ enabled: false, url: pa.origin });
+    await savePublishToken(pa.origin, TOKEN);
+    const v = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" });
+    const first = ((await call("POST", `/api/stageplots/venues/${v.id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+    const moveTo = async () => {
+      const r = await callRoute(serviceCuePublishRoutes, "/api/servicecue/publish", { method: "POST", body: { url: pb.origin, token: TOKEN } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      await stageplotsPublisher.settle();
+    };
+    const venue = async () => (await stageplotsStore.get()).venues.find((x) => x.id === v.id)!;
+    return { a, b, pa: pa.origin, pb: pb.origin, first, moveTo, venue, close: async () => (await a.close(), await b.close()) };
+  }
+
+  test("moves each venue to the new page under a new link, and takes the old one down with the old token", async () => {
+    const t = await twoPages();
+    try {
+      await t.moveTo();
+      const pub = (await t.venue()).publish!;
+      assert.equal(pub.origin, t.pb);
+      assert.notEqual(pub.secret, t.first, "the same secret now lives on two pages");
+      assert.deepEqual(t.b.hub.stagePlotKeys(pub.secret).sort().map((k) => k.split("/")[0]), ["index", "plot"]);
+      assert.equal(t.a.hub.stageplots.size, 0, "the old page still serves the venue");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("an old page that will not take the drop leaves the old link queued against it, in sight", async () => {
+    const t = await twoPages();
+    try {
+      t.a.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : t.a.worker(req));
+      await t.moveTo();
+      assert.equal((await t.venue()).publish!.origin, t.pb);
+      const view = frames.at(-1) as View;
+      assert.deepEqual(view.pendingRemovals.map((e) => [e.origin, e.reason]), [[t.pa, "address changed"]]);
+      assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("a new page that does not know StagePlots leaves the venue on the old one, saying why, and its link alive", async () => {
+    const t = await twoPages();
+    try {
+      t.b.respond = (req) => (/^\/_publish\/v1\/stageplots\//.test(req.path) ? { status: 404, body: '{"error":"Not found"}' } : t.b.worker(req));
+      await t.moveTo();
+      const pub = (await t.venue()).publish!;
+      assert.deepEqual([pub.origin, pub.secret], [t.pa, t.first], "the venue left a page that still serves it");
+      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ does not know StagePlots yet: deploy the Worker\./);
+      assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true, "the link of a venue that did not move was taken down");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+    } finally {
+      await t.close();
+    }
+  });
+});
