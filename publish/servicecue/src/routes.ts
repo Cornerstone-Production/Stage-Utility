@@ -13,9 +13,13 @@ import {
   HEARTBEAT_PATH,
   LIVE_PATH,
   PUBLISH_BASE_PATH,
+  STAGEPLOTS_PATH,
   docKeyForRequest,
   isAssetName,
   isDocKey,
+  isStagePlotsSecret,
+  stagePlotsKeyKind,
+  stagePlotsPath,
 } from "../../../main/types/servicecue-publish.js";
 
 /** One segment of a ServiceCue address: a name slug, an id, or `all-columns`. */
@@ -23,13 +27,21 @@ const SEGMENT = /^[A-Za-z0-9_-]{1,100}$/;
 
 export interface Rejection {
   kind: "reject";
-  status: 404 | 405;
+  status: 400 | 404 | 405;
   error: string;
   /** For a 405: the methods the path does answer. */
   allow?: string;
 }
 
 const notFound = (error = "Not found"): Rejection => ({ kind: "reject", status: 404, error });
+
+/**
+ * What a path the Worker does not know is answered: the one 404 everything unknown gets.
+ * StagePlots answers every miss with exactly this, so a secret that was never published, one
+ * that was deleted and a path that means nothing cannot be told apart.
+ */
+export const UNKNOWN: Rejection = notFound();
+const badRequest = (error: string): Rejection => ({ kind: "reject", status: 400, error });
 const notAllowed = (allow: string): Rejection => ({ kind: "reject", status: 405, error: "Method not allowed", allow });
 
 // ── The publisher's side: /_publish/v1/… ──────────────────────────────────────
@@ -47,11 +59,41 @@ export type PublishRoute =
   | { kind: "postHeartbeat" }
   | { kind: "putManifest" }
   | { kind: "getStatus" }
+  | { kind: "putStagePlot"; secret: string; key: string }
+  | { kind: "deleteStagePlot"; secret: string; key: string }
+  | { kind: "keepStagePlots"; secret: string }
+  | { kind: "dropStagePlots"; secret: string }
   | Rejection;
+
+/** Where the publisher puts a venue's stage plots: this, a secret, and a key or nothing. */
+const STAGEPLOTS_PUBLISH_PATH = `${PUBLISH_BASE_PATH}/stageplots`;
+
+/**
+ * A StagePlots publish request. A malformed secret or key is a 400, never a 404: a Worker from
+ * before StagePlots answers every path here 404, and that is how the publisher tells "deploy
+ * the Worker" from a refusal of one thing.
+ */
+function routeStagePlotsPublish(method: string, pathname: string): PublishRoute {
+  const rest = pathname.slice(STAGEPLOTS_PUBLISH_PATH.length + 1);
+  const slash = rest.indexOf("/");
+  const secret = slash < 0 ? rest : rest.slice(0, slash);
+  if (!isStagePlotsSecret(secret)) return badRequest("Not a StagePlots secret");
+  if (slash < 0) {
+    if (method === "PUT") return { kind: "keepStagePlots", secret };
+    if (method === "DELETE") return { kind: "dropStagePlots", secret };
+    return notAllowed("PUT, DELETE");
+  }
+  const key = rest.slice(slash + 1);
+  if (stagePlotsKeyKind(key) === null) return badRequest("Not a StagePlots key");
+  if (method === "PUT") return { kind: "putStagePlot", secret, key };
+  if (method === "DELETE") return { kind: "deleteStagePlot", secret, key };
+  return notAllowed("PUT, DELETE");
+}
 
 /** Which publish request this is. Called only after the token has been checked. */
 export function routePublish(method: string, url: URL): PublishRoute {
   if (!url.pathname.startsWith(`${PUBLISH_BASE_PATH}/`)) return notFound();
+  if (url.pathname.startsWith(`${STAGEPLOTS_PUBLISH_PATH}/`)) return routeStagePlotsPublish(method, url.pathname);
   const parts = url.pathname.slice(PUBLISH_BASE_PATH.length).split("/");
   // parts[0] is "" — the path began with the slash that follows the base.
 
@@ -97,6 +139,10 @@ export type PublicRoute =
   | { kind: "asset"; name: string }
   | { kind: "heartbeat" }
   | { kind: "live" }
+  /** A venue's stage plots page, if its secret has an index. */
+  | { kind: "stageplotsPage"; secret: string }
+  /** One key under a secret, if it holds one. */
+  | { kind: "stageplotsKey"; secret: string; key: string }
   | Rejection;
 
 /** `/servicecue`, or `/servicecue/<service type>/<layout>`, with at most one trailing slash. */
@@ -121,6 +167,13 @@ function matchPublic(url: URL): Exclude<PublicRoute, Rejection> | null {
     return isAssetName(name) ? { kind: "asset", name } : null;
   }
 
+  // The query is not looked at: it names nothing here, and a link pasted with one is the same link.
+  if (pathname.startsWith(`${STAGEPLOTS_PATH}/`)) {
+    const at = stagePlotsPath(pathname);
+    if (at === null) return null;
+    return at.key === null ? { kind: "stageplotsPage", secret: at.secret } : { kind: "stageplotsKey", secret: at.secret, key: at.key };
+  }
+
   if (pathname === HEARTBEAT_PATH) return search === "" ? { kind: "heartbeat" } : null;
   if (pathname === LIVE_PATH) return search === "" ? { kind: "live" } : null;
 
@@ -135,7 +188,10 @@ function matchPublic(url: URL): Exclude<PublicRoute, Rejection> | null {
  */
 export function routePublic(method: string, url: URL): PublicRoute {
   const found = matchPublic(url);
-  if (found === null) return notFound();
+  if (found === null) return UNKNOWN;
   if (found.kind === "live") return method === "GET" ? found : notAllowed("GET");
+  // Under a secret, another method is a path the Worker does not know, whether or not the secret
+  // is published: a 405 would say the address exists.
+  if (found.kind === "stageplotsPage" || found.kind === "stageplotsKey") return method === "GET" || method === "HEAD" ? found : UNKNOWN;
   return method === "GET" || method === "HEAD" ? found : notAllowed("GET, HEAD");
 }

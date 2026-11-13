@@ -96,6 +96,7 @@ const GOOD: Record<string, unknown> = {
       { id: "p-2", venueId: "v-1", name: "Baptism", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
     ],
     overrides: [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }],
+    pendingRemovals: [],
   },
   "trends-prefs.json": { soundMetric: "LAeq 2" },
   "video-feeds.json": {

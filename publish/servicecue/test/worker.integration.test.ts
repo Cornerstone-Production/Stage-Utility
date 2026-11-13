@@ -64,6 +64,7 @@ before(async () => {
   const assets = path.join(scratch, "assets-dir");
   mkdirSync(path.join(assets, "assets", "nested"), { recursive: true });
   writeFileSync(path.join(assets, "servicecue.html"), `<!doctype html><title>viewer</title>${BUILD_META}`);
+  writeFileSync(path.join(assets, "stageplots.html"), "<!doctype html><title>stage plots</title>");
   writeFileSync(path.join(assets, "assets", "app-abc123.js"), "console.log(1)");
   writeFileSync(path.join(assets, "assets", "nested", "x.js"), "console.log(2)");
   writeFileSync(path.join(assets, "assets", "readme.txt"), "not a file the build writes");
@@ -193,6 +194,125 @@ describe("the publisher", () => {
     assert.equal((await fetch(`${base}/api/service-types`)).status, 404);
     assert.equal((await fetch(`${base}/branding-images/logo-abc.svg`)).status, 404);
     assert.equal((await fetch(`${base}/api/state`)).status, 200);
+  });
+});
+
+describe("a venue's stage plots", () => {
+  const secret = () => randomBytes(32).toString("base64url");
+  const sp = (method: string, s: string, key = "", body?: unknown, type = "application/json") =>
+    send(method, `/_publish/v1/stageplots/${s}${key ? `/${key}` : ""}`, body, { ...auth, "Content-Type": type });
+  /** A WebP of exactly `size` bytes: RIFF, a size, WEBP, and noise. */
+  const webp = (size: number) => {
+    const bytes = randomBytes(size);
+    bytes.write("RIFF", 0, "latin1");
+    bytes.write("WEBP", 8, "latin1");
+    return bytes;
+  };
+  /** Status, every header but Date, and the body. */
+  const whole = async (res: Response) => ({
+    status: res.status,
+    headers: [...res.headers].filter(([n]) => n !== "date").sort(([a], [b]) => a.localeCompare(b)),
+    body: Buffer.from(await res.arrayBuffer()).toString("base64"),
+  });
+
+  test("a background of 2,000,000 bytes is stored in one row, answered whole, and gone with its secret", async () => {
+    const s = secret();
+    const big = webp(2_000_000);
+    assert.equal((await sp("PUT", s, "image/0123456789abcdef", big, "image/webp")).status, 204);
+    assert.equal((await sp("PUT", s, "index", { venue: { name: "Main room" } })).status, 204);
+    const got = await fetch(`${base}/stageplots/${s}/image/0123456789abcdef`);
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get("content-type"), "image/webp");
+    assert.ok(Buffer.from(await got.arrayBuffer()).equals(big), "the background did not come back byte for byte");
+    const page = await fetch(`${base}/stageplots/${s}`);
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), "<!doctype html><title>stage plots</title>");
+
+    assert.equal((await sp("DELETE", s)).status, 204);
+    for (const path of [`/stageplots/${s}`, `/stageplots/${s}/index`, `/stageplots/${s}/image/0123456789abcdef`]) {
+      assert.equal((await fetch(base + path)).status, 404, path);
+    }
+  });
+
+  test("never existed, deleted, short and malformed are the 404 any unknown path gets, byte for byte", async () => {
+    const deleted = secret();
+    assert.equal((await sp("PUT", deleted, "index", {})).status, 204);
+    assert.equal((await sp("DELETE", deleted)).status, 204);
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const expected = await whole(await fetch(`${base}/nothing-here`, { method }));
+      assert.equal(expected.status, 404);
+      for (const path of [`/stageplots/${secret()}`, `/stageplots/${secret()}/index`, `/stageplots/${deleted}`, `/stageplots/${deleted}/index`, `/stageplots/${deleted.slice(1)}`, `/stageplots/${deleted}/plot/a.b`]) {
+        assert.deepEqual(await whole(await fetch(base + path, { method })), expected, `${method} ${path}`);
+      }
+    }
+  });
+
+  test("is absent from the status answer and untouched by the ServiceCue manifest", async () => {
+    const before = (await (await send("GET", "/_publish/v1/status")).json()) as { docs: string[]; assets: string[] };
+    const s = secret();
+    assert.equal((await sp("PUT", s, "index", {})).status, 204);
+    // Read before the manifest below, which would delete a doc written by mistake and hide it.
+    const status = await (await send("GET", "/_publish/v1/status")).text();
+    assert.equal(status.includes(s), false, "the status answer named a secret");
+    const after = JSON.parse(status) as { docs: string[]; assets: string[] };
+    assert.deepEqual([after.docs, after.assets], [before.docs, before.assets], "a StagePlots write changed the docs or assets");
+    assert.equal((await send("PUT", "/_publish/v1/manifest", { docs: [], assets: [] })).status, 200);
+    assert.equal((await fetch(`${base}/stageplots/${s}/index`)).status, 200);
+  });
+
+  test("two secrets are kept apart: each serves its own, a third reads nothing of theirs, and dropping one leaves the other", async () => {
+    const a = secret();
+    const b = secret();
+    assert.equal((await sp("PUT", a, "index", { venue: "A" })).status, 204);
+    assert.equal((await sp("PUT", a, "plot/p-a", { plot: "A" })).status, 204);
+    assert.equal((await sp("PUT", b, "index", { venue: "B" })).status, 204);
+    assert.equal((await sp("PUT", b, "plot/p-b", { plot: "B" })).status, 204);
+    assert.deepEqual(await (await fetch(`${base}/stageplots/${a}/index`)).json(), { venue: "A" });
+    assert.deepEqual(await (await fetch(`${base}/stageplots/${b}/index`)).json(), { venue: "B" });
+    assert.equal((await fetch(`${base}/stageplots/${a}/plot/p-b`)).status, 404, "A's secret read B's plot");
+    const fresh = secret();
+    assert.equal((await fetch(`${base}/stageplots/${fresh}/index`)).status, 404, "a fresh secret read another venue's index");
+    assert.equal((await fetch(`${base}/stageplots/${fresh}/plot/p-b`)).status, 404, "a fresh secret read another venue's plot");
+    assert.equal((await sp("DELETE", a)).status, 204);
+    assert.equal((await fetch(`${base}/stageplots/${a}/index`)).status, 404);
+    assert.equal((await fetch(`${base}/stageplots/${b}/index`)).status, 200, "dropping A took B with it");
+    assert.equal((await fetch(`${base}/stageplots/${b}/plot/p-b`)).status, 200);
+  });
+
+  // Venues share keys: two venues drawing the same background both hold image/<its hash>, and
+  // plot ids can repeat across servers. Every delete is scoped by the secret as well as the key.
+  test("two secrets holding the same key: deleting it under one leaves the other's", async () => {
+    const a = secret();
+    const b = secret();
+    for (const s of [a, b]) {
+      assert.equal((await sp("PUT", s, "image/0123456789abcdef", webp(2048), "image/webp")).status, 204);
+      assert.equal((await sp("PUT", s, "plot/p-1", { plot: s === a ? "A" : "B" })).status, 204);
+    }
+    assert.equal((await sp("DELETE", a, "image/0123456789abcdef")).status, 204);
+    assert.equal((await fetch(`${base}/stageplots/${a}/image/0123456789abcdef`)).status, 404);
+    assert.equal((await fetch(`${base}/stageplots/${b}/image/0123456789abcdef`)).status, 200, "deleting A's image took B's");
+  });
+
+  test("two secrets holding the same key: keeping less under one leaves the other's", async () => {
+    const a = secret();
+    const b = secret();
+    for (const s of [a, b]) {
+      assert.equal((await sp("PUT", s, "index", { venue: s === a ? "A" : "B" })).status, 204);
+      assert.equal((await sp("PUT", s, "image/0123456789abcdef", webp(2048), "image/webp")).status, 204);
+    }
+    const keep = await sp("PUT", a, "", { keys: ["index"] });
+    assert.deepEqual((await keep.json()).removed, ["image/0123456789abcdef"]);
+    assert.equal((await fetch(`${base}/stageplots/${a}/image/0123456789abcdef`)).status, 404);
+    assert.equal((await fetch(`${base}/stageplots/${b}/image/0123456789abcdef`)).status, 200, "A's keep removed B's image");
+  });
+
+  test("one secret holds at most 100 keys, counted in the database", async () => {
+    const s = secret();
+    for (let i = 0; i < 100; i++) assert.equal((await sp("PUT", s, `plot/p-${i}`, {})).status, 204);
+    assert.equal((await sp("PUT", s, "plot/one-more", {})).status, 409);
+    const keep = await sp("PUT", s, "", { keys: ["plot/p-0"] });
+    assert.equal((await keep.json()).removed.length, 99);
+    assert.equal((await sp("PUT", s, "plot/one-more", {})).status, 204);
   });
 });
 

@@ -160,6 +160,12 @@ publishes to it updates it once it has a Cloudflare API token
 again. The docs and rundowns the page shows are not part of a deploy: they come from
 what Stage Utility sends.
 
+The same Worker serves [published stage plots](../features/stageplots.md#publishing) at
+`/stageplots/<secret>`. A Worker deployed from a release before StagePlots does not know
+those addresses: publishing a venue is refused with "*host* does not know StagePlots yet:
+deploy the Worker", and nothing else changes. Update the page either way above and
+publish again.
+
 ### Keeping it up to date
 
 The server the page is linked to (the one holding its address and its publishing token)
@@ -426,6 +432,9 @@ A leaked token lets someone, from anywhere:
 - fill the Worker's storage with docs and images until it is full;
 - host images, up to 2 MB each, at `https://servicecue.<your-subdomain>.workers.dev/branding-images/<name>`,
   on an address that has your name on it;
+- publish stage plots, and delete a venue's published plots if they know its link (the
+  secret is in the link, not something the token reveals: nothing on the Worker lists
+  secrets);
 - read the Stage Utility version your server is running, which the status answer reports.
 
 It reaches no part of your network, your Planning Center account or your settings.

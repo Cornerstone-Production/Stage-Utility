@@ -30,6 +30,7 @@ import {
   servicecuePublishStore,
 } from "../servicecue-publish-store.js";
 import { servicecueDeployer, servicecuePublisher } from "../servicecue-publisher-instance.js";
+import { stageplotsPublisher } from "../stageplots-publish-instance.js";
 import {
   checkAccountId,
   checkDeployToken,
@@ -298,7 +299,8 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
   const { res } = c;
   const before = await servicecuePublishStore.load();
   const beforeParsed = parsePublishUrl(before.url);
-  const hadToken = beforeParsed.ok && hasSecretValue(await readPublishToken(beforeParsed.origin));
+  const beforeToken = beforeParsed.ok ? (await readPublishToken(beforeParsed.origin)).trim() : "";
+  const hadToken = beforeParsed.ok && hasSecretValue(beforeToken);
 
   let url = before.url;
   if (typeof body.url === "string") {
@@ -340,6 +342,15 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     return;
   }
 
+  // Refused while a config restore lands: the stage plots publisher is paused then, and could not
+  // take the old page's links down with the token this save is about to replace.
+  if (stageplotsPublisher.restoring) {
+    const message = "A config restore is under way; try again once the server is back.";
+    console.warn(`[publish] the Public link was not saved: ${scrub(message)}`);
+    json(res, { error: message }, 503);
+    return;
+  }
+
   // The token and its address in one write, then the settings. If the second fails the first is put back, so a token
   // is never left beside an address it was not saved for; and a token read back for any address but its own reads as none.
   const previous = await secretsStore.getSecrets(PUBLISH_SECRET_SLOT);
@@ -363,6 +374,14 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     );
     await servicecueDeployer.credentialsChanged();
   }
+
+  // Published stage plots follow the page: each venue moves to a new address, and what is left on
+  // the old one is removed with its token, which only this request still holds. In the
+  // background, since a move uploads every background and would hold this answer past the card's
+  // wait; the publisher hands the old token on to every step, never rejects, and leaves each
+  // failure on the StagePlots card as the venue's last error (stageplots-publish.ts pageSaved).
+  const oldPage = beforeParsed.ok && hadToken ? { origin: beforeParsed.origin, token: beforeToken } : null;
+  void stageplotsPublisher.pageSaved(oldPage, target.ok ? target.origin : null);
 
   const { dropped } = await servicecuePublisher.apply({ dropCopy: before.enabled && !enabled });
   json(res, await settingsDto(dropped, dropDeploy));

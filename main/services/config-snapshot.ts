@@ -34,6 +34,10 @@ import {
 import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
+import { plural } from "./plural.js";
+import { mergeRestoredStagePlots, type LiveStagePlots, type RestoreMode } from "./stageplots-doc.js";
+import { isStagePlotsSecret } from "../types/servicecue-publish.js";
+import type { StagePlotsDoc } from "../types/stageplots.js";
 import { atomicWrite } from "./write-queue.js";
 import { StoreReadError } from "./data-store.js";
 import { MAX_CONFIG_BODY_BYTES } from "./routes/context.js";
@@ -339,6 +343,78 @@ async function liveSettings(dest: string): Promise<LiveSettings> {
   }
 }
 
+/**
+ * The live stage plots document a restore is about to replace, read off disk (never through
+ * the store, whose cache a restart must find cold). Undefined when there is none. One that
+ * fails the store's check is read for its links alone, so a restore never strands one; one
+ * that does not parse is "unknown", never a fresh install: it may hold links nobody can read,
+ * so nothing from the backup is revived over it (mergeRestoredStagePlots).
+ */
+async function liveStagePlots(file: string): Promise<LiveStagePlots> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (err) {
+    if (isNotFound(err)) return undefined;
+    throw err;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    // Whatever links it held cannot be read, so they can never be removed from here: said, with
+    // the pages they were on when the text still names them.
+    const hosts = [...new Set([...raw.matchAll(/"origin"\s*:\s*"(https?:\/\/[^"\\]+)"/g)].flatMap((m) => {
+      try {
+        return [new URL(m[1]!).host];
+      } catch {
+        return [];
+      }
+    }))].sort();
+    const where = hosts.length > 0 ? ` (on ${hosts.join(", ")})` : "";
+    console.warn(
+      `[config-snapshot] the live stageplots.json does not parse: any stage plots links in it${scrub(where, 400)} cannot be removed from here and are lost to this box; take them down on their page (by deleting its Worker) if they must go. No stage plots link in this backup comes back published, and each is queued for removal from its page`,
+    );
+    return "unknown";
+  }
+  // Imported lazily for the reason pauseBackgroundWriters is.
+  const { checkStagePlotsDoc, httpOrigin } = await import("./stageplots-store.js");
+  try {
+    return checkStagePlotsDoc(json);
+  } catch {
+    return linksOnly(json, httpOrigin);
+  }
+}
+
+/**
+ * A stage plots document that fails the check, cut down to its venues' links and its queue: all a
+ * restore needs to know of it. A secret this server could not have made, or an origin that is not
+ * one, is no link anyone can remove, and would make the restored file fail the store's own check:
+ * dropped, and counted on the log.
+ */
+function linksOnly(json: unknown, httpOrigin: (v: unknown) => string | null): StagePlotsDoc {
+  const o = (v: unknown): Record<string, unknown> | null => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const d = o(json);
+  let dropped = 0;
+  const link = (x: Record<string, unknown> | null) => {
+    if (!x || (x.secret === undefined && x.origin === undefined)) return null;
+    const origin = httpOrigin(x.origin);
+    if (isStagePlotsSecret(x.secret) && origin !== null) return { secret: x.secret, origin };
+    dropped++;
+    return null;
+  };
+  const venues = (Array.isArray(d?.venues) ? d.venues : []).map((raw, i) => {
+    const p = link(o(o(raw)?.publish));
+    return { id: `live-${i}`, name: "", kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: { ...p, publishedAt: "", lastError: null, publishedImages: [], unpublishedImages: [] } } : {}) };
+  });
+  const pendingRemovals = (Array.isArray(d?.pendingRemovals) ? d.pendingRemovals : []).flatMap((raw) => {
+    const l = link(o(raw));
+    return l ? [{ ...l, since: new Date().toISOString(), reason: "restored over" as const }] : [];
+  });
+  if (dropped > 0) console.warn(`[config-snapshot] the live stageplots.json fails its check; ${plural(dropped, "link")} in it with a malformed secret or page address could not be carried into this restore`);
+  return { venues, backgrounds: [], plots: [], overrides: [], pendingRemovals };
+}
+
 /** What the operator chose about the server the config was saved on. */
 export interface RestoreOptions {
   /** This box replaces that server: take its server id, and with it its screens
@@ -353,6 +429,9 @@ const KEEP_OWN_ID: RestoreOptions = { replacesOriginal: false };
 /** The screen bindings a restore may leave as they are. Bindings are to a server
  *  id: they go wherever the config's id goes. */
 const BINDINGS_FILE = "kiosk-devices.json";
+
+/** The stage plots store, whose venues' publish links follow the server id (see writeSnapshot). */
+const STAGEPLOTS_FILE = "stageplots.json";
 
 /**
  * Whether a restore takes the config's server id, and with it the config's screen
@@ -525,27 +604,32 @@ function mergeIdFloors(contents: object, live: Record<string, unknown> | null, f
  * and a static import of the controller here would make that a cycle.
  */
 async function pauseBackgroundWriters(): Promise<() => void> {
-  // Logged, not swallowed: if either stop is ever renamed this would otherwise
-  // proceed with the writers running and still report the restore as clean.
-  const failed = (what: string) => (err: unknown) => {
-    console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
-    return null;
-  };
   // Awaited, where these used to be fire-and-forget. The imports are lazy to
   // break a cycle, not because the timing is unimportant: not waiting meant the
   // writes below could begin before the poller had actually stopped, which is
   // the race the stop exists to remove.
-  const undos = await Promise.all([
-    import("./live-poller.js")
-      .then((m) => m.livePoller.pause())
-      .catch(failed("the live poller")),
-    import("./stage-controller.js")
-      .then((m) => m.stageController.pauseBackgroundWork())
-      .catch(failed("the stage controller")),
-  ]);
-  return () => {
-    for (const undo of undos) undo?.();
+  const writers = [
+    ["the live poller", () => import("./live-poller.js").then((m) => m.livePoller.pause())],
+    ["the stage controller", () => import("./stage-controller.js").then((m) => m.stageController.pauseBackgroundWork())],
+    // Waits for any publish in flight, then holds every stage plots write until a refused
+    // restore resumes it: a debounced republish must not write over the restored file.
+    ["the stage plots publisher", () => import("./stageplots-publish-instance.js").then((m) => m.stageplotsPublisher.pause())],
+  ] as const;
+  const settled = await Promise.allSettled(writers.map(([, pause]) => pause()));
+  const undos = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  const resume = () => {
+    for (const undo of undos) undo();
   };
+  // One that could not be quieted would write over the restored file and the restore would still
+  // report itself clean: refused instead, with what was paused resumed and the box as it was.
+  const failed = settled.flatMap((r, i) => (r.status === "rejected" ? [`${writers[i]![0]} (${errorMessage(r.reason)})`] : []));
+  if (failed.length > 0) {
+    resume();
+    const message = `The restore was refused: ${failed.join(" and ")} could not be paused, and would have written over the restored files. Nothing was changed.`;
+    console.error(`[config-snapshot] ${scrub(message, 600)}`);
+    throw new Error(message);
+  }
+  return resume;
 }
 
 class ConfigSnapshotService {
@@ -837,6 +921,25 @@ class ConfigSnapshotService {
       // bindings of its to write, but its screens still replace this server's,
       // so this server's bindings name screens that are no longer theirs.
       await releaseBindings(toRestore);
+    }
+    // Published stage plots: merged with the live file this restore replaces, so no link that
+    // may be live on a page is left unknown and none that was revoked comes back
+    // (mergeRestoredStagePlots has the rules). Two servers never publish one link: a config of
+    // another server's keeps its links with that server, unless this box replaces it.
+    if (toRestore.has(STAGEPLOTS_FILE)) {
+      const mode: RestoreMode = !take ? "keep-own" : serverIdIn(configSettings) === live?.serverId ? "same-id" : "replace";
+      const merged = mergeRestoredStagePlots({
+        restored: toRestore.get(STAGEPLOTS_FILE) as StagePlotsDoc,
+        live: await liveStagePlots(path.join(getUserDataPath(), STAGEPLOTS_FILE)),
+        mode,
+        now: new Date().toISOString(),
+      });
+      toRestore.set(STAGEPLOTS_FILE, merged.doc);
+      if (merged.unpublished > 0 || merged.queued > 0) {
+        console.log(
+          `[config-snapshot] restore: ${plural(merged.unpublished, "stage plots venue comes", "stage plots venues come")} back unpublished and ${plural(merged.queued, "link is", "links are")} queued for removal from its page, so none is left live and unknown`,
+        );
+      }
     }
     // A bundle carries addresses and no secrets, so a stored credential would
     // follow whatever address it names. Cleared before anything is written: a

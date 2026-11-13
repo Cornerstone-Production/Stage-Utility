@@ -15,7 +15,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { STAGEPLOT_LIMITS, type StagePlotsDoc } from "../types/stageplots.js";
+import { STAGEPLOT_LIMITS, type Background, type BackgroundView, type StagePlotsDoc, type StagePlotsView } from "../types/stageplots.js";
 import { getUserDataPath } from "./app-paths.js";
 import { errorMessage, isNotFound } from "./errors.js";
 import { scrub } from "./scrub.js";
@@ -56,6 +56,31 @@ export function stagePlotImageUrl(hash: string, ext: StagePlotImageExt): string 
 }
 
 /** A source raster's bytes, for a re-conversion, or null when it is missing. */
+/** A background as the API serves it, with the URLs of its converted image and its source. */
+export function backgroundView(b: Background): BackgroundView {
+  return { ...b, url: stagePlotImageUrl(b.converted.hash, "webp"), sourceUrl: stagePlotImageUrl(b.source.hash, b.source.ext) };
+}
+
+/** The document as GET /api/stageplots and every stageplots:updated frame carry it. */
+export function stagePlotsView(doc: StagePlotsDoc, notice: { at: string; message: string } | null = null): StagePlotsView {
+  return {
+    ...(notice ? { notice } : {}),
+    venues: doc.venues,
+    plots: doc.plots,
+    backgrounds: doc.backgrounds.map(backgroundView),
+    overrides: doc.overrides,
+    // Never the secrets; and not a publish in flight, which is not yet anything to remove. A list
+    // that is not one (a damaged file, left as it is so every save is refused, and said on load
+    // by normalizeStagePlots) shows as none rather than failing the whole document.
+    pendingRemovals: Array.isArray(doc.pendingRemovals) ? doc.pendingRemovals.filter((e) => e.reason !== "publishing").map(({ origin, since, reason }) => ({ origin, since, reason })) : [],
+  };
+}
+
+/** A converted background's WebP bytes, or null when the file is not there. */
+export async function readStagePlotImage(hash: string): Promise<Buffer | null> {
+  return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.webp`))?.data ?? null;
+}
+
 export async function readStagePlotSource(hash: string, ext: "png" | "jpg"): Promise<Buffer | null> {
   return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.${ext}`))?.data ?? null;
 }

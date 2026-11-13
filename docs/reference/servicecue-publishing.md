@@ -47,6 +47,10 @@ Failures answer `{"error": "…"}`.
 | `POST` | `/_publish/v1/heartbeat` | `{"at": <ms>, "version": "…"}` | `204`. `400` for anything else |
 | `PUT` | `/_publish/v1/manifest` | `{"docs": […], "assets": […]}` | `200 {"removedDocs": […], "removedAssets": […]}`. `400` if any entry is not a key or a name |
 | `GET` | `/_publish/v1/status` | | `200 {protocol, docs, assets, lastHeartbeat, viewers, build}` |
+| `PUT` | `/_publish/v1/stageplots/<secret>/<key>` | JSON, or WebP bytes for an `image/` key | `204`. See [StagePlots](#stageplots) |
+| `DELETE` | `/_publish/v1/stageplots/<secret>/<key>` | | `204` |
+| `PUT` | `/_publish/v1/stageplots/<secret>` | `{"keys": […]}` | `200 {"removed": […]}`: every key under the secret not named is deleted |
+| `DELETE` | `/_publish/v1/stageplots/<secret>` | | `204`: everything under the secret is deleted, in one statement |
 
 The status answer's fields:
 
@@ -136,6 +140,36 @@ serves its own branding images at, so a state whose `appLogo` is
 letters, digits, `.`, `_` and `-`, and not only dots. The type is one of `image/png`,
 `image/jpeg`, `image/webp`, `image/gif` and `image/svg+xml`.
 
+### StagePlots
+
+A venue's [stage plots](../features/stageplots.md#publishing) are published under a
+secret of their own: 32 random bytes the church's server makes, written as 43 characters
+of unpadded base64url. Under a secret there are three kinds of key:
+
+| Key | Holds |
+|---|---|
+| `index` | the venue: its name and notes, its plots in tab order, its default, and which plot it showed when it was published |
+| `plot/<id>` | one plot: its items, its background fade and its background's size. `<id>` is 1 to 80 of letters, digits, `-` and `_` |
+| `image/<hash>` | one converted background, `image/webp`. `<hash>` is 16 lower-case hex digits |
+
+None of it is a doc or an asset: it is in a table of its own, so the manifest never
+deletes it, the status answer never lists it, and `publish:docs` never names it. Nothing
+on the Worker lists secrets.
+
+| Case | Answer |
+|---|---|
+| A doc that is not a JSON object | `400` |
+| An image whose `Content-Type` is not `image/webp` | `415` |
+| An image that is empty or does not begin `RIFF`, four bytes, `WEBP` | `400` |
+| A body over 2,000,000 bytes | `413` |
+| A secret that already holds 100 other keys | `409` |
+| A secret or key of the wrong shape | `400` |
+| Another method | `405` with `Allow: PUT, DELETE` |
+
+A well-formed StagePlots request is never answered `404`. A Worker from before StagePlots
+answers every path under `/_publish/v1/stageplots/` with `404`, and that is how the
+publisher tells "deploy the Worker" apart from a refusal of one thing.
+
 ### Heartbeat
 
 Send one every 30 seconds or so while publishing. The Worker records it on **its own
@@ -162,6 +196,13 @@ Everything below is open: no token, `GET` and `HEAD` only except the socket, whi
 | `/branding-images/<name>` | the asset, with its type and `X-Content-Type-Options: nosniff` |
 | `/api/publish/heartbeat` | `{"at": <ms or null>, "now": <ms>, "build": <id or null>}`: when the church was last heard from, the edge's clock, and the build of the page this Worker serves |
 | `/api/live` | the WebSocket below |
+| `/stageplots/<secret>` | the stage plots page, while the secret has an `index`. One trailing slash is allowed |
+| `/stageplots/<secret>/index`, `/plot/<id>`, `/image/<hash>` | what is stored under that key |
+
+Under `/stageplots/`, everything that is not one of those (a secret nothing is published
+under, one that was deleted, a secret or key of the wrong shape, any method but `GET` and
+`HEAD`) is answered exactly as a path the Worker does not know: the same status, headers
+and body. The secret's shape is checked before storage is read. A query is ignored.
 
 The files the build writes beside the page (`/assets/*.js`, `*.css`, `*.woff` and
 `*.woff2`, `/favicon.svg`, `/apple-touch-icon.png`, the three `/icon-*.png` and
@@ -173,7 +214,7 @@ headers below, and `immutable` caching for `/assets/*`.
 `/` is a `302` to `/servicecue`, with no query carried, so a domain of its own opens
 on the landing page.
 
-**Everything else is a `404`**: `/servicecue/presets`, `/servicecue/manage`, a
+**Everything else is a `404`**: `/servicecue/presets`, `/servicecue/manage`, `/stageplots.html`, a
 deeper path, any file name not in the build. The Worker answers only paths it names;
 nothing falls back to a near one. The page's own file is never served at its own name.
 A path is judged as the URL parser leaves it: `..` and `%2e%2e` segments and a backslash
@@ -244,7 +285,13 @@ one opened as a page of its own is only a picture.
 
 Caching: the page is revalidated; `/assets/*` is `immutable` (its names carry a hash)
 and the icons and manifest are revalidated; docs, the heartbeat and every refusal are
-`no-store`; an asset is kept for a day.
+`no-store`; an asset is kept for a day. A stage plots background is
+`private, max-age=31536000, immutable` (its key is its content), never in a shared cache,
+so one that is taken down is not served on by a cache in between; its index and plots are
+`no-store`.
+
+The Worker's own log line for a request that failed names its path with anything after
+`/stageplots/` replaced by `<secret>`.
 
 ## What the page does
 
@@ -288,10 +335,12 @@ page, and goes away by itself when updates resume.
 
 A visitor may leave the page open for hours, across a deploy. The build stamps
 `servicecue.html` with an id, `<meta name="servicecue-build" content="…">` in its head:
-12 lower-case hex digits, the SHA-256 of the document as the build wrote it. The
+12 lower-case hex digits, the SHA-256 of the two documents as the build wrote them,
+`servicecue.html` and then the [stage plots page](#stageplots)'s `stageplots.html`. Each
 document names its script and style by names that carry their own content hash, so it
-is a different document whenever either is. (An icon or a manifest that changes alone
-is not a new build.)
+is a different document whenever either is, and a change to either page is a new build:
+a change to the stage plots page alone also reloads an open ServiceCue page once. (An
+icon or a manifest that changes alone is not a new build.)
 
 The Worker reads the id out of the document it serves and gives it to the status answer
 (`build`), puts it on the heartbeat it
@@ -357,6 +406,7 @@ connected and a church that is quiet costs nothing while it waits.
 | `version` in a heartbeat | 1 to 64 characters |
 | Publishing token | at least 32 characters |
 | `plans-upcoming` | 60 days |
+| Keys under one StagePlots secret | 100 |
 
 `MAX_VIEWERS`, `MAX_VIEWERS_PER_ADDRESS` and `VIEWER_IDLE_MS` change the first two limits
 and the 90 seconds. Set them as variables on the Worker in the Cloudflare dashboard, or as

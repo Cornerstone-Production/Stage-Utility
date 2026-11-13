@@ -70,7 +70,7 @@ describe("everything a build reads is a build input", () => {
     ["the Worker's bundle", worker.workerInputs.map((p) => path.relative(ROOT, path.join(ROOT, "publish/servicecue", p)).split(path.sep).join("/")).filter((p) => !p.includes("node_modules"))],
     ["the files the page's build reads by path", READ_BY_PATH],
     ["the files the interface's build copies from public/", filesUnder("public", "")],
-    ["the documents the builds start from", ["index.html", "app.html", "servicecue.html"]],
+    ["the documents the builds start from", ["index.html", "app.html", "servicecue.html", "stageplots.html"]],
   ];
 
   for (const [what, files] of sets) {

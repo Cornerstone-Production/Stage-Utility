@@ -9,16 +9,22 @@
 import {
   ASSET_CONTENT_TYPES,
   PUBLISH_MAX_BODY_BYTES,
+  STAGEPLOTS_HTML,
+  STAGEPLOTS_IMAGE_TYPE,
+  STAGEPLOTS_INDEX_KEY,
+  STAGEPLOTS_MAX_KEYS,
   VIEWER_HTML,
   assetContentType,
+  loggablePath,
+  stagePlotsKeyKind,
 } from "../../../main/types/servicecue-publish.js";
 import { authorize } from "./auth.js";
 import { BodyTooLarge, readCappedBody } from "./body.js";
 import { viewerBuild } from "./build.js";
 import { SVG_CSP, htmlCsp, json, jsonText, noContent, secured } from "./headers.js";
 import type { HubApi } from "./hub-api.js";
-import { isPublishArea, routePublic, routePublish, type Rejection } from "./routes.js";
-import { docText, frameBody, heartbeatBody, manifestBody, parseJson, type Parsed } from "./validate.js";
+import { UNKNOWN, isPublishArea, routePublic, routePublish, type Rejection } from "./routes.js";
+import { docText, frameBody, heartbeatBody, isWebp, manifestBody, parseJson, stagePlotsDocText, stagePlotsKeepBody, type Parsed } from "./validate.js";
 
 export interface HandlerDeps {
   hub: HubApi;
@@ -61,7 +67,8 @@ export async function handle(request: Request, deps: HandlerDeps): Promise<Respo
     // it was a failure and not a refusal (a publisher retries a 500 and gives up on a
     // 4xx), and the reason is on the Worker's log for whoever runs `wrangler tail`. The
     // body says nothing about it: this answer reaches anonymous visitors too.
-    console.error(`[servicecue-worker] ${request.method} ${url.pathname} failed:`, err);
+    // The path with any StagePlots secret taken out: whoever reads the log is not whoever holds the link.
+    console.error(`[servicecue-worker] ${request.method} ${loggablePath(url.pathname)} failed:`, err);
     return secured(json({ error: "The Worker could not answer that" }, 500));
   }
 }
@@ -160,6 +167,41 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
 
     case "getStatus":
       return forMethod(request, json({ ...(await deps.hub.status()), build: await servedBuild(deps.assets, url, "the status") }));
+
+    case "putStagePlot": {
+      let stored: { type: string; body: ArrayBuffer };
+      if (stagePlotsKeyKind(r.key) === "image") {
+        if (assetContentType(request.headers.get("Content-Type")) !== STAGEPLOTS_IMAGE_TYPE) {
+          return json({ error: `A StagePlots background must be ${STAGEPLOTS_IMAGE_TYPE}` }, 415);
+        }
+        const bytes = await readBytes(request);
+        if (!bytes.ok) return bytes.response;
+        if (!isWebp(bytes.value)) return json({ error: "The image is not a WebP" }, 400);
+        stored = { type: STAGEPLOTS_IMAGE_TYPE, body: toArrayBuffer(bytes.value) };
+      } else {
+        const body = await readValidated(request, stagePlotsDocText);
+        if (!body.ok) return body.response;
+        stored = { type: "application/json", body: toArrayBuffer(new TextEncoder().encode(body.value)) };
+      }
+      if ((await deps.hub.putStagePlot(r.secret, r.key, stored.type, stored.body)) === "full") {
+        return json({ error: `One secret holds at most ${STAGEPLOTS_MAX_KEYS} keys` }, 409);
+      }
+      return noContent();
+    }
+
+    case "deleteStagePlot":
+      await deps.hub.deleteStagePlot(r.secret, r.key);
+      return noContent();
+
+    case "keepStagePlots": {
+      const body = await readValidated(request, stagePlotsKeepBody);
+      if (!body.ok) return body.response;
+      return json({ removed: await deps.hub.keepStagePlots(r.secret, body.value) });
+    }
+
+    case "dropStagePlots":
+      await deps.hub.dropStagePlots(r.secret);
+      return noContent();
   }
 }
 
@@ -237,14 +279,39 @@ async function serve(request: Request, url: URL, deps: HandlerDeps): Promise<Res
       return deps.upgrade(request, await servedBuild(deps.assets, url, "the viewer handshake"));
     }
 
-    case "viewer": {
-      const res = await deps.assets(new Request(new URL(VIEWER_HTML, url), request));
-      // Not found is a deploy without the page in it, not a visitor's mistake.
-      if (!found(res)) return json({ error: "The page is not part of this deployment" }, 503);
-      const out = new Response(res.body, res);
-      out.headers.set("Content-Security-Policy", htmlCsp(url));
-      out.headers.set("Cache-Control", "no-cache");
-      return out;
+    case "stageplotsPage": {
+      // Only while the secret has an index: a page for any well-formed secret would tell a
+      // published link from a deleted one no better, and would answer 200 to a guess.
+      if ((await deps.hub.getStagePlot(r.secret, STAGEPLOTS_INDEX_KEY)) === null) return rejection(UNKNOWN);
+      return viewerDocument(request, url, deps, STAGEPLOTS_HTML);
     }
+
+    case "stageplotsKey": {
+      const item = await deps.hub.getStagePlot(r.secret, r.key);
+      if (item === null) return rejection(UNKNOWN);
+      if (item.type !== STAGEPLOTS_IMAGE_TYPE) return forMethod(request, jsonText(new TextDecoder().decode(item.body)));
+      return forMethod(
+        request,
+        new Response(item.body, {
+          // A background's key is its content, so it never changes; private, so no shared cache
+          // goes on serving it once it is taken down.
+          headers: { "Content-Type": STAGEPLOTS_IMAGE_TYPE, "Cache-Control": "private, max-age=31536000, immutable" },
+        }),
+      );
+    }
+
+    case "viewer":
+      return viewerDocument(request, url, deps, VIEWER_HTML);
   }
+}
+
+/** One of the viewer's documents, with the page's policy, revalidated every time. */
+async function viewerDocument(request: Request, url: URL, deps: HandlerDeps, document: string): Promise<Response> {
+  const res = await deps.assets(new Request(new URL(document, url), request));
+  // Not found is a deploy without the page in it, not a visitor's mistake.
+  if (!found(res)) return json({ error: "The page is not part of this deployment" }, 503);
+  const out = new Response(res.body, res);
+  out.headers.set("Content-Security-Policy", htmlCsp(url));
+  out.headers.set("Cache-Control", "no-cache");
+  return out;
 }

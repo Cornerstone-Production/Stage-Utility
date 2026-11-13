@@ -77,6 +77,7 @@ function doc(): StagePlotsView {
       { id: "v-off", name: "Hall Away", kind: "offsite", notes: "", plotIds: ["p-hall", "p-hall-alt"], defaultPlotId: "p-hall" },
     ],
     backgrounds: [],
+    pendingRemovals: [],
     plots: [
       plot("p-std", "v-main", "Standard"),
       plot("p-bap", "v-main", "Baptism"),

@@ -6,12 +6,14 @@
 // messages.test.ts. TEST-ONLY: no `.test.` in the name so the runner does not look for
 // tests in it.
 
-import { PUBLISH_PROTOCOL_VERSION, type AssetContentType, type HubStatus } from "../../../main/types/servicecue-publish.js";
+import { PUBLISH_PROTOCOL_VERSION, STAGEPLOTS_MAX_KEYS, type AssetContentType, type HubStatus } from "../../../main/types/servicecue-publish.js";
 import type { HubApi } from "./hub-api.js";
 
 export class MemoryHub implements HubApi {
   readonly docs = new Map<string, string>();
   readonly assets = new Map<string, { type: AssetContentType; body: ArrayBuffer }>();
+  /** StagePlots keys, as "<secret>/<key>". Kept apart from docs and assets, as the object keeps them. */
+  readonly stageplots = new Map<string, { type: string; body: ArrayBuffer }>();
   /** Every putDoc and deleteDoc asked for, in order, as "put <key>" and "delete <key>". */
   readonly calls: string[] = [];
   heartbeatAt: number | null = null;
@@ -39,6 +41,32 @@ export class MemoryHub implements HubApi {
   }
   async getAsset(name: string): Promise<{ type: AssetContentType; body: ArrayBuffer } | null> {
     return this.assets.get(name) ?? null;
+  }
+  async putStagePlot(secret: string, key: string, type: string, body: ArrayBuffer): Promise<"stored" | "full"> {
+    const id = `${secret}/${key}`;
+    if (!this.stageplots.has(id) && this.stagePlotKeys(secret).length >= STAGEPLOTS_MAX_KEYS) return "full";
+    this.stageplots.set(id, { type, body });
+    return "stored";
+  }
+  async getStagePlot(secret: string, key: string): Promise<{ type: string; body: ArrayBuffer } | null> {
+    return this.stageplots.get(`${secret}/${key}`) ?? null;
+  }
+  async deleteStagePlot(secret: string, key: string): Promise<void> {
+    this.stageplots.delete(`${secret}/${key}`);
+  }
+  async keepStagePlots(secret: string, keys: string[]): Promise<string[]> {
+    const removed = this.stagePlotKeys(secret).filter((k) => !keys.includes(k)).sort();
+    for (const k of removed) this.stageplots.delete(`${secret}/${k}`);
+    return removed;
+  }
+  async dropStagePlots(secret: string): Promise<number> {
+    const keys = this.stagePlotKeys(secret);
+    for (const k of keys) this.stageplots.delete(`${secret}/${k}`);
+    return keys.length;
+  }
+  /** The keys held under a secret. */
+  stagePlotKeys(secret: string): string[] {
+    return [...this.stageplots.keys()].filter((id) => id.startsWith(`${secret}/`)).map((id) => id.slice(secret.length + 1));
   }
   async heartbeat(sentAt: number, version: string, build: string | null): Promise<number> {
     this.heartbeatBuilds.push(build);

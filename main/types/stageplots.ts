@@ -18,7 +18,53 @@ export interface Venue {
   plotIds: string[];
   /** One of plotIds, or null only while the venue has no plots. */
   defaultPlotId: string | null;
+  /** Present while the venue is published to the public page. */
+  publish?: VenuePublish;
 }
+
+/**
+ * A venue published behind a secret link: `<origin>/stageplots/<secret>`. The secret is
+ * made on the server (32 random bytes, base64url) and is never logged. It rides in config
+ * backups; a restore that keeps this server's own id drops it, so two servers never
+ * publish one link (see docs/features/stageplots.md#publishing).
+ */
+export interface VenuePublish {
+  /** 43 characters of base64url. */
+  secret: string;
+  /** The page it was published to, as an origin ("https://host"). */
+  origin: string;
+  /** When a publish last went through, as an ISO instant. */
+  publishedAt: string;
+  /** The last failure, said in the operator's words and never naming the secret; null once one goes through. */
+  lastError: { at: string; message: string } | null;
+  /** Converted backgrounds (by hash) the page holds under this secret. Sorted. */
+  publishedImages: string[];
+  /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
+  unpublishedImages: string[];
+}
+
+/** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
+ *  before its first request, so a secret is never sent anywhere the store does not know of. */
+export const PENDING_REASONS = ["address changed", "not taken back", "publishing", "regenerated", "restored over", "unpublished", "venue deleted"] as const;
+export type PendingReason = (typeof PENDING_REASONS)[number];
+
+/**
+ * A secret that may still be live on a page and that nothing here shows any more: an old link
+ * after a regenerate, a venue unpublished or deleted while its page could not be reached, a
+ * publish whose take-back failed, a link a restore wrote over. The publisher removes it from
+ * that page (a drop of the whole secret) whenever it can, and the editor shows what is left.
+ */
+export interface PendingRemoval {
+  secret: string;
+  /** The page it was published to. Removed only with that page's token. */
+  origin: string;
+  /** When it was queued, as an ISO instant. */
+  since: string;
+  reason: PendingReason;
+}
+
+/** A pending removal as a browser sees it: never the secret. */
+export type PendingRemovalView = Omit<PendingRemoval, "secret">;
 
 export type BackgroundOriginalMime = "image/png" | "image/jpeg" | "application/pdf";
 export type BackgroundSourceExt = "png" | "jpg";
@@ -50,6 +96,10 @@ export interface BackgroundView extends Background {
   url: string;
   sourceUrl: string;
 }
+
+/** What drawing a plot needs of its background: the image's URL ("" for one not to draw)
+ *  and its size. A BackgroundView is one; the published page makes its own. */
+export type PlotBackground = Pick<BackgroundView, "url" | "converted">;
 
 /** Every kind of item a plot can carry. */
 export const ITEM_TYPES = ["box", "circle", "zone", "cable", "conn", "symbol", "text"] as const;
@@ -130,6 +180,9 @@ export interface StagePlotsDoc {
   /** Sorted by planId, then venueId; one per plan and venue. A document
    *  saved before overrides existed reads as []. */
   overrides: PlotOverride[];
+  /** Secrets to remove from a page, sorted by origin then secret, one per pair. A document
+   *  saved before they existed reads as []. */
+  pendingRemovals: PendingRemoval[];
 }
 
 /** GET /api/stageplots, and every stageplots:updated frame. */
@@ -138,6 +191,35 @@ export interface StagePlotsView {
   backgrounds: BackgroundView[];
   plots: Plot[];
   overrides: PlotOverride[];
+  /** The pending removals' pages, ages and reasons; the in-flight ("publishing") ones and every secret left out. */
+  pendingRemovals: PendingRemovalView[];
+  /** What following the last Public link save could not do (stageplots-publish.ts), for the Publish card. Absent when it did it all. */
+  notice?: { at: string; message: string };
+}
+
+/** A venue's `index` on the public page, as the server publishes it. */
+export interface PublishedVenue {
+  name: string;
+  notes: string;
+  /** Its plots, in tab order. */
+  plots: { id: string; name: string }[];
+  defaultPlotId: string | null;
+  /** The plot it showed when it was published, and why: the plan's override, or the default. */
+  shown: { plotId: string | null; reason: "plan" | "default" };
+  /** The plan the shown plot is for, when it is the plan's: its ISO date and Planning Center's own words. */
+  plan: { date: string | null; dates: string | null } | null;
+  /** The zone dates are shown in. */
+  timeZone: string;
+}
+
+/** One `plot/<id>` on the public page. */
+export interface PublishedPlot {
+  id: string;
+  name: string;
+  bgFade: number;
+  items: PlotItem[];
+  /** Its background's size, and its hash once the page holds the image (null until then). */
+  background: { hash: string | null; width: number; height: number } | null;
 }
 
 export const STAGEPLOT_LIMITS = {
@@ -161,6 +243,11 @@ export const STAGEPLOT_LIMITS = {
   itemMaxSize: 1000,
   /** Overrides across every venue and plan, past ones included. */
   overrides: 2000,
+  /** Pending removals the store holds. A restore and a failed take-back cannot refuse, so this is
+   *  far above what an action may queue (pendingRemovalsQueue). */
+  pendingRemovals: 1000,
+  /** Past this many, a regenerate or a publish is refused rather than queue another. */
+  pendingRemovalsQueue: 200,
 } as const;
 
 /** The plot canvas is this many units wide. */

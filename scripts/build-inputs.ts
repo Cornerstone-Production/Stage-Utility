@@ -20,6 +20,7 @@ export const BUILD_INPUT_PREFIXES = [
   "renderer/",
   "scripts/servicecue-bundle.ts",
   "servicecue.html",
+  "stageplots.html",
   "tailwind.config",
   "tsconfig",
   "vite.config",

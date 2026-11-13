@@ -17,7 +17,7 @@ import { createPortal, flushSync } from "react-dom";
 import { PrinterIcon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
-import type { BackgroundView, PlotItem } from "@main/types/stageplots";
+import type { PlotBackground, PlotItem } from "@main/types/stageplots";
 
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/cn";
@@ -76,7 +76,7 @@ export interface PrintSheetProps {
   /** "Default plot", "For this plan · Sun 15 Nov", or null for neither. */
   planLine: string | null;
   items: readonly PlotItem[];
-  background: BackgroundView | null;
+  background: PlotBackground | null;
   fade: number;
   /** The instant printed; now when absent. */
   now?: number;

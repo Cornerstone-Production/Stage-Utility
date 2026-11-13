@@ -60,6 +60,7 @@ function doc(): StagePlotsView {
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
     overrides: [],
+    pendingRemovals: [],
   };
 }
 
@@ -124,7 +125,7 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     // The server's own reading of the body and its own rule, never a canned answer.
     const change = readOverrideChange(body);
     if ("problem" in change) return { status: 400, json: { error: change.problem } };
-    const next = applyOverride({ ...DOC, backgrounds: [] }, change);
+    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] }, change);
     if ("problem" in next) return { status: next.status, json: { error: next.problem } };
     DOC.overrides = next.doc.overrides;
     return { status: 200, json: DOC };
@@ -261,6 +262,14 @@ afterEach(async () => {
 after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("/stageplots/edit", () => {
+  test("the Publish card sits last in the left column, for the selected venue", async () => {
+    await mount();
+    const publish = card("Publish");
+    assert.equal(publish.parentElement?.lastElementChild, publish, "the Publish card is not at the foot of the left column");
+    assert.ok(publish.parentElement?.contains(card("Venues")), "the Publish card is not in the left column");
+    assert.ok(within(publish).getByRole("button", { name: "Publish Room One" }));
+  });
+
   test("adding a venue shows it selected", async () => {
     await mount();
     await click(within(card("Venues")).getByRole("button", { name: "Venue" }));

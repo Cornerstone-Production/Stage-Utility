@@ -13,6 +13,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   FRAME_DOCS,
   PUBLISH_PROTOCOL_VERSION,
+  STAGEPLOTS_MAX_KEYS,
   assetContentType,
   type AssetContentType,
   type FrameChannel,
@@ -29,6 +30,9 @@ import { docsMessage, echoableCloseCode, frameMessage, heartbeatMessage } from "
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, body TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS assets (name TEXT PRIMARY KEY, type TEXT NOT NULL, body BLOB NOT NULL)",
+  // A venue's stage plots, by its secret: in a table of their own, so the manifest, the status
+  // answer and publish:docs, which all read docs and assets, can never name a secret.
+  "CREATE TABLE IF NOT EXISTS stageplots (secret TEXT NOT NULL, key TEXT NOT NULL, type TEXT NOT NULL, body BLOB NOT NULL, PRIMARY KEY (secret, key))",
 ];
 
 /** What a socket carries: where it came from, and when it arrived. */
@@ -98,6 +102,53 @@ export class PublishHub extends DurableObject<Env> implements HubApi {
     // storage that no longer says what it was given, and serving it would be a guess.
     if (type === null) throw new Error(`the stored asset ${name} has the type ${row.type}`);
     return { type, body: row.body };
+  }
+
+  // ── Stage plots ─────────────────────────────────────────────────────────────
+  //
+  // Nothing here broadcasts or logs: a viewer is never told a secret, and the Worker's log is
+  // read by whoever runs `wrangler tail`.
+
+  async putStagePlot(secret: string, key: string, type: string, body: ArrayBuffer): Promise<"stored" | "full"> {
+    return this.ctx.storage.transactionSync(() => {
+      const held = this.sql.exec("SELECT 1 FROM stageplots WHERE secret = ? AND key = ?", secret, key).toArray().length > 0;
+      if (!held) {
+        const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM stageplots WHERE secret = ?", secret).one().n;
+        if (count >= STAGEPLOTS_MAX_KEYS) return "full";
+      }
+      this.sql.exec(
+        "INSERT INTO stageplots (secret, key, type, body) VALUES (?, ?, ?, ?) ON CONFLICT(secret, key) DO UPDATE SET type = excluded.type, body = excluded.body",
+        secret,
+        key,
+        type,
+        body,
+      );
+      return "stored";
+    });
+  }
+
+  async getStagePlot(secret: string, key: string): Promise<{ type: string; body: ArrayBuffer } | null> {
+    const row = this.sql.exec<{ type: string; body: ArrayBuffer }>("SELECT type, body FROM stageplots WHERE secret = ? AND key = ?", secret, key).toArray()[0];
+    return row ? { type: row.type, body: row.body } : null;
+  }
+
+  async deleteStagePlot(secret: string, key: string): Promise<void> {
+    this.sql.exec("DELETE FROM stageplots WHERE secret = ? AND key = ?", secret, key);
+  }
+
+  async keepStagePlots(secret: string, keys: string[]): Promise<string[]> {
+    const keep = new Set(keys);
+    return this.ctx.storage.transactionSync(() => {
+      const held = this.sql.exec<{ key: string }>("SELECT key FROM stageplots WHERE secret = ? ORDER BY key", secret).toArray().map((r) => r.key);
+      const removed = held.filter((key) => !keep.has(key));
+      for (const key of removed) this.sql.exec("DELETE FROM stageplots WHERE secret = ? AND key = ?", secret, key);
+      return removed;
+    });
+  }
+
+  async dropStagePlots(secret: string): Promise<number> {
+    // One statement, so a secret is gone whole or not at all.
+    return this.sql.exec("DELETE FROM stageplots WHERE secret = ? RETURNING key", secret).toArray().length;
   }
 
   // ── Heartbeat ───────────────────────────────────────────────────────────────

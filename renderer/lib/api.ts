@@ -633,9 +633,14 @@ export type IpcChannel =
   | "stageplots:deleteVenue"
   | "stageplots:duplicatePlot"
   | "stageplots:get"
+  | "stageplots:publish"
+  | "stageplots:publishNow"
+  | "stageplots:regenerate"
+  | "stageplots:removePending"
   | "stageplots:saveItems"
   | "stageplots:setDefault"
   | "stageplots:setOverride"
+  | "stageplots:unpublish"
   | "stageplots:updateBackground"
   | "stageplots:updatePlot"
   | "stageplots:updateVenue"
@@ -848,6 +853,24 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // plot changed since (the error carries status 409 and the current version).
     case "stageplots:saveItems":
       return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
+
+    // Publishing a venue behind a secret link. Each answers the venue as it now is, or rejects
+    // with the sentence the card shows (409, 502, or 400 for a plot too large to publish).
+    case "stageplots:publish":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish`);
+
+    case "stageplots:regenerate":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/regenerate`);
+
+    case "stageplots:unpublish":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/unpublish`);
+
+    case "stageplots:publishNow":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish-now`);
+
+    // Remove now: drop every old link queued against the page set up.
+    case "stageplots:removePending":
+      return post<T>("/api/stageplots/pending/remove");
 
     case "servicecue:rundown": {
       const id = p.serviceTypeId as string;

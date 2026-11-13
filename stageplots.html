@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- A venue's published stage plots, served by publish/servicecue/ at
+     /stageplots/<secret> while the venue is published (see vite.servicecue.config.ts and
+     docs/features/stageplots.md). Never served at its own name. No inline script: the
+     Worker's content security policy allows none. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e0e" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>Stage plots</title>
+    <style>
+      :root {
+        --background: #f7f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0e0e0e; /* pure neutral: R=G=B, no cool or purple cast */
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--background);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./renderer/public/stageplots-public.tsx"></script>
+  </body>
+</html>

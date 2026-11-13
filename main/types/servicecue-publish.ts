@@ -405,3 +405,103 @@ export function viewerBuildFromHtml(html: string): string | null {
   const m = new RegExp(`<meta\\s+name="${VIEWER_BUILD_META}"\\s+content="([^"]*)"\\s*/?>`).exec(bare);
   return m !== null && isViewerBuildId(m[1]) ? m[1] : null;
 }
+
+// ── StagePlots ────────────────────────────────────────────────────────────────
+//
+// A venue's stage plots, published behind a secret link: `/stageplots/<secret>`. Each
+// venue has its own secret, made on the church's server (32 random bytes, base64url),
+// and everything published for it is kept under that secret and nowhere else: never in
+// the docs or assets above, so no manifest, status answer or `publish:docs` message ever
+// names it, and nothing lists the venues. Deleting a secret deletes all of it.
+//
+// Under a secret, three kinds of key:
+//
+//   index          the venue: its name, notes, plots in tab order, and which plot it showed
+//   plot/<id>      one plot: its items, fade and background size
+//   image/<hash>   one converted background, as WebP
+//
+// A secret, a key or a method that is not one of these is answered exactly as a path the
+// Worker does not know, and so is a secret nothing is published under: nobody can tell a
+// link that never existed from one that was deleted.
+
+/** The public address of a venue's plots: this, a slash, and its secret. */
+export const STAGEPLOTS_PATH = "/stageplots";
+
+/** The viewer's document for a venue's plots, served at `/stageplots/<secret>` while it is published. Never at its own name. */
+export const STAGEPLOTS_HTML = "/stageplots.html";
+
+/**
+ * A secret as the server makes it: 32 bytes in unpadded base64url, 43 characters. The
+ * last character carries only two bits of the 32nd byte, so it is one of 16; a string
+ * of 43 that ends otherwise is not one a server made, and is refused like any other.
+ */
+const STAGEPLOTS_SECRET = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/** Is this a secret a venue can be published under. Checked before anything is read, so a malformed one costs no storage read. */
+export function isStagePlotsSecret(value: unknown): value is string {
+  return typeof value === "string" && STAGEPLOTS_SECRET.test(value);
+}
+
+/** A stage plots id (a venue's, a plot's): letters, digits, `-` and `_`, 1 to 80. The app's store mints and checks ids by this. */
+export const STAGEPLOTS_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** A content hash as the app's image store names a file: the first 16 hex of its SHA-256. */
+export const STAGEPLOTS_HASH = /^[0-9a-f]{16}$/;
+
+/** The one type a published background is. */
+export const STAGEPLOTS_IMAGE_TYPE = "image/webp";
+
+/**
+ * The most keys one secret may hold. A venue at the app's limits holds 41 (its index, 20
+ * plots, 20 backgrounds); the rest is room for a republish that sends new backgrounds
+ * before it removes the ones they replace.
+ */
+export const STAGEPLOTS_MAX_KEYS = 100;
+
+/** The key of a venue's index. */
+export const STAGEPLOTS_INDEX_KEY = "index";
+
+/** The key of a plot, or null for an id that is not one. */
+export function stagePlotsPlotKey(plotId: string): string | null {
+  return STAGEPLOTS_ID.test(plotId) ? `plot/${plotId}` : null;
+}
+
+/** The key of a background, or null for a hash that is not one. */
+export function stagePlotsImageKey(hash: string): string | null {
+  return STAGEPLOTS_HASH.test(hash) ? `image/${hash}` : null;
+}
+
+/** What a key holds: JSON, or a background. Null when it is not a key. */
+export function stagePlotsKeyKind(key: unknown): "doc" | "image" | null {
+  if (typeof key !== "string") return null;
+  if (key === STAGEPLOTS_INDEX_KEY) return "doc";
+  const slash = key.indexOf("/");
+  if (slash < 0) return null;
+  const kind = key.slice(0, slash);
+  const rest = key.slice(slash + 1);
+  if (kind === "plot") return STAGEPLOTS_ID.test(rest) ? "doc" : null;
+  if (kind === "image") return STAGEPLOTS_HASH.test(rest) ? "image" : null;
+  return null;
+}
+
+/**
+ * The secret and key a path under `base` names, or null when it names none: `base/<secret>`
+ * (key null) or `base/<secret>/<key>`. One trailing slash is allowed after a bare secret.
+ * The URL parser has already resolved `.` and `..` segments; an encoded slash arrives as
+ * sent and is part of no secret or key.
+ */
+export function stagePlotsPath(pathname: string, base: string = STAGEPLOTS_PATH): { secret: string; key: string | null } | null {
+  if (!pathname.startsWith(`${base}/`)) return null;
+  const rest = pathname.slice(base.length + 1);
+  const slash = rest.indexOf("/");
+  const secret = slash < 0 ? rest : rest.slice(0, slash);
+  if (!isStagePlotsSecret(secret)) return null;
+  if (slash < 0 || slash === rest.length - 1) return { secret, key: null };
+  const key = rest.slice(slash + 1);
+  return stagePlotsKeyKind(key) === null ? null : { secret, key };
+}
+
+/** `pathname` with anything that could be a secret under a StagePlots path replaced, for a log line. */
+export function loggablePath(pathname: string): string {
+  return pathname.replace(/(\/stageplots\/)[^/]*/, "$1<secret>");
+}

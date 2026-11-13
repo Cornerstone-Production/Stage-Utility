@@ -271,3 +271,73 @@ describe("screen bindings on a restore", () => {
     assert.deepEqual(await bindings(), ["pi-lobby"]);
   });
 });
+
+// A published venue's secret link follows the same decision. Two servers publishing one
+// secret would overwrite each other's plots under one link, and the second could take
+// down the first's. Keeping this server's id drops every secret: the venues come back
+// unpublished. Taking the config's id (this box replaces that one) keeps them.
+describe("stage plot links on a restore", () => {
+  const STAGEPLOTS = path.join(TMP, "stageplots.json");
+  const SECRET = "A".repeat(42) + "E";
+  const published = {
+    venues: [
+      {
+        id: "v-1",
+        name: "Main room",
+        kind: "home",
+        notes: "",
+        plotIds: [],
+        defaultPlotId: null,
+        publish: {
+          secret: SECRET,
+          origin: "https://servicecue.example.workers.dev",
+          publishedAt: "2026-11-12T14:32:00.000Z",
+          lastError: null,
+          publishedImages: [],
+          unpublishedImages: [],
+        },
+      },
+    ],
+    backgrounds: [],
+    plots: [],
+    overrides: [],
+  };
+  const restoredPublish = async () => (JSON.parse(await fs.readFile(STAGEPLOTS, "utf8")) as typeof published).venues[0]!.publish;
+  const logged: string[] = [];
+  const originalLog = console.log;
+
+  afterEach(async () => {
+    console.log = originalLog;
+    logged.length = 0;
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(STAGEPLOTS, { force: true });
+  });
+
+  it("KEEPING THIS SERVER'S ID brings the venues back unpublished, and says so", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER }, "stageplots.json": published }), KEEP);
+    assert.equal(await restoredPublish(), undefined, "a second server came back publishing the first one's link");
+    assert.ok(logged.some((l) => l.includes("[config-snapshot] restore: 1 stage plots venue comes back unpublished")), JSON.stringify(logged));
+    assert.equal(logged.some((l) => l.includes(SECRET)), false, "the restore logged a secret");
+  });
+
+  it("TAKING THE CONFIG'S ID keeps the links: this box replaces the one that published them", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER }, "stageplots.json": published }), REPLACE);
+    assert.equal((await restoredPublish())?.secret, SECRET);
+  });
+
+  it("this server's own config keeps its own links", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OWN }, "stageplots.json": published }), KEEP);
+    assert.equal((await restoredPublish())?.secret, SECRET);
+  });
+
+  it("a config with no settings.json says nothing about whose links they are, so they are dropped", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "stageplots.json": published }), REPLACE);
+    assert.equal(await restoredPublish(), undefined);
+  });
+});

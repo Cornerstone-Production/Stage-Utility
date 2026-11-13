@@ -39,7 +39,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [], overrides: [] }));
+  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] }));
   for (const d of [STAGEPLOT_IMAGE_DIR, STAGEPLOT_ORIGINAL_DIR]) await fs.rm(path.join(TMP, d), { recursive: true, force: true });
   frames.length = 0;
 });
@@ -55,8 +55,8 @@ function tinyPdf(tag = ""): Buffer {
   return Buffer.from(`%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n%${tag}\n`, "latin1");
 }
 
-/** Every [stageplots] warning `run` logs. */
-async function warnings(run: () => Promise<unknown>): Promise<string[]> {
+/** Every warning `run` logs under `tag` ([stageplots] unless said). */
+async function warnings(run: () => Promise<unknown>, tag = "[stageplots]"): Promise<string[]> {
   const seen: string[] = [];
   const real = console.warn;
   console.warn = (...a: unknown[]) => void seen.push(a.join(" "));
@@ -65,7 +65,7 @@ async function warnings(run: () => Promise<unknown>): Promise<string[]> {
   } finally {
     console.warn = real;
   }
-  return seen.filter((w) => w.startsWith("[stageplots]"));
+  return seen.filter((w) => w.startsWith(tag));
 }
 
 async function aged(dir: string, file: string): Promise<void> {
@@ -94,7 +94,7 @@ describe("stage plot routes", () => {
   test("GET answers the document with each background's URLs", async () => {
     const r = await call("GET", "/api/stageplots");
     assert.equal(r.status, 200);
-    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
   test("venues: create, rename, change kind and notes, delete with its plots", async () => {
@@ -105,7 +105,7 @@ describe("stage plot routes", () => {
     assert.deepEqual(r.json, { id: v.id, name: "Chapel", kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
     r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
   test("a venue's first plot becomes its default, and set default moves it", async () => {
@@ -866,3 +866,324 @@ describe("per-plan overrides", () => {
   });
 });
 
+
+describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () => {
+  // The page is the Worker's own request handler over HTTP (fixtures/publish-receiver.ts); the
+  // address and token are saved where the ServiceCue Public link card saves them.
+  const TOKEN = "p".repeat(40);
+  const venueWithPlot = async () => {
+    const v = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" });
+    return v.id;
+  };
+
+  test("with no page set up, every action is a 409 that says where to set it up", async () => {
+    const { servicecuePublishStore, forgetPublishToken } = await import("../servicecue-publish-store.js");
+    await servicecuePublishStore.save({ enabled: false, url: "" });
+    await forgetPublishToken();
+    const id = await venueWithPlot();
+    const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
+    assert.equal(r.status, 409);
+    assert.match((r.json as { error: string }).error, /^Set up the public link first/);
+    for (const action of ["regenerate", "unpublish", "publish-now"]) {
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/${action}`)).status, 409, action);
+    }
+    assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
+  });
+
+  test("publishes to the page, follows a change, unpublishes, and deletes a published venue by unpublishing it first", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+
+      const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      const secret = (r.json as { publish: { secret: string } }).publish.secret;
+      assert.deepEqual(page.hub.stagePlotKeys(secret).sort().map((k) => k.split("/")[0]), ["index", "plot"]);
+      assert.equal((frames.at(-1) as View).venues[0]!.publish?.secret, secret, "the published venue was not broadcast");
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 409, "published twice");
+
+      // A saved change reaches the page through the app's own broadcaster and the publisher's
+      // real listener, once, and then nothing more is sent.
+      const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+      stageplotsPublisher.start();
+      const plotId = (await stageplotsStore.get()).venues.find((v) => v.id === id)!.plotIds[0]!;
+      assert.equal((await call("PATCH", `/api/stageplots/plots/${plotId}`, { name: "Renamed" })).status, 200);
+      await stageplotsPublisher.settle();
+      const got = await page.worker({ method: "GET", path: `/stageplots/${secret}/plot/${plotId}`, headers: {}, body: "", bytes: Buffer.alloc(0), at: 0 });
+      assert.equal(JSON.parse(got.body ?? "{}").name, "Renamed", "the saved change never reached the page");
+      const settled = page.requests.length;
+      await stageplotsPublisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(page.requests.length, settled, "the publisher kept sending after the change was published");
+
+      const off = await call("POST", `/api/stageplots/venues/${id}/unpublish`);
+      assert.equal(off.status, 200);
+      assert.equal((off.json as { publish?: unknown }).publish, undefined);
+      assert.equal(page.hub.stagePlotKeys(secret).length, 0);
+
+      // Published again, then deleted: the link goes with it.
+      const again = await call("POST", `/api/stageplots/venues/${id}/publish`);
+      const second = (again.json as { publish: { secret: string } }).publish.secret;
+      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
+      assert.deepEqual([del.status, del.json], [200, { ok: true }]);
+      assert.equal(page.hub.stagePlotKeys(second).length, 0, "the deleted venue's link is still live");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("deleting a published venue with no page set up queues its link, says so, and Remove now takes it down once the page is back", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken, forgetPublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      await forgetPublishToken();
+      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
+      assert.equal(del.status, 200);
+      assert.match((del.json as { notice?: string }).notice ?? "", /until that page is set up here again/);
+      const view = frames.at(-1) as View;
+      assert.deepEqual(view.pendingRemovals.map((e) => [e.origin, e.reason]), [[parsed.origin, "venue deleted"]]);
+      assert.equal(page.hub.stagePlotKeys(secret).length > 0, true, "the test's page lost the link before it was set up again");
+      await savePublishToken(parsed.origin, TOKEN);
+      const removed = await call("POST", "/api/stageplots/pending/remove");
+      assert.deepEqual([removed.status, removed.json], [200, { removed: 1, left: 0, waiting: 0 }]);
+      assert.equal(page.hub.stagePlotKeys(secret).length, 0);
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+describe("a restore landing", () => {
+  test("refuses a venue's delete: deleting it then would leave its link live with nothing knowing it", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const id = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    const secret = "A".repeat(42) + "E";
+    await stageplotsStore.update((d) => ({
+      ...d,
+      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] } } : v)),
+    }));
+    const resume = await stageplotsPublisher.pause();
+    try {
+      const del = await call("DELETE", `/api/stageplots/venues/${id.id}`);
+      assert.deepEqual([del.status, /restore is under way/.test((del.json as { error: string }).error)], [503, true]);
+      const after = (await stageplotsStore.get()).venues.find((v) => v.id === id.id);
+      assert.equal(after?.publish?.secret, secret, "the venue went, and its link with nothing to remove it");
+    } finally {
+      resume();
+    }
+  });
+
+  test("refuses the Public link save, before its token is replaced, and says so", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
+    const { servicecuePublishStore, savePublishToken, readPublishToken } = await import("../servicecue-publish-store.js");
+    await servicecuePublishStore.save({ enabled: false, url: "https://old.example" });
+    await savePublishToken("https://old.example" as Parameters<typeof savePublishToken>[0], "o".repeat(40));
+    const resume = await stageplotsPublisher.pause();
+    let said: string[];
+    try {
+      said = await warnings(async () => {
+        const r = await callRoute(serviceCuePublishRoutes, "/api/servicecue/publish", { method: "POST", body: { url: "https://new.example", token: "n".repeat(40) } });
+        assert.deepEqual([r.status, /restore is under way/.test((r.json as { error: string }).error)], [503, true]);
+      }, "[publish]");
+    } finally {
+      resume();
+    }
+    assert.equal((await servicecuePublishStore.load()).url, "https://old.example");
+    assert.equal((await readPublishToken("https://old.example" as Parameters<typeof readPublishToken>[0])).trim(), "o".repeat(40), "the old token was replaced with the stage plots unable to use it");
+    assert.ok(said.some((l) => l.startsWith("[publish] the Public link was not saved: A config restore is under way")), said.join(" / "));
+  });
+
+  test("every publishing action and Remove now refused for it is said on [stageplots]", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const id = ((await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string }).id;
+    const resume = await stageplotsPublisher.pause();
+    let said: string[];
+    try {
+      said = await warnings(async () => {
+        for (const action of ["publish", "regenerate", "unpublish", "publish-now"]) assert.equal((await call("POST", `/api/stageplots/venues/${id}/${action}`)).status, 503, action);
+        assert.equal((await call("POST", "/api/stageplots/pending/remove")).status, 503);
+      });
+    } finally {
+      resume();
+    }
+    const why = "A config restore is under way; try again once the server is back.";
+    assert.deepEqual(said, [
+      `[stageplots] publish refused for venue ${id}: ${why}`,
+      `[stageplots] regenerate refused for venue ${id}: ${why}`,
+      `[stageplots] unpublish refused for venue ${id}: ${why}`,
+      `[stageplots] publish-now refused for venue ${id}: ${why}`,
+      `[stageplots] Remove now refused: ${why}`,
+    ]);
+  });
+});
+
+describe("the page address changing under published venues", () => {
+  // Two pages, each the Worker's own handler. The venue is published to A; the Public link card
+  // then saves B's address and token through its own route, which still holds A's token.
+  const TOKEN = "q".repeat(40);
+  async function twoPages() {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const a = await FakeReceiver.start();
+    const b = await FakeReceiver.start();
+    a.token = TOKEN;
+    b.token = TOKEN;
+    const pa = parsePublishUrl(a.origin);
+    const pb = parsePublishUrl(b.origin);
+    assert.ok(pa.ok && pb.ok);
+    await servicecuePublishStore.save({ enabled: false, url: pa.origin });
+    await savePublishToken(pa.origin, TOKEN);
+    const v = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
+    await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" });
+    const first = ((await call("POST", `/api/stageplots/venues/${v.id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+    // The Public link card's save, through its own route, then everything it set off.
+    const save = async (body: { url?: string; token?: string }) => {
+      const r = await callRoute(serviceCuePublishRoutes, "/api/servicecue/publish", { method: "POST", body });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      await stageplotsPublisher.settle();
+    };
+    const moveTo = () => save({ url: pb.origin, token: TOKEN });
+    const venue = async () => (await stageplotsStore.get()).venues.find((x) => x.id === v.id)!;
+    // Whatever an earlier store write scheduled has run, so only what the save sets off is seen.
+    await stageplotsPublisher.settle();
+    return { a, b, pa: pa.origin, pb: pb.origin, first, id: v.id, save, moveTo, venue, close: async () => (await a.close(), await b.close()) };
+  }
+
+  test("moves each venue to the new page under a new link, and takes the old one down with the old token", async () => {
+    const t = await twoPages();
+    try {
+      await t.moveTo();
+      const pub = (await t.venue()).publish!;
+      assert.equal(pub.origin, t.pb);
+      assert.notEqual(pub.secret, t.first, "the same secret now lives on two pages");
+      assert.deepEqual(t.b.hub.stagePlotKeys(pub.secret).sort().map((k) => k.split("/")[0]), ["index", "plot"]);
+      assert.equal(t.a.hub.stageplots.size, 0, "the old page still serves the venue");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("an old page that will not take the drop leaves the old link queued against it, in sight", async () => {
+    const t = await twoPages();
+    try {
+      t.a.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : t.a.worker(req));
+      await t.moveTo();
+      assert.equal((await t.venue()).publish!.origin, t.pb);
+      const view = frames.at(-1) as View;
+      assert.deepEqual(view.pendingRemovals.map((e) => [e.origin, e.reason]), [[t.pa, "address changed"]]);
+      assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("a new page that does not know StagePlots leaves the venue on the old one, saying why, and its link alive", async () => {
+    const t = await twoPages();
+    try {
+      t.b.respond = (req) => (/^\/_publish\/v1\/stageplots\//.test(req.path) ? { status: 404, body: '{"error":"Not found"}' } : t.b.worker(req));
+      await t.moveTo();
+      const pub = (await t.venue()).publish!;
+      assert.deepEqual([pub.origin, pub.secret], [t.pa, t.first], "the venue left a page that still serves it");
+      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ does not know StagePlots yet: deploy the Worker\./);
+      assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true, "the link of a venue that did not move was taken down");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+    } finally {
+      await t.close();
+    }
+  });
+
+  // An address saved with no token for it leaves this server with no way to reach the old page
+  // after this request: its links are taken down now, while the old token is still in hand, or
+  // nothing could ever remove them.
+  for (const [what, url] of [
+    ["another address with no token", "b"],
+    ["the address cleared", ""],
+  ] as const) {
+    test(`${what}: the venues on the old page are taken down with its token and unpublished`, async () => {
+      const t = await twoPages();
+      try {
+        const said = await warnings(() => t.save({ url: url === "b" ? t.pb : "" }));
+        assert.equal(t.a.hub.stageplots.size, 0, "the old page still serves a link no token here can remove");
+        assert.equal((await t.venue()).publish, undefined, "the venue still claims a link on a page this server cannot reach");
+        assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+        assert.ok(said.some((l) => l.includes('"Main room" unpublished') && l.includes(`removed from ${new URL(t.pa).host}`)), said.join(" / "));
+        // The new page's token, saved after: nothing is left to move, and nothing appears on either page.
+        if (url === "b") await t.save({ url: t.pb, token: TOKEN });
+        assert.equal(t.a.hub.stageplots.size, 0);
+        assert.equal(t.b.hub.stageplots.size, 0);
+      } finally {
+        await t.close();
+      }
+    });
+  }
+
+  test("the old page refusing that take-down leaves the link queued against it, in sight", async () => {
+    const t = await twoPages();
+    try {
+      t.a.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : t.a.worker(req));
+      await t.save({ url: t.pb });
+      assert.equal((await t.venue()).publish, undefined);
+      const view = frames.at(-1) as View;
+      assert.deepEqual(view.pendingRemovals.map((e) => [e.origin, e.reason]), [[t.pa, "address changed"]]);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("the token cleared on the same address takes nothing down: the token can be entered again", async () => {
+    const t = await twoPages();
+    try {
+      await t.save({ url: t.pa, token: "" });
+      const pub = (await t.venue()).publish!;
+      assert.deepEqual([pub.origin, pub.secret], [t.pa, t.first]);
+      assert.ok(t.a.hub.stagePlotKeys(t.first).length > 0, "a token clear took the venue's link down");
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("a token saved for the page set up removes the old links waiting on it", async () => {
+    const t = await twoPages();
+    try {
+      const { forgetPublishToken } = await import("../servicecue-publish-store.js");
+      await forgetPublishToken();
+      const off = await call("POST", `/api/stageplots/venues/${t.id}/unpublish`);
+      assert.equal(off.status, 200);
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals.map((e) => [e.origin, e.reason]), [[t.pa, "unpublished"]]);
+      const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+      await stageplotsPublisher.settle();
+      assert.ok(t.a.hub.stagePlotKeys(t.first).length > 0, "the link went before the token was saved");
+      await t.save({ url: t.pa, token: TOKEN });
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+      assert.equal(t.a.hub.stageplots.size, 0, "the token was saved and the old link is still live");
+    } finally {
+      await t.close();
+    }
+  });
+});

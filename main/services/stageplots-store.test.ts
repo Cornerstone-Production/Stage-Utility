@@ -58,11 +58,11 @@ describe("stageplots store restore check", () => {
   test("the store is registered with its restore check", async () => {
     const check = restoreCheckFor("stageplots.json");
     assert.ok(check, "stageplots.json has no restore check");
-    assert.deepEqual(await check(goodDoc()), { ok: true, value: { ...goodDoc(), overrides: [] } });
+    assert.deepEqual(await check(goodDoc()), { ok: true, value: { ...goodDoc(), overrides: [], pendingRemovals: [] } });
   });
 
   test("restore check accepts the empty doc", () => {
-    assert.deepEqual(checkStagePlotsDoc({ venues: [], backgrounds: [], plots: [], overrides: [] }), { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(checkStagePlotsDoc({ venues: [], backgrounds: [], plots: [], overrides: [] }), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
   test("restore check refuses a plot whose venueId is unknown", () => {
@@ -271,7 +271,7 @@ describe("stageplots input validation", () => {
 
 describe("stageplots store", () => {
   test("update persists through the DataStore and get reads it back", async () => {
-    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
     await stageplotsStore.update((d) => ({ ...d, venues: [{ id: "v-1", name: "Main", kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
     const onDisk = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
     assert.equal(onDisk.venues[0].name, "Main");

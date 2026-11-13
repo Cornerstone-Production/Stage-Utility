@@ -27,11 +27,15 @@ export interface PdfPage {
   pages: number;
 }
 
+/** A publish action's answer: the venue as it now is, and anything the operator should know beside it. */
+export type PublishAnswer = Venue & { notice?: string };
+
 export const stageplotsApi = {
   get: () => invoke<StagePlotsView>("stageplots:get"),
   createVenue: (venue: VenueInput) => invoke<Venue>("stageplots:createVenue", { venue }),
   updateVenue: (id: string, changes: Partial<VenueInput>) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
-  deleteVenue: (id: string) => invoke<{ ok: true }>("stageplots:deleteVenue", { id }),
+  /** `notice`: the venue was published and its link could not be removed yet (it is queued). */
+  deleteVenue: (id: string) => invoke<{ ok: true; notice?: string }>("stageplots:deleteVenue", { id }),
   setDefault: (venueId: string, plotId: string) => invoke<Venue>("stageplots:setDefault", { venueId, plotId }),
   /** Give one plan its own plot for this venue, or hand it back to the default
    *  (`plotId` null). `planDate` is the plan's sort date, kept to name it by. */
@@ -50,4 +54,14 @@ export const stageplotsApi = {
   deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[] }>("stageplots:deletePlot", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
+  /** Put a venue on the public page behind a new secret link. */
+  publish: (id: string) => invoke<PublishAnswer>("stageplots:publish", { id }),
+  /** Move a published venue to a new link; the old one stops working once the new one is up. */
+  regenerate: (id: string) => invoke<PublishAnswer>("stageplots:regenerate", { id }),
+  /** Take a venue off the public page; its link stops working. */
+  unpublish: (id: string) => invoke<PublishAnswer>("stageplots:unpublish", { id }),
+  /** Send a published venue again, the backgrounds not yet published included. */
+  publishNow: (id: string) => invoke<PublishAnswer>("stageplots:publishNow", { id }),
+  /** Remove now: drop every old link queued against the page set up. */
+  removePending: () => invoke<{ removed: number; left: number; waiting: number }>("stageplots:removePending"),
 };

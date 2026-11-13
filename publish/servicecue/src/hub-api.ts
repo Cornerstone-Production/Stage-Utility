@@ -35,6 +35,23 @@ export interface HubApi {
   /** The edge's clock when the last heartbeat arrived, or null before the first. */
   getHeartbeat(): Promise<number | null>;
 
+  // A venue's stage plots, each kept under its secret (see STAGEPLOTS in the contract). None of
+  // these tells a viewer anything, and none is in the status answer or touched by a manifest:
+  // a secret is never sent where anyone but its holder can read it.
+
+  /**
+   * Store one key under a secret, replacing what is there. "full" when the secret already holds
+   * STAGEPLOTS_MAX_KEYS other keys, and nothing was stored.
+   */
+  putStagePlot(secret: string, key: string, type: string, body: ArrayBuffer): Promise<"stored" | "full">;
+  /** One key under a secret, as stored, or null when there is none. */
+  getStagePlot(secret: string, key: string): Promise<{ type: string; body: ArrayBuffer } | null>;
+  deleteStagePlot(secret: string, key: string): Promise<void>;
+  /** Delete every key under the secret but these. Resolves to what it deleted, sorted. */
+  keepStagePlots(secret: string, keys: string[]): Promise<string[]>;
+  /** Delete everything under the secret, at once. Resolves to how many keys went. */
+  dropStagePlots(secret: string): Promise<number>;
+
   /** Delete every doc and asset not named, and name the docs on `publish:docs`. Resolves to what it deleted. */
   applyManifest(docs: string[], assets: string[]): Promise<{ removedDocs: string[]; removedAssets: string[] }>;
   status(): Promise<HubStatus>;

@@ -44,6 +44,6 @@ describe("a stageplots.json from before overrides", () => {
     assert.equal(r.status, 200, r.body);
     r = await callRoute(stageplotsRoutes, "/api/stageplots/venues/v-1", { method: "DELETE" });
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 });
