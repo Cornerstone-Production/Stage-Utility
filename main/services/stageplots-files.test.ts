@@ -35,7 +35,7 @@ async function png(seed: number): Promise<Buffer> {
   return sharp({ create: { width: 40, height: 30, channels: 3, background: { r: seed, g: 90, b: 40 } } }).png().toBuffer();
 }
 
-const EMPTY_DOC = { venues: [], backgrounds: [], plots: [], overrides: [] };
+const EMPTY_DOC = { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] };
 
 /** A tidy source over `get`, not standing in for a damaged file. */
 function source(get: () => Promise<typeof EMPTY_DOC>) {
@@ -68,6 +68,7 @@ async function damagedStore(): Promise<string[]> {
     venues: [],
     plots: [],
     overrides: [],
+    pendingRemovals: [],
     backgrounds: [
       {
         id: "b-kept",
@@ -166,6 +167,7 @@ describe("stage-plot files", () => {
       venues: [],
       plots: [],
       overrides: [],
+    pendingRemovals: [],
       backgrounds: [
         {
           id: "b-1",
@@ -285,6 +287,7 @@ describe("stage-plot files", () => {
     const sourceHash = await files.storeStagePlotImage(source, "png");
     const pdfHash = await files.storeStagePlotOriginal(pdf);
     await stageplotsStore.update(() => ({
+      pendingRemovals: [],
       venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "Side door", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
       backgrounds: [
         {

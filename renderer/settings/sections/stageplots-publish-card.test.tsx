@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import type { Venue, VenuePublish } from "@main/types/stageplots";
+import type { PendingRemovalView, Venue, VenuePublish } from "@main/types/stageplots";
 
 import { installRenderDom, settle } from "../../test-dom.js";
 
@@ -23,6 +23,7 @@ const ORIGIN = "https://plots.example.workers.dev";
 const SECRET = "A".repeat(42) + "E";
 
 let VENUE: Venue;
+let PENDING: PendingRemovalView[] = [];
 /** What GET /api/servicecue/publish answers. */
 let SETTINGS: { url: string; token: string } = { url: ORIGIN, token: "••••" };
 let sent: string[] = [];
@@ -39,7 +40,6 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     lastError: null,
     publishedImages: [],
     unpublishedImages: [],
-    retired: [],
     ...extra,
   };
 }
@@ -50,6 +50,12 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
   let status = 200;
   let json: unknown = {};
   if (u.pathname === "/api/servicecue/publish") json = { enabled: false, ...SETTINGS };
+  else if (method === "POST" && u.pathname === "/api/stageplots/pending/remove") {
+    sent.push(`${method} ${u.pathname}`);
+    const here = PENDING.filter((e) => e.origin === ORIGIN).length;
+    PENDING = PENDING.filter((e) => e.origin !== ORIGIN);
+    json = { removed: here, left: 0, waiting: PENDING.length };
+  }
   else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/(publish|regenerate|unpublish|publish-now)$/.test(u.pathname)) {
     sent.push(`${method} ${u.pathname}`);
     if (refuse) {
@@ -70,7 +76,7 @@ const { render, cleanup, screen, fireEvent } = await import("@testing-library/re
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
-const { PublishCard, shortSecret } = await import("./stageplots-publish-card.js");
+const { PublishCard, PendingLinksCard, shortSecret } = await import("./stageplots-publish-card.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
 
@@ -87,7 +93,7 @@ async function mount() {
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(PublishCard, { venue: VENUE, save, timeZone: "America/Chicago" }),
+      VENUE.id === "none" ? React.createElement(PendingLinksCard, { pending: PENDING, save }) : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago" }),
       React.createElement(ConfirmHost),
     );
   let rerender!: (ui: React.ReactElement) => void;
@@ -114,6 +120,7 @@ beforeEach(() => {
   sent = [];
   refuse = null;
   notice = null;
+  PENDING = [];
   setDisplayHourCycle("24h");
 });
 afterEach(async () => {
@@ -249,5 +256,35 @@ describe("the Publish card, published", () => {
     );
     // A failure with every background published still has a way to try again.
     assert.ok(screen.getByRole("button", { name: "Publish now" }));
+  });
+});
+
+describe("old links still live", () => {
+  const entry = (origin: string, reason: PendingRemovalView["reason"] = "regenerated"): PendingRemovalView => ({ origin, since: "2026-11-12T20:00:00.000Z", reason });
+
+  test("are counted by page, and Remove now drains those on the page set up", async () => {
+    VENUE.publish = published();
+    PENDING = [entry(ORIGIN), entry(ORIGIN, "unpublished")];
+    const m = await mount();
+    assert.match(text(), /2 old links still live on plots\.example\.workers\.dev\./);
+    await click(screen.getByRole("button", { name: "Remove now" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/pending/remove"]);
+    await m.refresh();
+    assert.equal(/old links? still live/.test(text()), false);
+  });
+
+  test("on a page that is not set up here say so, and offer nothing that cannot work", async () => {
+    PENDING = [entry("https://old.example.workers.dev", "address changed")];
+    await mount();
+    assert.match(text(), /1 old link still live on old\.example\.workers\.dev\. Set that page up again to remove it\./);
+    assert.equal(screen.queryByRole("button", { name: "Remove now" }), null);
+  });
+
+  test("show with no venue selected, so a deleted venue's link is never out of sight", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    PENDING = [entry(ORIGIN, "venue deleted")];
+    await mount();
+    assert.match(text(), /1 old link still live on plots\.example\.workers\.dev\./);
+    assert.ok(screen.getByRole("button", { name: "Remove now" }));
   });
 });

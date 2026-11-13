@@ -41,9 +41,30 @@ export interface VenuePublish {
   publishedImages: string[];
   /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
   unpublishedImages: string[];
-  /** Earlier secrets of this venue (after a regenerate) whose removal from the page has not gone through yet. */
-  retired: string[];
 }
+
+/** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
+ *  before its first request, so a secret is never sent anywhere the store does not know of. */
+export const PENDING_REASONS = ["address changed", "not taken back", "publishing", "regenerated", "restored over", "unpublished", "venue deleted"] as const;
+export type PendingReason = (typeof PENDING_REASONS)[number];
+
+/**
+ * A secret that may still be live on a page and that nothing here shows any more: an old link
+ * after a regenerate, a venue unpublished or deleted while its page could not be reached, a
+ * publish whose take-back failed, a link a restore wrote over. The publisher removes it from
+ * that page (a drop of the whole secret) whenever it can, and the editor shows what is left.
+ */
+export interface PendingRemoval {
+  secret: string;
+  /** The page it was published to. Removed only with that page's token. */
+  origin: string;
+  /** When it was queued, as an ISO instant. */
+  since: string;
+  reason: PendingReason;
+}
+
+/** A pending removal as a browser sees it: never the secret. */
+export type PendingRemovalView = Omit<PendingRemoval, "secret">;
 
 export type BackgroundOriginalMime = "image/png" | "image/jpeg" | "application/pdf";
 export type BackgroundSourceExt = "png" | "jpg";
@@ -159,6 +180,9 @@ export interface StagePlotsDoc {
   /** Sorted by planId, then venueId; one per plan and venue. A document
    *  saved before overrides existed reads as []. */
   overrides: PlotOverride[];
+  /** Secrets to remove from a page, sorted by origin then secret, one per pair. A document
+   *  saved before they existed reads as []. */
+  pendingRemovals: PendingRemoval[];
 }
 
 /** GET /api/stageplots, and every stageplots:updated frame. */
@@ -167,6 +191,8 @@ export interface StagePlotsView {
   backgrounds: BackgroundView[];
   plots: Plot[];
   overrides: PlotOverride[];
+  /** The pending removals' pages, ages and reasons; the in-flight ("publishing") ones and every secret left out. */
+  pendingRemovals: PendingRemovalView[];
 }
 
 /** A venue's `index` on the public page, as the server publishes it. */
@@ -215,6 +241,11 @@ export const STAGEPLOT_LIMITS = {
   itemMaxSize: 1000,
   /** Overrides across every venue and plan, past ones included. */
   overrides: 2000,
+  /** Pending removals the store holds. A restore and a failed take-back cannot refuse, so this is
+   *  far above what an action may queue (pendingRemovalsQueue). */
+  pendingRemovals: 1000,
+  /** Past this many, a regenerate or a publish is refused rather than queue another. */
+  pendingRemovalsQueue: 200,
 } as const;
 
 /** The plot canvas is this many units wide. */

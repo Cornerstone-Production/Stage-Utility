@@ -58,7 +58,7 @@ import { PlotTabs } from "./stageplots-plot-tabs";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
 import { useCurrentPlan } from "../../main/stageplots/plan-following";
 import { planNamer } from "./plan-date-label";
-import { PublishCard } from "./stageplots-publish-card";
+import { PendingLinksCard, PublishCard } from "./stageplots-publish-card";
 import { ThisWeekCard } from "./stageplots-this-week-card";
 import { VenuesCard } from "./stageplots-venues-card";
 
@@ -578,7 +578,11 @@ function EditorBody({
           />
           <BackgroundsCard doc={doc} selectedId={backgroundId} onSelect={onBackground} save={save} {...(openPdf ? { openPdf } : {})} />
           {venue && <ThisWeekCard doc={doc} venue={venue} plan={plan} nameOf={planName} save={save} />}
-          {venue && <PublishCard venue={venue} save={save} timeZone={plan.timeZone} />}
+          {venue ? (
+            <PublishCard venue={venue} pending={doc.pendingRemovals} save={save} timeZone={plan.timeZone} />
+          ) : (
+            <PendingLinksCard pending={doc.pendingRemovals} save={save} />
+          )}
         </aside>
         <div className="min-w-0">
           {!venue ? (

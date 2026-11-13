@@ -7,6 +7,10 @@
 // what it says when the page refuses, is the server's (stageplots-publish.ts); the card
 // shows the venue as the server saved it, followed live on stageplots:updated.
 //
+// Old links still live (pending removals, the server's queue of secrets it keeps trying to take
+// down) are counted by page under the venue's state, with Remove now; with no venue selected the
+// editor shows them alone (PendingLinksCard).
+//
 // The page's host is the venue's own once published, and the Public link card's address
 // before that. Copy uses the clipboard where the browser has one; over plain HTTP, where
 // it has none and the older copy command does not work, the link is put in a field and
@@ -17,7 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CircleXIcon, CopyIcon, GlobeIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 
 import type { PublishSettingsDTO } from "@main/types/servicecue-publish-status";
-import type { Venue } from "@main/types/stageplots";
+import type { PendingRemovalView, Venue } from "@main/types/stageplots";
 import { STAGEPLOTS_PATH } from "@main/types/servicecue-publish";
 import { plural } from "@main/services/plural";
 
@@ -49,14 +53,77 @@ function whenLabel(iso: string, timeZone: string): string {
 const pill = "inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11px] leading-[13px] font-medium";
 const statusLine = "flex items-start gap-[7px] text-caption1 [&>svg]:mt-px [&>svg]:size-3.5 [&>svg]:shrink-0";
 
-export function PublishCard({ venue, save, timeZone }: { venue: Venue; save: Save; timeZone: string }) {
-  const pub = venue.publish ?? null;
-  // The Public link card's address, for the host and whether there is a page to publish to.
-  const target = useQuery({
+/** The Public link card's address and whether a token is saved for it: the page this server publishes to. */
+function usePublishTarget() {
+  return useQuery({
     queryKey: ["stageplots", "publish-target"],
     queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
     staleTime: 60_000,
   });
+}
+
+/**
+ * Old links still live: secrets the server keeps trying to remove from a page (an old link after
+ * a regenerate, a venue unpublished or deleted while its page could not be reached). Counted by
+ * page; Remove now drains those on the page set up, and one on another page says to set that
+ * page up again. Never a secret: the server does not send them.
+ */
+function PendingLinks({ pending, save }: { pending: readonly PendingRemovalView[]; save: Save }) {
+  const target = usePublishTarget();
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (pending.length === 0) return null;
+  const setUp = target.data?.url && target.data.token ? new URL(target.data.url).origin : null;
+  const byOrigin = new Map<string, number>();
+  for (const e of pending) byOrigin.set(e.origin, (byOrigin.get(e.origin) ?? 0) + 1);
+  const remove = async () => {
+    setWorking(true);
+    const r = await save(() => stageplotsApi.removePending());
+    setWorking(false);
+    setError(r.ok ? (r.value.left > 0 ? `${plural(r.value.left, "link")} could not be removed yet; they are tried again on every change.` : null) : r.error);
+  };
+  return (
+    <>
+      {[...byOrigin].map(([origin, n]) => (
+        <p key={origin} className={cn(statusLine, "text-warn-11")} data-testid="pending-links">
+          <TriangleAlertIcon aria-hidden />
+          <span>
+            <Mono text={`${plural(n, "old link")} still live on ${new URL(origin).host}.`} />{" "}
+            {origin === setUp ? (
+              <button type="button" className="underline underline-offset-2" disabled={working} onClick={() => void remove()}>
+                {working ? "Removing…" : "Remove now"}
+              </button>
+            ) : (
+              "Set that page up again to remove it."
+            )}
+          </span>
+        </p>
+      ))}
+      {error && (
+        <p className={cn(statusLine, "text-danger-11")} role="alert">
+          <CircleXIcon aria-hidden />
+          <span>{error}</span>
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The Publish card with no venue selected: only the old links still live, so a deleted venue's are never out of sight. */
+export function PendingLinksCard({ pending, save }: { pending: readonly PendingRemovalView[]; save: Save }) {
+  if (pending.length === 0) return null;
+  return (
+    <section className="su-card flex flex-col gap-2.5 px-3.5 py-3" aria-label="Publish">
+      <CardHeader title="Publish" />
+      <PendingLinks pending={pending} save={save} />
+    </section>
+  );
+}
+
+export function PublishCard({ venue, pending, save, timeZone }: { venue: Venue; pending: readonly PendingRemovalView[]; save: Save; timeZone: string }) {
+  const pub = venue.publish ?? null;
+  // The Public link card's address, for the host and whether there is a page to publish to.
+  const target = usePublishTarget();
   const [working, setWorking] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** What the server said beside a success: a copy left on a page this server cannot reach. Kept until another venue. */
@@ -124,7 +191,7 @@ export function PublishCard({ venue, save, timeZone }: { venue: Venue; save: Sav
   const notYet = pub?.unpublishedImages.length ?? 0;
   // One button, one rule: anything left to send or to take down. It sits in the backgrounds line
   // when there is one (the mockup's place for it), else under the error.
-  const needsPublishNow = !!pub && (notYet > 0 || lastError !== null || pub.retired.length > 0);
+  const needsPublishNow = !!pub && (notYet > 0 || lastError !== null);
   const publishNow = (
     <button type="button" className="underline underline-offset-2" disabled={working !== null} onClick={() => void run("publishNow")}>
       {working === "publishNow" ? "Publishing…" : "Publish now"}
@@ -236,6 +303,7 @@ export function PublishCard({ venue, save, timeZone }: { venue: Venue; save: Sav
           {needsPublishNow && notYet === 0 && <p className="text-caption1 text-accent">{publishNow}</p>}
         </>
       )}
+      <PendingLinks pending={pending} save={save} />
       {notice && (
         <p className={cn(statusLine, "text-warn-11")} role="status">
           <TriangleAlertIcon aria-hidden />

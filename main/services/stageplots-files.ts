@@ -63,7 +63,14 @@ export function backgroundView(b: Background): BackgroundView {
 
 /** The document as GET /api/stageplots and every stageplots:updated frame carry it. */
 export function stagePlotsView(doc: StagePlotsDoc): StagePlotsView {
-  return { venues: doc.venues, plots: doc.plots, backgrounds: doc.backgrounds.map(backgroundView), overrides: doc.overrides };
+  return {
+    venues: doc.venues,
+    plots: doc.plots,
+    backgrounds: doc.backgrounds.map(backgroundView),
+    overrides: doc.overrides,
+    // Never the secrets; and not a publish in flight, which is not yet anything to remove.
+    pendingRemovals: doc.pendingRemovals.filter((e) => e.reason !== "publishing").map(({ origin, since, reason }) => ({ origin, since, reason })),
+  };
 }
 
 /** A converted background's WebP bytes, or null when the file is not there. */

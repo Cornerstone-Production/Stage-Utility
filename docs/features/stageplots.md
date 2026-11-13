@@ -313,6 +313,7 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 |---|---|
 | **Off** | **Publish *venue***. Nothing is sent until it is pressed |
 | **Published** | When it was last published, the link with **Copy**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
+| **Old links still live** | Under either state, and on its own when no venue is selected: "*n* old links still live on *host*", with **Remove now** when that page is the one set up, and "Set that page up again to remove it" when not. See [Old links](#old-links) |
 
 - **Publish** makes the secret on the server, sends every background the venue's plots
   draw, then each plot, then the venue itself. If the page refuses or does not answer,
@@ -328,10 +329,15 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
   has included, and only then removes the old link. If anything fails, the old link keeps
   working and the card says so. A background the old link never had (one the page refused)
   does not stop it: it stays listed as not yet published. If the old link cannot be
-  removed, it is kept and removed by **Publish now**.
-- **Unpublish…** removes the venue's page and backgrounds from the public page. If that
-  fails, the venue stays published and the card says the link still works. Publishing
-  again makes a new link. A published venue cannot be deleted until it is unpublished.
+  removed, it waits as an [old link](#old-links). A regenerate is refused while 200 old
+  links are waiting, before anything is sent.
+- **Unpublish…** removes the venue's page and backgrounds from the public page. If the
+  page refuses, the venue stays published and the card says the link still works. With no
+  page set up, or the venue published to a page other than the one set up, the venue is
+  unpublished here and its link waits as an old link, and the card says it is left on that
+  page until the page is set up again. Publishing again makes a new link.
+- **Deleting** a published venue unpublishes it first. A link the page does not take
+  down waits as an old link, and the delete says so.
 - **Copy** copies the link. Over plain HTTP, where the browser has no clipboard API, it
   selects the link for copying by hand if the older copy command does not work.
 
@@ -339,12 +345,27 @@ The page shows the plot each venue had for the followed plan when it was last pu
 and republishes when the plan moves, so it follows the week as `/stageplots` does. Dates
 are in the app's time zone.
 
-Changing the page address under **Public link** does not move what is already
-published: the next change, **Publish now** or **Regenerate…** sends the venue to the
-new page under the same link, and the copy on the old page stays there, since this
-server no longer has a token for it. Regenerate and Unpublish say so on the card and on
-`/log`, naming the old page; take that copy down on the old page itself (delete its
-Worker, or rotate it to a page you still hold).
+Changing the page address under **Public link** moves each published venue to the new
+page under a new link on its next change or **Publish now**. Its old link waits as an old
+link on the old page, removed once that page is set up here again (or take it down on the
+old page itself, by deleting its Worker). If the new page will not take a venue, it stays
+on the old page and the card says why.
+
+### Old links
+
+No link is ever live on the page without this server knowing it. A link that nothing
+shows any more (the old one after a regenerate, a venue unpublished or deleted while its
+page could not be reached, a publish whose take-back failed, a link a restore wrote over)
+waits in a list kept with the stage plots, and carried by backups, until it is removed. A
+new link is written there before its first request goes out, and moves onto its venue only
+once the page holds it all, so not even a crash halfway through a publish loses one.
+
+The server removes what waits whenever it can reach the page: at start-up, on **Publish
+now** and **Remove now**, and on every change. A removal that fails is tried again then,
+and said once on `/log`. Only the page a link was published to can remove it, with that
+page's token: one on another page waits until that page is set up here again. The list
+never leaves the server with its links in it; the card is told only each page, when and
+why.
 
 A plot over 2 MB once written out cannot be published: the card names it. That takes far
 more than a working plot (hundreds of items with long input lists). A background over 2 MB
@@ -366,7 +387,7 @@ and its inputs up to 64 of 40 characters each.
 ## Backups
 
 A config backup carries `stageplots.json` (venues, plots, backgrounds, every
-plan's override and each published venue's secret link), both folders of background files and
+plan's override, each published venue's secret link and the old links waiting to be removed), both folders of background files and
 every PDF original, and a restore brings them all back. A photo background is
 about 1 to 3 MB of source plus at most 1 MB of WebP. One made from a PDF carries
 the PDF as uploaded too (up to 25 MB), beside its page's source, which for a
@@ -397,9 +418,10 @@ that were not a list and were read as none. Publishing logs each publish (with h
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
 that failed and why, every one refused before anything was sent (an unknown venue, one
-published or not, no page set up), an old link that could not be removed yet, what went up before a
-failure that could not be taken back, and a change of page address. The secret is never
-logged.
+published or not, no page set up, too many old links waiting), each old link queued for
+removal, removed, failing (once) or waiting for its page (once), what went up before a
+failure that could not be taken back, and each venue moved to a new page. The secret is
+never logged.
 A page that cannot read the plots logs that too, so does a print whose
 background did not load, and so does a page that finds Planning Center
 unreachable and falls back to each venue's default, and again when it can be

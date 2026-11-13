@@ -636,6 +636,7 @@ export type IpcChannel =
   | "stageplots:publish"
   | "stageplots:publishNow"
   | "stageplots:regenerate"
+  | "stageplots:removePending"
   | "stageplots:saveItems"
   | "stageplots:setDefault"
   | "stageplots:setOverride"
@@ -866,6 +867,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "stageplots:publishNow":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish-now`);
+
+    // Remove now: drop every old link queued against the page set up.
+    case "stageplots:removePending":
+      return post<T>("/api/stageplots/pending/remove");
 
     case "servicecue:rundown": {
       const id = p.serviceTypeId as string;

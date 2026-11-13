@@ -66,6 +66,7 @@ function venueDoc(plots = 2, backgrounds = 2, items: (i: number) => PlotItem[] =
     backgrounds: bgs,
     plots: ps,
     overrides: [],
+    pendingRemovals: [],
   };
 }
 
@@ -83,10 +84,39 @@ interface Harness {
 }
 
 let open: Harness | null = null;
+/** Every fake page a test started, for the standing check after it. */
+const pages: { page: Receiver; origin: string }[] = [];
 
-async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown } = {}): Promise<Harness> {
+/** A fake page (the Worker's real handler), registered for the standing check. */
+async function startPage(): Promise<Receiver> {
   const page = await FakeReceiver.start();
   page.token = TOKEN;
+  // The origin read now: a test may close its page before the check runs.
+  pages.push({ page, origin: page.origin });
+  return page;
+}
+
+/**
+ * THE STANDING CHECK, after every test: every secret any fake page holds is on a venue or in
+ * the store's pending removals, against that page. A secret live on a page that the store does
+ * not know of is a link nothing can ever take down.
+ */
+async function assertNoUnknownLinks(): Promise<void> {
+  const doc = await stageplotsStore.get();
+  for (const { page, origin: raw } of pages) {
+    const origin = parsePublishUrl(raw);
+    assert.ok(origin.ok);
+    const known = new Set([
+      ...doc.venues.flatMap((v) => (v.publish && v.publish.origin === origin.origin ? [v.publish.secret] : [])),
+      ...doc.pendingRemovals.filter((e) => e.origin === origin.origin).map((e) => e.secret),
+    ]);
+    const live = new Set([...page.hub.stageplots.keys()].map((id) => id.slice(0, id.indexOf("/"))));
+    for (const secret of live) assert.ok(known.has(secret), `a secret is live on ${raw} and the store does not know it`);
+  }
+}
+
+async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown } = {}): Promise<Harness> {
+  const page = await startPage();
   const parsed = parsePublishUrl(page.origin);
   assert.ok(parsed.ok);
   await stageplotsStore.update(() => checkStagePlotsDoc(structuredClone(doc)));
@@ -126,9 +156,15 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
 
 afterEach(async () => {
   await open?.publisher.stop();
-  await open?.page.close();
-  open = null;
+  try {
+    await assertNoUnknownLinks();
+  } finally {
+    for (const { page } of pages.splice(0)) await page.close().catch(() => undefined);
+    open = null;
+  }
 });
+
+const pending = async () => (await stageplotsStore.get()).pendingRemovals;
 
 /** The StagePlots requests the page received, as "METHOD secret key". */
 function spRequests(page: Receiver): { method: string; secret: string; key: string | null; r: Received }[] {
@@ -157,7 +193,7 @@ describe("publishing a venue", () => {
     assert.equal(pub.lastError, null);
     assert.deepEqual(pub.publishedImages, [hash(1), hash(2)]);
     assert.deepEqual(pub.unpublishedImages, []);
-    assert.deepEqual(pub.retired, []);
+    assert.deepEqual(await pending(), []);
     assert.deepEqual(h.page.hub.stagePlotKeys(pub.secret).sort(), [
       "image/0000000000000001",
       "image/0000000000000002",
@@ -184,7 +220,10 @@ describe("publishing a venue", () => {
     } satisfies PublishedVenue);
     const plot = JSON.parse((await visit(h.page, pub.secret, "plot/p-1")).body) as PublishedPlot;
     assert.deepEqual(plot.background, { hash: hash(2), width: 2400, height: 1600 });
-    assert.equal(h.saved.length, 1, "the published venue was not broadcast once");
+    // Two writes, each broadcast: the secret queued before its first request went out, then moved onto the venue.
+    assert.equal(h.saved.length, 2, "the publish did not write the queue entry and then the venue");
+    assert.equal(h.saved.at(-1)!.venues[0]!.publish?.secret, pub.secret);
+    assert.deepEqual(h.saved.at(-1)!.pendingRemovals, []);
   });
 
   test("20 plots on 20 backgrounds: every request is under the cap and the Worker holds all 41 keys", async () => {
@@ -283,7 +322,7 @@ describe("regenerating the link", () => {
     assert.ok(r.ok, r.ok ? "" : r.error);
     const pub = (await h.venue()).publish!;
     assert.notEqual(pub.secret, old);
-    assert.deepEqual(pub.retired, []);
+    assert.deepEqual(await pending(), []);
     const after = spRequests({ ...h.page, requests: h.page.requests.slice(before) } as Receiver);
     const firstOld = after.findIndex((q) => q.secret === old);
     const lastNew = after.map((q) => q.secret === pub.secret).lastIndexOf(true);
@@ -325,15 +364,17 @@ describe("regenerating the link", () => {
     h.page.respond = (req) => (fail && req.method === "DELETE" && req.path === `/_publish/v1/stageplots/${old}` ? { status: 500, body: "" } : h.page.worker(req));
     const r = await h.publisher.regenerate("v-1");
     assert.ok(r.ok, "the new link is up, so the regenerate went through");
-    let pub = (await h.venue()).publish!;
-    assert.deepEqual(pub.retired, [old]);
-    assert.match(pub.lastError?.message ?? "", /old link could not be removed/);
+    assert.deepEqual((await pending()).map((e) => [e.secret === old, e.reason]), [[true, "regenerated"]]);
     assert.equal((await visit(h.page, old, "index")).status, 200);
+    // An ordinary change tries again, and failing again writes nothing.
+    const saves = h.saved.length;
+    await h.edit((d) => ({ ...d, plots: d.plots.map((p) => ({ ...p, name: `${p.name}!`, version: p.version + 1 })) }));
+    await h.publisher.settle();
+    assert.equal((await pending()).length, 1, "the old link left the queue while it is still live");
+    assert.equal(h.saved.length, saves + 1, "a failed removal wrote to the store");
     fail = false;
     assert.ok((await h.publisher.publishNow("v-1")).ok);
-    pub = (await h.venue()).publish!;
-    assert.deepEqual(pub.retired, []);
-    assert.equal(pub.lastError, null);
+    assert.deepEqual(await pending(), []);
     assert.equal((await visit(h.page, old, "index")).status, 404);
   });
 });
@@ -588,8 +629,7 @@ describe("after the page address changes", () => {
   async function moved() {
     const h = await harness();
     assert.ok((await h.publisher.publish("v-1")).ok);
-    const other = await FakeReceiver.start();
-    other.token = TOKEN;
+    const other = await startPage();
     const parsed = parsePublishUrl(other.origin);
     assert.ok(parsed.ok);
     (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: parsed.origin, token: TOKEN });
@@ -614,23 +654,119 @@ describe("after the page address changes", () => {
       assert.ok(log.lines.some((l) => l.includes("[stageplots]") && leftOnRe(oldHost).test(l)), "the log does not name the old page");
     } finally {
       log.restore();
-      await other.close();
     }
+    void other;
   });
 
   test("Regenerate says the old link's copy is left on the old page, not that it is removed", async () => {
     const { h, other, oldHost } = await moved();
     const log = capture();
     try {
+      const old = (await h.venue()).publish!.secret;
       const reg = await h.publisher.regenerate("v-1");
       assert.ok(reg.ok, reg.ok ? "" : reg.error);
-      assert.match((await h.venue()).publish!.lastError?.message ?? "", leftOnRe(oldHost));
+      const parsedOld = parsePublishUrl(h.page.origin);
+      assert.ok(parsedOld.ok);
+      assert.deepEqual((await pending()).map((e) => [e.secret === old, e.origin, e.reason]), [[true, parsedOld.origin, "regenerated"]]);
       assert.ok(h.page.hub.stageplots.size > 0);
       assert.equal(log.lines.some((l) => l.includes("the old one is removed")), false, log.lines.join(" / "));
+      assert.ok(log.lines.some((l) => leftOnRe(oldHost).test(l)), "the log does not name the old page");
     } finally {
       log.restore();
-      await other.close();
     }
+    void other;
+  });
+});
+
+describe("pending removals: a secret is never forgotten while it may be live", () => {
+  const fakeSecret = (i: number) => `${i.toString(36).padStart(42, "A")}E`;
+  const originOf = (h: Harness) => {
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    return o.origin;
+  };
+
+  test("a failed take-back leaves the secret queued, shown, and removed by Remove now once the page answers", async () => {
+    const { stagePlotsView } = await import("./stageplots-files.js");
+    const h = await harness(venueDoc(2, 2));
+    let down = true;
+    h.page.respond = (req) => {
+      const m = SP.exec(req.path);
+      if (down && m && m[2] === "index") return { status: 500, body: "" };
+      if (down && m && req.method === "DELETE") return { status: 500, body: "" };
+      return h.page.worker(req);
+    };
+    assert.equal((await h.publisher.publish("v-1")).ok, false);
+    const queued = await pending();
+    assert.deepEqual(queued.map((e) => e.reason), ["not taken back"]);
+    assert.deepEqual(stagePlotsView(await stageplotsStore.get()).pendingRemovals.map((e) => e.reason), ["not taken back"], "the card cannot see it");
+    assert.equal(JSON.stringify(stagePlotsView(await stageplotsStore.get())).includes(queued[0]!.secret), false, "the view carries a secret");
+    down = false;
+    assert.deepEqual(await h.publisher.removePending(), { removed: 1, left: 0, waiting: 0 });
+    assert.deepEqual(await pending(), []);
+  });
+
+  test("a publish left in flight by a crash is removed when the publisher starts", async () => {
+    const h = await harness();
+    const secret = fakeSecret(7);
+    await h.page.worker({ method: "PUT", path: `/_publish/v1/stageplots/${secret}/plot/p-0`, headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: "{}", bytes: Buffer.from("{}"), at: 0 });
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret, origin: originOf(h), since: "2026-11-12T10:00:00.000Z", reason: "publishing" }] }));
+    const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
+    const fresh = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store: stageplotsStore, image: async () => null, plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    fresh.start();
+    await fresh.settle();
+    await fresh.stop();
+    assert.deepEqual(await pending(), []);
+    assert.deepEqual(h.page.hub.stagePlotKeys(secret), []);
+  });
+
+  test("Unpublish with no page set up queues the link, unpublishes the venue, and says where it is left", async () => {
+    let set = true;
+    let h!: Harness;
+    h = await harness(venueDoc(), { target: async () => (set ? { ok: true, origin: originOf(h), token: TOKEN } : { ok: false, message: "Set up the public link first." }) });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    set = false;
+    const off = await h.publisher.unpublish("v-1");
+    assert.ok(off.ok, off.ok ? "" : off.error);
+    assert.equal((await h.venue()).publish, undefined);
+    assert.match(off.ok ? (off.notice ?? "") : "", new RegExp(`left on ${host(h.page).replace(/\./g, "\\.")} until that page is set up here again`));
+    assert.deepEqual((await pending()).map((e) => [e.secret === secret, e.reason]), [[true, "unpublished"]]);
+    set = true;
+    assert.deepEqual(await h.publisher.removePending(), { removed: 1, left: 0, waiting: 0 });
+    assert.equal((await visit(h.page, secret, "index")).status, 404);
+  });
+
+  test("an entry for another page waits, is said once, and writes nothing", async () => {
+    const h = await harness();
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: fakeSecret(3), origin: "https://elsewhere.example", since: "2026-11-12T10:00:00.000Z", reason: "regenerated" }] }));
+    const lines: string[] = [];
+    const spy = mock.method(console, "warn", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+    try {
+      const saves = h.saved.length;
+      assert.deepEqual(await h.publisher.removePending(), { removed: 0, left: 0, waiting: 1 });
+      assert.deepEqual(await h.publisher.removePending(), { removed: 0, left: 0, waiting: 1 });
+      assert.equal(h.saved.length, saves, "waiting wrote to the store");
+    } finally {
+      spy.mock.restore();
+    }
+    assert.equal(lines.filter((l) => l.includes("elsewhere.example") && l.includes("waits")).length, 1, lines.join(" / "));
+  });
+
+  test("a full queue refuses a regenerate before anything is sent, so the old link is never left unknown", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const filler = Array.from({ length: 199 }, (_, i) => ({ secret: fakeSecret(i + 100), origin: "https://elsewhere.example", since: "2026-11-12T10:00:00.000Z", reason: "regenerated" as const }));
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: filler }));
+    h.page.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : h.page.worker(req));
+    assert.ok((await h.publisher.regenerate("v-1")).ok, "the 199th queued link is still allowed");
+    assert.equal((await pending()).length, 200);
+    const before = h.page.requests.length;
+    const r = await h.publisher.regenerate("v-1");
+    assert.equal(r.ok, false);
+    assert.equal(r.ok ? 0 : r.status, 409);
+    assert.match(r.ok ? "" : r.error, /old links are still waiting to be removed/);
+    assert.equal(h.page.requests.length, before, "a refused regenerate sent something");
   });
 });
 
@@ -649,7 +785,7 @@ describe("the secret", () => {
         const pub = (await h.venue()).publish;
         if (pub) {
           secrets.add(pub.secret);
-          for (const s of pub.retired) secrets.add(s);
+          for (const e of await pending()) secrets.add(e.secret);
           if (pub.lastError) errors.push(pub.lastError.message);
         }
       };
@@ -695,7 +831,6 @@ describe("the publish state in the store", () => {
       lastError: { at: "2026-11-12T14:31:00.000Z", message: "It did not answer." },
       publishedImages: [hash(2), hash(1), hash(2)],
       unpublishedImages: [],
-      retired: [],
     };
     const once = checkStagePlotsDoc(doc);
     assert.deepEqual(once.venues[0]!.publish!.publishedImages, [hash(1), hash(2)]);
@@ -704,10 +839,42 @@ describe("the publish state in the store", () => {
     assert.equal(Object.hasOwn(off.venues[0]!, "publish"), false, "an unpublished venue grew a publish field");
   });
 
-  test("refuses a secret, an image or a retired secret of the wrong shape", async () => {
+  test("pending removals are checked, sorted by page then secret, one per pair, and pass the check again unchanged", async () => {
+    const e = (secret: string, origin: string, reason = "regenerated") => ({ secret, origin, since: "2026-11-12T10:00:00.000Z", reason });
+    const A = "A".repeat(42) + "E";
+    const B = "B".repeat(42) + "E";
+    const doc = { ...venueDoc(), pendingRemovals: [e(B, "https://b.example"), e(A, "https://b.example"), e(A, "https://a.example"), e(A, "https://b.example", "unpublished")] };
+    const once = checkStagePlotsDoc(doc);
+    assert.deepEqual(once.pendingRemovals.map((x) => [x.origin, x.secret === A ? "A" : "B"]), [
+      ["https://a.example", "A"],
+      ["https://b.example", "A"],
+      ["https://b.example", "B"],
+    ]);
+    assert.deepEqual(checkStagePlotsDoc(once), once);
+    for (const bad of [e("short", "https://a.example"), e(A, "not a url"), e(A, "https://a.example", "because")]) {
+      assert.throws(() => checkStagePlotsDoc({ ...venueDoc(), pendingRemovals: [bad] }), Error, JSON.stringify(bad));
+    }
+  });
+
+  test("a stageplots.json whose pending removals are not a list is never read as none", async () => {
+    const { normalizeStagePlots } = await import("./stageplots-store.js");
+    const lines: string[] = [];
+    const spy = mock.method(console, "warn", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+    let out: unknown;
+    try {
+      out = normalizeStagePlots({ ...venueDoc(), pendingRemovals: "lost" } as never);
+    } finally {
+      spy.mock.restore();
+    }
+    assert.equal((out as { pendingRemovals: unknown }).pendingRemovals, "lost", "a damaged list was replaced, forgetting what it held");
+    assert.ok(lines.some((l) => l.includes("pending removals are not a list")));
+    assert.throws(() => checkStagePlotsDoc(out), Error, "a save would go through and write over it");
+  });
+
+  test("refuses a secret, an image or an origin of the wrong shape", async () => {
     const base = venueDoc();
-    const pub = { secret: "A".repeat(42) + "E", origin: "https://x.example", publishedAt: "2026-11-12T14:32:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], retired: [] };
-    for (const bad of [{ secret: "short" }, { secret: "A".repeat(42) + "B" }, { publishedImages: ["nothex"] }, { retired: ["short"] }, { origin: "not a url" }, { publishedAt: "yesterday" }]) {
+    const pub = { secret: "A".repeat(42) + "E", origin: "https://x.example", publishedAt: "2026-11-12T14:32:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] };
+    for (const bad of [{ secret: "short" }, { secret: "A".repeat(42) + "B" }, { publishedImages: ["nothex"] }, { origin: "not a url" }, { publishedAt: "yesterday" }]) {
       base.venues[0]!.publish = { ...pub, ...bad } as never;
       assert.throws(() => checkStagePlotsDoc(base), Error, JSON.stringify(bad));
     }

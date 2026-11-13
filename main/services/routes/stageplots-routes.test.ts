@@ -39,7 +39,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [], overrides: [] }));
+  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] }));
   for (const d of [STAGEPLOT_IMAGE_DIR, STAGEPLOT_ORIGINAL_DIR]) await fs.rm(path.join(TMP, d), { recursive: true, force: true });
   frames.length = 0;
 });
@@ -94,7 +94,7 @@ describe("stage plot routes", () => {
   test("GET answers the document with each background's URLs", async () => {
     const r = await call("GET", "/api/stageplots");
     assert.equal(r.status, 200);
-    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
   test("venues: create, rename, change kind and notes, delete with its plots", async () => {
@@ -105,7 +105,7 @@ describe("stage plot routes", () => {
     assert.deepEqual(r.json, { id: v.id, name: "Chapel", kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
     r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [] });
+    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
   test("a venue's first plot becomes its default, and set default moves it", async () => {
@@ -891,7 +891,7 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
     assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
   });
 
-  test("publishes to the page, refuses to delete the venue while it is, and unpublishes", async () => {
+  test("publishes to the page, follows a change, unpublishes, and deletes a published venue by unpublishing it first", async () => {
     const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
     const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
     const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
@@ -911,11 +911,6 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       assert.equal((frames.at(-1) as View).venues[0]!.publish?.secret, secret, "the published venue was not broadcast");
       assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 409, "published twice");
 
-      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
-      assert.equal(del.status, 409);
-      assert.match((del.json as { error: string }).error, /^unpublish Main room before deleting it/);
-      assert.ok((await stageplotsStore.get()).venues.some((v) => v.id === id), "the published venue was deleted");
-
       // A saved change reaches the page through the app's own broadcaster and the publisher's
       // real listener, once, and then nothing more is sent.
       const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
@@ -934,7 +929,45 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       assert.equal(off.status, 200);
       assert.equal((off.json as { publish?: unknown }).publish, undefined);
       assert.equal(page.hub.stagePlotKeys(secret).length, 0);
-      assert.equal((await call("DELETE", `/api/stageplots/venues/${id}`)).status, 200);
+
+      // Published again, then deleted: the link goes with it.
+      const again = await call("POST", `/api/stageplots/venues/${id}/publish`);
+      const second = (again.json as { publish: { secret: string } }).publish.secret;
+      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
+      assert.deepEqual([del.status, del.json], [200, { ok: true }]);
+      assert.equal(page.hub.stagePlotKeys(second).length, 0, "the deleted venue's link is still live");
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("deleting a published venue with no page set up queues its link, says so, and Remove now takes it down once the page is back", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken, forgetPublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      await forgetPublishToken();
+      const del = await call("DELETE", `/api/stageplots/venues/${id}`);
+      assert.equal(del.status, 200);
+      assert.match((del.json as { notice?: string }).notice ?? "", /until that page is set up here again/);
+      const view = frames.at(-1) as View;
+      assert.deepEqual(view.pendingRemovals.map((e) => [e.origin, e.reason]), [[parsed.origin, "venue deleted"]]);
+      assert.equal(page.hub.stagePlotKeys(secret).length > 0, true, "the test's page lost the link before it was set up again");
+      await savePublishToken(parsed.origin, TOKEN);
+      const removed = await call("POST", "/api/stageplots/pending/remove");
+      assert.deepEqual([removed.status, removed.json], [200, { removed: 1, left: 0, waiting: 0 }]);
+      assert.equal(page.hub.stagePlotKeys(secret).length, 0);
+      assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
     } finally {
       await page.close();
     }

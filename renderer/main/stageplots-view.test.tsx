@@ -72,6 +72,7 @@ function doc(): StagePlotsView {
       { id: "p-hall", venueId: "v-off", name: "Setup", backgroundId: "b-1", bgFade: 0.2, items: [], version: 0 },
     ],
     overrides: [],
+    pendingRemovals: [],
   };
 }
 

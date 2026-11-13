@@ -11,6 +11,7 @@ import { PATCH_COLORS } from "../types/patch.js";
 import { STAGEPLOTS_HASH, STAGEPLOTS_ID, isStagePlotsSecret } from "../types/servicecue-publish.js";
 import {
   ITEM_TYPES,
+  PENDING_REASONS,
   PLOT_UNITS_WIDE,
   STAGEPLOT_LIMITS,
   SYMBOL_KINDS,
@@ -22,6 +23,8 @@ import {
   type ItemType,
   type Plot,
   type PlotItem,
+  type PendingReason,
+  type PendingRemoval,
   type PlotOverride,
   type StagePlotsDoc,
   type SymbolKind,
@@ -36,7 +39,7 @@ import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
 import { fitToHeight, plotHeight, withCableBox } from "./stageplots-doc.js";
 
-const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [] };
+const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] };
 
 /** Ids the server mints and routes put in a URL: letters, digits, `-` and `_`. The
  *  publish contract's, so a plot id is always one the public page can carry. */
@@ -169,8 +172,6 @@ function pageOrNull(v: unknown, what: string): number | null {
 
 /** The longest last-error sentence kept. */
 const PUBLISH_ERROR_CHARS = 600;
-/** The most earlier secrets a venue keeps waiting to be removed. */
-const PUBLISH_RETIRED_MAX = 20;
 
 function isoInstant(v: unknown, what: string): string {
   const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
@@ -216,8 +217,31 @@ function checkPublish(raw: unknown, what: string): VenuePublish {
     lastError,
     publishedImages: sortedSet(p.publishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s published backgrounds`),
     unpublishedImages: sortedSet(p.unpublishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s backgrounds not yet published`),
-    retired: sortedSet(p.retired, PUBLISH_RETIRED_MAX, isStagePlotsSecret, `${what}'s earlier links`),
   };
+}
+
+function checkPending(raw: unknown, i: number): PendingRemoval {
+  const e = asObject(raw, `pending removal ${i + 1}`);
+  const what = `pending removal ${i + 1}`;
+  if (!isStagePlotsSecret(e.secret)) refuse(`${what}'s secret is not one this server makes`);
+  const origin = httpOrigin(e.origin);
+  if (origin === null) refuse(`${what}'s origin must be an http or https origin`);
+  if (!PENDING_REASONS.includes(e.reason as PendingReason)) refuse(`${what}'s reason must be one of ${PENDING_REASONS.join(", ")}`);
+  return { secret: e.secret, origin, since: isoInstant(e.since, `${what}'s time`), reason: e.reason as PendingReason };
+}
+
+/** Pending removals in their one order (origin, then secret), one per secret and page: the
+ *  first of a pair kept, so the same list always comes out the same. */
+export function sortPending(list: readonly PendingRemoval[]): PendingRemoval[] {
+  const seen = new Set<string>();
+  const out: PendingRemoval[] = [];
+  for (const e of [...list].sort((a, b) => a.origin.localeCompare(b.origin) || a.secret.localeCompare(b.secret) || a.since.localeCompare(b.since))) {
+    const key = `${e.origin} ${e.secret}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
 }
 
 function checkVenue(raw: unknown, i: number): Venue {
@@ -464,6 +488,8 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
   const heightOf = (id: string | null) => plotHeight(id === null ? null : backgroundById.get(id));
   const plots = asArray(d.plots, "the plots").map((p, i) => checkPlot(p, i, heightOf));
   const overrides = d.overrides === undefined ? [] : asArray(d.overrides, "the overrides").map(checkOverride);
+  const pendingRemovals = d.pendingRemovals === undefined ? [] : asArray(d.pendingRemovals, "the pending removals").map(checkPending);
+  if (pendingRemovals.length > STAGEPLOT_LIMITS.pendingRemovals) refuse(`there can be at most ${STAGEPLOT_LIMITS.pendingRemovals} pending removals`);
   for (const [what, list] of [["the venues", venues], ["the backgrounds", backgrounds], ["the plots", plots]] as const) {
     uniqueIds(list.map((e) => ({ id: e.id })), what);
   }
@@ -499,7 +525,7 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
     if (seenOverride.has(key)) refuse(`plan "${o.planId}" has more than one override for venue "${o.venueId}"`);
     seenOverride.add(key);
   }
-  return { venues, backgrounds, plots, overrides: sortOverrides(overrides) };
+  return { venues, backgrounds, plots, overrides: sortOverrides(overrides), pendingRemovals: sortPending(pendingRemovals) };
 }
 
 // ── Overrides ────────────────────────────────────────────────────────────
@@ -564,11 +590,20 @@ export function applyOverride(
  * [stageplots], since the next save will write the empty list over it.
  */
 export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
-  if (!isRecord(doc) || Array.isArray(doc.overrides)) return doc;
-  if ((doc as { overrides?: unknown }).overrides !== undefined) {
-    console.warn("[stageplots] stageplots.json's plan overrides are not a list; read as none, and the next save replaces them");
+  if (!isRecord(doc)) return doc;
+  let out = doc;
+  if (!Array.isArray(out.overrides)) {
+    if ((out as { overrides?: unknown }).overrides !== undefined) {
+      console.warn("[stageplots] stageplots.json's plan overrides are not a list; read as none, and the next save replaces them");
+    }
+    out = { ...out, overrides: [] };
   }
-  return { ...doc, overrides: [] };
+  const pending = (out as { pendingRemovals?: unknown }).pendingRemovals;
+  if (pending === undefined) out = { ...out, pendingRemovals: [] };
+  // Never read as none: each may be a link still live on a page, and forgetting it would leave
+  // nothing that could take it down. Left as it is, so every save is refused until it is fixed.
+  else if (!Array.isArray(pending)) console.warn("[stageplots] stageplots.json's pending removals are not a list; left as they are, and saves are refused until the file is fixed");
+  return out;
 }
 
 const store = new DataStore<StagePlotsDoc>("stageplots.json", EMPTY, "config", {

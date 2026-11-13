@@ -5,7 +5,8 @@
 //   GET    /api/stageplots                          the whole document, backgrounds with URLs
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
 //   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
-//   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides
+//   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
+//                                                   one is unpublished first → { ok, notice? }
 //   POST   /api/stageplots/venues/:id/default       { plotId }
 //   POST   /api/stageplots/backgrounds?name=        raw PNG or JPEG (12 MB) → 201 background
 //   POST   /api/stageplots/backgrounds/pdf?name=    raw PDF (25 MB) → 201 { originalHash, bytes };
@@ -30,6 +31,7 @@
 //   POST   /api/stageplots/venues/:id/regenerate    → the venue under a new link; the old one is deleted
 //   POST   /api/stageplots/venues/:id/unpublish     → the venue, its link deleted from the page
 //   POST   /api/stageplots/venues/:id/publish-now   → the venue, everything sent again
+//   POST   /api/stageplots/pending/remove           → { removed, left, waiting }: Remove now
 //                                                   Each: 409 when the venue is (not) published or no
 //                                                   page is set up, 502 { error } when the page
 //                                                   refused or did not answer, 400 for a plot too
@@ -222,12 +224,13 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
 }
 
 async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
+  // A published venue is unpublished first, by the publisher: its link removed from the page, or
+  // queued for removal when the page cannot take it, so no link is left that nothing knows of.
+  const { notice } = await stageplotsPublisher.retireForDelete(id);
   const doc = await mutate(
     c.res,
     (d) => {
-      const v = findVenue(d, id);
-      // Its link would stay live with nothing left here that could take it down.
-      if (v.publish) throw new Refused(409, `unpublish ${v.name} before deleting it: its link still works`);
+      findVenue(d, id);
       return {
         ...d,
         venues: d.venues.filter((v) => v.id !== id),
@@ -235,7 +238,7 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
         overrides: d.overrides.filter((o) => o.venueId !== id),
       };
     },
-    () => ({ ok: true }),
+    () => (notice ? { ok: true, notice } : { ok: true }),
   );
   if (doc) console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides`);
 }
@@ -700,6 +703,13 @@ async function publishAction(c: RouteCtx, id: string, run: (id: string) => Retur
   else json(c.res, { error: r.error }, r.status);
 }
 
+/** Remove now: every old link queued against the page set up is dropped from it. Answers how many went, failed and wait for another page. */
+async function removePending(c: RouteCtx): Promise<void> {
+  const r = await stageplotsPublisher.removePending();
+  if ("error" in r) json(c.res, { error: r.error }, r.status);
+  else json(c.res, r);
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────
 
 /** The id in `/api/stageplots/<kind>/<id>[/<action>]`, or null. */
@@ -720,6 +730,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (pathname === `${PREFIX}/backgrounds` && method === "POST") return uploadImage(c);
   if (pathname === `${PREFIX}/backgrounds/pdf` && method === "POST") return uploadPdf(c);
   if (pathname === `${PREFIX}/overrides` && method === "PUT") return saveOverride(c);
+  if (pathname === `${PREFIX}/pending/remove` && method === "POST") return removePending(c);
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);

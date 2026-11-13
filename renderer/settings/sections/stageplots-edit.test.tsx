@@ -60,6 +60,7 @@ function doc(): StagePlotsView {
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
     overrides: [],
+    pendingRemovals: [],
   };
 }
 
@@ -124,7 +125,7 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     // The server's own reading of the body and its own rule, never a canned answer.
     const change = readOverrideChange(body);
     if ("problem" in change) return { status: 400, json: { error: change.problem } };
-    const next = applyOverride({ ...DOC, backgrounds: [] }, change);
+    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] }, change);
     if ("problem" in next) return { status: next.status, json: { error: next.problem } };
     DOC.overrides = next.doc.overrides;
     return { status: 200, json: DOC };
