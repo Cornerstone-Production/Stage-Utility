@@ -16,6 +16,7 @@ import { PUBLISH_UPCOMING_DAYS } from "@main/types/servicecue-publish";
 import { Button, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
+import { appZoneOf } from "../../lib/app-zone";
 import { useEditingTarget } from "./editing-target";
 import { planLabel } from "./slots-target-pill";
 import {
@@ -79,7 +80,7 @@ export function PlanSwitcher({ disabled }: { disabled?: boolean }) {
   const editing = useEditingTarget();
   const { plans, unavailable, loaded } = useUpcomingPlans();
   const mode: PlanSwitcherMode = state?.planSwitcherMode ?? "upcoming";
-  const timeZone = state?.timezone ?? null;
+  const timeZone = appZoneOf(state);
   const target = editing.target;
 
   const back = stepTarget(plans, mode, target, -1);

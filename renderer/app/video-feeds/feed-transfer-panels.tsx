@@ -9,7 +9,7 @@
 
 import { useRef, useState } from "react";
 import { DownloadIcon } from "lucide-react";
-import { hostTimeZone, zonedDateKey } from "@main/services/app-timezone";
+import { zonedDateKey } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
 import {
@@ -30,6 +30,7 @@ import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { useStageState } from "../../main/use-stage-state";
+import { appZoneOf } from "../../lib/app-zone";
 import { SIDE_PANE } from "./side-pane";
 
 const BUNDLE_KIND = "stage-utility-video-feeds";
@@ -111,7 +112,7 @@ function passwordKind(f: VideoFeedView): "publish" | "camera" | null {
 
 export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: VideoPorts }) {
   // The server names the file by the app's date, not the browser's.
-  const timeZone = useStageState().state?.timezone ?? null;
+  const timeZone = appZoneOf(useStageState().state);
   const [openedAt] = useState(() => Date.now());
   // Feeds the operator unticked, so a feed that arrives while the panel is open
   // starts ticked like the rest.
@@ -215,7 +216,7 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
       <Note tone="info">
         Feeds keep their ids, so a view moved with them finds its Video widgets&apos; feeds on the other server.
       </Note>
-      <div className={MONO}>stage-utility-video-feeds-{zonedDateKey(openedAt, timeZone ?? hostTimeZone())}.json</div>
+      <div className={MONO}>stage-utility-video-feeds-{zonedDateKey(openedAt, timeZone)}.json</div>
       <div className="flex justify-end pt-1">
         {none ? (
           <Button variant="accent" size="small" disabled>

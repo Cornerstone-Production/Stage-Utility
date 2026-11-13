@@ -61,6 +61,10 @@ let datesKnown = false;
  *  and where it used to substitute the LIVE type's name. */
 let typeNamesKnown = true;
 
+/** The app's zone, and the server clock's, as GET /api/state reports them. */
+let TIMEZONE: string | null = "UTC";
+let HOST_TIMEZONE = "UTC";
+
 const PLANS: UpcomingPlan[] = [
   { serviceTypeId: YOUTH, serviceTypeName: "Youth", planId: "y1", title: "Youth night", sortDate: "2026-09-09T23:00:00Z", dates: "September 9, 2026", isCurrent: false },
   { serviceTypeId: SUN, serviceTypeName: "Sunday", planId: LIVE_PLAN, title: "Sunday", sortDate: "2026-09-13T14:00:00Z", dates: "September 13, 2026", isCurrent: true },
@@ -76,7 +80,6 @@ const STATE = {
   planId: LIVE_PLAN,
   planTitle: "Sunday",
   planDates: "September 13, 2026",
-  timezone: "UTC",
   slotsByView: {},
   slotsByLayoutObject: {},
 } as unknown as StageState;
@@ -112,7 +115,7 @@ const STATE = {
       overrideSlots: null,
     };
   } else if (url.includes("/api/state")) {
-    body = { ...STATE, planSwitcherMode: mode };
+    body = { ...STATE, timezone: TIMEZONE, hostTimezone: HOST_TIMEZONE, planSwitcherMode: mode };
   }
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -127,6 +130,8 @@ const { __resetForTests } = await import("../../main/use-stage-state.js");
 const { invoke: ipc, __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { encodeTarget } = await import("./plan-switcher-step.js");
 const { toast } = await import("../../components/ui/toast.js");
+const { planLabel } = await import("./slots-target-pill.js");
+const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.js");
 
 /** Several macrotasks: the state hydrate, the two queries and the re-renders
  *  they cause are separate turns, and one tick left the result order-dependent. */
@@ -218,6 +223,8 @@ beforeEach(() => {
   unavailable = undefined;
   datesKnown = false;
   typeNamesKnown = true;
+  TIMEZONE = "UTC";
+  HOST_TIMEZONE = "UTC";
 });
 afterEach(async () => {
   cleanup();
@@ -549,6 +556,48 @@ describe("the pill's date label", () => {
       "This plan",
       "naming the live plan's date while another week is being edited points a save at the wrong week in the operator's head",
     );
+  });
+});
+
+// The app reasons in its server's zone when none is configured (appTimeZone), so
+// the dates the switcher and the pill print follow the server's clock, not the
+// browser's. A server across the date line from the browser is a day apart.
+describe("plan dates with no app time zone set", () => {
+  test("the switcher dates its plans by the server's clock", async () => {
+    const next = PLANS[2]!;
+    TIMEZONE = null;
+    HOST_TIMEZONE = serverZoneApartFromBrowser(next.sortDate!);
+    mount();
+    await settle();
+    const select = document.querySelector("[data-plan-switcher] select") as HTMLSelectElement;
+    assert.ok(select, "the switcher's middle control is a native select");
+    const labels = [...select.options].map((o) => o.textContent ?? "");
+    const want = `${planLabel(next.sortDate, null, HOST_TIMEZONE)} · Sunday`;
+    assert.ok(labels.includes(want), `want "${want}" among ${JSON.stringify(labels)}`);
+  });
+
+  test("the pill dates the plan being edited by the server's clock", async () => {
+    const live = PLANS[1]!;
+    datesKnown = true;
+    TIMEZONE = null;
+    HOST_TIMEZONE = serverZoneApartFromBrowser(live.sortDate!);
+    mount();
+    await settle();
+    assert.equal(
+      screen.getByTestId("label").textContent,
+      planLabel(live.sortDate, null, HOST_TIMEZONE),
+      "the pill dated the plan by the browser's clock, not the server's",
+    );
+  });
+
+  test("a zone that is set still wins over the server's clock", async () => {
+    const live = PLANS[1]!;
+    datesKnown = true;
+    TIMEZONE = "UTC";
+    HOST_TIMEZONE = "Pacific/Kiritimati";
+    mount();
+    await settle();
+    assert.equal(screen.getByTestId("label").textContent, planLabel(live.sortDate, null, "UTC"));
   });
 });
 
