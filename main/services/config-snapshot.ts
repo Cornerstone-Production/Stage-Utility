@@ -35,7 +35,8 @@ import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
 import { plural } from "./plural.js";
-import { mergeRestoredStagePlots, type RestoreMode } from "./stageplots-doc.js";
+import { mergeRestoredStagePlots, type LiveStagePlots, type RestoreMode } from "./stageplots-doc.js";
+import { isStagePlotsSecret } from "../types/servicecue-publish.js";
 import type { StagePlotsDoc } from "../types/stageplots.js";
 import { atomicWrite } from "./write-queue.js";
 import { StoreReadError } from "./data-store.js";
@@ -346,9 +347,10 @@ async function liveSettings(dest: string): Promise<LiveSettings> {
  * The live stage plots document a restore is about to replace, read off disk (never through
  * the store, whose cache a restart must find cold). Undefined when there is none. One that
  * fails the store's check is read for its links alone, so a restore never strands one; one
- * that does not parse holds no link anyone can read, and is said so.
+ * that does not parse is "unknown", never a fresh install: it may hold links nobody can read,
+ * so nothing from the backup is revived over it (mergeRestoredStagePlots).
  */
-async function liveStagePlots(file: string): Promise<StagePlotsDoc | undefined> {
+async function liveStagePlots(file: string): Promise<LiveStagePlots> {
   let raw: string;
   try {
     raw = await fs.readFile(file, "utf8");
@@ -360,23 +362,37 @@ async function liveStagePlots(file: string): Promise<StagePlotsDoc | undefined> 
   try {
     json = JSON.parse(raw);
   } catch {
-    console.warn("[config-snapshot] the live stageplots.json does not parse, so its published links could not be carried into this restore");
-    return undefined;
+    console.warn(
+      "[config-snapshot] the live stageplots.json does not parse, so which of its links are live cannot be known: no stage plots link in this backup comes back published, and each is queued for removal from its page",
+    );
+    return "unknown";
   }
   // Imported lazily for the reason pauseBackgroundWriters is.
-  const { checkStagePlotsDoc } = await import("./stageplots-store.js");
+  const { checkStagePlotsDoc, httpOrigin } = await import("./stageplots-store.js");
   try {
     return checkStagePlotsDoc(json);
   } catch {
-    return linksOnly(json);
+    return linksOnly(json, httpOrigin);
   }
 }
 
-/** A stage plots document that fails the check, cut down to its venues' links and its queue: all a restore needs to know of it. */
-function linksOnly(json: unknown): StagePlotsDoc {
+/**
+ * A stage plots document that fails the check, cut down to its venues' links and its queue: all a
+ * restore needs to know of it. A secret this server could not have made, or an origin that is not
+ * one, is no link anyone can remove, and would make the restored file fail the store's own check:
+ * dropped, and counted on the log.
+ */
+function linksOnly(json: unknown, httpOrigin: (v: unknown) => string | null): StagePlotsDoc {
   const o = (v: unknown): Record<string, unknown> | null => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
   const d = o(json);
-  const link = (x: Record<string, unknown> | null) => (x && typeof x.secret === "string" && typeof x.origin === "string" ? { secret: x.secret, origin: x.origin } : null);
+  let dropped = 0;
+  const link = (x: Record<string, unknown> | null) => {
+    if (!x || (x.secret === undefined && x.origin === undefined)) return null;
+    const origin = httpOrigin(x.origin);
+    if (isStagePlotsSecret(x.secret) && origin !== null) return { secret: x.secret, origin };
+    dropped++;
+    return null;
+  };
   const venues = (Array.isArray(d?.venues) ? d.venues : []).map((raw, i) => {
     const p = link(o(o(raw)?.publish));
     return { id: `live-${i}`, name: "", kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: { ...p, publishedAt: "", lastError: null, publishedImages: [], unpublishedImages: [] } } : {}) };
@@ -385,6 +401,7 @@ function linksOnly(json: unknown): StagePlotsDoc {
     const l = link(o(raw));
     return l ? [{ ...l, since: new Date().toISOString(), reason: "restored over" as const }] : [];
   });
+  if (dropped > 0) console.warn(`[config-snapshot] the live stageplots.json fails its check; ${plural(dropped, "link")} in it with a malformed secret or page address could not be carried into this restore`);
   return { venues, backgrounds: [], plots: [], overrides: [], pendingRemovals };
 }
 

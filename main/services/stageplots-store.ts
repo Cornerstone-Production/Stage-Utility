@@ -188,7 +188,7 @@ function sortedSet(v: unknown, max: number, ok: (x: unknown) => boolean, what: s
 }
 
 /** `v` when it is an http or https origin written as URL writes one, else null. */
-function httpOrigin(v: unknown): string | null {
+export function httpOrigin(v: unknown): string | null {
   if (typeof v !== "string" || v.length > 200 || !URL.canParse(v)) return null;
   const u = new URL(v);
   return (u.protocol === "https:" || u.protocol === "http:") && u.origin === v ? u.origin : null;
@@ -229,7 +229,6 @@ function checkPending(raw: unknown, i: number): PendingRemoval {
   if (!PENDING_REASONS.includes(e.reason as PendingReason)) refuse(`${what}'s reason must be one of ${PENDING_REASONS.join(", ")}`);
   return { secret: e.secret, origin, since: isoInstant(e.since, `${what}'s time`), reason: e.reason as PendingReason };
 }
-
 
 function checkVenue(raw: unknown, i: number): Venue {
   const v = asObject(raw, `venue ${i + 1}`);

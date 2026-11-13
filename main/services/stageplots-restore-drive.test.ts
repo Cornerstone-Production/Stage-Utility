@@ -202,6 +202,60 @@ describe("a restore never revives a revoked link, and never strands a live one",
   });
 });
 
+describe("a live stageplots.json that cannot be read", () => {
+  test("one that does not parse is never a fresh install: the backup's link is not revived, and is taken down", async () => {
+    await box(OWN);
+    const { p } = publisher();
+    assert.ok((await p.publish("v-1")).ok);
+    const s = (await venue()).publish!.secret;
+    const b = await bundle(OWN);
+    for (const x of publishers.splice(0)) await x.stop();
+    await fs.writeFile(path.join(TMP, "stageplots.json"), "{ not json", "utf8");
+    const warn = mock.method(console, "warn", () => undefined);
+    try {
+      await restoreAndRestart(b);
+    } finally {
+      warn.mock.restore();
+    }
+    assert.equal((await venue()).publish, undefined, "a link the live file may have revoked came back published");
+    assert.equal(await visit(s), 404, "the backup's link, queued for removal, is still live");
+    await noUnknownLinks();
+  });
+
+  test("one that fails its check carries only well-formed links, so the restored file passes the store's own check", async () => {
+    await box(OWN);
+    const { p } = publisher();
+    assert.ok((await p.publish("v-1")).ok);
+    const s = (await venue()).publish!.secret;
+    const b = await bundle(null);
+    (b.files["stageplots.json"] as { venues: { publish?: unknown }[] }).venues[0]!.publish = undefined;
+    for (const x of publishers.splice(0)) await x.stop();
+    // A venue with no name fails the check; its link is good, another venue's and a queued one's are not.
+    const live = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
+    live.venues[0].name = "";
+    live.venues.push({ id: "v-9", publish: { secret: "not-a-secret", origin } }, { id: "v-8", publish: { secret: `${"Z".repeat(42)}E`, origin: "nowhere" } });
+    live.pendingRemovals = [{ secret: "short", origin, since: "2026-11-13T10:00:00.000Z", reason: "regenerated" }];
+    await fs.writeFile(path.join(TMP, "stageplots.json"), JSON.stringify(live), "utf8");
+    const lines: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+    try {
+      await configSnapshot.apply(b, { replacesOriginal: false });
+    } finally {
+      warn.mock.restore();
+    }
+    quiet();
+    const written = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
+    const checked = checkStagePlotsDoc(written);
+    assert.deepEqual(checked.pendingRemovals.map((e) => [e.secret === s, e.origin === origin, e.reason]), [[true, true, "restored over"]]);
+    assert.ok(lines.some((l) => l.includes("3 links in it with a malformed secret or page address")), lines.join(" / "));
+    await stageplotsStore.update(() => checked);
+    const r = publisher();
+    await r.p.settle();
+    assert.equal(await visit(s), 404);
+    await noUnknownLinks();
+  });
+});
+
 describe("a restore that cannot quiet a background writer", () => {
   for (const which of ["the live poller", "the stage controller", "the stage plots publisher"] as const) {
     test(`is refused when ${which} cannot be paused, with nothing written and the others resumed`, async () => {

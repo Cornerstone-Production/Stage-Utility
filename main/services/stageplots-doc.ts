@@ -85,7 +85,6 @@ export function overridesOfPlot(doc: { overrides: readonly PlotOverride[] }, plo
   return doc.overrides.filter((o) => o.plotId === plotId);
 }
 
-
 /** Pending removals in their one order (origin, then secret), one per secret and page: the
  *  first of a pair kept, so the same list always comes out the same. */
 export function sortPending(list: readonly PendingRemoval[]): PendingRemoval[] {
@@ -110,6 +109,13 @@ export type RestoreMode =
   | "replace";
 
 /**
+ * The live stage plots document a restore replaces: what it holds, undefined when there is none
+ * (a fresh install), or "unknown" when it is there and cannot be read, which holds links nobody
+ * can know.
+ */
+export type LiveStagePlots = StagePlotsDoc | undefined | "unknown";
+
+/**
  * The stage plots document a restore writes: the restored one, merged with the live one it
  * replaces so that no secret that may be live on a page is left unknown, and none that was
  * revoked comes back. Matched by secret and page.
@@ -122,6 +128,8 @@ export type RestoreMode =
  *   come back is queued for removal, unless it is another server's (keep-own), which stays with
  *   that server. The restored queue is kept, except another server's.
  *   Every live link, on a venue or queued, that the result does not hold is queued.
+ *   A live file that cannot be read ("unknown") is never taken for a fresh install: no restored
+ *   link comes back published, since it may have been revoked since, and each is queued as above.
  *
  * Pure, and handed what the files hold, so the cases can be put to it one by one.
  */
@@ -132,21 +140,23 @@ export function mergeRestoredStagePlots({
   now,
 }: {
   restored: StagePlotsDoc;
-  live: StagePlotsDoc | undefined;
+  live: LiveStagePlots;
   mode: RestoreMode;
   now: string;
 }): { doc: StagePlotsDoc; unpublished: number; queued: number } {
   const key = (secret: string, origin: string) => `${origin} ${secret}`;
-  const liveOnVenues = new Map((live?.venues ?? []).flatMap((v) => (v.publish ? [[key(v.publish.secret, v.publish.origin), v.publish] as const] : [])));
-  const liveQueued = new Map((live?.pendingRemovals ?? []).map((e) => [key(e.secret, e.origin), e] as const));
-  const fresh = !live || live.venues.length === 0;
+  const unknown = live === "unknown";
+  const known = unknown ? undefined : live;
+  const liveOnVenues = new Map((known?.venues ?? []).flatMap((v) => (v.publish ? [[key(v.publish.secret, v.publish.origin), v.publish] as const] : [])));
+  const liveQueued = new Map((known?.pendingRemovals ?? []).map((e) => [key(e.secret, e.origin), e] as const));
+  const fresh = !unknown && (!known || known.venues.length === 0);
   const queue: PendingRemoval[] = [];
   let unpublished = 0;
   const venues: Venue[] = restored.venues.map((v) => {
     const p = v.publish;
     if (!p) return v;
     const k = key(p.secret, p.origin);
-    const keep = liveOnVenues.has(k) || (!liveQueued.has(k) && (mode === "replace" || (mode === "same-id" && fresh)));
+    const keep = liveOnVenues.has(k) || (!unknown && !liveQueued.has(k) && (mode === "replace" || (mode === "same-id" && fresh)));
     if (keep) return v;
     unpublished++;
     if (mode !== "keep-own") queue.push({ secret: p.secret, origin: p.origin, since: now, reason: "restored over" });

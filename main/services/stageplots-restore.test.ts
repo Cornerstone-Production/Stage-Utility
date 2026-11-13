@@ -133,3 +133,25 @@ describe("a restore that takes the config's id (this box replaces that one)", ()
     allKnown(r.doc, live, restored);
   });
 });
+
+describe("a live file that cannot be read", () => {
+  // "unknown" is never a fresh install: it may hold a revocation nobody can read, so no restored
+  // link comes back published in any mode, and each that is this server's to remove is queued.
+  for (const mode of ["same-id", "replace"] as const) {
+    test(`revives nothing and queues the restored links (${mode})`, () => {
+      const restored = doc([pub(S("A")), null], [queued(S("Q"))]);
+      const { doc: out, unpublished } = mergeRestoredStagePlots({ restored, live: "unknown", mode, now: NOW });
+      assert.deepEqual(published(out), [null, null]);
+      assert.equal(unpublished, 1);
+      assert.deepEqual(pendingSecrets(out), [S("A"), S("Q")].sort());
+      allKnown(out, restored);
+    });
+  }
+
+  test("leaves another server's links with it (keep-own)", () => {
+    const restored = doc([pub(S("A"))]);
+    const { doc: out } = mergeRestoredStagePlots({ restored, live: "unknown", mode: "keep-own", now: NOW });
+    assert.deepEqual(published(out), [null]);
+    assert.deepEqual(out.pendingRemovals, []);
+  });
+});
