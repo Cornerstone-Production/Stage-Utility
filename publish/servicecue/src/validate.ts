@@ -9,11 +9,13 @@ import {
   FRAME_DOCS,
   PUBLISH_MAX_BODY_BYTES,
   PUBLISH_MAX_VERSION_LENGTH,
+  STAGEPLOTS_MAX_KEYS,
   filterPublicState,
   isAssetName,
   isDocKey,
   isFrameChannel,
   isRecord,
+  stagePlotsKeyKind,
   type FixedDocKey,
   type PublicState,
 } from "../../../main/types/servicecue-publish.js";
@@ -153,4 +155,26 @@ export function manifestBody(json: unknown): Parsed<{ docs: string[]; assets: st
   const badAsset = assets.find((a) => !isAssetName(a));
   if (badAsset !== undefined) return refuse(`${JSON.stringify(badAsset)} is not an asset name`);
   return { ok: true, value: { docs: docs as string[], assets: assets as string[] } };
+}
+
+// ── StagePlots ────────────────────────────────────────────────────────────────
+
+/** A StagePlots doc (a venue's index, a plot): any JSON object, stored as it was sent. */
+export function stagePlotsDocText(json: unknown, text: string): Parsed<string> {
+  return isRecord(json) ? { ok: true, value: text } : refuse("A StagePlots doc must be an object");
+}
+
+/** Does this say it is a WebP: `RIFF`, four bytes of size, `WEBP`. Enough that the Worker never serves as an image what is not one. */
+export function isWebp(bytes: Uint8Array): boolean {
+  const tag = (at: number, text: string) => [...text].every((c, i) => bytes[at + i] === c.charCodeAt(0));
+  return bytes.byteLength >= 12 && tag(0, "RIFF") && tag(8, "WEBP");
+}
+
+/** What to keep under a secret: `{ keys: [...] }`, every one a StagePlots key. One bad entry refuses it whole. */
+export function stagePlotsKeepBody(json: unknown): Parsed<string[]> {
+  if (!isRecord(json) || !Array.isArray(json.keys)) return refuse("A keep must be an object with a list of keys");
+  if (json.keys.length > STAGEPLOTS_MAX_KEYS) return refuse(`A keep names at most ${STAGEPLOTS_MAX_KEYS} keys`);
+  const bad = json.keys.find((k) => stagePlotsKeyKind(k) === null);
+  if (bad !== undefined) return refuse(`${JSON.stringify(bad)} is not a StagePlots key`);
+  return { ok: true, value: json.keys as string[] };
 }
