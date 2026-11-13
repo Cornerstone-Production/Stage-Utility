@@ -210,13 +210,18 @@ describe("a live stageplots.json that cannot be read", () => {
     const s = (await venue()).publish!.secret;
     const b = await bundle(OWN);
     for (const x of publishers.splice(0)) await x.stop();
-    await fs.writeFile(path.join(TMP, "stageplots.json"), "{ not json", "utf8");
-    const warn = mock.method(console, "warn", () => undefined);
+    // Cut short mid-write: it does not parse, though the page its link was on can still be read.
+    await fs.writeFile(path.join(TMP, "stageplots.json"), `{"venues":[{"id":"v-1","publish":{"secret":"${s}","origin":"${origin}"`, "utf8");
+    const lines: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
     try {
       await restoreAndRestart(b);
     } finally {
       warn.mock.restore();
     }
+    const said = lines.find((l) => l.startsWith("[config-snapshot] the live stageplots.json does not parse")) ?? "";
+    assert.ok(said.includes(`any stage plots links in it (on ${new URL(origin).host}) cannot be removed from here and are lost to this box`), said || lines.join(" / "));
+    assert.equal(said.includes(s), false, "the warning names a secret");
     assert.equal((await venue()).publish, undefined, "a link the live file may have revoked came back published");
     assert.equal(await visit(s), 404, "the backup's link, queued for removal, is still live");
     await noUnknownLinks();

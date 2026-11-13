@@ -362,8 +362,18 @@ async function liveStagePlots(file: string): Promise<LiveStagePlots> {
   try {
     json = JSON.parse(raw);
   } catch {
+    // Whatever links it held cannot be read, so they can never be removed from here: said, with
+    // the pages they were on when the text still names them.
+    const hosts = [...new Set([...raw.matchAll(/"origin"\s*:\s*"(https?:\/\/[^"\\]+)"/g)].flatMap((m) => {
+      try {
+        return [new URL(m[1]!).host];
+      } catch {
+        return [];
+      }
+    }))].sort();
+    const where = hosts.length > 0 ? ` (on ${hosts.join(", ")})` : "";
     console.warn(
-      "[config-snapshot] the live stageplots.json does not parse, so which of its links are live cannot be known: no stage plots link in this backup comes back published, and each is queued for removal from its page",
+      `[config-snapshot] the live stageplots.json does not parse: any stage plots links in it${scrub(where, 400)} cannot be removed from here and are lost to this box; take them down on their page (by deleting its Worker) if they must go. No stage plots link in this backup comes back published, and each is queued for removal from its page`,
     );
     return "unknown";
   }
