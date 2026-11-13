@@ -22,6 +22,7 @@ const { PUBLISH_MAX_BODY_BYTES, isStagePlotsSecret } = await import("../types/se
 
 import type { FakeReceiver as Receiver, Received } from "./fixtures/publish-receiver.js";
 import type { PlotItem, PublishedPlot, PublishedVenue, StagePlotsDoc, Venue } from "../types/stageplots.js";
+import type { PatchFile } from "../types/patch.js";
 
 const TOKEN = "k".repeat(40);
 const SP = /^\/_publish\/v1\/stageplots\/([^/]+)(?:\/(.+))?$/;
@@ -75,7 +76,11 @@ interface Harness {
   publisher: InstanceType<typeof StagePlotsPublisher>;
   images: Map<string, Uint8Array>;
   saved: StagePlotsDoc[];
-  plan: { planId: string | null; planDates: string | null };
+  plan: { planId: string | null; planDates: string | null; serviceTypeId: string | null };
+  /** The patch the publisher reads; null reads as a patch that cannot be read. */
+  patch: { file: PatchFile | null };
+  /** How many times the publisher asked where to publish: once per republish that got past its fingerprint. */
+  targetCalls: () => number;
   /** Tell the publisher a channel was broadcast, as the app's broadcaster does. */
   hear: (channel: string) => void;
   /** Change the document as a route would, and broadcast it. */
@@ -115,7 +120,10 @@ async function assertNoUnknownLinks(): Promise<void> {
   }
 }
 
-async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown } = {}): Promise<Harness> {
+async function harness(
+  doc: StagePlotsDoc = venueDoc(),
+  opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown; patchRetry?: { firstMs: number; maxMs: number } } = {},
+): Promise<Harness> {
   const page = await startPage();
   const parsed = parsePublishUrl(page.origin);
   assert.ok(parsed.ok);
@@ -123,18 +131,29 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
   const images = new Map<string, Uint8Array>();
   for (const b of doc.backgrounds) images.set(b.converted.hash, webp());
   const saved: StagePlotsDoc[] = [];
-  const plan = { planId: null as string | null, planDates: null as string | null };
+  const plan = { planId: null as string | null, planDates: null as string | null, serviceTypeId: null as string | null };
+  const patch: { file: PatchFile | null } = { file: { sheets: [], updatedAt: "" } };
   let listener: (channel: string) => void = () => undefined;
+  let targetCalls = 0;
+  const target = (opts.target as () => Promise<never>) ?? (async () => ({ ok: true, origin: parsed.origin, token: TOKEN }));
   const publisher = new StagePlotsPublisher({
-    target: (opts.target as never) ?? (async () => ({ ok: true, origin: parsed.origin, token: TOKEN })),
+    target: () => {
+      targetCalls++;
+      return target();
+    },
     store: stageplotsStore,
     image: async (h) => images.get(h) ?? null,
     plan: () => plan,
+    patch: async () => {
+      if (!patch.file) throw new Error("patch.json could not be read (EIO)");
+      return structuredClone(patch.file);
+    },
     timeZone: () => "America/Chicago",
     onSaved: (d) => saved.push(d),
     listen: (cb) => (listener = cb),
     debounceMs: 30,
     ...(opts.client ? { client: opts.client as never } : {}),
+    ...(opts.patchRetry ? { patchRetry: opts.patchRetry } : {}),
   });
   publisher.start();
   const h: Harness = {
@@ -143,6 +162,8 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
     images,
     saved,
     plan,
+    patch,
+    targetCalls: () => targetCalls,
     hear: (channel) => listener(channel),
     edit: async (fn) => {
       await stageplotsStore.update(fn);
@@ -269,6 +290,8 @@ describe("publishing a venue", () => {
     const r = await h.publisher.publish("v-1");
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.error, /^Plot "Plot 0" is too large to publish \(\d+\.\d MB; the limit is 2\.0 MB\)/);
+    // Patch channels count toward the limit too, so the refusal names them as a way out.
+    assert.match(r.ok ? "" : r.error, /patch channels\.$/);
     assert.equal(spRequests(h.page).length, 0, "a request was sent for a publish that could not complete");
     assert.equal((await h.venue()).publish, undefined);
   });
@@ -1214,7 +1237,7 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     await h.page.worker({ method: "PUT", path: `/_publish/v1/stageplots/${secret}/plot/p-0`, headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: "{}", bytes: Buffer.from("{}"), at: 0 });
     await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret, origin: originOf(h), since: "2026-11-12T10:00:00.000Z", reason: "publishing" }] }));
     const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
-    const fresh = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store: stageplotsStore, image: async () => null, plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    const fresh = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store: stageplotsStore, image: async () => null, plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }), timeZone: () => "UTC", onSaved: () => undefined });
     fresh.start();
     await fresh.settle();
     await fresh.stop();
@@ -1286,7 +1309,7 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     const store = flaky();
     await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: fakeSecret(4), origin: originOf(h), since: "2026-11-12T10:00:00.000Z", reason: "regenerated" }] }));
     const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
-    const p = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store, image: async () => null, plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    const p = new P({ target: async () => ({ ok: true, origin: originOf(h), token: TOKEN }), store, image: async () => null, plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }), timeZone: () => "UTC", onSaved: () => undefined });
     const log = errors();
     let r: Awaited<ReturnType<typeof p.removePending>>;
     try {
@@ -1307,7 +1330,7 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     await stageplotsStore.update(() => checkStagePlotsDoc(venueDoc()));
     const store = flaky();
     const { StagePlotsPublisher: P } = await import("./stageplots-publish.js");
-    const p = new P({ target: async () => ({ ok: true, origin: o.origin, token: TOKEN }), store, image: async () => webp(), plan: () => ({ planId: null, planDates: null }), timeZone: () => "UTC", onSaved: () => undefined });
+    const p = new P({ target: async () => ({ ok: true, origin: o.origin, token: TOKEN }), store, image: async () => webp(), plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }), timeZone: () => "UTC", onSaved: () => undefined });
     assert.ok((await p.publish("v-1")).ok);
     const old = (await stageplotsStore.get()).venues[0]!.publish!.secret;
     // The write that queues the old link is the last before the drain reads the queue.
@@ -1338,7 +1361,7 @@ describe("pending removals: a secret is never forgotten while it may be live", (
       },
       store: stageplotsStore,
       image: async () => null,
-      plan: () => ({ planId: null, planDates: null }),
+      plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }),
       timeZone: () => "UTC",
       onSaved: () => undefined,
     });
@@ -1365,7 +1388,7 @@ describe("pending removals: a secret is never forgotten while it may be live", (
       target: async () => ({ ok: true, origin: o.origin, token: TOKEN }),
       store: { get: async () => damaged, update: async () => Promise.reject(new Error("refused")) },
       image: async () => null,
-      plan: () => ({ planId: null, planDates: null }),
+      plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }),
       timeZone: () => "UTC",
       onSaved: () => undefined,
     });
@@ -1520,6 +1543,315 @@ describe("the publish state in the store", () => {
     for (const bad of [{ secret: "short" }, { secret: "A".repeat(42) + "B" }, { publishedImages: ["nothex"] }, { origin: "not a url" }, { publishedAt: "yesterday" }]) {
       base.venues[0]!.publish = { ...pub, ...bad } as never;
       assert.throws(() => checkStagePlotsDoc(base), Error, JSON.stringify(bad));
+    }
+  });
+});
+
+describe("linked connection points on the public page", () => {
+  // Every patch field the public page must never see carries SENTINEL; only the linked
+  // device's name, its connectors, the sheet's name and its channels' console channel and
+  // label are published.
+  function patchWithSentinels(): PatchFile {
+    return {
+      updatedAt: "",
+      sheets: [
+        {
+          id: "sheet-SENTINEL-ID",
+          name: "Main patch",
+          kind: "dante",
+          devices: [
+            { id: "rack-SENTINEL-ID", name: "SENTINEL rack", kind: "rack", inputs: 32, outputs: 16, color: "#8b8d98" },
+            { id: "sb1-SENTINEL-ID", name: "SB-1", kind: "snake", inputs: 16, outputs: 4, color: "#0091ff", inLabels: ["A1", "A2"] },
+            { id: "hop-SENTINEL-ID", name: "SENTINEL hop", kind: "pocket", inputs: 4, outputs: 0, color: "#e5484d" },
+            { id: "fp3-SENTINEL-ID", name: "FP-3", kind: "pocket", inputs: 4, outputs: 0, color: "#12a594" },
+          ],
+          endpoints: [
+            {
+              rackId: "rack-SENTINEL-ID",
+              dir: "in",
+              index: 1,
+              consoleChannel: "1",
+              label: "Kick In",
+              mic: "SENTINEL mic",
+              phantom: true,
+              notes: "SENTINEL notes",
+              owner: "SENTINEL owner",
+              micSlotRef: "SENTINEL slot",
+              pcoPosition: "SENTINEL position",
+              path: [{ deviceId: "hop-SENTINEL-ID", connector: "SENTINEL-CONNECTOR" }, { deviceId: "sb1-SENTINEL-ID", connector: "A1" }],
+            },
+            { rackId: "rack-SENTINEL-ID", dir: "in", index: 2, consoleChannel: "2", label: "Snare", mic: "SENTINEL mic", path: [{ deviceId: "sb1-SENTINEL-ID", connector: "A2" }] },
+            { rackId: "rack-SENTINEL-ID", dir: "in", index: 3, consoleChannel: "3", label: "SENTINEL unrelated", path: [{ deviceId: "hop-SENTINEL-ID", connector: "1" }] },
+            { rackId: "rack-SENTINEL-ID", dir: "out", index: 1, consoleChannel: "Mix 1", label: "Wedge", feedType: "SENTINEL feed", path: [{ deviceId: "fp3-SENTINEL-ID", connector: "1" }] },
+          ],
+          variants: [{ id: "var-SENTINEL", name: "SENTINEL variant", overrides: {} }],
+          assignments: { byServiceType: { "st-SENTINEL": "var-SENTINEL" }, byPlan: {} },
+        },
+      ],
+    };
+  }
+
+  const linked = (deviceId: string, lastName: string, lastColor: string | null = null) => ({
+    sheetId: "sheet-SENTINEL-ID",
+    deviceId,
+    lastName,
+    lastColor,
+  });
+
+  /** v-1 links SB-1 and a device that is gone; v-2 links FP-3. Both published. */
+  async function twoVenues(opts: Parameters<typeof harness>[1] = {}) {
+    const doc = venueDoc(1, 1, () => [
+      item("box-1"),
+      // Every type's own fields too: publishedItems names each field, so one it forgot is gone from the page.
+      item("sym-1", { type: "symbol", symbol: "wedge", label: "Floor wedge" }),
+      item("txt-1", { type: "text", textKind: "callout", label: "Riser skirt" }),
+      item("cab-1", { type: "cable", points: [[10, 10], [200, 120]], dashed: true, label: "" }),
+      item("c-sb1", { type: "conn", label: "Old SB", color: null, patchLink: linked("sb1-SENTINEL-ID", "Old SB") }),
+      item("c-gone", { type: "conn", label: "Lost box", color: "#46a758", inputs: ["Spare"], patchLink: linked("gone-SENTINEL-ID", "Lost box", "#46a758") }),
+    ]);
+    doc.venues.push({ id: "v-2", name: "Chapel", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    doc.plots.push({ id: "p-9", venueId: "v-2", name: "Chapel plot", backgroundId: null, bgFade: 0, items: [item("c-fp3", { type: "conn", label: "FP-3", color: "#12a594", patchLink: linked("fp3-SENTINEL-ID", "FP-3", "#12a594") })], version: 1 });
+    const h = await harness(doc, opts);
+    h.patch.file = patchWithSentinels();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    assert.ok((await h.publisher.publish("v-2")).ok);
+    await h.publisher.settle();
+    const doc2 = await stageplotsStore.get();
+    const secretOf = (id: string) => doc2.venues.find((v) => v.id === id)!.publish!.secret;
+    return { h, s1: secretOf("v-1"), s2: secretOf("v-2") };
+  }
+
+  /** Every key path in a JSON value, arrays as [], sorted and unique. */
+  function keyPaths(value: unknown, at = ""): string[] {
+    if (Array.isArray(value)) return value.flatMap((v) => keyPaths(v, `${at}[]`));
+    if (value === null || typeof value !== "object") return [];
+    return Object.entries(value).flatMap(([k, v]) => [`${at ? `${at}.` : ""}${k}`, ...keyPaths(v, `${at ? `${at}.` : ""}${k}`)]);
+  }
+  const sortedPaths = (value: unknown) => [...new Set(keyPaths(value))].sort();
+
+  test("the published plot carries exactly the resolved name, colour and channels, and no other patch data", async () => {
+    const { h, s1 } = await twoVenues();
+    const body = (await visit(h.page, s1, "plot/p-0")).body;
+    assert.ok(!body.includes("SENTINEL"), `patch data the page must not see was published: ${body.match(/.{0,40}SENTINEL.{0,40}/)?.[0]}`);
+    const plot = JSON.parse(body) as PublishedPlot;
+    assert.deepEqual(sortedPaths(plot), [
+      "background",
+      "background.hash",
+      "background.height",
+      "background.width",
+      "bgFade",
+      "id",
+      "items",
+      "items[].color",
+      "items[].dashed",
+      "items[].h",
+      "items[].id",
+      "items[].inputs",
+      "items[].label",
+      "items[].notes",
+      "items[].patch",
+      "items[].patch.channels",
+      "items[].patch.channels[].channel",
+      "items[].patch.channels[].label",
+      "items[].patch.channels[].path",
+      "items[].patch.sheet",
+      "items[].points",
+      "items[].rotation",
+      "items[].symbol",
+      "items[].textKind",
+      "items[].type",
+      "items[].w",
+      "items[].x",
+      "items[].y",
+      "name",
+    ]);
+    const sb1 = plot.items.find((it) => it.id === "c-sb1")!;
+    assert.deepEqual([sb1.label, sb1.color], ["SB-1", "#0091ff"]);
+    assert.deepEqual(sb1.patch, {
+      sheet: "Main patch",
+      channels: [
+        { channel: "Ch 1", label: "Kick In", path: "SB-1/A1" },
+        { channel: "Ch 2", label: "Snare", path: "SB-1/A2" },
+      ],
+    });
+    assert.equal(plot.items.find((it) => it.id === "sym-1")!.symbol, "wedge");
+    assert.equal(plot.items.find((it) => it.id === "txt-1")!.textKind, "callout");
+    assert.deepEqual(plot.items.find((it) => it.id === "cab-1")!.points, [[10, 10], [200, 120]]);
+    const gone = plot.items.find((it) => it.id === "c-gone")!;
+    assert.deepEqual([gone.label, gone.color, gone.patch, gone.inputs], ["Lost box", "#46a758", undefined, ["Spare"]]);
+  });
+
+  test("a patch change republishes only the venues that show it; one nothing published shows sends nothing", async () => {
+    const { h, s1, s2 } = await twoVenues();
+    const sentSince = (mark: number) => spRequests({ ...h.page, requests: h.page.requests.slice(mark) } as Receiver).map((q) => `${q.method} ${q.secret === s1 ? "v-1" : q.secret === s2 ? "v-2" : "?"} ${q.key ?? "keep"}`);
+    const patchSaved = async (fn: (f: PatchFile) => void) => {
+      fn(h.patch.file!);
+      h.hear("patch:updated");
+      await h.publisher.settle();
+    };
+
+    let mark = h.page.requests.length;
+    const asked = h.targetCalls();
+    await patchSaved((f) => {
+      f.sheets[0]!.endpoints[0]!.mic = "SENTINEL another mic";
+      f.sheets[0]!.devices[0]!.name = "SENTINEL rack renamed";
+      // On the chain of a channel SB-1 lists, but before SB-1: a row names only SB-1.
+      f.sheets[0]!.devices[2]!.name = "SENTINEL hop renamed";
+      f.sheets[0]!.variants[0]!.name = "SENTINEL renamed variant";
+    });
+    assert.deepEqual(sentSince(mark), [], "a patch change no published point shows was sent");
+    // Stopped at the fingerprint, not by the per-key dedupe behind it: a fingerprint holding
+    // anything of the patch the page does not get would go on to ask where to publish.
+    assert.equal(h.targetCalls(), asked, "a patch change no published point shows got past the fingerprint");
+
+    mark = h.page.requests.length;
+    await patchSaved((f) => {
+      f.sheets[0]!.devices[1]!.name = "SB-1 Left";
+    });
+    assert.deepEqual(sentSince(mark), ["PUT v-1 plot/p-0"], "a rename of v-1's device reached another venue, or sent more than its plot");
+    const renamed = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.equal(renamed.items.find((it) => it.id === "c-sb1")!.label, "SB-1 Left");
+
+    mark = h.page.requests.length;
+    await patchSaved((f) => {
+      f.sheets[0]!.endpoints[3]!.label = "Wedge 2";
+    });
+    assert.deepEqual(sentSince(mark), ["PUT v-2 plot/p-9"], "a channel through v-2's device reached v-1");
+  });
+
+  test("a week variant that re-patches a channel publishes this plan's channels", async () => {
+    const { h, s1 } = await twoVenues();
+    const f = h.patch.file!;
+    f.sheets[0]!.variants.push({ id: "var-week", name: "Week", overrides: { "rack-SENTINEL-ID:in:3": { path: [{ deviceId: "sb1-SENTINEL-ID", connector: "9" }], label: "Keys" } } });
+    f.sheets[0]!.assignments.byPlan["plan-week"] = { variantId: "var-week" };
+    h.plan.planId = "plan-week";
+    h.plan.planDates = "November 15, 2026";
+    h.hear("stage:state-changed");
+    await h.publisher.settle();
+    const plot = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.deepEqual(plot.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2", "SB-1/9"]);
+  });
+
+  test("an unreadable patch publishes linked points unlinked with their last names, said once on [stageplots]", async () => {
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    let h: Harness;
+    let s1: string;
+    try {
+      ({ h, s1 } = await twoVenues());
+      h.patch.file = null;
+      h.hear("patch:updated");
+      h.hear("patch:updated");
+      await h.publisher.settle();
+      await h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name: "Renamed", version: p.version + 1 } : p)) }));
+      await h.publisher.settle();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const plot = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    const sb1 = plot.items.find((it) => it.id === "c-sb1")!;
+    assert.deepEqual([sb1.label, sb1.color, sb1.patch], ["Old SB", null, undefined]);
+    const ours = lines.filter((l) => l.startsWith("[stageplots]"));
+    assert.equal(ours.filter((l) => l.includes("could not read the patch sheet")).length, 1, ours.join(" / "));
+    assert.ok(
+      ours.some((l) => l.includes('"Main room" · "Plot 0": 2 connection points published unlinked') && l.includes('"Old SB" (the patch sheet cannot be read)')),
+      ours.join(" / "),
+    );
+  });
+
+  test("a device removed from the patch is published with its last name, and said on [stageplots]", async () => {
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      await twoVenues();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    assert.ok(lines.some((l) => l.startsWith("[stageplots]") && l.includes('"Lost box" (its patch device is gone)')), lines.join(" / "));
+  });
+});
+
+describe("a patch that could not be read, read again", () => {
+  const link = (deviceId: string, lastName: string) => ({ sheetId: "main", deviceId, lastName, lastColor: null });
+  const patchFile = (): PatchFile => ({
+    updatedAt: "",
+    sheets: [
+      {
+        id: "main",
+        name: "Main patch",
+        kind: "analog",
+        devices: [
+          { id: "rack", name: "Rack A", kind: "rack", inputs: 8, outputs: 0 },
+          { id: "sb1", name: "SB-1", kind: "snake", inputs: 8, outputs: 0, color: "#0091ff" },
+        ],
+        endpoints: [{ rackId: "rack", dir: "in", index: 1, consoleChannel: "1", label: "Kick In", path: [{ deviceId: "sb1", connector: "1" }] }],
+        variants: [],
+        assignments: { byServiceType: {}, byPlan: {} },
+      },
+    ],
+  });
+  const linkedDoc = () => venueDoc(1, 1, () => [item("c-sb1", { type: "conn", label: "Old SB", patchLink: link("sb1", "Old SB") })]);
+  const sb1 = async (h: Harness) => {
+    const secret = (await h.venue()).publish!.secret;
+    return (JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).items.find((it) => it.id === "c-sb1")!;
+  };
+  const RETRY = { firstMs: 20, maxMs: 80 };
+  /** Until `check` holds, or a failure naming `what` after five seconds. */
+  async function until(check: () => Promise<boolean>, what: string): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (!(await check())) {
+      if (Date.now() > deadline) throw new Error(`still waiting after 5000 ms for ${what}`);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }
+
+  test("is retried on a backoff with no event at all; once it reads, said once, and the venue that links it is sent again", async () => {
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      const h = await harness(linkedDoc(), { patchRetry: RETRY });
+      h.patch.file = null;
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      await h.publisher.settle();
+      assert.equal((await sb1(h)).patch, undefined);
+      // Fails a few times on the backoff, then reads: nothing is saved or broadcast.
+      await new Promise((r) => setTimeout(r, 120));
+      h.patch.file = patchFile();
+      await until(async () => (await sb1(h)).patch !== undefined, "the page to follow the patch again");
+      const healed = await sb1(h);
+      assert.deepEqual([healed.label, healed.patch?.channels.map((c) => c.path)], ["SB-1", ["SB-1/1"]]);
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const ours = lines.filter((l) => l.startsWith("[stageplots]"));
+    assert.equal(ours.filter((l) => l.includes("could not read the patch sheet")).length, 1, ours.join(" / "));
+    assert.equal(ours.filter((l) => l.includes("the patch sheet can be read again")).length, 1, ours.join(" / "));
+  });
+
+  test("a start that reads the patch sends the venues that link it again, so a page published unlinked before it follows", async () => {
+    const h = await harness(linkedDoc());
+    h.patch.file = null;
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    await h.publisher.stop();
+    assert.equal((await sb1(h)).patch, undefined);
+    const origin = parsePublishUrl(h.page.origin);
+    assert.ok(origin.ok);
+    const restarted = new StagePlotsPublisher({
+      target: async () => ({ ok: true, origin: origin.origin, token: TOKEN }),
+      store: stageplotsStore,
+      image: async (k) => h.images.get(k) ?? null,
+      plan: () => h.plan,
+      patch: async () => patchFile(),
+      timeZone: () => "America/Chicago",
+      onSaved: () => undefined,
+      debounceMs: 30,
+    });
+    try {
+      restarted.start();
+      await until(async () => (await sb1(h)).patch !== undefined, "the restarted publisher to send the linked venue");
+    } finally {
+      await restarted.stop();
     }
   });
 });

@@ -14,7 +14,6 @@ import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
 import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
-import { broadcast } from "../broadcaster.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
 import { LayoutNameRefused } from "../servicecue-slug.js";
 import { isRecord } from "../is-record.js";
@@ -134,9 +133,8 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.file (PatchFile) required");
         return;
       }
-      const saved = await patchStore.save(file);
-      broadcast("patch:updated", saved); // change-driven; editor + /patch live-update
-      json(res, saved);
+      // patchStore.save broadcasts patch:updated, for the editor, /patch and stage plots.
+      json(res, await patchStore.save(file));
       return;
     }
 

@@ -397,3 +397,33 @@ describe("stage plot items", () => {
     assert.match(refusal(bad), /plot "p-1".*type/);
   });
 });
+
+describe("patch links on items", () => {
+  const link = { sheetId: "analog", deviceId: "dev-sb1", lastName: "SB-1", lastColor: "#0091ff" };
+
+  test("a link on a connection point is kept, field by field", () => {
+    const [conn] = checkItems([item({ type: "conn", patchLink: { ...link, extra: "dropped" } })], H, "the plot");
+    assert.deepEqual(conn.patchLink, link);
+  });
+
+  test("patchLink on a non-conn item is 400", () => {
+    for (const type of ["box", "circle", "zone", "text"]) {
+      const extra = type === "text" ? { textKind: "label" } : {};
+      assert.match(validateItems([item({ type, ...extra, patchLink: link })], H) ?? "", /not a connection point/, type);
+    }
+  });
+
+  test("saving an item whose link dangles is accepted: the patch is never consulted", () => {
+    assert.equal(validateItems([item({ type: "conn", patchLink: { ...link, sheetId: "gone", deviceId: "also-gone" } })], H), null);
+  });
+
+  test("a link's ids, last name and last colour are held to their shape", () => {
+    assert.match(validateItems([item({ type: "conn", patchLink: { ...link, sheetId: "" } })], H) ?? "", /patch sheet id/);
+    assert.match(validateItems([item({ type: "conn", patchLink: { ...link, deviceId: "d".repeat(101) } })], H) ?? "", /patch device id/);
+    assert.match(validateItems([item({ type: "conn", patchLink: { ...link, deviceId: "a\nb" } })], H) ?? "", /patch device id/);
+    assert.match(validateItems([item({ type: "conn", patchLink: { ...link, lastName: "n".repeat(61) } })], H) ?? "", /last name/);
+    assert.match(validateItems([item({ type: "conn", patchLink: { ...link, lastColor: "#2563eb" } })], H) ?? "", /last colou?r/);
+    assert.match(validateItems([item({ type: "conn", patchLink: "analog/dev-sb1" })], H) ?? "", /patch link/);
+    assert.equal(validateItems([item({ type: "conn", patchLink: { ...link, lastColor: null } })], H), null);
+  });
+});

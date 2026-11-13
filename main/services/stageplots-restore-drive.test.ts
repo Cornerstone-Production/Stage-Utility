@@ -74,7 +74,7 @@ function publisher() {
     target: async () => ({ ok: true, origin: origin as never, token: TOKEN }),
     store: stageplotsStore,
     image: async () => webp(),
-    plan: () => ({ planId: null, planDates: null }),
+    plan: () => ({ planId: null, planDates: null, serviceTypeId: null }), patch: async () => ({ sheets: [], updatedAt: "" }),
     timeZone: () => "America/Chicago",
     onSaved: () => undefined,
     listen: (cb) => (listener = cb),

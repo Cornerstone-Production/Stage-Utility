@@ -128,6 +128,36 @@ describe("the published stage plots page", () => {
     assert.equal(document.querySelector("[data-testid=plot-background]")?.getAttribute("href"), `/stageplots/${SECRET}/image/0000000000000001`);
   });
 
+  test("a tap on a linked connection point lists the channels it was published with, not its inputs", async () => {
+    const p = plot("p-2", "Special", null);
+    p.items = [
+      {
+        id: "sb1",
+        type: "conn",
+        x: 100,
+        y: 100,
+        w: 25,
+        h: 25,
+        rotation: 0,
+        label: "SB-1",
+        color: "#0091ff",
+        notes: "",
+        inputs: ["Own input"],
+        patch: { sheet: "Main patch", channels: [{ channel: "Ch 1", label: "Kick In", path: "SB-1/1" }] },
+      },
+    ];
+    STORED.set("plot/p-2", p);
+    await mount();
+    const item = document.querySelector('[data-id="sb1"]')!;
+    await act(async () => {
+      fireEvent.pointerDown(item, { pointerId: 1, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(item, { pointerId: 1, clientX: 10, clientY: 10 });
+    });
+    await settle();
+    const details = document.querySelector("[data-item-details]")!;
+    assert.match(details.textContent ?? "", /^SB-1Connection pointPatch channels · Main patchCh 1Kick InSB-1\/1$/);
+  });
+
   test("a tap on an item shows its label, notes and inputs", async () => {
     await mount();
     const item = document.querySelector('[data-id="i-p-2"]')!;

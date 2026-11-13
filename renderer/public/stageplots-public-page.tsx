@@ -5,6 +5,9 @@
 // index and each plot from under the same secret and draws them with the read-only
 // component /stageplots uses (venue-plots.tsx): no venue list, no editor, no print.
 //
+// A connection point linked to the patch arrives resolved: its device's name and colour, and
+// the channels a tap lists (`patch`), never the link itself.
+//
 // It reads nothing else and writes nothing. It reads again when the tab comes back into
 // view, so a phone left on the page picks up a republish without a timer.
 
@@ -123,6 +126,7 @@ export function StagePlotsPublicPage({ path }: { path: string }) {
         resolved={{ plot: shown, reason: index.shown.reason }}
         planDay={index.plan ? planDateLabel(index.plan.date, index.timeZone, { dates: index.plan.dates }) : null}
         backgroundOf={backgroundOf}
+        channelsOf={(plot, itemId) => loaded.plots.get(plot.id)?.doc?.items.find((it) => it.id === itemId)?.patch ?? null}
         plotState={(plot) => {
           const r = loaded.plots.get(plot.id);
           return !r?.doc ? "failed" : r.stale ? "stale" : "ok";

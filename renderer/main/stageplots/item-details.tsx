@@ -1,10 +1,12 @@
-// item-details.tsx — what a tap on an item shows on /stageplots: its label and
-// kind, its notes, and its inputs, numbered. Beside the item on a desk; on a
+// item-details.tsx — what a tap on an item shows on /stageplots and the public
+// page: its label and kind, its notes, and its inputs, numbered; or, for a
+// connection point linked to the patch, the patch channels through its device
+// ("Patch channels · Main patch") in place of its inputs. Beside the item on a desk; on a
 // phone (under 640 px) a bottom sheet instead, so a long input list does not
 // cover the item. The switch is CSS (the sm: breakpoint), so it is checked in a
 // browser, not in jsdom, which loads no stylesheet.
 
-import type { PlotItem } from "@main/types/stageplots";
+import type { PatchChannels, PlotItem } from "@main/types/stageplots";
 
 import { cn } from "../../lib/cn";
 import { eyebrow } from "./doc-helpers";
@@ -22,7 +24,20 @@ export function detailsPosition(item: DOMRect | { left: number; right: number; t
   return { left: Math.max(8, left), top: Math.max(8, item.top - frame.top - 6) };
 }
 
-export function ItemDetails({ item, at, onClose }: { item: PlotItem; at: { left: number; top: number } | null; onClose: () => void }) {
+const row = "grid items-baseline gap-2 border-t border-line py-1 first:border-t-0 max-sm:py-1.5";
+
+export function ItemDetails({
+  item,
+  at,
+  onClose,
+  channels = null,
+}: {
+  item: PlotItem;
+  at: { left: number; top: number } | null;
+  onClose: () => void;
+  /** A linked point's patch channels, listed instead of its inputs; null for anything else. */
+  channels?: PatchChannels | null;
+}) {
   return (
     <div
       data-item-details=""
@@ -57,12 +72,33 @@ export function ItemDetails({ item, at, onClose }: { item: PlotItem; at: { left:
           <Mono text={item.notes} />
         </p>
       )}
-      {item.inputs.length > 0 && (
+      {channels ? (
+        <>
+          <span className={cn(eyebrow, "mt-2.5")}>
+            <Mono text={`Patch channels · ${channels.sheet}`} />
+          </span>
+          <ul className="mt-1" data-testid="patch-channels">
+            {channels.channels.map((c, i) => (
+              <li key={i} className={cn(row, "grid-cols-[auto_minmax(0,1fr)_auto]")}>
+                <span className="text-[11px] text-fg-subtle">
+                  <Mono text={c.channel} />
+                </span>
+                <span className="min-w-0 text-fg">
+                  <Mono text={c.label} />
+                </span>
+                <span className="text-[11px] text-fg-muted">
+                  <Mono text={c.path} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : item.inputs.length > 0 && (
         <>
           <span className={cn(eyebrow, "mt-2.5")}>Inputs</span>
           <ul className="mt-1" data-testid="item-inputs">
             {item.inputs.map((name, i) => (
-              <li key={i} className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 border-t border-line py-1 first:border-t-0 max-sm:py-1.5">
+              <li key={i} className={cn(row, "grid-cols-[auto_minmax(0,1fr)]")}>
                 <span className="font-mono text-[11px] text-fg-subtle tabular-nums">{i + 1}</span>
                 <span className="text-fg">
                   <Mono text={name} />

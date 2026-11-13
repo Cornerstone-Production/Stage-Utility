@@ -666,6 +666,7 @@ nothing. A body that is not a JSON object is a `400`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/api/stageplots/patch` | The [patch](../patch-sheet/README.md) file, as `GET /api/patch` answers it, for [linked connection points](../features/stageplots.md#patch-link). `503` while `patch.json` cannot be read, or was damaged and set aside with nothing saved since, never the seed sheets `GET /api/patch` falls back to |
 | GET | `/api/stageplots` | `{venues, backgrounds, plots, overrides, pendingRemovals, notice?}`; `notice` is `{at, message}`, what following the last Public link save could not do, until the next save (and absent after a restart); `pendingRemovals` lists each [old link](../features/stageplots.md#old-links) waiting to be removed as `{origin, since, reason}`, never its secret; each background carries `url` (its converted WebP) and `sourceUrl` (the source it was converted from: the upload, or the rendered PDF page, at most 2400 px on its long edge with its metadata dropped) |
 | POST | `/api/stageplots/venues` | `{name, kind, notes?}`, `kind` `home` or `offsite`. `201` with the venue; `400` past 50 venues |
 | PATCH | `/api/stageplots/venues/:id` | Any of `{name, kind, notes}` |
@@ -705,7 +706,12 @@ plot's width and height); `rotation` is degrees in (-180, 180], about the centre
 bounding box and its rotation to 0, whatever was sent.
 `color` is one of the patch sheet's ten swatches, or `null`. `label` is up to 60
 characters, `notes` up to 500, `inputs` up to 64 names of up to 40 characters. A
-plot holds up to 500 items, each `id` once. Any other field is dropped.
+`conn` may carry `patchLink`: `{sheetId, deviceId, lastName, lastColor}`, the patch
+sheet and device it [follows](../features/stageplots.md#patch-link), each id 1 to 100
+characters with no control characters, `lastName` up to 60 characters and `lastColor` a
+swatch or `null`. It is never checked against the patch, so a link to a device that is
+gone saves; on any other type it is a `400`. A plot holds up to 500 items, each `id`
+once. Any other field is dropped.
 
 ## Channels
 

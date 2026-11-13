@@ -17,7 +17,7 @@
 // the server will accept.
 
 import { fitToHeight } from "@main/services/stageplots-doc";
-import { PLOT_UNITS_WIDE, type CablePoint, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type CablePoint, type PatchLink, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
 
 import { clampPoint, fitItem, resizeInFrame, round1, snapRotation, withCableBox } from "./geometry";
 import { SYMBOLS } from "./symbols";
@@ -87,6 +87,10 @@ export type EditorAction =
   | { type: "movePoint"; id: string; index: number; point: { x: number; y: number } }
   /** A field edit; `live` while typing (one step, committed when it settles). */
   | { type: "patch"; id: string; fields: Partial<Omit<PlotItem, "id" | "type">>; live?: boolean }
+  /** Link a connection point to a patch device: it takes the device's name and colour, saved as its last. */
+  | { type: "link"; id: string; link: PatchLink }
+  /** Unlink it, keeping the name and colour it showed, which are its own again. */
+  | { type: "unlink"; id: string; label: string; color: string | null }
   | { type: "addInput"; id: string }
   | { type: "removeInput"; id: string; index: number }
   | { type: "duplicate"; id: string; newId: string }
@@ -239,6 +243,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "patch":
       if (action.live) return live(state, action.id, (current) => patched(current, action.fields));
       return stepItem(state, action.id, (it) => patched(it, action.fields));
+    case "link":
+      return stepItem(state, action.id, (it) =>
+        it.type === "conn" ? { ...it, label: action.link.lastName, color: action.link.lastColor, patchLink: action.link } : it,
+      );
+    case "unlink":
+      return stepItem(state, action.id, (it) => {
+        if (!it.patchLink) return it;
+        const { patchLink: _link, ...rest } = it;
+        return { ...rest, label: action.label, color: action.color };
+      });
     case "addInput":
       return stepItem(state, action.id, (it) => ({ ...it, inputs: [...it.inputs, ""] }));
     case "removeInput":

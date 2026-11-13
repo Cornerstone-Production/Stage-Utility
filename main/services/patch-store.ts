@@ -4,7 +4,8 @@
 // docs/patch-sheet/DESIGN.md.
 
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
-import { DataStore } from "./data-store.js";
+import { broadcast } from "./broadcaster.js";
+import { DataStore, StoreReadError } from "./data-store.js";
 import { asArray, asObject, checked } from "./restore-check.js";
 
 const emptyAssignments = () => ({ byServiceType: {}, byPlan: {} });
@@ -66,10 +67,28 @@ class PatchStore {
     return migrate(await this.store.load());
   }
 
-  /** Replace the whole patch file, stamping updatedAt. Returns the saved file. */
+  /**
+   * load(), for a reader that must not take the seed sheets for the patch (a stage plot link
+   * would read "device removed" for every device): throws a StoreReadError (503) while
+   * patch.json cannot be read, and while a damaged one has been set aside and nothing has
+   * been saved over it since.
+   */
+  async loadStrict(): Promise<PatchFile> {
+    const raw = await this.store.loadStrict();
+    if (this.store.loadedFromCorrupt && raw === EMPTY) throw new StoreReadError("patch.json", null, "was damaged and set aside, and nothing has been saved since");
+    return migrate(raw);
+  }
+
+  /**
+   * Replace the whole patch file, stamping updatedAt, and broadcast it on patch:updated.
+   * Returns the saved file. The broadcast is here and not in a route because every saver
+   * owes it: /patch, the editor and the stage plots publisher all follow the patch on it,
+   * and a view import that saved variants without one left them all on the old patch.
+   */
   async save(file: PatchFile): Promise<PatchFile> {
     const next: PatchFile = { ...file, updatedAt: new Date().toISOString() };
     await this.store.update(() => next);
+    broadcast("patch:updated", next);
     return next;
   }
 }

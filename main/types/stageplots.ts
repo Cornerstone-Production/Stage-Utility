@@ -142,7 +142,48 @@ export interface PlotItem {
   points?: CablePoint[];
   /** Only on a cable. */
   dashed?: boolean;
+  /** Only on a connection point: the patch sheet device it follows. */
+  patchLink?: PatchLink;
 }
+
+/**
+ * A connection point's link to a device on a patch sheet. Read-only: the point takes the
+ * device's name and colour while the sheet can be read and the device is there, and lists
+ * the channels whose path runs through it. lastName and lastColor are what it showed when
+ * the plot was last saved, and what it shows ("unlinked") when the sheet cannot be read or
+ * the device is gone. See docs/features/stageplots.md#patch-link.
+ */
+export interface PatchLink {
+  sheetId: string;
+  deviceId: string;
+  /** At most labelChars long. */
+  lastName: string;
+  /** One of PATCH_COLORS, or null. */
+  lastColor: string | null;
+}
+
+/** One patch channel whose path runs through a linked point's device, as a tap lists it. */
+export interface PatchChannelRow {
+  /** The console channel: "Ch 3", or the console's own name for it ("Mix 2"); "" when unset. */
+  channel: string;
+  /** The source (an input) or destination (an output). */
+  label: string;
+  /** The connector on the linked device it comes through: "SB-1/3". */
+  path: string;
+}
+
+/** What a tap on a linked point lists: the sheet's name and the channels through its device. */
+export interface PatchChannels {
+  sheet: string;
+  channels: PatchChannelRow[];
+}
+
+/**
+ * An item as the public page gets it. Never the link itself (no sheet or device id, no
+ * last name): a linked point's label and colour are the device's as resolved at publish
+ * time, and `patch` is present only on a linked point with channels to list.
+ */
+export type PublishedItem = Omit<PlotItem, "patchLink"> & { patch?: PatchChannels };
 
 export interface Plot {
   id: string;
@@ -217,7 +258,7 @@ export interface PublishedPlot {
   id: string;
   name: string;
   bgFade: number;
-  items: PlotItem[];
+  items: PublishedItem[];
   /** Its background's size, and its hash once the page holds the image (null until then). */
   background: { hash: string | null; width: number; height: number } | null;
 }
@@ -238,6 +279,10 @@ export const STAGEPLOT_LIMITS = {
   inputChars: 40,
   cablePointsMin: 2,
   cablePointsMax: 50,
+  /** A patch link's sheet and device ids. */
+  patchIdChars: 100,
+  /** Channels a tap lists for one linked point, on /stageplots and the public page. */
+  patchChannelsPerPoint: 128,
   /** An item's smallest and largest width and height, in plot units. */
   itemMinSize: 8,
   itemMaxSize: 1000,

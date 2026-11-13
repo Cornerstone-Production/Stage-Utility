@@ -58,6 +58,12 @@ open its editor under the line: name, kind, channel counts, color (ten swatches 
 none), the connector-label generator, and **Remove device**. **Add device** appends a
 rack, opens it and selects its name for typing.
 
+A [stage plot](../features/stageplots.md#patch-link) connection point can link to a
+device: it takes the device's name and color, and a tap on it lists the channels whose
+path runs through it. Renaming, recoloring or re-patching a linked device shows there on
+the next save of the patch, and republishes a published venue that links it. Removing
+one leaves the point "unlinked" with its last name.
+
 ## Inputs and outputs
 
 Both are first-class, on their own tabs.

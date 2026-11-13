@@ -11,6 +11,7 @@ process.env.STAGE_UTILITY_DATA = dir;
 const { viewsStore } = await import("./views-store.js");
 const { oscStore } = await import("./osc-store.js");
 const { applyViewBundle } = await import("./view-import.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
 
 const bundle = (over: Record<string, unknown> = {}) => ({
   kind: "stage-utility-view", version: 1, appVersion: "1.0.0",
@@ -550,6 +551,19 @@ describe("patch variants", () => {
   });
 
   beforeEach(async () => { await viewsStore.save([] as never); });
+
+  // Guard: /patch, the patch editor and the stage plots publisher follow the patch on
+  // patch:updated. An import that saved variants without it left all three on the old patch.
+  test("a variant import broadcasts the saved patch on patch:updated", async () => {
+    await blankPatch();
+    const heard: unknown[] = [];
+    addBroadcastListener((channel, payload) => {
+      if (channel === "patch:updated") heard.push(payload);
+    });
+    await applyViewBundle(withVariant());
+    const last = heard.at(-1) as { sheets: { variants: { id: string }[] }[] } | undefined;
+    assert.deepEqual(last?.sheets[0]?.variants.map((v) => v.id), ["var-1"]);
+  });
 
   test("a variant that is not here is added and the type assigned to it", async () => {
     await blankPatch();
