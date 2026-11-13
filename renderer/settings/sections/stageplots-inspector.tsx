@@ -178,7 +178,7 @@ function Swatches({ item, dispatch, locked }: { item: PlotItem; dispatch: (a: Ed
           disabled={locked}
           onClick={() => set(null)}
           className={cn(
-            "relative size-5 overflow-hidden rounded-full border border-line-strong bg-transparent transition-transform enabled:hover:scale-110 disabled:opacity-45 after:absolute after:top-[-2px] after:bottom-[-2px] after:left-1/2 after:w-px after:rotate-45 after:bg-fg-subtle",
+            "relative size-5 overflow-hidden rounded-full border border-line-strong bg-transparent transition-transform enabled:hover:scale-110 disabled:opacity-50 after:absolute after:top-[-2px] after:bottom-[-2px] after:left-1/2 after:w-px after:rotate-45 after:bg-fg-subtle",
             ring,
           )}
         />
@@ -193,7 +193,7 @@ function Swatches({ item, dispatch, locked }: { item: PlotItem; dispatch: (a: Ed
             onClick={() => set(c)}
             // The swatch's colour is data, one of the patch sheet's ten.
             style={{ background: c }}
-            className={cn("size-5 rounded-full transition-transform enabled:hover:scale-110 disabled:opacity-45 disabled:aria-pressed:opacity-100", ring)}
+            className={cn("size-5 rounded-full transition-transform enabled:hover:scale-110 disabled:opacity-50", ring)}
           />
         ))}
       </div>

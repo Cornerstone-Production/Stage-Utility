@@ -8,7 +8,7 @@
 // edits like any other: nothing is saved until Save. Nothing here writes to the patch.
 
 import { useState } from "react";
-import { LinkIcon, UnlinkIcon } from "lucide-react";
+import { LinkIcon } from "lucide-react";
 
 import { PATCH_KIND_LABELS, type PatchDevice, type PatchDeviceKind } from "@main/types/patch";
 import type { PlotItem } from "@main/types/stageplots";
@@ -26,6 +26,18 @@ export function ioText(d: { inputs: number; outputs: number }): string {
 }
 
 const kindName = (kind: PatchDeviceKind) => PATCH_KIND_LABELS[kind] ?? kind;
+
+/** A link struck through, as the approved mockup draws Unlink: lucide's own unlink breaks the
+ *  chain instead, which reads as a different control beside the Link button's chain. */
+function UnlinkGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+      <path d="M4 4l16 16" />
+    </svg>
+  );
+}
 
 function Dot({ color, lost = false }: { color: string | null; lost?: boolean }) {
   return color ? (
@@ -129,7 +141,7 @@ const LOST: Record<"unavailable" | "removed", { status: string; hint: string; ta
   },
   removed: {
     status: "unlinked · device removed",
-    hint: "Showing the last name and color it had. The device is no longer on the patch sheet; unlink to edit the name and color, then link it again if you need to.",
+    hint: "Showing the last name and color it had. The device is gone from the patch sheet: unlink to edit them, or to link another device.",
     tap: "A tap lists the point's own inputs, without patch channels.",
   },
 };
@@ -165,7 +177,7 @@ export function PatchDeviceField({
   }
   const unlink = (
     <Button variant="transparent" size="small" onClick={() => dispatch({ type: "unlink", id: item.id, label: item.label, color: item.color })}>
-      <UnlinkIcon className="size-3.5" />
+      <UnlinkGlyph className="size-3.5" />
       Unlink
     </Button>
   );
