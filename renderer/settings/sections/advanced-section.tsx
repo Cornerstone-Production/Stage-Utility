@@ -38,6 +38,7 @@ import { SERVER_ID_FLASH, ServerIdStatus } from "./server-id-field";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { WhatsNewButton } from "./whats-new";
+import { PublicLinkPanel } from "./servicecue-public-link";
 import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
@@ -1642,6 +1643,16 @@ export function AdvancedSection({
       <CardFrame title={title}>
         {show("data-archive") && <DataArchivePanel />}
         {show("history-milestones") && <HistoryMilestonesPanel />}
+      </CardFrame>
+    ),
+
+    "public-link/Public link": (show, title) => (
+      <CardFrame title={title}>
+        {show("public-link") && (
+          <div className="p-4" data-setting-id="public-link">
+            <PublicLinkPanel />
+          </div>
+        )}
       </CardFrame>
     ),
 

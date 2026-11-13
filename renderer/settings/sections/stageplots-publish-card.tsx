@@ -34,6 +34,7 @@ import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { Mono } from "../../main/stageplots/mono";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
+import { SettingsInAdvancedLink } from "./servicecue-public-link";
 import { zonedDayLabel } from "./plan-date-label";
 import { CardHeader, iconButton, type Save } from "./stageplots-shared";
 
@@ -236,11 +237,8 @@ export function PublishCard({ venue, pending, save, timeZone, follow }: { venue:
           </p>
           {target.data && !pageSetUp && (
             <p className="text-caption1 text-fg-subtle">
-              Set up the public link first, under{" "}
-              <a href="/servicecue/presets" className="text-accent underline underline-offset-2">
-                Public link
-              </a>{" "}
-              on the ServiceCue layouts page.
+              Set up the public link first, in{" "}
+              <SettingsInAdvancedLink>Settings &gt; Advanced &gt; Public link</SettingsInAdvancedLink>.
             </p>
           )}
           <Button variant="accent" className="self-start" disabled={working !== null || (target.data !== undefined && !pageSetUp)} onClick={() => void run("publish")}>

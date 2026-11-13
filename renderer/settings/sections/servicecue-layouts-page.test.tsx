@@ -68,7 +68,7 @@ const saves = (s: { requests: { method: string; path: string }[] }, path: string
 const headings = () => [...document.querySelectorAll("h1, h2")].map((h) => h.textContent ?? "");
 const rowHeads = () =>
   [...document.querySelectorAll("button[aria-expanded]")]
-    .filter((b) => /^(Landing page|Public link)/.test(b.textContent ?? ""))
+    .filter((b) => /^Landing page/.test(b.textContent ?? ""))
     .map((b) => `${b.textContent} ${b.getAttribute("aria-expanded")}`);
 
 test("the page: its title, a way back, and the sections in order", async () => {
@@ -77,10 +77,10 @@ test("the page: its title, a way back, and the sections in order", async () => {
     await mount();
     assert.deepEqual(headings(), ["ServiceCue layouts", "Layouts", "Category roles"]);
     assert.equal(screen.getByRole("link", { name: "ServiceCue" }).getAttribute("href"), "/servicecue/manage");
-    // The two rows a church sets once sit last, shut, each saying what it holds.
-    await eventually(() =>
-      assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night false", "Public link· Off false"]),
-    );
+    // The Landing page row sits last, shut, saying what it holds; the Public link is a status line
+    // beside it, since the card itself is on Settings > Advanced.
+    await eventually(() => assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night false"]));
+    await eventually(() => assert.equal(publicLinkRow().textContent, "Public link· OffSettings in Advanced"));
   } finally {
     s.restore();
   }
@@ -102,14 +102,17 @@ test("Category roles is there to use before any layout exists", async () => {
 
 // ── Landing page and Public link rows ───────────────────────────────────────
 
-test("Public link opens to the card without a frame or a title of its own: the row has both", async () => {
+/** The Public link status line: not a disclosure, so it is found by its link. */
+const publicLinkRow = () => screen.getByRole("link", { name: "Settings in Advanced" }).parentElement as HTMLElement;
+
+test("the Public link is a status line with a link to Settings > Advanced, and holds no card", async () => {
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /^Public link/ })));
-    const card = await eventually(() => document.querySelector('section[aria-labelledby="pub-title"]') as HTMLElement);
-    assert.equal(card.querySelector("h2")?.classList.contains("sr-only"), true, "a second visible Public link title inside the row");
-    assert.equal(/\bborder\b/.test(card.className), false, `a card frame inside the row's own: ${card.className}`);
+    await eventually(() => assert.equal(publicLinkRow().textContent, "Public link· OffSettings in Advanced"));
+    assert.equal(screen.getByRole("link", { name: "Settings in Advanced" }).getAttribute("href"), "/settings/advanced/public-link");
+    assert.equal(document.querySelector('section[aria-labelledby="pub-title"]'), null, "the card is still on this page");
+    assert.equal(screen.queryByRole("switch", { name: "Publish ServiceCue to the web" }), null);
   } finally {
     s.restore();
   }
@@ -144,7 +147,7 @@ test("Landing page opens to the service types, and a tick saves them in Planning
     await settle();
     fireEvent.click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
     await eventually(() => assert.deepEqual(s.shown(), ["sun", "wed"]));
-    await eventually(() => assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night true", "Public link· Off false"]));
+    await eventually(() => assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night true"]));
   } finally {
     s.restore();
   }

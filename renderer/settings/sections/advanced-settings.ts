@@ -15,6 +15,7 @@ export const ADVANCED_TABS = [
   { id: "updates", name: "Updates" },
   { id: "schedule", name: "Schedule" },
   { id: "network", name: "Network" },
+  { id: "public-link", name: "Public link" },
   { id: "data", name: "Data" },
   { id: "video", name: "Video relay" },
 ] as const;
@@ -232,6 +233,16 @@ export const ADVANCED_SETTINGS = [
     description:
       "Any IP address, localhost, a name with no dot and names ending .local, .internal or .home.arpa are always answered and need no entry. Add the others here; names waiting to be accepted or dismissed show here too.",
     keywords: ["host", "hostname", "dns", "accept", "dismiss", "waiting", "allowlist", "domain", "add", "remove"],
+  },
+
+  {
+    id: "public-link",
+    tab: "public-link",
+    card: "Public link",
+    name: "Public link",
+    description:
+      "Publish ServiceCue to a page of your own on the web, so volunteers open a link instead of the app. The page address, the publishing token, the link to hand out with its QR code, what the public sees, and the Cloudflare connection that keeps the page up to date.",
+    keywords: ["servicecue", "publish", "cloudflare", "worker", "token", "qr", "share", "web", "url", "volunteers", "internet"],
   },
 
   {

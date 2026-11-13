@@ -12,8 +12,7 @@ import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useListSaves, type ListEdit, type ListIo, type ListSaveResult } from "../../lib/use-list-saves";
 import { CategoryRoles, type RoleActions } from "./servicecue-roles-section";
-import { PublicLinkCard, usePublishSummary } from "./servicecue-public-link";
-import { appZoneOf } from "../../lib/app-zone";
+import { PublicLinkStatusRow } from "./servicecue-public-link";
 import { uid } from "@renderer/lib/uid";
 import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-layout-card";
 import {
@@ -66,7 +65,7 @@ export const ROLES: ListIo<CategoryRole> = {
 };
 
 /** The ServiceCue layouts page: the layouts, the category roles their columns come
- *  from, and the landing page and public link that offer them. */
+ *  from, and the landing page that offers them and the way to the public link. */
 export function ServiceCueSection() {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const { list: layouts, adopt: adoptLayouts, edit: editLayouts } = useListSaves(LAYOUTS);
@@ -519,7 +518,6 @@ export function ServiceCueSection() {
   };
 
   const shownNames = shownIds.map(typeName).filter((n): n is string => !!n);
-  const publishWord = usePublishSummary();
 
   return (
     <div className="max-w-[920px] pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
@@ -651,17 +649,7 @@ export function ServiceCueSection() {
             ))
           )}
         </MoreRow>
-        <MoreRow title="Public link" summary={publishWord}>
-          {/* The same landing page and layouts, handed to anyone with a link. It lists
-              what it publishes from the two lists above, so it cannot say one thing
-              while the page does another. */}
-          <PublicLinkCard
-            typeNames={shownNames}
-            layoutNames={sortedLayouts.map((l) => l.name)}
-            timeZone={appZoneOf(stage.state)}
-            embedded
-          />
-        </MoreRow>
+        <PublicLinkStatusRow />
       </section>
       {announcer}
     </div>
