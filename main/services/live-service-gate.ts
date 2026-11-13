@@ -20,9 +20,11 @@
 //      anchored to the SERVICE's own time — so unlike a calendar comparison, its
 //      value cannot change while a service is running.
 //
-// `serviceEnded` is deliberately NOT handled here. It is the plan's own SERVICE END
-// header — an explicit operator signal, position-based, and therefore incapable of
-// misfiring on a clock. Callers apply it themselves.
+// `serviceEnded` is deliberately NOT handled by shouldRecordLive. It is the plan's
+// own SERVICE END header — an explicit operator signal, position-based, and
+// therefore incapable of misfiring on a clock. serviceRunning applies it, and the
+// recorders and the plan controller all ask serviceRunning, so they cannot
+// disagree about whether a service is still going.
 
 import type { PcoLiveDTO } from "../types/stage.js";
 import { zonedDateKey } from "./app-timezone.js";
@@ -57,6 +59,27 @@ export function isServiceNearNow(live: PcoLiveDTO, nowMs: number = Date.now()): 
   return Math.abs(nowMs - anchor) <= SERVICE_START_WINDOW_MS;
 }
 
+/** Planning Center is in one of this plan's items: the reading of "live" every
+ *  recorder trusts. `preservice` is not it: every plan with a service time gets
+ *  that countdown, days ahead. */
+export function inLiveItem(live: PcoLiveDTO): boolean {
+  return live.mode === "item" && !!live.currentItemId;
+}
+
+/**
+ * Planning Center reports this service RUNNING: in one of its items and not
+ * parked past its SERVICE END header. Parking on a trailing buffer item below
+ * SERVICE END is how every service ends, and Live stays in that item.
+ *
+ * `stale`: the reading is the last good one, kept while reads fail. It counts
+ * only while its service is near now: a failing read is not evidence the
+ * service stopped, and neither is it evidence of one days old.
+ */
+export function serviceRunning(live: PcoLiveDTO, opts: { stale?: boolean; nowMs?: number } = {}): boolean {
+  if (!inLiveItem(live) || live.serviceEnded) return false;
+  return !opts.stale || isServiceNearNow(live, opts.nowMs);
+}
+
 /**
  * The gate every recorder asks.
  *
@@ -69,7 +92,7 @@ export function shouldRecordLive(
   hasOpenRecord: boolean,
   nowMs: number = Date.now(),
 ): boolean {
-  if (live.mode !== "item" || !live.currentItemId) return false;
+  if (!inLiveItem(live)) return false;
   if (hasOpenRecord) return true; // rule 1 — nothing time-based may end a live recording
   return isServiceNearNow(live, nowMs); // rule 2
 }

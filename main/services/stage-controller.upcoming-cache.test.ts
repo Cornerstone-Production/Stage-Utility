@@ -6,6 +6,10 @@
 // minutes ran out. A partial list is now reused for thirty seconds, and a whole one
 // still for five minutes. Driven through the real controller with the two reads it
 // makes replaced, and the clock moved by hand.
+//
+// While Planning Center is down every open page asks for the list, so the
+// unavailable answer is held for thirty seconds, and readers who ask while a
+// read is in flight share it rather than each asking Planning Center again.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
@@ -17,7 +21,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "upcoming-cache-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
 const { stageController } = await import("./stage-controller.js");
-const { UPCOMING_CACHE_MS, UPCOMING_PARTIAL_CACHE_MS } = await import("./upcoming-plans.js");
+const { UPCOMING_CACHE_MS, UPCOMING_OUTAGE_CACHE_MS, UPCOMING_PARTIAL_CACHE_MS } = await import("./upcoming-plans.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
 after(() => fs.rm(TMP, { recursive: true, force: true }));
@@ -27,6 +31,7 @@ const ctl = stageController as unknown as {
   readPlans: (serviceTypeId: string) => Promise<{ plans: unknown[]; recentFailed: boolean }>;
   state: Record<string, unknown>;
   upcomingCache: unknown;
+  upcomingOutage: unknown;
   lastRefreshLine: string;
   plansOutage: { forget: () => void };
 };
@@ -35,12 +40,17 @@ const NOW = Date.parse("2026-10-06T15:00:00Z");
 const PLAN = (id: string) => ({ id, title: `Plan ${id}`, seriesTitle: null, sortDate: "2026-10-11T15:00:00Z", dates: "Oct 11" });
 
 let reads: string[] = [];
+let typeReads = 0;
+let typesFail = false;
 let failing = new Set<string>();
 /** Types whose upcoming plans read, and whose recent plans did not. */
 let recentFailing = new Set<string>();
 
 beforeEach(() => {
   reads = [];
+  typeReads = 0;
+  typesFail = false;
+  ctl.upcomingOutage = null;
   ctl.lastRefreshLine = "";
   failing = new Set();
   recentFailing = new Set();
@@ -48,10 +58,14 @@ beforeEach(() => {
   ctl.lastRefreshLine = "";
   ctl.plansOutage.forget();
   ctl.state = { ...ctl.state, allowedServiceTypeIds: [], planId: null };
-  ctl.listServiceTypes = async () => [
-    { id: "1", name: "Sunday" },
-    { id: "2", name: "Wednesday" },
-  ];
+  ctl.listServiceTypes = async () => {
+    typeReads++;
+    if (typesFail) throw new Error("Planning Center returned 429");
+    return [
+      { id: "1", name: "Sunday" },
+      { id: "2", name: "Wednesday" },
+    ];
+  };
   ctl.readPlans = async (id) => {
     reads.push(id);
     if (failing.has(id)) throw new Error("Planning Center returned 503");
@@ -117,18 +131,18 @@ describe("getUpcomingPlanList caching", () => {
   });
 
   it("says once that the list is unavailable while every type stays down, and when it is back", async (t) => {
-    // Nothing unavailable is cached, so every request while Planning Center is
-    // down reads it again and lands on the unavailable answer.
+    // An unavailable answer is held for thirty seconds, so these requests come
+    // further apart than that: each reads Planning Center again and lands on it.
     const lines = captureConsole(t, "log", "warn");
     const down = () => lines.filter((l) => l.includes("[plans] upcoming list unavailable"));
     failing.add("1");
     failing.add("2");
-    for (let i = 0; i < 4; i++) await listAt(t, i * 1000);
+    for (let i = 0; i < 4; i++) await listAt(t, i * (UPCOMING_OUTAGE_CACHE_MS + 1));
     assert.equal(reads.length, 8, "each request read both types, so this proves the line is deduplicated, not skipped");
     assert.equal(down().length, 1, `one outage, one line: ${JSON.stringify(down())}`);
 
     failing.clear();
-    await listAt(t, 3000 + UPCOMING_CACHE_MS + 1);
+    await listAt(t, 3 * (UPCOMING_OUTAGE_CACHE_MS + 1) + UPCOMING_CACHE_MS + 1);
     assert.equal(lines.filter((l) => l.includes("[plans] upcoming list available again")).length, 1, JSON.stringify(lines));
   });
 
@@ -179,5 +193,162 @@ describe("getUpcomingPlanList caching", () => {
     await listAt(t, 0);
     const cached = (stageController as unknown as { cachedUpcoming: (id: string) => { title: string } | null }).cachedUpcoming("p1");
     assert.equal(cached?.title, "Plan p1");
+  });
+
+  it("holds an unavailable answer for thirty seconds without asking Planning Center", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    failing.add("1");
+    failing.add("2");
+    const first = await listAt(t, 0);
+    assert.equal(reads.length, 2);
+    assert.ok(first.unavailable);
+    const held = await listAt(t, UPCOMING_OUTAGE_CACHE_MS - 1);
+    assert.equal(reads.length, 2, `a request inside the outage window asked Planning Center again (${reads.length} reads)`);
+    assert.equal(held.unavailable, first.unavailable, "the held answer did not say the list is unavailable");
+    assert.equal(lines.filter((l) => l.includes("[plans] upcoming list unavailable")).length, 1, "a held answer was said again");
+    await listAt(t, UPCOMING_OUTAGE_CACHE_MS + 1);
+    assert.equal(reads.length, 4, "the outage was held past its window");
+  });
+
+  it("holds an unavailable answer when the service types themselves cannot be read", async (t) => {
+    captureConsole(t, "log", "warn");
+    typesFail = true;
+    await listAt(t, 0);
+    await listAt(t, 1000);
+    assert.equal(typeReads, 1, `a request inside the outage window asked for the service types again (${typeReads} reads)`);
+  });
+
+  it("asks again at once for an allowlist the held outage was not for", async (t) => {
+    captureConsole(t, "log", "warn");
+    typesFail = true;
+    await listAt(t, 0);
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: ["1"] };
+    await listAt(t, 1000);
+    assert.equal(typeReads, 2, "an outage held for one allowlist answered for another");
+  });
+
+  it("forgets a held outage once Planning Center answers", async (t) => {
+    captureConsole(t, "log", "warn");
+    typesFail = true;
+    await listAt(t, 0);
+    // Answered under another allowlist, then back inside the thirty seconds.
+    typesFail = false;
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: ["1"] };
+    await listAt(t, 1000);
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: [] };
+    const back = await listAt(t, 2000);
+    assert.equal(back.unavailable, undefined, "an outage was answered after Planning Center had answered");
+  });
+
+  it("shares a read in flight with a second caller", async (t) => {
+    captureConsole(t, "log", "warn");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctl.readPlans = async (id) => {
+      reads.push(id);
+      await gate;
+      return { plans: [PLAN(`p${id}`)], recentFailed: false };
+    };
+    t.mock.method(Date, "now", () => NOW);
+    const a = stageController.getUpcomingPlanList(60);
+    const b = stageController.getUpcomingPlanList(60);
+    release();
+    const [one, two] = await Promise.all([a, b]);
+    assert.equal(typeReads, 1, `the second caller read the service types again (${typeReads} reads)`);
+    assert.equal(reads.length, 2, `the second caller read each type again (${reads.length} reads)`);
+    assert.deepEqual(one, two);
+  });
+
+  it("holds an outage only for the window it was asked for", async (t) => {
+    captureConsole(t, "log", "warn");
+    typesFail = true;
+    await listAt(t, 0);
+    t.mock.method(Date, "now", () => NOW + 1000);
+    await stageController.getUpcomingPlanList(30);
+    assert.equal(typeReads, 2, "an outage held for sixty days answered for thirty");
+  });
+
+  it("forgets a held outage when the allowed service types are set", async (t) => {
+    captureConsole(t, "log", "warn");
+    typesFail = true;
+    await listAt(t, 0);
+    await stageController.setAllowedServiceTypes([]);
+    typesFail = false;
+    const after = await listAt(t, 1000);
+    assert.equal(after.unavailable, undefined, "setting the allowed types left the outage held");
+  });
+
+  it("does not share a read in flight with a caller under another allowlist", async (t) => {
+    captureConsole(t, "log", "warn");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctl.readPlans = async (id) => {
+      reads.push(id);
+      await gate;
+      return { plans: [PLAN(`p${id}`)], recentFailed: false };
+    };
+    t.mock.method(Date, "now", () => NOW);
+    const a = stageController.getUpcomingPlanList(60);
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: ["1"] };
+    const b = stageController.getUpcomingPlanList(60);
+    release();
+    const [, two] = await Promise.all([a, b]);
+    assert.equal(typeReads, 2, "a caller under another allowlist was handed a read made for the first");
+    assert.deepEqual(two.plans.map((p) => p.serviceTypeId), ["1"]);
+  });
+
+  it("files a list under the allowlist it was read for, though that changed mid-read", async (t) => {
+    captureConsole(t, "log", "warn");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Held inside the plan reads: the types were already chosen for every type.
+    ctl.readPlans = async (id) => {
+      reads.push(id);
+      await gate;
+      return { plans: [PLAN(`p${id}`)], recentFailed: false };
+    };
+    t.mock.method(Date, "now", () => NOW);
+    const a = stageController.getUpcomingPlanList(60);
+    await new Promise((r) => setTimeout(r, 0));
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: ["1"] };
+    release();
+    await a;
+    const later = await stageController.getUpcomingPlanList(60);
+    assert.deepEqual(
+      later.plans.map((p) => p.serviceTypeId),
+      ["1"],
+      "a list read for every type was served to the allowlist set during the read",
+    );
+  });
+
+  it("files an outage under the allowlist it was read for, though that changed mid-read", async (t) => {
+    captureConsole(t, "log", "warn");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    ctl.listServiceTypes = async () => {
+      typeReads++;
+      if (first) {
+        first = false;
+        await gate;
+        throw new Error("Planning Center returned 429");
+      }
+      return [{ id: "1", name: "Sunday" }];
+    };
+    t.mock.method(Date, "now", () => NOW);
+    const a = stageController.getUpcomingPlanList(60);
+    ctl.state = { ...ctl.state, allowedServiceTypeIds: ["1"] };
+    release();
+    await a;
+    const later = await stageController.getUpcomingPlanList(60);
+    assert.equal(later.unavailable, undefined, "an outage read for every type was held for the allowlist set during the read");
   });
 });

@@ -55,6 +55,47 @@ last-minute substitution reaches a stage display in about a minute rather than
 waiting up to two hours. Outside a window the roster makes no extra requests at
 all and moves on the configured interval exactly as before.
 
+### Which plan the screens follow
+
+In **Auto** plan mode the plan is chosen again on each refresh (the **Refresh
+interval**, and **Refresh now**), at the rollover an hour after the followed plan's
+service ends, and when the allowed service types or the plan mode change. Each
+time it reads the upcoming plans of every allowed service type and follows the
+nearest one, skipping a plan whose service ended more than an hour ago. The live
+tick does not choose a plan: asking every other type whether it is live would be a
+Planning Center read per type per second.
+
+A plan whose service Planning Center still reports running, in one of its items
+and not parked past its SERVICE END header, is never treated as over: neither the
+rollover nor a refresh moves off it, however far past its planned end the service
+runs. That holds on a stale live reading too, while its service is within 12 hours
+of now. It is the same test the recorders use. The rollover comes once Live leaves
+the plan's items or reaches SERVICE END, with no time limit; while it waits, it
+says so once per plan: `[stage-controller] auto rollover waits: plan <id> ended
+<N> min ago, Planning Center still reports it live (item <title>)`.
+
+A read that fails does not move the plan:
+
+- When no type can be read, or the types that answered have no plans while one
+  failed, the plan stays and the refresh is logged as failed.
+- When the followed plan's own service type cannot be read and another type
+  answers with a plan, the plan still stays. It moves only to a plan another type
+  reports live now: in one of its items in Planning Center Live, with its service
+  within 12 hours of now. A plan merely coming up next does not displace it, and
+  while the followed plan is itself live nothing does, including when its own live
+  reading has stopped answering while its service is within those 12 hours. The
+  hold is logged once, `[plans] holding the followed plan …`, with why, and its end
+  once, `[plans] <type>'s plans can be read again`. **Refresh now** during a hold
+  fails with the reason rather than reporting a refresh.
+- A type that fails while the followed plan's type answers is passed over, and
+  the plan follows the types that answered.
+- None of this keeps a plan whose service ended more than an hour ago: that one
+  moves on as if every type had answered (`[plans] the followed plan … is over`).
+  A rollover that cannot move anywhere is tried again after a minute, then after
+  waits that double up to 15 minutes (`[stage-controller] auto rollover — still on
+  plan …`), and on the next tick once Planning Center's live state answers again
+  (`[pco] live state known again`).
+
 The **Pre-service countdown** option picks what the countdown counts to: *Plan
 start* (matches PCO's green timer, service time minus pre-service items above a
 "service start" header) or *Service start time*. People's photos are proxied at
