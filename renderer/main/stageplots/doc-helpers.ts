@@ -62,5 +62,5 @@ export function formatBytes(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** The address parameter naming a venue: `/stageplots?venue=<id>` opens it, and `/stageplots/edit?venue=<id>` opens the editor on it. */
+/** The editor's address parameter: `/stageplots/edit?venue=<id>` opens the editor on that venue. (/stageplots has its own path, /stageplots/<id>.) */
 export const VENUE_PARAM = "venue";

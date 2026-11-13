@@ -41,7 +41,7 @@ let PATCH: PatchFile | null = null;
 const { render, cleanup, screen, fireEvent, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { act } = await import("react");
-const { StagePlotsPage, LAST_VENUE_KEY } = await import("./stageplots-view.js");
+const { StagePlotsPage, StagePlotsVenueRoute, LAST_VENUE_KEY } = await import("./stageplots-view.js");
 const { PrintSheet, printedDate, printLayout, legendLines } = await import("./stageplots-print.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -111,11 +111,12 @@ afterEach(async () => {
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 
-/** The page under a real router, so the address it writes can be read back. */
+/** The page under a real router with the two routes the app has, so the address it writes can be read back. */
 async function mountAt(url: string) {
   const root = createRootRoute({});
-  const route = createRoute({ getParentRoute: () => root, path: "/stageplots", component: StagePlotsPage });
-  const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: [url] }) });
+  const list = createRoute({ getParentRoute: () => root, path: "/stageplots", component: StagePlotsPage });
+  const venue = createRoute({ getParentRoute: () => root, path: "/stageplots/$venueId", component: StagePlotsVenueRoute });
+  const router = createRouter({ routeTree: root.addChildren([list, venue]), history: createMemoryHistory({ initialEntries: [url] }) });
   await act(async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
@@ -123,34 +124,66 @@ async function mountAt(url: string) {
   for (let i = 0; i < 4; i++) await settle();
   return router;
 }
-const venueInAddress = (router: Awaited<ReturnType<typeof mountAt>>) => (router.state.location.search as { venue?: unknown }).venue;
+const addressOf = (router: Awaited<ReturnType<typeof mountAt>>) => router.state.location.pathname;
 
 describe("/stageplots: the venue's address", () => {
-  test("opening a venue from its card writes ?venue=, and the back link removes it", async () => {
+  test("opening a venue from its card goes to /stageplots/<id>, and the back link to /stageplots", async () => {
     const router = await mountAt("/stageplots");
-    assert.equal(venueInAddress(router), undefined);
+    assert.equal(addressOf(router), "/stageplots");
     fireEvent.click(screen.getByText("Hall Away"));
     await settle();
     await settle();
-    assert.equal(venueInAddress(router), "v-off");
+    assert.equal(addressOf(router), "/stageplots/v-off");
+    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Hall Away");
     fireEvent.click(screen.getByRole("button", { name: "Stage plots" }));
     await settle();
     await settle();
     assert.ok(screen.getByTestId("venue-list"));
-    assert.equal(venueInAddress(router), undefined);
+    assert.equal(addressOf(router), "/stageplots");
   });
 
-  test("a venue opened on its own, as the only home venue, writes ?venue=", async () => {
+  test("a venue replaces the address rather than adding to the history", async () => {
+    const router = await mountAt("/stageplots");
+    fireEvent.click(screen.getByText("Hall Away"));
+    await settle();
+    await settle();
+    assert.equal(router.history.length, 1);
+  });
+
+  test("a fresh load of /stageplots/<id> opens that venue over the remembered one", async () => {
+    localStorage.setItem(LAST_VENUE_KEY, "v-main");
+    const router = await mountAt("/stageplots/v-off");
+    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Hall Away");
+    assert.equal(addressOf(router), "/stageplots/v-off");
+  });
+
+  test("an id that names no venue shows the list, and the address stays as it was", async () => {
+    const router = await mountAt("/stageplots/v-gone");
+    assert.ok(screen.getByTestId("venue-list"));
+    assert.equal(addressOf(router), "/stageplots/v-gone");
+  });
+
+  test("the only home venue, opened on its own, goes to its address", async () => {
     DOC.venues = DOC.venues.filter((v) => v.id !== "v-small");
     const router = await mountAt("/stageplots");
     assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Room One");
-    assert.equal(venueInAddress(router), "v-main");
+    assert.equal(addressOf(router), "/stageplots/v-main");
   });
 
-  test("the remembered venue, once opened, writes ?venue=", async () => {
+  test("the remembered venue, once opened, goes to its address", async () => {
     localStorage.setItem(LAST_VENUE_KEY, "v-off");
     const router = await mountAt("/stageplots");
-    assert.equal(venueInAddress(router), "v-off");
+    assert.equal(addressOf(router), "/stageplots/v-off");
+  });
+
+  test("Back from the only home venue shows the list, not the venue again", async () => {
+    DOC.venues = DOC.venues.filter((v) => v.id !== "v-small");
+    const router = await mountAt("/stageplots");
+    fireEvent.click(screen.getByRole("button", { name: "Stage plots" }));
+    await settle();
+    await settle();
+    assert.ok(screen.getByTestId("venue-list"));
+    assert.equal(addressOf(router), "/stageplots");
   });
 });
 
@@ -273,19 +306,6 @@ describe("/stageplots", () => {
     assert.ok(screen.getByText("No plots yet"));
     const add = screen.getByRole("link", { name: "Add a plot" });
     assert.equal(add.getAttribute("href"), "/stageplots/edit?venue=v-small");
-  });
-
-  test("?venue= opens that venue over the remembered one", async () => {
-    localStorage.setItem(LAST_VENUE_KEY, "v-main");
-    window.history.replaceState(null, "", "/stageplots?venue=v-off");
-    await mount();
-    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Hall Away");
-  });
-
-  test("?venue= naming no venue shows the list", async () => {
-    window.history.replaceState(null, "", "/stageplots?venue=v-gone");
-    await mount();
-    assert.ok(screen.getByTestId("venue-list"));
   });
 
   test("a failed read says so instead of showing no venues", async () => {

@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
-import { StagePlotsPage } from "../main/stageplots-view";
+import { StagePlotsPage, StagePlotsVenueRoute } from "../main/stageplots-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
@@ -335,6 +335,10 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   { path: "/patch/edit", Component: PatchSection },
   // The stage plots editor, reached from /stageplots. It draws its own heading.
   { path: "/stageplots/edit", Component: StagePlotsEdit },
+  // One venue's plots, the address to copy or make a QR code of. Static siblings such
+  // as /stageplots/edit win over the parameter. Untitled and nested: the page draws
+  // the venue's own heading, and the rail keeps Stage plots lit.
+  { path: "/stageplots/$venueId", Component: StagePlotsVenueRoute, parent: "/stageplots" },
   // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.

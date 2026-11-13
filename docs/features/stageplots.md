@@ -90,11 +90,12 @@ plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
 selected, the plot itself, its legend, and the venue's notes.
 
 - With exactly one home venue, `/stageplots` opens it directly.
-- A venue has its own address, `/stageplots?venue=<id>`, on the server's local
-  address (`http://<server>:8788/stageplots?venue=<id>`, or port 80 where the
+- A venue has its own address, `/stageplots/<venue id>`, on the server's local
+  address (`http://<server>:8788/stageplots/<venue id>`, or port 80 where the
   friendly port is set up). Opening a venue puts it in the address bar and leaving
-  it takes it out, so the bar can be copied or made into a QR code. The address
-  wins over the remembered venue; an id that names no venue shows the list.
+  it goes back to `/stageplots`, so the bar can be copied or made into a QR code,
+  and the address opens that venue on a fresh load. It wins over the remembered
+  venue; an id that names no venue shows the list.
 - A venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
   named in `?venue=` when it exists.
