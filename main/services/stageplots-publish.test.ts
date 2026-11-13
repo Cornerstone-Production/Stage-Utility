@@ -79,6 +79,8 @@ interface Harness {
   plan: { planId: string | null; planDates: string | null; serviceTypeId: string | null };
   /** The patch the publisher reads; null reads as a patch that cannot be read. */
   patch: { file: PatchFile | null };
+  /** How many times the publisher asked where to publish: once per republish that got past its fingerprint. */
+  targetCalls: () => number;
   /** Tell the publisher a channel was broadcast, as the app's broadcaster does. */
   hear: (channel: string) => void;
   /** Change the document as a route would, and broadcast it. */
@@ -129,8 +131,13 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
   const plan = { planId: null as string | null, planDates: null as string | null, serviceTypeId: null as string | null };
   const patch: { file: PatchFile | null } = { file: { sheets: [], updatedAt: "" } };
   let listener: (channel: string) => void = () => undefined;
+  let targetCalls = 0;
+  const target = (opts.target as () => Promise<never>) ?? (async () => ({ ok: true, origin: parsed.origin, token: TOKEN }));
   const publisher = new StagePlotsPublisher({
-    target: (opts.target as never) ?? (async () => ({ ok: true, origin: parsed.origin, token: TOKEN })),
+    target: () => {
+      targetCalls++;
+      return target();
+    },
     store: stageplotsStore,
     image: async (h) => images.get(h) ?? null,
     plan: () => plan,
@@ -152,6 +159,7 @@ async function harness(doc: StagePlotsDoc = venueDoc(), opts: { target?: () => P
     saved,
     plan,
     patch,
+    targetCalls: () => targetCalls,
     hear: (channel) => listener(channel),
     edit: async (fn) => {
       await stageplotsStore.update(fn);
@@ -278,6 +286,8 @@ describe("publishing a venue", () => {
     const r = await h.publisher.publish("v-1");
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.error, /^Plot "Plot 0" is too large to publish \(\d+\.\d MB; the limit is 2\.0 MB\)/);
+    // Patch channels count toward the limit too, so the refusal names them as a way out.
+    assert.match(r.ok ? "" : r.error, /patch channels\.$/);
     assert.equal(spRequests(h.page).length, 0, "a request was sent for a publish that could not complete");
     assert.equal((await h.venue()).publish, undefined);
   });
@@ -1677,6 +1687,7 @@ describe("linked connection points on the public page", () => {
     };
 
     let mark = h.page.requests.length;
+    const asked = h.targetCalls();
     await patchSaved((f) => {
       f.sheets[0]!.endpoints[0]!.mic = "SENTINEL another mic";
       f.sheets[0]!.devices[0]!.name = "SENTINEL rack renamed";
@@ -1685,6 +1696,9 @@ describe("linked connection points on the public page", () => {
       f.sheets[0]!.variants[0]!.name = "SENTINEL renamed variant";
     });
     assert.deepEqual(sentSince(mark), [], "a patch change no published point shows was sent");
+    // Stopped at the fingerprint, not by the per-key dedupe behind it: a fingerprint holding
+    // anything of the patch the page does not get would go on to ask where to publish.
+    assert.equal(h.targetCalls(), asked, "a patch change no published point shows got past the fingerprint");
 
     mark = h.page.requests.length;
     await patchSaved((f) => {
