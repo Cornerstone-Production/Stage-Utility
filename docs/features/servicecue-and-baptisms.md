@@ -86,9 +86,9 @@ They are edited on the **ServiceCue layouts** page (`/servicecue/presets`), reac
 from **Edit layouts** on the launcher, with **ServiceCue** lit in the sidebar and a
 link back to it above the title. The page holds, in order: a notice when some category
 is in no role (see [Category roles](#category-roles)), **Layouts**, **Category roles**,
-and two rows shut at the foot of the page, **Landing page** and **Public link**, each
-saying what it holds (the service types the landing page shows; whether the page is
-publishing).
+a row shut at the foot of the page, **Landing page**, saying what it holds (the service
+types it shows), and a line beneath it, **Public link**, saying whether the page is
+publishing, with a **Settings in Advanced** link to where it is set up.
 
 **Landing page** opens to a tick box per service type. Only the ticked types appear on
 the landing page, each with the layouts in the page's order, then All columns; the first
@@ -380,8 +380,8 @@ layout's old address shows All columns there, and its All columns does not add t
 categories in no role. Updating the page (**Keep the page up to date**, or a redeploy)
 brings it in line.
 
-The server sends; nothing on the internet connects to it. **Public link**, a row at the
-foot of the ServiceCue layouts page (`/servicecue/presets`), is where it is switched on: the page's address, the publishing token set on it, and the link
+The server sends; nothing on the internet connects to it. **Settings → Advanced → Public link**
+(`/settings/advanced/public-link`) is where it is switched on: the page's address, the publishing token set on it, and the link
 to hand out. Under **Cloudflare connection**, **Keep the page up to date** gives the server a
 Cloudflare account ID and API token so it updates the public page itself after each update
 ([how](../ops/servicecue-on-the-web.md#keeping-it-up-to-date)). The page holds copies of what is sent and nothing else: no Planning Center

@@ -679,7 +679,9 @@ behind this are listed in the [API](../reference/api.md).
 
 ## Advanced
 
-**Settings → Advanced** holds the settings you touch rarely. It is split into tabs, and
+**Settings → Advanced** holds the settings you touch rarely, among them the
+[Public link](servicecue-and-baptisms.md#on-the-web) that publishes ServiceCue to a page of your own,
+on its own **Public link** tab. It is split into tabs, and
 each tab has its own address, `/settings/advanced/<tab>`, so a tab can be bookmarked or
 sent to someone. `/settings/advanced` opens General; an address that is not a tab shows
 General too. The sidebar keeps **Advanced** lit on every tab. **Server log** at the

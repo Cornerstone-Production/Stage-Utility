@@ -1,4 +1,4 @@
-// servicecue-public-link.tsx — the "Public link" card on the ServiceCue layouts page.
+// servicecue-public-link.tsx — the "Public link" card, on Settings > Advanced > Public link.
 //
 // ServiceCue on the web: the server sends what ServiceCue shows out to a page the
 // operator deployed, and volunteers open that page instead of the app. This card is
@@ -19,9 +19,12 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
+import { appZoneOf } from "../../lib/app-zone";
+import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { useUpdateStatus } from "../../app/queries";
 import { QrHint } from "../../components/qr-hint";
 import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
@@ -34,6 +37,9 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { ConnectionField } from "./connection-field";
 import { selectMask, typedTokenOf } from "./servicecue-token";
 import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
+import { advancedTabPath } from "./advanced-settings";
+import { byOrder } from "./servicecue-layouts-model";
+import type { ServiceCueConfig, ServiceCueLayout, ServiceTypeDTO } from "../../../main/types/pco.js";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -204,6 +210,97 @@ export function usePublishSummary(pollMs = POLL_MS): string {
   return error ? "Couldn't load" : "Loading…";
 }
 
+/** Where the card lives. */
+export const PUBLIC_LINK_PATH = advancedTabPath("public-link");
+
+/**
+ * What the card says the public sees, read where the ServiceCue layouts page keeps it: the
+ * landing page's service types (named by Planning Center, so only once it is connected), the
+ * layouts, and the app's zone for the page's deploy time. A read that fails is logged under
+ * the card's tag and reported in `failed`, so the card says so instead of drawing an empty list.
+ */
+export function usePublishScope(): {
+  typeNames: string[];
+  layoutNames: string[];
+  timeZone: string | undefined;
+  failed: ScopeFailed;
+} {
+  const stage = useStageState();
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  const { fail, clear } = useFailedReads<"layouts" | "config" | "types">("servicecue");
+  const layouts = useQuery({ queryKey: ["servicecue:listLayouts"], queryFn: () => invoke<ServiceCueLayout[]>("servicecue:listLayouts") });
+  const config = useQuery({ queryKey: ["servicecue:getConfig"], queryFn: () => invoke<ServiceCueConfig>("servicecue:getConfig") });
+  const types = useQuery({
+    queryKey: ["stage:listServiceTypes"],
+    queryFn: () => invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
+    enabled: pcoConfigured === true,
+  });
+  useEffect(() => {
+    if (layouts.error) fail("layouts", "the layouts the public link lists", layouts.error);
+    else clear("layouts");
+  }, [layouts.error, fail, clear]);
+  useEffect(() => {
+    if (config.error) fail("config", "the service types the public link lists", config.error);
+    else clear("config");
+  }, [config.error, fail, clear]);
+  useEffect(() => {
+    if (types.error) fail("types", "the service type names the public link lists", types.error);
+    else clear("types");
+  }, [types.error, fail, clear]);
+  const shown = new Set(config.data?.serviceTypeIds ?? []);
+  return {
+    typeNames: (types.data ?? []).filter((t) => shown.has(t.id)).map((t) => t.name),
+    layoutNames: byOrder(layouts.data ?? []).map((l) => l.name),
+    timeZone: appZoneOf(stage.state),
+    failed: { layouts: !!layouts.error, types: !!config.error || !!types.error },
+  };
+}
+
+/** Which of the lists "what the public sees" draws could not be read. */
+export interface ScopeFailed {
+  layouts: boolean;
+  types: boolean;
+}
+
+/** The card as Settings > Advanced draws it, with what it publishes loaded alongside. */
+export function PublicLinkPanel() {
+  return <PublicLinkCard {...usePublishScope()} embedded />;
+}
+
+/**
+ * One line on the ServiceCue layouts page: the card's state, and the way to the card. A real
+ * link that opens in a new tab like any other; inside the app's router a plain click navigates
+ * without a reload (null outside a router, where the tests render the page bare).
+ */
+export function PublicLinkStatusRow() {
+  const word = usePublishSummary();
+  return (
+    <div className="flex min-h-11 items-center gap-2 rounded-[10px] border border-line bg-surface px-3 py-2 text-footnote">
+      <span className="whitespace-nowrap font-semibold text-fg">Public link</span>
+      <span className="min-w-0 flex-1 truncate text-fg-muted">· {word}</span>
+      <SettingsInAdvancedLink />
+    </div>
+  );
+}
+
+/** "Settings in Advanced": the way to the Public link tab, for whoever sends the operator there. */
+export function SettingsInAdvancedLink({ children = "Settings in Advanced" }: { children?: ReactNode }) {
+  const router = useRouter({ warn: false }) as { navigate: (o: { to: string }) => unknown } | null;
+  return (
+    <a
+      href={PUBLIC_LINK_PATH}
+      onClick={(e) => {
+        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        void router.navigate({ to: PUBLIC_LINK_PATH });
+      }}
+      className="whitespace-nowrap rounded-sm text-accent underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+    >
+      {children}
+    </a>
+  );
+}
+
 /** The card on a page of its own, and inside a row that already frames and titles it. */
 const CARD_LOOK = {
   failed: "mb-5",
@@ -216,6 +313,7 @@ export function PublicLinkCard({
   typeNames,
   layoutNames,
   timeZone,
+  failed: scopeFailed,
   pollMs = POLL_MS,
   embedded = false,
 }: {
@@ -223,6 +321,8 @@ export function PublicLinkCard({
   layoutNames: string[];
   /** The app's zone, which the page's deploy time is written in. The browser's own when the app's is not known yet. */
   timeZone?: string;
+  /** Lists that could not be read: the summary says so where it would have drawn them. */
+  failed?: ScopeFailed;
   /** How often it asks how it is going. A seam for the test that watches it change. */
   pollMs?: number;
   /** Inside a row that already says "Public link" and draws the border: no card frame
@@ -524,13 +624,21 @@ export function PublicLinkCard({
           {notice && <Note>{notice}</Note>}
           <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">What the public sees</div>
           <ul className="flex list-disc flex-col gap-[3px] pl-[18px] text-footnote">
-            <li>
-              {typeNames.length > 0 ? typeNames.join(", ") : "No service types yet"}{" "}
-              <span className="text-fg-muted">· follows Landing page</span>
-            </li>
-            <li>
-              {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every layout above</span>
-            </li>
+            {scopeFailed?.types ? (
+              <li className="list-none"><ErrorNote>Couldn't load the service types, so this list is incomplete.</ErrorNote></li>
+            ) : (
+              <li>
+                {typeNames.length > 0 ? typeNames.join(", ") : "No service types yet"}{" "}
+                <span className="text-fg-muted">· follows Landing page</span>
+              </li>
+            )}
+            {scopeFailed?.layouts ? (
+              <li className="list-none"><ErrorNote>Couldn't load the layouts, so this list is incomplete.</ErrorNote></li>
+            ) : (
+              <li>
+                {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every ServiceCue layout</span>
+              </li>
+            )}
             <li>
               The live item, countdown and clock <span className="text-fg-muted">· as they change</span>
             </li>

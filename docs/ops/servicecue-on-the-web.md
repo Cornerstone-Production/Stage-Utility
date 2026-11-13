@@ -103,8 +103,8 @@ the LAN.
    `"protocol":1` with your token, and a 401 without it, mean the Worker is running
    and the secret is set.
 
-6. **Turn it on in Stage Utility.** Open the ServiceCue layouts page
-   (`/servicecue/presets`), open **Public link** at the foot of the page, and enter the Worker's address and the
+6. **Turn it on in Stage Utility.** Open **Settings → Advanced → Public link**
+   (`/settings/advanced/public-link`) and enter the Worker's address and the
    token from step 4. Switch it on: Stage Utility asks the Worker first, so a wrong
    address or token is said on the card and nothing is switched on. The card then shows
    the link to give out (with **Copy** and a **QR code**) and how long ago the Worker last
@@ -139,7 +139,7 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
    ```
 
    `workersDev: false` turns the `workers.dev` address off; leave it out to keep both.
-3. In the Public link card, change the page address and enter the publishing token
+3. In **Settings → Advanced → Public link**, change the page address and enter the publishing token
    again in the same save: a token is kept only for the address it was saved with.
 4. Harden the zone, in the domain's own settings:
    - **SSL/TLS → Edge Certificates**: **Always Use HTTPS** on, **HSTS** on (6 months,
@@ -191,8 +191,8 @@ Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Work
 Pages** overview, on the right.
 
 **Give them to the server.** The credentials are saved for the page's address, so the address has
-to be set first. On the ServiceCue layouts page (`/servicecue/presets`), open **Cloudflare
-connection** on the **Public link** card (it shows once the card has been switched on, as in the
+to be set first. In **Settings → Advanced → Public link**, open **Cloudflare
+connection** on the card (it shows once the card has been switched on, as in the
 steps above) and find **Keep the page up to date**:
 
 1. Paste the account ID into **Cloudflare account ID**.
