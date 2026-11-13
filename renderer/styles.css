@@ -780,11 +780,13 @@
     display: none !important;
   }
 
-  /* Only the sheet, and what holds it. */
-  :root:has(.patch-print-sheet) :not(:has(.patch-print-sheet)):not(.patch-print-sheet):not(.patch-print-sheet *) {
+  /* Only the sheet, and what holds it. A stage plot's print sheet
+     (.stageplots-print-sheet, below) is made the page the same way. */
+  :root:has(.patch-print-sheet, .stageplots-print-sheet)
+    :not(:has(.patch-print-sheet, .stageplots-print-sheet)):not(.patch-print-sheet, .stageplots-print-sheet):not(.patch-print-sheet *, .stageplots-print-sheet *) {
     display: none !important;
   }
-  :has(.patch-print-sheet) {
+  :has(.patch-print-sheet, .stageplots-print-sheet) {
     display: block !important;
     position: static !important;
     height: auto !important;
@@ -2090,15 +2092,69 @@ button.score-capsule:focus-visible {
   --su-companion-plate: #000;
 }
 
-/* Stage plots: the paper a plot is drawn on, and its grid. A converted background
-   is a light raster, so a plot sits on paper in both themes: dimmed in dark rather
-   than inverted, since inverting would turn a colour photo into a negative.
-   Strictly neutral (R=G=B). */
+/* A stage plot printed: white paper and dark ink in either theme, mounted only
+   while printing (stageplots-print.tsx) and never shown on screen. In print,
+   the patch block above drops everything that does not hold it; here it gets a
+   landscape page of its own (a named @page, so the patch sheet keeps its
+   portrait one) and keeps its swatch colours. */
+:root {
+  --su-print-paper: #ffffff;
+  --su-print-ink: #161616;
+  --su-print-muted: #5e5e5e;
+  --su-print-line: #dcdcdc;
+}
+.stageplots-paper {
+  --su-plot-paper: var(--su-print-paper);
+  --su-plot-grid: #ededed;
+  --su-plot-ink: #3b3b3b;
+  --su-plot-label: var(--su-print-ink);
+  --legend-ink: var(--su-print-muted);
+  --legend-on: var(--su-print-paper);
+  --su-surface-raised: var(--su-print-paper);
+  --su-fg-soft: var(--su-print-ink);
+  --su-fg-subtle: var(--su-print-muted);
+  background: var(--su-print-paper);
+  color: var(--su-print-ink);
+  color-scheme: light;
+}
+.stageplots-print-sheet {
+  display: none;
+}
+@page stageplot {
+  size: landscape;
+  margin: 12mm;
+}
+@media print {
+  .stageplots-print-sheet {
+    display: block !important;
+    page: stageplot;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .stageplots-print-page {
+    height: calc(100vh - 1px);
+    break-inside: avoid;
+  }
+  .stageplots-print-next {
+    break-before: page;
+  }
+}
+
+/* Stage plots: the paper a plot is drawn on, its grid, the ink of an item with no
+   colour of its own and the ink of its label. A converted background is a light
+   raster, so a plot sits on paper in both themes: dimmed in dark rather than
+   inverted, since inverting would turn a colour photo into a negative. A printed
+   plot is white paper in either theme (.stageplots-paper). Strictly neutral
+   (R=G=B). An item's own colour is data: one of the patch sheet's swatches. */
 :root {
   --su-plot-paper: #ffffff;
   --su-plot-grid: #ededed;
+  --su-plot-ink: #3b3b3b;
+  --su-plot-label: #1c1c1c;
 }
 .dark {
   --su-plot-paper: #d9d9d9;
   --su-plot-grid: #cacaca;
+  --su-plot-ink: #303030;
+  --su-plot-label: #141414;
 }

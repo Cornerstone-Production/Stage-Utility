@@ -7,19 +7,31 @@
 // resolves: a plot's venue and background exist, a venue lists exactly its own
 // plots, and its default is one of them.
 
+import { PATCH_COLORS } from "../types/patch.js";
 import {
+  ITEM_TYPES,
+  PLOT_UNITS_WIDE,
   STAGEPLOT_LIMITS,
+  SYMBOL_KINDS,
+  TEXT_KINDS,
   type Background,
   type BackgroundOriginalMime,
   type BackgroundSourceExt,
+  type CablePoint,
+  type ItemType,
   type Plot,
+  type PlotItem,
   type StagePlotsDoc,
+  type SymbolKind,
+  type TextKind,
   type Venue,
   type VenueKind,
 } from "../types/stageplots.js";
 import { DataStore } from "./data-store.js";
+import { errorMessage } from "./errors.js";
 import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
+import { fitToHeight, plotHeight, withCableBox } from "./stageplots-doc.js";
 
 const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [] };
 
@@ -177,7 +189,142 @@ function checkBackground(raw: unknown, i: number): Background {
   };
 }
 
-function checkPlot(raw: unknown, i: number): Plot {
+// ── Items ────────────────────────────────────────────────────────────────
+
+const L = STAGEPLOT_LIMITS;
+
+/** A finite number within [min, max], or a refusal naming `what`. */
+function within(v: unknown, min: number, max: number, what: string): number {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
+    refuse(`${what} must be a number from ${shown(min, "up")} to ${shown(max, "down")}`);
+  }
+  return v;
+}
+
+/**
+ * A bound as a refusal states it, to a tenth, rounded inward: a plot 666.666…
+ * high reads "to 666.6", never "to 666.7", which would read as allowing the
+ * very value it refused.
+ */
+function shown(n: number, way: "up" | "down"): number {
+  return (way === "up" ? Math.ceil(n * 10) : Math.floor(n * 10)) / 10;
+}
+
+function text(v: unknown, max: number, what: string): string {
+  if (typeof v !== "string") refuse(`${what} must be text`);
+  if (v.length > max) refuse(`${what} is longer than ${max} characters`);
+  return v;
+}
+
+function checkPoint(raw: unknown, height: number, what: string): CablePoint {
+  if (!Array.isArray(raw) || raw.length !== 2) refuse(`${what} must be an [x, y] pair`);
+  return [within(raw[0], 0, PLOT_UNITS_WIDE, `${what}'s x`), within(raw[1], 0, height, `${what}'s y`)];
+}
+
+/**
+ * One item, rebuilt field by field: a field the item does not have is dropped,
+ * and a type's own fields (symbol, textKind, points, dashed) appear only on
+ * that type. So the same item always comes out the same, and an unchanged save
+ * compares equal to what is stored.
+ */
+function checkItem(raw: unknown, height: number, what: string): PlotItem {
+  const it = asObject(raw, what);
+  const id = checkId(it.id, what);
+  const named = `${what} "${id}"`;
+  if (!ITEM_TYPES.includes(it.type as ItemType)) refuse(`${named}'s type must be one of ${ITEM_TYPES.join(", ")}`);
+  const type = it.type as ItemType;
+  const cable = type === "cable";
+  // A cable's box and turn are derived from its points below, never checked:
+  // whatever the client sent for them is replaced.
+  const geometry = (key: "x" | "y" | "w" | "h" | "rotation", min: number, max: number, what: string) =>
+    cable ? 0 : within(it[key], min, max, `${named}'s ${what}`);
+  if (!cable && it.rotation === -180) refuse(`${named}'s rotation must be more than -180 and at most 180 (-180 is 180)`);
+  if (it.color !== null && !PATCH_COLORS.includes(it.color as (typeof PATCH_COLORS)[number])) {
+    refuse(`${named}'s colour must be one of the patch sheet's ten swatches, or none`);
+  }
+  const inputs = asArray(it.inputs, `${named}'s inputs`);
+  if (inputs.length > L.inputsPerItem) refuse(`${named} has more than ${L.inputsPerItem} inputs`);
+  const item: PlotItem = {
+    id,
+    type,
+    x: geometry("x", 0, PLOT_UNITS_WIDE, "x"),
+    y: geometry("y", 0, height, "y"),
+    w: geometry("w", L.itemMinSize, L.itemMaxSize, "width"),
+    h: geometry("h", L.itemMinSize, L.itemMaxSize, "height"),
+    rotation: geometry("rotation", -180, 180, "rotation"),
+    label: text(it.label, L.labelChars, `${named}'s label`),
+    color: it.color as string | null,
+    notes: text(it.notes, L.notesChars, `${named}'s notes`),
+    inputs: inputs.map((v, j) => text(v, L.inputChars, `${named}'s input ${j + 1}`)),
+  };
+  if (type === "symbol") {
+    if (!SYMBOL_KINDS.includes(it.symbol as SymbolKind)) refuse(`${named}'s symbol must be one of ${SYMBOL_KINDS.join(", ")}`);
+    item.symbol = it.symbol as SymbolKind;
+  }
+  if (type === "text") {
+    if (!TEXT_KINDS.includes(it.textKind as TextKind)) refuse(`${named}'s text kind must be one of ${TEXT_KINDS.join(", ")}`);
+    item.textKind = it.textKind as TextKind;
+  }
+  if (cable) {
+    const points = asArray(it.points, `${named}'s points`);
+    if (points.length < L.cablePointsMin || points.length > L.cablePointsMax) {
+      refuse(`${named} must have ${L.cablePointsMin} to ${L.cablePointsMax} points`);
+    }
+    item.points = points.map((p, j) => checkPoint(p, height, `${named}'s point ${j + 1}`));
+    required(it.dashed, "boolean", `${named}'s dashed`);
+    item.dashed = it.dashed as boolean;
+    // Never the client's box or turn: a cable's are its points' (withCableBox),
+    // derived here, before anything is checked against the plot.
+    return withCableBox(item);
+  }
+  return item;
+}
+
+/**
+ * A plot's items on a plot `height` units high, each rebuilt (checkItem), or a
+ * throw naming the first problem. The items route and the restore check both
+ * hold items to this.
+ */
+export function checkItems(raw: unknown, height: number, what: string): PlotItem[] {
+  const list = asArray(raw, `${what}'s items`);
+  if (list.length > L.itemsPerPlot) refuse(`${what} can have at most ${L.itemsPerPlot} items`);
+  const items = list.map((it, j) => checkItem(it, height, `${what}'s item ${j + 1}`));
+  const seen = new Set<string>();
+  for (const it of items) {
+    if (seen.has(it.id)) refuse(`${what} lists item "${it.id}" more than once`);
+    seen.add(it.id);
+  }
+  return items;
+}
+
+/** Why `items` cannot be saved on a plot `height` units high, or null. The
+ *  routes and the restore check use checkItems; this is the test seam, and the
+ *  renderer's tests hold the editor's drafts to the server's rules with it. */
+export function validateItems(items: unknown, height: number): string | null {
+  try {
+    checkItems(items, height, "the plot");
+    return null;
+  } catch (err) {
+    return errorMessage(err);
+  }
+}
+
+/**
+ * `items` fitted to a plot `height` units high (fitToHeight, which the editor
+ * uses too), with how many moved; the list itself when none did. Used when a
+ * plot switches to a background that makes it shorter.
+ */
+export function itemsWithin(items: readonly PlotItem[], height: number): { items: PlotItem[]; moved: number } {
+  let moved = 0;
+  const next = items.map((it) => {
+    const fitted = fitToHeight(it, height);
+    if (fitted !== it) moved++;
+    return fitted;
+  });
+  return moved === 0 ? { items: items as PlotItem[], moved } : { items: next, moved };
+}
+
+function checkPlot(raw: unknown, i: number, heightOf: (backgroundId: string | null) => number): Plot {
   const p = asObject(raw, `plot ${i + 1}`);
   const id = checkId(p.id, `plot ${i + 1}`);
   const what = `plot "${id}"`;
@@ -185,14 +332,13 @@ function checkPlot(raw: unknown, i: number): Plot {
   orRefuse(nameProblem(p.name, what));
   if (p.backgroundId !== null && typeof p.backgroundId !== "string") refuse(`${what}'s background must be a background id or null`);
   orRefuse(fadeProblem(p.bgFade, what));
-  const items = asArray(p.items, `${what}'s items`).map((item, j) => asObject(item, `${what}'s item ${j + 1}`));
   return {
     id,
     venueId: p.venueId as string,
     name: p.name as string,
     backgroundId: p.backgroundId as string | null,
     bgFade: p.bgFade as number,
-    items,
+    items: checkItems(p.items, heightOf(p.backgroundId as string | null), what),
     version: checkCount(p.version, `${what}'s version`),
   };
 }
@@ -206,7 +352,11 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
   const d = asObject(raw, "the stage plots");
   const venues = asArray(d.venues, "the venues").map(checkVenue);
   const backgrounds = asArray(d.backgrounds, "the backgrounds").map(checkBackground);
-  const plots = asArray(d.plots, "the plots").map(checkPlot);
+  // A plot naming a background that does not exist is refused below; until
+  // then its items are measured on the grid's height.
+  const backgroundById = new Map(backgrounds.map((b) => [b.id, b]));
+  const heightOf = (id: string | null) => plotHeight(id === null ? null : backgroundById.get(id));
+  const plots = asArray(d.plots, "the plots").map((p, i) => checkPlot(p, i, heightOf));
   for (const [what, list] of [["the venues", venues], ["the backgrounds", backgrounds], ["the plots", plots]] as const) {
     uniqueIds(list.map((e) => ({ id: e.id })), what);
   }

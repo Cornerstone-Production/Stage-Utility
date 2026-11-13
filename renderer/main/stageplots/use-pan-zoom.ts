@@ -1,6 +1,6 @@
 // use-pan-zoom.ts — zoom and pan a plot by moving its SVG viewBox.
 //
-// Drag pans, two fingers pinch, a trackpad pinch (a wheel event with ctrl or
+// Drag pans (unless the editor has claimed the pointer for an item), two fingers pinch, a trackpad pinch (a wheel event with ctrl or
 // cmd held) zooms at the pointer, and an ordinary wheel pans only once zoomed
 // in, so scrolling past a plot on a page still scrolls the page. Buttons zoom
 // in, out and back to the whole plot.
@@ -51,12 +51,20 @@ export function panView(view: View, full: { w: number; h: number }, dx: number, 
 }
 
 export interface PanZoom {
+  /** The part of the plot on screen, in plot units. */
+  view: View;
   viewBox: string;
   /** 1 is the whole plot. */
   zoom: number;
   zoomIn: () => void;
   zoomOut: () => void;
   fit: () => void;
+  /**
+   * Mark a pointer as someone else's: the editor claims the pointer that
+   * pressed an item, so dragging the item does not also pan the plot. A second
+   * finger still pinches. Released when that pointer lifts.
+   */
+  claim: (pointerId: number) => void;
   /** Spread onto the SVG. */
   handlers: {
     onPointerDown: (e: PointerEvent<SVGSVGElement>) => void;
@@ -72,6 +80,7 @@ export function usePanZoom(svgRef: RefObject<SVGSVGElement | null>, fullW: numbe
   const viewRef = useLatestRef(view);
   const fullRef = useLatestRef({ w: fullW, h: fullH });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const claimed = useRef(new Set<number>());
 
   /** Plot units per screen pixel, and the frame's box. */
   const measure = () => {
@@ -124,7 +133,7 @@ export function usePanZoom(svgRef: RefObject<SVGSVGElement | null>, fullW: numbe
     const v = viewRef.current;
     const full = fullRef.current;
     if (ps.size === 1) {
-      setView(panView(v, full, (e.clientX - prev.x) * m.k, (e.clientY - prev.y) * m.k));
+      if (!claimed.current.has(e.pointerId)) setView(panView(v, full, (e.clientX - prev.x) * m.k, (e.clientY - prev.y) * m.k));
     } else if (ps.size === 2) {
       const other = [...ps.entries()].find(([id]) => id !== e.pointerId)![1];
       const before = Math.hypot(prev.x - other.x, prev.y - other.y);
@@ -140,15 +149,18 @@ export function usePanZoom(svgRef: RefObject<SVGSVGElement | null>, fullW: numbe
   };
   const onPointerUp = (e: PointerEvent<SVGSVGElement>) => {
     pointers.current.delete(e.pointerId);
+    claimed.current.delete(e.pointerId);
   };
 
   const center = () => ({ x: view.x + view.w / 2, y: view.y + view.h / 2 });
   return {
+    view,
     viewBox: `${view.x} ${view.y} ${view.w} ${view.h}`,
     zoom: fullW / view.w,
     zoomIn: () => setView(zoomView(view, { w: fullW, h: fullH }, ZOOM_STEP, center())),
     zoomOut: () => setView(zoomView(view, { w: fullW, h: fullH }, 1 / ZOOM_STEP, center())),
     fit: () => setView(fitView({ w: fullW, h: fullH })),
+    claim: (pointerId: number) => claimed.current.add(pointerId),
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp },
   };
 }

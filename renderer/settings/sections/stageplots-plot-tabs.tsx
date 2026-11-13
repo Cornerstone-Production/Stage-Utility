@@ -1,6 +1,7 @@
 // stageplots-plot-tabs.tsx — a venue's plots as tabs in the editor, the star on
 // the default, and the selected plot's menu: Rename, Duplicate, Set as
-// default, Delete. Each saves at once. The default plot cannot be deleted
+// default, Delete. Each saves at once; New, Duplicate and Delete first ask the
+// editor whether the selected plot can be left (unsaved changes). The default plot cannot be deleted
 // until another is the default, so its Delete is not offered.
 
 import { useRef, useState } from "react";
@@ -35,12 +36,16 @@ export function PlotTabs({
   plots,
   selected,
   onSelect,
+  beforeSwitch,
   save,
 }: {
   venue: Venue;
   plots: Plot[];
   selected: Plot | null;
   onSelect: (plotId: string) => void;
+  /** Asked before anything that leaves the selected plot (New, Duplicate,
+   *  Delete); false stops it. The editor asks about unsaved changes. */
+  beforeSwitch?: () => Promise<boolean>;
   save: Save;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -56,18 +61,24 @@ export function PlotTabs({
     return r.ok ? r.value : null;
   };
 
+  const leaving = async () => (beforeSwitch ? beforeSwitch() : true);
+
   const add = async () => {
+    if (!(await leaving())) return;
     const made = await run(() =>
       stageplotsApi.createPlot({ venueId: venue.id, name: `Plot ${plots.length + 1}`, backgroundId: selected?.backgroundId ?? null }),
     );
     if (made) onSelect(made.id);
   };
   const duplicate = async (plot: Plot) => {
+    if (!(await leaving())) return;
     const copy = await run(() => stageplotsApi.duplicatePlot(plot.id));
     if (copy) onSelect(copy.id);
   };
   const remove = async (plot: Plot) => {
+    // The delete is asked first, so a Cancel there never costs unsaved work.
     if (!(await confirm({ title: `Delete ${plot.name}?`, message: `It is removed from ${venue.name}. Its background stays.`, confirmLabel: "Delete plot", destructive: true }))) return;
+    if (!(await leaving())) return;
     await run(() => stageplotsApi.deletePlot(plot.id));
   };
   const finishRename = async (plot: Plot, name: string | null) => {

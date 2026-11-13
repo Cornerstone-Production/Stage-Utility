@@ -4,7 +4,10 @@
 // What is NOT here, because jsdom loads no stylesheet and measures every
 // element as 0 by 0: pinch zoom and drag pan (usePanZoom reads the frame's
 // size to turn pixels into plot units), the plot paper and grid colours, the
-// 390 px phone layout and its lack of horizontal scroll. Those are driven in a
+// 390 px phone layout and its lack of horizontal scroll, where a tap's details
+// sit beside the item (they are placed from measured boxes), and the switch to
+// a bottom sheet under 640 px (a CSS breakpoint), and the printed page itself
+// (one landscape page; print media and @page need a real browser's PDF). Those are driven in a
 // browser; the pan and zoom geometry itself is unit-tested in use-pan-zoom.test.ts.
 //
 // Every name below is invented. This is a public repository.
@@ -21,9 +24,11 @@ const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let DOC: StagePlotsView;
+/** The app's time zone, as GET /api/state reports it. */
+let TIMEZONE: string | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const path = String(url).split("?")[0];
-  const body = path === "/api/stageplots" ? DOC : null;
+  const body = path === "/api/stageplots" ? DOC : path === "/api/state" ? { timezone: TIMEZONE } : null;
   return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
 };
 
@@ -31,6 +36,8 @@ const { render, cleanup, screen, fireEvent, within } = await import("@testing-li
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("./stageplots-view.js");
+const { PrintSheet, printedDate, printLayout, legendLines } = await import("./stageplots-print.js");
+const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
 const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
@@ -77,12 +84,15 @@ const tabs = () => screen.getAllByRole("tab");
 
 beforeEach(() => {
   DOC = doc();
+  TIMEZONE = null;
   localStorage.clear();
 });
 afterEach(async () => {
   cleanup();
   await settle();
   resetReplayCache();
+  // The print sheet reads the app's time zone from the shared stage state.
+  resetStageState();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 
@@ -132,7 +142,7 @@ describe("/stageplots", () => {
     assert.equal(image.getAttribute("href"), background.url);
     assert.equal(image.getAttribute("opacity"), "0.66");
     assert.equal(plot().getAttribute("viewBox"), "0 0 1000 666.6666666666666");
-    assert.ok(plot().querySelector("[data-items]"), "the items layer PR 2 draws into");
+    assert.ok(plot().querySelector("[data-items]"), "no items layer");
   });
 
   test("a stageplots:updated event redraws without a reload", async () => {
@@ -215,5 +225,133 @@ describe("/stageplots", () => {
     assert.ok(isOperatorPath("/stageplots/edit"));
     assert.ok(DESTINATIONS.some((d) => d.path === "/stageplots" && d.label === "Stage plots"));
     assert.ok(NAV_GROUPS.find((g) => g.label === "Content")?.paths.includes("/stageplots"));
+  });
+});
+
+describe("/stageplots: an item's details, the legend and print", () => {
+  type Item = StagePlotsView["plots"][number]["items"][number];
+  const item = (over: Partial<Item> & Pick<Item, "id" | "type">): Item => ({ x: 100, y: 100, w: 25, h: 25, rotation: 0, label: "", color: null, notes: "", inputs: [], ...over });
+  const marked = (): Item[] => [
+    item({ id: "fp3", type: "conn", label: "FP-3", color: "#12a594", notes: "Floor pocket, stage left.", inputs: ["Keys L", "Keys R", "Click"] }),
+    item({ id: "w1", type: "symbol", symbol: "wedge", label: "Floor wedge", color: "#f76b15", x: 300 }),
+    item({ id: "w2", type: "symbol", symbol: "wedge", label: "Floor wedge", color: "#f76b15", x: 400 }),
+    item({ id: "c1", type: "text", textKind: "callout", label: "Riser skirt faces the room", x: 500 }),
+  ];
+  const plotSvg = () => screen.getByRole("img", { name: /Stage plot/ });
+  const press = async (target: Element, dx = 0) => {
+    await act(async () => {
+      fireEvent.pointerDown(target, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+      fireEvent.pointerUp(target, { pointerId: 1, clientX: 10 + dx, clientY: 10, button: 0 });
+    });
+    await settle();
+  };
+
+  async function openMarked() {
+    DOC.plots[1].items = marked();
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+  }
+
+  test("tapping FP-3 lists its three inputs", async () => {
+    await openMarked();
+    await press(plotSvg().querySelector('[data-id="fp3"] rect')!);
+    const details = screen.getByTestId("item-details");
+    assert.match(details.textContent!, /^FP-3Connection pointFloor pocket, stage left\.Inputs/);
+    assert.deepEqual([...within(details).getAllByRole("listitem")].map((li) => li.textContent), ["1Keys L", "2Keys R", "3Click"]);
+    assert.ok(plotSvg().querySelector('[data-id="fp3"] rect[fill="none"]'), "the tapped item is not ringed");
+    // A tap on the empty plot closes it; a tap on text opens nothing.
+    await press(plotSvg().querySelector("rect")!);
+    assert.ok(screen.queryByTestId("item-details") === null);
+    await press(plotSvg().querySelector('[data-id="c1"] circle')!);
+    assert.ok(screen.queryByTestId("item-details") === null);
+    // A press off the plot closes it too (on a phone the sheet covers the legend).
+    await press(plotSvg().querySelector('[data-id="fp3"] rect')!);
+    await act(async () => {
+      fireEvent.pointerDown(within(screen.getByTestId("item-details")).getByText("Keys L"), { pointerId: 2 });
+    });
+    assert.ok(screen.queryByTestId("item-details") !== null, "a press inside the details closed them");
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("legend"), { pointerId: 2 });
+    });
+    assert.ok(screen.queryByTestId("item-details") === null, "a press off the plot left the details open");
+  });
+
+  test("a cancelled press does not swallow the next tap", async () => {
+    await openMarked();
+    const target = plotSvg().querySelector('[data-id="fp3"] rect')!;
+    await act(async () => {
+      fireEvent.pointerDown(target, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+      fireEvent.pointerCancel(target, { pointerId: 1, clientX: 10, clientY: 10 });
+    });
+    await press(target);
+    assert.ok(screen.queryByTestId("item-details") !== null, "the tap after a cancelled press opened nothing");
+  });
+
+  test("a press that moves is a pan, not a tap", async () => {
+    await openMarked();
+    await press(plotSvg().querySelector('[data-id="fp3"] rect')!, 30);
+    assert.ok(screen.queryByTestId("item-details") === null);
+  });
+
+  test("the legend under the plot groups the two wedges and keys the callout", async () => {
+    await openMarked();
+    const legend = screen.getByTestId("legend");
+    assert.deepEqual([...legend.querySelectorAll('[data-testid="legend-row"]')].map((r) => r.textContent), ["FP-3", "Floor wedge×2"]);
+    assert.deepEqual([...legend.querySelectorAll('[data-testid="callout-key"]')].map((r) => r.textContent), ["1Riser skirt faces the room"]);
+  });
+
+  test("the print layout has the legend, the callout key and the connection points", async () => {
+    let printed = 0;
+    (window as unknown as { print: () => void }).print = () => void printed++;
+    await openMarked();
+    assert.ok(screen.queryByTestId("print-page") === null, "the sheet is on the page before printing");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Print" }));
+    });
+    await settle();
+    assert.equal(printed, 1);
+    const page = screen.getByTestId("print-page");
+    assert.ok(page.parentElement === document.body, "the sheet is not on <body>, where the print rules expect it");
+    assert.match(page.querySelector("h1")!.textContent!, /^Room One · Special$/);
+    assert.match(page.querySelector("header p")!.textContent!, /^Default plotPrinted /);
+    assert.deepEqual([...page.querySelectorAll('[data-testid="legend-row"]')].map((r) => r.textContent), ["FP-3", "Floor wedge×2"]);
+    assert.deepEqual([...page.querySelectorAll('[data-testid="callout-key"]')].map((r) => r.textContent), ["1Riser skirt faces the room"]);
+    assert.equal(page.querySelector('[data-testid="print-connections"]')?.textContent, "FP-3 Keys L, Keys R, Click");
+    assert.ok(page.querySelector('svg [data-id="fp3"]'), "the plot is not on the page");
+    await act(async () => {
+      window.dispatchEvent(new window.Event("afterprint"));
+    });
+    assert.ok(screen.queryByTestId("print-page") === null, "the sheet stayed after printing");
+  });
+
+  test("the printed date uses the app time zone", async () => {
+    // 12:00 UTC on Thursday 12 November is already Friday 13 in UTC+14, and
+    // still Thursday on any host clock from UTC-11 to UTC+11.
+    const noonUtc = Date.UTC(2026, 10, 12, 12);
+    assert.equal(printedDate(noonUtc, "Pacific/Kiritimati"), "Fri 13 Nov 2026");
+    assert.equal(printedDate(noonUtc, "UTC"), "Thu 12 Nov 2026");
+    TIMEZONE = "Pacific/Kiritimati";
+    await act(async () => {
+      render(React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
+    });
+    await settle();
+    assert.equal(screen.getByTestId("print-page").querySelector("header p")!.textContent, "Printed Fri 13 Nov 2026");
+  });
+
+  test("a long legend goes beside the plot in up to two columns, then onto a second page", () => {
+    assert.deepEqual(printLayout(10), { columns: 1, secondPage: false });
+    assert.deepEqual(printLayout(50), { columns: 2, secondPage: false });
+    assert.deepEqual(printLayout(60), { columns: 4, secondPage: true });
+  });
+
+  test("a connection point with a long input list counts as the lines it wraps to", () => {
+    const boxes = [1, 2, 3].map((n) => item({ id: `sb${n}`, type: "conn", label: `SB-${n}`, inputs: Array.from({ length: 30 }, (_, i) => `Input ${i + 1}`) }));
+    // "SB-1 Input 1, ..., Input 30" is 294 characters: ten lines of a column, not one.
+    assert.equal(legendLines(boxes), 3 + 3 * 10 + 3, `three 30-input stage boxes counted as ${legendLines(boxes)} lines`);
+    assert.deepEqual(printLayout(legendLines(boxes)), { columns: 2, secondPage: false });
+    const six = [...boxes, ...[4, 5, 6].map((n) => ({ ...boxes[0], id: `sb${n}`, label: `SB-${n}` }))];
+    assert.equal(printLayout(legendLines(six)).secondPage, true, "six 30-input stage boxes still fit beside the plot");
+    assert.equal(legendLines([item({ id: "p", type: "conn", label: "FP-3", inputs: ["Keys L"] })]), 2 + 3);
   });
 });

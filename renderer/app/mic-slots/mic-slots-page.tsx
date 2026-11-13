@@ -22,11 +22,11 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useBlocker } from "@tanstack/react-router";
 import { Loader2Icon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { Button, EmptyState, ErrorNote, confirm } from "../../components/ui";
+import { LeaveGuard } from "../../components/leave-guard";
+import { Button, EmptyState, ErrorNote } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { usePageActions } from "../page-actions";
 import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
@@ -56,30 +56,11 @@ const collide: CollisionDetection = (args) => {
   return closestCenter(args);
 };
 
-/** Leaving the page with unsaved work asks first, for a link, Back and a closing
- *  tab alike. Rendered only under a router: useBlocker needs one. */
-export function LeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
-  const blocker = useBlocker({
-    shouldBlockFn: () => dirty,
-    enableBeforeUnload: () => dirty,
-    withResolver: true,
-  });
-  const asked = useRef(false);
-  useEffect(() => {
-    if (blocker.status !== "blocked" || asked.current) return;
-    asked.current = true;
-    void confirm({
-      title: "Leave without saving?",
-      message: `${plural(count, "board")} ${count === 1 ? "has" : "have"} changes that are not saved. Leaving loses them.`,
-      confirmLabel: "Leave",
-      destructive: true,
-    }).then((ok) => {
-      asked.current = false;
-      if (ok) blocker.proceed?.();
-      else blocker.reset?.();
-    });
-  }, [blocker, count]);
-  return null;
+/** Leaving with unsaved boards asks first, naming how many. */
+export function MicSlotsLeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
+  return (
+    <LeaveGuard dirty={dirty} message={`${plural(count, "board")} ${count === 1 ? "has" : "have"} changes that are not saved. Leaving loses them.`} />
+  );
 }
 
 export function MicSlotsPage() {
@@ -213,7 +194,7 @@ export function MicSlotsPage() {
 
   return (
     <div className="flex flex-col gap-4 pb-[50vh] max-sm:pb-24" data-mic-slots-page>
-      {router && <LeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
+      {router && <MicSlotsLeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
       <TopBar mic={mic} savedOpen={savedOpen} onSavedOpen={setSavedOpen} savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null} />
       {mic.targetsFailed != null && (
         <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>

@@ -86,7 +86,7 @@ photo does not hold two in memory.
 
 Read-only. The venues as cards, home then offsite, each with a thumbnail of its
 default plot. A venue opens to its plots as tabs with the default selected, the plot
-itself, and the venue's notes.
+itself, its legend, and the venue's notes.
 
 - With exactly one home venue, `/stageplots` opens it directly.
 - The browser remembers the last venue opened and opens it next time; **Stage
@@ -94,16 +94,21 @@ itself, and the venue's notes.
 - Pinch or Ctrl/Cmd-scroll to zoom, drag to pan, and the buttons in the plot's
   corner zoom in, out and back to the whole plot. An ordinary scroll pans only
   once the plot is zoomed in, so the page still scrolls past it.
-- An edit anywhere shows without a reload.
+- Tap an item for its label, kind, notes and numbered inputs: beside the item on a
+  desk, as a sheet along the bottom on a phone. A tap on the empty plot, anywhere
+  off the plot, or Escape closes it; text has no details.
+- **Print** beside the venue's name prints the plot (see [Printing](#printing)).
+- A saved edit anywhere shows without a reload.
 
 **Edit** in the bar opens the editor.
 
 ## /stageplots/edit
 
 Venues and Backgrounds down the left, the selected venue's plots on the right.
-Every change saves as it is made and every open `/stageplots` follows it; there is
-no Save button. A change the server refuses says why beside the control, and the
-page goes back to what is saved.
+Venues, backgrounds, plots and a plot's background and fade save as they are made,
+and every open `/stageplots` follows them. A change the server refuses says why
+beside the control, and the page goes back to what is saved. What is drawn on a
+plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
 
 - **Venues**: **+ Venue** adds one and selects it. The selected venue's name and
   notes save when you leave the field; Home or Offsite saves at once.
@@ -113,13 +118,124 @@ page goes back to what is saved.
   background), and **⋯** on the selected tab for **Rename**, **Duplicate** (an
   independent copy named "… copy", which opens), **Set as default** and
   **Delete…**.
-- **Toolbar**: zoom, the plot's **Background** (or **None (grid)**), and **Fade**,
-  which previews on the plot while dragged and saves when let go.
+- **Toolbar**: undo and redo, zoom, the plot's **Background** (or **None (grid)**),
+  **Fade**, which previews on the plot while dragged and saves when let go, and
+  **Print**.
+
+A plot switched to a background that makes it shorter moves any item that no
+longer fits wholly on it up until it does, and brings a cable's points below the
+new edge up to it. That changes the plot's items: switching back does not
+put them where they were. The log says how many moved. With unsaved changes on the
+plot, picking another background asks first: **Save and switch**, **Discard and
+switch**, or **Cancel**; it never switches under unsaved work.
+
+### Editing a plot
+
+Under the toolbar: the palette, the plot, its legend, and the inspector for the
+selected item.
+
+- **Add**: press an item in the palette. It lands in the middle of what the plot
+  shows, selected, each one a little further down and right than the last. When the
+  palette with its names would leave the plot under 600 pixels wide, it shows icons
+  only, each named by its tooltip.
+- **Select**: press an item. Press the empty plot to clear the selection; dragging
+  the empty plot pans it.
+- **Move**: drag the item. **Resize**: drag the square at its corner; it grows
+  about its centre along its own sides, even when turned. **Rotate**: drag the
+  circle above it (below it when the item is at the top edge), in 5° steps. A cable's points each have a handle; drag one to
+  move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
+- **Keys**, while the plot has focus (pressing it gives it focus): the arrow keys
+  move the selected item 4 units, 20 with Shift; Delete or Backspace removes it.
+  Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes, anywhere on the page but in a
+  field.
+- **Inspector**: the item's kind with **Duplicate** (a copy a little down and
+  right) and **Delete**; its label; for text, Label, Callout or Dimension; a colour,
+  one of the patch sheet's ten swatches or none; width, height and rotation (a
+  cable shows **Dashed** and its point count instead); notes, shown when someone
+  taps it; and its inputs.
+- **Undo and redo** cover the draft. A drag, a resize, a rotate or typing in one
+  field is one step, however long it takes.
+
+Every change stays inside the plot and within the size limits, so a draft can
+always be saved.
+
+**Save and Discard.** While the draft differs from what is saved, a banner says
+so: **Save** sends it, **Discard** puts back what is saved. Nothing reaches
+`/stageplots` until Save. Each save carries the version of the plot it started
+from. If the plot was saved from somewhere else since, the save is refused and
+nothing is overwritten: the banner says the plot changed elsewhere and offers
+**Reload**, which shows the saved plot and drops the draft. A change elsewhere to
+the plot's name or fade does not count, nor does a background change that moved no
+items; a save refused for one of those before its news arrived is sent again on the
+new version. A background change that moved items does count. Nothing counts while
+the draft has nothing unsaved, which simply shows the new plot; undoing back to
+that clears the banner. Leaving the page,
+switching venue or plot, or **+**, **Duplicate** or **Delete…** on a plot ask
+first while there are unsaved changes.
+
+### Item types
+
+| Type | Draws |
+|---|---|
+| Box, Circle | a shape, lightly filled in its colour |
+| Zone | a dashed, translucent area: a choir, a baptistry |
+| Cable | a line through its points, dashed or solid, with a dot at each end |
+| Connection point | a floor pocket, stage box or wall plate |
+| Symbol | one of nine drawings: drum kit, grand piano, keyboard, floor wedge, amp, mic stand, console, speaker, camera |
+| Text: Label | words on the plot, sized with it |
+| Text: Callout | a numbered dot; its text is listed in the legend's callout key |
+| Text: Dimension | a line with end ticks and arrowheads, its label above |
+
+Zones are drawn under shapes, shapes under cables, cables under symbols and
+connection points, and text on top; the selected item is drawn above everything.
+A new symbol is labelled with its name, a new cable is dashed, and a new label,
+dimension or callout reads "Text", "10 ft" or "Note".
+
+Labels stay the same size on screen at any zoom, and read level however an item
+is turned. Shapes and symbols scale with the plot.
+
+### Labels
+
+A label is free text, up to 60 characters. The field suggests labels this venue
+already uses (on the plot being edited, unsaved ones included, and on the venue's
+other plots), then starter gear: drum kit, grand piano, keyboard, floor wedge,
+guitar amp, bass amp, mic stand, FOH console, speaker, camera, DI box, stage box,
+IEM transmitter. The whole list shows when the field takes focus and narrows as
+you type, the matching part marked. The arrow keys move through it and Enter takes
+the highlighted one; anything typed is used as it is.
+
+### Inputs
+
+Any item can list what plugs in there, in order: up to 64 inputs of 40
+characters each, typically on a connection point. **Add input** adds a row and puts
+the cursor in it. The inputs show, numbered, when someone taps the item on
+`/stageplots`, and printed beside the plot for each connection point.
+
+### The legend
+
+Under the plot, in the editor and on `/stageplots`: one row per label and colour,
+with a drawing of the item, so two orange "Floor wedge" read as one row, "×2".
+Unlabelled items and text are left out. Callouts follow, numbered in the order
+they were added, with their text.
+
+### Printing
+
+**Print** opens the browser's print dialog with the plot on one landscape page:
+the venue and plot, "Default plot" when it is, the date printed in the app's time
+zone, the plot, its legend and callout key, and each connection point's inputs.
+The page is white paper in either theme. To make a PDF, choose Save as PDF in the
+dialog. The browser's own print (Cmd/Ctrl+P) gives the same page.
+
+The legend sits beside the plot in one or two columns. A legend too long for two
+moves to a second page, in four columns, and the plot keeps the whole first page.
+
+In the editor, Print shows the plot as it stands, unsaved changes included.
 
 ## Limits
 
 50 venues, 20 plots a venue, 50 backgrounds, names of 60 characters and notes of
-500.
+500. A plot holds up to 500 items; an item's label is up to 60 characters, its
+notes 500, and its inputs up to 64 of 40 characters each.
 
 ## Backups
 
@@ -144,8 +260,12 @@ background accepted with its size before and after and the source kept, a conver
 background over 1 MB at the lowest quality, a clean-up re-conversion or one refused
 because its source is missing, a venue or background deleted, files tidied away or
 left behind, the tidy skipped and why, image processing unavailable because sharp
-did not load, and a save that failed. A page that cannot read the plots logs that
-too. See [Updates and logs](../ops/updates-and-logs.md).
+did not load, a save that failed, every item save refused and why (a body that is
+not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
+version that is not a whole number, "changed elsewhere"), and how many items moved
+up onto a plot once its background change is saved.
+A page that cannot read the plots logs that too, and so does a print whose
+background did not load. See [Updates and logs](../ops/updates-and-logs.md).
 
 ## API
 

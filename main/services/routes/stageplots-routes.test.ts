@@ -486,3 +486,211 @@ describe("stage plot routes", () => {
     assert.equal(r.responded, false);
   });
 });
+
+describe("plot items: PUT /api/stageplots/plots/:id/items", () => {
+  type PlotJson = { id: string; version: number; items: Record<string, unknown>[] };
+  const box = (over: Record<string, unknown> = {}) => ({
+    id: "i-1",
+    type: "box",
+    x: 100,
+    y: 100,
+    w: 80,
+    h: 60,
+    rotation: 0,
+    label: "Drum riser",
+    color: null,
+    notes: "",
+    inputs: [],
+    ...over,
+  });
+  const save = (id: string, version: number, items: unknown) => call("PUT", `/api/stageplots/plots/${id}/items`, { version, items });
+  async function fresh() {
+    const v = await venue();
+    return plot(v.id);
+  }
+  async function refusedWith(id: string, items: unknown, why: RegExp) {
+    let r!: Awaited<ReturnType<typeof call>>;
+    const said = await warnings(async () => {
+      r = await save(id, 0, items);
+    });
+    assert.equal(r.status, 400, r.body);
+    assert.match((r.json as { error: string }).error, why);
+    assert.ok(said.some((w) => /items refused/.test(w)), `the refusal was not said on [stageplots]: ${said.join("\n")}`);
+    assert.deepEqual((await stageplotsStore.get()).plots[0].items, [], "a refused save stored something");
+  }
+
+  test("an unknown type is 400", async () => {
+    const p = await fresh();
+    await refusedWith(p.id, [box({ type: "triangle" })], /type/);
+  });
+
+  test("a symbol outside SYMBOL_KINDS is 400", async () => {
+    const p = await fresh();
+    await refusedWith(p.id, [box({ type: "symbol", symbol: "harp" })], /symbol/);
+  });
+
+  test("a colour outside PATCH_COLORS is 400", async () => {
+    const p = await fresh();
+    await refusedWith(p.id, [box({ color: "#123456" })], /colou?r/);
+  });
+
+  test("NaN or out-of-plot geometry is 400", async () => {
+    const p = await fresh();
+    // JSON has no NaN: a client that sends one sends null, or a string.
+    await refusedWith(p.id, [box({ x: null })], /x/);
+    await refusedWith(p.id, [box({ x: "NaN" })], /x/);
+    await refusedWith(p.id, [box({ y: 563 })], /y/); // the grid plot is 562.5 high
+    await refusedWith(p.id, [box({ x: 1001 })], /x/);
+  });
+
+  test("the 501st item is 400", async () => {
+    const p = await fresh();
+    const many = Array.from({ length: 501 }, (_, i) => box({ id: `i-${i}` }));
+    await refusedWith(p.id, many, /500 items/);
+    const r = await save(p.id, 0, many.slice(0, 500));
+    assert.equal(r.status, 200, r.body);
+  });
+
+  test("a cable with one point is 400", async () => {
+    const p = await fresh();
+    await refusedWith(p.id, [box({ type: "cable", points: [[10, 10]], dashed: false })], /2 to 50 points/);
+  });
+
+  test("a refused body is said on [stageplots]: not an object, or an unknown plot", async () => {
+    const p = await fresh();
+    let r!: Awaited<ReturnType<typeof call>>;
+    let said = await warnings(async () => {
+      r = await call("PUT", `/api/stageplots/plots/${p.id}/items`, [1, 2]);
+    });
+    assert.equal(r.status, 400, r.body);
+    assert.ok(said.some((w) => /items refused .*not a JSON object/.test(w)), said.join("\n"));
+    said = await warnings(async () => {
+      r = await save("p-nowhere", 0, []);
+    });
+    assert.equal(r.status, 404, r.body);
+    assert.ok(said.some((w) => /items refused for plot p-nowhere: no such plot/.test(w)), said.join("\n"));
+  });
+
+  test("a body without a whole-number version is 400", async () => {
+    const p = await fresh();
+    const r = await call("PUT", `/api/stageplots/plots/${p.id}/items`, { items: [] });
+    assert.equal(r.status, 400, r.body);
+    assert.match((r.json as { error: string }).error, /version/);
+    assert.equal((await call("PUT", "/api/stageplots/plots/p-nowhere/items", { version: 0, items: [] })).status, 404);
+  });
+
+  test("a stale version is 409 and stores nothing", async () => {
+    const p = await fresh();
+    assert.equal((await save(p.id, 0, [box()])).status, 200);
+    frames.length = 0;
+    let r!: Awaited<ReturnType<typeof call>>;
+    const said = await warnings(async () => {
+      r = await save(p.id, 0, [box({ label: "Overwritten" })]);
+    });
+    assert.equal(r.status, 409, r.body);
+    assert.deepEqual(r.json, { error: "changed elsewhere", version: 1 });
+    assert.ok(said.some((w) => /changed elsewhere/.test(w)), said.join("\n"));
+    const stored = (await stageplotsStore.get()).plots[0];
+    assert.equal(stored.items[0].label, "Drum riser");
+    assert.equal(stored.version, 1);
+    assert.equal(frames.length, 0, "a refused save broadcast");
+  });
+
+  test("two saves on one version: one lands, the other is 409, one broadcast", async () => {
+    const p = await fresh();
+    frames.length = 0;
+    const [a, b] = await Promise.all([save(p.id, 0, [box({ label: "First" })]), save(p.id, 0, [box({ label: "Second" })])]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+    const winner = a.status === 200 ? "First" : "Second";
+    const stored = (await stageplotsStore.get()).plots[0];
+    assert.equal(stored.items[0].label, winner);
+    assert.equal(stored.version, 1);
+    assert.equal(frames.length, 1);
+  });
+
+  test("a good save bumps version and broadcasts once", async () => {
+    const p = await fresh();
+    frames.length = 0;
+    const r = await save(p.id, 0, [box({ secret: "dropped" }), box({ id: "i-2", type: "symbol", symbol: "drumkit", color: "#e5484d", inputs: ["Kick In"] })]);
+    assert.equal(r.status, 200, r.body);
+    const saved = (r.json as { plot: PlotJson }).plot;
+    assert.equal(saved.version, 1);
+    assert.equal(saved.items.length, 2);
+    assert.equal("secret" in saved.items[0], false, "an unknown field was kept");
+    assert.equal(frames.length, 1);
+    assert.deepEqual((frames[0] as View).plots[0], saved);
+  });
+
+  test("an unchanged save writes nothing, broadcasts nothing and keeps the version", async () => {
+    const p = await fresh();
+    assert.equal((await save(p.id, 0, [box()])).status, 200);
+    const file = path.join(TMP, "stageplots.json");
+    const before = (await fs.stat(file)).mtimeMs;
+    frames.length = 0;
+    const r = await save(p.id, 1, [box()]);
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { plot: PlotJson }).plot.version, 1);
+    assert.equal(frames.length, 0);
+    assert.equal((await fs.stat(file)).mtimeMs, before);
+  });
+
+  test("every write rebuilds items, so a duplicate never shares one with its original", async () => {
+    const p = await fresh();
+    assert.equal((await save(p.id, 0, [box({ inputs: ["Kick In"] })])).status, 200);
+    const copy = (await call("POST", `/api/stageplots/plots/${p.id}/duplicate`)).json as PlotJson;
+    const doc = await stageplotsStore.get();
+    const [orig, dup] = [doc.plots.find((x) => x.id === p.id)!, doc.plots.find((x) => x.id === copy.id)!];
+    // The store keeps the document in memory: a copy that shares an item object
+    // with its original changes both the moment either is edited in place. What
+    // keeps them apart is checkStagePlotsDoc rebuilding every item on every write
+    // (checkItems), not the duplicate route's own structuredClone.
+    assert.notEqual(dup.items[0], orig.items[0], "the copy shares an item object with the original");
+    assert.notEqual(dup.items[0].inputs, orig.items[0].inputs, "the copy shares an inputs list with the original");
+    assert.equal((await save(copy.id, 0, [box({ label: "Changed" })])).status, 200);
+    assert.equal((await stageplotsStore.get()).plots.find((x) => x.id === p.id)!.items[0].label, "Drum riser");
+  });
+
+  test("a plot with a full-height cable on a 3:2 plan switches to a shorter background, the cable fitted", async () => {
+    const plan = (await upload("/api/stageplots/backgrounds?name=Plan.jpg", await jpeg(2400, 1600))).json as View["backgrounds"][number];
+    const wide = (await upload("/api/stageplots/backgrounds?name=Wide.jpg", await jpeg(600, 300))).json as View["backgrounds"][number];
+    const v = await venue();
+    const p = await plot(v.id, "Standard", plan.id);
+    const H32 = 2000 / 3;
+    const cable = box({ type: "cable", points: [[50, 0], [50, H32]], dashed: true, x: 50, y: 0, w: 0, h: H32 });
+    assert.equal((await save(p.id, 0, [cable])).status, 200);
+    const r = await call("PATCH", `/api/stageplots/plots/${p.id}`, { backgroundId: wide.id });
+    assert.equal(r.status, 200, r.body);
+    const stored = (await stageplotsStore.get()).plots[0];
+    assert.deepEqual(stored.items[0].points, [[50, 0], [50, 500]]);
+    assert.equal(stored.items[0].h, 500);
+  });
+
+  test("a background switch moves an item below the new bottom back onto the plot, and says so", async () => {
+    const tall = (await upload("/api/stageplots/backgrounds?name=Tall.jpg", await jpeg(600, 900))).json as View["backgrounds"][number];
+    const v = await venue();
+    const p = await plot(v.id, "Standard", tall.id);
+    // 600 x 900 is a plot 1500 units high.
+    const items = [
+      box({ y: 1200, h: 60 }),
+      box({ id: "i-2", type: "cable", points: [[10, 20], [300, 1400]], dashed: true, x: 10, y: 20, w: 290, h: 1380 }),
+      box({ id: "i-3", y: 50 }),
+    ];
+    assert.equal((await save(p.id, 0, items)).status, 200);
+    let r!: Awaited<ReturnType<typeof call>>;
+    const said: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void said.push(a.join(" "));
+    try {
+      r = await call("PATCH", `/api/stageplots/plots/${p.id}`, { backgroundId: null });
+    } finally {
+      console.log = real;
+    }
+    assert.equal(r.status, 200, r.body);
+    const stored = (await stageplotsStore.get()).plots[0];
+    assert.equal(stored.items[0].y, 562.5 - 60);
+    assert.deepEqual(stored.items[1].points, [[10, 20], [300, 562.5]]);
+    assert.equal(stored.items[1].h, 542.5);
+    assert.equal(stored.items[2].y, 50, "an item already on the plot moved");
+    assert.ok(said.some((l) => /\[stageplots\].*2 items moved/.test(l)), said.join("\n"));
+  });
+});
