@@ -2,7 +2,8 @@
 // the default, and the selected plot's menu: Rename, Duplicate, Set as
 // default, Delete. Each saves at once; New, Duplicate and Delete first ask the
 // editor whether the selected plot can be left (unsaved changes). The default plot cannot be deleted
-// until another is the default, so its Delete is not offered.
+// until another is the default, so its Delete is not offered. Deleting a plot that
+// plans use clears those plans' overrides, and its confirm names the plans.
 
 import { useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
@@ -37,6 +38,7 @@ export function PlotTabs({
   selected,
   onSelect,
   beforeSwitch,
+  plansUsing,
   save,
 }: {
   venue: Venue;
@@ -46,6 +48,8 @@ export function PlotTabs({
   /** Asked before anything that leaves the selected plot (New, Duplicate,
    *  Delete); false stops it. The editor asks about unsaved changes. */
   beforeSwitch?: () => Promise<boolean>;
+  /** The plans whose override names a plot, by name ("Sun 15 Nov"): its delete hands them back to the default. */
+  plansUsing?: (plotId: string) => string[];
   save: Save;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +81,13 @@ export function PlotTabs({
   };
   const remove = async (plot: Plot) => {
     // The delete is asked first, so a Cancel there never costs unsaved work.
-    if (!(await confirm({ title: `Delete ${plot.name}?`, message: `It is removed from ${venue.name}. Its background stays.`, confirmLabel: "Delete plot", destructive: true }))) return;
+    const plans = plansUsing?.(plot.id) ?? [];
+    const message =
+      `It is removed from ${venue.name}. Its background stays.` +
+      (plans.length === 0
+        ? ""
+        : ` ${plans.length === 1 ? "The plan" : `The ${plans.length} plans`} using it go back to the default plot: ${plans.join(", ")}.`);
+    if (!(await confirm({ title: `Delete ${plot.name}?`, message, confirmLabel: "Delete plot", destructive: true }))) return;
     if (!(await leaving())) return;
     await run(() => stageplotsApi.deletePlot(plot.id));
   };

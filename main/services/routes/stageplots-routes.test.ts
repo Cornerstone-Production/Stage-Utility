@@ -39,7 +39,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [] }));
+  await stageplotsStore.update(() => ({ venues: [], backgrounds: [], plots: [], overrides: [] }));
   for (const d of [STAGEPLOT_IMAGE_DIR, STAGEPLOT_ORIGINAL_DIR]) await fs.rm(path.join(TMP, d), { recursive: true, force: true });
   frames.length = 0;
 });
@@ -94,7 +94,7 @@ describe("stage plot routes", () => {
   test("GET answers the document with each background's URLs", async () => {
     const r = await call("GET", "/api/stageplots");
     assert.equal(r.status, 200);
-    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [] });
+    assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [] });
   });
 
   test("venues: create, rename, change kind and notes, delete with its plots", async () => {
@@ -105,7 +105,7 @@ describe("stage plot routes", () => {
     assert.deepEqual(r.json, { id: v.id, name: "Chapel", kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
     r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [] });
+    assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [] });
   });
 
   test("a venue's first plot becomes its default, and set default moves it", async () => {
@@ -694,3 +694,175 @@ describe("plot items: PUT /api/stageplots/plots/:id/items", () => {
     assert.ok(said.some((l) => /\[stageplots\].*2 items moved/.test(l)), said.join("\n"));
   });
 });
+
+describe("per-plan overrides", () => {
+  const put = (body: unknown) => call("PUT", "/api/stageplots/overrides", body);
+  /** Every [stageplots] line `run` logs. */
+  async function said(run: () => Promise<unknown>): Promise<string[]> {
+    const seen: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void seen.push(a.join(" "));
+    try {
+      await run();
+    } finally {
+      console.log = real;
+    }
+    return seen.filter((l) => l.startsWith("[stageplots]"));
+  }
+
+  async function room() {
+    const v = await venue();
+    const std = await plot(v.id, "Standard");
+    const bap = await plot(v.id, "Baptism");
+    const xmas = await plot(v.id, "Christmas");
+    return { v, std, bap, xmas };
+  }
+
+  test("PUT sets an override, answers the document, broadcasts once and says so", async () => {
+    const { v, bap } = await room();
+    frames.length = 0;
+    let r!: Awaited<ReturnType<typeof call>>;
+    const lines = await said(async () => {
+      r = await put({ planId: "101", venueId: v.id, plotId: bap.id, planDate: "2026-11-16T15:00:00Z" });
+    });
+    assert.equal(r.status, 200, r.body);
+    const stored = (await stageplotsStore.get()).overrides;
+    assert.deepEqual(stored, [{ planId: "101", venueId: v.id, plotId: bap.id, planDate: "2026-11-16T15:00:00.000Z" }]);
+    assert.deepEqual((r.json as View).overrides, stored);
+    assert.equal(frames.length, 1);
+    assert.deepEqual((frames[0] as View).overrides, stored);
+    assert.ok(lines.some((l) => l.includes("plan 101") && l.includes("Baptism")), lines.join("\n"));
+  });
+
+  test("the same override again, or removing one that is not there, writes and broadcasts nothing", async () => {
+    const { v, bap } = await room();
+    assert.equal((await put({ planId: "101", venueId: v.id, plotId: bap.id, planDate: "2026-11-16T15:00:00Z" })).status, 200);
+    const file = path.join(TMP, "stageplots.json");
+    const before = (await fs.stat(file)).mtimeMs;
+    frames.length = 0;
+    // The same date in another spelling is the same instant.
+    let r = await put({ planId: "101", venueId: v.id, plotId: bap.id, planDate: "2026-11-16T15:00:00.000Z" });
+    assert.equal(r.status, 200, r.body);
+    // A save that does not know the date keeps the one stored.
+    r = await put({ planId: "101", venueId: v.id, plotId: bap.id, planDate: null });
+    assert.equal(r.status, 200, r.body);
+    r = await put({ planId: "999", venueId: v.id, plotId: null });
+    assert.equal(r.status, 200, r.body);
+    assert.equal(frames.length, 0, "a change that changed nothing broadcast");
+    assert.equal((await fs.stat(file)).mtimeMs, before, "a change that changed nothing wrote the file");
+    assert.equal((await stageplotsStore.get()).overrides[0].planDate, "2026-11-16T15:00:00.000Z");
+  });
+
+  test("plotId null removes the override", async () => {
+    const { v, bap } = await room();
+    await put({ planId: "101", venueId: v.id, plotId: bap.id });
+    frames.length = 0;
+    const r = await put({ planId: "101", venueId: v.id, plotId: null });
+    assert.equal(r.status, 200, r.body);
+    assert.deepEqual((await stageplotsStore.get()).overrides, []);
+    assert.equal(frames.length, 1);
+  });
+
+  test("an unknown venue is 404, another venue's plot and a bad body 400, each said on [stageplots] and none stored", async () => {
+    const { v, bap } = await room();
+    const other = await venue("Chapel");
+    const otherPlot = await plot(other.id, "Chapel");
+    frames.length = 0;
+    const cases: [unknown, number, RegExp][] = [
+      [{ planId: "101", venueId: "v-nowhere", plotId: bap.id }, 404, /no such venue/],
+      [{ planId: "101", venueId: v.id, plotId: otherPlot.id }, 400, /one of the venue's plots/],
+      [{ planId: "101", venueId: v.id, plotId: "p-gone" }, 400, /one of the venue's plots/],
+      [{ planId: "1/2", venueId: v.id, plotId: bap.id }, 400, /plan id/],
+      [{ venueId: v.id, plotId: bap.id }, 400, /plan id/],
+      [{ planId: "101", venueId: v.id, plotId: 7 }, 400, /plotId/],
+      [{ planId: "101", venueId: v.id, plotId: bap.id, planDate: "soon" }, 400, /date/],
+      [[1, 2], 400, /object/],
+    ];
+    for (const [body, status, why] of cases) {
+      let r!: Awaited<ReturnType<typeof call>>;
+      const w = await warnings(async () => {
+        r = await put(body);
+      });
+      assert.equal(r.status, status, `${JSON.stringify(body)}: ${r.body}`);
+      assert.match(String((r.json as { error?: string } | null)?.error), why);
+      assert.ok(w.some((l) => l.includes("override refused")), `${JSON.stringify(body)} was refused without a word: ${w.join(" | ")}`);
+    }
+    assert.deepEqual((await stageplotsStore.get()).overrides, []);
+    assert.equal(frames.length, 0);
+  });
+
+  test("a refusal's log line is scrubbed", async () => {
+    const w = await warnings(() => put({ planId: "101", venueId: "v-x\n[stageplots] forged", plotId: "p-1" }));
+    assert.ok(w.length > 0);
+    assert.ok(w.every((l) => !l.includes("\n")), w.join(" | "));
+  });
+
+  test("deleting a plot removes its overrides and names the plans", async () => {
+    const { v, bap, xmas } = await room();
+    await put({ planId: "101", venueId: v.id, plotId: bap.id });
+    await put({ planId: "102", venueId: v.id, plotId: xmas.id });
+    await put({ planId: "103", venueId: v.id, plotId: bap.id });
+    let r!: Awaited<ReturnType<typeof call>>;
+    const lines = await said(async () => {
+      r = await call("DELETE", `/api/stageplots/plots/${bap.id}`);
+    });
+    assert.equal(r.status, 200, r.body);
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["101", "103"] });
+    assert.deepEqual(
+      (await stageplotsStore.get()).overrides.map((o) => o.planId),
+      ["102"],
+    );
+    assert.ok(lines.some((l) => /2 plan overrides cleared/.test(l)), lines.join("\n"));
+    // A plot no plan overrides clears none.
+    r = await call("DELETE", `/api/stageplots/plots/${xmas.id}`);
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["102"] });
+  });
+
+  test("deleting a venue takes its overrides with it, and leaves another venue's", async () => {
+    const { v, bap } = await room();
+    const other = await venue("Chapel");
+    await plot(other.id, "Chapel");
+    const otherAlt = await plot(other.id, "Chapel alt");
+    await put({ planId: "101", venueId: v.id, plotId: bap.id });
+    await put({ planId: "101", venueId: other.id, plotId: otherAlt.id });
+    const r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
+    assert.equal(r.status, 200, r.body);
+    assert.deepEqual(
+      (await stageplotsStore.get()).overrides.map((o) => o.venueId),
+      [other.id],
+    );
+  });
+
+  test("at the 2000-override limit a new override is refused and said; a change to one already there is not", async () => {
+    const { v, bap, xmas } = await room();
+    await stageplotsStore.update((d) => ({
+      ...d,
+      overrides: Array.from({ length: 2000 }, (_, i) => ({ planId: String(10_000 + i), venueId: v.id, plotId: bap.id, planDate: null })),
+    }));
+    frames.length = 0;
+    let r!: Awaited<ReturnType<typeof call>>;
+    const w = await warnings(async () => {
+      r = await put({ planId: "1", venueId: v.id, plotId: bap.id });
+    });
+    assert.equal(r.status, 400, r.body);
+    assert.match(String((r.json as { error: string }).error), /at most 2000 overrides/);
+    assert.ok(w.some((l) => l.includes("override refused")), w.join(" | "));
+    assert.equal(frames.length, 0);
+    r = await put({ planId: "10000", venueId: v.id, plotId: xmas.id });
+    assert.equal(r.status, 200, r.body);
+    assert.equal((await stageplotsStore.get()).overrides.length, 2000);
+  });
+
+  test("an override for a past plan is kept by every other change", async () => {
+    const { v, bap, std } = await room();
+    await put({ planId: "50", venueId: v.id, plotId: bap.id, planDate: "2020-01-05T15:00:00Z" });
+    await call("PATCH", `/api/stageplots/plots/${bap.id}`, { name: "Baptism 2" });
+    await call("POST", `/api/stageplots/venues/${v.id}/default`, { plotId: bap.id });
+    await call("POST", `/api/stageplots/venues/${v.id}/default`, { plotId: std.id });
+    assert.deepEqual(
+      (await stageplotsStore.get()).overrides.map((o) => o.planId),
+      ["50"],
+    );
+  });
+});
+

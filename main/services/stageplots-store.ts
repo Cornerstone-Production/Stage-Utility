@@ -21,6 +21,7 @@ import {
   type ItemType,
   type Plot,
   type PlotItem,
+  type PlotOverride,
   type StagePlotsDoc,
   type SymbolKind,
   type TextKind,
@@ -33,7 +34,7 @@ import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
 import { fitToHeight, plotHeight, withCableBox } from "./stageplots-doc.js";
 
-const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [] };
+const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [] };
 
 /** Ids the server mints and routes put in a URL: letters, digits, `-` and `_`. */
 export const STAGEPLOT_ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -43,6 +44,30 @@ export const STAGEPLOT_HASH = /^[0-9a-f]{16}$/;
 const KINDS: readonly VenueKind[] = ["home", "offsite"];
 const ORIGINAL_MIMES: readonly BackgroundOriginalMime[] = ["image/png", "image/jpeg", "application/pdf"];
 const SOURCE_EXTS: readonly BackgroundSourceExt[] = ["png", "jpg"];
+
+/** A Planning Center plan id as an override names it: what STAGEPLOT_ID allows. */
+function planIdProblem(v: unknown): string | null {
+  return typeof v === "string" && STAGEPLOT_ID.test(v) ? null : "the plan id must be 1 to 80 letters, digits, - or _";
+}
+
+/** The longest plan date taken, in characters: an ISO instant with an offset is 29. */
+const PLAN_DATE_CHARS = 40;
+
+/** An ISO date with a time on it. A bare date would be read as midnight UTC,
+ *  which is the evening before across the Americas. */
+const PLAN_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/**
+ * A plan date as stored: null, or the ISO instant `v` names, in toISOString's
+ * one spelling, so the same instant always compares equal. A string over 40
+ * characters, without a time, or one Date cannot read, is a refusal (thrown).
+ */
+function planDateOf(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
+  if (!Number.isFinite(at)) refuse("the plan date must be an ISO date and time, or null");
+  return new Date(at).toISOString();
+}
 
 /** Why `v` is not a usable name for `what` ("the venue"), or null. */
 export function nameProblem(v: unknown, what: string): string | null {
@@ -104,6 +129,7 @@ const LIMIT_SAYS = {
   venue: `there can be at most ${STAGEPLOT_LIMITS.venues} venues`,
   background: `there can be at most ${STAGEPLOT_LIMITS.backgrounds} backgrounds`,
   plot: `a venue can have at most ${STAGEPLOT_LIMITS.plotsPerVenue} plots`,
+  override: `there can be at most ${STAGEPLOT_LIMITS.overrides} overrides`,
 } as const;
 
 export function limitProblem(doc: StagePlotsDoc, kind: "venue" | "plot" | "background", venueId?: string): string | null {
@@ -343,10 +369,32 @@ function checkPlot(raw: unknown, i: number, heightOf: (backgroundId: string | nu
   };
 }
 
+function checkOverride(raw: unknown, i: number): PlotOverride {
+  const o = asObject(raw, `override ${i + 1}`);
+  const what = typeof o.planId === "string" ? `the override for plan "${o.planId}"` : `override ${i + 1}`;
+  const planProblem = planIdProblem(o.planId);
+  if (planProblem) refuse(`${what}: ${planProblem}`);
+  const venueId = checkId(o.venueId, `${what}'s venue`);
+  const plotId = checkId(o.plotId, `${what}'s plot`);
+  let planDate: string | null;
+  try {
+    planDate = planDateOf(o.planDate);
+  } catch (err) {
+    refuse(`${what}: ${errorMessage(err)}`);
+  }
+  return { planId: o.planId as string, venueId, plotId, planDate };
+}
+
+/** Overrides in their one order: by plan, then venue. */
+function sortOverrides(list: PlotOverride[]): PlotOverride[] {
+  return [...list].sort((a, b) => a.planId.localeCompare(b.planId) || a.venueId.localeCompare(b.venueId));
+}
+
 /**
  * A whole document, every field shaped as a save would leave it and every id
  * it names resolved — or a throw naming the first that is not. The restore
- * check, and the rule the routes' writes keep.
+ * check, and the rule the routes' writes keep. A document with no `overrides`
+ * (saved before they existed) reads as [].
  */
 export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
   const d = asObject(raw, "the stage plots");
@@ -357,6 +405,7 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
   const backgroundById = new Map(backgrounds.map((b) => [b.id, b]));
   const heightOf = (id: string | null) => plotHeight(id === null ? null : backgroundById.get(id));
   const plots = asArray(d.plots, "the plots").map((p, i) => checkPlot(p, i, heightOf));
+  const overrides = d.overrides === undefined ? [] : asArray(d.overrides, "the overrides").map(checkOverride);
   for (const [what, list] of [["the venues", venues], ["the backgrounds", backgrounds], ["the plots", plots]] as const) {
     uniqueIds(list.map((e) => ({ id: e.id })), what);
   }
@@ -382,11 +431,91 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
       refuse(`venue "${v.id}"'s default plot must be one of its plots`);
     }
   }
-  return { venues, backgrounds, plots };
+  if (overrides.length > STAGEPLOT_LIMITS.overrides) refuse(LIMIT_SAYS.override);
+  const seenOverride = new Set<string>();
+  for (const o of overrides) {
+    const venue = venueById.get(o.venueId);
+    if (!venue) refuse(`the override for plan "${o.planId}" names a venue that does not exist`);
+    if (!venue.plotIds.includes(o.plotId)) refuse(`the override for plan "${o.planId}" names a plot that is not one of venue "${venue.id}"'s`);
+    const key = JSON.stringify([o.planId, o.venueId]);
+    if (seenOverride.has(key)) refuse(`plan "${o.planId}" has more than one override for venue "${o.venueId}"`);
+    seenOverride.add(key);
+  }
+  return { venues, backgrounds, plots, overrides: sortOverrides(overrides) };
+}
+
+// ── Overrides ────────────────────────────────────────────────────────────
+
+/** A PUT /api/stageplots/overrides body: plotId null removes the override. */
+export interface OverrideChange {
+  planId: string;
+  venueId: string;
+  plotId: string | null;
+  planDate: string | null;
+}
+
+/** The change a PUT /api/stageplots/overrides body asks for, or why it cannot be one. */
+export function readOverrideChange(body: unknown): OverrideChange | { problem: string } {
+  if (!isRecord(body)) return { problem: "the override must be an object" };
+  const planProblem = planIdProblem(body.planId);
+  if (planProblem) return { problem: planProblem };
+  if (typeof body.venueId !== "string" || body.venueId === "") return { problem: "venueId must be a venue id" };
+  if (body.plotId !== null && typeof body.plotId !== "string") return { problem: "plotId must be one of the venue's plots, or null to use the default" };
+  try {
+    return { planId: body.planId as string, venueId: body.venueId, plotId: body.plotId, planDate: planDateOf(body.planDate) };
+  } catch (err) {
+    return { problem: errorMessage(err) };
+  }
+}
+
+/**
+ * `change` applied: the new document, or `doc` itself when it changes nothing
+ * (the same plot again, or removing an override that is not there), with the
+ * venue's name and the plot's (null when handed back to the default) for the
+ * log; or a refusal, with the status to answer it with. A change that does not
+ * know the plan's date keeps the date already stored. The routes and the
+ * editor's tests apply overrides through this one function.
+ */
+export function applyOverride(
+  doc: StagePlotsDoc,
+  change: OverrideChange,
+): { doc: StagePlotsDoc; venueName: string; plotName: string | null } | { status: 400 | 404; problem: string } {
+  const venue = doc.venues.find((v) => v.id === change.venueId);
+  if (!venue) return { status: 404, problem: "no such venue" };
+  const done = (next: StagePlotsDoc) => ({
+    doc: next,
+    venueName: venue.name,
+    plotName: change.plotId === null ? null : (doc.plots.find((p) => p.id === change.plotId)?.name ?? change.plotId),
+  });
+  const at = doc.overrides.findIndex((o) => o.planId === change.planId && o.venueId === change.venueId);
+  const current = at >= 0 ? doc.overrides[at] : null;
+  if (change.plotId === null) {
+    return done(current ? { ...doc, overrides: doc.overrides.filter((_, i) => i !== at) } : doc);
+  }
+  if (!venue.plotIds.includes(change.plotId)) return { status: 400, problem: "plotId must be one of the venue's plots, or null to use the default" };
+  const next: PlotOverride = { planId: change.planId, venueId: venue.id, plotId: change.plotId, planDate: change.planDate ?? current?.planDate ?? null };
+  if (current && current.plotId === next.plotId && current.planDate === next.planDate) return done(doc);
+  if (!current && doc.overrides.length >= STAGEPLOT_LIMITS.overrides) return { status: 400, problem: LIMIT_SAYS.override };
+  return done({ ...doc, overrides: current ? doc.overrides.map((o, i) => (i === at ? next : o)) : sortOverrides([...doc.overrides, next]) });
+}
+
+/**
+ * A document as read from disk, with `overrides` as a list: a file saved
+ * before overrides existed has no key for them and reads as []. One whose
+ * `overrides` is there but not a list reads as [] too, and says so on
+ * [stageplots], since the next save will write the empty list over it.
+ */
+export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
+  if (!isRecord(doc) || Array.isArray(doc.overrides)) return doc;
+  if ((doc as { overrides?: unknown }).overrides !== undefined) {
+    console.warn("[stageplots] stageplots.json's plan overrides are not a list; read as none, and the next save replaces them");
+  }
+  return { ...doc, overrides: [] };
 }
 
 const store = new DataStore<StagePlotsDoc>("stageplots.json", EMPTY, "config", {
   restoreCheck: checked(checkStagePlotsDoc),
+  normalize: normalizeStagePlots,
 });
 
 export const stageplotsStore = {

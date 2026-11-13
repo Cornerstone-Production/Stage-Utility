@@ -666,10 +666,10 @@ nothing. A body that is not a JSON object is a `400`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/stageplots` | `{venues, backgrounds, plots}`; each background carries `url` (its converted WebP) and `sourceUrl` (the source it was converted from: the upload, or the rendered PDF page, at most 2400 px on its long edge with its metadata dropped) |
+| GET | `/api/stageplots` | `{venues, backgrounds, plots, overrides}`; each background carries `url` (its converted WebP) and `sourceUrl` (the source it was converted from: the upload, or the rendered PDF page, at most 2400 px on its long edge with its metadata dropped) |
 | POST | `/api/stageplots/venues` | `{name, kind, notes?}`, `kind` `home` or `offsite`. `201` with the venue; `400` past 50 venues |
 | PATCH | `/api/stageplots/venues/:id` | Any of `{name, kind, notes}` |
-| DELETE | `/api/stageplots/venues/:id` | The venue and its plots |
+| DELETE | `/api/stageplots/venues/:id` | The venue, its plots and its plans' overrides |
 | POST | `/api/stageplots/venues/:id/default` | `{plotId}`, one of the venue's plots, becomes its default |
 | POST | `/api/stageplots/backgrounds?name=` | The body is a PNG or JPEG, raw (12 MB, 50 megapixels). Converted, then `201` with the background. `400` naming why for anything else, including a PDF, before any conversion; `400` past 50 backgrounds |
 | POST | `/api/stageplots/backgrounds/pdf?name=` | The body is a PDF, raw (25 MB). Kept, never served; `201` with `{originalHash, bytes}`. `409` while five PDFs already wait for their page |
@@ -679,8 +679,9 @@ nothing. A body that is not a JSON object is a `400`.
 | POST | `/api/stageplots/plots` | `{venueId, name, backgroundId?}`. A venue's first plot becomes its default. `201` with the plot; `400` past 20 plots in the venue |
 | POST | `/api/stageplots/plots/:id/duplicate` | An independent copy named `"<name> copy"`, placed after the original. `201` with the copy; `400` past 20 plots in the venue |
 | PATCH | `/api/stageplots/plots/:id` | Any of `{name, backgroundId, bgFade}`, `backgroundId` an existing background or `null`, `bgFade` 0 to 1. Bumps the plot's `version`. A background that makes the plot shorter moves any item that no longer fits wholly on it up until it does (a cable's points below the new edge come up to it) |
-| DELETE | `/api/stageplots/plots/:id` | `409` while it is its venue's default |
+| DELETE | `/api/stageplots/plots/:id` | `409` while it is its venue's default. Removes every plan's override naming it, and answers `{ok: true, clearedPlans}` with those plans' ids |
 | PUT | `/api/stageplots/plots/:id/items` | `{version, items}`: the plot's whole item list, saved against the `version` it was loaded at. `200` with `{plot}`, its `version` one higher; an unchanged list saves nothing and keeps the version. `409` with `{error: "changed elsewhere", version}` when the plot changed since, storing nothing. `400` naming the first item that breaks a rule (see [Items](#stage-plot-items)), or a `version` that is not a whole number. Each refusal is logged on `[stageplots]` |
+| PUT | `/api/stageplots/overrides` | `{planId, venueId, plotId, planDate?}`: Planning Center plan `planId` shows `plotId`, one of the venue's plots, in that venue instead of its default; `plotId: null` hands the plan back to the default. `planDate` is the plan's sort date (an ISO date and time, stored as one) or `null`; a save without one keeps the date already stored. Answers the whole document. The same plot again, or removing an override that is not there, saves nothing. `404` for an unknown venue, `400` for a plot of another venue, a plan id that is not 1 to 80 letters, digits, `-` or `_`, a date that is not one or has no time of day, or past 2000 overrides; each refusal is logged on `[stageplots]` |
 
 #### Stage plot items
 

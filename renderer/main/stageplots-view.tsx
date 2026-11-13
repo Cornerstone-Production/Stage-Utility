@@ -8,13 +8,19 @@
 // on one landscape page. With exactly one home venue it opens that venue
 // straight away, and the browser remembers the last venue opened. Live: an edit
 // anywhere redraws it without a reload (useStagePlots).
+//
+// It follows the live or next Planning Center plan the way /patch does
+// (useFollowedPlan): each venue shows that plan's override if it has one, else
+// its default, and says which ("For this plan · Sun 15 Nov" or "Default").
+// While Planning Center cannot be read, every venue shows its default under a
+// notice saying so.
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 
-import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type StagePlotsView, type Venue } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotOverride, type StagePlotsView, type Venue } from "@main/types/stageplots";
 import { plural } from "@main/services/plural";
-import { plotHeight } from "@main/services/stageplots-doc";
+import { plotHeight, resolvePlot } from "@main/services/stageplots-doc";
 
 import { usePageActions } from "../app/page-actions";
 import { Button } from "../components/ui/button";
@@ -29,6 +35,7 @@ import { ItemDetails, detailsPosition } from "./stageplots/item-details";
 import { Mono } from "./stageplots/mono";
 import { PlotLegend } from "./stageplots/plot-legend";
 import { PlotSvg } from "./stageplots/plot-svg";
+import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
 import { usePanZoom } from "./stageplots/use-pan-zoom";
 import { useStagePlots } from "./stageplots/use-stageplots";
 
@@ -47,11 +54,26 @@ function remember(id: string | null): void {
   else removeStored(LAST_VENUE_KEY);
 }
 
-function VenueCard({ doc, venue, onOpen }: { doc: StagePlotsView; venue: Venue; onOpen: () => void }) {
+/** "Planning Center is unreachable, showing the default plot." Above the page. */
+function UnreachableNotice() {
+  return (
+    <div
+      role="status"
+      className="mb-3 flex items-start gap-2.5 rounded-[10px] border border-line-strong bg-surface px-3 py-[9px] text-caption1 text-fg shadow-[var(--su-shadow-1)]"
+    >
+      <TriangleAlertIcon className="mt-px size-4 shrink-0 text-warn-11" aria-hidden />
+      <span>Planning Center is unreachable, showing the default plot.</span>
+    </div>
+  );
+}
+
+function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onOpen: () => void }) {
   const plots = plotsOf(doc, venue);
-  const shown = plots.find((p) => p.id === venue.defaultPlotId) ?? plots[0];
+  const resolved = resolvePlot(doc, venue.id, plan.resolvedPlanId);
+  const shown = resolved.plot ?? plots[0];
   const background = backgroundOf(doc, shown);
-  const summary = plots.length === 0 ? "No plots yet" : [plural(plots.length, "plot"), "Default", ...(background ? [] : ["no background"])].join(" · ");
+  const why = resolved.reason === "plan" && shown ? `${shown.name} for this plan` : "Default";
+  const summary = plots.length === 0 ? "No plots yet" : [plural(plots.length, "plot"), why, ...(background ? [] : ["no background"])].join(" · ");
   return (
     <button
       type="button"
@@ -71,7 +93,7 @@ function VenueCard({ doc, venue, onOpen }: { doc: StagePlotsView; venue: Venue; 
   );
 }
 
-function VenueList({ doc, onOpen }: { doc: StagePlotsView; onOpen: (id: string) => void }) {
+function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (id: string) => void }) {
   if (doc.venues.length === 0) {
     return (
       <EmptyState
@@ -91,7 +113,7 @@ function VenueList({ doc, onOpen }: { doc: StagePlotsView; onOpen: (id: string) 
         <div key={g.label} className="flex flex-col gap-2">
           <span className={cn(eyebrow, "mt-2")}>{g.label}</span>
           {g.venues.map((v) => (
-            <VenueCard key={v.id} doc={doc} venue={v} onOpen={() => onOpen(v.id)} />
+            <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
           ))}
         </div>
       ))}
@@ -189,11 +211,22 @@ function PlotFrame({ plot, background }: { plot: Plot; background: BackgroundVie
   );
 }
 
-function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; onBack: () => void }) {
+const badge = "inline-flex h-[22px] items-center gap-1.5 rounded-full px-[9px] text-[11px] leading-[13px] font-medium whitespace-nowrap";
+
+function VenuePage({ doc, venue, plan, onBack }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void }) {
   const plots = plotsOf(doc, venue);
-  const [picked, setPicked] = useState<{ venueId: string; plotId: string } | null>(null);
-  const selected = selectedPlot(venue, plots, picked);
+  const resolved = resolvePlot(doc, venue.id, plan.resolvedPlanId);
+  // A tab picked by hand holds only while the plan's plot is the one it was
+  // picked over: when the plan moves on (or Planning Center drops), the new
+  // plan's plot is selected again rather than hidden behind an old pick.
+  const [picked, setPicked] = useState<{ venueId: string; plotId: string; over: string | null } | null>(null);
+  const pick = picked && picked.over === (resolved.plot?.id ?? null) ? picked : null;
+  const selected = selectedPlot(venue, plots, pick, resolved.plot?.id);
   const background = backgroundOf(doc, selected);
+  const forPlan = !!selected && resolved.reason === "plan" && selected.id === resolved.plot?.id;
+  const isDefault = !!selected && resolved.reason === "default" && selected.id === venue.defaultPlotId;
+  const day = forPlan ? plan.label : null;
+  const planLabel = day ? `For this plan · ${day}` : "For this plan";
   return (
     <div className="flex flex-col">
       <button
@@ -206,8 +239,17 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
       </button>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
         <h1 className="text-title3 font-semibold text-fg">{venue.name}</h1>
-        {selected && selected.id === venue.defaultPlotId && (
-          <span className="inline-flex h-[22px] items-center rounded-full bg-fill px-[9px] text-[11px] leading-[13px] font-medium text-fg-muted">
+        {forPlan && (
+          <span className={cn(badge, "bg-accent-soft text-fg")} data-testid="plan-badge">
+            <span className="size-1.5 rounded-full bg-accent" aria-hidden />
+            {/* One flex item: Mono splits the label into runs, and the gap would part them. */}
+            <span>
+              <Mono text={planLabel} />
+            </span>
+          </span>
+        )}
+        {isDefault && (
+          <span className={cn(badge, "bg-fill text-fg-muted")} data-testid="plan-badge">
             Default
           </span>
         )}
@@ -216,7 +258,7 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
             className="ml-auto"
             venueName={venue.name}
             plotName={selected.name}
-            planLine={selected.id === venue.defaultPlotId ? "Default plot" : null}
+            planLine={forPlan ? planLabel : selected.id === venue.defaultPlotId ? "Default plot" : null}
             items={selected.items}
             background={background}
             fade={selected.bgFade}
@@ -234,7 +276,7 @@ function VenuePage({ doc, venue, onBack }: { doc: StagePlotsView; venue: Venue; 
                 type="button"
                 role="tab"
                 aria-selected={p.id === selected.id}
-                onClick={() => setPicked({ venueId: venue.id, plotId: p.id })}
+                onClick={() => setPicked({ venueId: venue.id, plotId: p.id, over: resolved.plot?.id ?? null })}
                 className={tabClass(p.id === selected.id)}
               >
                 {p.name}
@@ -264,8 +306,11 @@ export function openVenue(doc: StagePlotsView, open: Open): Venue | null {
   return home.length === 1 ? home[0] : null;
 }
 
+const NO_OVERRIDES: readonly PlotOverride[] = [];
+
 export function StagePlotsPage() {
   const { doc, loading, error } = useStagePlots();
+  const plan = useFollowedPlan(doc?.overrides ?? NO_OVERRIDES);
   const [open, setOpen] = useState<Open>(() => {
     const id = remembered();
     return id ? { kind: "venue", id } : { kind: "auto" };
@@ -277,10 +322,12 @@ export function StagePlotsPage() {
     [],
   );
 
-  if (!doc) {
+  // Held until the plan is known too: drawn on the plots alone, a venue would
+  // show its default and then swap to this plan's plot.
+  if (!doc || !plan.known) {
     return (
       <div className="pt-5 max-sm:pt-4">
-        {error ? <ErrorNote>Couldn&apos;t load the stage plots.</ErrorNote> : loading ? <p className="text-footnote text-fg-subtle">Loading…</p> : null}
+        {error && !doc ? <ErrorNote>Couldn&apos;t load the stage plots.</ErrorNote> : loading || !plan.known ? <p className="text-footnote text-fg-subtle">Loading…</p> : null}
       </div>
     );
   }
@@ -288,10 +335,12 @@ export function StagePlotsPage() {
   return (
     <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3 sm:max-w-[1100px]">
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
+      {plan.unreachable && <UnreachableNotice />}
       {venue ? (
         <VenuePage
           doc={doc}
           venue={venue}
+          plan={plan}
           onBack={() => {
             remember(null);
             setOpen({ kind: "list" });
@@ -301,6 +350,7 @@ export function StagePlotsPage() {
         <div className="sm:max-w-[380px]">
           <VenueList
             doc={doc}
+            plan={plan}
             onOpen={(id) => {
               remember(id);
               setOpen({ kind: "venue", id });

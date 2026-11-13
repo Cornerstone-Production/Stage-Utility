@@ -89,9 +89,13 @@ const GOOD: Record<string, unknown> = {
   },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
   "stageplots.json": {
-    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "", plotIds: ["p-1"], defaultPlotId: "p-1" }],
+    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [],
-    plots: [{ id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 }],
+    plots: [
+      { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+      { id: "p-2", venueId: "v-1", name: "Baptism", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+    ],
+    overrides: [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }],
   },
   "trends-prefs.json": { soundMetric: "LAeq 2" },
   "video-feeds.json": {

@@ -26,9 +26,11 @@ const teardown = installRenderDom();
 let DOC: StagePlotsView;
 /** The app's time zone, as GET /api/state reports it. */
 let TIMEZONE: string | null = null;
+/** The server's own clock's zone, as GET /api/state reports it. */
+let HOST_TIMEZONE = "UTC";
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const path = String(url).split("?")[0];
-  const body = path === "/api/stageplots" ? DOC : path === "/api/state" ? { timezone: TIMEZONE } : null;
+  const body = path === "/api/stageplots" ? DOC : path === "/api/state" ? { timezone: TIMEZONE, hostTimezone: HOST_TIMEZONE } : null;
   return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
 };
 
@@ -41,6 +43,7 @@ const { __resetForTests: resetStageState } = await import("./use-stage-state.js"
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
 const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
 const background = {
   id: "b-1",
@@ -68,12 +71,15 @@ function doc(): StagePlotsView {
       { id: "p-alt", venueId: "v-main", name: "Special", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
       { id: "p-hall", venueId: "v-off", name: "Setup", backgroundId: "b-1", bgFade: 0.2, items: [], version: 0 },
     ],
+    overrides: [],
   };
 }
 
 async function mount() {
   await act(async () => {
-    render(React.createElement(StagePlotsPage));
+    // The page reads the upcoming plans through react-query, as in the app.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(StagePlotsPage)));
   });
   await settle();
   await settle();
@@ -85,6 +91,7 @@ const tabs = () => screen.getAllByRole("tab");
 beforeEach(() => {
   DOC = doc();
   TIMEZONE = null;
+  HOST_TIMEZONE = "UTC";
   localStorage.clear();
 });
 afterEach(async () => {
@@ -332,6 +339,18 @@ describe("/stageplots: an item's details, the legend and print", () => {
     assert.equal(printedDate(noonUtc, "Pacific/Kiritimati"), "Fri 13 Nov 2026");
     assert.equal(printedDate(noonUtc, "UTC"), "Thu 12 Nov 2026");
     TIMEZONE = "Pacific/Kiritimati";
+    await act(async () => {
+      render(React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
+    });
+    await settle();
+    assert.equal(screen.getByTestId("print-page").querySelector("header p")!.textContent, "Printed Fri 13 Nov 2026");
+  });
+
+  test("with no zone set, the printed date follows the server's clock, not the browser's", async () => {
+    // The app reasons in its host's zone when none is configured (appTimeZone),
+    // so a server in UTC+14 has already reached Friday whatever the browser says.
+    const noonUtc = Date.UTC(2026, 10, 12, 12);
+    HOST_TIMEZONE = "Pacific/Kiritimati";
     await act(async () => {
       render(React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
     });

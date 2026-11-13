@@ -1,7 +1,7 @@
 // stageplots-doc.ts — pure readings of the stage plots document, shared by the
 // routes and the editor so the two cannot name things differently.
 
-import { PLOT_UNITS_WIDE, type Background, type Plot, type PlotItem, type Venue } from "../types/stageplots.js";
+import { PLOT_UNITS_WIDE, type Background, type Plot, type PlotItem, type PlotOverride, type Venue } from "../types/stageplots.js";
 
 /** A plot's height in plot units: its background's aspect ratio over
  *  PLOT_UNITS_WIDE, or 16:9 when it has none. */
@@ -51,3 +51,37 @@ export function plotsUsing(
   const venueName = new Map(doc.venues.map((v) => [v.id, v.name]));
   return doc.plots.filter((p) => p.backgroundId === backgroundId).map((p) => ({ venue: venueName.get(p.venueId) ?? "?", plot: p.name }));
 }
+
+/** Why a venue shows the plot it shows: an override for this plan, or its default. */
+export type PlotReason = "plan" | "default";
+
+/**
+ * The plot `venueId` shows for `planId`: the plan's override for this venue
+ * when it names one of the venue's plots, else the venue's default. Null only
+ * for a venue with no plots (or none by that id). An override whose plot is
+ * gone, or belongs to another venue, falls back to the default rather than
+ * leaving the venue blank. With no plan (none live or next, or Planning Center
+ * unreachable, which the caller turns into null) it is the default.
+ */
+export function resolvePlot(
+  doc: { venues: readonly Venue[]; plots: readonly Plot[]; overrides: readonly PlotOverride[] },
+  venueId: string,
+  planId: string | null,
+): { plot: Plot | null; reason: PlotReason } {
+  const venue = doc.venues.find((v) => v.id === venueId);
+  if (!venue) return { plot: null, reason: "default" };
+  const ofVenue = (id: string | null | undefined) =>
+    id ? (doc.plots.find((p) => p.id === id && p.venueId === venueId && venue.plotIds.includes(id)) ?? null) : null;
+  if (planId !== null) {
+    const ov = doc.overrides.find((o) => o.planId === planId && o.venueId === venueId);
+    const plot = ofVenue(ov?.plotId);
+    if (plot) return { plot, reason: "plan" };
+  }
+  return { plot: ofVenue(venue.defaultPlotId), reason: "default" };
+}
+
+/** The overrides that name `plotId`: the plans whose override its delete clears. */
+export function overridesOfPlot(doc: { overrides: readonly PlotOverride[] }, plotId: string): PlotOverride[] {
+  return doc.overrides.filter((o) => o.plotId === plotId);
+}
+

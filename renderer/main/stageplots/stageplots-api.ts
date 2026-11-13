@@ -33,6 +33,10 @@ export const stageplotsApi = {
   updateVenue: (id: string, changes: Partial<VenueInput>) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
   deleteVenue: (id: string) => invoke<{ ok: true }>("stageplots:deleteVenue", { id }),
   setDefault: (venueId: string, plotId: string) => invoke<Venue>("stageplots:setDefault", { venueId, plotId }),
+  /** Give one plan its own plot for this venue, or hand it back to the default
+   *  (`plotId` null). `planDate` is the plan's sort date, kept to name it by. */
+  setOverride: (planId: string, venueId: string, plotId: string | null, planDate: string | null) =>
+    invoke<StagePlotsView>("stageplots:setOverride", { planId, venueId, plotId, planDate }),
   uploadImage: (name: string, bytes: Blob, from?: PdfPage) =>
     invoke<BackgroundView>("stageplots:uploadImage", { name, bytes, ...(from ?? {}) }),
   uploadPdf: (name: string, bytes: Blob) => invoke<{ originalHash: string; bytes: number }>("stageplots:uploadPdf", { name, bytes }),
@@ -42,7 +46,8 @@ export const stageplotsApi = {
   createPlot: (plot: { venueId: string; name: string; backgroundId?: string | null }) => invoke<Plot>("stageplots:createPlot", { plot }),
   duplicatePlot: (id: string) => invoke<Plot>("stageplots:duplicatePlot", { id }),
   updatePlot: (id: string, changes: PlotChanges) => invoke<Plot>("stageplots:updatePlot", { id, changes }),
-  deletePlot: (id: string) => invoke<{ ok: true }>("stageplots:deletePlot", { id }),
+  /** `clearedPlans`: the plans whose override named the plot, cleared with it. */
+  deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[] }>("stageplots:deletePlot", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
 };
