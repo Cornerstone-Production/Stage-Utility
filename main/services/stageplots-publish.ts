@@ -687,7 +687,7 @@ export class StagePlotsPublisher {
         }
         await this.unpublishInStore(venue.id, { secret: pub.secret, origin: pub.origin, since: this.at(), reason: "address changed" });
         say("warn", [pub.secret], `"${venue.name}" unpublished: the page address changed with no page to move to, and its link could not be removed from ${host} (${sentence(r, host)}); it is queued for removal`);
-      }).catch((err: unknown) => this.venueFailed(venue, `The page address changed and its link on ${host} could not be taken down: ${errorMessage(err)}`));
+      }).catch((err: unknown) => this.venueFailed(venue, `The page address changed, and taking its link down from ${host} failed part way: ${errorMessage(err)}`));
     }
   }
 

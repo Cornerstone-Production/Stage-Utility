@@ -824,6 +824,78 @@ describe("after the page address changes", () => {
     assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
   });
 
+  /** The publisher's store, with the next read or the next unpublishing write made to fail once. */
+  function failing(h: Harness) {
+    const f = { get: false, unpublish: false };
+    (h.publisher as unknown as { deps: { store: unknown } }).deps.store = {
+      get: () => {
+        if (f.get) {
+          f.get = false;
+          return Promise.reject(new Error("disk went away"));
+        }
+        return stageplotsStore.get();
+      },
+      update: (fn: (d: StagePlotsDoc) => StagePlotsDoc) =>
+        stageplotsStore.update((d) => {
+          const next = fn(d);
+          if (f.unpublish && d.venues.some((v) => v.publish) && !next.venues.some((v) => v.publish)) {
+            f.unpublish = false;
+            throw new Error("disk full");
+          }
+          return next;
+        }),
+    };
+    return f;
+  }
+
+  for (const [what, moving] of [
+    ["a move to the new page", true],
+    ["a take-down with no new page", false],
+  ] as const) {
+    test(`${what} that cannot read the stage plots says so on the card, and still drains the old page with its token`, async () => {
+      const h = await harness();
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      const o = parsePublishUrl(h.page.origin);
+      const other = await startPage();
+      const parsed = parsePublishUrl(other.origin);
+      assert.ok(o.ok && parsed.ok);
+      const stale = await queuedOn(h.page, o.origin, 13);
+      (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () =>
+        moving ? { ok: true, origin: parsed.origin, token: TOKEN } : { ok: false, message: "Set up the public link first." };
+      const f = failing(h);
+      const quiet = mock.method(console, "error", () => undefined);
+      try {
+        f.get = true;
+        await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, moving ? parsed.origin : null);
+        await h.publisher.settle();
+      } finally {
+        quiet.mock.restore();
+      }
+      assert.match((await h.venue()).publish?.lastError?.message ?? "", /^The page address was saved, but the published stage plots could not follow it: the stage plots could not be read: disk went away$/);
+      assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
+    });
+  }
+
+  test("a take-down whose unpublish cannot be saved says so on the card, and still drains the old page with its token", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    const stale = await queuedOn(h.page, o.origin, 14);
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: false, message: "Set up the public link first." });
+    const f = failing(h);
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      f.unpublish = true;
+      await h.publisher.pageSaved({ origin: o.origin, token: TOKEN }, null);
+      await h.publisher.settle();
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.match((await h.venue()).publish?.lastError?.message ?? "", /^The page address changed, and taking its link down from 127\.0\.0\.1:\d+ failed part way: disk full$/);
+    assert.deepEqual(h.page.hub.stagePlotKeys(stale), [], "the old page's queue was not drained with its token");
+  });
+
   test("Unpublish names the old page whose copy it cannot reach, and never claims it is gone", async () => {
     const { h, other, oldHost } = await moved();
     const log = capture();
