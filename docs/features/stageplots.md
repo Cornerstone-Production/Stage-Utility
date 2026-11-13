@@ -353,7 +353,11 @@ the save still holds. An old link the old page will not take down waits as an
 there, by deleting its Worker). If the new page will not take a venue (one deployed before
 StagePlots, say), the venue stays on the old page with its link working, and the card says
 why; **Publish now** tries the move again. A new token for the same address moves nothing,
-and removes what waits on that page.
+and removes what waits on that page. Saving another address with no token for it, or
+clearing the address, leaves nothing here that could reach the old page afterwards: each
+venue on it is unpublished and its link removed with the old token, or kept as an old
+link on that page if it will not go. Clearing only the token on the same address takes
+nothing down; the token can be entered again.
 
 ### Old links
 

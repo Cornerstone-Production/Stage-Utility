@@ -608,14 +608,20 @@ export class StagePlotsPublisher {
    * the page set up now, which a new token may have just made reachable. On a chain of its own,
    * so settle() and stop() cover it.
    */
-  pageSaved(old: Target | null): Promise<void> {
-    return this.serial(ADDRESS_CHAIN, () => this.afterPageSaved(old));
+  pageSaved(old: Target | null, saved: string | null = null): Promise<void> {
+    return this.serial(ADDRESS_CHAIN, () => this.afterPageSaved(old, saved));
   }
 
-  private async afterPageSaved(old: Target | null): Promise<void> {
+  /** `saved`: the address the save left set up (its origin), or null when it cleared it. */
+  private async afterPageSaved(old: Target | null, saved: string | null): Promise<void> {
     if (this.paused) return;
     const target = await this.deps.target();
-    if (!target.ok) return;
+    if (!target.ok) {
+      // The address changed (or was cleared) with no token for the new one: after this request
+      // nothing here can reach the old page, so its links come down now, with its token.
+      if (old && old.origin !== saved) await this.takeDownOldPage(old);
+      return;
+    }
     if (!old || old.origin !== target.origin) {
       const doc = await this.deps.store.get();
       for (const venue of doc.venues) {
@@ -628,6 +634,35 @@ export class StagePlotsPublisher {
       if (old) await this.drainQueued(false, old);
     }
     await this.drainQueued(false);
+  }
+
+  /**
+   * The page this server leaves, with no new page to move to: every venue on it unpublished, its
+   * link dropped with the old token, or queued against the old page when the drop fails, so the
+   * card shows it rather than a venue claiming a link nothing here can reach. Then what waits on
+   * the old page is drained with the same token.
+   */
+  private async takeDownOldPage(old: Target): Promise<void> {
+    const host = hostOf(old.origin);
+    const doc = await this.deps.store.get();
+    for (const venue of doc.venues) {
+      if (venue.publish?.origin !== old.origin) continue;
+      await this.serial(venue.id, async () => {
+        const pub = (await this.venueNow(venue.id))?.publish;
+        if (!pub || pub.origin !== old.origin) return;
+        const r = await this.client(old).dropStagePlots(pub.secret);
+        if (r.ok) {
+          this.forget(pub.secret);
+          await this.unpublishInStore(venue.id, null);
+          // A warning, not a note: nobody pressed Unpublish.
+          say("warn", [pub.secret], `"${venue.name}" unpublished: the page address changed with no page to move to, so its link and backgrounds are removed from ${host}`);
+          return;
+        }
+        await this.unpublishInStore(venue.id, { secret: pub.secret, origin: pub.origin, since: this.at(), reason: "address changed" });
+        say("warn", [pub.secret], `"${venue.name}" unpublished: the page address changed with no page to move to, and its link could not be removed from ${host} (${sentence(r, host)}); it is queued for removal`);
+      });
+    }
+    await this.drainQueued(false, old);
   }
 
   // ── The parts ──────────────────────────────────────────────────────────────

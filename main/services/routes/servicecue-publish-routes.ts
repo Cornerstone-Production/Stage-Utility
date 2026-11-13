@@ -370,7 +370,7 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
   // the old one is removed with its token, which only this request still holds. In the
   // background: a move uploads every background, and the card follows it on stageplots:updated.
   const oldPage = beforeParsed.ok && hadToken ? { origin: beforeParsed.origin, token: beforeToken } : null;
-  void stageplotsPublisher.pageSaved(oldPage).catch((err: unknown) => {
+  void stageplotsPublisher.pageSaved(oldPage, target.ok ? target.origin : null).catch((err: unknown) => {
     console.error(`[stageplots] the stage plots could not follow the page address: ${scrub(errorMessage(err))}`);
   });
 
