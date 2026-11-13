@@ -405,9 +405,15 @@ others are resumed, nothing is written, and `[config-snapshot]` names which.
   - every live link the result does not hold (one published after the backup, the newer
     one after a regenerate) is queued for removal, and removed when the server starts.
     Restoring an older backup therefore takes down links made since, even ones nobody
-    revoked: publish those venues again for new links.
+    revoked: publish those venues again for new links;
+  - a live `stageplots.json` that does not parse is never taken for a fresh install: no
+    bundle link comes back published, and each is queued for removal, since the live file
+    may have revoked it. One that parses but fails its check is read for its links alone;
+    a link in it whose secret or page address is malformed cannot be removed by any page
+    and is dropped, counted on `[config-snapshot]`.
 
-  The stage plots publisher is paused while a restore lands. Logged on
+  The stage plots publisher is paused while a restore lands: every action, a venue delete
+  and **Remove now** answer `503` until the server is back. Logged on
   `[config-snapshot]` with how many venues came back unpublished and links were queued.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash

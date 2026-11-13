@@ -6,7 +6,8 @@
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
 //   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
 //   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
-//                                                   one is unpublished first → { ok, notice? }
+//                                                   one is unpublished first → { ok, notice? };
+//                                                   503 while a config restore is landing
 //   POST   /api/stageplots/venues/:id/default       { plotId }
 //   POST   /api/stageplots/backgrounds?name=        raw PNG or JPEG (12 MB) → 201 background
 //   POST   /api/stageplots/backgrounds/pdf?name=    raw PDF (25 MB) → 201 { originalHash, bytes };
@@ -28,14 +29,20 @@
 //                                                   → the document; null removes the
 //                                                   plan's override for that venue
 //   POST   /api/stageplots/venues/:id/publish       → the venue, published behind a new secret link
-//   POST   /api/stageplots/venues/:id/regenerate    → the venue under a new link; the old one is deleted
-//   POST   /api/stageplots/venues/:id/unpublish     → the venue, its link deleted from the page
+//   POST   /api/stageplots/venues/:id/regenerate    → the venue under a new link; the old one is queued
+//                                                   for removal and removed when the page takes it
+//   POST   /api/stageplots/venues/:id/unpublish     → the venue, its link deleted from the page; with no
+//                                                   page to ask, queued, and the answer adds notice
 //   POST   /api/stageplots/venues/:id/publish-now   → the venue, everything sent again
 //   POST   /api/stageplots/pending/remove           → { removed, left, waiting }: Remove now
-//                                                   Each: 409 when the venue is (not) published or no
-//                                                   page is set up, 502 { error } when the page
-//                                                   refused or did not answer, 400 for a plot too
-//                                                   large to publish (stageplots-publish.ts)
+//                                                   Each venue action: 404 for an unknown venue, 409
+//                                                   when it is (not) published, no page is set up
+//                                                   (publish, regenerate, publish-now) or the queue is
+//                                                   full, 502 { error } when the page refused or did
+//                                                   not answer, 400 for a plot too large to publish.
+//                                                   Each of the five: 503 while a config restore is
+//                                                   landing; Remove now also when the queue cannot be
+//                                                   read (stageplots-publish.ts)
 //
 // Every change saves at once and broadcasts the whole document on
 // stageplots:updated, so a second browser follows without a reload. A change

@@ -357,7 +357,11 @@ and removes what waits on that page. Saving another address with no token for it
 clearing the address, leaves nothing here that could reach the old page afterwards: each
 venue on it is unpublished and its link removed with the old token, or kept as an old
 link on that page if it will not go. Clearing only the token on the same address takes
-nothing down; the token can be entered again.
+nothing down; the token can be entered again. All of this runs after the save answers,
+since a move uploads every background; anything in it that fails (the page settings or
+the stage plots unreadable, a move that cannot be saved) is said on `/log` and shown as
+the last error of each venue it concerns, and never stops the old page's links being
+removed with its token.
 
 ### Old links
 
