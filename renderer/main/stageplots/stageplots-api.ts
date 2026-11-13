@@ -27,6 +27,9 @@ export interface PdfPage {
   pages: number;
 }
 
+/** A publish action's answer: the venue as it now is, and anything the operator should know beside it. */
+export type PublishAnswer = Venue & { notice?: string };
+
 export const stageplotsApi = {
   get: () => invoke<StagePlotsView>("stageplots:get"),
   createVenue: (venue: VenueInput) => invoke<Venue>("stageplots:createVenue", { venue }),
@@ -51,11 +54,11 @@ export const stageplotsApi = {
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
   /** Put a venue on the public page behind a new secret link. */
-  publish: (id: string) => invoke<Venue>("stageplots:publish", { id }),
+  publish: (id: string) => invoke<PublishAnswer>("stageplots:publish", { id }),
   /** Move a published venue to a new link; the old one stops working once the new one is up. */
-  regenerate: (id: string) => invoke<Venue>("stageplots:regenerate", { id }),
+  regenerate: (id: string) => invoke<PublishAnswer>("stageplots:regenerate", { id }),
   /** Take a venue off the public page; its link stops working. */
-  unpublish: (id: string) => invoke<Venue>("stageplots:unpublish", { id }),
+  unpublish: (id: string) => invoke<PublishAnswer>("stageplots:unpublish", { id }),
   /** Send a published venue again, the backgrounds not yet published included. */
-  publishNow: (id: string) => invoke<Venue>("stageplots:publishNow", { id }),
+  publishNow: (id: string) => invoke<PublishAnswer>("stageplots:publishNow", { id }),
 };

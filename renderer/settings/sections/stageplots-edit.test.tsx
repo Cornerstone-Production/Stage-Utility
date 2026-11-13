@@ -261,6 +261,14 @@ afterEach(async () => {
 after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("/stageplots/edit", () => {
+  test("the Publish card sits last in the left column, for the selected venue", async () => {
+    await mount();
+    const publish = card("Publish");
+    assert.equal(publish.parentElement?.lastElementChild, publish, "the Publish card is not at the foot of the left column");
+    assert.ok(publish.parentElement?.contains(card("Venues")), "the Publish card is not in the left column");
+    assert.ok(within(publish).getByRole("button", { name: "Publish Room One" }));
+  });
+
   test("adding a venue shows it selected", async () => {
     await mount();
     await click(within(card("Venues")).getByRole("button", { name: "Venue" }));

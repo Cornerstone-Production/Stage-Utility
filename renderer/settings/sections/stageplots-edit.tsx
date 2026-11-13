@@ -1,8 +1,9 @@
 // stageplots-edit.tsx — /stageplots/edit: venues, backgrounds, plots and the
 // plot editor.
 //
-// Venues, Backgrounds and This week (the plot the live plan, and any other
-// upcoming plan, shows instead of the default) down the left; the selected
+// Venues, Backgrounds, This week (the plot the live plan, and any other
+// upcoming plan, shows instead of the default) and Publish (the venue on the
+// public page behind a secret link) down the left; the selected
 // venue's plots as tabs, a toolbar (undo and redo, zoom, background, fade,
 // print, which prints the canvas as it stands, unsaved changes included), and
 // the work area: the palette, the canvas with its legend under it, and the
@@ -57,6 +58,7 @@ import { PlotTabs } from "./stageplots-plot-tabs";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
 import { useCurrentPlan } from "../../main/stageplots/plan-following";
 import { planNamer } from "./plan-date-label";
+import { PublishCard } from "./stageplots-publish-card";
 import { ThisWeekCard } from "./stageplots-this-week-card";
 import { VenuesCard } from "./stageplots-venues-card";
 
@@ -576,6 +578,7 @@ function EditorBody({
           />
           <BackgroundsCard doc={doc} selectedId={backgroundId} onSelect={onBackground} save={save} {...(openPdf ? { openPdf } : {})} />
           {venue && <ThisWeekCard doc={doc} venue={venue} plan={plan} nameOf={planName} save={save} />}
+          {venue && <PublishCard venue={venue} save={save} timeZone={plan.timeZone} />}
         </aside>
         <div className="min-w-0">
           {!venue ? (
