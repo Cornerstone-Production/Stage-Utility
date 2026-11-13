@@ -156,8 +156,8 @@ describe("the Publish card, off", () => {
     SETTINGS = { url: "", token: "" };
     await mount();
     assert.equal((screen.getByRole("button", { name: "Publish Room One" }) as HTMLButtonElement).disabled, true);
-    assert.match(text(), /Set up the public link first, under Public link on the ServiceCue layouts page\./);
-    assert.equal(screen.getByRole("link", { name: "Public link" }).getAttribute("href"), "/servicecue/presets");
+    assert.match(text(), /Set up the public link first, in Settings > Advanced > Public link\./);
+    assert.equal(screen.getByRole("link", { name: "Settings > Advanced > Public link" }).getAttribute("href"), "/settings/advanced/public-link");
   });
 });
 

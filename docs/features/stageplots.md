@@ -334,8 +334,8 @@ lists venues; but whoever is sent it can send it on. A link that was never publi
 was regenerated or unpublished, and a mistyped one all answer exactly as an address the
 page does not know.
 
-It uses the page address and publishing token saved under **Public link** at the foot of
-the ServiceCue layouts page; ServiceCue publishing itself does not have to be switched
+It uses the page address and publishing token saved under **Settings → Advanced →
+Public link**; ServiceCue publishing itself does not have to be switched
 on. The page must be deployed from a release with StagePlots in it: an older one is
 refused with "*host* does not know StagePlots yet: deploy the Worker", and is fixed by
 [updating the page](../ops/servicecue-on-the-web.md#updating-it).
@@ -390,7 +390,7 @@ reads it again every minute or so (backing off to every fifteen), and once it ca
 each venue that links it again. After a restart it does the same once, so a page published
 unlinked before it follows the patch again.
 
-Saving a new page address under **Public link** moves each published venue to the new
+Saving a new page address in **Settings → Advanced → Public link** moves each published venue to the new
 page straight away, under a new link (the address changes anyway, and so one link never
 lives on two pages), then removes the old links from the old page with its token, which
 the save still holds. An old link the old page will not take down waits as an
