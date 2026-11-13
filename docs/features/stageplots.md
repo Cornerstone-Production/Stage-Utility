@@ -372,9 +372,12 @@ more than a working plot (hundreds of items with long input lists). A background
 is listed as not yet published, with that reason.
 
 The secret is in `stageplots.json` and so in config backups: anyone holding a backup can
-open the venue's link. A restore that keeps this server's own id brings venues back
-unpublished, so two servers never publish one link; one that takes the backup's id (this
-box replaces the one it came from) keeps them. What the page holds and how it answers is
+open the venue's link. A restore merges the backup's links with the live ones so that none
+is left live and unknown here and none that was revoked comes back: a link both hold stays
+published; another server's links stay with it, unless this box replaces that server; and
+every live link the restore does not keep is queued as an [old link](#old-links) and
+removed at start-up, which takes down links made since the backup. The rules in full are
+in [Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot). What the page holds and how it answers is
 in the [publishing protocol](../reference/servicecue-publishing.md#stageplots).
 
 ## Limits

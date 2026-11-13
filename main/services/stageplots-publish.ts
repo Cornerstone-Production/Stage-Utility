@@ -250,6 +250,21 @@ export class StagePlotsPublisher {
     await Promise.all([...this.chains.values()]);
   }
 
+  /**
+   * For a config restore: wait for every run in flight, then refuse every action and skip every
+   * republish and drain until the answer is called, so nothing here writes over the restored
+   * file. A restore that succeeds never calls it (the process restarts).
+   */
+  async pause(): Promise<() => void> {
+    this.paused = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    await Promise.all([...this.chains.values()]);
+    return () => {
+      this.paused = false;
+    };
+  }
+
   /** Every pending wait has fired and every run it queued has finished. For tests and the drive. */
   async settle(): Promise<void> {
     for (;;) {

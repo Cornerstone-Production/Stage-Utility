@@ -37,7 +37,7 @@ import { DataStore } from "./data-store.js";
 import { errorMessage } from "./errors.js";
 import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
-import { fitToHeight, plotHeight, withCableBox } from "./stageplots-doc.js";
+import { fitToHeight, plotHeight, sortPending, withCableBox } from "./stageplots-doc.js";
 
 const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] };
 
@@ -230,19 +230,6 @@ function checkPending(raw: unknown, i: number): PendingRemoval {
   return { secret: e.secret, origin, since: isoInstant(e.since, `${what}'s time`), reason: e.reason as PendingReason };
 }
 
-/** Pending removals in their one order (origin, then secret), one per secret and page: the
- *  first of a pair kept, so the same list always comes out the same. */
-export function sortPending(list: readonly PendingRemoval[]): PendingRemoval[] {
-  const seen = new Set<string>();
-  const out: PendingRemoval[] = [];
-  for (const e of [...list].sort((a, b) => a.origin.localeCompare(b.origin) || a.secret.localeCompare(b.secret) || a.since.localeCompare(b.since))) {
-    const key = `${e.origin} ${e.secret}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(e);
-  }
-  return out;
-}
 
 function checkVenue(raw: unknown, i: number): Venue {
   const v = asObject(raw, `venue ${i + 1}`);

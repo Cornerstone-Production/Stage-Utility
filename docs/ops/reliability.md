@@ -388,12 +388,24 @@ cleared, and nothing that runs in the background is paused.
   setting up again.", including for a config with no server id, which asks
   nothing else; with the box ticked, only when the config brings no bindings. A bundle with no `settings.json` changes no screens, and leaves
   this server's bindings as they are.
-- **Stage plots links follow the id too.** A published venue's secret link is in
-  `stageplots.json`. A restore whose id is taken (this server's own config, or
-  ticked) keeps it; one that keeps this server's id, or a bundle with no
-  `settings.json`, brings every venue back unpublished, so two servers never publish
-  one link. The links stay live on the public page, owned by the server they came
-  from. Logged on `[config-snapshot]` with how many venues.
+- **Stage plots links are merged, never lost.** A published venue's secret link is in
+  `stageplots.json`, and a restore merges the bundle's with the live file's so that no
+  link is left live on the page with nothing here that knows it, and none that was
+  revoked comes back:
+  - a link both files hold on a venue stays published, whatever the ids say;
+  - otherwise a bundle's link comes back published only when the config's id is taken
+    from another server (ticked), or onto a fresh install (no stage plots yet, or no
+    venues). Restoring this server's own older config does not bring back a link revoked
+    since: the venue comes back unpublished and the link is queued for removal;
+  - another server's config, with this server's id kept, brings its venues back
+    unpublished, and its links stay with that server;
+  - every live link the result does not hold (one published after the backup, the newer
+    one after a regenerate) is queued for removal, and removed when the server starts.
+    Restoring an older backup therefore takes down links made since, even ones nobody
+    revoked: publish those venues again for new links.
+
+  The stage plots publisher is paused while a restore lands. Logged on
+  `[config-snapshot]` with how many venues came back unpublished and links were queued.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.
