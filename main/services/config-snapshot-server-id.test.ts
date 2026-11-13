@@ -295,7 +295,6 @@ describe("stage plot links on a restore", () => {
           lastError: null,
           publishedImages: [],
           unpublishedImages: [],
-          retired: [],
         },
       },
     ],
