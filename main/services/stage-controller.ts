@@ -2221,6 +2221,7 @@ export class StageController {
     // For each candidate, fetch its nearest upcoming plan.
     type Candidate = { type: ServiceTypeDTO; plan: PlanDTO };
     let best: Candidate | null = null;
+    let failed = 0;
 
     for (const type of candidates) {
       try {
@@ -2262,6 +2263,7 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
+        failed++;
         // The type id stays OUT of the format string. It comes from PCO, and a
         // `%s` in the first argument would eat the error standing beside it —
         // the operator told that fetching failed and not told why.
@@ -2271,6 +2273,16 @@ export class StageController {
           scrubError(err),
         );
       }
+    }
+
+    // No plan found while any type failed to read is a failed read, not an
+    // empty week: the type that failed may be the one whose plan the screens
+    // follow. The plan stays, as it does when the service types themselves
+    // cannot be read (that throws above). Clearing it here flipped every
+    // plan-following page (/patch, /stageplots, the slot boards) to its default
+    // on one failed poll, and back on the next good one. The caller logs the throw.
+    if (!best && failed > 0) {
+      throw new Error(`could not read the upcoming plans of ${failed} of ${candidates.length} service types; keeping the current plan`);
     }
 
     if (!best) {
