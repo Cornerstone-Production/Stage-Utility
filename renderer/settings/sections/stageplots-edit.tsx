@@ -20,7 +20,7 @@
 // the version is. Leaving the page, or switching plot or venue, with unsaved
 // changes asks first.
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type Dispatch, type ReactNode } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
@@ -256,10 +256,8 @@ function PlotEditor({
       </div>
       <SaveError message={error} className="mb-2" />
       <div
-        className={cn(
-          "grid items-start gap-3",
-          iconPalette ? "grid-cols-[44px_minmax(0,1fr)] xl:grid-cols-[44px_minmax(0,1fr)_280px]" : "grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_280px]",
-        )}
+        className="grid grid-cols-[var(--palette)_minmax(0,1fr)] items-start gap-3 xl:grid-cols-[var(--palette)_minmax(0,1fr)_280px]"
+        style={{ "--palette": `${iconPalette ? PALETTE_ICONS_PX : PALETTE_PX}px` } as CSSProperties}
       >
         <StagePlotsPalette onAdd={add} icons={iconPalette} />
         <div className="flex min-w-0 flex-col gap-3" ref={canvasColumn}>

@@ -51,7 +51,7 @@ export function ItemIcon({ kind, className }: { kind: IconKey | `sym:${(typeof S
 }
 
 /** The palette's width with names, and as icons only. */
-export const PALETTE_PX = 132;
+export const PALETTE_PX = 140;
 export const PALETTE_ICONS_PX = 44;
 
 /**
