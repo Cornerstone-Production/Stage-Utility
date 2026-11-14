@@ -33,7 +33,10 @@
 //                  that page was last sent (a listing, a rename, a plot added, a regenerate, an
 //                  unpublish, a delete, a move); a page moved away from is sent an empty one. A
 //                  Worker from before landing pages answers 404: "needs updating". A failure is
-//                  shown on the Publish card and tried again, after a minute and then longer.
+//                  shown on the Publish card and tried again, after a minute and then longer,
+//                  and the next list goes whatever that page was sent before. A page moved away
+//                  from that will not take its empty list is said on the follow's notice and
+//                  not tried again: nothing here can reach it after the move.
 //
 // A linked connection point goes out as the device's name and colour and the channels through
 // it, resolved here at publish time (stageplots-patch-link.ts), never as the link itself. While
@@ -106,6 +109,8 @@ export interface StagePlotsPublishDeps {
   debounceMs?: number;
   /** How long after a failed patch read it is tried again, doubling up to `maxMs`. A seam for a test. */
   patchRetry?: { firstMs: number; maxMs: number };
+  /** How long after a landing list that did not get through it is tried again, doubling up to `maxMs`. A seam for a test. */
+  landingRetry?: { firstMs: number; maxMs: number };
   now?: () => number;
 }
 
@@ -267,7 +272,7 @@ export function landingList(doc: StagePlotsDoc, origin: string): LandingList {
   const listed = doc.venues.filter((v) => v.publish?.listed && v.publish.origin === origin);
   return {
     venues: [...listed.filter((v) => v.kind === "home"), ...listed.filter((v) => v.kind !== "home")].map((v) => ({
-      name: v.name,
+      name: v.name.trim(),
       secret: v.publish!.secret,
       plots: v.plotIds.length,
     })),
@@ -352,6 +357,8 @@ export class StagePlotsPublisher {
     await Promise.all([...this.chains.values()]);
     return () => {
       this.paused = false;
+      // A change heard while paused, or a retry that came due, was skipped: the list is made again now.
+      void this.syncLanding();
     };
   }
 
@@ -851,11 +858,21 @@ export class StagePlotsPublisher {
       return;
     }
     const away = old !== null && old.origin !== saved;
-    // The page left lists nothing of this server's any more: with its old token, while there is one.
-    if (away) await this.sendLanding(old!, NONE_LISTED);
     const hadNote = this.followNote !== null;
     this.followNote = null;
     const notes: string[] = [];
+    // The page left lists nothing of this server's any more: with its old token, while there is
+    // one. A failure is this follow's to say, not the landing line's (which the next list sent to
+    // the page set up now clears), and nothing tries it again: after this nothing here can reach
+    // that page.
+    if (away) {
+      const failed = await this.sendLanding(old!, NONE_LISTED);
+      if (failed) {
+        const message = `${failed} Its landing page keeps listing what it listed until ${hostOf(old!.origin)} is set up here again, or its Worker is taken down.`;
+        say("warn", [], message);
+        notes.push(message);
+      }
+    }
     let target: PublishTarget | null = null;
     try {
       target = await this.deps.target();
@@ -898,51 +915,57 @@ export class StagePlotsPublisher {
       try {
         [target, doc] = await Promise.all([this.deps.target(), this.deps.store.get()]);
       } catch (err) {
-        await this.landingFailed(null, [], `The landing page could not be updated: ${errorMessage(err)}`);
+        await this.landingFailed([], `The landing page could not be updated: ${errorMessage(err)}`);
         return;
       }
       // No page set up: there is nowhere to send a list, and no venue can be published.
       if (!target.ok) return;
-      await this.sendLanding(target, landingList(doc, target.origin));
+      const list = landingList(doc, target.origin);
+      const failed = await this.sendLanding(target, list);
+      if (failed) return this.landingFailed(list.venues.map((v) => v.secret), failed);
+      this.landingRetryMs = 0;
+      if (this.landingNote) {
+        this.landingNote = null;
+        say("log", [], `the landing page on ${hostOf(target.origin)} is up to date again`);
+        await this.tellCard();
+      }
     });
   }
 
-  /** Send `list` to the page `target` when it is not what that page was last sent. True once the page holds it. */
-  private async sendLanding(target: Target, list: LandingList): Promise<boolean> {
+  /**
+   * Send `list` to the page `target` when it is not what that page was last sent. Null once the
+   * page holds it; otherwise why not, for the caller to say. A send that fails forgets what that
+   * page was last sent: the page may have taken it and the answer been lost, so the next list goes
+   * whatever it is, the one it was sent before included.
+   */
+  private async sendLanding(target: Target, list: LandingList): Promise<string | null> {
     const text = JSON.stringify(list);
-    if (this.landingSent.get(target.origin) === text) return true;
+    if (this.landingSent.get(target.origin) === text) return null;
     const host = hostOf(target.origin);
-    const secrets = list.venues.map((v) => v.secret);
     const r = await this.client(target).putLanding(list);
     // A Worker from before landing pages has none: with nothing to list there is nothing it lacks.
     const notThere = !r.ok && r.kind === "refused" && r.status === 404;
     if (r.ok || (notThere && list.venues.length === 0)) {
       const before = this.landingSent.get(target.origin);
       this.landingSent.set(target.origin, text);
-      if (r.ok && before !== undefined) say("log", secrets, `the landing page on ${host} lists ${plural(list.venues.length, "venue")} now`);
-      this.landingRetryMs = 0;
-      if (this.landingNote) {
-        this.landingNote = null;
-        say("log", [], `the landing page on ${host} is up to date again`);
-        await this.tellCard();
-      }
-      return true;
+      if (r.ok && before !== undefined) say("log", list.venues.map((v) => v.secret), `the landing page on ${host} lists ${plural(list.venues.length, "venue")} now`);
+      return null;
     }
-    const message = notThere ? `${host} needs updating before it can show a landing page: deploy the Worker.` : `The landing page on ${host} could not be updated: ${sentence(r, host)}`;
-    await this.landingFailed(target, secrets, message);
-    return false;
+    this.landingSent.delete(target.origin);
+    return notThere ? `${host} needs updating before it can show a landing page: deploy the Worker.` : `The landing page on ${host} could not be updated: ${sentence(r, host)}`;
   }
 
-  /** A landing list that did not get through: shown on the card, said once, and tried again later. */
-  private async landingFailed(target: Target | null, secrets: readonly string[], message: string): Promise<void> {
+  /** The landing list of the page set up that did not get through: shown on the card, said once, and the list made and sent again later. */
+  private async landingFailed(secrets: readonly string[], message: string): Promise<void> {
     const changed = this.landingNote?.message !== message;
     this.landingNote = { at: this.at(), message };
     if (changed) {
       say("warn", secrets, `${message} It is tried again after a minute, and on every change.`);
       await this.tellCard();
     }
-    if (target === null || this.landingRetryTimer || this.stopped) return;
-    this.landingRetryMs = Math.min(LANDING_RETRY.maxMs, this.landingRetryMs === 0 ? LANDING_RETRY.firstMs : this.landingRetryMs * 2);
+    if (this.landingRetryTimer || this.stopped) return;
+    const retry = this.deps.landingRetry ?? LANDING_RETRY;
+    this.landingRetryMs = Math.min(retry.maxMs, this.landingRetryMs === 0 ? retry.firstMs : this.landingRetryMs * 2);
     this.landingRetryTimer = setTimeout(() => {
       this.landingRetryTimer = null;
       void this.syncLanding();

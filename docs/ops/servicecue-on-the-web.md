@@ -137,7 +137,9 @@ in front of anyone who finds the page.
 - The page holds one small list: each listed venue's name, plot count and link, never its
   notes, plots or patch. Stage Utility sends it again whenever it changes: a venue listed or
   taken off, renamed, given a plot or losing one, its link regenerated, unpublished,
-  deleted, or moved to a new page address (the old page is sent an empty list).
+  deleted, or moved to a new page address (the old page is sent an empty list with its
+  old token; if it will not take it, the Publish card says so, and the old page keeps its
+  list until it is set up here again or its Worker is taken down).
 - With no venue listed, `/` goes straight on to `/servicecue`, as it always has.
 - The page follows the visitor's light or dark setting.
 

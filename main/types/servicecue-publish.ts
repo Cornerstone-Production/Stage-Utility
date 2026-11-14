@@ -9,12 +9,17 @@
 //   - the publisher inside the app, which sends it.
 //
 // It holds names, patterns and pure functions and nothing else: no Node, no DOM,
-// no Workers API, no import. The Worker bundles it and the browser bundles it, and
-// the root test suite runs it. docs/reference/servicecue-publishing.md describes
-// the protocol these constants define.
+// no Workers API. Its one import is the app's StagePlots limits (stageplots.ts,
+// which imports nothing), so the landing list is held to the numbers the app keeps
+// rather than a copy of them; it names the .ts file because plain Node runs this
+// module for the deploy script. The Worker bundles it and the browser bundles it,
+// and the root test suite runs it. docs/reference/servicecue-publishing.md
+// describes the protocol these constants define.
 //
 // Every list below is sorted, one entry per line, so two branches that each add an
 // entry merge without a conflict and a test can pin the exact list.
+
+import { STAGEPLOT_LIMITS } from "./stageplots.ts";
 
 /** The protocol's version: the `v1` in every publish path, and `protocol` in the status answer. */
 export const PUBLISH_PROTOCOL_VERSION = 1;
@@ -530,11 +535,11 @@ export const LANDING_PATH = "/api/landing";
 export const LANDING_HTML = "/landing.html";
 
 /** The most venues the list holds: the app's own limit. */
-export const LANDING_MAX_VENUES = 50;
+export const LANDING_MAX_VENUES = STAGEPLOT_LIMITS.venues;
 /** The longest name: the app's own limit. */
-const LANDING_NAME_CHARS = 60;
+const LANDING_NAME_CHARS = STAGEPLOT_LIMITS.nameChars;
 /** The most plots a venue can have: the app's own limit. */
-const LANDING_MAX_PLOTS = 20;
+const LANDING_MAX_PLOTS = STAGEPLOT_LIMITS.plotsPerVenue;
 
 /** One listed venue: its name, its secret link and how many plots it has. */
 export interface LandingVenue {

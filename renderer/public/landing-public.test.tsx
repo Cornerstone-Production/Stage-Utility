@@ -19,11 +19,18 @@ const A = `${"a".repeat(42)}A`;
 const B = `${"b".repeat(42)}E`;
 let LIST: unknown;
 let STATUS = 200;
+/** The request never answers ("network"), or answers with a body that is not JSON ("body"). */
+let BREAK: "network" | "body" | null = null;
 let asked: string[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   asked.push(new URL(String(url), "https://plots.example.workers.dev").pathname);
-  return { ok: STATUS < 300, status: STATUS, json: async () => LIST, text: async () => JSON.stringify(LIST) };
+  if (BREAK === "network") throw new TypeError("Failed to fetch");
+  const json = async () => {
+    if (BREAK === "body") throw new SyntaxError("Unexpected token < in JSON");
+    return LIST;
+  };
+  return { ok: STATUS < 300, status: STATUS, json, text: async () => JSON.stringify(LIST) };
 };
 
 const { render, cleanup, screen } = await import("@testing-library/react");
@@ -41,6 +48,7 @@ async function mount() {
 beforeEach(() => {
   LIST = { venues: [{ name: "Main Auditorium", secret: A, plots: 3 }, { name: "Youth Room", secret: B, plots: 1 }] };
   STATUS = 200;
+  BREAK = null;
   asked = [];
 });
 afterEach(() => cleanup());
@@ -74,4 +82,13 @@ describe("the landing page", () => {
     assert.match(document.body.textContent!, /The venues could not be loaded\. Try again in a moment\./);
     assert.ok(screen.getByRole("link", { name: /ServiceCue/ }));
   });
+
+  for (const broken of ["network", "body"] as const) {
+    test(`no answer at all, or one that is not JSON, says so too (${broken})`, async () => {
+      BREAK = broken;
+      await mount();
+      assert.match(document.body.textContent!, /The venues could not be loaded\. Try again in a moment\./, "the visitor was left on Loading");
+      assert.ok(screen.getByRole("link", { name: /ServiceCue/ }));
+    });
+  }
 });

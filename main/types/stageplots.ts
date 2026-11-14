@@ -5,6 +5,9 @@
 // follows its background's aspect ratio (16:9 when it has none), so items keep
 // their place on the drawing when the background changes or is re-converted.
 // See docs/features/stageplots.md.
+//
+// It imports nothing: the public page's contract (servicecue-publish.ts) takes
+// STAGEPLOT_LIMITS from here, and the ServiceCue Worker and plain Node load it.
 
 export type VenueKind = "home" | "offsite";
 

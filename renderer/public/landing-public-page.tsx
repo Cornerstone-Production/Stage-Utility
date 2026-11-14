@@ -16,11 +16,16 @@ import { useTheme } from "../lib/use-theme";
 
 type Loaded = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; venues: LandingVenue[] };
 
+/** The list, or failed: an answer that is not one, an unreadable body and no answer at all alike. Never rejects. */
 async function load(): Promise<Loaded> {
-  const res = await fetch(LANDING_PATH, { cache: "no-store" });
-  if (!res.ok) return { kind: "failed" };
-  const r = readLandingList(await res.json());
-  return r.ok ? { kind: "ready", venues: r.list.venues } : { kind: "failed" };
+  try {
+    const res = await fetch(LANDING_PATH, { cache: "no-store" });
+    if (!res.ok) return { kind: "failed" };
+    const r = readLandingList(await res.json());
+    return r.ok ? { kind: "ready", venues: r.list.venues } : { kind: "failed" };
+  } catch {
+    return { kind: "failed" };
+  }
 }
 
 const card = "flex rounded-xl border border-line bg-surface text-fg shadow-[var(--su-shadow-1)]";
@@ -33,15 +38,12 @@ export function LandingPublicPage() {
 
   useEffect(() => {
     let live = true;
-    load().then(
-      (next) => {
-        if (!live) return;
-        // Nothing listed any more: `/` is ServiceCue again.
-        if (next.kind === "ready" && next.venues.length === 0) window.location.replace("/servicecue");
-        else setLoaded(next);
-      },
-      () => live && setLoaded({ kind: "failed" }),
-    );
+    void load().then((next) => {
+      if (!live) return;
+      // Nothing listed any more: `/` is ServiceCue again.
+      if (next.kind === "ready" && next.venues.length === 0) window.location.replace("/servicecue");
+      else setLoaded(next);
+    });
     return () => {
       live = false;
     };

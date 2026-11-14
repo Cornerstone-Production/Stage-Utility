@@ -122,7 +122,12 @@ async function assertNoUnknownLinks(): Promise<void> {
 
 async function harness(
   doc: StagePlotsDoc = venueDoc(),
-  opts: { target?: () => Promise<unknown>; client?: (t: { origin: string; token: string }) => unknown; patchRetry?: { firstMs: number; maxMs: number } } = {},
+  opts: {
+    target?: () => Promise<unknown>;
+    client?: (t: { origin: string; token: string }) => unknown;
+    patchRetry?: { firstMs: number; maxMs: number };
+    landingRetry?: { firstMs: number; maxMs: number };
+  } = {},
 ): Promise<Harness> {
   const page = await startPage();
   const parsed = parsePublishUrl(page.origin);
@@ -154,6 +159,7 @@ async function harness(
     debounceMs: 30,
     ...(opts.client ? { client: opts.client as never } : {}),
     ...(opts.patchRetry ? { patchRetry: opts.patchRetry } : {}),
+    ...(opts.landingRetry ? { landingRetry: opts.landingRetry } : {}),
   });
   publisher.start();
   const h: Harness = {
@@ -211,7 +217,7 @@ describe("the landing list", () => {
     const s = (c: string) => `${c.repeat(42)}A`;
     doc.venues = [
       { ...base, id: "v-off", name: "Away", kind: "offsite", notes: "Secret door code 1234", publish: pub(s("a"), "https://page.example", true) },
-      { ...base, id: "v-home", name: "Main", notes: "Load in at the side", publish: pub(s("b"), "https://page.example", true) },
+      { ...base, id: "v-home", name: "  Main ", notes: "Load in at the side", publish: pub(s("b"), "https://page.example", true) },
       { ...base, id: "v-unlisted", name: "Chapel", publish: pub(s("c"), "https://page.example", false) },
       { ...base, id: "v-elsewhere", name: "Annex", publish: pub(s("d"), "https://other.example", true) },
       { ...base, id: "v-unpublished", name: "Hall" },
@@ -222,6 +228,113 @@ describe("the landing list", () => {
         { name: "Away", secret: s("a"), plots: base.plotIds.length },
       ],
     });
+  });
+
+  const landingOn = (page: Receiver) => (page.hub.landing === null ? null : (JSON.parse(page.hub.landing) as { venues: { name: string }[] }));
+  const LANDING = "/_publish/v1/landing";
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "error", () => undefined), mock.method(console, "warn", () => undefined), mock.method(console, "log", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+
+  test("a send whose answer was lost goes again, even when the list is back to what the page was sent before it", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    assert.deepEqual(landingOn(h.page), { venues: [] });
+    // The page stores the list, and its answer never arrives.
+    h.page.respond = async (req) => {
+      const a = await h.page.worker(req);
+      return req.path === LANDING ? { status: 500, body: "" } : a;
+    };
+    await quietly(() => h.publisher.setListed("v-1", true));
+    assert.deepEqual(landingOn(h.page)?.venues.map((v) => v.name), ["Main room"]);
+    h.page.respond = (req) => h.page.worker(req);
+    await quietly(() => h.publisher.setListed("v-1", false));
+    assert.deepEqual(landingOn(h.page), { venues: [] }, "the page still lists a venue taken off it");
+    assert.equal(h.publisher.landingNotice(), null);
+  });
+
+  test("a list that could not be made (the settings unreadable) is made and sent again after the wait the log names", async () => {
+    let throwNext = false;
+    const h = await harness(venueDoc(), {
+      landingRetry: { firstMs: 20, maxMs: 20 },
+      target: async () => {
+        if (throwNext) {
+          throwNext = false;
+          throw new Error("settings.json could not be read (EIO)");
+        }
+        const o = parsePublishUrl(open!.page.origin);
+        assert.ok(o.ok);
+        return { ok: true, origin: o.origin, token: TOKEN };
+      },
+    });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    assert.ok((await h.publisher.setListed("v-1", true)).ok);
+    const said: string[] = [];
+    const spy = mock.method(console, "warn", (...a: unknown[]) => void said.push(a.join(" ")));
+    try {
+      throwNext = true;
+      await h.edit((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, name: "Chapel" })) }));
+      await waitFor(() => said.some((w) => /The landing page could not be updated: settings\.json could not be read/.test(w)), "the failure to be said");
+      assert.match(said.find((w) => /landing page/.test(w))!, /tried again after a minute/);
+      await waitFor(() => landingOn(h.page)?.venues[0]?.name === "Chapel", "the retry the log promised", 2000);
+    } finally {
+      spy.mock.restore();
+    }
+    await h.publisher.settle();
+  });
+
+  test("a restore that pauses and gives way sends the list a change made while it held", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const resume = await h.publisher.pause();
+    await h.edit((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, publish: { ...v.publish!, listed: true } })) }));
+    await h.publisher.settle();
+    assert.deepEqual(landingOn(h.page), { venues: [] }, "a paused publisher sent the list");
+    resume();
+    await h.publisher.settle();
+    assert.deepEqual(landingOn(h.page)?.venues.map((v) => v.name), ["Main room"], "the resume did not send the list the restore held back");
+  });
+
+  test("an old page that will not take its empty list keeps it, said on the move's own notice, and nothing tries it again", async () => {
+    const h = await harness(venueDoc(), { landingRetry: { firstMs: 20, maxMs: 20 } });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    assert.ok((await h.publisher.setListed("v-1", true)).ok);
+    const a = parsePublishUrl(h.page.origin);
+    const other = await startPage();
+    const b = parsePublishUrl(other.origin);
+    assert.ok(a.ok && b.ok);
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: b.origin, token: TOKEN });
+    let oldLandingPuts = 0;
+    h.page.respond = (req) => {
+      if (req.path !== LANDING) return h.page.worker(req);
+      oldLandingPuts++;
+      return { status: 500, body: "" };
+    };
+    await quietly(async () => {
+      await h.publisher.pageSaved({ origin: a.origin, token: TOKEN }, b.origin);
+      // The move's write, broadcast as the app's broadcaster does.
+      h.hear("stageplots:updated");
+      await h.publisher.settle();
+      // Whatever a retry would do, it has had time to do it.
+      await new Promise((r) => setTimeout(r, 100));
+      await h.publisher.settle();
+    });
+    assert.deepEqual(landingOn(other)?.venues.map((v) => v.name), ["Main room"]);
+    assert.match(
+      h.publisher.notice()?.message ?? "",
+      new RegExp(`The landing page on ${host(h.page).replace(/\./g, "\\.")} could not be updated: .* Its landing page keeps listing what it listed until ${host(h.page).replace(/\./g, "\\.")} is set up here again, or its Worker is taken down\\.`),
+      "the old page's failure is not on the move's notice",
+    );
+    assert.equal(h.publisher.landingNotice(), null, "the landing line names a page that is no longer set up");
+    assert.equal(oldLandingPuts, 1, "the old page was tried again with nothing here able to reach it");
+    assert.deepEqual(landingOn(h.page)?.venues.map((v) => v.name), ["Main room"]);
   });
 });
 

@@ -175,7 +175,8 @@ publisher tells "deploy the Worker" apart from a refusal of one thing.
 
 The page's own address, `/`, is a landing page while at least one venue is listed on it
 (see [The landing page](../ops/servicecue-on-the-web.md#the-landing-page)). The publisher
-sends the whole list, replacing the one held, whenever it changes:
+sends the whole list, replacing the one held, whenever it changes, and again after a send
+that failed, since the page may have stored it before its answer was lost:
 
 ```json
 { "venues": [{ "name": "Main Auditorium", "secret": "<43 characters>", "plots": 3 }] }
