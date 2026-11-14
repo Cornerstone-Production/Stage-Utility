@@ -55,8 +55,9 @@ export const stageplotsApi = {
   createPlot: (plot: { venueId: string; name: string; backgroundId?: string | null }) => invoke<Plot>("stageplots:createPlot", { plot }),
   duplicatePlot: (id: string) => invoke<Plot>("stageplots:duplicatePlot", { id }),
   updatePlot: (id: string, changes: PlotChanges) => invoke<Plot>("stageplots:updatePlot", { id, changes }),
-  /** `clearedPlans`: the plans whose override named the plot, cleared with it. */
-  /** Deleting the default makes the first plot left the default (`defaultPlotId`, null when none is left). */
+  /** `clearedPlans`: the plans whose override named the plot, cleared with it.
+   *  `defaultPlotId`: the venue's default after the delete (deleting the default makes the first
+   *  plot left in tab order the default); null only when no plot is left. */
   deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[]; defaultPlotId: string | null }>("stageplots:deletePlot", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),

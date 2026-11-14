@@ -127,21 +127,31 @@ describe("stage plot routes", () => {
     const a = await plot(v.id, "Standard");
     const b = await plot(v.id, "Baptism");
     const c = await plot(v.id, "Christmas");
-    // Not the default: the default stays.
-    assert.equal((await call("DELETE", `/api/stageplots/plots/${b.id}`)).status, 200);
+    const d = await plot(v.id, "Easter");
+    // Not the default: the default stays, and the answer names it.
+    const other = await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.equal(other.status, 200);
+    assert.equal((other.json as { defaultPlotId: string | null }).defaultPlotId, a.id, "the answer is the default as it is after the delete");
     let doc = await stageplotsStore.get();
     assert.equal(doc.venues[0].defaultPlotId, a.id);
-    // The default: the first plot left in tab order takes over, and the answer says which.
+    // Tab order now differs from creation order: d, then c, then a.
+    assert.equal((await call("PATCH", `/api/stageplots/venues/${v.id}`, { plotIds: [d.id, c.id, a.id] })).status, 200);
+    // The default: the FIRST plot left in tab order (d) takes over, not the last (c), and the
+    // answer says which.
     const r = await call("DELETE", `/api/stageplots/plots/${a.id}`);
     assert.equal(r.status, 200, r.body);
-    assert.equal((r.json as { defaultPlotId: string | null }).defaultPlotId, c.id);
+    assert.equal((r.json as { defaultPlotId: string | null }).defaultPlotId, d.id);
     doc = await stageplotsStore.get();
-    assert.deepEqual(doc.venues[0].plotIds, [c.id]);
+    assert.deepEqual(doc.venues[0].plotIds, [d.id, c.id]);
+    assert.equal(doc.venues[0].defaultPlotId, d.id);
+    assert.equal((await call("DELETE", `/api/stageplots/plots/${d.id}`)).status, 200);
+    doc = await stageplotsStore.get();
     assert.equal(doc.venues[0].defaultPlotId, c.id);
+    assert.equal(doc.venues[0].plotIds.length, 1);
     // The last plot: the venue is left with none.
     const last = await call("DELETE", `/api/stageplots/plots/${c.id}`);
     assert.equal(last.status, 200, last.body);
-    assert.equal((last.json as { defaultPlotId: string | null }).defaultPlotId, null);
+    assert.equal((last.json as { defaultPlotId: string | null }).defaultPlotId, null, "null only when no plot is left");
     doc = await stageplotsStore.get();
     assert.deepEqual(doc.venues[0].plotIds, []);
     assert.equal(doc.venues[0].defaultPlotId, null);
@@ -830,7 +840,7 @@ describe("per-plan overrides", () => {
   });
 
   test("deleting a plot removes its overrides and names the plans", async () => {
-    const { v, bap, xmas } = await room();
+    const { v, std, bap, xmas } = await room();
     await put({ planId: "101", venueId: v.id, plotId: bap.id });
     await put({ planId: "102", venueId: v.id, plotId: xmas.id });
     await put({ planId: "103", venueId: v.id, plotId: bap.id });
@@ -839,7 +849,7 @@ describe("per-plan overrides", () => {
       r = await call("DELETE", `/api/stageplots/plots/${bap.id}`);
     });
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(r.json, { ok: true, clearedPlans: ["101", "103"], defaultPlotId: null });
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["101", "103"], defaultPlotId: std.id });
     assert.deepEqual(
       (await stageplotsStore.get()).overrides.map((o) => o.planId),
       ["102"],
@@ -847,7 +857,7 @@ describe("per-plan overrides", () => {
     assert.ok(lines.some((l) => /2 plan overrides cleared/.test(l)), lines.join("\n"));
     // A plot no plan overrides clears none.
     r = await call("DELETE", `/api/stageplots/plots/${xmas.id}`);
-    assert.deepEqual(r.json, { ok: true, clearedPlans: ["102"], defaultPlotId: null });
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["102"], defaultPlotId: std.id });
   });
 
   test("deleting a venue takes its overrides with it, and leaves another venue's", async () => {
