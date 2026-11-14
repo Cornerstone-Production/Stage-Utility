@@ -763,7 +763,62 @@ async function addFromPalette(testId: string): Promise<string> {
   return added;
 }
 
+/** A press on a palette item, moves, and a release, as a drag from the palette. */
+async function paletteDrag(testId: string, to: { x: number; y: number }, { release = true, thenClick = false }: { release?: boolean; thenClick?: boolean } = {}) {
+  const btn = screen.getByTestId(`add-${testId}`);
+  const ev = async (kind: "pointerDown" | "pointerMove" | "pointerUp", x: number, y: number) => {
+    await act(async () => {
+      fireEvent[kind](btn, { pointerId: 1, clientX: x, clientY: y, button: 0, isPrimary: true });
+      // The browser sends the click in the same task as the release.
+      if (kind === "pointerUp" && thenClick) fireEvent.click(btn, { detail: 1 });
+    });
+  };
+  await ev("pointerDown", 20, 200);
+  await ev("pointerMove", 25, 205);
+  await ev("pointerMove", to.x, to.y);
+  if (release) await ev("pointerUp", to.x, to.y);
+  await settle();
+}
+const itemIds = () => [...canvas().querySelectorAll("[data-id]")].map((g) => g.getAttribute("data-id")!);
+
 describe("the plot editor", () => {
+  test("a palette item dragged onto the plot lands centred on the drop point", async () => {
+    await mount();
+    stubBox();
+    await paletteDrag("box", { x: 400, y: 300 }, { thenClick: true });
+    assert.equal(itemIds().length, 1, "the click after a drop added a second item");
+    const [id] = itemIds();
+    assert.ok(id, "the drop added nothing");
+    const w = Number(drawn(id).querySelector("rect")!.getAttribute("width"));
+    const h = Number(drawn(id).querySelector("rect")!.getAttribute("height"));
+    assert.ok(Math.abs(at(id).x + w / 2 - 400) <= 1 && Math.abs(at(id).y + h / 2 - 300) <= 1, `centred on (400, 300), at ${JSON.stringify(at(id))} ${w}x${h}`);
+  });
+
+  test("a palette drag let go off the plot, or ended with Escape, adds nothing; a plain click after still adds", async () => {
+    await mount();
+    stubBox();
+    // Off the plot: below its box (it is 666 px tall).
+    await paletteDrag("box", { x: 400, y: 900 });
+    assert.deepEqual(itemIds(), [], "dropped off the plot");
+    // Escape mid-drag, then let go over the plot.
+    await paletteDrag("box", { x: 400, y: 300 }, { release: false });
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(screen.getByTestId("add-box"), { pointerId: 1, clientX: 400, clientY: 300, button: 0, isPrimary: true });
+    });
+    await settle();
+    assert.deepEqual(itemIds(), [], "Escape cancelled the drag");
+    assert.equal(screen.queryByTestId("palette-ghost"), null);
+    // A later keyboard (or any plain) click adds, as it always did.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-box"), { detail: 0 });
+    });
+    await settle();
+    assert.equal(itemIds().length, 1, "a plain click after a cancelled drag still adds");
+  });
+
   test("clicking Drum kit in the palette adds a selected drum kit", async () => {
     await mount();
     const id = await addFromPalette("drumkit");

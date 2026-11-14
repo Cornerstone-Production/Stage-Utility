@@ -5,7 +5,7 @@
 // icon follows the pointer and lands where it is let go on the plot; let go
 // anywhere else, or Escape, and nothing is added.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { SYMBOL_KINDS } from "@main/types/stageplots";
 
@@ -14,6 +14,7 @@ import type { AddKind } from "../../main/stageplots/editor-state";
 import { Part } from "../../main/stageplots/symbols";
 import { SYMBOLS, TYPE_NAMES, iconParts, type IconKey } from "../../main/stageplots/symbols";
 import { cn } from "../../lib/cn";
+import { usePressDrag } from "../../lib/use-press-drag";
 
 /** The palette, as the mockup groups it. Symbols in their drawing order. */
 export const PALETTE: { group: string; entries: { kind: AddKind; name: string }[] }[] = [
@@ -73,58 +74,24 @@ export function StagePlotsPalette({
   onDrop?: (kind: AddKind, point: { x: number; y: number }) => void;
   icons?: boolean;
 }) {
-  const press = useRef<{ kind: AddKind; pointerId: number; x: number; y: number; dragging: boolean } | null>(null);
-  /** Set when a press ended as a drag: the click the browser sends after it adds nothing more. */
-  const dragged = useRef(false);
   const [ghost, setGhost] = useState<{ kind: AddKind; x: number; y: number } | null>(null);
-  useEffect(() => {
-    if (!ghost) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      press.current = null;
-      dragged.current = true;
-      setGhost(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [ghost]);
+  const drag = usePressDrag<AddKind>({
+    slop: DRAG_SLOP_PX,
+    onMove: (kind, e) => setGhost({ kind, x: e.clientX, y: e.clientY }),
+    onDrop: (kind, e) => onDrop?.(kind, { x: e.clientX, y: e.clientY }),
+    onEnd: () => setGhost(null),
+  });
 
   const handlers = (kind: AddKind) => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
       if (e.button !== 0 || !onDrop) return;
-      dragged.current = false;
-      press.current = { kind, pointerId: e.pointerId, x: e.clientX, y: e.clientY, dragging: false };
-      // Held from the press, so a quick first move that leaves the button is still this drag's.
-      e.currentTarget.setPointerCapture?.(e.pointerId);
+      drag.press(e, kind);
     },
-    onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => {
-      const p = press.current;
-      if (!p || p.pointerId !== e.pointerId) return;
-      if (!p.dragging) {
-        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < DRAG_SLOP_PX) return;
-        p.dragging = true;
-      }
-      setGhost({ kind, x: e.clientX, y: e.clientY });
-    },
-    onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => {
-      const p = press.current;
-      if (!p || p.pointerId !== e.pointerId) return;
-      press.current = null;
-      setGhost(null);
-      if (!p.dragging) return;
-      dragged.current = true;
-      onDrop?.(kind, { x: e.clientX, y: e.clientY });
-    },
-    onPointerCancel: () => {
-      press.current = null;
-      setGhost(null);
-    },
-    onClick: () => {
-      if (dragged.current) {
-        dragged.current = false;
-        return;
-      }
-      onAdd(kind);
+    onPointerMove: drag.move,
+    onPointerUp: drag.up,
+    onPointerCancel: drag.cancel,
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      if (!drag.claimClick(e)) onAdd(kind);
     },
   });
 
