@@ -290,19 +290,47 @@ selected item.
 Every change stays inside the plot and within the size limits, so a draft can
 always be saved.
 
-**Save and Discard.** While the draft differs from what is saved, a banner says
-so: **Save** sends it, **Discard** puts back what is saved. Nothing reaches
-`/stageplots` until Save. Each save carries the version of the plot it started
-from. If the plot was saved from somewhere else since, the save is refused and
-nothing is overwritten: the banner says the plot changed elsewhere and offers
+### Save and Discard
+
+While the draft differs from what is saved, a banner says so: **Save** sends it,
+**Discard** puts back what is saved. Nothing reaches `/stageplots` until Save.
+Each save carries the version of the plot it started from. If the plot was saved
+from somewhere else since, the save is refused and nothing is overwritten: the
+banner says the plot was saved elsewhere after your draft began and offers
 **Reload**, which shows the saved plot and drops the draft. A change elsewhere to
 the plot's name or fade does not count, nor does a background change that moved no
 items; a save refused for one of those before its news arrived is sent again on the
 new version. A background change that moved items does count. Nothing counts while
 the draft has nothing unsaved, which simply shows the new plot; undoing back to
-that clears the banner. Leaving the page,
-switching venue or plot, or **+**, **Duplicate** or **Delete…** on a plot ask
-first while there are unsaved changes.
+that clears the banner.
+
+**The draft is kept on the server.** About a second after the last change, and as
+the page closes, the editor stores the draft, so a reload, a closed tab, a crash or
+another device picks it up. The banner ends with **Draft kept 14:32** once it is
+stored and **Keeping draft…** while it is on its way. A stored draft is not the plot:
+it is never on `/stageplots` or the public page, is never published, and changes
+nothing anyone else sees until **Save**, which saves the plot and deletes the draft.
+**Discard**, and undoing back to what is saved, delete it too.
+
+- **Opening a plot with a draft** shows the draft, with a banner naming when it was
+  kept (**Unsaved draft from Sat 14 Nov, 14:32**), **Discard draft** and **Save**. A
+  plot with a draft carries a dot on its tab, and its venue a dot in the list.
+- **One draft per plot.** Two devices editing the same plot share it; the last
+  change kept wins. A draft drawn on a version of the plot whose items were saved
+  from elsewhere since opens as saved elsewhere, and **Reload** drops it. A rename, a
+  fade or a background change that moved no items does not make a draft stale.
+- **When the server cannot take it**, the banner turns red: "The draft could not be
+  kept (the server did not answer); leaving now loses it. Trying again." It is tried
+  again after 2 seconds, then 4, 8 and so on up to 30.
+- **Leaving.** Switching venue or plot, **+**, **Duplicate**, or **Delete…** on the
+  plot being edited, stores the draft and goes on without asking; it asks only when
+  the draft could not be stored, and going on then drops it. Deleting another plot
+  leaves the open plot's draft alone. Leaving the page asks only while
+  the newest change has not reached the server: a link or Back stores it first, and
+  closing the tab asks until it is stored. A very large draft (past about 64 KB,
+  hundreds of items) may not get out as the tab closes, because browsers cap what a
+  closing page can send; it is safe once **Draft kept** shows.
+- A draft whose plot is deleted, with the plot or its venue, is deleted with it.
 
 ### Item types
 
@@ -538,7 +566,7 @@ lists up to 128 patch channels.
 ## Backups
 
 A config backup carries `stageplots.json` (venues, plots, backgrounds, every
-plan's override, each published venue's secret link and the old links waiting to be removed), both folders of background files and
+plan's override, each published venue's secret link and the old links waiting to be removed), `stageplot-drafts.json` (the editor's unsaved drafts), both folders of background files and
 every PDF original, and a restore brings them all back. A photo background is
 about 1 to 3 MB of source plus at most 1 MB of WebP. One made from a PDF carries
 the PDF as uploaded too (up to 25 MB), beside its page's source, which for a
@@ -561,7 +589,9 @@ because its source is missing, a venue or background deleted, files tidied away 
 left behind, the tidy skipped and why, image processing unavailable because sharp
 did not load, a save that failed, every item save refused and why (a body that is
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
-version that is not a whole number, "changed elsewhere"), how many items moved
+version that is not a whole number, "changed elsewhere"), every draft refused and
+why, drafts dropped because their plot is gone, a draft that could not be written,
+how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
 overrides cleared with a deleted plot, a deleted default and the plot that took
@@ -578,6 +608,7 @@ failure that could not be taken back, and each venue moved to a new page. The se
 never logged. A publish that cannot read the patch sheet says so once (linked points go
 out unlinked) and again when it can, and each plot sent with linked points that went out
 unlinked names them and why (the device is gone, or the sheet cannot be read).
+The editor logs a draft it could not keep (once, until it is kept again, and then that it is), one it could not delete, one it could not send as the page closed, and a failed read of the drafts.
 A page that cannot read the plots logs that too, so does one that cannot read the patch
 sheet for its linked points, so does a print whose
 background did not load, and so does a page that finds Planning Center

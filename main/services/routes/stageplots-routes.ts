@@ -32,6 +32,18 @@
 //   PUT    /api/stageplots/plots/:id/items          { version, items } → { plot }, version + 1;
 //                                                   409 { error, version } when the plot
 //                                                   changed since that version
+//   GET    /api/stageplots/drafts                   { drafts: [{ plotId, baseVersion, items, savedAt }] }:
+//                                                   the editor's kept drafts, one per plot; a draft
+//                                                   whose plot is gone is dropped here, and said
+//   PUT    /api/stageplots/plots/:id/draft          { baseVersion, items } → { plotId, baseVersion, savedAt };
+//                                                   items held to a save's rules; 404 unknown plot
+//   DELETE /api/stageplots/plots/:id/draft          → { ok }; nothing there is not an error
+//                                                   A draft never touches stageplots.json, never
+//                                                   broadcasts stageplots:updated and is never
+//                                                   published: it broadcasts { drafts: [{ plotId,
+//                                                   savedAt }] } on stageplots:drafts. A saved item
+//                                                   list deletes its plot's draft, and deleting a plot
+//                                                   or venue deletes its drafts.
 //   PUT    /api/stageplots/overrides               { planId, venueId, plotId | null, planDate? }
 //                                                   → the document; null removes the
 //                                                   plan's override for that venue
@@ -66,15 +78,18 @@ import { randomBytes } from "node:crypto";
 import type http from "node:http";
 
 import {
+  STAGEPLOT_DRAFTS_CHANNEL,
   STAGEPLOT_LIMITS,
   STAGEPLOTS_CHANNEL,
   type Background,
   type Plot,
+  type PlotDraft,
   type StagePlotsDoc,
   type Venue,
   type VenueKind,
 } from "../../types/stageplots.js";
-import { broadcast } from "../broadcaster.js";
+import { broadcast, channelHasSubscribers } from "../broadcaster.js";
+import { plotDraftsStore } from "../stageplot-drafts-store.js";
 import { patchStore } from "../patch-store.js";
 import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
@@ -152,6 +167,7 @@ async function mutate(
   change: (doc: StagePlotsDoc) => StagePlotsDoc,
   pick: (doc: StagePlotsDoc) => unknown,
   status = 200,
+  afterSave?: () => Promise<unknown>,
 ): Promise<StagePlotsDoc | null> {
   let doc: StagePlotsDoc;
   let changed = false;
@@ -170,6 +186,7 @@ async function mutate(
     throw err;
   }
   if (changed) broadcast(STAGEPLOTS_CHANNEL, toView(doc));
+  await afterSave?.();
   json(res, pick(doc), status);
   return changed ? doc : null;
 }
@@ -338,7 +355,10 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
     },
     () => (notice ? { ok: true, notice } : { ok: true }),
   );
-  if (doc) console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides`);
+  if (doc) {
+    const drafts = await dropDraftsWithout(doc);
+    console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides${drafts > 0 ? ` and ${scrub(drafts)} unsaved drafts` : ""}`);
+  }
 }
 
 async function setDefault(c: RouteCtx, id: string): Promise<void> {
@@ -447,6 +467,10 @@ async function updatePlot(c: RouteCtx, id: string): Promise<void> {
   );
   // Only once the move is saved: a refused change moved nothing.
   if (saved && moved > 0) console.log(`[stageplots] plot ${scrub(id)}: ${scrub(moved)} items moved up onto the plot after its background changed`);
+  // A rename, a fade or a background that moved no item changes the version and not the items:
+  // a draft based on the version before is still based on these items, and keeps working.
+  const now = saved?.plots.find((p) => p.id === id);
+  if (now && moved === 0) await carryDraftBase(id, now.version - 1, now.version);
 }
 
 /** Why a PUT …/items body is refused, said on [stageplots] and answered. */
@@ -491,6 +515,10 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
       return replaceIn<Plot>(doc, "plots", { ...p, items, version: p.version + 1 });
     },
     (doc) => ({ plot: findPlot(doc, id) }),
+    200,
+    // A save that went through, changed or not, is what the plot's draft was kept for: it goes
+    // before the answer, so the editor never reads back a draft of what it just saved.
+    () => dropDraft(id),
   );
 }
 
@@ -524,12 +552,112 @@ async function deletePlot(c: RouteCtx, id: string): Promise<void> {
     () => ({ ok: true, clearedPlans: cleared, defaultPlotId: nowDefault }),
   );
   if (!saved) return;
+  const drafts = await dropDraftsWithout(saved);
+  if (drafts > 0) console.log(`[stageplots] plot ${scrub(id)} deleted with its unsaved draft`);
   if (cleared.length > 0) {
     console.log(`[stageplots] plot ${scrub(id)} deleted; ${scrub(cleared.length)} plan overrides cleared (plans ${scrub(cleared.join(", "))}), which show the default now`);
   }
   if (wasDefault) {
     console.log(`[stageplots] plot ${scrub(id)} was its venue's default; ${nowDefault ? `plot ${scrub(nowDefault)} is the default now` : "the venue has no plots left"}`);
   }
+}
+
+// ── Drafts ───────────────────────────────────────────────────────────────
+
+/** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
+const draftNotes = (drafts: readonly PlotDraft[]) => ({ drafts: drafts.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
+
+/** Change the drafts and, when that changed anything, say which plots have one now on stageplots:drafts. A failed write is said on [stageplots] and thrown. */
+async function changeDrafts(fn: (drafts: PlotDraft[]) => PlotDraft[]): Promise<PlotDraft[]> {
+  let changed = false;
+  let saved: PlotDraft[];
+  try {
+    saved = await plotDraftsStore.update((drafts) => {
+      const next = fn(drafts);
+      changed = next !== drafts;
+      return next;
+    });
+  } catch (err) {
+    console.error(`[stageplots] a draft could not be written: ${scrub(errorMessage(err))}`);
+    throw err;
+  }
+  if (changed && channelHasSubscribers(STAGEPLOT_DRAFTS_CHANNEL)) broadcast(STAGEPLOT_DRAFTS_CHANNEL, draftNotes(saved));
+  return saved;
+}
+
+/** Delete one plot's draft, if it has one. */
+function dropDraft(plotId: string): Promise<PlotDraft[]> {
+  return changeDrafts((drafts) => (drafts.some((d) => d.plotId === plotId) ? drafts.filter((d) => d.plotId !== plotId) : drafts));
+}
+
+/** Delete every draft whose plot `doc` no longer has. Resolves to how many went. */
+async function dropDraftsWithout(doc: StagePlotsDoc): Promise<number> {
+  const plots = new Set(doc.plots.map((p) => p.id));
+  let dropped = 0;
+  await changeDrafts((drafts) => {
+    const kept = drafts.filter((d) => plots.has(d.plotId));
+    dropped = drafts.length - kept.length;
+    return dropped > 0 ? kept : drafts;
+  });
+  return dropped;
+}
+
+/** A draft based on `from` is based on `to` now: the plot changed and its items did not. */
+async function carryDraftBase(plotId: string, from: number, to: number): Promise<void> {
+  await changeDrafts((drafts) =>
+    drafts.some((d) => d.plotId === plotId && d.baseVersion === from) ? drafts.map((d) => (d.plotId === plotId && d.baseVersion === from ? { ...d, baseVersion: to } : d)) : drafts,
+  );
+}
+
+/** Every draft whose plot still exists. One whose plot is gone (deleted elsewhere, or a restore that brought other plots) is dropped and said. */
+async function listDrafts(c: RouteCtx): Promise<void> {
+  const [doc, drafts] = await Promise.all([stageplotsStore.get(), plotDraftsStore.all()]);
+  const plots = new Set(doc.plots.map((p) => p.id));
+  const orphans = drafts.filter((d) => !plots.has(d.plotId));
+  if (orphans.length === 0) return json(c.res, { drafts });
+  const kept = await changeDrafts((all) => all.filter((d) => plots.has(d.plotId)));
+  console.warn(`[stageplots] ${scrub(orphans.length)} unsaved drafts dropped: their plots are gone (${scrub(orphans.map((d) => d.plotId).join(", "))})`);
+  json(c.res, { drafts: kept });
+}
+
+/** Why a draft is refused, said on [stageplots] and answered. */
+function refuseDraft(res: http.ServerResponse, id: string, status: number, why: string): void {
+  console.warn(`[stageplots] draft refused for plot ${scrub(id)}: ${scrub(why)}`);
+  json(res, { error: why }, status);
+}
+
+/** Keep a plot's unsaved items: held to a save's rules, never written to the plot. */
+async function putDraft(c: RouteCtx, id: string): Promise<void> {
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readObjectBody(c.req, c.res);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] draft refused for plot ${scrub(id)}: ${scrub(err.message)}`);
+    throw err;
+  }
+  if (!body) {
+    console.warn(`[stageplots] draft refused for plot ${scrub(id)}: the body is not a JSON object`);
+    return;
+  }
+  const doc = await stageplotsStore.get();
+  const plot = doc.plots.find((p) => p.id === id);
+  if (!plot) return refuseDraft(c.res, id, 404, "no such plot");
+  const baseVersion = body.baseVersion;
+  if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion) || baseVersion < 0) return refuseDraft(c.res, id, 400, "baseVersion must be a whole number");
+  let items;
+  try {
+    items = checkItems(body.items, plotHeight(doc.backgrounds.find((b) => b.id === plot.backgroundId)), "the plot");
+  } catch (err) {
+    return refuseDraft(c.res, id, 400, errorMessage(err));
+  }
+  const draft: PlotDraft = { plotId: id, baseVersion, items, savedAt: new Date().toISOString() };
+  await changeDrafts((drafts) => [...drafts.filter((d) => d.plotId !== id), draft]);
+  json(c.res, { plotId: id, baseVersion, savedAt: draft.savedAt });
+}
+
+async function deleteDraft(c: RouteCtx, id: string): Promise<void> {
+  await dropDraft(id);
+  json(c.res, { ok: true });
 }
 
 // ── Overrides ────────────────────────────────────────────────────────────
@@ -844,6 +972,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (pathname === `${PREFIX}/backgrounds/pdf` && method === "POST") return uploadPdf(c);
   if (pathname === `${PREFIX}/overrides` && method === "PUT") return saveOverride(c);
   if (pathname === `${PREFIX}/pending/remove` && method === "POST") return removePending(c);
+  if (pathname === `${PREFIX}/drafts` && method === "GET") return listDrafts(c);
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);
@@ -855,6 +984,9 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   if (id && method === "POST") return duplicatePlot(c, id);
   id = idIn(pathname, "plots", "items");
   if (id && method === "PUT") return saveItems(c, id);
+  id = idIn(pathname, "plots", "draft");
+  if (id && method === "PUT") return putDraft(c, id);
+  if (id && method === "DELETE") return deleteDraft(c, id);
   id = idIn(pathname, "venues");
   if (id && method === "PATCH") return updateVenue(c, id);
   if (id && method === "DELETE") return deleteVenue(c, id);

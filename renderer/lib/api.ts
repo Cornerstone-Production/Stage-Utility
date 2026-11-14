@@ -631,8 +631,12 @@ export type IpcChannel =
   | "stageplots:deleteBackground"
   | "stageplots:deletePlot"
   | "stageplots:deleteVenue"
+  | "stageplots:discardDraft"
+  | "stageplots:drafts"
   | "stageplots:duplicatePlot"
   | "stageplots:get"
+  | "stageplots:keepDraft"
+  | "stageplots:keepDraftOnLeave"
   | "stageplots:patch"
   | "stageplots:publish"
   | "stageplots:publishNow"
@@ -855,6 +859,24 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     // The whole item list, against the version it was loaded at: 409 when the
     // plot changed since (the error carries status 409 and the current version).
+    case "stageplots:drafts":
+      return apiFetch<T>("/api/stageplots/drafts");
+
+    case "stageplots:keepDraft":
+      return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`, { baseVersion: p.baseVersion, items: p.items });
+
+    // The page is going: a keepalive request is still sent once it has. Browsers cap its body
+    // at 64 KB, so a very large draft is refused here, and the leave guard has already asked.
+    case "stageplots:keepDraftOnLeave":
+      return apiFetch<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`, {
+        method: "PUT",
+        body: JSON.stringify({ baseVersion: p.baseVersion, items: p.items }),
+        keepalive: true,
+      });
+
+    case "stageplots:discardDraft":
+      return del<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`);
+
     case "stageplots:saveItems":
       return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
 

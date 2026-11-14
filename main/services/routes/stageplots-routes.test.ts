@@ -20,7 +20,8 @@ const { stageplotsRoutes } = await import("./stageplots-routes.js");
 const { stageplotsStore } = await import("../stageplots-store.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { RemoteServer } = await import("../remote-server.js");
-const { STAGEPLOTS_CHANNEL } = await import("../../types/stageplots.js");
+const { STAGEPLOTS_CHANNEL, STAGEPLOT_DRAFTS_CHANNEL } = await import("../../types/stageplots.js");
+const { plotDraftsStore } = await import("../stageplot-drafts-store.js");
 const { STAGEPLOT_IMAGE_DIR, STAGEPLOT_ORIGINAL_DIR } = await import("../stageplots-files.js");
 type View = import("../../types/stageplots.js").StagePlotsView;
 
@@ -862,6 +863,149 @@ describe("plot items: PUT /api/stageplots/plots/:id/items", () => {
   });
 });
 
+describe("plot drafts", () => {
+  const box = (id = "i-1", x = 10) => ({ id, type: "box", x, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] });
+  const keep = (plotId: string, body: unknown) => call("PUT", `/api/stageplots/plots/${plotId}/draft`, body);
+  const draftsNow = async () => ((await call("GET", "/api/stageplots/drafts")).json as { drafts: { plotId: string; baseVersion: number; items: unknown[]; savedAt: string }[] }).drafts;
+  const notes: unknown[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel === STAGEPLOT_DRAFTS_CHANNEL) notes.push(payload);
+  });
+  beforeEach(async () => {
+    await plotDraftsStore.update(() => []);
+    notes.length = 0;
+  });
+
+  test("a kept draft is listed, says which plot on stageplots:drafts, and never touches the plot", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    const before = (await stageplotsStore.get()).plots[0];
+    frames.length = 0;
+    const r = await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal(r.status, 200, r.body);
+    const { savedAt } = r.json as { savedAt: string };
+    assert.deepEqual(r.json, { plotId: p.id, baseVersion: 0, savedAt });
+    assert.deepEqual(await draftsNow(), [{ plotId: p.id, baseVersion: 0, items: [box()], savedAt }]);
+    // Which plot, and since when: never the items.
+    assert.deepEqual(notes, [{ drafts: [{ plotId: p.id, savedAt }] }]);
+    assert.equal(frames.length, 0, "a draft broadcast stageplots:updated");
+    assert.deepEqual((await stageplotsStore.get()).plots[0], before, "a draft changed the plot");
+  });
+
+  test("a draft is held to a save's rules; a refusal stores nothing and is said on [stageplots]", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    for (const [plotId, body, status, says] of [
+      ["p-nowhere", { baseVersion: 0, items: [] }, 404, /no such plot/],
+      [p.id, { baseVersion: -1, items: [] }, 400, /baseVersion/],
+      [p.id, { baseVersion: 0, items: [{ ...box(), type: "blob" }] }, 400, /type must be one of/],
+      [p.id, { baseVersion: 0, items: [{ ...box(), y: 9999 }] }, 400, /y must be a number/],
+      [p.id, { baseVersion: 0, items: Array.from({ length: 501 }, (_, i) => box(`i-${i}`)) }, 400, /at most 500 items/],
+    ] as const) {
+      const said = await warnings(async () => {
+        const r = await keep(plotId, body);
+        assert.equal(r.status, status, r.body);
+        assert.match((r.json as { error: string }).error, says);
+      });
+      assert.equal(said.length, 1, String(says));
+      assert.match(said[0], new RegExp(`draft refused for plot ${plotId}`));
+    }
+    assert.deepEqual(await draftsNow(), []);
+    assert.deepEqual(notes, []);
+  });
+
+  test("one draft per plot: keeping again replaces it", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await keep(p.id, { baseVersion: 0, items: [box("i-1", 300)] });
+    const drafts = await draftsNow();
+    assert.equal(drafts.length, 1);
+    assert.equal((drafts[0].items[0] as { x: number }).x, 300);
+  });
+
+  test("a save deletes the plot's draft, an unchanged save too, before it answers", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 0, items: [box()] })).status, 200);
+    assert.deepEqual(await draftsNow(), []);
+    assert.deepEqual(notes.at(-1), { drafts: [] });
+    await keep(p.id, { baseVersion: 1, items: [box("i-1", 50)] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 1, items: [box()] })).status, 200);
+    assert.deepEqual(await draftsNow(), [], "an unchanged save left the draft");
+  });
+
+  test("a refused save keeps the draft", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 7, items: [box()] })).status, 409);
+    assert.equal((await draftsNow()).length, 1);
+  });
+
+  test("Discard deletes it; a plot with none is not an error", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.deepEqual((await call("DELETE", `/api/stageplots/plots/${p.id}/draft`)).json, { ok: true });
+    assert.deepEqual(await draftsNow(), []);
+    const r = await call("DELETE", `/api/stageplots/plots/${p.id}/draft`);
+    assert.deepEqual([r.status, r.json], [200, { ok: true }]);
+  });
+
+  test("deleting a plot, or its venue, deletes its draft and leaves another plot's", async () => {
+    const v = await venue("Main room");
+    const a = await plot(v.id, "Standard");
+    const b = await plot(v.id, "Baptism");
+    const w = await venue("Chapel");
+    const c = await plot(w.id, "Standard");
+    for (const p of [a, b, c]) await keep(p.id, { baseVersion: 0, items: [box()] });
+    // Read from the store, not GET, which drops a draft whose plot is gone on its own.
+    await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId).sort(), [a.id, c.id].sort());
+    await call("DELETE", `/api/stageplots/venues/${v.id}`);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId), [c.id]);
+  });
+
+  test("a rename or a fade moves a draft's base to the new version; a background that moved items does not", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { name: "Renamed" });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { bgFade: 0.7 });
+    assert.equal((await stageplotsStore.get()).plots[0].version, 2);
+    assert.equal((await draftsNow())[0].baseVersion, 2, "a change that left the items alone made the draft look stale");
+    // A draft drawn on an older version stays behind: its items were not these.
+    await keep(p.id, { baseVersion: 1, items: [box()] });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { name: "Again" });
+    assert.equal((await draftsNow())[0].baseVersion, 1);
+  });
+
+  test("a background switch that moves items leaves the draft's base behind", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    // An item low on the 16:9 grid, then a wide background that is shorter.
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 0, items: [{ ...box(), y: 500 }] })).status, 200);
+    await keep(p.id, { baseVersion: 1, items: [{ ...box(), y: 500 }, box("i-2")] });
+    const bytes = await jpeg(1600, 400);
+    const bg = (await upload("/api/stageplots/backgrounds?name=Wide", bytes)).json as { id: string };
+    assert.equal((await call("PATCH", `/api/stageplots/plots/${p.id}`, { backgroundId: bg.id })).status, 200);
+    assert.equal((await stageplotsStore.get()).plots[0].version, 2);
+    assert.equal((await draftsNow())[0].baseVersion, 1);
+  });
+
+  test("a draft whose plot is gone is dropped when the drafts are read, and said", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await plotDraftsStore.update((d) => [...d, { plotId: "p-gone", baseVersion: 3, items: [], savedAt: "2026-11-14T14:32:00.000Z" }]);
+    const said = await warnings(async () => assert.deepEqual((await draftsNow()).map((d) => d.plotId), [p.id]));
+    assert.deepEqual(said, ["[stageplots] 1 unsaved drafts dropped: their plots are gone (p-gone)"]);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId), [p.id]);
+  });
+});
+
 describe("per-plan overrides", () => {
   const put = (body: unknown) => call("PUT", "/api/stageplots/overrides", body);
   /** Every [stageplots] line `run` logs. */
@@ -1056,6 +1200,39 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       assert.equal((await call("POST", `/api/stageplots/venues/${id}/${action}`)).status, 409, action);
     }
     assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
+  });
+
+  test("a draft kept on a published venue's plot sends nothing to the page and broadcasts no change to the plots", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+      stageplotsPublisher.start();
+      await stageplotsPublisher.settle();
+      const plotId = (await stageplotsStore.get()).venues.find((v) => v.id === id)!.plotIds[0]!;
+      const sent = page.requests.length;
+      frames.length = 0;
+      const item = { id: "i-1", type: "box", x: 10, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] };
+      assert.equal((await call("PUT", `/api/stageplots/plots/${plotId}/draft`, { baseVersion: 0, items: [item] })).status, 200);
+      await stageplotsPublisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(frames.length, 0, "a draft broadcast stageplots:updated");
+      assert.equal(page.requests.length, sent, "a draft reached the page");
+      assert.deepEqual((await stageplotsStore.get()).plots.find((p) => p.id === plotId)!.items, []);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
   });
 
   test("publishes to the page, follows a change, unpublishes, and deletes a published venue by unpublishing it first", async () => {

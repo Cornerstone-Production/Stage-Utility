@@ -46,7 +46,7 @@ export function shortSecret(secret: string): string {
 }
 
 /** "Thu 12 Nov, 14:32", in the app's zone and hour cycle. */
-function whenLabel(iso: string, timeZone: string): string {
+export function whenLabel(iso: string, timeZone: string): string {
   const ms = Date.parse(iso);
   return `${zonedDayLabel(ms, timeZone)}, ${formatClock(ms, { timeZone })}`;
 }

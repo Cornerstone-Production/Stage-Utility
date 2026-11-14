@@ -310,6 +310,29 @@ export const STAGEPLOT_LIMITS = {
 /** The plot canvas is this many units wide. */
 export const PLOT_UNITS_WIDE = 1000;
 
+/**
+ * A plot's unsaved items, kept on the server so the editor loses nothing to a reload, a
+ * closed tab or a crash (stageplot-drafts.json). One per plot. Never the plot itself: not on
+ * /stageplots, not published, until Save.
+ */
+export interface PlotDraft {
+  plotId: string;
+  /** The plot's version the draft was drawn on. Behind the plot's (its items changed since), it opens as saved elsewhere. */
+  baseVersion: number;
+  items: PlotItem[];
+  /** When it was last kept, as an ISO instant. */
+  savedAt: string;
+}
+
+/** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
+export interface PlotDraftNotes {
+  drafts: { plotId: string; savedAt: string }[];
+}
+
+/** Broadcast with PlotDraftNotes whenever a draft is kept or goes. Not hydrated: the
+ *  editor reads GET /api/stageplots/drafts on mount. */
+export const STAGEPLOT_DRAFTS_CHANNEL = "stageplots:drafts";
+
 /** Broadcast with the whole StagePlotsView after every change. Not hydrated:
  *  a page reads GET /api/stageplots on mount, like patch:updated. */
 export const STAGEPLOTS_CHANNEL = "stageplots:updated";

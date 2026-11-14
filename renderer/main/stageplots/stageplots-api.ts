@@ -4,10 +4,12 @@
 // document on stageplots:updated, so callers do not patch local state from
 // these answers: useStagePlots refetches on the broadcast.
 
+import { errorMessage } from "@main/services/errors";
 import type { PatchFile } from "@main/types/patch";
-import type { BackgroundView, Plot, PlotItem, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotDraft, PlotItem, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
 
 import { invoke } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
 
 export interface VenueInput {
   name: string;
@@ -60,6 +62,19 @@ export const stageplotsApi = {
    *  `defaultPlotId`: the venue's default after the delete (deleting the default makes the first
    *  plot left in tab order the default); null only when no plot is left. */
   deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[]; defaultPlotId: string | null }>("stageplots:deletePlot", { id }),
+  /** The editor's kept drafts, every plot's. */
+  drafts: () => invoke<{ drafts: PlotDraft[] }>("stageplots:drafts"),
+  /** Keep a plot's unsaved items as its draft: never the plot, never published. */
+  keepDraft: (id: string, baseVersion: number, items: PlotItem[]) =>
+    invoke<{ plotId: string; baseVersion: number; savedAt: string }>("stageplots:keepDraft", { id, baseVersion, items }),
+  /** keepDraft as the page goes: a keepalive request, sent and not waited for. Says on the client log if it could not go. */
+  keepDraftOnLeave: (id: string, baseVersion: number, items: PlotItem[]): void => {
+    invoke("stageplots:keepDraftOnLeave", { id, baseVersion, items }).catch((err: unknown) =>
+      logToServer("stageplots", `could not keep the unsaved draft of plot ${id} as the page closed: ${errorMessage(err)}`),
+    );
+  },
+  /** Delete a plot's draft: Discard, or a Reload after it was saved elsewhere. */
+  discardDraft: (id: string) => invoke<{ ok: true }>("stageplots:discardDraft", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
   /** Put a venue on the public page behind a new secret link. */

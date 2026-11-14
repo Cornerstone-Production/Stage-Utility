@@ -24,6 +24,7 @@ export function UnsavedBanner({
   className,
   compact = false,
   actions,
+  marker,
 }: {
   message?: ReactNode;
   saving?: boolean;
@@ -37,6 +38,8 @@ export function UnsavedBanner({
   /** Buttons in place of Discard and Save, for a state that offers something
    *  else (a save refused because the work changed elsewhere offers Reload). */
   actions?: ReactNode;
+  /** Drawn before the message: the plot editor's dot, amber while unsaved and red when its draft could not be kept. */
+  marker?: ReactNode;
 }) {
   if (compact) {
     return (
@@ -63,6 +66,7 @@ export function UnsavedBanner({
         className,
       )}
     >
+      {marker}
       <span className="flex-1 min-w-0 text-caption1 text-fg-muted">{message}</span>
       {actions ?? (
         <>

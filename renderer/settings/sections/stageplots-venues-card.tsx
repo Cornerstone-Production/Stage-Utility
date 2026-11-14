@@ -23,7 +23,7 @@ import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { venueGroups, venuePath, venueSegment } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
-import { CardHeader, CommitText, Num, SaveError, Segmented, eyebrow, iconButton, type Save } from "./stageplots-shared";
+import { CardHeader, CommitText, DraftDot, Num, SaveError, Segmented, eyebrow, iconButton, type Save } from "./stageplots-shared";
 
 /** How long "Copied …" stays under the header. */
 const COPIED_MS = 4000;
@@ -38,12 +38,15 @@ export function VenuesCard({
   selected,
   onSelect,
   save,
+  drafted,
 }: {
   doc: StagePlotsView;
   selected: Venue | null;
   /** Picks a venue; answers whether it did (unsaved work may have been kept instead). */
   onSelect: (id: string) => Promise<boolean>;
   save: Save;
+  /** Plots with an unsaved draft kept on the server: a venue holding one carries a dot. */
+  drafted?: ReadonlySet<string>;
 }) {
   const [error, setError] = useState<string | null>(null);
   /** What Copy its address did: copied, or the address to copy by hand. */
@@ -156,7 +159,10 @@ export function VenuesCard({
           {g.venues.map((v) => (
             <div key={v.id}>
               <VenueRow current={v.id === selected?.id} onClick={() => void onSelect(v.id)} onMenu={(at) => openMenu(at, menuFor(v))}>
-                <span className="truncate">{v.name}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate">{v.name}</span>
+                  {v.plotIds.some((id) => drafted?.has(id)) && <DraftDot />}
+                </span>
                 <span className="text-[11px] text-fg-subtle">
                   <Num>{v.plotIds.length}</Num> {v.plotIds.length === 1 ? "plot" : "plots"}
                 </span>

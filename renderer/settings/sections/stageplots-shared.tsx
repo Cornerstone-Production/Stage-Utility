@@ -32,6 +32,11 @@ export function CardHeader({ title, children }: { title: string; children?: Reac
   );
 }
 
+/** The dot on a plot tab, or a venue in the list, with an unsaved draft kept on the server. */
+export function DraftDot() {
+  return <span role="img" aria-label="Unsaved draft" title="Unsaved draft" className="inline-block size-1.5 shrink-0 rounded-full bg-warn-11" />;
+}
+
 /** A failed save, beside the control that made it. Never reads as saved. */
 export function SaveError({ message, className }: { message: string | null; className?: string }) {
   if (!message) return null;

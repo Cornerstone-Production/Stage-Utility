@@ -112,6 +112,8 @@ export type EditorAction =
   | { type: "discard" }
   /** The server's items replace the draft and its history (a reload, or a change from elsewhere to a clean draft). */
   | { type: "load"; items: PlotItem[]; height: number }
+  /** A kept draft (its items) is what the editor shows, over the saved items it was loaded with: unsaved, with no history. */
+  | { type: "restore"; items: PlotItem[] }
   /** The plot's height changed (its background did); later changes are kept inside the new one. */
   | { type: "height"; height: number };
 
@@ -370,6 +372,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...initialEditorState(action.items, action.height),
         selectedId: action.items.some((it) => it.id === state.selectedId) ? state.selectedId : null,
       };
+    case "restore": {
+      // Kept on a plot that may have been switched to a shorter background since: fitted by the
+      // server's own rule, so a Save is never refused for an item's y.
+      const fitted = action.items.map((it) => fitToHeight(it, state.height));
+      return { ...state, items: fitted.every((it, i) => it === action.items[i]) ? action.items : fitted, undo: [], redo: [], gesture: null, selectedId: null };
+    }
   }
 }
 

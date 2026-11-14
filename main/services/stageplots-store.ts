@@ -232,7 +232,7 @@ function pageOrNull(v: unknown, what: string): number | null {
 /** The longest last-error sentence kept. */
 const PUBLISH_ERROR_CHARS = 600;
 
-function isoInstant(v: unknown, what: string): string {
+export function isoInstant(v: unknown, what: string): string {
   const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
   if (!Number.isFinite(at)) refuse(`${what} must be an ISO date and time`);
   return new Date(at).toISOString();
