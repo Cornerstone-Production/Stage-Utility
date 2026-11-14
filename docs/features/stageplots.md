@@ -52,7 +52,10 @@ calls the original. An uploaded PDF is kept as it was.
 greyscale, contrast evened out, then faded 40% toward white. It is on for a new
 upload. Switching it converts again from the kept source, so it can be switched
 back. The background's detail shows the source and the result side by side, the
-original's size, the web image's size and pixels, and which plots use it.
+original's size, the web image's size and pixels, and which plots use it. Press
+either picture and it opens large over the page; **Before** and **After** (or the
+left and right arrow keys) switch between them in place, and Escape, the close
+button or a press outside closes it.
 
 A background that a plot uses cannot be deleted; the refusal names the plots.
 A file no background names any more (a deleted background, the image a clean-up

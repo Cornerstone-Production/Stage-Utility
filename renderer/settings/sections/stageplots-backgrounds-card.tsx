@@ -1,6 +1,7 @@
 // stageplots-backgrounds-card.tsx — the editor's Backgrounds card: upload a PNG,
 // JPEG or PDF, list what is uploaded, and for the selected one its clean-up
-// switch, before and after, sizes, which plots use it, and delete.
+// switch, before and after (each opens large, stageplots-cleanup-preview.tsx),
+// sizes, which plots use it, and delete.
 //
 // A PNG or JPEG goes up as it is and the server converts it. A PDF is read in
 // the browser: with more than one page a picker asks which, then the PDF is
@@ -9,7 +10,7 @@
 // because the server keeps the PDF but never sends it back.
 
 import { useEffect, useRef, useState } from "react";
-import { UploadIcon } from "lucide-react";
+import { Maximize2Icon, UploadIcon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import { STAGEPLOT_LIMITS, type BackgroundView, type StagePlotsView } from "@main/types/stageplots";
@@ -22,6 +23,7 @@ import { loadPdf, type OpenPdf } from "../../lib/pdf-raster";
 import { formatBytes, plotsUsing } from "../../main/stageplots/doc-helpers";
 import { Mono } from "../../main/stageplots/mono";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
+import { CleanupPreview, type CleanupSide } from "./stageplots-cleanup-preview";
 import { CardHeader, Num, SaveError, type Save } from "./stageplots-shared";
 
 const MB = 1024 * 1024;
@@ -118,6 +120,8 @@ function PagePicker({
 
 function BackgroundDetail({ doc, background, save, onError }: { doc: StagePlotsView; background: BackgroundView; save: Save; onError: (m: string | null) => void }) {
   const [converting, setConverting] = useState(false);
+  const [preview, setPreview] = useState<CleanupSide | null>(null);
+  const thumbs = useRef<Record<CleanupSide, HTMLButtonElement | null>>({ before: null, after: null });
   const users = plotsUsing(doc, background.id);
   const setCleanup = async (cleanup: boolean) => {
     setConverting(true);
@@ -154,15 +158,43 @@ function BackgroundDetail({ doc, background, save, onError }: { doc: StagePlotsV
         <Switch aria-label="Clean-up" checked={background.cleanup} disabled={converting} onCheckedChange={(on) => void setCleanup(on)} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <figure className="m-0">
-          <img src={background.sourceUrl} alt="" loading="lazy" className="block aspect-[3/2] w-full rounded-md border border-line bg-[var(--su-plot-paper)] object-contain" />
-          <figcaption className="mt-[3px] text-[11px] text-fg-subtle">Before</figcaption>
-        </figure>
-        <figure className="m-0">
-          <img src={background.url} alt="" className="block aspect-[3/2] w-full rounded-md border border-line bg-[var(--su-plot-paper)] object-contain" />
-          <figcaption className="mt-[3px] text-[11px] text-fg-subtle">After</figcaption>
-        </figure>
+        {(["before", "after"] as const).map((side) => (
+          <figure key={side} className="m-0">
+            <button
+              ref={(el) => {
+                thumbs.current[side] = el;
+              }}
+              type="button"
+              aria-label={`Open ${side === "before" ? "Before" : "After"} large`}
+              onClick={() => setPreview(side)}
+              className="group relative block aspect-[3/2] w-full cursor-zoom-in overflow-hidden rounded-md border border-line bg-[var(--su-plot-paper)] transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <img
+                src={side === "before" ? background.sourceUrl : background.url}
+                alt=""
+                {...(side === "before" ? { loading: "lazy" as const } : {})}
+                className="block h-full w-full object-contain"
+              />
+              <span
+                aria-hidden
+                className="absolute right-1 bottom-1 grid size-[18px] place-items-center rounded-[5px] bg-popover text-fg-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+              >
+                <Maximize2Icon className="size-3" />
+              </span>
+            </button>
+            <figcaption className="mt-[3px] text-[11px] text-fg-subtle">{side === "before" ? "Before" : "After"}</figcaption>
+          </figure>
+        ))}
       </div>
+      {preview && (
+        <CleanupPreview
+          background={background}
+          side={preview}
+          thumbOf={(side) => thumbs.current[side]}
+          onClose={() => setPreview(null)}
+          kindLabel={KIND_OF[background.original.mime]}
+        />
+      )}
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] text-caption1">
         <dt className="text-fg-subtle">Original</dt>
         <dd className="m-0 text-right text-fg-soft">

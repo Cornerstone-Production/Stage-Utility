@@ -411,6 +411,26 @@ describe("/stageplots/edit", () => {
     assert.equal(screen.getByRole("switch", { name: "Clean-up" }).getAttribute("aria-checked"), "false");
   });
 
+  test("Before and After open large, switch with the arrow keys, and Escape closes back to the thumbnail", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Open Before large" }));
+    const dialog = screen.getByRole("dialog", { name: /before and after clean-up/ });
+    assert.equal(within(dialog).getByRole("button", { name: "Before" }).getAttribute("aria-pressed"), "true");
+    assert.match(screen.getByTestId("cleanup-meta").textContent!, /^Source · /);
+    assert.equal(document.activeElement, within(dialog).getByRole("button", { name: "Close" }));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "ArrowRight" });
+    });
+    assert.match(screen.getByTestId("cleanup-meta").textContent!, /^Web image · WebP · .* · 2400 × 1600$/);
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle();
+    assert.equal(screen.queryByRole("dialog"), null);
+    assert.equal(document.activeElement, screen.getByRole("button", { name: "Open After large" }), "focus returns to the thumbnail it shrank into");
+  });
+
   test("deleting a used background shows the plot names", async () => {
     await mount();
     await click(screen.getByRole("button", { name: "Delete background…" }));
