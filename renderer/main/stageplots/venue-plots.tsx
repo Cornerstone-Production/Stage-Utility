@@ -45,20 +45,31 @@ export interface FrameTitle {
   badge: string | null;
 }
 
-/** Ask for the browser's own fullscreen, where it has one; refused or missing is fine, the view still covers the page. */
-function enterFullscreen(): void {
+/**
+ * Ask for the browser's own fullscreen, where it has one. True once it is entered.
+ * False when the browser has none (iPhone Safari, a locked-down kiosk) or refuses:
+ * the full-window overlay is the feature and stands without it, so a caller that
+ * gets false leaves the overlay up. Called straight from the click, as a browser
+ * grants fullscreen only to a gesture.
+ */
+async function enterFullscreen(): Promise<boolean> {
+  if (!document.documentElement.requestFullscreen) return false;
   try {
-    void document.documentElement.requestFullscreen?.()?.catch(() => {});
+    await document.documentElement.requestFullscreen();
+    return true;
   } catch {
-    // Not offered here (iPhone Safari, a locked-down kiosk): the full-window view stands alone.
+    return false;
   }
 }
 
-function leaveFullscreen(): void {
+/** Leave the browser's fullscreen. True once it is left; false when there was none to leave or the browser refuses. */
+async function leaveFullscreen(): Promise<boolean> {
+  if (!document.fullscreenElement) return false;
   try {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    await document.exitFullscreen();
+    return true;
   } catch {
-    // Nothing to leave.
+    return false;
   }
 }
 
@@ -77,11 +88,16 @@ export function PlotFrame({
   title?: FrameTitle;
   /** Drawn as the full-window view. */
   full?: boolean;
-  /** Open (true) or close (false) the full-window view. */
-  onFull?: (open: boolean) => void;
+  /** Open (true, from the button that asked) or close (false) the full-window view. */
+  onFull?: (open: boolean, from?: HTMLElement) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef<HTMLButtonElement>(null);
+  // Opening the full-window view moves focus into it, onto the way out.
+  useEffect(() => {
+    if (full) exitRef.current?.focus();
+  }, [full]);
   const pz = usePanZoom(svgRef, PLOT_UNITS_WIDE, plotHeight(background));
   // A tap is decided from the press and the release, not from click: after the
   // plot captures the pointer, a click names the plot, not the item under it.
@@ -189,7 +205,7 @@ export function PlotFrame({
         <div className={cn(floating, "top-[max(12px,env(safe-area-inset-top))] right-[max(12px,env(safe-area-inset-right))] gap-0.5 p-[3px] [&_button]:size-[30px] [&_svg]:!size-4")}>
           {zoomControls}
           <span aria-hidden className="mx-0.5 h-[18px] w-px bg-line-strong" />
-          <button type="button" className={zoomButton} onClick={() => onFull?.(false)} aria-label="Exit full window" title="Exit full window (Esc)" data-testid="exit-full-window">
+          <button ref={exitRef} type="button" className={zoomButton} onClick={() => onFull?.(false)} aria-label="Exit full window" title="Exit full window (Esc)" data-testid="exit-full-window">
             <Minimize2Icon />
           </button>
         </div>
@@ -208,10 +224,11 @@ export function PlotFrame({
             <button
               type="button"
               className={zoomButton}
-              onClick={() => {
-                // In the click itself: a browser grants fullscreen only to a gesture.
-                enterFullscreen();
-                onFull(true);
+              onClick={(e) => {
+                // In the click itself: a browser grants fullscreen only to a gesture. A refusal
+                // (false) leaves the full-window overlay standing, which is the feature.
+                void enterFullscreen();
+                onFull(true, e.currentTarget);
               }}
               aria-label="Full window"
               title="Full window"
@@ -251,7 +268,7 @@ function FullWindow({ onClose, children }: { onClose: () => void; children: Reac
       document.body.style.overflow = overflow;
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("fullscreenchange", onFullscreen);
-      leaveFullscreen();
+      void leaveFullscreen();
     };
   }, [onClose]);
   return createPortal(children, document.body);
@@ -319,7 +336,22 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
   const planLabel = planDay && forPlan ? `For this plan · ${planDay}` : "For this plan";
   const [full, setFull] = useState(false);
   const closeFull = useCallback(() => setFull(false), []);
+  // The button that opened the full-window view: focus goes back to it when the view closes.
+  const opener = useRef<HTMLElement | null>(null);
+  const setFullWindow = (open: boolean, from?: HTMLElement) => {
+    if (open) opener.current = from ?? null;
+    setFull(open);
+  };
+  useEffect(() => {
+    if (!full) return;
+    return () => opener.current?.focus();
+  }, [full]);
   const title: FrameTitle | undefined = selected ? { venue: name, plot: selected.name, badge: forPlan ? planLabel : isDefault ? "Default" : null } : undefined;
+  // With no plot to show (the last one deleted, the venue emptied) an open full-window view
+  // closes, and stays closed: a plot arriving later must not open it again.
+  useResyncOn([!!title], () => {
+    if (!title) setFull(false);
+  });
   return (
     <div className="flex flex-col">
       {before}
@@ -379,11 +411,11 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
                 className="mx-auto w-full sm:max-w-[max(24rem,calc((100svh_-_15rem)*var(--plot-aspect)))]"
                 style={{ "--plot-aspect": PLOT_UNITS_WIDE / plotHeight(background) } as CSSProperties}
               >
-                <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} {...(title ? { title } : {})} onFull={setFull} />
+                <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} {...(title ? { title } : {})} onFull={setFullWindow} />
               </div>
               {full && title && (
                 <FullWindow onClose={closeFull}>
-                  <PlotFrame key={`full-${selected.id}`} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} title={title} full onFull={setFull} />
+                  <PlotFrame key={`full-${selected.id}`} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} title={title} full onFull={setFullWindow} />
                 </FullWindow>
               )}
               <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan. Tap an item for its details.</p>

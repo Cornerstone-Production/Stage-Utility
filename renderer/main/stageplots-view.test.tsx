@@ -337,6 +337,39 @@ describe("/stageplots", () => {
     assert.equal(screen.queryByRole("dialog"), null);
   });
 
+  test("Full window takes focus onto Exit, and gives it back to the Full window button on close", async () => {
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+    const open = screen.getByRole("button", { name: "Full window" });
+    fireEvent.click(open);
+    await settle();
+    assert.equal(document.activeElement, screen.getByRole("button", { name: "Exit full window" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    assert.equal(document.activeElement, screen.getByRole("button", { name: "Full window" }), "focus is back on the button that opened it");
+  });
+
+  test("an open Full window closes when its plot goes away, and a plot arriving later does not open it again", async () => {
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Full window" }));
+    await settle();
+    assert.ok(screen.getByRole("dialog"));
+    const emptied = doc();
+    emptied.venues[1] = { ...emptied.venues[1], plotIds: [], defaultPlotId: null };
+    emptied.plots = emptied.plots.filter((p) => p.venueId !== "v-main");
+    await act(async () => FakeEventSource.last!.push("stageplots:updated", emptied));
+    await settle();
+    assert.equal(screen.queryByRole("dialog"), null, "the view closed with its plot");
+    assert.equal(document.body.style.overflow, "", "the page scrolls again");
+    await act(async () => FakeEventSource.last!.push("stageplots:updated", doc()));
+    await settle();
+    assert.ok(screen.getByRole("button", { name: "Full window" }));
+    assert.equal(screen.queryByRole("dialog"), null, "it did not open itself again");
+  });
+
   test("a failed read says so instead of showing no venues", async () => {
     const real = globalThis.fetch;
     (globalThis as unknown as { fetch: unknown }).fetch = async () => ({ ok: false, status: 500, statusText: "Server Error", json: async () => ({ error: "boom" }), text: async () => "boom" });
