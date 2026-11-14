@@ -598,11 +598,9 @@ export type IpcChannel =
   | "spl:getHistoryCurrent"
   | "spl:getMetrics"
   | "spl:getSummary"
-  | "spl:getTrendPrefs"
   | "spl:getVisibleMetrics"
   | "spl:listHistory"
   | "spl:series"
-  | "spl:setTrendPrefs"
   | "spl:setVisibleMetrics"
   | "stage:getBrandingSource"
   | "stage:getRemoteUrl"
@@ -975,11 +973,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "spl:getSummary":
       return apiFetch<T>("/api/spl/summary");
-
-    case "spl:getTrendPrefs":
-      return apiFetch<T>("/api/spl/trend");
-    case "spl:setTrendPrefs":
-      return post<T>("/api/spl/trend", p);
 
     case "people:getCount":
       return apiFetch<T>("/api/people/count");

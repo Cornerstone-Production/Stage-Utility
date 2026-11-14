@@ -68,7 +68,6 @@ function installFetch(refusal: Refusal) {
     if (url === "/api/service-timeline") return ok([timeline()]);
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url.match(/^\/api\/service-timeline\/[^/]+$/)) return ok(timeline());
     if (url.match(/^\/api\/attendance\/history\/[^/]+$/)) return ok(null);

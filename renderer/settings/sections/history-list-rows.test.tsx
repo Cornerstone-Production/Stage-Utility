@@ -141,7 +141,6 @@ function installFetch(opts: { extra?: ServiceTimeline[]; baptisms?: BaptismSessi
     if (url === "/api/service-timeline") return ok([NINE, ELEVEN, ...(opts.extra ?? [])]);
     if (url === "/api/attendance/history?summary=1") return ok(ATT);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok(opts.baptisms ?? []);
     if (url.startsWith("/api/baptism/lane")) return ok({ spans: [] });
     // Opening a row's detail page reads its own record back by key — the

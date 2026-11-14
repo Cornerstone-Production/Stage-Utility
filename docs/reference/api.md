@@ -338,7 +338,6 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw: `{metrics}`, server-wide; `POST` takes `{metrics: string[]}` |
-| GET / POST | `/api/spl/trend` | A stored `{shown, metric}` preference for an SPL line on an attendance trend. Nothing in the app reads it; the Trends card's metric is `/api/history/trends-prefs`, and the Recent services widget keeps its own `showSpl` and `splMetric` settings |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |

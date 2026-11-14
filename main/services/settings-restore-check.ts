@@ -418,8 +418,6 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   integrationConfigs,
   integrationEnabled,
   splVisibleMetrics: texts,
-  splTrendShown: bool,
-  splTrendMetric: text,
   oscFeedbackPort: (v, k) => clampOscFeedbackPort(number(v, k)),
   wirelessMeterRateMs: (v, k) => clampMeterRate(number(v, k)),
   // Start-up migrations that have run: see above.

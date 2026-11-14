@@ -103,7 +103,6 @@ function installFetch(state: { items: Item[]; posts: Posted[] }) {
     if (url === "/api/service-timeline") return ok([timeline(state.items)]);
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline(state.items));
     if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(null);
