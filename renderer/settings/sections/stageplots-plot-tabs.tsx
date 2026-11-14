@@ -12,7 +12,7 @@
 // says which; deleting the last plot leaves the venue empty. Deleting a plot that
 // plans use clears those plans' overrides, and its confirm names the plans.
 
-import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { DropdownMenu } from "radix-ui";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
 
@@ -24,6 +24,7 @@ import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger"
 import { confirm } from "../../components/ui/confirm-dialog";
 import { Input } from "../../components/ui/input";
 import { cn } from "../../lib/cn";
+import { usePressDrag } from "../../lib/use-press-drag";
 import { tabClass } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
@@ -98,11 +99,8 @@ export function PlotTabs({
   // The order shown while a drag's save is on its way, so the tab does not jump back first.
   const [order, setOrder] = useState<string[] | null>(null);
   const shown = order ? order.map((id) => plots.find((p) => p.id === id)).filter((p): p is Plot => !!p) : plots;
-  // A drag in progress: which tab, from where, and the slot it would land in.
-  const drag = useRef<{ id: string; pointerId: number; x: number; dragging: boolean } | null>(null);
+  // A drag in progress: which tab, and the slot it would land in.
   const [dropAt, setDropAt] = useState<{ id: string; index: number } | null>(null);
-  /** Set when a press ended as a drag: the click the browser sends after it is not a select. */
-  const dragged = useRef(false);
   const rowRef = useRef<HTMLDivElement>(null);
 
   const run = async <T,>(fn: () => Promise<T>): Promise<T | null> => {
@@ -144,52 +142,38 @@ export function PlotTabs({
     if (name !== null && name.trim() && name !== plot.name) await run(() => stageplotsApi.updatePlot(plot.id, { name }));
   };
 
-  /** The slot a pointer at `clientX` would drop the dragged tab into, among the other tabs. */
-  const slotAt = (id: string, clientX: number): number => {
-    const tabs = [...(rowRef.current?.querySelectorAll<HTMLElement>("[data-plot-tab]") ?? [])].filter((el) => el.dataset.plotTab !== id);
-    return tabs.filter((el) => {
-      const r = el.getBoundingClientRect();
-      return r.left + r.width / 2 < clientX;
-    }).length;
+  /** The tabs but the dragged one, with where each sits on screen. */
+  const otherTabs = (id: string) =>
+    [...(rowRef.current?.querySelectorAll<HTMLElement>("[data-plot-tab]") ?? [])]
+      .filter((el) => el.dataset.plotTab !== id)
+      .map((el) => el.getBoundingClientRect());
+  /**
+   * The slot a pointer at (`clientX`, `clientY`) would drop the dragged tab into, among the
+   * other tabs. The row wraps, so a tab is before the pointer when its row is above the
+   * pointer's, or it is in the same row and its middle is left of the pointer.
+   */
+  const slotAt = (id: string, clientX: number, clientY: number): number => {
+    const rects = otherTabs(id);
+    if (rects.length === 0) return 0;
+    // The pointer's row: the one under it, or the nearest when it is above or below them all.
+    const row = rects.reduce((best, r) => {
+      const gap = (q: DOMRect) => (clientY < q.top ? q.top - clientY : clientY > q.bottom ? clientY - q.bottom : 0);
+      return gap(r) < gap(best) ? r : best;
+    });
+    const sameRow = (r: DOMRect) => r.top < row.bottom && r.bottom > row.top;
+    return rects.filter((r) => (sameRow(r) ? r.left + r.width / 2 < clientX : r.top < row.top)).length;
   };
+  const pressDrag = usePressDrag<string>({
+    slop: DRAG_SLOP_PX,
+    axis: "x",
+    onMove: (id, e) => setDropAt({ id, index: slotAt(id, e.clientX, e.clientY) }),
+    onDrop: (id, e) => void reorder(moved(shown.map((p) => p.id), id, slotAt(id, e.clientX, e.clientY))),
+    onEnd: () => setDropAt(null),
+  });
   const onTabPointerDown = (e: ReactPointerEvent<HTMLButtonElement>, id: string) => {
     if (e.button !== 0 || renaming || plots.length < 2) return;
-    dragged.current = false;
-    drag.current = { id, pointerId: e.pointerId, x: e.clientX, dragging: false };
-    // Held from the press, so a quick first move that leaves the tab is still this drag's.
-    e.currentTarget.setPointerCapture?.(e.pointerId);
+    pressDrag.press(e, id);
   };
-  /** True once the press is a drag, so the tab's long press gives way to it. */
-  const onTabPointerMove = (e: ReactPointerEvent<HTMLButtonElement>): boolean => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return false;
-    if (!d.dragging) {
-      if (Math.abs(e.clientX - d.x) < DRAG_SLOP_PX) return false;
-      d.dragging = true;
-    }
-    setDropAt({ id: d.id, index: slotAt(d.id, e.clientX) });
-    return true;
-  };
-  const endDrag = (e: ReactPointerEvent<HTMLButtonElement>, drop: boolean) => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
-    drag.current = null;
-    setDropAt(null);
-    if (!d.dragging) return;
-    dragged.current = true;
-    if (drop) void reorder(moved(shown.map((p) => p.id), d.id, slotAt(d.id, e.clientX)));
-  };
-  useEffect(() => {
-    if (!dropAt) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      drag.current = null;
-      dragged.current = true;
-      setDropAt(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [dropAt]);
 
   /** What can be done to a plot: the selected tab's ⋯ menu and any tab's right-click menu list the same. */
   const actionsFor = (p: Plot): TabAction[] => {
@@ -250,18 +234,14 @@ export function PlotTabs({
                     selected={isSelected}
                     dragging={dropAt?.id === p.id}
                     onMenu={(at) => openMenu(p, at)}
-                    onClick={() => {
-                      if (dragged.current) {
-                        dragged.current = false;
-                        return;
-                      }
-                      onSelect(p.id);
+                    onClick={(e) => {
+                      if (!pressDrag.claimClick(e)) onSelect(p.id);
                     }}
                     onDoubleClick={() => setRenaming(p.id)}
                     onPointerDown={(e) => onTabPointerDown(e, p.id)}
-                    onPointerMove={onTabPointerMove}
-                    onPointerUp={(e) => endDrag(e, true)}
-                    onPointerCancel={(e) => endDrag(e, false)}
+                    onPointerMove={pressDrag.move}
+                    onPointerUp={pressDrag.up}
+                    onPointerCancel={pressDrag.cancel}
                   >
                     {p.name}
                     {isDefault && <Star />}
@@ -375,7 +355,7 @@ function TabButton({
   onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => boolean;
   onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerCancel: (e: ReactPointerEvent<HTMLButtonElement>) => void;
-  onClick: () => void;
+  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
   onDoubleClick: () => void;
   children: ReactNode;
 }) {

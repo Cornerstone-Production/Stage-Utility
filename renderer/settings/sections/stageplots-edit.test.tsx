@@ -175,10 +175,9 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     const clearedPlans = overridesOfPlot(DOC, p.id).map((o) => o.planId);
     DOC.plots = DOC.plots.filter((x) => x.id !== p.id);
     v.plotIds = v.plotIds.filter((x) => x !== p.id);
-    const promoted = v.defaultPlotId === p.id ? (v.plotIds[0] ?? null) : null;
-    if (v.defaultPlotId === p.id) v.defaultPlotId = promoted;
+    if (v.defaultPlotId === p.id) v.defaultPlotId = v.plotIds[0] ?? null;
     DOC.overrides = DOC.overrides.filter((o) => o.plotId !== p.id);
-    return { status: 200, json: { ok: true, clearedPlans, defaultPlotId: promoted } };
+    return { status: 200, json: { ok: true, clearedPlans, defaultPlotId: v.defaultPlotId } };
   }
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
@@ -495,6 +494,112 @@ describe("/stageplots/edit", () => {
     assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/venues/v-1", body: { plotIds: ["p-2", "p-1"] } });
     await settle();
     assert.deepEqual(tabs().map((t) => t.textContent), ["Special", "Standard"]);
+  });
+
+  test("deleting the default, with the tabs reordered, names the first tab left, and the server makes that plot the default", async () => {
+    // Created p-1, p-2, p-3; the tabs read Third, Standard, Special.
+    DOC.plots.push(plot("p-3", "v-1", "Third"));
+    DOC.venues[0].plotIds = ["p-3", "p-1", "p-2"];
+    await mount();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Third", "Standard", "Special"]);
+    // Standard (the default) moves right, so the tab order is Third, Special, Standard.
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: "Move right" }));
+    await settle();
+    assert.deepEqual(DOC.venues[0].plotIds, ["p-3", "p-2", "p-1"]);
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    // The FIRST plot left in tab order (Third), not the last (Special) and not creation order's (Special).
+    assert.match(dialog.textContent!, /Third becomes the default\./);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.equal(DOC.venues[0].defaultPlotId, "p-3", "the server made the plot the confirm named the default");
+  });
+
+  // jsdom lays nothing out, so the tabs are given boxes: `[left, top]` each, 100 x 30.
+  function stubTabs(boxes: Record<string, [number, number]>) {
+    for (const tab of tabs()) {
+      const [left, top] = boxes[tab.dataset.plotTab!];
+      tab.getBoundingClientRect = () => ({ left, top, right: left + 100, bottom: top + 30, width: 100, height: 30, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    }
+  }
+  const tabOf = (id: string) => tabs().find((t) => t.dataset.plotTab === id)!;
+  async function tabEvent(kind: "pointerDown" | "pointerMove" | "pointerUp", id: string, x: number, y: number) {
+    await act(async () => {
+      fireEvent[kind](tabOf(id), { pointerId: 1, clientX: x, clientY: y, button: 0, isPrimary: true });
+    });
+  }
+  /** Press on the middle of `id`, drag to (x, y) in two moves, let go. */
+  async function dragTab(id: string, boxes: Record<string, [number, number]>, x: number, y: number) {
+    stubTabs(boxes);
+    const [left, top] = boxes[id];
+    await tabEvent("pointerDown", id, left + 50, top + 15);
+    await tabEvent("pointerMove", id, left + 50 + (x - left - 50) / 2, y);
+    await tabEvent("pointerMove", id, x, y);
+    await tabEvent("pointerUp", id, x, y);
+    await settle();
+  }
+
+  test("dragging a tab along the row reorders the plots, saved as the venue's plotIds", async () => {
+    DOC.plots.push(plot("p-3", "v-1", "Third"));
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3"];
+    await mount();
+    // Standard let go at 240: right of Special's middle (150), left of Third's (250), so slot 1.
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [200, 0] }, 240, 15);
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/venues/v-1", body: { plotIds: ["p-2", "p-1", "p-3"] } });
+    // The click the browser sends after the drag does not select the tab.
+    await act(async () => {
+      fireEvent.click(tabOf("p-1"), { detail: 1 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "false");
+  });
+
+  test("dragging across a wrapped row lands in the slot under the pointer, by row", async () => {
+    DOC.plots.push(plot("p-3", "v-1", "Third"), plot("p-4", "v-1", "Fourth"));
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
+    await mount();
+    // Two rows of two: Standard, Special over Third, Fourth. Fourth dragged into the first
+    // row's left end is slot 0, not decided by the horizontal position alone.
+    await dragTab("p-4", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [0, 40], "p-4": [100, 40] }, 10, 15);
+    assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-4", "p-1", "p-2", "p-3"] });
+    sent = [];
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
+    broadcast();
+    await settle();
+    // Standard dragged to the second row's left end (x 10, y 55): after the whole first row's
+    // other tab (Special) and before Third.
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [0, 40], "p-4": [100, 40] }, 10, 55);
+    assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-2", "p-1", "p-3", "p-4"] });
+  });
+
+  test("a drag with no click after it does not swallow a later click on a tab", async () => {
+    await mount();
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0] }, 160, 15);
+    // The browser sent no click after the release (it ended off the tab). Time passes.
+    await settle();
+    await act(async () => {
+      fireEvent.click(tabOf("p-2"), { detail: 1 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "true");
+  });
+
+  test("Escape cancels a tab drag and sends nothing; the next keyboard click still selects", async () => {
+    await mount();
+    stubTabs({ "p-1": [0, 0], "p-2": [100, 0] });
+    await tabEvent("pointerDown", "p-1", 50, 15);
+    await tabEvent("pointerMove", "p-1", 160, 15);
+    assert.ok(screen.getByTestId("tab-drop-marker"));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    assert.equal(screen.queryByTestId("tab-drop-marker"), null);
+    await tabEvent("pointerUp", "p-1", 160, 15);
+    assert.deepEqual(writes(), [], "nothing was saved");
+    // A keyboard Enter or Space on a tab is a click with no detail: not the one that follows a drag.
+    await act(async () => {
+      fireEvent.click(tabOf("p-2"), { detail: 0 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "true");
   });
 
   test("a double-click on a tab renames it in place", async () => {
