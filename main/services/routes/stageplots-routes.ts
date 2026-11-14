@@ -258,7 +258,7 @@ async function createVenue(c: RouteCtx): Promise<void> {
   );
 }
 
-/** Why an address change is refused, said on [stageplots] and answered. */
+/** Why an address change is refused, said on [stageplots] and answered as the sentence the Venues card shows. */
 function refuseAddress(id: string, why: string): never {
   console.warn(`[stageplots] address refused for venue ${scrub(id)}: ${scrub(why)}`);
   throw new Refused(400, why);
@@ -275,13 +275,13 @@ function addressesAfter(doc: StagePlotsDoc, v: Venue, body: Record<string, unkno
   const keep = body.oldSlugs;
   if (keep !== undefined) {
     if (!Array.isArray(keep) || !keep.every((s) => typeof s === "string" && v.oldSlugs.includes(s))) {
-      refuseAddress(v.id, "oldSlugs may only leave out some of the venue's old addresses");
+      refuseAddress(v.id, "Old addresses can only be dropped from the venue's own list, never added");
     }
     oldSlugs = v.oldSlugs.filter((s) => keep.includes(s));
   }
   let slug = v.slug;
   if (body.slug !== undefined && body.slug !== v.slug) {
-    if (body.slug === null) refuseAddress(v.id, "a venue's address can be changed, not removed");
+    if (body.slug === null) refuseAddress(v.id, "A venue's address can be changed, not removed");
     const problem = venueSlugProblem(body.slug);
     if (problem) refuseAddress(v.id, problem);
     const next = body.slug as string;

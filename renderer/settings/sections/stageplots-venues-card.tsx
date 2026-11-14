@@ -274,7 +274,7 @@ function AddressField({ venue, onCommit, onCopy }: { venue: Venue; onCommit: (sl
         )}
       </div>
       <p id={`venue-address-${venue.id}-note`} role={refused ? "alert" : undefined} className={cn("-mt-0.5 text-[11px] leading-[14px]", refused ? "text-danger-11" : "text-fg-subtle")}>
-        {refused ? `${refused.charAt(0).toUpperCase()}${refused.slice(1)}.` : "Stays when the venue is renamed, so printed QR codes keep working."}
+        {refused ? `${refused}.` : "Stays when the venue is renamed, so printed QR codes keep working."}
       </p>
     </div>
   );

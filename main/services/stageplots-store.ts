@@ -139,13 +139,13 @@ const VENUE_ID_SHAPE = /^v-[0-9a-f]{12}$/;
 /** /stageplots/edit is the editor's own address. */
 const RESERVED_SLUGS = new Set(["edit"]);
 
-/** Why `v` cannot be a venue's address, or null. Says nothing about other venues: see addressOwners. */
+/** Why `v` cannot be a venue's address, as a sentence, or null. Says nothing about other venues: see addressOwners. */
 export function venueSlugProblem(v: unknown): string | null {
   if (typeof v !== "string" || v.length === 0 || v.length > STAGEPLOT_LIMITS.slugChars || !SLUG.test(v)) {
-    return `an address is lower-case letters, digits and single hyphens, 1 to ${STAGEPLOT_LIMITS.slugChars} characters`;
+    return `An address is lower-case letters, digits and single hyphens, 1 to ${STAGEPLOT_LIMITS.slugChars} characters`;
   }
-  if (RESERVED_SLUGS.has(v)) return "that address is the editor's own";
-  if (VENUE_ID_SHAPE.test(v)) return "an address shaped like a venue id is kept for venue ids";
+  if (RESERVED_SLUGS.has(v)) return "That address is the editor's own";
+  if (VENUE_ID_SHAPE.test(v)) return "An address shaped like a venue id is kept for venue ids";
   return null;
 }
 
@@ -197,6 +197,7 @@ const LIMIT_SAYS = {
   override: `there can be at most ${STAGEPLOT_LIMITS.overrides} overrides`,
 } as const;
 
+/** Why one more of `kind` cannot be added to `doc`, or null. */
 export function limitProblem(doc: StagePlotsDoc, kind: "venue" | "plot" | "background", venueId?: string): string | null {
   const count =
     kind === "venue" ? doc.venues.length : kind === "background" ? doc.backgrounds.length : doc.plots.filter((p) => p.venueId === venueId).length;

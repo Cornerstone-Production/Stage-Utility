@@ -244,15 +244,30 @@ describe("stageplots overrides in the restore check", () => {
 
   test("an address a venue holds is held to the rules on a restore", () => {
     for (const [venue, says] of [
-      [{ slug: "Bad Slug" }, /address: an address is lower-case/],
+      [{ slug: "Bad Slug" }, /address: An address is lower-case/],
       [{ slug: "edit" }, /editor's own/],
       [{ slug: "x", oldSlugs: ["x"] }, /more than once/],
       [{ slug: "x", oldSlugs: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }, /more than 10 old addresses/],
-      [{ slug: "x", oldSlugs: ["v-0123456789ab"] }, /old address "v-0123456789ab": an address shaped like a venue id/],
+      [{ slug: "x", oldSlugs: ["v-0123456789ab"] }, /old address "v-0123456789ab": An address shaped like a venue id/],
     ] as const) {
       const doc = goodDoc();
       Object.assign(doc.venues[0], venue);
       assert.match(refusal(doc), says);
+    }
+  });
+
+  test("no two venues answer to one address, whether it is one's address, one's old address or one's id", () => {
+    for (const [what, a, b] of [
+      ["two addresses", { slug: "hall" }, { slug: "hall" }],
+      ["an address and an old one", { slug: "hall" }, { slug: "chapel", oldSlugs: ["hall"] }],
+      ["two old ones", { slug: "main", oldSlugs: ["hall"] }, { slug: "chapel", oldSlugs: ["hall"] }],
+      ["an id and an address", {}, { slug: "v-1" }],
+      ["an id and an old address", {}, { slug: "chapel", oldSlugs: ["v-1"] }],
+    ] as const) {
+      const doc = goodDoc();
+      Object.assign(doc.venues[0], a);
+      doc.venues.push(Object.assign({ ...doc.venues[0], id: "v-2", name: "Chapel", slug: null, oldSlugs: [], plotIds: [], defaultPlotId: null }, b) as (typeof doc.venues)[number]);
+      assert.match(refusal(doc), /venues "v-1" and "v-2" both answer to the address/, what);
     }
   });
 

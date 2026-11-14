@@ -1293,6 +1293,19 @@ describe("the plot editor", () => {
     assert.notEqual(document.activeElement, field, "the declined Rename was still waiting and took the cursor");
   });
 
+  test("an address the server refuses shows under the field as the server wrote it, a venue's name in its own case", async () => {
+    await mount();
+    refuse = { what: "PATCH /api/stageplots/venues/v-1", error: "chapel already uses that address" };
+    const field = screen.getByLabelText("Address") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "chapel" } });
+      fireEvent.blur(field);
+    });
+    await settle();
+    assert.equal(field.value, "chapel", "the refused address was not kept as typed");
+    assert.equal(screen.getByRole("alert").textContent, "chapel already uses that address.", "the card rewrote the server's sentence");
+  });
+
   test("a venue's menu copies and opens its address by name, not its id", async () => {
     DOC.venues[0].slug = "room-one";
     const router = await mountRouted("/stageplots/edit?venue=v-1");

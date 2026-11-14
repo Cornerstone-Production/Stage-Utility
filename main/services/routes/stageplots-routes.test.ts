@@ -585,7 +585,7 @@ describe("venue addresses", () => {
     await patchVenue(v.id, { slug: "big-hall" });
     let r = await patchVenue(v.id, { oldSlugs: ["main-room", "elsewhere"] });
     assert.equal(r.status, 400);
-    assert.match((r.json as { error: string }).error, /only leave out/);
+    assert.equal((r.json as { error: string }).error, "Old addresses can only be dropped from the venue's own list, never added");
     const said = await logs(async () => assert.equal((await patchVenue(v.id, { oldSlugs: ["hall"] })).status, 200));
     assert.deepEqual(said, [`[stageplots] venue ${v.id} no longer answers to /stageplots/main-room`]);
     assert.deepEqual((await venueNow(v.id)).oldSlugs, ["hall"]);
@@ -634,6 +634,8 @@ describe("venue addresses", () => {
       const r = await patchVenue(v.id, { slug });
       assert.equal(r.status, 400, String(slug));
       assert.match((r.json as { error: string }).error, says, String(slug));
+      // The Venues card shows it as written: a sentence, never capitalised there.
+      assert.match((r.json as { error: string }).error, /^[A-Z]/, `the refusal of ${String(slug)} is not a sentence`);
     }
     assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["main-room", []]);
   });
