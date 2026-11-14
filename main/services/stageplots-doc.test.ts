@@ -16,9 +16,9 @@ function plot(id: string, venueId: string): Plot {
 
 function doc(overrides: PlotOverride[] = []) {
   const venues: Venue[] = [
-    { id: "v-main", name: "Room One", kind: "home", notes: "", plotIds: ["p-std", "p-bap", "p-xmas"], defaultPlotId: "p-std" },
-    { id: "v-off", name: "Hall Away", kind: "offsite", notes: "", plotIds: ["p-hall"], defaultPlotId: "p-hall" },
-    { id: "v-empty", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null },
+    { id: "v-main", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-std", "p-bap", "p-xmas"], defaultPlotId: "p-std" },
+    { id: "v-off", name: "Hall Away", slug: null, oldSlugs: [], kind: "offsite", notes: "", plotIds: ["p-hall"], defaultPlotId: "p-hall" },
+    { id: "v-empty", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null },
   ];
   const plots = [plot("p-std", "v-main"), plot("p-bap", "v-main"), plot("p-xmas", "v-main"), plot("p-hall", "v-off")];
   return { venues, plots, overrides };

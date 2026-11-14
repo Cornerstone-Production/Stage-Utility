@@ -66,9 +66,9 @@ const background = {
 function doc(): StagePlotsView {
   return {
     venues: [
-      { id: "v-off", name: "Hall Away", kind: "offsite", notes: "", plotIds: ["p-hall"], defaultPlotId: "p-hall" },
-      { id: "v-main", name: "Room One", kind: "home", notes: "Load in at the side.", plotIds: ["p-std", "p-alt"], defaultPlotId: "p-alt" },
-      { id: "v-small", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null },
+      { id: "v-off", name: "Hall Away", slug: null, oldSlugs: [], kind: "offsite", notes: "", plotIds: ["p-hall"], defaultPlotId: "p-hall" },
+      { id: "v-main", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "Load in at the side.", plotIds: ["p-std", "p-alt"], defaultPlotId: "p-alt" },
+      { id: "v-small", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null },
     ],
     backgrounds: [background],
     plots: [
@@ -174,6 +174,30 @@ describe("/stageplots: the venue's address", () => {
     localStorage.setItem(LAST_VENUE_KEY, "v-off");
     const router = await mountAt("/stageplots");
     assert.equal(addressOf(router), "/stageplots/v-off");
+  });
+
+  test("a venue with an address by name: its address, its id and an old address all open it, and the bar shows its address", async () => {
+    const off = DOC.venues.find((v) => v.id === "v-off")!;
+    off.slug = "hall-away";
+    off.oldSlugs = ["the-hall"];
+    for (const url of ["/stageplots/hall-away", "/stageplots/v-off", "/stageplots/the-hall"]) {
+      const router = await mountAt(url);
+      assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Hall Away", url);
+      assert.equal(addressOf(router), "/stageplots/hall-away", url);
+      assert.equal(router.history.length, 1, `${url}: replaced, not pushed`);
+      cleanup();
+    }
+  });
+
+  test("opening a venue with an address by name from its card goes to that address", async () => {
+    DOC.venues.find((v) => v.id === "v-off")!.slug = "hall-away";
+    const router = await mountAt("/stageplots");
+    fireEvent.click(screen.getByText("Hall Away"));
+    await settle();
+    await settle();
+    assert.equal(addressOf(router), "/stageplots/hall-away");
+    // Remembered by id, which a change of address cannot break.
+    assert.equal(localStorage.getItem(LAST_VENUE_KEY), "v-off");
   });
 
   test("Back from the only home venue shows the list, not the venue again", async () => {

@@ -288,7 +288,7 @@ describe("stage-plot files", () => {
     const pdfHash = await files.storeStagePlotOriginal(pdf);
     await stageplotsStore.update(() => ({
       pendingRemovals: [],
-      venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "Side door", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+      venues: [{ id: "v-1", name: "Main room", slug: null, oldSlugs: [], kind: "home", notes: "Side door", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
       backgrounds: [
         {
           id: "b-1",

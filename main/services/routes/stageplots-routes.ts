@@ -5,9 +5,12 @@
 //   GET    /api/stageplots                          the whole document, backgrounds with URLs
 //   GET    /api/stageplots/patch                    the patch file, for linked connection points;
 //                                                   503 when it cannot be read, never the seed sheets
-//   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
-//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes?, plotIds? }; plotIds
-//                                                   names each of its plots once, in tab order
+//   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue, its address
+//                                                   made from its name (-2, -3… when taken)
+//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes?, plotIds?, slug?, oldSlugs? };
+//                                                   plotIds names each of its plots once, in tab
+//                                                   order; a new slug keeps the old one as an
+//                                                   alias, and oldSlugs may only drop aliases
 //   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
 //                                                   one is unpublished first → { ok, notice? };
 //                                                   503 while a config restore is landing
@@ -93,15 +96,18 @@ import { stageplotsPublisher } from "../stageplots-publish-instance.js";
 import { plotHeight } from "../stageplots-doc.js";
 import {
   STAGEPLOT_ID,
+  addressOwners,
   applyOverride,
   checkItems,
   itemsWithin,
   limitProblem,
   nameProblem,
   readOverrideChange,
+  slugFromName,
   stageplotsStore,
   validatePlotInput,
   validateVenueInput,
+  venueSlugProblem,
 } from "../stageplots-store.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
@@ -205,9 +211,13 @@ async function createVenue(c: RouteCtx): Promise<void> {
     c.res,
     (doc) => {
       orRefuse(limitProblem(doc, "venue"));
+      const name = (body.name as string).trim();
+      const owners = addressOwners(doc.venues);
       const venue: Venue = {
         id,
-        name: (body.name as string).trim(),
+        name,
+        slug: slugFromName(name, (s) => owners.has(s)),
+        oldSlugs: [],
         kind: body.kind as VenueKind,
         notes: typeof body.notes === "string" ? body.notes : "",
         plotIds: [],
@@ -220,16 +230,54 @@ async function createVenue(c: RouteCtx): Promise<void> {
   );
 }
 
+/** Why an address change is refused, said on [stageplots] and answered. */
+function refuseAddress(id: string, why: string): never {
+  console.warn(`[stageplots] address refused for venue ${scrub(id)}: ${scrub(why)}`);
+  throw new Refused(400, why);
+}
+
+/**
+ * The venue's addresses after a PATCH. `oldSlugs` may only leave some of the old addresses out.
+ * A new `slug` keeps the one it replaces as an old address (newest last, the oldest dropped past
+ * ten) and takes itself off that list if it was one. No other venue may answer to it, by its
+ * id, its address or an old one. A rename never reaches here: the address stays.
+ */
+function addressesAfter(doc: StagePlotsDoc, v: Venue, body: Record<string, unknown>): Pick<Venue, "slug" | "oldSlugs"> {
+  let oldSlugs = v.oldSlugs;
+  const keep = body.oldSlugs;
+  if (keep !== undefined) {
+    if (!Array.isArray(keep) || !keep.every((s) => typeof s === "string" && v.oldSlugs.includes(s))) {
+      refuseAddress(v.id, "oldSlugs may only leave out some of the venue's old addresses");
+    }
+    oldSlugs = v.oldSlugs.filter((s) => keep.includes(s));
+  }
+  let slug = v.slug;
+  if (body.slug !== undefined && body.slug !== v.slug) {
+    if (body.slug === null) refuseAddress(v.id, "a venue's address can be changed, not removed");
+    const problem = venueSlugProblem(body.slug);
+    if (problem) refuseAddress(v.id, problem);
+    const next = body.slug as string;
+    const owner = addressOwners(doc.venues).get(next);
+    if (owner && owner.id !== v.id) refuseAddress(v.id, `${owner.name} already uses that address`);
+    oldSlugs = oldSlugs.filter((s) => s !== next);
+    if (slug !== null) oldSlugs = [...oldSlugs, slug].slice(-STAGEPLOT_LIMITS.oldSlugs);
+    slug = next;
+  }
+  return { slug, oldSlugs };
+}
+
 async function updateVenue(c: RouteCtx, id: string): Promise<void> {
   const body = await readObjectBody(c.req, c.res);
   if (!body) return;
   const problem = validateVenueInput(body, { partial: true });
   if (problem) return error(c.res, problem);
   const order = body.plotIds;
-  await mutate(
+  let before = null as Venue | null;
+  const saved = await mutate(
     c.res,
     (doc) => {
       const v = findVenue(doc, id);
+      before = v;
       // A new tab order is a list of strings naming exactly the venue's plots, each once:
       // anything else would drop or duplicate a plot, so it is refused whole.
       if (
@@ -249,10 +297,21 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
         ...(body.kind !== undefined ? { kind: body.kind as VenueKind } : {}),
         ...(typeof body.notes === "string" ? { notes: body.notes } : {}),
         ...(order !== undefined ? { plotIds: order as string[] } : {}),
+        ...addressesAfter(doc, v, body),
       });
     },
     (doc) => findVenue(doc, id),
   );
+  if (saved && before) logAddressChange(before, findVenue(saved, id));
+}
+
+/** An address change, and old addresses dropped, said on [stageplots]: each changes what a link or QR code opens. */
+function logAddressChange(was: Venue, now: Venue): void {
+  const from = was.slug ?? was.id;
+  const to = now.slug ?? now.id;
+  if (from !== to) console.log(`[stageplots] venue ${scrub(now.id)} now at /stageplots/${scrub(to)}; /stageplots/${scrub(from)} still opens it`);
+  const dropped = was.oldSlugs.filter((s) => !now.oldSlugs.includes(s) && s !== now.slug);
+  if (dropped.length > 0) console.log(`[stageplots] venue ${scrub(now.id)} no longer answers to ${scrub(dropped.map((s) => `/stageplots/${s}`).join(", "))}`);
 }
 
 async function deleteVenue(c: RouteCtx, id: string): Promise<void> {

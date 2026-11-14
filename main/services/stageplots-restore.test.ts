@@ -23,7 +23,7 @@ function pub(secret: string, origin = ORIGIN): VenuePublish {
 
 function doc(publishes: (VenuePublish | null)[], pendingRemovals: PendingRemoval[] = []): StagePlotsDoc {
   return {
-    venues: publishes.map((p, i) => ({ id: `v-${i}`, name: `Room ${i}`, kind: "home", notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: p } : {}) })),
+    venues: publishes.map((p, i) => ({ id: `v-${i}`, name: `Room ${i}`, slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: p } : {}) })),
     backgrounds: [],
     plots: [],
     overrides: [],

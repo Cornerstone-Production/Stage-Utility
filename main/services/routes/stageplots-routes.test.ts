@@ -97,12 +97,12 @@ describe("stage plot routes", () => {
     assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
-  test("venues: create, rename, change kind and notes, delete with its plots", async () => {
+  test("venues: create, rename (the address stays), change kind and notes, delete with its plots", async () => {
     const v = await venue();
     const p = await plot(v.id);
     let r = await call("PATCH", `/api/stageplots/venues/${v.id}`, { name: "  Chapel ", kind: "offsite", notes: "Side door" });
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(r.json, { id: v.id, name: "Chapel", kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
+    assert.deepEqual(r.json, { id: v.id, name: "Chapel", slug: "main-room", oldSlugs: [], kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
     r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
     assert.equal(r.status, 200, r.body);
     assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
@@ -516,7 +516,7 @@ describe("stage plot routes", () => {
   test("the 51st venue is 400", async () => {
     await stageplotsStore.update((d) => ({
       ...d,
-      venues: Array.from({ length: 50 }, (_, i) => ({ id: `v-${i}`, name: `Room ${i}`, kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null })),
+      venues: Array.from({ length: 50 }, (_, i) => ({ id: `v-${i}`, name: `Room ${i}`, slug: null, oldSlugs: [], kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null })),
     }));
     const r = await call("POST", "/api/stageplots/venues", { name: "One too many", kind: "home" });
     assert.equal(r.status, 400);
@@ -526,6 +526,131 @@ describe("stage plot routes", () => {
   test("a path it does not own falls through", async () => {
     const r = await call("GET", "/api/stageplotsx");
     assert.equal(r.responded, false);
+  });
+});
+
+describe("venue addresses", () => {
+  const patchVenue = (id: string, body: unknown) => call("PATCH", `/api/stageplots/venues/${id}`, body);
+  const venueNow = async (id: string) => (await stageplotsStore.get()).venues.find((v) => v.id === id)!;
+  /** Every line `run` logs under [stageplots]. */
+  async function logs(run: () => Promise<unknown>): Promise<string[]> {
+    const seen: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void seen.push(a.join(" "));
+    try {
+      await run();
+    } finally {
+      console.log = real;
+    }
+    return seen.filter((l) => l.startsWith("[stageplots]"));
+  }
+
+  test("a new venue's address is made from its name, with -2, -3 when it is taken", async () => {
+    const made = async (name: string) => ((await call("POST", "/api/stageplots/venues", { name, kind: "home" })).json as { slug: string }).slug;
+    assert.equal(await made("Main Auditorium"), "main-auditorium");
+    assert.equal(await made("Main  Auditorium!"), "main-auditorium-2");
+    assert.equal(await made("main auditorium"), "main-auditorium-3");
+    assert.equal(await made("Café Été"), "cafe-ete");
+    assert.equal(await made("!!!"), "venue");
+    // The editor's own address is never a venue's.
+    assert.equal(await made("Edit"), "edit-2");
+    const long = await made("A".repeat(60));
+    assert.equal(long, "a".repeat(60));
+    const longer = await made("A".repeat(60));
+    assert.equal(longer, `${"a".repeat(58)}-2`);
+  });
+
+  test("a changed address keeps the old one as an alias; going back takes it off the list; both logged", async () => {
+    const v = await venue("Main room");
+    const said = await logs(async () => {
+      const r = await patchVenue(v.id, { slug: "hall" });
+      assert.equal(r.status, 200, r.body);
+    });
+    assert.deepEqual(said, [`[stageplots] venue ${v.id} now at /stageplots/hall; /stageplots/main-room still opens it`]);
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["hall", ["main-room"]]);
+    await patchVenue(v.id, { slug: "big-hall" });
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["big-hall", ["main-room", "hall"]]);
+    // An old address taken back is its address again, and off the list.
+    await patchVenue(v.id, { slug: "main-room" });
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["main-room", ["hall", "big-hall"]]);
+    // A rename leaves it alone.
+    await patchVenue(v.id, { name: "The Big Hall" });
+    assert.equal((await venueNow(v.id)).slug, "main-room");
+  });
+
+  test("old addresses can only be dropped, and a drop is logged", async () => {
+    const v = await venue("Main room");
+    await patchVenue(v.id, { slug: "hall" });
+    await patchVenue(v.id, { slug: "big-hall" });
+    let r = await patchVenue(v.id, { oldSlugs: ["main-room", "elsewhere"] });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /only leave out/);
+    const said = await logs(async () => assert.equal((await patchVenue(v.id, { oldSlugs: ["hall"] })).status, 200));
+    assert.deepEqual(said, [`[stageplots] venue ${v.id} no longer answers to /stageplots/main-room`]);
+    assert.deepEqual((await venueNow(v.id)).oldSlugs, ["hall"]);
+    r = await patchVenue(v.id, { oldSlugs: "hall" });
+    assert.equal(r.status, 400);
+  });
+
+  test("at most ten old addresses are kept, the newest", async () => {
+    const v = await venue("Room");
+    for (let i = 1; i <= 12; i++) assert.equal((await patchVenue(v.id, { slug: `room-${i}` })).status, 200);
+    const now = await venueNow(v.id);
+    assert.equal(now.slug, "room-12");
+    assert.deepEqual(now.oldSlugs, ["room-2", "room-3", "room-4", "room-5", "room-6", "room-7", "room-8", "room-9", "room-10", "room-11"]);
+  });
+
+  test("an address another venue answers to, by its address, an old one or its id, is refused naming it, and said", async () => {
+    const chapel = await venue("Chapel");
+    await patchVenue(chapel.id, { slug: "the-chapel" });
+    const main = await venue("Main room");
+    await stageplotsStore.update((d) => ({ ...d, venues: [...d.venues, { id: "side-room", name: "Side room", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
+    for (const taken of ["the-chapel", "chapel", "side-room"]) {
+      const said = await warnings(async () => {
+        const r = await patchVenue(main.id, { slug: taken });
+        assert.equal(r.status, 400, taken);
+        assert.equal((r.json as { error: string }).error, taken === "side-room" ? "Side room already uses that address" : "Chapel already uses that address");
+      });
+      assert.equal(said.length, 1, taken);
+      assert.match(said[0], new RegExp(`address refused for venue ${main.id}: .*already uses that address`));
+    }
+    assert.equal((await venueNow(main.id)).slug, "main-room");
+  });
+
+  test("an address that breaks the rules is refused, and saves nothing", async () => {
+    const v = await venue("Main room");
+    for (const [slug, says] of [
+      ["Main Room", /lower-case letters/],
+      ["-room", /lower-case letters/],
+      ["room--two", /lower-case letters/],
+      ["", /lower-case letters/],
+      ["a".repeat(61), /1 to 60/],
+      [42, /lower-case letters/],
+      ["edit", /editor's own/],
+      ["v-0123456789ab", /venue id/],
+      [null, /changed, not removed/],
+    ] as const) {
+      const r = await patchVenue(v.id, { slug });
+      assert.equal(r.status, 400, String(slug));
+      assert.match((r.json as { error: string }).error, says, String(slug));
+    }
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["main-room", []]);
+  });
+
+  test("a venue saved before addresses existed has none, answers at its id, and can be given one", async () => {
+    await stageplotsStore.update((d) => ({ ...d, venues: [{ id: "v-old", name: "Old room", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
+    const r = await patchVenue("v-old", { slug: "old-room" });
+    assert.equal(r.status, 200, r.body);
+    // Its id was never an old address: it opens the venue anyway, as every id does.
+    assert.deepEqual(await venueNow("v-old").then((x) => [x.slug, x.oldSlugs]), ["old-room", []]);
+  });
+
+  test("a document where two venues answer to one address is refused", async () => {
+    await venue("Chapel");
+    await assert.rejects(
+      stageplotsStore.update((d) => ({ ...d, venues: [...d.venues, { id: "v-2", name: "Another", slug: "x", oldSlugs: ["chapel"], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] })),
+      /both answer to the address "chapel"/,
+    );
   });
 });
 

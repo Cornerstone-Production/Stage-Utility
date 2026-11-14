@@ -58,7 +58,7 @@ describe("stageplots store restore check", () => {
   test("the store is registered with its restore check", async () => {
     const check = restoreCheckFor("stageplots.json");
     assert.ok(check, "stageplots.json has no restore check");
-    assert.deepEqual(await check(goodDoc()), { ok: true, value: { ...goodDoc(), overrides: [], pendingRemovals: [] } });
+    assert.deepEqual(await check(goodDoc()), { ok: true, value: { ...goodDoc(), venues: goodDoc().venues.map((v) => ({ ...v, slug: null, oldSlugs: [] })), overrides: [], pendingRemovals: [] } });
   });
 
   test("restore check accepts the empty doc", () => {
@@ -235,6 +235,27 @@ describe("stageplots overrides in the restore check", () => {
     assert.equal(warned.filter((w) => w.startsWith("[stageplots]") && /overrides/.test(w)).length, 1, warned.join(" | "));
   });
 
+  test("a venue read from a file saved before addresses existed has none, and keeps one it has", () => {
+    const doc = { ...goodDoc(), overrides: [], pendingRemovals: [] };
+    doc.venues.push({ ...doc.venues[0], id: "v-2", slug: "chapel", oldSlugs: ["hall"] } as (typeof doc.venues)[number]);
+    const read = normalizeStagePlots(doc as unknown as Parameters<typeof normalizeStagePlots>[0]);
+    assert.deepEqual(read.venues.map((v) => [v.id, v.slug, v.oldSlugs]), [["v-1", null, []], ["v-2", "chapel", ["hall"]]]);
+  });
+
+  test("an address a venue holds is held to the rules on a restore", () => {
+    for (const [venue, says] of [
+      [{ slug: "Bad Slug" }, /address: an address is lower-case/],
+      [{ slug: "edit" }, /editor's own/],
+      [{ slug: "x", oldSlugs: ["x"] }, /more than once/],
+      [{ slug: "x", oldSlugs: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }, /more than 10 old addresses/],
+      [{ slug: "x", oldSlugs: ["v-0123456789ab"] }, /old address "v-0123456789ab": an address shaped like a venue id/],
+    ] as const) {
+      const doc = goodDoc();
+      Object.assign(doc.venues[0], venue);
+      assert.match(refusal(doc), says);
+    }
+  });
+
   test("overrides come out sorted by plan, then venue, and pass the check again unchanged", () => {
     const once = checkStagePlotsDoc(
       withOverrides([ov({ planId: "300" }), ov({ planId: "200", venueId: "v-2", plotId: "p-3" }), ov({ planId: "200" })]),
@@ -272,7 +293,7 @@ describe("stageplots input validation", () => {
 describe("stageplots store", () => {
   test("update persists through the DataStore and get reads it back", async () => {
     assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
-    await stageplotsStore.update((d) => ({ ...d, venues: [{ id: "v-1", name: "Main", kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
+    await stageplotsStore.update((d) => ({ ...d, venues: [{ id: "v-1", name: "Main", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
     const onDisk = JSON.parse(await fs.readFile(path.join(TMP, "stageplots.json"), "utf8"));
     assert.equal(onDisk.venues[0].name, "Main");
     assert.equal((await stageplotsStore.get()).venues.length, 1);

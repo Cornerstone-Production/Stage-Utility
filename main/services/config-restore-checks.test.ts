@@ -89,7 +89,7 @@ const GOOD: Record<string, unknown> = {
   },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
   "stageplots.json": {
-    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    venues: [{ id: "v-1", name: "Main room", slug: "main-room", oldSlugs: ["main-hall"], kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [],
     plots: [
       { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 },

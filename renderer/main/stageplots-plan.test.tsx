@@ -73,8 +73,8 @@ const plot = (id: string, venueId: string, name: string) => ({ id, venueId, name
 function doc(): StagePlotsView {
   return {
     venues: [
-      { id: "v-main", name: "Room One", kind: "home", notes: "", plotIds: ["p-std", "p-bap", "p-xmas"], defaultPlotId: "p-std" },
-      { id: "v-off", name: "Hall Away", kind: "offsite", notes: "", plotIds: ["p-hall", "p-hall-alt"], defaultPlotId: "p-hall" },
+      { id: "v-main", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-std", "p-bap", "p-xmas"], defaultPlotId: "p-std" },
+      { id: "v-off", name: "Hall Away", slug: null, oldSlugs: [], kind: "offsite", notes: "", plotIds: ["p-hall", "p-hall-alt"], defaultPlotId: "p-hall" },
     ],
     backgrounds: [],
     pendingRemovals: [],

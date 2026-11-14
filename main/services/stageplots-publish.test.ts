@@ -63,7 +63,7 @@ function venueDoc(plots = 2, backgrounds = 2, items: (i: number) => PlotItem[] =
     version: 1,
   }));
   return {
-    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "Side door.", plotIds: ps.map((p) => p.id), defaultPlotId: "p-0" }],
+    venues: [{ id: "v-1", name: "Main room", slug: null, oldSlugs: [], kind: "home", notes: "Side door.", plotIds: ps.map((p) => p.id), defaultPlotId: "p-0" }],
     backgrounds: bgs,
     plots: ps,
     overrides: [],
@@ -1609,7 +1609,7 @@ describe("linked connection points on the public page", () => {
       item("c-sb1", { type: "conn", label: "Old SB", color: null, patchLink: linked("sb1-SENTINEL-ID", "Old SB") }),
       item("c-gone", { type: "conn", label: "Lost box", color: "#46a758", inputs: ["Spare"], patchLink: linked("gone-SENTINEL-ID", "Lost box", "#46a758") }),
     ]);
-    doc.venues.push({ id: "v-2", name: "Chapel", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    doc.venues.push({ id: "v-2", name: "Chapel", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
     doc.plots.push({ id: "p-9", venueId: "v-2", name: "Chapel plot", backgroundId: null, bgFade: 0, items: [item("c-fp3", { type: "conn", label: "FP-3", color: "#12a594", patchLink: linked("fp3-SENTINEL-ID", "FP-3", "#12a594") })], version: 1 });
     const h = await harness(doc, opts);
     h.patch.file = patchWithSentinels();

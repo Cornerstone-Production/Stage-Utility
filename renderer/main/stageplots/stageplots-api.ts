@@ -36,7 +36,8 @@ export const stageplotsApi = {
   /** The patch, for linked connection points. Rejects (503) when it cannot be read, rather than answering the seed sheets. */
   patch: () => invoke<PatchFile>("stageplots:patch"),
   createVenue: (venue: VenueInput) => invoke<Venue>("stageplots:createVenue", { venue }),
-  updateVenue: (id: string, changes: Partial<VenueInput>) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
+  /** `slug`: a new address, the old one kept as an alias. `oldSlugs`: the aliases to keep, some of them left out. */
+  updateVenue: (id: string, changes: Partial<VenueInput> & { slug?: string; oldSlugs?: string[] }) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
   /** A venue's plots in a new tab order: each of its plot ids exactly once. */
   reorderPlots: (venueId: string, plotIds: string[]) => invoke<Venue>("stageplots:updateVenue", { id: venueId, changes: { plotIds } }),
   /** `notice`: the venue was published and its link could not be removed yet (it is queued). */

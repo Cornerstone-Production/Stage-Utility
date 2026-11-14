@@ -11,6 +11,14 @@ export type VenueKind = "home" | "offsite";
 export interface Venue {
   id: string;
   name: string;
+  /**
+   * The venue's address on /stageplots: `/stageplots/<slug>`. Made from its name when the
+   * venue is created and never changed by a rename. Null for a venue created before addresses
+   * existed, which answers at its id until one is set. See venueSlugProblem for the rules.
+   */
+  slug: string | null;
+  /** Addresses it had before, newest last, at most STAGEPLOT_LIMITS.oldSlugs: each still opens it. */
+  oldSlugs: string[];
   /** Only groups the list: home venues first. */
   kind: VenueKind;
   notes: string;
@@ -293,6 +301,10 @@ export const STAGEPLOT_LIMITS = {
   pendingRemovals: 1000,
   /** Past this many, a regenerate or a publish is refused rather than queue another. */
   pendingRemovalsQueue: 200,
+  /** A venue's address, in characters. */
+  slugChars: 60,
+  /** Old addresses a venue keeps answering to; past this the oldest goes. */
+  oldSlugs: 10,
 } as const;
 
 /** The plot canvas is this many units wide. */

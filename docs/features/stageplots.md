@@ -17,6 +17,30 @@ venue's first plot becomes its default. Deleting the default makes the first plo
 left, in tab order, the default; deleting a venue's last plot leaves it with none.
 Deleting a venue deletes its plots.
 
+### Its own address
+
+Each venue has an address by name, `/stageplots/main-auditorium`, on the
+server's local address (`http://<server>:8788/stageplots/main-auditorium`, or
+port 80 where the friendly port is set up). It is made from the venue's name when
+the venue is added: lower case, accents dropped, everything else a hyphen, with
+`-2`, `-3` added when another venue already answers to it. A rename never changes
+it, so a printed QR code keeps working.
+
+Change it in the venue's **Address** field in the editor; it saves when you leave
+the field. An address is lower-case letters, digits and single hyphens, up to 60
+characters. The server refuses one another venue answers to (naming that venue),
+`edit` (the editor's own address) and one shaped like a venue id (`v-` and twelve
+hex digits). The old address keeps working: the venue lists its **Old addresses,
+still working** with a × that stops one answering, after asking. A venue keeps up
+to ten; past that the oldest stops working.
+
+A venue's id always opens it too: `/stageplots/v-1a2b3c4d5e6f`. A venue added
+before addresses existed has none until one is set, and its address is its id.
+Opening a venue by its id or an old address puts its address in the bar.
+
+The published link on the public page is the secret one, whatever the address
+(see [Publishing](#publishing)).
+
 A plot is 1000 units wide, and its height follows its background's shape. A plot
 with no background is drawn on a plain 16:9 grid.
 
@@ -94,12 +118,11 @@ plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
 selected, the plot itself, its legend, and the venue's notes.
 
 - With exactly one home venue, `/stageplots` opens it directly.
-- A venue has its own address, `/stageplots/<venue id>`, on the server's local
-  address (`http://<server>:8788/stageplots/<venue id>`, or port 80 where the
-  friendly port is set up). Opening a venue puts it in the address bar and leaving
-  it goes back to `/stageplots`, so the bar can be copied or made into a QR code,
-  and the address opens that venue on a fresh load. It wins over the remembered
-  venue; an id that names no venue shows the list.
+- A venue has its own address on the server's local address (see
+  [Its own address](#its-own-address)). Opening a venue puts it in the address bar
+  and leaving it goes back to `/stageplots`, so the bar can be copied or made into
+  a QR code, and the address opens that venue on a fresh load. It wins over the
+  remembered venue; an address that names no venue shows the list.
 - A venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
   named in `?venue=` when it exists, and on its plot named in `?plot=`.
@@ -155,8 +178,9 @@ and every open `/stageplots` follows them. A change the server refuses says why
 beside the control, and the page goes back to what is saved. What is drawn on a
 plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
 
-- **Venues**: **+ Venue** adds one and selects it. The selected venue's name and
-  notes save when you leave the field; Home or Offsite saves at once. Right-click
+- **Venues**: **+ Venue** asks for the name (Enter adds it, Escape does not) and selects the new venue. The selected venue's name,
+  address (with a button that copies it in full) and notes save when you leave the
+  field; Home or Offsite saves at once. Right-click
   a venue (or press and hold on a touch screen) for **Rename** (selects it and puts
   the cursor in its name), **Home** or **Offsite**, **Open on /stageplots**, **Copy
   its address** and **Delete venue…**.
@@ -542,7 +566,9 @@ up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
 overrides cleared with a deleted plot, a deleted default and the plot that took
 over, a new plot order refused and why, and plan overrides in `stageplots.json`
-that were not a list and were read as none. Publishing logs each publish (with how
+that were not a list and were read as none, every venue address change (the new
+address and the old one that still opens it), old addresses dropped, and every
+address refused and why. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
 that failed and why, every one refused before anything was sent (an unknown venue, one

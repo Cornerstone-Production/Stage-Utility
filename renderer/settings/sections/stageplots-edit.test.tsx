@@ -92,7 +92,7 @@ function plot(id: string, venueId: string, name: string, backgroundId: string | 
 
 function doc(): StagePlotsView {
   return {
-    venues: [{ id: "v-1", name: "Room One", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    venues: [{ id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
     overrides: [],
@@ -114,7 +114,7 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const venue = (id: string) => DOC.venues.find((v) => v.id === id)!;
   let m: RegExpExecArray | null;
   if (method === "POST" && path === "/api/stageplots/venues") {
-    const v = { id: `v-new${++ids}`, plotIds: [], defaultPlotId: null, notes: "", ...(body as object) } as unknown as StagePlotsView["venues"][number];
+    const v = { id: `v-new${++ids}`, slug: `new-venue-${ids}`, oldSlugs: [], plotIds: [], defaultPlotId: null, notes: "", ...(body as object) } as unknown as StagePlotsView["venues"][number];
     DOC.venues.push(v);
     return { status: 201, json: v };
   }
@@ -330,7 +330,7 @@ after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("/stageplots/edit", () => {
   test("a venue picked after opening with ?venue= wins over the parameter", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
     window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
     try {
       await mount();
@@ -343,7 +343,7 @@ describe("/stageplots/edit", () => {
   });
 
   test("?venue= opens the editor on that venue", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
     window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
     try {
       await mount();
@@ -385,13 +385,41 @@ describe("/stageplots/edit", () => {
     assert.ok(within(publish).getByRole("button", { name: "Publish Room One" }));
   });
 
-  test("adding a venue shows it selected", async () => {
+  test("adding a venue asks its name first, adds it under that name and shows it selected", async () => {
     await mount();
     await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    assert.deepEqual(writes(), [], "nothing is added before it has a name");
+    const field = screen.getByLabelText("New venue name") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "  Main Auditorium " } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    await settle();
     assert.deepEqual(writes(), ["POST /api/stageplots/venues"]);
+    // The name goes with the create, so the address the server makes from it is the venue's name.
+    assert.deepEqual(sent[0].body, { name: "Main Auditorium", kind: "home", notes: "" });
     const current = within(card("Venues")).getAllByRole("button").find((b) => b.getAttribute("aria-current") === "true");
-    assert.equal(current?.textContent, "New venue0 plots");
-    assert.equal((screen.getByLabelText("Venue name") as HTMLInputElement).value, "New venue");
+    assert.equal(current?.textContent, "Main Auditorium0 plots");
+    assert.equal((screen.getByLabelText("Venue name") as HTMLInputElement).value, "Main Auditorium");
+    assert.equal(screen.queryByLabelText("New venue name"), null);
+  });
+
+  test("Escape, or leaving the new venue's name empty, adds nothing", async () => {
+    await mount();
+    await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    let field = screen.getByLabelText("New venue name");
+    fireEvent.change(field, { target: { value: "Chapel" } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Escape" });
+    });
+    assert.equal(screen.queryByLabelText("New venue name"), null);
+    await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    field = screen.getByLabelText("New venue name");
+    await act(async () => {
+      fireEvent.blur(field);
+    });
+    await settle();
+    assert.deepEqual(writes(), []);
   });
 
   test("upload a JPEG posts raw bytes and lists the background", async () => {
@@ -1170,7 +1198,7 @@ describe("the plot editor", () => {
   });
 
   test("a venue's Rename declined at the discard prompt leaves nothing waiting: picking it later does not grab the name field", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
     await mount();
     await addFromPalette("box");
     const rowTwo = () => within(card("Venues")).getByRole("button", { name: /Room Two/ });
@@ -1186,6 +1214,24 @@ describe("the plot editor", () => {
     assert.equal(rowTwo().getAttribute("aria-current"), "true", "Room Two is selected now");
     const field = screen.getByLabelText("Venue name") as HTMLInputElement;
     assert.notEqual(document.activeElement, field, "the declined Rename was still waiting and took the cursor");
+  });
+
+  test("a venue's menu copies and opens its address by name, not its id", async () => {
+    DOC.venues[0].slug = "room-one";
+    const router = await mountRouted("/stageplots/edit?venue=v-1");
+    const row = () => within(card("Venues")).getByRole("button", { name: /Room One/ });
+    const menu = async (name: string) => {
+      await act(async () => {
+        fireEvent.contextMenu(row(), { clientX: 30, clientY: 30 });
+      });
+      await click(screen.getByRole("menuitem", { name }));
+      await settle();
+    };
+    await menu("Copy its address");
+    // No clipboard here, so it shows the address to copy by hand: the address is the point.
+    assert.match(within(card("Venues")).getByRole("status").textContent!, /\/stageplots\/room-one$/);
+    await menu("Open on /stageplots");
+    assert.equal(router.state.location.pathname, "/stageplots/room-one");
   });
 
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
@@ -1371,7 +1417,7 @@ describe("the This week card", () => {
     DOC.venues[0].plotIds.push("p-3");
     DOC.plots.push(plot("p-3", "v-1", "Baptism"));
     // Another venue's plots must never be offered here.
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
     DOC.plots.push(plot("p-9", "v-2", "Elsewhere"));
   }
   const thisWeek = () => card("This week");

@@ -119,7 +119,7 @@ const card = () => screen.getByRole("region", { name: "Publish" });
 const text = () => card().textContent ?? "";
 
 beforeEach(() => {
-  VENUE = { id: "v-1", name: "Room One", kind: "home", notes: "", plotIds: [], defaultPlotId: null };
+  VENUE = { id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null };
   SETTINGS = { url: ORIGIN, token: "••••" };
   sent = [];
   refuse = null;

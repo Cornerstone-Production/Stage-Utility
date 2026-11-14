@@ -130,7 +130,65 @@ export function validatePlotInput(body: unknown, { partial }: { partial: boolean
   return null;
 }
 
-/** Why one more of `kind` cannot be added to `doc`, or null. */
+// ── Addresses ────────────────────────────────────────────────────────────
+
+/** A venue address: lower-case letters and digits in runs joined by single hyphens. */
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** The shape of the ids this server mints for venues (`v-` and 12 hex): an address is never one. */
+const VENUE_ID_SHAPE = /^v-[0-9a-f]{12}$/;
+/** /stageplots/edit is the editor's own address. */
+const RESERVED_SLUGS = new Set(["edit"]);
+
+/** Why `v` cannot be a venue's address, or null. Says nothing about other venues: see addressOwners. */
+export function venueSlugProblem(v: unknown): string | null {
+  if (typeof v !== "string" || v.length === 0 || v.length > STAGEPLOT_LIMITS.slugChars || !SLUG.test(v)) {
+    return `an address is lower-case letters, digits and single hyphens, 1 to ${STAGEPLOT_LIMITS.slugChars} characters`;
+  }
+  if (RESERVED_SLUGS.has(v)) return "that address is the editor's own";
+  if (VENUE_ID_SHAPE.test(v)) return "an address shaped like a venue id is kept for venue ids";
+  return null;
+}
+
+/**
+ * Every address a venue answers to (its id, its address and its old ones), mapped to the venue
+ * that owns it. A Map, because the key comes from a request. Throws when two venues claim one.
+ */
+export function addressOwners(venues: readonly Venue[]): Map<string, Venue> {
+  const owners = new Map<string, Venue>();
+  for (const v of venues) {
+    for (const address of new Set([v.id, ...(v.slug === null ? [] : [v.slug]), ...v.oldSlugs])) {
+      const other = owners.get(address);
+      if (other && other.id !== v.id) refuse(`venues "${other.id}" and "${v.id}" both answer to the address "${address}"`);
+      owners.set(address, v);
+    }
+  }
+  return owners;
+}
+
+/**
+ * The address a new venue named `name` takes: the name lower-cased, accents dropped, anything
+ * else a hyphen, at most 60 characters ("venue" when nothing is left), with -2, -3… added
+ * while `taken` says another venue answers to it.
+ */
+export function slugFromName(name: string, taken: (slug: string) => boolean): string {
+  const base =
+    name
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, STAGEPLOT_LIMITS.slugChars)
+      .replace(/-+$/, "") || "venue";
+  const usable = (s: string) => venueSlugProblem(s) === null && !taken(s);
+  if (usable(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `-${n}`;
+    const s = `${base.slice(0, STAGEPLOT_LIMITS.slugChars - suffix.length).replace(/-+$/, "")}${suffix}`;
+    if (usable(s)) return s;
+  }
+}
+
 /** What each limit says when it is reached, for a save and a restore alike. */
 const LIMIT_SAYS = {
   venue: `there can be at most ${STAGEPLOT_LIMITS.venues} venues`,
@@ -240,9 +298,25 @@ function checkVenue(raw: unknown, i: number): Venue {
   orRefuse(notesProblem(v.notes, what));
   const plotIds = textList(v.plotIds, `${what}'s plots`);
   if (v.defaultPlotId !== null && typeof v.defaultPlotId !== "string") refuse(`${what}'s default plot must be a plot id or null`);
+  // A venue saved before addresses existed has neither: no address yet, and no old ones.
+  const rawSlug = v.slug === undefined ? null : v.slug;
+  if (rawSlug !== null) {
+    const p = venueSlugProblem(rawSlug);
+    if (p) refuse(`${what}'s address: ${p}`);
+  }
+  const slug = rawSlug as string | null;
+  const oldSlugs = v.oldSlugs === undefined ? [] : textList(v.oldSlugs, `${what}'s old addresses`);
+  if (oldSlugs.length > STAGEPLOT_LIMITS.oldSlugs) refuse(`${what} has more than ${STAGEPLOT_LIMITS.oldSlugs} old addresses`);
+  for (const old of oldSlugs) {
+    const p = venueSlugProblem(old);
+    if (p) refuse(`${what}'s old address "${old}": ${p}`);
+  }
+  if (new Set(oldSlugs).size !== oldSlugs.length || (slug !== null && oldSlugs.includes(slug))) refuse(`${what} lists an address more than once`);
   const venue: Venue = {
     id,
     name: v.name as string,
+    slug: slug as string | null,
+    oldSlugs,
     kind: v.kind as VenueKind,
     notes: v.notes as string,
     plotIds,
@@ -511,6 +585,8 @@ export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
     uniqueIds(list.map((e) => ({ id: e.id })), what);
   }
   if (venues.length > STAGEPLOT_LIMITS.venues) refuse(LIMIT_SAYS.venue);
+  // No two venues answer to one address, an id included: /stageplots/<x> opens one venue.
+  addressOwners(venues);
   if (backgrounds.length > STAGEPLOT_LIMITS.backgrounds) refuse(LIMIT_SAYS.background);
 
   const venueById = new Map(venues.map((v) => [v.id, v]));
@@ -614,6 +690,10 @@ export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
       console.warn("[stageplots] stageplots.json's plan overrides are not a list; read as none, and the next save replaces them");
     }
     out = { ...out, overrides: [] };
+  }
+  // A venue saved before addresses existed reads with none: it answers at its id until one is set.
+  if (Array.isArray(out.venues) && out.venues.some((v) => isRecord(v) && (v.slug === undefined || v.oldSlugs === undefined))) {
+    out = { ...out, venues: out.venues.map((v) => (isRecord(v) ? { ...v, slug: v.slug ?? null, oldSlugs: v.oldSlugs ?? [] } : v)) };
   }
   const pending = (out as { pendingRemovals?: unknown }).pendingRemovals;
   if (pending === undefined) out = { ...out, pendingRemovals: [] };
