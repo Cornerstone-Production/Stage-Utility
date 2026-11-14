@@ -6,8 +6,7 @@ import { SYMBOL_KINDS } from "@main/types/stageplots";
 
 import { eyebrow } from "../../main/stageplots/doc-helpers";
 import type { AddKind } from "../../main/stageplots/editor-state";
-import { Part } from "../../main/stageplots/symbols";
-import { SYMBOLS, TYPE_NAMES, iconParts, type IconKey } from "../../main/stageplots/symbols";
+import { Part, SYMBOLS, TYPE_NAMES, iconDrawing, type IconKey } from "../../main/stageplots/symbols";
 import { cn } from "../../lib/cn";
 
 /** The palette, as the mockup groups it. Symbols in their drawing order. */
@@ -26,20 +25,25 @@ export const PALETTE: { group: string; entries: { kind: AddKind; name: string }[
   },
 ];
 
-/** A palette icon, 100 x 100, drawn in the current colour. */
+/** Lucide's line: 2 units of a 24-unit icon. */
+const LINE_PER_UNIT = 2 / 24;
+
+/** A palette icon, drawn in the current colour, its line as wide as a Lucide
+ *  icon's at the same size, so it matches the app's other icons. */
 export function ItemIcon({ kind, className }: { kind: IconKey | `sym:${(typeof SYMBOL_KINDS)[number]}`; className?: string }) {
+  const { box, parts } = iconDrawing(kind);
   return (
     <svg
-      viewBox="0 0 100 100"
+      viewBox={`0 0 ${box[0]} ${box[1]}`}
       aria-hidden
-      className={cn("size-[18px] flex-none text-fg-muted", className)}
+      className={cn("size-4 flex-none text-fg-muted", className)}
       fill="none"
       stroke="currentColor"
-      strokeWidth={7}
+      strokeWidth={Math.max(...box) * LINE_PER_UNIT}
       strokeLinejoin="round"
       strokeLinecap="round"
     >
-      {iconParts(kind).map((p, i) => (
+      {parts.map((p, i) => (
         <Part key={i} part={p} />
       ))}
     </svg>

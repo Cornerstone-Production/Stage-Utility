@@ -10,7 +10,7 @@ import { cn } from "../../lib/cn";
 import { eyebrow } from "./doc-helpers";
 import { calloutKey, legendRows, type LegendRow } from "./legend";
 import { Mono } from "./mono";
-import { Part, SYMBOLS } from "./symbols";
+import { SymbolDrawing } from "./symbols";
 
 /** A row's glyph, 24 x 16: what the group of items looks like, in its colour. */
 export function LegendGlyph({ row }: { row: Pick<LegendRow, "type" | "color" | "symbol" | "dashed"> }) {
@@ -30,12 +30,7 @@ export function LegendGlyph({ row }: { row: Pick<LegendRow, "type" | "color" | "
     g = <rect x={2} y={2} width={20} height={12} rx={3} strokeWidth={1.3} strokeDasharray="3 2" style={{ fill: col, fillOpacity: 0.18, stroke: col }} />;
   else if (row.type === "box") g = <rect x={3} y={2} width={18} height={12} rx={2} strokeWidth={1.4} style={{ fill: col, fillOpacity: 0.1, stroke: col }} />;
   else if (row.type === "circle") g = <ellipse cx={12} cy={8} rx={9} ry={6} strokeWidth={1.4} style={{ fill: col, fillOpacity: 0.1, stroke: col }} />;
-  else
-    g = (
-      <g transform="translate(4 0) scale(.16)" fill="none" stroke="currentColor" strokeWidth={9} strokeLinejoin="round" strokeLinecap="round" style={{ color: col }}>
-        {row.symbol && SYMBOLS[row.symbol].parts.map((p, i) => <Part key={i} part={p} />)}
-      </g>
-    );
+  else g = row.symbol ? <SymbolDrawing kind={row.symbol} x={1} y={0} w={22} h={16} strokeWidth={4 / 3} color={col} /> : null;
   return (
     <svg viewBox="0 0 24 16" aria-hidden className="h-4 w-6 flex-none text-[var(--legend-ink,var(--su-fg-muted))]">
       {g}

@@ -245,7 +245,7 @@ first while there are unsaved changes.
 | Zone | a dashed, translucent area: a choir, a baptistry |
 | Cable | a line through its points, dashed or solid, with a dot at each end |
 | Connection point | a floor pocket, stage box or wall plate |
-| Symbol | one of nine drawings: drum kit, grand piano, keyboard, floor wedge, amp, mic stand, console, speaker, camera |
+| Symbol | one of nine outline drawings: drum kit, grand piano, keyboard, floor wedge, amp, mic stand, console, speaker, camera. A drawing keeps its proportions, centred in its box |
 | Text: Label | words on the plot, sized with it |
 | Text: Callout | a numbered dot; its text is listed in the legend's callout key |
 | Text: Dimension | a line with end ticks and arrowheads, its label above |

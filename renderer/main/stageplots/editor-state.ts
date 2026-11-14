@@ -44,7 +44,7 @@ export const DEFAULT_SIZES: Record<Exclude<AddKind, "cable" | `sym:${SymbolKind}
   wedge: [58, 33],
   amp: [67, 50],
   micstand: [46, 46],
-  console: [150, 58],
+  console: [114, 72],
   speaker: [46, 67],
   camera: [71, 50],
 };
