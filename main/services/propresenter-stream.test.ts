@@ -1552,7 +1552,11 @@ describe("a playlist the API refuses", () => {
     burstOn = false;
     heartbeatOn = false;
     await streaming();
-    await frameAndSettle();
+    push(frame(WIRE.playlist, PLAYLIST_FRAME));
+    // Wait for the failure to LAND (the service sets its deadline when it has
+    // handled the 404), not for a fixed settle: how long the read takes is the
+    // machine's load, and the case is about what happens after it.
+    await until("the broken playlist's failure to be recorded", () => inner(propresenterService).playlistRetryAt > 0);
     assert.equal(playlistReads().length, 1);
 
     playlistStatus = 200;
@@ -1568,7 +1572,6 @@ describe("a playlist the API refuses", () => {
     await until(
       "the new playlist to be read immediately",
       () => seen.includes(`GET /v1/playlist/${other}`),
-      1000,
     );
   });
 });
