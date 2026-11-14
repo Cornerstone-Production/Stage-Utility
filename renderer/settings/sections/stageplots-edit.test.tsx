@@ -229,6 +229,7 @@ const { itemRenderProbe } = await import("../../main/stageplots/plot-items.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 
@@ -265,6 +266,20 @@ async function mount({ viewer = false }: { viewer?: boolean } = {}) {
     );
   });
   for (let i = 0; i < 4; i++) await settle();
+}
+
+/** The editor and /stageplots as two routes of a real router over a memory history, opened at `url`. */
+async function mountRouted(url: string) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const root = createRootRoute({});
+  const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement(StagePlotsEdit, { openPdf: fakePdf }) });
+  const list = createRoute({ getParentRoute: () => root, path: "/stageplots", component: () => React.createElement(StagePlotsPage) });
+  const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: [url] }) });
+  await act(async () => {
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
+  });
+  for (let i = 0; i < 6; i++) await settle();
+  return router;
 }
 
 async function click(el: Element) {
@@ -332,6 +347,30 @@ describe("/stageplots/edit", () => {
     } finally {
       window.history.replaceState(null, "", "/");
     }
+  });
+
+  test("?venue=&plot= opens the editor on that venue with that plot selected", async () => {
+    await mountRouted("/stageplots/edit?venue=v-1&plot=p-2");
+    assert.equal(tabs().find((t) => t.textContent === "Special")?.getAttribute("aria-selected"), "true");
+    assert.equal(tabs().find((t) => t.textContent === "Standard")?.getAttribute("aria-selected"), "false");
+  });
+
+  test("the back link goes to the venue list inside the app, no page load; a modified click is left to the browser", async () => {
+    const router = await mountRouted("/stageplots/edit?venue=v-1");
+    const back = screen.getByRole("link", { name: "Stage plots" });
+    // Cmd-click: not ours, so the browser opens it in a new tab.
+    const modified = fireEvent.click(back, { metaKey: true });
+    assert.equal(modified, true, "a Cmd-click was taken over");
+    assert.equal(router.state.location.pathname, "/stageplots/edit");
+    let notPrevented = true;
+    await act(async () => {
+      notPrevented = fireEvent.click(back);
+    });
+    for (let i = 0; i < 4; i++) await settle();
+    assert.equal(notPrevented, false, "a plain click was left to the browser, which loads the page");
+    assert.equal(router.state.location.pathname, "/stageplots");
+    assert.equal(screen.queryAllByRole("tab").length, 0, "the plot editor is gone");
+    assert.ok(screen.getByText("Room One"), "the venue list shows");
   });
 
   test("the Publish card sits last in the left column, for the selected venue", async () => {

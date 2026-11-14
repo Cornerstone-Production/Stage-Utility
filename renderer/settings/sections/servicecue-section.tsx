@@ -1,12 +1,12 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AlertCircleIcon, PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "lucide-react";
-import { useRouter } from "@tanstack/react-router";
 
 import { Button, Checkbox, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { useInAppLink } from "../../lib/use-search-param";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -662,15 +662,11 @@ export function ServiceCueSection() {
  * `warn: false` answers null outside a router (the tests render the page bare).
  */
 function BackLink({ to, children }: { to: string; children: ReactNode }) {
-  const router = useRouter({ warn: false }) as { navigate: (o: { to: string }) => unknown } | null;
+  const go = useInAppLink();
   return (
     <a
       href={to}
-      onClick={(e) => {
-        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        e.preventDefault();
-        void router.navigate({ to });
-      }}
+      onClick={(e) => go(e, { to })}
       className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
       <ChevronLeftIcon className="size-3.5" aria-hidden="true" />

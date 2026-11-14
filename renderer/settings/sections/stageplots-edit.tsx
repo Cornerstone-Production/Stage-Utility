@@ -40,7 +40,7 @@ import { uid } from "../../lib/uid";
 import { useElementSize } from "../../lib/use-element-size";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { useRouterHandle } from "../../lib/use-search-param";
+import { useInAppLink, useRouterHandle } from "../../lib/use-search-param";
 import { PLOT_PARAM, VENUE_PARAM, backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
 import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, type EditorAction, type EditorState } from "../../main/stageplots/editor-state";
 import { round1 } from "../../main/stageplots/geometry";
@@ -351,7 +351,7 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   // `/stageplots/edit?venue=<id>&plot=<id>` opens on that venue and plot; a pick in the page wins after.
   const [asked] = useSearchParam(VENUE_PARAM);
   const [askedPlot] = useSearchParam(PLOT_PARAM);
-  const router = useRouterHandle();
+  const goInApp = useInAppLink();
   const [venueId, setVenueId] = useState<string | null>(null);
   const [plotPick, setPlotPick] = useState<{ venueId: string; plotId: string } | null>(null);
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
@@ -378,11 +378,7 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
         href="/stageplots"
         // In the app, not a page load: a full load fetched the whole app again
         // and every status read, and opened the remembered venue rather than the list.
-        onClick={(e) => {
-          if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-          e.preventDefault();
-          void router.navigate({ to: "/stageplots", search: {}, state: { list: true } });
-        }}
+        onClick={(e) => goInApp(e, { to: "/stageplots", search: {}, state: { list: true } })}
         className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-caption1 text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <ChevronLeftIcon className="size-3.5" />

@@ -37,7 +37,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { ErrorNote } from "../components/ui/error-note";
 import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
-import { useRouterHandle } from "../lib/use-search-param";
+import { useInAppLink, useRouterHandle } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
 import { PLOT_PARAM, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
@@ -137,16 +137,14 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
 }
 
 function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void; channelsOf: ChannelsOf }) {
-  const router = useRouterHandle();
+  const goInApp = useInAppLink();
   /** Edit opens the editor on this venue and the plot on screen, in the app rather than as a page load; a modified click still opens a new tab. */
   const editLink = (plotId: string) => {
     const search = { [VENUE_PARAM]: venue.id, [PLOT_PARAM]: plotId };
     return {
       href: `/stageplots/edit?${new URLSearchParams(search)}`,
       onClick: (e: MouseEvent<HTMLAnchorElement>) => {
-        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-        e.preventDefault();
-        void router.navigate({ to: "/stageplots/edit", search });
+        goInApp(e, { to: "/stageplots/edit", search });
       },
     };
   };

@@ -19,7 +19,6 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
@@ -31,6 +30,7 @@ import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
 import { SkeletonRows } from "../../components/ui/skeleton";
 import { invoke } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { useInAppLink } from "../../lib/use-search-param";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
@@ -285,15 +285,11 @@ export function PublicLinkStatusRow() {
 
 /** "Settings in Advanced": the way to the Public link tab, for whoever sends the operator there. */
 export function SettingsInAdvancedLink({ children = "Settings in Advanced" }: { children?: ReactNode }) {
-  const router = useRouter({ warn: false }) as { navigate: (o: { to: string }) => unknown } | null;
+  const go = useInAppLink();
   return (
     <a
       href={PUBLIC_LINK_PATH}
-      onClick={(e) => {
-        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        e.preventDefault();
-        void router.navigate({ to: PUBLIC_LINK_PATH });
-      }}
+      onClick={(e) => go(e, { to: PUBLIC_LINK_PATH })}
       className="whitespace-nowrap rounded-sm text-accent underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
       {children}
