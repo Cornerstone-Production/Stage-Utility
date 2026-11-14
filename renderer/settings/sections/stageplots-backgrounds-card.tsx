@@ -23,7 +23,7 @@ import { loadPdf, type OpenPdf } from "../../lib/pdf-raster";
 import { formatBytes, plotsUsing } from "../../main/stageplots/doc-helpers";
 import { Mono } from "../../main/stageplots/mono";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
-import { CleanupPreview, type CleanupSide } from "./stageplots-cleanup-preview";
+import { CleanupPreview, SIDES, type CleanupSide } from "./stageplots-cleanup-preview";
 import { CardHeader, Num, SaveError, type Save } from "./stageplots-shared";
 
 const MB = 1024 * 1024;
@@ -158,23 +158,18 @@ function BackgroundDetail({ doc, background, save, onError }: { doc: StagePlotsV
         <Switch aria-label="Clean-up" checked={background.cleanup} disabled={converting} onCheckedChange={(on) => void setCleanup(on)} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {(["before", "after"] as const).map((side) => (
+        {SIDES.map(({ side, label, src }) => (
           <figure key={side} className="m-0">
             <button
               ref={(el) => {
                 thumbs.current[side] = el;
               }}
               type="button"
-              aria-label={`Open ${side === "before" ? "Before" : "After"} large`}
+              aria-label={`Open ${label} large`}
               onClick={() => setPreview(side)}
               className="group relative block aspect-[3/2] w-full cursor-zoom-in overflow-hidden rounded-md border border-line bg-[var(--su-plot-paper)] transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
-              <img
-                src={side === "before" ? background.sourceUrl : background.url}
-                alt=""
-                {...(side === "before" ? { loading: "lazy" as const } : {})}
-                className="block h-full w-full object-contain"
-              />
+              <img src={src(background)} alt="" loading="lazy" className="block h-full w-full object-contain" />
               <span
                 aria-hidden
                 className="absolute right-1 bottom-1 grid size-[18px] place-items-center rounded-[5px] bg-popover text-fg-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
@@ -182,7 +177,7 @@ function BackgroundDetail({ doc, background, save, onError }: { doc: StagePlotsV
                 <Maximize2Icon className="size-3" />
               </span>
             </button>
-            <figcaption className="mt-[3px] text-[11px] text-fg-subtle">{side === "before" ? "Before" : "After"}</figcaption>
+            <figcaption className="mt-[3px] text-[11px] text-fg-subtle">{label}</figcaption>
           </figure>
         ))}
       </div>

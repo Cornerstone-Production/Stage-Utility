@@ -230,6 +230,7 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
+const { CleanupPreview } = await import("./stageplots-cleanup-preview.js");
 const { clearClipboard } = await import("../../main/stageplots/clipboard.js");
 const { DUPLICATE_OFFSET } = await import("../../main/stageplots/editor-state.js");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
@@ -470,6 +471,30 @@ describe("/stageplots/edit", () => {
     await settle();
     assert.equal(screen.queryByRole("dialog"), null);
     assert.equal(document.activeElement, screen.getByRole("button", { name: "Open After large" }), "focus returns to the thumbnail it shrank into");
+  });
+
+  test("both thumbnails load lazily", async () => {
+    await mount();
+    const imgs = ["Open Before large", "Open After large"].map((name) => screen.getByRole("button", { name }).querySelector("img")!);
+    assert.deepEqual(imgs.map((i) => i.getAttribute("loading")), ["lazy", "lazy"]);
+  });
+
+  test("a preview that goes away while it shrinks never calls onClose or takes focus afterwards", async () => {
+    let closed = 0;
+    const thumb = document.createElement("button");
+    thumb.getBoundingClientRect = () => ({ left: 10, top: 10, right: 110, bottom: 80, width: 100, height: 70, x: 10, y: 10, toJSON: () => ({}) }) as DOMRect;
+    document.body.appendChild(thumb);
+    const view = render(React.createElement(CleanupPreview, { background: DOC.backgrounds[0], side: "before", thumbOf: () => thumb, onClose: () => void closed++, kindLabel: "JPEG" }));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    view.unmount();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    thumb.remove();
+    assert.equal(closed, 0, "the shrink's timer outlived the preview");
+    assert.notEqual(document.activeElement, thumb);
   });
 
   test("deleting a used background shows the plot names", async () => {

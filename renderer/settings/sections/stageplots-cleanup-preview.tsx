@@ -44,9 +44,10 @@ function targetBox(aspect: number): Box {
   return { left: (window.innerWidth - width) / 2, top: (window.innerHeight - height) / 2, width, height };
 }
 
-const SIDES: { side: CleanupSide; label: string }[] = [
-  { side: "before", label: "Before" },
-  { side: "after", label: "After" },
+/** The two images, in the order they are listed everywhere: the kept source, then the web image. */
+export const SIDES: { side: CleanupSide; label: string; src: (background: BackgroundView) => string }[] = [
+  { side: "before", label: "Before", src: (b) => b.sourceUrl },
+  { side: "after", label: "After", src: (b) => b.url },
 ];
 
 export function CleanupPreview({
@@ -73,6 +74,15 @@ export function CleanupPreview({
   const [box, setBox] = useState<Box | null>(() => (animate ? boxOf(thumbOf(initial)) : targetBox(aspect)));
   const closing = useRef(false);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // The shrink's timer: cleared if the preview goes away first (its background deleted), so
+  // it never calls onClose, or focuses a thumbnail, on a view that is no longer there.
+  const shrink = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (shrink.current !== null) window.clearTimeout(shrink.current);
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     if (!animate) return;
@@ -97,7 +107,7 @@ export function CleanupPreview({
     const to = boxOf(back);
     if (!animate || !to) return done();
     setBox(to);
-    window.setTimeout(done, CLEANUP_PREVIEW_MS);
+    shrink.current = window.setTimeout(done, CLEANUP_PREVIEW_MS);
   }, [animate, onClose, side, thumbOf]);
 
   useEffect(() => {
@@ -176,7 +186,7 @@ export function CleanupPreview({
           {SIDES.map((s) => (
             <img
               key={s.side}
-              src={s.side === "before" ? background.sourceUrl : background.url}
+              src={s.src(background)}
               alt={s.side === side ? `${background.name}, ${s.label.toLowerCase()} clean-up` : ""}
               aria-hidden={s.side !== side}
               className="absolute inset-0 h-full w-full object-contain"
