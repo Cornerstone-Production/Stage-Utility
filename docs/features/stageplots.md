@@ -107,6 +107,12 @@ selected, the plot itself, its legend, and the venue's notes.
 - Pinch or Ctrl/Cmd-scroll to zoom, drag to pan, and the buttons in the plot's
   corner zoom in, out and back to the whole plot. An ordinary scroll pans only
   once the plot is zoomed in, so the page still scrolls past it.
+- **Full window**, the last button in that corner, lays the plot over the whole
+  window on its paper, with nothing of the app around it: the venue, the plot and
+  its badge top left, zoom, fit and **Exit full window** top right. Where the browser
+  allows it (a desktop or Android browser) it is the browser's own fullscreen too;
+  iPhone Safari keeps its bars. Pinch, pan and a tap for an item's details work as
+  on the page. Escape, the exit button or leaving the browser's fullscreen closes it.
 - Tap an item for its label, kind, notes and numbered inputs: beside the item on a
   desk, as a sheet along the bottom on a phone. A connection point linked to the
   patch lists its patch channels instead (see [Patch link](#patch-link)). A tap on
@@ -339,8 +345,8 @@ A venue can be put on the [ServiceCue public page](../ops/servicecue-on-the-web.
 behind a secret link, for a crew who are not on the building's network:
 `<page address>/stageplots/<secret>`. The page is the venue as `/stageplots` shows it,
 read-only: its plots as tabs, the one it showed when it was published selected and marked
-**Default** or **For this plan · Sun 16 Nov**, pinch zoom and pan, a tap on an item for its
-label, notes and inputs, the legend and the venue's notes. There is no venue list, no
+**Default** or **For this plan · Sun 16 Nov**, pinch zoom and pan, **Full window**, a tap on
+an item for its label, notes and inputs, the legend and the venue's notes. There is no venue list, no
 editor and no print. The page reads the venue again when it comes back into view; a plot whose read
 fails keeps the copy it had and says it could not refresh, and one that has never loaded
 says so rather than drawing an empty stage.

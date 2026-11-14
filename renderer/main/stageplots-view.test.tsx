@@ -308,6 +308,35 @@ describe("/stageplots", () => {
     assert.equal(add.getAttribute("href"), "/stageplots/edit?venue=v-small");
   });
 
+  test("Edit beside Print opens the editor on the venue and the plot on screen", async () => {
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+    const edit = screen.getByRole("link", { name: "Edit" });
+    assert.equal(edit.getAttribute("href"), "/stageplots/edit?venue=v-main&plot=p-alt");
+  });
+
+  test("Full window lays the plot over the page, named, and Escape or Exit closes it", async () => {
+    await mount();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Full window" }));
+    await settle();
+    const dialog = screen.getByRole("dialog", { name: "Room One, Special, full window" });
+    assert.ok(within(dialog).getByText("Default"));
+    assert.ok(dialog.querySelector("svg"), "the plot is drawn in it");
+    assert.equal(document.body.style.overflow, "hidden", "the page behind does not scroll");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    assert.equal(screen.queryByRole("dialog"), null);
+    assert.equal(document.body.style.overflow, "");
+    fireEvent.click(screen.getByRole("button", { name: "Full window" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Exit full window" }));
+    await settle();
+    assert.equal(screen.queryByRole("dialog"), null);
+  });
+
   test("a failed read says so instead of showing no venues", async () => {
     const real = globalThis.fetch;
     (globalThis as unknown as { fetch: unknown }).fetch = async () => ({ ok: false, status: 500, statusText: "Server Error", json: async () => ({ error: "boom" }), text: async () => "boom" });
