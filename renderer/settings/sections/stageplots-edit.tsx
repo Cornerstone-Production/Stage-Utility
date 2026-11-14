@@ -611,9 +611,11 @@ function EditorBody({
           <VenuesCard
             doc={doc}
             selected={venue}
-            onSelect={(id) => {
-              if (id === venue?.id) return;
-              void confirmLeave().then((ok) => ok && onVenue(id));
+            onSelect={async (id) => {
+              if (id === venue?.id) return true;
+              const ok = await confirmLeave();
+              if (ok) onVenue(id);
+              return ok;
             }}
             save={save}
           />

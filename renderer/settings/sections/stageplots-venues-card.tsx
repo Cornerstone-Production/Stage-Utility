@@ -3,7 +3,7 @@
 // long press on a venue opens its menu: Rename (selects it and puts the cursor in
 // its name), Home or Offsite, Open on /stageplots, Copy its address, Delete venue.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PlusIcon } from "lucide-react";
 
 import { STAGEPLOT_LIMITS, type StagePlotsView, type Venue, type VenueKind } from "@main/types/stageplots";
@@ -11,12 +11,15 @@ import { STAGEPLOT_LIMITS, type StagePlotsView, type Venue, type VenueKind } fro
 import { Button } from "../../components/ui/button";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { copyText } from "../../lib/clipboard";
 import { useRouterHandle } from "../../lib/use-search-param";
 import { venueGroups } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { CardHeader, CommitText, Num, SaveError, Segmented, eyebrow, type Save } from "./stageplots-shared";
+
+/** How long "Copied …" stays under the header. */
+const COPIED_MS = 4000;
 
 const KINDS = [
   { value: "home", label: "Home" },
@@ -31,14 +34,20 @@ export function VenuesCard({
 }: {
   doc: StagePlotsView;
   selected: Venue | null;
-  onSelect: (id: string) => void;
+  /** Picks a venue; answers whether it did (unsaved work may have been kept instead). */
+  onSelect: (id: string) => Promise<boolean>;
   save: Save;
 }) {
   const [error, setError] = useState<string | null>(null);
   /** What Copy its address did: copied, or the address to copy by hand. */
   const [copied, setCopied] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const { menu, open: openMenu, close: closeMenu } = useContextMenuState();
+  // The status is for reading once: it goes after a few seconds.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), COPIED_MS);
+    return () => clearTimeout(t);
+  }, [copied]);
   const cardRef = useRef<HTMLElement>(null);
   const router = useRouterHandle();
   const focusName = () => {
@@ -63,7 +72,7 @@ export function VenuesCard({
 
   const add = async () => {
     const venue = await run(() => stageplotsApi.createVenue({ name: "New venue", kind: "home", notes: "" }));
-    if (venue) onSelect(venue.id);
+    if (venue) void onSelect(venue.id);
   };
 
   const remove = async (venue: Venue) => {
@@ -84,7 +93,10 @@ export function VenuesCard({
       onSelect: () => {
         if (v.id === selected?.id) return focusName();
         renameNext.current = v.id;
-        onSelect(v.id);
+        // Declined (unsaved work kept): the venue is not selected, so nothing is left waiting to rename it.
+        void onSelect(v.id).then((switched) => {
+          if (!switched && renameNext.current === v.id) renameNext.current = null;
+        });
       },
     },
     ...KINDS.map((k): ContextMenuItem => ({
@@ -96,10 +108,19 @@ export function VenuesCard({
         if (v.kind !== k.value) void run(() => stageplotsApi.updateVenue(v.id, { kind: k.value }));
       },
     })),
-    { label: "Open on /stageplots", onSelect: () => void router?.navigate({ to: `/stageplots/${encodeURIComponent(v.id)}`, search: {} }) },
+    {
+      label: "Open on /stageplots",
+      // Through the router when there is one (no page load); else the browser goes there.
+      onSelect: () => (router ? void router.navigate({ to: `/stageplots/${encodeURIComponent(v.id)}`, search: {} }) : window.location.assign(address(v))),
+    },
     {
       label: "Copy its address",
-      onSelect: () => void copyText(address(v)).then((ok) => setCopied(ok ? `Copied ${address(v)}` : `Copy this address by hand: ${address(v)}`)),
+      onSelect: () => {
+        const byHand = () => setCopied(`Copy this address by hand: ${address(v)}`);
+        void copyText(address(v))
+          .then((ok) => (ok ? setCopied(`Copied ${address(v)}`) : byHand()))
+          .catch(byHand);
+      },
     },
     { separator: true },
     { label: "Delete venue…", danger: true, onSelect: () => void remove(v) },
@@ -125,7 +146,7 @@ export function VenuesCard({
           <span className={`${eyebrow} px-1.5 py-1`}>{g.label}</span>
           {g.venues.map((v) => (
             <div key={v.id}>
-              <VenueRow current={v.id === selected?.id} onClick={() => onSelect(v.id)} onMenu={(at) => setMenu({ ...at, items: menuFor(v) })}>
+              <VenueRow current={v.id === selected?.id} onClick={() => void onSelect(v.id)} onMenu={(at) => openMenu(at, menuFor(v))}>
                 <span className="truncate">{v.name}</span>
                 <span className="text-[11px] text-fg-subtle">
                   <Num>{v.plotIds.length}</Num> {v.plotIds.length === 1 ? "plot" : "plots"}

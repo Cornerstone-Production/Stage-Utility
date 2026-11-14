@@ -18,6 +18,7 @@
 // must be free to win the gesture instead.
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -26,6 +27,28 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
+
+import type { ContextMenuItem } from "./context-menu";
+
+/**
+ * Where a context menu is open and what it lists, for the component that renders the
+ * `<ContextMenu>`: `open` from a trigger's callback with the items as they are at that
+ * moment, `close` for the menu's `onClose`. `menu` is null while it is closed.
+ *
+ *     const { menu, open, close } = useContextMenuState();
+ *     const trigger = useContextMenuTrigger((at) => open(at, itemsFor(thing)));
+ *     {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
+ */
+export function useContextMenuState(): {
+  menu: { x: number; y: number; items: ContextMenuItem[] } | null;
+  open: (at: { x: number; y: number }, items: ContextMenuItem[]) => void;
+  close: () => void;
+} {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const open = useCallback((at: { x: number; y: number }, items: ContextMenuItem[]) => setMenu({ x: at.x, y: at.y, items }), []);
+  const close = useCallback(() => setMenu(null), []);
+  return { menu, open, close };
+}
 
 /** How long a touch or pen must be held before it counts as a long press. */
 export const LONG_PRESS_MS = 500;

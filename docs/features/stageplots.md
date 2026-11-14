@@ -235,7 +235,8 @@ selected item.
 - **Keys**, while the plot has focus (pressing it gives it focus): the arrow keys
   move the selected item 4 units, 20 with Shift; Delete or Backspace removes it;
   Cmd/Ctrl with C, X, V and D copy, cut, paste and duplicate; Cmd/Ctrl with ] and
-  [ bring it forward or send it backward a step, with Shift all the way.
+  [ bring it forward or send it backward a step, and Alt+Cmd/Ctrl with ] and [ all
+  the way to the front or the back (Shift+Cmd+[ and ] are the browser's, to switch tabs).
   Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes, anywhere on the page but in a
   field.
 - **Inspector**: the item's kind with **Duplicate** (a copy a little down and
@@ -256,7 +257,9 @@ selected item.
   pastes into any plot, in any venue, in this browser, in another tab of it too.
   Each paste of one copy lands a little further down and right than the last; the
   first paste after a cut lands where the item was; **Paste here** centres it where
-  you clicked. A linked connection point pastes still linked.
+  you clicked. A linked connection point pastes still linked. What another tab or an older
+  version left in the browser's storage is pasted only if it is a plot item the
+  server would save; anything else is ignored.
 - **Undo and redo** cover the draft. A drag, a resize, a rotate or typing in one
   field is one step, however long it takes.
 
@@ -292,7 +295,8 @@ first while there are unsaved changes.
 
 Zones are drawn under shapes, shapes under cables, cables under symbols and
 connection points, and text on top; within each, in the order **Arrange** gives
-them, newest on top by default. The selected item is drawn above everything.
+them, newest on top by default. The selected item is drawn in its place, so Arrange
+shows at once; only its outline and handles are drawn above everything.
 A new symbol is labelled with its name, a new cable is dashed, and a new label,
 dimension or callout reads "Text", "10 ft" or "Note".
 

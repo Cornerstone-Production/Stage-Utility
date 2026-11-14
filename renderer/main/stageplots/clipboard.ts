@@ -10,7 +10,8 @@
 // (Duplicate's offset), so repeated pastes do not stack. A cut's first paste lands
 // where the item was.
 
-import type { PlotItem } from "@main/types/stageplots";
+import { ITEM_TYPES, STAGEPLOT_LIMITS as L, SYMBOL_KINDS, TEXT_KINDS, type PlotItem } from "@main/types/stageplots";
+import { PATCH_COLORS } from "@main/types/patch";
 
 import { readStored, removeStored, writeStored } from "../../lib/safe-storage";
 import { uid } from "../../lib/uid";
@@ -26,8 +27,50 @@ interface Clip {
 
 let held: Clip | null = null;
 
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isText = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
+
+/**
+ * Whether `v` is an item the server would accept on a save (stageplots-store checkItem),
+ * short of where it sits: a paste moves it onto the plot it lands on. The browser's storage
+ * is anything another tab, an older build or a person left there, and a paste of the wrong
+ * shape would put the editor's draft where Save is refused for good. clipboard.test.ts
+ * holds this to the server's own check, case by case.
+ */
+function isClipItem(v: unknown): v is PlotItem {
+  if (!isObject(v) || typeof v.id !== "string" || v.id.length === 0) return false;
+  if (!ITEM_TYPES.includes(v.type as PlotItem["type"])) return false;
+  const cable = v.type === "cable";
+  if (![v.x, v.y, v.w, v.h, v.rotation].every(isNumber)) return false;
+  if (!cable) {
+    const [w, h, rotation] = [v.w as number, v.h as number, v.rotation as number];
+    if (w < L.itemMinSize || w > L.itemMaxSize || h < L.itemMinSize || h > L.itemMaxSize) return false;
+    if (rotation <= -180 || rotation > 180) return false;
+  }
+  if (v.color !== null && !PATCH_COLORS.includes(v.color as (typeof PATCH_COLORS)[number])) return false;
+  if (!isText(v.label, L.labelChars) || !isText(v.notes, L.notesChars)) return false;
+  if (!Array.isArray(v.inputs) || v.inputs.length > L.inputsPerItem || !v.inputs.every((i) => isText(i, L.inputChars))) return false;
+  if (v.type === "symbol" && !SYMBOL_KINDS.includes(v.symbol as never)) return false;
+  if (v.type === "text" && !TEXT_KINDS.includes(v.textKind as never)) return false;
+  if (v.patchLink !== undefined) {
+    const link = v.patchLink;
+    const idOk = (id: unknown) => typeof id === "string" && id.length > 0 && id.length <= L.patchIdChars && ![...id].some((ch) => ch.charCodeAt(0) < 0x20);
+    if (v.type !== "conn" || !isObject(link) || !idOk(link.sheetId) || !idOk(link.deviceId) || !isText(link.lastName, L.labelChars)) return false;
+    if (link.lastColor !== null && !PATCH_COLORS.includes(link.lastColor as (typeof PATCH_COLORS)[number])) return false;
+  }
+  if (cable) {
+    const pts = v.points;
+    if (!Array.isArray(pts) || pts.length < L.cablePointsMin || pts.length > L.cablePointsMax) return false;
+    if (!pts.every((p) => Array.isArray(p) && p.length === 2 && isNumber(p[0]) && isNumber(p[1]))) return false;
+    if (typeof v.dashed !== "boolean") return false;
+  }
+  return true;
+}
+
 function isClip(v: unknown): v is Clip {
-  return !!v && typeof v === "object" && Array.isArray((v as Clip).items) && typeof (v as Clip).pastes === "number";
+  if (!isObject(v) || !Array.isArray(v.items) || v.items.length > L.itemsPerPlot) return false;
+  return typeof v.pastes === "number" && Number.isInteger(v.pastes) && v.pastes >= -1 && v.items.every(isClipItem);
 }
 
 function current(): Clip | null {

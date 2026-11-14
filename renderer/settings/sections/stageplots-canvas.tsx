@@ -13,7 +13,8 @@
 // Arrow keys nudge (Shift for further) and Delete or Backspace removes, only
 // while the canvas has focus; a press on it focuses it. So do Cmd/Ctrl with C, X,
 // V and D (copy, cut, paste, duplicate) and with ] and [ (forward and backward a
-// step, Shift for all the way). Undo and redo keys are the page's (stageplots-edit.tsx).
+// step; add Alt for all the way: Shift+Cmd+[ and ] switch browser tabs on macOS and
+// never reach the page). Undo and redo keys are the page's (stageplots-edit.tsx).
 //
 // A right-click, or a long press on touch, opens the app's context menu: on an
 // item (selecting it first) Cut, Copy, Paste, Duplicate, Arrange and Delete; on
@@ -23,12 +24,12 @@
 // What jsdom cannot show: real pointer capture, the SVG's measured box, pinch.
 // The tests stub the box; the rest is driven in a browser.
 
-import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject, type SVGProps } from "react";
+import { useRef, type KeyboardEvent, type PointerEvent, type RefObject, type SVGProps } from "react";
 
 import type { BackgroundView, PlotItem } from "@main/types/stageplots";
 
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { uid } from "../../lib/uid";
 import { canPaste, copyItems, takePaste } from "../../main/stageplots/clipboard";
@@ -81,14 +82,13 @@ export interface CanvasProps {
   canRedo?: boolean;
 }
 
-/** The keys Arrange answers to, with Cmd or Ctrl held: ] forward, [ backward, Shift for all the way. */
+/** The keys Arrange answers to, with Cmd or Ctrl held: ] forward, [ backward, Alt for all the way. */
 const ARRANGE_KEYS: Record<string, [Arrange, Arrange]> = { BracketRight: ["forward", "front"], BracketLeft: ["backward", "back"] };
 
 export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz, svgRef, dispatch, canUndo = false, canRedo = false }: CanvasProps) {
   const drag = useRef<Drag | null>(null);
   const itemsRef = useLatestRef(items);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const { menu, open: showMenu, close: closeMenu } = useContextMenuState();
 
   const item = (id: string) => itemsRef.current.find((x) => x.id === id);
   const copy = (id: string, cut = false) => {
@@ -114,10 +114,10 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
     {
       label: "Arrange",
       items: [
-        { label: "Bring to front", shortcut: "⇧⌘]", onSelect: () => dispatch({ type: "arrange", id, to: "front" }) },
+        { label: "Bring to front", shortcut: "⌥⌘]", onSelect: () => dispatch({ type: "arrange", id, to: "front" }) },
         { label: "Bring forward", shortcut: "⌘]", onSelect: () => dispatch({ type: "arrange", id, to: "forward" }) },
         { label: "Send backward", shortcut: "⌘[", onSelect: () => dispatch({ type: "arrange", id, to: "backward" }) },
-        { label: "Send to back", shortcut: "⇧⌘[", onSelect: () => dispatch({ type: "arrange", id, to: "back" }) },
+        { label: "Send to back", shortcut: "⌥⌘[", onSelect: () => dispatch({ type: "arrange", id, to: "back" }) },
       ],
     },
     { separator: true },
@@ -157,7 +157,7 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
     const id = hit?.getAttribute("data-id") ?? (under?.closest("[data-hd]") ? selectedId : null);
     if (id && id !== selectedId) dispatch({ type: "select", id });
     svg.focus({ preventScroll: true });
-    setMenu({ ...pt, items: id ? itemMenu(id) : canvasMenu(p) });
+    showMenu(pt, id ? itemMenu(id) : canvasMenu(p));
   };
   const trigger = useContextMenuTrigger(openMenu);
 
@@ -218,14 +218,17 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
     const it = items.find((x) => x.id === selectedId);
-    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+    if (e.metaKey || e.ctrlKey) {
       const key = e.key.toLowerCase();
       const arrange = ARRANGE_KEYS[e.code];
-      if (key === "v") paste();
+      if (arrange) {
+        if (!it || e.shiftKey) return;
+        dispatch({ type: "arrange", id: it.id, to: arrange[e.altKey ? 1 : 0] });
+      } else if (e.altKey) return;
+      else if (key === "v") paste();
       else if (it && key === "c") copy(it.id);
       else if (it && key === "x") copy(it.id, true);
       else if (it && key === "d") duplicate(it.id);
-      else if (it && arrange) dispatch({ type: "arrange", id: it.id, to: arrange[e.shiftKey ? 1 : 0] });
       else return;
       e.preventDefault();
       return;

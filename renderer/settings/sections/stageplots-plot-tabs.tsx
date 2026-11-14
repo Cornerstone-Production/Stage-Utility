@@ -12,7 +12,7 @@
 // says which; deleting the last plot leaves the venue empty. Deleting a plot that
 // plans use clears those plans' overrides, and its confirm names the plans.
 
-import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { DropdownMenu } from "radix-ui";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
 
@@ -20,7 +20,7 @@ import { STAGEPLOT_LIMITS, type Plot, type Venue } from "@main/types/stageplots"
 
 import { MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "../../components/ui";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { Input } from "../../components/ui/input";
 import { cn } from "../../lib/cn";
@@ -127,7 +127,9 @@ export function PlotTabs({
     // The delete is asked first, so a Cancel there never costs unsaved work.
     const message = deleteMessage(venue, plots, plot, plansUsing?.(plot.id) ?? []);
     if (!(await confirm({ title: `Delete ${plot.name}?`, message, confirmLabel: "Delete plot", destructive: true }))) return;
-    if (!(await leaving())) return;
+    // Only the selected plot's unsaved changes are at stake: deleting another plot (from its
+    // right-click menu) neither asks about them nor discards them.
+    if (plot.id === selected?.id && !(await leaving())) return;
     await run(() => stageplotsApi.deletePlot(plot.id));
   };
   const reorder = async (ids: string[]) => {
@@ -179,26 +181,25 @@ export function PlotTabs({
   const actionsFor = (p: Plot): TabAction[] => {
     const index = shown.indexOf(p);
     const isDefault = p.id === venue.defaultPlotId;
-    const order = shown.map((x) => x.id);
+    const ids = shown.map((x) => x.id);
     return [
       { label: "Rename", rename: true, run: () => setRenaming(p.id) },
       { label: "Duplicate", disabled: plots.length >= STAGEPLOT_LIMITS.plotsPerVenue, run: () => void duplicate(p) },
       { label: "Set as default", disabled: isDefault, why: isDefault ? "Already the default" : undefined, run: () => void run(() => stageplotsApi.setDefault(venue.id, p.id)) },
-      { label: "Move left", disabled: index === 0, run: () => void reorder(moved(order, p.id, index - 1)) },
-      { label: "Move right", disabled: index === shown.length - 1, run: () => void reorder(moved(order, p.id, index + 1)) },
+      { label: "Move left", disabled: index === 0, run: () => void reorder(moved(ids, p.id, index - 1)) },
+      { label: "Move right", disabled: index === shown.length - 1, run: () => void reorder(moved(ids, p.id, index + 1)) },
       { label: "Delete…", danger: true, separated: true, run: () => void remove(p) },
     ];
   };
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const { menu, open, close: closeMenu } = useContextMenuState();
   const openMenu = (p: Plot, at: { x: number; y: number }) =>
-    setMenu({
-      ...at,
-      items: actionsFor(p).flatMap((a): ContextMenuItem[] => [
+    open(
+      at,
+      actionsFor(p).flatMap((a): ContextMenuItem[] => [
         ...(a.separated ? [{ separator: true }] : []),
         { label: a.label, disabled: a.disabled, danger: a.danger, onSelect: a.run },
       ]),
-    });
+    );
 
   /** The tab order with the dragged tab left out, for where the drop marker goes. */
   const others = dropAt ? shown.filter((p) => p.id !== dropAt.id) : shown;

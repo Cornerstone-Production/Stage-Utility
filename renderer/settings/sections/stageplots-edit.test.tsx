@@ -230,6 +230,8 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
+const { clearClipboard } = await import("../../main/stageplots/clipboard.js");
+const { DUPLICATE_OFFSET } = await import("../../main/stageplots/editor-state.js");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 
@@ -303,6 +305,7 @@ const tabs = () => screen.getAllByRole("tab");
 const writes = () => sent.map((s) => s.what);
 
 beforeEach(() => {
+  clearClipboard();
   DOC = doc();
   PATCH = patchFile();
   PATCH_DOWN = false;
@@ -823,7 +826,7 @@ describe("the plot editor", () => {
     await mount();
     const id = await addFromPalette("drumkit");
     assert.equal(drawn(id).querySelector("[data-symbol]")?.getAttribute("data-symbol"), "drumkit");
-    assert.ok(drawn(id).querySelector('[data-hd="size"]'), "the new item is not selected");
+    assert.ok(canvas().querySelector(`[data-selection-of="${id}"] [data-hd="size"]`), "the new item is not selected");
     assert.match(screen.getByTestId("inspector").textContent!, /Symbol · Drum kit/);
     assert.ok(banner(), "no unsaved banner");
     assert.deepEqual(writes(), [], "adding saved something");
@@ -1002,6 +1005,164 @@ describe("the plot editor", () => {
     assert.ok(banner() === null);
   });
 
+  // ── Keys, and the right-click menus ───────────────────────────────────────
+
+  /** Two boxes, `a` then `b` in drawing order, with `id` selected by a press on it. */
+  async function twoBoxes(select: "a" | "b") {
+    DOC.plots[0].items = [item({ id: "a", x: 100, y: 100 }), item({ id: "b", x: 400, y: 300 })];
+    await mount();
+    stubBox();
+    const p = at(select);
+    await pointer("pointerDown", drawn(select).querySelector("rect")!, p.x + 5, p.y + 5);
+    await pointer("pointerUp", canvas(), p.x + 5, p.y + 5);
+    await settle();
+  }
+  const orderNow = () => [...canvas().querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id")!);
+  async function key(init: KeyboardEventInit & { key: string }) {
+    await act(async () => {
+      fireEvent.keyDown(canvas(), init);
+    });
+  }
+  /** Where the menu opens: over an item (what is drawn there is what elementFromPoint says), or the empty plot. */
+  async function rightClick(over: "a" | "b" | null, x = 600, y = 500) {
+    stubBox();
+    (document as unknown as { elementFromPoint: unknown }).elementFromPoint = () => (over ? drawn(over).querySelector("rect")! : canvas());
+    await act(async () => {
+      fireEvent.contextMenu(over ? drawn(over).querySelector("rect")! : canvas(), { clientX: x, clientY: y });
+    });
+    await settle();
+  }
+
+  test("Cmd or Ctrl with C and V copy and paste, each paste a step further on; X cuts, and its first paste lands where it was", async () => {
+    await twoBoxes("a");
+    const origin = at("a");
+    await key({ key: "c", metaKey: true });
+    await key({ key: "v", metaKey: true });
+    assert.equal(itemIds().length, 3, "Cmd+V pasted");
+    const first = itemIds().find((id) => id !== "a" && id !== "b")!;
+    assert.deepEqual(at(first), { x: origin.x + DUPLICATE_OFFSET, y: origin.y + DUPLICATE_OFFSET }, "the first paste of a copy is one step on");
+    await key({ key: "v", ctrlKey: true });
+    const second = itemIds().find((id) => ![first, "a", "b"].includes(id))!;
+    assert.deepEqual(at(second), { x: origin.x + 2 * DUPLICATE_OFFSET, y: origin.y + 2 * DUPLICATE_OFFSET }, "the next paste is a step further");
+    // Cut the selected (pasted) item: it goes, and its first paste lands where it was.
+    const where = at(second);
+    await key({ key: "x", ctrlKey: true });
+    assert.equal(itemIds().includes(second), false, "Ctrl+X removed it");
+    await key({ key: "v", ctrlKey: true });
+    const back = itemIds().find((id) => ![first, "a", "b"].includes(id))!;
+    assert.deepEqual(at(back), where, "a cut's first paste is at offset 0");
+  });
+
+  test("Cmd or Ctrl with D duplicates the selected item", async () => {
+    await twoBoxes("b");
+    await key({ key: "d", metaKey: true });
+    assert.equal(itemIds().length, 3);
+    await key({ key: "d", ctrlKey: true });
+    assert.equal(itemIds().length, 4);
+  });
+
+  test("the arrange keys: Cmd+[ and ] a step, Alt+Cmd+[ and ] all the way, and the order shows while the item is selected", async () => {
+    DOC.plots[0].items = [item({ id: "a", x: 100, y: 100 }), item({ id: "b", x: 400, y: 300 }), item({ id: "c", x: 700, y: 100 })];
+    await mount();
+    stubBox();
+    const p = at("b");
+    await pointer("pointerDown", drawn("b").querySelector("rect")!, p.x + 5, p.y + 5);
+    await pointer("pointerUp", canvas(), p.x + 5, p.y + 5);
+    await settle();
+    assert.deepEqual(orderNow(), ["a", "b", "c"]);
+    await key({ key: "[", code: "BracketLeft", metaKey: true });
+    assert.deepEqual(orderNow(), ["b", "a", "c"], "backward one step, drawn there while selected");
+    await key({ key: "]", code: "BracketRight", ctrlKey: true });
+    assert.deepEqual(orderNow(), ["a", "b", "c"], "forward one step");
+    await key({ key: "‘", code: "BracketLeft", metaKey: true, altKey: true });
+    assert.deepEqual(orderNow(), ["b", "a", "c"], "Alt+Cmd+[ sends it to the back");
+    await key({ key: "’", code: "BracketRight", metaKey: true, altKey: true });
+    assert.deepEqual(orderNow(), ["a", "c", "b"], "Alt+Cmd+] brings it to the front");
+    // Shift+Cmd+[ is the browser's (it switches tabs): the page does nothing with it.
+    await key({ key: "{", code: "BracketLeft", metaKey: true, shiftKey: true });
+    assert.deepEqual(orderNow(), ["a", "c", "b"]);
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'), "it is still the selected item");
+  });
+
+  test("right-click on an item selects it and offers Cut, Copy, Paste, Duplicate, Arrange and Delete; Arrange moves it while selected", async () => {
+    await twoBoxes("a");
+    await rightClick("b");
+    const menu = screen.getByRole("menu");
+    assert.deepEqual(
+      within(menu).getAllByRole("menuitem").map((m) => m.textContent!.replace(/[⌘⌥⇧⌫›].*$/, "")),
+      ["Cut", "Copy", "Paste", "Duplicate", "Arrange", "Delete"],
+    );
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'), "the item under the click was selected first");
+    assert.equal(within(menu).getByRole("menuitem", { name: /^Paste/ }).hasAttribute("disabled"), true, "nothing copied yet");
+    await act(async () => {
+      fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /Arrange/ }).parentElement!);
+    });
+    const sub = within(screen.getAllByRole("menu")[1]);
+    assert.deepEqual(
+      sub.getAllByRole("menuitem").map((m) => m.textContent),
+      ["Bring to front⌥⌘]", "Bring forward⌘]", "Send backward⌘[", "Send to back⌥⌘["],
+    );
+    await click(sub.getByRole("menuitem", { name: /Send to back/ }));
+    assert.deepEqual(orderNow(), ["b", "a"], "Send to back shows at once, with b still selected");
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'));
+  });
+
+  test("right-click on the empty plot offers Paste here, Add here, Undo, Redo and Fit", async () => {
+    await twoBoxes("a");
+    await rightClick(null, 800, 500);
+    const menu = screen.getByRole("menu");
+    assert.deepEqual(
+      within(menu).getAllByRole("menuitem").map((m) => m.textContent!.replace(/[⌘⇧›].*$/, "")),
+      ["Paste here", "Add here", "Undo", "Redo", "Fit the whole plot"],
+    );
+    assert.equal(within(menu).getByRole("menuitem", { name: /^Paste here/ }).hasAttribute("disabled"), true);
+    await act(async () => {
+      fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /Add here/ }).parentElement!);
+    });
+    await click(within(screen.getAllByRole("menu")[1]).getByRole("menuitem", { name: "Box" }));
+    const added = itemIds().find((id) => id !== "a" && id !== "b");
+    assert.ok(added, "Add here > Box added a box");
+    const w = Number(drawn(added).querySelector("rect")!.getAttribute("width"));
+    assert.ok(Math.abs(at(added).x + w / 2 - 800) <= 1, "centred where it was clicked");
+  });
+
+  test("right-click Delete on a tab that is not the selected one deletes it without asking about, or discarding, the selected plot's changes", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    assert.ok(banner(), "Standard has unsaved changes");
+    await act(async () => {
+      fireEvent.contextMenu(tabs().find((t) => t.textContent === "Special")!, { clientX: 50, clientY: 20 });
+    });
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /Delete Special\?/);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.ok(writes().includes("DELETE /api/stageplots/plots/p-2"), "Special was deleted");
+    assert.equal(screen.queryByText(/Discard unsaved changes\?/), null, "no discard prompt");
+    assert.equal(screen.queryByRole("alertdialog"), null);
+    assert.ok(drawn(mine), "Standard's draft is intact");
+    assert.ok(banner(), "and still unsaved");
+  });
+
+  test("a venue's Rename declined at the discard prompt leaves nothing waiting: picking it later does not grab the name field", async () => {
+    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    await mount();
+    await addFromPalette("box");
+    const rowTwo = () => within(card("Venues")).getByRole("button", { name: /Room Two/ });
+    await act(async () => {
+      fireEvent.contextMenu(rowTwo(), { clientX: 30, clientY: 30 });
+    });
+    await click(screen.getByRole("menuitem", { name: "Rename" }));
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    assert.equal(rowTwo().getAttribute("aria-current"), "false", "the switch was declined");
+    // Later, by a plain pick: the same prompt, accepted. The name field must not take focus.
+    await click(rowTwo());
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
+    assert.equal(rowTwo().getAttribute("aria-current"), "true", "Room Two is selected now");
+    const field = screen.getByLabelText("Venue name") as HTMLInputElement;
+    assert.notEqual(document.activeElement, field, "the declined Rename was still waiting and took the cursor");
+  });
+
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
     DOC.plots[0].items = Array.from({ length: 500 }, (_, i) => item({ id: `i-${i}`, x: (i % 25) * 38, y: Math.floor(i / 25) * 30, w: 30, h: 20 }));
     await mount();
@@ -1130,7 +1291,7 @@ describe("the plot editor", () => {
     const t = at("t");
     await pointer("pointerDown", drawn("t").querySelector("rect")!, t.x + 5, t.y + 5);
     await pointer("pointerUp", canvas(), t.x + 5, t.y + 5);
-    const rot = drawn("t").querySelector('[data-hd="rot"]')!;
+    const rot = canvas().querySelector('[data-selection-of="t"] [data-hd="rot"]')!;
     assert.ok(rot.hasAttribute("data-below"), "the rotate handle is not under the item");
     // The handle sits straight under the centre (140, 20); drag it a little right of there.
     const [cx, cy] = [140, 20 + 20 + 6 + 26];
