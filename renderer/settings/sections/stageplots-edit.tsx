@@ -54,7 +54,7 @@ import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-p
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
 import { useSearchParam } from "../../lib/use-search-param";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
-import { StagePlotsCanvas } from "./stageplots-canvas";
+import { StagePlotsCanvas, toPlot } from "./stageplots-canvas";
 import { StagePlotsInspector } from "./stageplots-inspector";
 import { PALETTE_ICONS_PX, PALETTE_PX, StagePlotsPalette } from "./stageplots-palette";
 import { PlotTabs } from "./stageplots-plot-tabs";
@@ -161,6 +161,17 @@ function PlotEditor({
     svgRef.current?.focus({ preventScroll: true });
   };
 
+  /** A palette item let go at a screen point: added there, centred on it, when the point is on the plot. */
+  const drop = (kind: AddKind, at: { x: number; y: number }) => {
+    const svg = svgRef.current;
+    const r = svg?.getBoundingClientRect();
+    if (!svg || !r || at.x < r.left || at.x > r.right || at.y < r.top || at.y > r.bottom) return;
+    const p = toPlot(svg, at.x, at.y);
+    if (!p) return;
+    dispatch({ type: "add", kind, at: { x: round1(p.x), y: round1(p.y) }, id: uid("i") });
+    svg.focus({ preventScroll: true });
+  };
+
   const selected = shown.items.find((it) => it.id === draft.selectedId) ?? null;
   // The label field suggests what this venue already uses: the draft, then its other plots.
   const labelSources: PlotItem[][] = [shown.items, ...plotsOf(doc, venue).filter((p) => p.id !== plot.id).map((p) => p.items)];
@@ -261,7 +272,7 @@ function PlotEditor({
           iconPalette ? "grid-cols-[44px_minmax(0,1fr)] xl:grid-cols-[44px_minmax(0,1fr)_280px]" : "grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_280px]",
         )}
       >
-        <StagePlotsPalette onAdd={add} icons={iconPalette} />
+        <StagePlotsPalette onAdd={add} onDrop={drop} icons={iconPalette} />
         <div className="flex min-w-0 flex-col gap-3" ref={canvasColumn}>
           <div className="su-card overflow-hidden p-0">
             <StagePlotsCanvas

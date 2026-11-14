@@ -48,7 +48,7 @@ type Drag =
   | { mode: "pt"; id: string; index: number; pointerId: number; start: { x: number; y: number }; startPx: { x: number; y: number }; moved: boolean };
 
 /** A screen point as plot units under the current view, with plot units per pixel; null before layout. */
-function toPlot(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number; k: number } | null {
+export function toPlot(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number; k: number } | null {
   const r = svg.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) return null;
   const [vx, vy, vw, vh] = (svg.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);

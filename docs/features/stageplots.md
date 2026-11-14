@@ -212,7 +212,9 @@ Under the toolbar: the palette, the plot, its legend, and the inspector for the
 selected item.
 
 - **Add**: press an item in the palette. It lands in the middle of what the plot
-  shows, selected, each one a little further down and right than the last. When the
+  shows, selected, each one a little further down and right than the last. Or drag
+  it from the palette onto the plot: it lands centred where it is let go. Let go
+  anywhere else, or press Escape during the drag, and nothing is added. When the
   palette with its names would leave the plot under 600 pixels wide, it shows icons
   only, each named by its tooltip.
 - **Select**: press an item. Press the empty plot to clear the selection; dragging
