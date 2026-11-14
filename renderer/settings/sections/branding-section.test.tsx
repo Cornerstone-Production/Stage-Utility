@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
@@ -838,6 +838,15 @@ describe("editing in the dialog itself", () => {
     });
   }
 
+  /** The dropped image is in the editor and decoded. A drop is read by a FileReader, then the editor
+   *  decodes it in an effect, so both land after the dialog does, by as long as the machine's load
+   *  makes them. Save is disabled until the decode is done, so it is the signal; waiting only for
+   *  the slider let a test end, and its fake Image go, before the effect ran. Bounded, not a sleep. */
+  const editorHolds = async (scope: ReturnType<typeof within>) => {
+    await eventually(() => assert.ok(scope.queryByRole("slider", { name: "Zoom" }) !== null, "the dropped image is not in the editor"));
+    await eventually(() => assert.equal(button(scope, /^Save /).hasAttribute("disabled"), false, "the editor never finished decoding the image"));
+  };
+
   for (const [card, title, field] of [
     [/Empty slot image/, "Empty slot image", "emptyLogo"],
     [/Default avatar/, "Default avatar", "avatar"],
@@ -864,8 +873,9 @@ describe("editing in the dialog itself", () => {
         const { writes } = mount();
         await dropOn(screen.getByRole("button", { name: card }), png());
         const d = within(await dialog(title));
-        assert.ok(d.getByRole("slider", { name: "Zoom" }), "the dropped image is not in the editor");
+        await editorHolds(d);
         await press(d.getByRole("button", { name: /^Save / }));
+        await eventually(() => assert.ok(writes.length > 0, "Save wrote nothing"));
         assert.equal(writes.length, 1, `expected one write, got ${writes.length}`);
         assert.ok(writes[0]![field], `the drop did not write ${field}`);
       } finally {
@@ -882,7 +892,7 @@ describe("editing in the dialog itself", () => {
       const el = await dialog("Empty slot image");
       absent(within(el).queryByRole("slider", { name: "Zoom" }), "an editor with nothing to edit");
       await dropOn(el, png());
-      assert.ok(within(el).getByRole("slider", { name: "Zoom" }), "the dropped image is not in the editor");
+      await editorHolds(within(el));
     } finally {
       restoreCanvas();
     }
@@ -893,7 +903,7 @@ describe("editing in the dialog itself", () => {
     try {
       mount();
       await dropOn(screen.getByRole("button", { name: "Add a logo" }), png("logo.png"));
-      assert.ok(within(await dialog("Logo")).getByRole("slider", { name: "Zoom" }));
+      await editorHolds(within(await dialog("Logo")));
     } finally {
       restoreCanvas();
     }
