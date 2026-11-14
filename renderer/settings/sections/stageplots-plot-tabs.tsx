@@ -12,13 +12,15 @@
 // says which; deleting the last plot leaves the venue empty. Deleting a plot that
 // plans use clears those plans' overrides, and its confirm names the plans.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { DropdownMenu } from "radix-ui";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
 
 import { STAGEPLOT_LIMITS, type Plot, type Venue } from "@main/types/stageplots";
 
 import { MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "../../components/ui";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { Input } from "../../components/ui/input";
 import { cn } from "../../lib/cn";
@@ -157,14 +159,16 @@ export function PlotTabs({
     // Held from the press, so a quick first move that leaves the tab is still this drag's.
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
-  const onTabPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+  /** True once the press is a drag, so the tab's long press gives way to it. */
+  const onTabPointerMove = (e: ReactPointerEvent<HTMLButtonElement>): boolean => {
     const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
+    if (!d || d.pointerId !== e.pointerId) return false;
     if (!d.dragging) {
-      if (Math.abs(e.clientX - d.x) < DRAG_SLOP_PX) return;
+      if (Math.abs(e.clientX - d.x) < DRAG_SLOP_PX) return false;
       d.dragging = true;
     }
     setDropAt({ id: d.id, index: slotAt(d.id, e.clientX) });
+    return true;
   };
   const endDrag = (e: ReactPointerEvent<HTMLButtonElement>, drop: boolean) => {
     const d = drag.current;
@@ -187,6 +191,31 @@ export function PlotTabs({
     return () => document.removeEventListener("keydown", onKey);
   }, [dropAt]);
 
+  /** What can be done to a plot: the selected tab's ⋯ menu and any tab's right-click menu list the same. */
+  const actionsFor = (p: Plot): TabAction[] => {
+    const index = shown.indexOf(p);
+    const isDefault = p.id === venue.defaultPlotId;
+    const order = shown.map((x) => x.id);
+    return [
+      { label: "Rename", rename: true, run: () => setRenaming(p.id) },
+      { label: "Duplicate", disabled: plots.length >= STAGEPLOT_LIMITS.plotsPerVenue, run: () => void duplicate(p) },
+      { label: "Set as default", disabled: isDefault, why: isDefault ? "Already the default" : undefined, run: () => void run(() => stageplotsApi.setDefault(venue.id, p.id)) },
+      { label: "Move left", disabled: index === 0, run: () => void reorder(moved(order, p.id, index - 1)) },
+      { label: "Move right", disabled: index === shown.length - 1, run: () => void reorder(moved(order, p.id, index + 1)) },
+      { label: "Delete…", danger: true, separated: true, run: () => void remove(p) },
+    ];
+  };
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const openMenu = (p: Plot, at: { x: number; y: number }) =>
+    setMenu({
+      ...at,
+      items: actionsFor(p).flatMap((a): ContextMenuItem[] => [
+        ...(a.separated ? [{ separator: true }] : []),
+        { label: a.label, disabled: a.disabled, danger: a.danger, onSelect: a.run },
+      ]),
+    });
+
   /** The tab order with the dragged tab left out, for where the drop marker goes. */
   const others = dropAt ? shown.filter((p) => p.id !== dropAt.id) : shown;
   const marker = <span aria-hidden className="mb-1.5 h-6 w-0.5 shrink-0 self-end rounded-full bg-accent" data-testid="tab-drop-marker" />;
@@ -198,7 +227,6 @@ export function PlotTabs({
           {shown.map((p) => {
             const isSelected = p.id === selected?.id;
             const isDefault = p.id === venue.defaultPlotId;
-            const index = shown.indexOf(p);
             const at = others.indexOf(p);
             return (
               <div key={p.id} className="relative flex items-center">
@@ -217,12 +245,11 @@ export function PlotTabs({
                     }}
                   />
                 ) : (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={isSelected}
-                    data-plot-tab={p.id}
-                    title="Double-click to rename, drag to reorder"
+                  <TabButton
+                    plot={p}
+                    selected={isSelected}
+                    dragging={dropAt?.id === p.id}
+                    onMenu={(at) => openMenu(p, at)}
                     onClick={() => {
                       if (dragged.current) {
                         dragged.current = false;
@@ -235,11 +262,10 @@ export function PlotTabs({
                     onPointerMove={onTabPointerMove}
                     onPointerUp={(e) => endDrag(e, true)}
                     onPointerCancel={(e) => endDrag(e, false)}
-                    className={cn(tabClass(isSelected), "touch-pan-y select-none", dropAt?.id === p.id && "opacity-50")}
                   >
                     {p.name}
                     {isDefault && <Star />}
-                  </button>
+                  </TabButton>
                 )}
                 {isSelected && renaming !== p.id && (
                   <DropdownMenu.Root>
@@ -262,44 +288,22 @@ export function PlotTabs({
                           inputRef.current?.select();
                         }}
                       >
-                        <DropdownMenu.Item
-                          className={MENU_ITEM}
-                          onSelect={() => {
-                            renamingRef.current = true;
-                            setRenaming(p.id);
-                          }}
-                        >
-                          Rename
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item className={MENU_ITEM} disabled={plots.length >= STAGEPLOT_LIMITS.plotsPerVenue} onSelect={() => void duplicate(p)}>
-                          Duplicate
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item
-                          className={cn(MENU_ITEM, "data-[disabled]:text-fg-subtle")}
-                          disabled={isDefault}
-                          onSelect={() => void run(() => stageplotsApi.setDefault(venue.id, p.id))}
-                        >
-                          Set as default
-                          {isDefault && <Why>Already the default</Why>}
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item
-                          className={cn(MENU_ITEM, "data-[disabled]:text-fg-subtle")}
-                          disabled={index === 0}
-                          onSelect={() => void reorder(moved(shown.map((x) => x.id), p.id, index - 1))}
-                        >
-                          Move left
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item
-                          className={cn(MENU_ITEM, "data-[disabled]:text-fg-subtle")}
-                          disabled={index === shown.length - 1}
-                          onSelect={() => void reorder(moved(shown.map((x) => x.id), p.id, index + 1))}
-                        >
-                          Move right
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Separator className="my-1 h-px bg-line" />
-                        <DropdownMenu.Item className={MENU_ITEM_DANGER} onSelect={() => void remove(p)}>
-                          Delete…
-                        </DropdownMenu.Item>
+                        {actionsFor(p).map((a) => (
+                          <Fragment key={a.label}>
+                            {a.separated && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
+                            <DropdownMenu.Item
+                              className={a.danger ? MENU_ITEM_DANGER : cn(MENU_ITEM, "data-[disabled]:text-fg-subtle")}
+                              disabled={a.disabled}
+                              onSelect={() => {
+                                if (a.rename) renamingRef.current = true;
+                                a.run();
+                              }}
+                            >
+                              {a.label}
+                              {a.why && <Why>{a.why}</Why>}
+                            </DropdownMenu.Item>
+                          </Fragment>
+                        ))}
                       </DropdownMenu.Content>
                     </DropdownMenu.Portal>
                   </DropdownMenu.Root>
@@ -328,6 +332,82 @@ export function PlotTabs({
         </div>
       </div>
       <SaveError message={error} className="mt-1.5" />
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={closeMenu} />}
     </div>
+  );
+}
+
+/** One thing a plot's menus offer. */
+interface TabAction {
+  label: string;
+  run: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  /** A line above it. */
+  separated?: boolean;
+  /** Why it cannot be chosen, after its label in the ⋯ menu. */
+  why?: string | undefined;
+  /** Rename: the ⋯ menu hands focus to the name field once it has closed. */
+  rename?: boolean;
+}
+
+/**
+ * A plot's tab: a press selects it, a drag reorders, a double-click renames, and a
+ * right-click or long press opens its menu. A drag under way cancels the long press.
+ */
+function TabButton({
+  plot,
+  selected,
+  dragging,
+  onMenu,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  ...rest
+}: {
+  plot: Plot;
+  selected: boolean;
+  dragging: boolean;
+  onMenu: (at: { x: number; y: number }) => void;
+  onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  /** True once the press is a drag. */
+  onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => boolean;
+  onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  children: ReactNode;
+}) {
+  const trigger = useContextMenuTrigger(onMenu);
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      data-plot-tab={plot.id}
+      title="Double-click to rename, drag to reorder, right-click for more"
+      {...rest}
+      onContextMenu={trigger.onContextMenu}
+      onClickCapture={trigger.onClickCapture}
+      onPointerDown={(e) => {
+        trigger.onPointerDown(e);
+        onPointerDown(e);
+      }}
+      onPointerMove={(e) => {
+        trigger.onPointerMove(e);
+        if (onPointerMove(e)) trigger.cancel();
+      }}
+      onPointerUp={(e) => {
+        trigger.onPointerUp(e);
+        onPointerUp(e);
+      }}
+      onPointerCancel={(e) => {
+        trigger.onPointerCancel(e);
+        onPointerCancel(e);
+      }}
+      style={trigger.style}
+      className={cn(tabClass(selected), "touch-pan-y select-none", dragging && "opacity-50")}
+    />
   );
 }

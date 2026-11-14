@@ -153,7 +153,10 @@ beside the control, and the page goes back to what is saved. What is drawn on a
 plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
 
 - **Venues**: **+ Venue** adds one and selects it. The selected venue's name and
-  notes save when you leave the field; Home or Offsite saves at once.
+  notes save when you leave the field; Home or Offsite saves at once. Right-click
+  a venue (or press and hold on a touch screen) for **Rename** (selects it and puts
+  the cursor in its name), **Home** or **Offsite**, **Open on /stageplots**, **Copy
+  its address** and **Delete venue…**.
 - **Backgrounds**: **Upload**, the list, and the selected background's detail with
   its **Clean-up** switch and **Delete background…**.
 - **This week**: which plot the selected venue shows for the live or next plan,
@@ -164,7 +167,8 @@ plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
   **Set as default**, **Move left**, **Move right** and **Delete…**. Double-click a
   tab to rename it, and drag a tab along the row to reorder the plots; the order
   saves when it is let go, and Escape during the drag cancels it. `/stageplots`
-  shows the tabs in the same order. Deleting the default plot says in its confirm
+  shows the tabs in the same order. Right-click any tab (or press and hold on a
+  touch screen) for the same menu as its **⋯**. Deleting the default plot says in its confirm
   which plot becomes the default.
 - **Toolbar**: undo and redo, zoom, the plot's **Background** (or **None (grid)**),
   **Fade**, which previews on the plot while dragged and saves when let go, and
@@ -226,7 +230,9 @@ selected item.
   edge), in 1° steps, or 15° with Shift held. A cable's points each have a
   handle; drag one to move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
 - **Keys**, while the plot has focus (pressing it gives it focus): the arrow keys
-  move the selected item 4 units, 20 with Shift; Delete or Backspace removes it.
+  move the selected item 4 units, 20 with Shift; Delete or Backspace removes it;
+  Cmd/Ctrl with C, X, V and D copy, cut, paste and duplicate; Cmd/Ctrl with ] and
+  [ bring it forward or send it backward a step, with Shift all the way.
   Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes, anywhere on the page but in a
   field.
 - **Inspector**: the item's kind with **Duplicate** (a copy a little down and
@@ -236,6 +242,18 @@ selected item.
   point a lock between width and height shows that changing one changes the
   other); notes, shown when someone
   taps it; and its inputs.
+- **Menus**: right-click an item (or press and hold it on a touch screen) for
+  **Cut**, **Copy**, **Paste**, **Duplicate**, **Arrange** (**Bring to front**,
+  **Bring forward**, **Send backward**, **Send to back**) and **Delete**; right-click
+  the empty plot for **Paste here**, **Add here** (every palette item, placed where
+  you clicked), **Undo**, **Redo** and **Fit the whole plot**. Arrange moves an item
+  within its layer only: a zone brought to the front stays under the shapes and
+  gear (see [Item types](#item-types)).
+- **Copy and paste** use the editor's own clipboard, not the system's: a copy
+  pastes into any plot, in any venue, in this browser, in another tab of it too.
+  Each paste of one copy lands a little further down and right than the last; the
+  first paste after a cut lands where the item was; **Paste here** centres it where
+  you clicked. A linked connection point pastes still linked.
 - **Undo and redo** cover the draft. A drag, a resize, a rotate or typing in one
   field is one step, however long it takes.
 
@@ -270,7 +288,8 @@ first while there are unsaved changes.
 | Text: Dimension | a line with end ticks and arrowheads, its label above |
 
 Zones are drawn under shapes, shapes under cables, cables under symbols and
-connection points, and text on top; the selected item is drawn above everything.
+connection points, and text on top; within each, in the order **Arrange** gives
+them, newest on top by default. The selected item is drawn above everything.
 A new symbol is labelled with its name, a new cable is dashed, and a new label,
 dimension or callout reads "Text", "10 ft" or "Note".
 

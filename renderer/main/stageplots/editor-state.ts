@@ -19,6 +19,7 @@
 import { fitToHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type CablePoint, type PatchLink, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
 
+import { layer } from "./draw-layer";
 import { clampPoint, fitItem, keepsShape, resizeInFrame, round1, scaledToFit, snapRotation, withCableBox } from "./geometry";
 import { SYMBOLS } from "./symbols";
 
@@ -48,6 +49,9 @@ export const DEFAULT_SIZES: Record<Exclude<AddKind, "cable" | `sym:${SymbolKind}
   speaker: [46, 67],
   camera: [71, 50],
 };
+
+/** Where Arrange moves an item, within its own layer. */
+export type Arrange = "front" | "forward" | "backward" | "back";
 
 /** A new cable's half-length: it is added as a level line 250 units long. */
 const CABLE_HALF = 125;
@@ -95,6 +99,10 @@ export type EditorAction =
   | { type: "addInput"; id: string }
   | { type: "removeInput"; id: string; index: number }
   | { type: "duplicate"; id: string; newId: string }
+  /** Items from the clipboard, already given new ids: moved by (dx, dy), or centred on `at`; the last is selected. */
+  | { type: "paste"; items: PlotItem[]; dx?: number; dy?: number; at?: { x: number; y: number } }
+  /** Within its layer (zones, shapes, cables, gear, text never cross): to the top or bottom, or one step. */
+  | { type: "arrange"; id: string; to: Arrange }
   | { type: "remove"; id: string }
   | { type: "undo" }
   | { type: "redo" }
@@ -272,6 +280,35 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         state.height,
       );
       return step(state, [...state.items, copy], copy.id);
+    }
+    case "paste": {
+      if (action.items.length === 0) return state;
+      // Centred on `at` as a group, or moved by (dx, dy); each then fitted onto the plot.
+      let [dx, dy] = [action.dx ?? 0, action.dy ?? 0];
+      if (action.at) {
+        const xs = action.items.flatMap((it) => (it.points ? it.points.map((p) => p[0]) : [it.x, it.x + it.w]));
+        const ys = action.items.flatMap((it) => (it.points ? it.points.map((p) => p[1]) : [it.y, it.y + it.h]));
+        dx = action.at.x - (Math.min(...xs) + Math.max(...xs)) / 2;
+        dy = action.at.y - (Math.min(...ys) + Math.max(...ys)) / 2;
+      }
+      const pasted = action.items.map((it) => fitItem(moved(structuredClone(it), dx, dy, state.height), state.height));
+      return step(state, [...state.items, ...pasted], pasted.at(-1)!.id);
+    }
+    case "arrange": {
+      const i = state.items.findIndex((it) => it.id === action.id);
+      if (i < 0) return state;
+      const it = state.items[i];
+      // The indexes of the items drawn in the same layer, in drawing order.
+      const peers = state.items.map((x, j) => (layer(x) === layer(it) ? j : -1)).filter((j) => j >= 0);
+      const at = peers.indexOf(i);
+      const to = { front: peers.length - 1, back: 0, forward: Math.min(at + 1, peers.length - 1), backward: Math.max(at - 1, 0) }[action.to];
+      if (to === at) return state;
+      const items = state.items.slice();
+      items.splice(i, 1);
+      // Where the target peer sits once this item is out of the list.
+      const target = peers[to] - (peers[to] > i ? 1 : 0);
+      items.splice(to > at ? target + 1 : target, 0, it);
+      return step(state, items);
     }
     case "remove":
       return step(

@@ -284,6 +284,8 @@ function PlotEditor({
               pz={pz}
               svgRef={svgRef}
               dispatch={dispatch}
+              canUndo={draft.undo.length > 0 || !!draft.gesture}
+              canRedo={draft.redo.length > 0}
             />
           </div>
           <PlotLegend items={shown.items} emptyHint="Labelled items are listed here." className="su-card px-3.5 py-2.5" />

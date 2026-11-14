@@ -19,6 +19,7 @@ import { memo, type ReactNode } from "react";
 
 import type { PlotItem } from "@main/types/stageplots";
 
+import { layer } from "./draw-layer";
 import { calloutNumbers } from "./legend";
 import { MonoTspans } from "./mono";
 import { Part, SYMBOLS } from "./symbols";
@@ -31,15 +32,6 @@ const ACCENT = "var(--su-accent)";
 /** One decimal: enough at any zoom, and short in the DOM. */
 function r1(v: number): number {
   return Math.round(v * 10) / 10;
-}
-
-/** Draw order layer: zones under shapes under cables under symbols under text. */
-function layer(it: PlotItem): number {
-  if (it.type === "zone") return 0;
-  if (it.type === "box" || it.type === "circle") return 1;
-  if (it.type === "cable") return 2;
-  if (it.type === "text") return 4;
-  return 3;
 }
 
 /** `items` in the order they are drawn: by layer, then as added, the selected one last. */

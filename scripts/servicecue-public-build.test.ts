@@ -204,6 +204,7 @@ describe("what is in the bundle", () => {
       "renderer/main/servicecue-text-size.ts",
       // The read-only plot the published stage plots page shares with /stageplots.
       "renderer/main/stageplots/doc-helpers.ts",
+      "renderer/main/stageplots/draw-layer.ts",
       "renderer/main/stageplots/item-details.tsx",
       "renderer/main/stageplots/legend.ts",
       "renderer/main/stageplots/mono.tsx",

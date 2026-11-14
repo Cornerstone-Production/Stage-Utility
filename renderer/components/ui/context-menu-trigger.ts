@@ -158,8 +158,12 @@ export function useContextMenuTrigger(
     setPressing(false);
   }
 
+  /** A press on a control INSIDE the trigger. The trigger itself may be a control (a
+   *  tab, a list row that is a button): that is the thing the menu is for. */
   function withinControl(e: ReactPointerEvent<HTMLElement>): boolean {
-    return e.target instanceof HTMLElement && e.target.closest(CONTROL_SELECTOR) != null;
+    if (!(e.target instanceof HTMLElement)) return false;
+    const control = e.target.closest(CONTROL_SELECTOR);
+    return control != null && control !== e.currentTarget;
   }
 
   function onPointerDown(e: ReactPointerEvent<HTMLElement>) {

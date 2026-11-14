@@ -238,6 +238,41 @@ describe("geometry", () => {
   });
 });
 
+describe("paste and arrange", () => {
+  const zone = (id: string) => box({ id, type: "zone" });
+  const shape = (id: string) => box({ id });
+  const ids = (st: EditorState) => st.items.map((it) => it.id);
+
+  test("paste moves by an offset, or centres on a point; the last pasted is selected and it is one undo step", () => {
+    const copy = box({ id: "c1" });
+    let s = run(start([]), { type: "paste", items: [copy], dx: 16, dy: 16 });
+    assert.deepEqual([s.items[0].x, s.items[0].y, s.selectedId], [116, 116, "c1"]);
+    s = run(start([]), { type: "paste", items: [box({ id: "c2" })], at: { x: 500, y: 300 } });
+    assert.deepEqual([s.items[0].x + s.items[0].w / 2, s.items[0].y + s.items[0].h / 2], [500, 300]);
+    s = run(s, { type: "undo" });
+    assert.deepEqual(s.items, []);
+  });
+
+  test("a paste near the edge stays on the plot", () => {
+    const s = run(start([]), { type: "paste", items: [box({ id: "c" })], at: { x: 995, y: 5 } });
+    const it = s.items[0];
+    assert.ok(it.x + it.w <= 1000 && it.y >= 0, JSON.stringify(it));
+  });
+
+  test("arrange moves an item within its own layer only", () => {
+    // Drawn: zones z1 z2 under shapes a b c.
+    const items = [shape("a"), zone("z1"), shape("b"), zone("z2"), shape("c")];
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "a", to: "front" })), ["z1", "b", "z2", "c", "a"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "a", to: "forward" })), ["z1", "b", "a", "z2", "c"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c", to: "backward" })), ["a", "z1", "c", "b", "z2"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c", to: "back" })), ["c", "a", "z1", "b", "z2"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "z2", to: "back" })), ["a", "z2", "z1", "b", "c"]);
+    // Already there: nothing changes, and no undo step is made.
+    const same = run(start(items), { type: "arrange", id: "c", to: "front" });
+    assert.equal(same.undo.length, 0);
+  });
+});
+
 describe("a height change", () => {
   const H32 = 2000 / 3;
   const GRID = 562.5;
