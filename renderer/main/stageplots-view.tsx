@@ -22,9 +22,9 @@
 // a tap lists the patch channels through it for the followed plan; while the
 // patch cannot be read it shows its last name and colour and lists its inputs.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useParams } from "@tanstack/react-router";
-import { TriangleAlertIcon } from "lucide-react";
+import { PencilIcon, TriangleAlertIcon } from "lucide-react";
 
 import type { PlotOverride, StagePlotsView, Venue } from "@main/types/stageplots";
 import { plural } from "@main/services/plural";
@@ -39,7 +39,7 @@ import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
 import { useRouterHandle } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
-import { backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
+import { PLOT_PARAM, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
@@ -137,6 +137,19 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
 }
 
 function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void; channelsOf: ChannelsOf }) {
+  const router = useRouterHandle();
+  /** Edit opens the editor on this venue and the plot on screen, in the app rather than as a page load; a modified click still opens a new tab. */
+  const editLink = (plotId: string) => {
+    const search = { [VENUE_PARAM]: venue.id, [PLOT_PARAM]: plotId };
+    return {
+      href: `/stageplots/edit?${new URLSearchParams(search)}`,
+      onClick: (e: MouseEvent<HTMLAnchorElement>) => {
+        if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        void router.navigate({ to: "/stageplots/edit", search });
+      },
+    };
+  };
   return (
     <VenuePlots
       key={venue.id}
@@ -156,15 +169,22 @@ function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsVi
       }
       before={<BackLink onClick={onBack} />}
       actions={(shown) => (
-        <PrintControl
-          className="ml-auto"
-          venueName={venue.name}
-          plotName={shown.plot.name}
-          planLine={shown.planLine}
-          items={shown.plot.items}
-          background={shown.background}
-          fade={shown.plot.bgFade}
-        />
+        <span className="ml-auto flex items-center gap-1.5">
+          <Button asChild variant="filled" size="small">
+            <a {...editLink(shown.plot.id)}>
+              <PencilIcon className="size-3.5" />
+              Edit
+            </a>
+          </Button>
+          <PrintControl
+            venueName={venue.name}
+            plotName={shown.plot.name}
+            planLine={shown.planLine}
+            items={shown.plot.items}
+            background={shown.background}
+            fade={shown.plot.bgFade}
+          />
+        </span>
       )}
     />
   );

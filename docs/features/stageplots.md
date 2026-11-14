@@ -99,7 +99,7 @@ selected, the plot itself, its legend, and the venue's notes.
   venue; an id that names no venue shows the list.
 - A venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
-  named in `?venue=` when it exists.
+  named in `?venue=` when it exists, and on its plot named in `?plot=`.
 - The plot is drawn as large as fits: never taller than the screen, centred in the
   column on a wide display.
 - The browser remembers the last venue opened and opens it next time; **Stage
@@ -111,10 +111,12 @@ selected, the plot itself, its legend, and the venue's notes.
   desk, as a sheet along the bottom on a phone. A connection point linked to the
   patch lists its patch channels instead (see [Patch link](#patch-link)). A tap on
   the empty plot, anywhere off the plot, or Escape closes it; text has no details.
-- **Print** beside the venue's name prints the plot (see [Printing](#printing)).
+- **Edit** beside the venue's name opens the editor on this venue and the plot on
+  screen; **Print** prints the plot (see [Printing](#printing)).
 - A saved edit anywhere shows without a reload.
 
-**Edit** in the bar opens the editor.
+**Edit** in the bar opens the editor. **Stage plots** above the editor's heading
+comes back to the venue list without reloading the page.
 
 ### Following the plan
 

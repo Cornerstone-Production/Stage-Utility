@@ -64,3 +64,5 @@ export function formatBytes(bytes: number): string {
 
 /** The editor's address parameter: `/stageplots/edit?venue=<id>` opens the editor on that venue. (/stageplots has its own path, /stageplots/<id>.) */
 export const VENUE_PARAM = "venue";
+/** The editor opens on this plot of that venue, when it is one. */
+export const PLOT_PARAM = "plot";
