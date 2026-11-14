@@ -338,6 +338,63 @@ describe("the landing list", () => {
   });
 });
 
+describe("a send whose answer is lost", () => {
+  // The page stores what it was sent and its answer never arrives. What this process remembers
+  // as sent must not claim it, or a change back to what was sent before is never sent.
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "error", () => undefined), mock.method(console, "warn", () => undefined), mock.method(console, "log", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+  /** The page stores each request `lose` picks, and answers it 500. */
+  const losing = (h: Harness, lose: (req: Received) => boolean) => {
+    h.page.respond = async (req) => {
+      const a = await h.page.worker(req);
+      return lose(req) ? { status: 500, body: "" } : a;
+    };
+  };
+  const labelled = (label: string) => (d: StagePlotsDoc) => ({ ...d, plots: d.plots.map((p) => ({ ...p, items: [item("i-0", { label })], version: p.version + 1 })) });
+
+  test("a plot changed back to what it was before a lost answer is sent again", async () => {
+    const h = await harness(venueDoc(1, 0));
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    const shown = async () => (await visit(h.page, secret, "plot/p-0")).body;
+    losing(h, (req) => req.method === "PUT" && SP.exec(req.path)?.[2] === "plot/p-0");
+    await quietly(async () => {
+      await h.edit(labelled("Monitor"));
+      await h.publisher.settle();
+    });
+    assert.match(await shown(), /Monitor/, "the page did not take the change; the test is not testing a lost answer");
+    h.page.respond = (req) => h.page.worker(req);
+    await h.edit(labelled("Wedge"));
+    await h.publisher.settle();
+    assert.match(await shown(), /Wedge/, "the page still shows the change whose answer was lost");
+  });
+
+  test("a keep whose answer was lost is sent again when the venue goes back to the keys before it", async () => {
+    const h = await harness(venueDoc(1, 0));
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    losing(h, (req) => req.method === "PUT" && SP.exec(req.path)?.[1] === secret && SP.exec(req.path)?.[2] === undefined);
+    const extra = { id: "p-1", venueId: "v-1", name: "Plot 1", backgroundId: null, bgFade: 0.4, items: [item("i-1")], version: 1 };
+    await quietly(async () => {
+      await h.edit((d) => ({ ...d, plots: [...d.plots, extra], venues: d.venues.map((v) => ({ ...v, plotIds: [...v.plotIds, "p-1"] })) }));
+      await h.publisher.settle();
+    });
+    assert.ok(h.page.hub.stagePlotKeys(secret).includes("plot/p-1"), "the page did not take the new plot; the test is not testing a lost answer");
+    h.page.respond = (req) => h.page.worker(req);
+    await quietly(async () => {
+      await h.edit((d) => ({ ...d, plots: d.plots.filter((p) => p.id !== "p-1"), venues: d.venues.map((v) => ({ ...v, plotIds: ["p-0"] })) }));
+      await h.publisher.settle();
+    });
+    assert.deepEqual(h.page.hub.stagePlotKeys(secret).sort(), ["index", "plot/p-0"], "a deleted plot is still on the public page");
+  });
+});
+
 describe("publishing a venue", () => {
   test("PUTs every background, then each plot, then the index, under a new secret, and saves the link", async () => {
     const h = await harness(venueDoc(2, 2));

@@ -1391,7 +1391,10 @@ export class StagePlotsPublisher {
       if (sent.get(key) === h) return null;
       const r = await client.putStagePlot(secret, key, text, "application/json");
       count++;
+      // A failure may have been stored and its answer lost: what the page holds is not known, so
+      // the next send of this key goes whatever it is, the text sent before this one included.
       if (r.ok) sent.set(key, h);
+      else sent.delete(key);
       return r;
     };
     for (const { plot, bg, items, unresolved } of plots) {
@@ -1409,8 +1412,12 @@ export class StagePlotsPublisher {
     if (opts.force || this.kept.get(secret) !== keep) {
       const r = await client.keepStagePlots(secret, keys);
       count++;
+      // As a put: a keep that failed may have been applied, so the next one goes whatever it is.
       if (r.ok) this.kept.set(secret, keep);
-      else warnings.push(`What was taken off this venue could not be removed from ${host} yet: ${sentence(r, host)}`);
+      else {
+        this.kept.delete(secret);
+        warnings.push(`What was taken off this venue could not be removed from ${host} yet: ${sentence(r, host)}`);
+      }
     }
     return { ok: true, sent: count, held: [...held].sort(), unpublished, warnings };
   }
