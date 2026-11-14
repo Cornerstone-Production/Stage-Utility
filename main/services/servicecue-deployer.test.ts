@@ -932,7 +932,13 @@ describe("Update the page now, repeated", () => {
 
   it("allows another deploy once the minute is up, and does not count a refusal or a failure against it", async (t) => {
     captureConsole(t, "log", "warn");
-    const d = makeDeployer({ ...FAST, nowEveryMs: 40 });
+    // A real minute, and the clock moved past it by hand: a 40 ms window was
+    // outrun by a loaded machine between the deploy and the press that must be
+    // limited. Only Date.now is shifted; timers and the fake Cloudflare stay real.
+    const realNow = Date.now;
+    let skewMs = 0;
+    t.mock.method(Date, "now", () => realNow() + skewMs);
+    const d = makeDeployer(FAST);
     fake.respond = (r) => (r.method === "PUT" ? failure(500, 1, "down") : undefined);
     assert.equal((await d.deployNow()).kind, "failed");
     fake.respond = () => undefined;
@@ -940,7 +946,7 @@ describe("Update the page now, repeated", () => {
     d.consider(BUILD_A);
     await d.settled();
     assert.equal((await d.deployNow()).kind, "limited");
-    await sleep(60);
+    skewMs += 60_001;
     assert.equal((await d.deployNow()).kind, "deployed");
   });
 });
