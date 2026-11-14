@@ -6,7 +6,8 @@
 //   GET    /api/stageplots/patch                    the patch file, for linked connection points;
 //                                                   503 when it cannot be read, never the seed sheets
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
-//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
+//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes?, plotIds? }; plotIds
+//                                                   names each of its plots once, in tab order
 //   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
 //                                                   one is unpublished first → { ok, notice? };
 //                                                   503 while a config restore is landing
@@ -21,9 +22,10 @@
 //   POST   /api/stageplots/plots                    { venueId, name, backgroundId? } → 201 plot
 //   POST   /api/stageplots/plots/:id/duplicate      → 201 the copy, "<name> copy"
 //   PATCH  /api/stageplots/plots/:id                { name?, backgroundId?, bgFade? }
-//   DELETE /api/stageplots/plots/:id                409 while it is its venue's default;
-//                                                   → { ok, clearedPlans }, the plans whose
-//                                                   override named it, which go with it
+//   DELETE /api/stageplots/plots/:id                → { ok, clearedPlans, defaultPlotId }: the
+//                                                   plans whose override named it, which go
+//                                                   with it, and the venue's default after
+//                                                   (the first plot left when it was the default)
 //   PUT    /api/stageplots/plots/:id/items          { version, items } → { plot }, version + 1;
 //                                                   409 { error, version } when the plot
 //                                                   changed since that version
