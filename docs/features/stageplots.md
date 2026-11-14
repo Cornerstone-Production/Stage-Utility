@@ -348,7 +348,7 @@ page does not know.
 It uses the page address and publishing token saved under **Settings → Advanced →
 Public link**; ServiceCue publishing itself does not have to be switched
 on. The page must be deployed from a release with StagePlots in it: an older one is
-refused with "*host* does not know StagePlots yet: deploy the Worker", and is fixed by
+refused with "*host* needs updating before it can show stage plots: deploy the Worker", and is fixed by
 [updating the page](../ops/servicecue-on-the-web.md#updating-it).
 
 The **Publish** card, at the foot of the editor's left column, is per venue:

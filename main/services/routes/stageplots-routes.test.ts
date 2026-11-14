@@ -1110,7 +1110,7 @@ describe("the page address changing under published venues", () => {
       await t.moveTo();
       const pub = (await t.venue()).publish!;
       assert.deepEqual([pub.origin, pub.secret], [t.pa, t.first], "the venue left a page that still serves it");
-      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ does not know StagePlots yet: deploy the Worker\./);
+      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ needs updating before it can show stage plots: deploy the Worker\./);
       assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true, "the link of a venue that did not move was taken down");
       assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
     } finally {

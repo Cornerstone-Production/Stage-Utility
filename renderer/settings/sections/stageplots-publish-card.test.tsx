@@ -146,9 +146,9 @@ describe("the Publish card, off", () => {
 
   test("a refusal is shown beside the button, and the plots are said to be saved", async () => {
     await mount();
-    refuse = { status: 502, error: "plots.example.workers.dev does not know StagePlots yet: deploy the Worker." };
+    refuse = { status: 502, error: "plots.example.workers.dev needs updating before it can show stage plots: deploy the Worker." };
     await click(screen.getByRole("button", { name: "Publish Room One" }));
-    assert.match(screen.getByRole("alert").textContent ?? "", /^plots\.example\.workers\.dev does not know StagePlots yet: deploy the Worker\. Your plots are saved here\.$/);
+    assert.match(screen.getByRole("alert").textContent ?? "", /^Not published: plots\.example\.workers\.dev needs updating before it can show stage plots: deploy the Worker\. Your plots save and show on this network as usual; only the public link waits\.$/);
     assert.equal(screen.getByTestId("publish-pill").textContent, "Off");
   });
 
@@ -257,7 +257,7 @@ describe("the Publish card, published", () => {
     await mount();
     assert.equal(
       screen.getByRole("alert").textContent,
-      "Last error 14:31: plots.example.workers.dev did not answer (timed out after 10 s). Your plots are saved here.",
+      "Last error 14:31: plots.example.workers.dev did not answer (timed out after 10 s). Your plots save and show on this network as usual; only the public link waits.",
     );
     // A failure with every background published still has a way to try again.
     assert.ok(screen.getByRole("button", { name: "Publish now" }));

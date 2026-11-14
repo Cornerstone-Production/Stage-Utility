@@ -162,8 +162,9 @@ what Stage Utility sends.
 
 The same Worker serves [published stage plots](../features/stageplots.md#publishing) at
 `/stageplots/<secret>`. A Worker deployed from a release before StagePlots does not know
-those addresses: publishing a venue is refused with "*host* does not know StagePlots yet:
-deploy the Worker", and nothing else changes. Update the page either way above and
+those addresses: publishing a venue is refused with "*host* needs updating before it can show
+stage plots: deploy the Worker", and nothing else changes; the plots still save and show on
+`/stageplots` on the local network. Update the page either way above and
 publish again.
 
 ### Keeping it up to date

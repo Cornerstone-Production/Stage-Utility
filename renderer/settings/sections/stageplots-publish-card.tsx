@@ -51,6 +51,9 @@ function whenLabel(iso: string, timeZone: string): string {
   return `${zonedDayLabel(ms, timeZone)}, ${formatClock(ms, { timeZone })}`;
 }
 
+/** Said beside every publishing failure: publishing is never in the way of editing or of /stageplots. */
+const SAVED_HERE = "Your plots save and show on this network as usual; only the public link waits.";
+
 const pill = "inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11px] leading-[13px] font-medium";
 const statusLine = "flex items-start gap-[7px] text-caption1 [&>svg]:mt-px [&>svg]:size-3.5 [&>svg]:shrink-0";
 
@@ -310,7 +313,7 @@ export function PublishCard({ venue, pending, save, timeZone, follow }: { venue:
             <p className={cn(statusLine, "text-danger-11")} role="alert">
               <CircleXIcon aria-hidden />
               <span>
-                <Mono text={`Last error ${formatClock(Date.parse(lastError.at), { timeZone })}: ${lastError.message} Your plots are saved here.`} />
+                <Mono text={`Last error ${formatClock(Date.parse(lastError.at), { timeZone })}: ${lastError.message} ${SAVED_HERE}`} />
               </span>
             </p>
           )}
@@ -325,12 +328,18 @@ export function PublishCard({ venue, pending, save, timeZone, follow }: { venue:
           <span>{notice}</span>
         </p>
       )}
-      {error && !(pub && lastError?.message === error) && (
+      {error && pub && lastError?.message !== error && (
         <p className={cn(statusLine, "text-danger-11")} role="alert">
           <CircleXIcon aria-hidden />
-          <span>
-            {pub ? error : `${error} Your plots are saved here.`}
-          </span>
+          <span>{error}</span>
+        </p>
+      )}
+      {/* A publish that did not go through is a warning about the public link, never about the plots:
+          nothing here is gated on publishing, so it must not read like a failed save. */}
+      {error && !pub && (
+        <p className={cn(statusLine, "text-warn-11")} role="alert">
+          <TriangleAlertIcon aria-hidden />
+          <span>{`Not published: ${error} ${SAVED_HERE}`}</span>
         </p>
       )}
     </section>

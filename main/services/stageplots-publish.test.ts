@@ -302,7 +302,7 @@ describe("publishing a venue", () => {
     h.page.respond = (req) => (SP.test(req.path) ? { status: 404, body: '{"error":"Not found"}' } : h.page.worker(req));
     const r = await h.publisher.publish("v-1");
     assert.equal(r.ok, false);
-    assert.equal(r.ok ? "" : r.error, `${host(h.page)} does not know StagePlots yet: deploy the Worker.`);
+    assert.equal(r.ok ? "" : r.error, `${host(h.page)} needs updating before it can show stage plots: deploy the Worker.`);
     assert.equal((await h.venue()).publish, undefined);
     // Nothing went up on a Worker that answers every StagePlots path 404: nothing to take back.
     assert.deepEqual(spRequests(h.page).map((q) => q.method), ["PUT"], "it went on, or tried to take back what an old Worker never stored");
