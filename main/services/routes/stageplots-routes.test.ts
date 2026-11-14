@@ -961,7 +961,7 @@ describe("plot drafts", () => {
     const w = await venue("Chapel");
     const c = await plot(w.id, "Standard");
     for (const p of [a, b, c]) await keep(p.id, { baseVersion: 0, items: [box()] });
-    // Read from the store, not GET, which drops a draft whose plot is gone on its own.
+    // Read from the store, not GET, which leaves a draft whose plot is gone out of its answer.
     await call("DELETE", `/api/stageplots/plots/${b.id}`);
     assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId).sort(), [a.id, c.id].sort());
     await call("DELETE", `/api/stageplots/venues/${v.id}`);
@@ -995,14 +995,56 @@ describe("plot drafts", () => {
     assert.equal((await draftsNow())[0].baseVersion, 1);
   });
 
-  test("a draft whose plot is gone is dropped when the drafts are read, and said", async () => {
+  test("a draft whose plot is gone is left out when the drafts are read, said once, and never deleted by the read", async () => {
     const v = await venue();
     const p = await plot(v.id);
     await keep(p.id, { baseVersion: 0, items: [box()] });
     await plotDraftsStore.update((d) => [...d, { plotId: "p-gone", baseVersion: 3, items: [], savedAt: "2026-11-14T14:32:00.000Z" }]);
     const said = await warnings(async () => assert.deepEqual((await draftsNow()).map((d) => d.plotId), [p.id]));
-    assert.deepEqual(said, ["[stageplots] 1 unsaved drafts dropped: their plots are gone (p-gone)"]);
-    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId), [p.id]);
+    assert.deepEqual(said, ["[stageplots] 1 unsaved drafts left out: their plots are not in stageplots.json (p-gone); they stay in stageplot-drafts.json"]);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId).sort(), [p.id, "p-gone"].sort(), "a read deleted a draft");
+    assert.deepEqual(await warnings(() => draftsNow()), [], "the same draft left out was said again on the next read");
+  });
+
+  test("a drafts store that cannot be written never turns a save, a rename or a delete into a failure: the answer says so", async (t) => {
+    const v = await venue("Main room");
+    const a = await plot(v.id, "Standard");
+    const b = await plot(v.id, "Baptism");
+    const w = await venue("Chapel");
+    await plot(w.id, "Standard");
+    await keep(a.id, { baseVersion: 0, items: [box()] });
+    t.mock.method(plotDraftsStore, "update", async () => {
+      throw new Error("stageplot-drafts.json could not be written (ENOSPC)");
+    });
+    const errors: string[] = [];
+    t.mock.method(console, "error", (...m: unknown[]) => void errors.push(m.join(" ")));
+    const notice = (r: { json: unknown }) => (r.json as { draftNotice?: string }).draftNotice ?? "";
+
+    let r = await call("PUT", `/api/stageplots/plots/${a.id}/items`, { version: 0, items: [box("i-2")] });
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { plot: { version: number } }).plot.version, 1);
+    assert.match(notice(r), /^Saved, but the plot's unsaved draft could not be deleted, so it may open again: .*ENOSPC/);
+
+    r = await call("PATCH", `/api/stageplots/plots/${a.id}`, { name: "Renamed" });
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { name: string }).name, "Renamed");
+    assert.match(notice(r), /^Saved, but the plot's unsaved draft could not be moved onto this version, so it may open as saved elsewhere: /);
+
+    r = await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { ok: boolean }).ok, true);
+    assert.match(notice(r), /^The plot was deleted, but its unsaved draft could not be deleted with it: /);
+
+    r = await call("DELETE", `/api/stageplots/venues/${w.id}`);
+    assert.equal(r.status, 200, r.body);
+    assert.match(notice(r), /^The venue was deleted, but the unsaved drafts of its plots could not be deleted with it: /);
+
+    assert.deepEqual(
+      (await stageplotsStore.get()).plots.map((p) => p.name),
+      ["Renamed"],
+      "a save, a rename or a delete did not land",
+    );
+    assert.equal(errors.filter((e) => e.startsWith("[stageplots] a draft could not be written")).length, 4, errors.join(" | "));
   });
 });
 

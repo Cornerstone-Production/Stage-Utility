@@ -81,10 +81,13 @@ export function usePlotDrafts(): PlotDraftsState {
     return off;
   }, [refresh, replace]);
 
-  const kept = useCallback((draft: PlotDraft) => replace(new Map([...(held.current ?? []), [draft.plotId, draft]])), [replace]);
+  const kept = useCallback((draft: PlotDraft) => replace(new Map(held.current).set(draft.plotId, draft)), [replace]);
   const dropped = useCallback(
     (plotId: string) => {
-      if (held.current?.has(plotId)) replace(new Map([...held.current].filter(([id]) => id !== plotId)));
+      if (!held.current?.has(plotId)) return;
+      const next = new Map(held.current);
+      next.delete(plotId);
+      replace(next);
     },
     [replace],
   );

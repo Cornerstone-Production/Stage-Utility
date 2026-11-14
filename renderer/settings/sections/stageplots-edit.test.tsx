@@ -45,6 +45,10 @@ let DRAFTS: PlotDraft[] = [];
 let DRAFTS_DOWN = false;
 /** While set, a draft PUT waits for it before it lands: one still on its way. */
 let DRAFT_HOLD: Promise<void> | null = null;
+/** While set, a save of a plot's items lands on the server and waits for it before it answers. */
+let ITEMS_HOLD: Promise<void> | null = null;
+/** While set, a save, rename or delete of a plot answers this as its `draftNotice`: the drafts file did not take it. */
+let DRAFT_NOTICE: string | null = null;
 /** Draft PUTs sent, landed or not. */
 let draftPutsOut = 0;
 /** GET /api/stageplots/drafts asked, from any page. */
@@ -252,7 +256,9 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     } else {
       ({ status, json } = route(method, u.pathname, u.searchParams, body));
       if (status < 300) broadcast();
+      if (status < 300 && DRAFT_NOTICE && /^\/api\/stageplots\/plots\/[^/]+(\/items)?$/.test(u.pathname)) json = { ...(json as object), draftNotice: DRAFT_NOTICE };
     }
+    if (ITEMS_HOLD && method === "PUT" && u.pathname.endsWith("/items")) await ITEMS_HOLD;
   }
   return { ok: status < 300, status, statusText: String(status), json: async () => json, text: async () => JSON.stringify(json) };
 };
@@ -352,6 +358,8 @@ beforeEach(() => {
   DRAFTS = [];
   DRAFTS_DOWN = false;
   DRAFT_HOLD = null;
+  ITEMS_HOLD = null;
+  DRAFT_NOTICE = null;
   draftPutsOut = 0;
   draftReads = 0;
   STATE = {};
@@ -1530,6 +1538,87 @@ describe("the kept draft", () => {
       "the save went out before the draft write it should wait for",
     );
     assert.deepEqual(DRAFTS, [], "a draft of what was just saved was left on the server");
+  });
+
+  test("a plot's draft survives a save on another plot, and opens again when its tab is picked", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    await click(tabs()[1]);
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"], "the save on Special took Standard's draft");
+    await click(tabs()[0]);
+    for (let i = 0; i < 3; i++) await settle();
+    assert.ok(ids().includes(mine), "Standard opened without its draft");
+    assert.match(document.body.textContent!, /Unsaved draft from/);
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"], "opening Standard deleted its draft");
+  });
+
+  test("closing the page while a Save is on its way sends no draft of what it is saving, so the draft does not come back over it", async () => {
+    await mount();
+    await addFromPalette("box");
+    let release!: () => void;
+    ITEMS_HOLD = new Promise((r) => (release = r));
+    // Saved before the second was up: nothing kept yet, so a closing page would send it.
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    await until(() => writes().includes("PUT /api/stageplots/plots/p-1/items"), "the save to go out");
+    // The save has landed on the server and its answer is not back: the tab closes now.
+    await act(async () => void window.dispatchEvent(new Event("pagehide")));
+    await settle();
+    release();
+    ITEMS_HOLD = null;
+    for (let i = 0; i < 4; i++) await settle();
+    assert.deepEqual(draftWrites(), [], "the page sent a draft of the items its Save was carrying");
+    assert.deepEqual(DRAFTS, [], "a draft came back over the save that deleted it");
+  });
+
+  test("the plot's version moving under an unchanged draft (a rename elsewhere) keeps it again on the new version, so it never opens as saved elsewhere", async () => {
+    await mount();
+    await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    assert.equal(DRAFTS[0].baseVersion, 0);
+    // Renamed on another desk; the server's draft stayed on version 0 (its write landed after the
+    // rename carried the drafts, or the carry could not be written).
+    DOC.plots[0] = { ...DOC.plots[0], name: "Renamed", version: 1 };
+    await act(async () => broadcast());
+    await until(() => DRAFTS[0]?.baseVersion === 1, "the draft to be kept again on version 1");
+    assert.ok(isKept(), "the banner does not say the draft is kept");
+    cleanup();
+    await settle();
+    await mount();
+    assert.equal(screen.queryByText(/This plot was saved elsewhere/), null, "the draft opened as saved elsewhere");
+    assert.match(document.body.textContent!, /Unsaved draft from/);
+  });
+
+  test("a save, or a rename through its card, whose draft the server could not tidy says so in a note, and stands", async () => {
+    DRAFT_NOTICE = "Saved, but the plot's unsaved draft could not be deleted, so it may open again: disk full";
+    await mount();
+    await addFromPalette("box");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.equal(banner(), null, "the save did not land");
+    assert.equal(screen.getByTestId("draft-note").textContent, DRAFT_NOTICE);
+    // Through a card's save: a rename.
+    DRAFT_NOTICE = "Saved, but the plot's unsaved draft could not be moved onto this version, so it may open as saved elsewhere: disk full";
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: "Rename" }));
+    const field = screen.getByLabelText("Plot name") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "Renamed" } });
+      fireEvent.keyDown(field, { key: "Enter" });
+      field.blur();
+    });
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(tabs()[0].textContent, "Renamed");
+    assert.equal(screen.getByTestId("draft-note").textContent, DRAFT_NOTICE);
+    // The next save that leaves nothing undone clears it.
+    DRAFT_NOTICE = null;
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.equal(screen.queryByTestId("draft-note"), null);
   });
 
   test("closing the tab asks only while the newest change has not reached the server", async () => {

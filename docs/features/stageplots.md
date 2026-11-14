@@ -329,8 +329,13 @@ nothing anyone else sees until **Save**, which saves the plot and deletes the dr
   the newest change has not reached the server: a link or Back stores it first, and
   closing the tab asks until it is stored. A very large draft (past about 64 KB,
   hundreds of items) may not get out as the tab closes, because browsers cap what a
-  closing page can send; it is safe once **Draft kept** shows.
+  closing page can send; it is safe once **Draft kept** shows. A tab closed while
+  **Save** is on its way sends no draft of what that save carries: the save itself
+  keeps it.
 - A draft whose plot is deleted, with the plot or its venue, is deleted with it.
+  Should the drafts file not take that (or a save's delete of its draft, or a
+  rename's move of it onto the new version), the save, rename or delete still
+  stands and a small note under the banner says what was left undone.
 
 ### Item types
 
@@ -600,7 +605,7 @@ left behind, the tidy skipped and why, image processing unavailable because shar
 did not load, a save that failed, every item save refused and why (a body that is
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
 version that is not a whole number, "changed elsewhere"), every draft refused and
-why, drafts dropped because their plot is gone, a draft that could not be written, each
+why, drafts left out because their plot is not in `stageplots.json` (kept in the file), a draft that could not be written, each
 venue listed on or taken off the landing page, each new landing list a page took, and a
 list the page would not take (once, with why, and again once it does),
 how many items moved

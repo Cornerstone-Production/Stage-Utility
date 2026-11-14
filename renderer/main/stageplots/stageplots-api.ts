@@ -33,6 +33,11 @@ export interface PdfPage {
 /** A publish action's answer: the venue as it now is, and anything the operator should know beside it. */
 export type PublishAnswer = Venue & { notice?: string };
 
+/** On an answer that deleted or moved a plot's kept draft: what the drafts file could not take. The change itself landed. */
+export interface DraftNotice {
+  draftNotice?: string;
+}
+
 export const stageplotsApi = {
   get: () => invoke<StagePlotsView>("stageplots:get"),
   /** The patch, for linked connection points. Rejects (503) when it cannot be read, rather than answering the seed sheets. */
@@ -43,7 +48,7 @@ export const stageplotsApi = {
   /** A venue's plots in a new tab order: each of its plot ids exactly once. */
   reorderPlots: (venueId: string, plotIds: string[]) => invoke<Venue>("stageplots:updateVenue", { id: venueId, changes: { plotIds } }),
   /** `notice`: the venue was published and its link could not be removed yet (it is queued). */
-  deleteVenue: (id: string) => invoke<{ ok: true; notice?: string }>("stageplots:deleteVenue", { id }),
+  deleteVenue: (id: string) => invoke<{ ok: true; notice?: string } & DraftNotice>("stageplots:deleteVenue", { id }),
   setDefault: (venueId: string, plotId: string) => invoke<Venue>("stageplots:setDefault", { venueId, plotId }),
   /** Give one plan its own plot for this venue, or hand it back to the default
    *  (`plotId` null). `planDate` is the plan's sort date, kept to name it by. */
@@ -57,11 +62,11 @@ export const stageplotsApi = {
   deleteBackground: (id: string) => invoke<{ ok: true }>("stageplots:deleteBackground", { id }),
   createPlot: (plot: { venueId: string; name: string; backgroundId?: string | null }) => invoke<Plot>("stageplots:createPlot", { plot }),
   duplicatePlot: (id: string) => invoke<Plot>("stageplots:duplicatePlot", { id }),
-  updatePlot: (id: string, changes: PlotChanges) => invoke<Plot>("stageplots:updatePlot", { id, changes }),
+  updatePlot: (id: string, changes: PlotChanges) => invoke<Plot & DraftNotice>("stageplots:updatePlot", { id, changes }),
   /** `clearedPlans`: the plans whose override named the plot, cleared with it.
    *  `defaultPlotId`: the venue's default after the delete (deleting the default makes the first
    *  plot left in tab order the default); null only when no plot is left. */
-  deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[]; defaultPlotId: string | null }>("stageplots:deletePlot", { id }),
+  deletePlot: (id: string) => invoke<{ ok: true; clearedPlans: string[]; defaultPlotId: string | null } & DraftNotice>("stageplots:deletePlot", { id }),
   /** The editor's kept drafts, every plot's. */
   drafts: () => invoke<{ drafts: PlotDraft[] }>("stageplots:drafts"),
   /** Keep a plot's unsaved items as its draft: never the plot, never published. */
@@ -76,7 +81,7 @@ export const stageplotsApi = {
   /** Delete a plot's draft: Discard, or a Reload after it was saved elsewhere. */
   discardDraft: (id: string) => invoke<{ ok: true }>("stageplots:discardDraft", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
-  saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot }>("stageplots:saveItems", { id, version, items }),
+  saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot } & DraftNotice>("stageplots:saveItems", { id, version, items }),
   /** Put a venue on the public page behind a new secret link. */
   publish: (id: string) => invoke<PublishAnswer>("stageplots:publish", { id }),
   /** Move a published venue to a new link; the old one stops working once the new one is up. */

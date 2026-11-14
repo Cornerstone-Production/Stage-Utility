@@ -53,7 +53,7 @@ import { PlotLegend } from "../../main/stageplots/plot-legend";
 import { PrintControl } from "../../main/stageplots-print";
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { resolveItems, stampLinks, type PatchRead, type ResolvedItems } from "@main/services/stageplots-patch-link";
-import { stageplotsApi } from "../../main/stageplots/stageplots-api";
+import { stageplotsApi, type DraftNotice } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
 import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-patch";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
@@ -369,13 +369,17 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [plotPick, setPlotPick] = useState<{ venueId: string; plotId: string } | null>(null);
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
+  /** What the drafts file could not do after the last save that touched a draft, or null. The save itself landed. */
+  const [draftNote, setDraftNote] = useState<string | null>(null);
 
   // Every save reads the document again after it, landed or not: a refused
-  // change leaves the page showing what the server holds.
+  // change leaves the page showing what the server holds. One that landed says
+  // what the drafts could not do after it (a rename, a delete), or clears that.
   const save: Save = useCallback(
     async (run) => {
       try {
         const value = await run();
+        setDraftNote(draftNoticeOf(value));
         void refresh();
         return { ok: true, value };
       } catch (err) {
@@ -440,8 +444,16 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
       openPdf={openPdf}
       drafts={drafts}
       keptDrafts={drafts.drafts}
+      draftNote={draftNote}
+      onDraftNote={setDraftNote}
     />
   );
+}
+
+/** A save's `draftNotice` (stageplots-api.ts), or null. */
+function draftNoticeOf(value: unknown): string | null {
+  const notice = typeof value === "object" && value !== null ? (value as DraftNotice).draftNotice : undefined;
+  return typeof notice === "string" ? notice : null;
 }
 
 function EditorBody({
@@ -460,6 +472,8 @@ function EditorBody({
   openPdf,
   drafts,
   keptDrafts,
+  draftNote,
+  onDraftNote,
 }: {
   doc: StagePlotsView;
   venue: Venue | null;
@@ -477,6 +491,9 @@ function EditorBody({
   drafts: PlotDraftsState;
   /** Every kept draft by plot, read before the editor was drawn. */
   keptDrafts: ReadonlyMap<string, PlotDraft>;
+  /** What the drafts file could not do after the last save that landed; shown beside the banner. */
+  draftNote: string | null;
+  onDraftNote: (note: string | null) => void;
 }) {
   const height = plotHeight(backgroundOf(doc, plot));
   // The plan and the names plans go by, once, for the This week card and the
@@ -503,6 +520,8 @@ function EditorBody({
   const keeper = useDraftKeeper({ plotId: plot?.id ?? null, items: draft.items, dirty, baseVersion: base, onKept: drafts.kept, onDropped: drafts.dropped, onWriting: drafts.writing });
   /** The kept draft this plot opened with, while nothing has changed since: the banner says when it is from. */
   const [restored, setRestored] = useState<{ plotId: string; savedAt: string } | null>(null);
+  /** The plot the draft was loaded for: the render that picks another still holds the one before. */
+  const [loadedFor, setLoadedFor] = useState(plot?.id ?? null);
 
   // Another plot: its items, its version, nothing pending; or its kept draft over them. A draft
   // drawn on an older version than the plot's (its items changed since: a rename or a fade
@@ -515,13 +534,16 @@ function EditorBody({
     setConflict(!!kept && !!plot && kept.baseVersion !== plot.version && !sameItems(kept.items, plot.items));
     setRestored(kept ? { plotId: kept.plotId, savedAt: kept.savedAt } : null);
     setSaveError(null);
+    setLoadedFor(plot?.id ?? null);
     keeper.reset(kept);
   });
   // The same plot, changed (a broadcast or a read after a save), and again when
   // the draft turns clean (Discard, or undo back to the start) so a save from
   // elsewhere that landed meanwhile is taken then rather than left behind.
   useResyncOn([plot, dirty], () => {
-    if (!plot) return;
+    // Another plot: the resync above loads it, and this render's draft is still the last
+    // plot's, whose saved items would load over the kept draft just restored and drop it.
+    if (!plot || plot.id !== loadedFor) return;
     // Saved elsewhere over this draft's base: its base stays, so Save stays refused. A kept
     // draft opened that way holds the plot's newer items as "saved" ones, which are not its base.
     if (conflict && isDirty(draft)) return;
@@ -587,6 +609,7 @@ function EditorBody({
     let version = base;
     const send = async (on: number) => {
       const r = await stageplotsApi.saveItems(plot.id, on, stamped);
+      onDraftNote(r.draftNotice ?? null);
       dispatch({ type: "saved", sent, items: r.plot.items });
       setBase(r.plot.version);
       version = r.plot.version;
@@ -596,7 +619,7 @@ function EditorBody({
     // draft as the save lands, and no draft write may land after that and bring it back.
     keeper.hold();
     try {
-      await keeper.serial(async () => {
+      await keeper.saving(sent, async () => {
         try {
           await send(base);
         } catch (err) {
@@ -610,7 +633,7 @@ function EditorBody({
       drafts.dropped(plot.id);
       setRestored(null);
       // Changed again while the save was on its way: that is a draft on the saved version.
-      if (!sameItems(draftRef.current.items, sent)) void keeper.flushOn(version);
+      if (!sameItems(draftRef.current.items, sent)) void keeper.flush(version);
       return true;
     } catch (err) {
       if ((err as ApiError).status === 409) setConflict(true);
@@ -720,6 +743,11 @@ function EditorBody({
         )
       )}
       <SaveError message={saveError ?? (keeper.dropError ? `The server still holds a draft of this plot that was meant to go (${keeper.dropError}); it opens again next time.` : null)} className="mb-3" />
+      {draftNote && (
+        <p role="status" data-testid="draft-note" className="-mt-1 mb-3 text-caption1 text-fg-muted">
+          {draftNote}
+        </p>
+      )}
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
       <div className="grid items-start gap-4 lg:grid-cols-[268px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-3">

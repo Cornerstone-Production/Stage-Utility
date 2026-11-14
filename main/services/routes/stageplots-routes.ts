@@ -34,7 +34,9 @@
 //                                                   changed since that version
 //   GET    /api/stageplots/drafts                   { drafts: [{ plotId, baseVersion, items, savedAt }] }:
 //                                                   the editor's kept drafts, one per plot; a draft
-//                                                   whose plot is gone is dropped here, and said
+//                                                   whose plot is gone is left out, and said, and
+//                                                   never deleted here (a damaged stageplots.json
+//                                                   reads as no plots at all)
 //   PUT    /api/stageplots/plots/:id/draft          { baseVersion, items } → { plotId, baseVersion, savedAt };
 //                                                   items held to a save's rules; 404 unknown plot
 //   DELETE /api/stageplots/plots/:id/draft          → { ok }; nothing there is not an error
@@ -43,7 +45,10 @@
 //                                                   published: it broadcasts { drafts: [{ plotId,
 //                                                   savedAt }] } on stageplots:drafts. A saved item
 //                                                   list deletes its plot's draft, and deleting a plot
-//                                                   or venue deletes its drafts.
+//                                                   or venue deletes the drafts of the plots it
+//                                                   removed. A drafts write that fails after one of
+//                                                   those, or a rename's carry, never turns it into a
+//                                                   failure: the answer carries `draftNotice`.
 //   PUT    /api/stageplots/overrides               { planId, venueId, plotId | null, planDate? }
 //                                                   → the document; null removes the
 //                                                   plan's override for that venue
@@ -171,7 +176,7 @@ async function mutate(
   change: (doc: StagePlotsDoc) => StagePlotsDoc,
   pick: (doc: StagePlotsDoc) => unknown,
   status = 200,
-  afterSave?: () => Promise<unknown>,
+  afterSave?: (doc: StagePlotsDoc, changed: boolean) => Promise<string | null>,
 ): Promise<StagePlotsDoc | null> {
   let doc: StagePlotsDoc;
   let changed = false;
@@ -190,8 +195,10 @@ async function mutate(
     throw err;
   }
   if (changed) broadcast(STAGEPLOTS_CHANNEL, toView(doc));
-  await afterSave?.();
-  json(res, pick(doc), status);
+  // What the drafts could not do after it: said beside the answer, which stays a success.
+  const draftNotice = (await afterSave?.(doc, changed)) ?? null;
+  const picked = pick(doc);
+  json(res, draftNotice ? { ...(picked as object), draftNotice } : picked, status);
   return changed ? doc : null;
 }
 
@@ -346,10 +353,13 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
     return;
   }
   const notice = retired.notice;
+  let plotIds: string[] = [];
+  let drafts = 0;
   const doc = await mutate(
     c.res,
     (d) => {
       findVenue(d, id);
+      plotIds = d.plots.filter((p) => p.venueId === id).map((p) => p.id);
       return {
         ...d,
         venues: d.venues.filter((v) => v.id !== id),
@@ -358,11 +368,15 @@ async function deleteVenue(c: RouteCtx, id: string): Promise<void> {
       };
     },
     () => (notice ? { ok: true, notice } : { ok: true }),
+    200,
+    (_, changed) =>
+      changed
+        ? draftsAfter("The venue was deleted, but the unsaved drafts of its plots could not be deleted with it", async () => {
+            drafts = await dropDrafts(plotIds);
+          })
+        : Promise.resolve(null),
   );
-  if (doc) {
-    const drafts = await dropDraftsWithout(doc);
-    console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides${drafts > 0 ? ` and ${scrub(drafts)} unsaved drafts` : ""}`);
-  }
+  if (doc) console.log(`[stageplots] venue ${scrub(id)} deleted, with its plots and plan overrides${drafts > 0 ? ` and ${scrub(drafts)} unsaved drafts` : ""}`);
 }
 
 async function setDefault(c: RouteCtx, id: string): Promise<void> {
@@ -468,13 +482,19 @@ async function updatePlot(c: RouteCtx, id: string): Promise<void> {
       return next === doc ? doc : replaceIn<Plot>(next, "plots", { ...findPlot(next, id), version: p.version + 1 });
     },
     (doc) => findPlot(doc, id),
+    200,
+    // A rename, a fade or a background that moved no item changes the version and not the items:
+    // a draft based on the version before is still based on these items, and keeps working.
+    (doc, changed) => {
+      const now = doc.plots.find((p) => p.id === id);
+      if (!changed || !now || moved > 0) return Promise.resolve(null);
+      return draftsAfter("Saved, but the plot's unsaved draft could not be moved onto this version, so it may open as saved elsewhere", () =>
+        carryDraftBase(id, now.version - 1, now.version),
+      );
+    },
   );
   // Only once the move is saved: a refused change moved nothing.
   if (saved && moved > 0) console.log(`[stageplots] plot ${scrub(id)}: ${scrub(moved)} items moved up onto the plot after its background changed`);
-  // A rename, a fade or a background that moved no item changes the version and not the items:
-  // a draft based on the version before is still based on these items, and keeps working.
-  const now = saved?.plots.find((p) => p.id === id);
-  if (now && moved === 0) await carryDraftBase(id, now.version - 1, now.version);
 }
 
 /** Why a PUT …/items body is refused, said on [stageplots] and answered. */
@@ -522,7 +542,7 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
     200,
     // A save that went through, changed or not, is what the plot's draft was kept for: it goes
     // before the answer, so the editor never reads back a draft of what it just saved.
-    () => dropDraft(id),
+    () => draftsAfter("Saved, but the plot's unsaved draft could not be deleted, so it may open again", () => dropDraft(id)),
   );
 }
 
@@ -534,6 +554,7 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
  * log says both (the editor's confirm named them before the delete was sent).
  */
 async function deletePlot(c: RouteCtx, id: string): Promise<void> {
+  let drafts = 0;
   let cleared: string[] = [];
   let nowDefault: string | null = null;
   let wasDefault = false;
@@ -554,9 +575,15 @@ async function deletePlot(c: RouteCtx, id: string): Promise<void> {
       };
     },
     () => ({ ok: true, clearedPlans: cleared, defaultPlotId: nowDefault }),
+    200,
+    (_, changed) =>
+      changed
+        ? draftsAfter("The plot was deleted, but its unsaved draft could not be deleted with it", async () => {
+            drafts = await dropDrafts([id]);
+          })
+        : Promise.resolve(null),
   );
   if (!saved) return;
-  const drafts = await dropDraftsWithout(saved);
   if (drafts > 0) console.log(`[stageplots] plot ${scrub(id)} deleted with its unsaved draft`);
   if (cleared.length > 0) {
     console.log(`[stageplots] plot ${scrub(id)} deleted; ${scrub(cleared.length)} plan overrides cleared (plans ${scrub(cleared.join(", "))}), which show the default now`);
@@ -594,12 +621,26 @@ function dropDraft(plotId: string): Promise<PlotDraft[]> {
   return changeDrafts((drafts) => (drafts.some((d) => d.plotId === plotId) ? drafts.filter((d) => d.plotId !== plotId) : drafts));
 }
 
-/** Delete every draft whose plot `doc` no longer has. Resolves to how many went. */
-async function dropDraftsWithout(doc: StagePlotsDoc): Promise<number> {
-  const plots = new Set(doc.plots.map((p) => p.id));
+/**
+ * A drafts change after a save, delete or rename that has landed. Its failure never makes that
+ * a failure: changeDrafts has said it on [stageplots], and it is answered as the `draftNotice`
+ * the editor shows beside its banner.
+ */
+async function draftsAfter(what: string, fn: () => Promise<unknown>): Promise<string | null> {
+  try {
+    await fn();
+    return null;
+  } catch (err) {
+    return `${what}: ${errorMessage(err)}`;
+  }
+}
+
+/** Delete the drafts of `plotIds`, plots a delete has just removed, and only those. Resolves to how many went. */
+async function dropDrafts(plotIds: readonly string[]): Promise<number> {
+  const gone = new Set(plotIds);
   let dropped = 0;
   await changeDrafts((drafts) => {
-    const kept = drafts.filter((d) => plots.has(d.plotId));
+    const kept = drafts.filter((d) => !gone.has(d.plotId));
     dropped = drafts.length - kept.length;
     return dropped > 0 ? kept : drafts;
   });
@@ -613,15 +654,25 @@ async function carryDraftBase(plotId: string, from: number, to: number): Promise
   );
 }
 
-/** Every draft whose plot still exists. One whose plot is gone (deleted elsewhere, or a restore that brought other plots) is dropped and said. */
+/** The orphans last said, so each editor mount does not say them again. */
+let saidOrphans = "";
+
+/**
+ * Every draft whose plot exists. One whose plot is not there (deleted while the drafts could not
+ * be written, a restore that brought other plots, or a stageplots.json that cannot be read and
+ * answers no plots at all) is left out of the answer and said once, and never deleted here: a
+ * read that deleted on what it could not see would take every draft with a damaged file.
+ */
 async function listDrafts(c: RouteCtx): Promise<void> {
   const [doc, drafts] = await Promise.all([stageplotsStore.get(), plotDraftsStore.all()]);
   const plots = new Set(doc.plots.map((p) => p.id));
-  const orphans = drafts.filter((d) => !plots.has(d.plotId));
-  if (orphans.length === 0) return json(c.res, { drafts });
-  const kept = await changeDrafts((all) => all.filter((d) => plots.has(d.plotId)));
-  console.warn(`[stageplots] ${scrub(orphans.length)} unsaved drafts dropped: their plots are gone (${scrub(orphans.map((d) => d.plotId).join(", "))})`);
-  json(c.res, { drafts: kept });
+  const orphans = drafts.filter((d) => !plots.has(d.plotId)).map((d) => d.plotId);
+  const said = orphans.join(",");
+  if (said !== saidOrphans && orphans.length > 0) {
+    console.warn(`[stageplots] ${scrub(orphans.length)} unsaved drafts left out: their plots are not in stageplots.json (${scrub(orphans.join(", "))}); they stay in stageplot-drafts.json`);
+  }
+  saidOrphans = said;
+  json(c.res, { drafts: drafts.filter((d) => plots.has(d.plotId)) });
 }
 
 /** Why a draft is refused, said on [stageplots] and answered. */

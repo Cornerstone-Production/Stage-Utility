@@ -2,9 +2,12 @@
 // (PUT /api/stageplots/plots/:id/draft), so a reload, a closed tab or a crash loses nothing.
 //
 // A change is stored a second after the last one, and on leaving the page (a keepalive
-// request on pagehide). Every draft write, and every Save, Discard and Reload, runs one after
-// another (`serial`), so a draft write can never land after the Save that replaces it and
-// leave a draft of what was just saved. A store that fails is tried again after 2 s, then 4,
+// request on pagehide). Every draft write and every Save runs one after another (`saving`), so
+// a draft write can never land after the Save that replaces it and leave a draft of what was
+// just saved; the keepalive cannot wait its turn, so it is not sent while a Save of the same
+// items is on its way. A draft is kept on a version of the plot: when that moves and the items
+// did not (a rename or a fade, here or elsewhere), it is stored again on the new one, so it
+// never opens as saved elsewhere. A store that fails is tried again after 2 s, then 4,
 // 8… up to 30, said once on the client log when it starts failing and once when it is kept
 // again. A draft turned clean again (undo back to the saved plot) is deleted; a delete that
 // fails is shown (`dropError`) and the draft opens again next time.
@@ -12,7 +15,7 @@
 // What the editor shows follows from what is held here: nothing to keep, being kept, kept
 // at a time, or not kept (and why). Only kept is safe to leave; see `unstored`.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
 import type { PlotDraft, PlotItem } from "@main/types/stageplots";
@@ -51,18 +54,29 @@ export interface DraftKeeper {
   unstored: boolean;
   /** Why the server still holds a draft that was meant to go, or null. */
   dropError: string | null;
-  /** Store the newest change now, after anything queued; true once it is on the server (or there is nothing to store). */
-  flush: () => Promise<boolean>;
-  /** flush, drawn on `baseVersion`: after a Save, which moved the plot's version before the editor drew again. */
-  flushOn: (baseVersion: number) => Promise<boolean>;
-  /** Run `fn` once every draft write before it has finished, and before any after it starts. */
-  serial: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Store the newest change now, after anything queued; true once it is on the server (or there
+   * is nothing to store). `on`: the version to draw it on, after a Save moved the plot's version
+   * before the editor drew again.
+   */
+  flush: (on?: number) => Promise<boolean>;
+  /**
+   * Run a Save of `items` once every draft write before it has finished, and before any after it
+   * starts. While it is on its way, the page closing sends no draft of those items: the Save
+   * deletes the draft as it lands, and a keepalive landing after it would put it back.
+   */
+  saving: <T>(items: PlotItem[], fn: () => Promise<T>) => Promise<T>;
   /** Stop waiting to store (a Save or a Discard is about to replace the draft). */
   hold: () => void;
   /** The plot changed: what the server keeps for it now (its draft, or none). Call during render. */
   reset: (kept: PlotDraft | null) => void;
   /** The server no longer has this plot's draft (it was saved). */
   forget: () => void;
+}
+
+/** Whether the draft the server holds, `kept`, is `now`: this plot's items, on this version. Anything else is not on the server yet. */
+function isKept(kept: PlotDraft | null, now: { plotId: string | null; items: PlotItem[]; baseVersion: number }): boolean {
+  return kept !== null && kept.plotId === now.plotId && kept.baseVersion === now.baseVersion && sameItems(kept.items, now.items);
 }
 
 export function useDraftKeeper({
@@ -83,8 +97,8 @@ export function useDraftKeeper({
   /** A write of the plot's draft is going out; call what it answers once it is done. */
   onWriting: (plotId: string) => () => void;
 }): DraftKeeper {
-  /** What the server holds as this plot's draft, and since when; null for none. */
-  const [kept, setKept] = useState<{ plotId: string; items: PlotItem[]; savedAt: string } | null>(null);
+  /** What the server holds as the open plot's draft: its items, the version they were drawn on, and since when. */
+  const [kept, setKept] = useState<PlotDraft | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const latest = useLatestRef({ plotId, items, dirty, baseVersion, kept, onKept, onDropped, onWriting });
@@ -92,98 +106,85 @@ export function useDraftKeeper({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryMs = useRef(0);
   const failing = useRef(false);
-  /** The store a retry runs: `store` itself, which cannot name itself as it is made. */
-  const retry = useRef<(forPlot: string) => void>(() => undefined);
-  /** `drop`, for a store that lands after its draft was let go: made after `store`, so reached through here. */
-  const dropLater = useRef<(forPlot: string) => void>(() => undefined);
+  /** The items a Save on its way is sending, or null: the page closing sends no draft of them. */
+  const inSave = useRef<PlotItem[] | null>(null);
   /** Unmounted: a store that fails after this sets no retry. */
   const gone = useRef(false);
 
-  const serial = useCallback(<T>(fn: () => Promise<T>): Promise<T> => {
+  // Plain functions: every one reads what changes through `latest` and the refs above, never
+  // from the render that made it, so a timer or an answer that outlives that render still acts
+  // on the newest state.
+
+  function serial<T>(fn: () => Promise<T>): Promise<T> {
     const run = queue.current.then(fn, fn);
     queue.current = run.catch(() => undefined);
     return run;
-  }, []);
+  }
 
-  const hold = useCallback(() => {
+  function hold(): void {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-  }, []);
+  }
 
-  const store = useCallback(
-    (forPlot: string, on?: number): Promise<boolean> =>
-      serial(async () => {
-        const now = latest.current;
-        // The plot was left (its draft stored first, or let go), or there is nothing new.
-        if (now.plotId !== forPlot || !now.dirty) return true;
-        if (now.kept?.plotId === forPlot && sameItems(now.kept.items, now.items) && on === undefined) return true;
-        const sent = now.items;
-        const base = on ?? now.baseVersion;
-        const done = now.onWriting(forPlot);
-        try {
-          const r = await stageplotsApi.keepDraft(forPlot, base, sent);
-          setKept({ plotId: forPlot, items: sent, savedAt: r.savedAt });
-          setFailed(null);
-          retryMs.current = 0;
-          latest.current.onKept({ plotId: forPlot, baseVersion: r.baseVersion, items: sent, savedAt: r.savedAt });
-          if (failing.current) {
-            failing.current = false;
-            logToServer("stageplots", `the unsaved draft of plot ${forPlot} is kept again`);
-          }
-          // Discarded (or undone back to the saved plot) while it was on its way: it goes again.
-          if (latest.current.plotId === forPlot && !latest.current.dirty) dropLater.current(forPlot);
-          return true;
-        } catch (err) {
-          const reason = failure(err);
-          setFailed(reason);
-          if (!failing.current) {
-            failing.current = true;
-            logToServer("stageplots", `could not keep the unsaved draft of plot ${forPlot} (${reason}); trying again`);
-          }
-          retryMs.current = Math.min(RETRY_MAX_MS, retryMs.current === 0 ? RETRY_FIRST_MS : retryMs.current * 2);
-          hold();
-          // Not once the editor is gone: its last chance was the keepalive on pagehide.
-          if (!gone.current) timer.current = setTimeout(() => retry.current(forPlot), retryMs.current);
-          return false;
-        } finally {
-          done();
+  function store(forPlot: string, on?: number): Promise<boolean> {
+    return serial(async () => {
+      const now = latest.current;
+      // The plot was left (its draft stored first, or let go), or there is nothing new.
+      if (now.plotId !== forPlot || !now.dirty) return true;
+      const sent = now.items;
+      const base = on ?? now.baseVersion;
+      if (isKept(now.kept, { plotId: forPlot, items: sent, baseVersion: base })) return true;
+      const done = now.onWriting(forPlot);
+      try {
+        const r = await stageplotsApi.keepDraft(forPlot, base, sent);
+        setKept({ plotId: forPlot, items: sent, baseVersion: r.baseVersion, savedAt: r.savedAt });
+        setFailed(null);
+        retryMs.current = 0;
+        latest.current.onKept({ plotId: forPlot, baseVersion: r.baseVersion, items: sent, savedAt: r.savedAt });
+        if (failing.current) {
+          failing.current = false;
+          logToServer("stageplots", `the unsaved draft of plot ${forPlot} is kept again`);
         }
-      }),
-    // `latest` is a ref, read when the store runs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [serial, hold],
-  );
-
-  useEffect(() => {
-    retry.current = (forPlot) => void store(forPlot);
-  }, [store]);
-
-  const drop = useCallback(
-    (forPlot: string): Promise<string | null> =>
-      serial(async () => {
-        try {
-          await stageplotsApi.discardDraft(forPlot);
-          if (latest.current.kept?.plotId === forPlot) setKept(null);
-          setDropError(null);
-          latest.current.onDropped(forPlot);
-          return null;
-        } catch (err) {
-          const reason = failure(err);
-          setDropError(reason);
-          logToServer("stageplots", `could not delete the unsaved draft of plot ${forPlot} (${reason}); it opens again next time`);
-          return reason;
+        // Discarded (or undone back to the saved plot) while it was on its way: it goes again.
+        if (latest.current.plotId === forPlot && !latest.current.dirty) void drop(forPlot);
+        return true;
+      } catch (err) {
+        const reason = failure(err);
+        setFailed(reason);
+        if (!failing.current) {
+          failing.current = true;
+          logToServer("stageplots", `could not keep the unsaved draft of plot ${forPlot} (${reason}); trying again`);
         }
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [serial],
-  );
+        retryMs.current = Math.min(RETRY_MAX_MS, retryMs.current === 0 ? RETRY_FIRST_MS : retryMs.current * 2);
+        hold();
+        // Not once the editor is gone: its last chance was the keepalive on pagehide.
+        if (!gone.current) timer.current = setTimeout(() => void store(forPlot), retryMs.current);
+        return false;
+      } finally {
+        done();
+      }
+    });
+  }
 
-  useEffect(() => {
-    dropLater.current = (forPlot) => void drop(forPlot);
-  }, [drop]);
+  function drop(forPlot: string): Promise<string | null> {
+    return serial(async () => {
+      try {
+        await stageplotsApi.discardDraft(forPlot);
+        if (latest.current.kept?.plotId === forPlot) setKept(null);
+        setDropError(null);
+        latest.current.onDropped(forPlot);
+        return null;
+      } catch (err) {
+        const reason = failure(err);
+        setDropError(reason);
+        logToServer("stageplots", `could not delete the unsaved draft of plot ${forPlot} (${reason}); it opens again next time`);
+        return reason;
+      }
+    });
+  }
 
-  // A change: stored a second after the last one. Clean again (undo back to the saved plot):
-  // the server's draft goes.
+  // A change, or the plot's version moving under unchanged items: stored a second after the
+  // last one. Clean again (undo back to the saved plot): the server's draft goes.
   useEffect(() => {
     if (!plotId) return;
     if (!dirty) {
@@ -191,19 +192,20 @@ export function useDraftKeeper({
       if (latest.current.kept?.plotId === plotId) void drop(plotId);
       return;
     }
-    const now = latest.current;
-    if (now.kept?.plotId === plotId && sameItems(now.kept.items, items)) return;
+    if (isKept(latest.current.kept, { plotId, items, baseVersion })) return;
     hold();
     timer.current = setTimeout(() => void store(plotId), KEEP_DELAY_MS);
-    // `latest` is a ref; items and dirty are what change.
+    // hold, drop and store read only refs, whichever render made them; `latest` is a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plotId, items, dirty, store, drop, hold]);
+  }, [plotId, items, dirty, baseVersion]);
 
-  // Leaving the page: the newest change goes as a keepalive request, which outlives the page.
+  // Leaving the page: the newest change goes as a keepalive request, which outlives the page,
+  // unless a Save on its way carries those very items.
   useEffect(() => {
     const onHide = () => {
       const now = latest.current;
-      if (!now.plotId || !now.dirty || (now.kept?.plotId === now.plotId && sameItems(now.kept.items, now.items))) return;
+      if (!now.plotId || !now.dirty || isKept(now.kept, now)) return;
+      if (inSave.current && sameItems(inSave.current, now.items)) return;
       stageplotsApi.keepDraftOnLeave(now.plotId, now.baseVersion, now.items);
     };
     window.addEventListener("pagehide", onHide);
@@ -216,42 +218,36 @@ export function useDraftKeeper({
       gone.current = true;
       hold();
     };
-  }, [hold]);
+  }, []);
 
-  const flush = useCallback((): Promise<boolean> => {
+  const flush = (on?: number): Promise<boolean> => {
     const forPlot = latest.current.plotId;
     if (!forPlot) return Promise.resolve(true);
     hold();
-    return store(forPlot);
-  }, [latest, store, hold]);
+    return store(forPlot, on);
+  };
 
-  const flushOn = useCallback(
-    (on: number): Promise<boolean> => {
-      const forPlot = latest.current.plotId;
-      if (!forPlot) return Promise.resolve(true);
-      hold();
-      return store(forPlot, on);
-    },
-    [latest, store, hold],
-  );
+  const saving = <T,>(sending: PlotItem[], fn: () => Promise<T>): Promise<T> => {
+    inSave.current = sending;
+    return serial(fn).finally(() => {
+      if (inSave.current === sending) inSave.current = null;
+    });
+  };
 
   const reset = (next: PlotDraft | null) => {
-    setKept(next ? { plotId: next.plotId, items: next.items, savedAt: next.savedAt } : null);
+    setKept(next);
     setFailed(null);
     setDropError(null);
   };
-  const forget = useCallback(() => {
+  const forget = () => {
     setKept(null);
     setFailed(null);
-  }, []);
+  };
 
-  const stored = !dirty || (kept !== null && kept.plotId === plotId && sameItems(kept.items, items));
-  const status: KeepStatus = !dirty
-    ? { kind: "idle" }
-    : stored && kept
-      ? { kind: "kept", savedAt: kept.savedAt }
-      : failed !== null
-        ? { kind: "failed", reason: failed }
-        : { kind: "keeping" };
-  return { status, unstored: !stored, dropError, flush, flushOn, serial, hold, reset, forget };
+  const stored = !dirty || isKept(kept, { plotId, items, baseVersion });
+  let status: KeepStatus = { kind: "keeping" };
+  if (!dirty) status = { kind: "idle" };
+  else if (stored && kept) status = { kind: "kept", savedAt: kept.savedAt };
+  else if (failed !== null) status = { kind: "failed", reason: failed };
+  return { status, unstored: !stored, dropError, flush, saving, hold, reset, forget };
 }

@@ -303,8 +303,8 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
-  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown, keepalive?: boolean): Promise<T> {
+  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined, ...(keepalive ? { keepalive } : {}) });
 }
 
 function post<T>(path: string, body?: unknown): Promise<T> {
@@ -315,9 +315,13 @@ function patch<T>(path: string, body?: unknown): Promise<T> {
   return sendJson<T>("PATCH", path, body);
 }
 
-function put<T>(path: string, body?: unknown): Promise<T> {
-  return sendJson<T>("PUT", path, body);
+/** `keepalive`: the request is still sent once the page has gone (a page closing). */
+function put<T>(path: string, body?: unknown, { keepalive }: { keepalive?: boolean } = {}): Promise<T> {
+  return sendJson<T>("PUT", path, body, keepalive);
 }
+
+/** A stage plot's kept draft. */
+const draftPath = (p: Record<string, unknown>) => `/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`;
 
 function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
@@ -864,19 +868,15 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/stageplots/drafts");
 
     case "stageplots:keepDraft":
-      return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`, { baseVersion: p.baseVersion, items: p.items });
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items });
 
     // The page is going: a keepalive request is still sent once it has. Browsers cap its body
     // at 64 KB, so a very large draft is refused here, and the leave guard has already asked.
     case "stageplots:keepDraftOnLeave":
-      return apiFetch<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`, {
-        method: "PUT",
-        body: JSON.stringify({ baseVersion: p.baseVersion, items: p.items }),
-        keepalive: true,
-      });
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items }, { keepalive: true });
 
     case "stageplots:discardDraft":
-      return del<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`);
+      return del<T>(draftPath(p));
 
     case "stageplots:saveItems":
       return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
