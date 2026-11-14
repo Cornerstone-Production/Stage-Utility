@@ -70,6 +70,18 @@ describe("the viewer's addresses", () => {
     assert.equal(publicKind("POST", "/"), "reject:405");
   });
 
+  test("the landing list is read at /api/landing, with no query; its document is never at its own name", () => {
+    assert.equal(publicKind("GET", "/api/landing"), "landing");
+    assert.equal(publicKind("PUT", "/api/landing"), "reject:405");
+    for (const no of ["/api/landing?x=1", "/api/landing/", "/landing.html", "/landing"]) assert.equal(publicKind("GET", no), "reject:404", no);
+  });
+
+  test("the publisher puts the landing list at its own path, outside StagePlots", () => {
+    assert.equal(publishKind("PUT", "/_publish/v1/landing"), "putLanding");
+    assert.equal(publishKind("POST", "/_publish/v1/landing"), "reject:405");
+    assert.equal(publishKind("PUT", "/_publish/v1/landing/x"), "reject:404");
+  });
+
   test("a segment is a slug or an id: letters, digits, underscore, dash", () => {
     for (const no of [
       "/servicecue/we.ekend/audio",

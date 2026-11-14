@@ -15,6 +15,7 @@ import {
   isDocKey,
   isFrameChannel,
   isRecord,
+  readLandingList,
   stagePlotsKeyKind,
   type FixedDocKey,
   type PublicState,
@@ -171,6 +172,12 @@ export function isWebp(bytes: Uint8Array): boolean {
 }
 
 /** What to keep under a secret: `{ keys: [...] }`, every one a StagePlots key. One bad entry refuses it whole. */
+/** A landing list (readLandingList), stored as the canonical text of what it rebuilt: never a field it does not know. */
+export function landingBody(json: unknown): Parsed<string> {
+  const r = readLandingList(json);
+  return r.ok ? { ok: true, value: JSON.stringify(r.list) } : refuse(r.error);
+}
+
 export function stagePlotsKeepBody(json: unknown): Parsed<string[]> {
   if (!isRecord(json) || !Array.isArray(json.keys)) return refuse("A keep must be an object with a list of keys");
   if (json.keys.length > STAGEPLOTS_MAX_KEYS) return refuse(`A keep names at most ${STAGEPLOTS_MAX_KEYS} keys`);

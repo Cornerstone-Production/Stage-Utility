@@ -49,6 +49,12 @@ export interface VenuePublish {
   publishedImages: string[];
   /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
   unpublishedImages: string[];
+  /**
+   * Shown on the page's landing page, its own address: the venue's name, plot count and link,
+   * to anyone who opens it. Off until turned on; kept through a regenerate and a page move,
+   * gone with an unpublish. See docs/ops/servicecue-on-the-web.md#the-landing-page.
+   */
+  listed: boolean;
 }
 
 /** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
@@ -244,6 +250,8 @@ export interface StagePlotsView {
   pendingRemovals: PendingRemovalView[];
   /** What following the last Public link save could not do (stageplots-publish.ts), for the Publish card. Absent when it did it all. */
   notice?: { at: string; message: string };
+  /** Why the page's landing page does not show the venues listed on it (an older Worker, a page that refused), for the Publish card. Absent when it does. */
+  landing?: { at: string; message: string };
 }
 
 /** A venue's `index` on the public page, as the server publishes it. */

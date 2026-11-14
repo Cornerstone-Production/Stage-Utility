@@ -50,6 +50,6 @@ export const stageplotsPublisher = new StagePlotsPublisher({
   patch: publisherPatch,
   timeZone: appTimeZone,
   // The follow's notice rides on every broadcast, so the Publish card keeps it until the next save clears it.
-  onSaved: (doc) => broadcast(STAGEPLOTS_CHANNEL, stagePlotsView(doc, stageplotsPublisher.notice())),
+  onSaved: (doc) => broadcast(STAGEPLOTS_CHANNEL, stagePlotsView(doc, stageplotsPublisher.notice(), stageplotsPublisher.landingNotice())),
   listen: (cb) => addBroadcastListener((channel) => cb(channel)),
 });

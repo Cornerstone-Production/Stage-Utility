@@ -1202,6 +1202,125 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
     assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
   });
 
+  /** A page set up as the Public link card saves one, the publisher started, and `run` handed it. */
+  async function withPage(run: (page: Awaited<ReturnType<(typeof import("../fixtures/publish-receiver.js"))["FakeReceiver"]["start"]>>) => Promise<void>) {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      stageplotsPublisher.start();
+      await run(page);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
+  }
+  const settled = async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    await stageplotsPublisher.settle();
+    // The landing list goes on its own chain, after the broadcast that settle does not wait for.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 20));
+    await stageplotsPublisher.settle();
+  };
+  const landingOn = (page: { hub: { landing: string | null } }) => (page.hub.landing === null ? null : (JSON.parse(page.hub.landing) as { venues: { name: string; secret: string; plots: number }[] }));
+
+  test("a listed venue is on its page's landing list, names and links only, and the list follows every change to it", async () => {
+    await withPage(async (page) => {
+      const id = await venueWithPlot();
+      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      await settled();
+      assert.deepEqual(landingOn(page)?.venues ?? [], [], "a venue was listed before it was asked");
+      let r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+      assert.equal(r.status, 200, r.body);
+      assert.equal((r.json as { publish: { listed: boolean } }).publish.listed, true);
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main room", secret, plots: 1 }] });
+      // A rename and a new plot: sent again.
+      await call("PATCH", `/api/stageplots/venues/${id}`, { name: "Main Auditorium", notes: "Side door" });
+      await call("POST", "/api/stageplots/plots", { venueId: id, name: "Baptism" });
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret, plots: 2 }] }, "the notes, or a stale name or count, reached the list");
+      // A regenerate lists the new link, still listed.
+      r = await call("POST", `/api/stageplots/venues/${id}/regenerate`);
+      assert.equal(r.status, 200, r.body);
+      const fresh = (r.json as { publish: { secret: string; listed: boolean } }).publish;
+      assert.equal(fresh.listed, true, "the regenerate dropped the listing");
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret: fresh.secret, plots: 2 }] });
+      // Unpublished: off the list.
+      await call("POST", `/api/stageplots/venues/${id}/unpublish`);
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [] });
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
+  test("taking a venue off the landing page, or deleting it, takes it off the list", async () => {
+    await withPage(async (page) => {
+      const a = await venueWithPlot();
+      const b = (await call("POST", "/api/stageplots/venues", { name: "Chapel", kind: "offsite" })).json as { id: string };
+      for (const id of [a, b.id]) {
+        assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+        assert.equal((await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true })).status, 200);
+      }
+      assert.deepEqual(landingOn(page)!.venues.map((v) => v.name), ["Main room", "Chapel"]);
+      assert.equal((await call("POST", `/api/stageplots/venues/${a}/listed`, { listed: false })).status, 200);
+      assert.deepEqual(landingOn(page)!.venues.map((v) => v.name), ["Chapel"]);
+      await call("DELETE", `/api/stageplots/venues/${b.id}`);
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [] });
+      await call("DELETE", `/api/stageplots/venues/${a}`);
+    });
+  });
+
+  test("only a published venue can be listed, and listed is true or false", async () => {
+    await withPage(async () => {
+      const id = await venueWithPlot();
+      const said = await warnings(async () => {
+        const r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+        assert.equal(r.status, 409);
+        assert.match((r.json as { error: string }).error, /not published/);
+      });
+      assert.equal(said.length, 1);
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: "yes" })).status, 400);
+      assert.equal((await call("POST", "/api/stageplots/venues/v-nowhere/listed", { listed: true })).status, 404);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
+  test("a page whose Worker predates landing pages: the listing is saved, the card says the page needs updating, said once", async () => {
+    await withPage(async (page) => {
+      const real = page.respond;
+      page.respond = (req) => (req.path === "/_publish/v1/landing" ? { status: 404, body: '{"error":"Not found"}' } : real(req));
+      const id = await venueWithPlot();
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+      const said = await warnings(async () => {
+        const r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+        assert.equal(r.status, 200, r.body);
+        assert.match((r.json as { notice: string }).notice, /needs updating before it can show a landing page: deploy the Worker\./);
+        await settled();
+      });
+      assert.equal(said.filter((w) => /landing page/.test(w)).length, 1, said.join(" | "));
+      const view = (await call("GET", "/api/stageplots")).json as View;
+      assert.match(view.landing!.message, /needs updating before it can show a landing page/);
+      assert.equal(view.venues[0].publish!.listed, true, "the listing was not kept");
+      // The Worker deployed: the next change sends the list, and the card's line goes.
+      page.respond = real;
+      await call("PATCH", `/api/stageplots/venues/${id}`, { notes: "x" });
+      await call("PATCH", `/api/stageplots/venues/${id}`, { name: "Main room 2" });
+      await settled();
+      assert.equal(landingOn(page)!.venues.length, 1);
+      assert.equal(((await call("GET", "/api/stageplots")).json as View).landing, undefined);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
   test("a draft kept on a published venue's plot sends nothing to the page and broadcasts no change to the plots", async () => {
     const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
     const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
@@ -1325,7 +1444,7 @@ describe("a restore landing", () => {
     const secret = "A".repeat(42) + "E";
     await stageplotsStore.update((d) => ({
       ...d,
-      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] } } : v)),
+      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], listed: false } } : v)),
     }));
     const resume = await stageplotsPublisher.pause();
     try {
@@ -1429,6 +1548,27 @@ describe("the page address changing under published venues", () => {
       assert.equal(t.a.hub.stageplots.size, 0, "the old page still serves the venue");
       assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
     } finally {
+      await t.close();
+    }
+  });
+
+  test("a listed venue moves onto the new page's landing list, still listed, and the old page lists nothing", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    stageplotsPublisher.start();
+    const t = await twoPages();
+    try {
+      assert.equal((await call("POST", `/api/stageplots/venues/${t.id}/listed`, { listed: true })).status, 200);
+      assert.deepEqual(JSON.parse(t.a.hub.landing!), { venues: [{ name: "Main room", secret: t.first, plots: 1 }] });
+      await t.moveTo();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 20));
+      await stageplotsPublisher.settle();
+      const pub = (await t.venue()).publish!;
+      assert.equal(pub.listed, true, "the move dropped the listing");
+      assert.deepEqual(JSON.parse(t.b.hub.landing!), { venues: [{ name: "Main room", secret: pub.secret, plots: 1 }] });
+      assert.deepEqual(JSON.parse(t.a.hub.landing!), { venues: [] }, "the old page still lists the venue");
+    } finally {
+      await call("DELETE", `/api/stageplots/venues/${t.id}`);
+      await stageplotsPublisher.settle();
       await t.close();
     }
   });

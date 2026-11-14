@@ -17,7 +17,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 const { FakeReceiver, waitFor } = await import("./fixtures/publish-receiver.js");
 const { parsePublishUrl } = await import("./servicecue-publish-rules.js");
 const { stageplotsStore, checkStagePlotsDoc } = await import("./stageplots-store.js");
-const { StagePlotsPublisher } = await import("./stageplots-publish.js");
+const { StagePlotsPublisher, landingList } = await import("./stageplots-publish.js");
 const { PUBLISH_MAX_BODY_BYTES, isStagePlotsSecret } = await import("../types/servicecue-publish.js");
 
 import type { FakeReceiver as Receiver, Received } from "./fixtures/publish-receiver.js";
@@ -202,6 +202,28 @@ async function visit(page: Receiver, secret: string, key: string): Promise<{ sta
 }
 
 const host = (page: Receiver) => new URL(page.origin).host;
+
+describe("the landing list", () => {
+  test("is each venue published on that page and listed, home first, as its name, secret and plot count and nothing else", () => {
+    const doc = venueDoc();
+    const pub = (secret: string, origin: string, listed: boolean) => ({ secret, origin, publishedAt: "2026-11-14T12:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], listed });
+    const base = doc.venues[0]!;
+    const s = (c: string) => `${c.repeat(42)}A`;
+    doc.venues = [
+      { ...base, id: "v-off", name: "Away", kind: "offsite", notes: "Secret door code 1234", publish: pub(s("a"), "https://page.example", true) },
+      { ...base, id: "v-home", name: "Main", notes: "Load in at the side", publish: pub(s("b"), "https://page.example", true) },
+      { ...base, id: "v-unlisted", name: "Chapel", publish: pub(s("c"), "https://page.example", false) },
+      { ...base, id: "v-elsewhere", name: "Annex", publish: pub(s("d"), "https://other.example", true) },
+      { ...base, id: "v-unpublished", name: "Hall" },
+    ];
+    assert.deepEqual(landingList(doc, "https://page.example"), {
+      venues: [
+        { name: "Main", secret: s("b"), plots: base.plotIds.length },
+        { name: "Away", secret: s("a"), plots: base.plotIds.length },
+      ],
+    });
+  });
+});
 
 describe("publishing a venue", () => {
   test("PUTs every background, then each plot, then the index, under a new secret, and saves the link", async () => {
@@ -1487,12 +1509,23 @@ describe("the publish state in the store", () => {
       lastError: { at: "2026-11-12T14:31:00.000Z", message: "It did not answer." },
       publishedImages: [hash(2), hash(1), hash(2)],
       unpublishedImages: [],
+      listed: true,
     };
     const once = checkStagePlotsDoc(doc);
     assert.deepEqual(once.venues[0]!.publish!.publishedImages, [hash(1), hash(2)]);
     assert.deepEqual(checkStagePlotsDoc(once), once);
     const off = checkStagePlotsDoc(venueDoc());
     assert.equal(Object.hasOwn(off.venues[0]!, "publish"), false, "an unpublished venue grew a publish field");
+  });
+
+  test("a publish state saved before the landing page is not listed; a listing that is not true or false is refused", async () => {
+    const { checkStagePlotsDoc } = await import("./stageplots-store.js");
+    const doc = venueDoc();
+    const old = { secret: "A".repeat(42) + "E", origin: "https://page.example", publishedAt: "2026-11-12T14:32:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] };
+    doc.venues[0]!.publish = old as never;
+    assert.equal(checkStagePlotsDoc(doc).venues[0]!.publish!.listed, false, "a venue published before landing pages came back listed");
+    doc.venues[0]!.publish = { ...old, listed: "yes" } as never;
+    assert.throws(() => checkStagePlotsDoc(doc), /landing page listing must be true or false/);
   });
 
   test("pending removals are checked, sorted by page then secret, one per pair, and pass the check again unchanged", async () => {

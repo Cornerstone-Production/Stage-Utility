@@ -438,9 +438,19 @@ says so rather than drawing an empty stage.
 **Anyone with the link can see that venue's plots, item notes and inputs included.** For each
 [linked connection point](#patch-link) that includes the patch sheet's name and the channels a
 tap lists. The link is 43 random characters, so it cannot be guessed, and nothing on the page
-lists venues; but whoever is sent it can send it on. A link that was never published, one that
-was regenerated or unpublished, and a mistyped one all answer exactly as an address the
-page does not know.
+lists venues unless you list them (below); but whoever is sent it can send it on. A link that
+was never published, one that was regenerated or unpublished, and a mistyped one all answer
+exactly as an address the page does not know.
+
+**Show on the landing page** lists a published venue on the page's own address, the
+[landing page](../ops/servicecue-on-the-web.md#the-landing-page): its name, plot count and
+link, beside a ServiceCue card, for anyone who opens the page. That makes the link public to
+anyone who finds the page, which the switch's line says. Every venue starts off it. A
+listed venue stays listed through a regenerate (the new link is listed) and a page move,
+and comes off with an unpublish or a delete. With no venue listed, the page's address goes
+straight to ServiceCue as before. A page deployed before landing pages keeps doing that, and
+the switch's line says "*host* needs updating before it can show a landing page: deploy the
+Worker."
 
 It uses the page address and publishing token saved under **Settings → Advanced →
 Public link**; ServiceCue publishing itself does not have to be switched
@@ -453,7 +463,7 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 | | |
 |---|---|
 | **Off** | **Publish *venue***. Nothing is sent until it is pressed |
-| **Published** | When it was last published, the link with **Copy**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
+| **Published** | When it was last published, the link with **Copy**, **Show on the landing page**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
 | **Old links still live** | Under either state, and on its own when no venue is selected: "*n* old links still live on *host*", with **Remove now** when that page is the one set up, and "Set that page up again to remove it" when not. See [Old links](#old-links) |
 
 - **Publish** makes the secret on the server, sends every background the venue's plots
@@ -590,7 +600,9 @@ left behind, the tidy skipped and why, image processing unavailable because shar
 did not load, a save that failed, every item save refused and why (a body that is
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
 version that is not a whole number, "changed elsewhere"), every draft refused and
-why, drafts dropped because their plot is gone, a draft that could not be written,
+why, drafts dropped because their plot is gone, a draft that could not be written, each
+venue listed on or taken off the landing page, each new landing list a page took, and a
+list the page would not take (once, with why, and again once it does),
 how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan

@@ -2,8 +2,10 @@
 // ServiceCue public page behind a secret link, or not.
 //
 // Off: what publishing does, and Publish <venue>. Published: when it was last published,
-// the link with Copy, Regenerate… and Unpublish… behind their confirms, the backgrounds
-// not yet published with Publish now, and the last error. What each action does, and
+// the link with Copy, Show on the landing page (the page's own address lists the venue;
+// its line says who sees it, or that the page needs updating), Regenerate… and Unpublish…
+// behind their confirms, the backgrounds not yet published with Publish now, and the last
+// error. What each action does, and
 // what it says when the page refuses, is the server's (stageplots-publish.ts); the card
 // shows the venue as the server saved it, followed live on stageplots:updated.
 //
@@ -26,6 +28,7 @@ import { STAGEPLOTS_PATH } from "@main/types/servicecue-publish";
 import { plural } from "@main/services/plural";
 
 import { Button } from "../../components/ui/button";
+import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
@@ -38,7 +41,7 @@ import { SettingsInAdvancedLink } from "./servicecue-public-link";
 import { zonedDayLabel } from "./plan-date-label";
 import { CardHeader, iconButton, type Save } from "./stageplots-shared";
 
-type Action = "publish" | "regenerate" | "unpublish" | "publishNow";
+type Action = "publish" | "regenerate" | "unpublish" | "publishNow" | "listing";
 
 /** "q7Hk2v…Rb4w": enough of a secret to tell two links apart, short enough for the card. */
 export function shortSecret(secret: string): string {
@@ -140,7 +143,22 @@ export function PendingLinksCard({ pending, save, notice, timeZone }: { pending:
   );
 }
 
-export function PublishCard({ venue, pending, save, timeZone, follow }: { venue: Venue; pending: readonly PendingRemovalView[]; save: Save; timeZone: string; follow?: FollowNoticeView | undefined }) {
+export function PublishCard({
+  venue,
+  pending,
+  save,
+  timeZone,
+  follow,
+  landing,
+}: {
+  venue: Venue;
+  pending: readonly PendingRemovalView[];
+  save: Save;
+  timeZone: string;
+  follow?: FollowNoticeView | undefined;
+  /** Why the page's landing page does not show what is listed on it (StagePlotsView.landing). */
+  landing?: FollowNoticeView | undefined;
+}) {
   const pub = venue.publish ?? null;
   // The Public link card's address, for the host and whether there is a page to publish to.
   const target = usePublishTarget();
@@ -170,12 +188,20 @@ export function PublishCard({ venue, pending, save, timeZone, follow }: { venue:
   const host = pub ? new URL(pub.origin).host : savedUrl ? new URL(savedUrl).host : "the public page";
   const link = pub ? `${pub.origin}${STAGEPLOTS_PATH}/${pub.secret}` : "";
 
-  const run = async (action: Action) => {
+  const run = async (action: Exclude<Action, "listing">) => {
     setWorking(action);
     const r = await save(() => stageplotsApi[action](venue.id));
     setWorking(null);
     setError(r.ok ? null : r.error);
     setNotice(r.ok ? (r.value.notice ?? null) : null);
+  };
+
+  /** Show on the landing page, or take off: saved at once, and sent to the page. */
+  const setListed = async (listed: boolean) => {
+    setWorking("listing");
+    const r = await save(() => stageplotsApi.setListed(venue.id, listed));
+    setWorking(null);
+    setError(r.ok ? null : r.error);
   };
 
   const onCopy = async () => {
@@ -292,6 +318,21 @@ export function PublishCard({ venue, pending, save, timeZone, follow }: { venue:
               Selected: press Ctrl+C (⌘C on a Mac) to copy it.
             </p>
           )}
+          <div className="flex items-center gap-2.5">
+            <span className="min-w-0 flex-1">
+              <b className="block text-footnote font-medium">Show on the landing page</b>
+              {landing ? (
+                <small className="block text-[11px] leading-[14px] text-warn-11" role="status" data-testid="landing-note">
+                  {landing.message}
+                </small>
+              ) : (
+                <small className="block text-[11px] leading-[14px] text-fg-subtle">
+                  Anyone who opens {host} sees {venue.name} and can open its plots.
+                </small>
+              )}
+            </span>
+            <Switch aria-label="Show on the landing page" checked={pub.listed} disabled={working !== null} onCheckedChange={(on) => void setListed(on)} />
+          </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <Button size="small" variant="filled" disabled={working !== null} onClick={() => void onRegenerate()}>
               <RefreshCwIcon className="size-3.5" aria-hidden />

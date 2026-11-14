@@ -85,6 +85,8 @@ export const stageplotsApi = {
   unpublish: (id: string) => invoke<PublishAnswer>("stageplots:unpublish", { id }),
   /** Send a published venue again, the backgrounds not yet published included. */
   publishNow: (id: string) => invoke<PublishAnswer>("stageplots:publishNow", { id }),
+  /** Show a published venue on its page's landing page, or take it off. `notice`: the page could not take the list (an older Worker). */
+  setListed: (id: string, listed: boolean) => invoke<PublishAnswer>("stageplots:setListed", { id, listed }),
   /** Remove now: drop every old link queued against the page set up. */
   removePending: () => invoke<{ removed: number; left: number; waiting: number }>("stageplots:removePending"),
 };

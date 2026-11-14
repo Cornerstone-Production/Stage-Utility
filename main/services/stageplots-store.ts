@@ -276,7 +276,15 @@ function checkPublish(raw: unknown, what: string): VenuePublish {
     lastError,
     publishedImages: sortedSet(p.publishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s published backgrounds`),
     unpublishedImages: sortedSet(p.unpublishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s backgrounds not yet published`),
+    // Saved before the landing page existed: not listed, so nothing becomes public that was not.
+    listed: listedOf(p.listed, what),
   };
+}
+
+function listedOf(v: unknown, what: string): boolean {
+  if (v === undefined) return false;
+  if (typeof v !== "boolean") refuse(`${what}'s landing page listing must be true or false`);
+  return v;
 }
 
 function checkPending(raw: unknown, i: number): PendingRemoval {

@@ -11,6 +11,8 @@
 import {
   ASSET_PATH_PREFIX,
   HEARTBEAT_PATH,
+  LANDING_PATH,
+  LANDING_PUBLISH_PATH,
   LIVE_PATH,
   PUBLISH_BASE_PATH,
   STAGEPLOTS_PATH,
@@ -63,6 +65,7 @@ export type PublishRoute =
   | { kind: "deleteStagePlot"; secret: string; key: string }
   | { kind: "keepStagePlots"; secret: string }
   | { kind: "dropStagePlots"; secret: string }
+  | { kind: "putLanding" }
   | Rejection;
 
 /** Where the publisher puts a venue's stage plots: this, a secret, and a key or nothing. */
@@ -94,6 +97,8 @@ function routeStagePlotsPublish(method: string, pathname: string): PublishRoute 
 export function routePublish(method: string, url: URL): PublishRoute {
   if (!url.pathname.startsWith(`${PUBLISH_BASE_PATH}/`)) return notFound();
   if (url.pathname.startsWith(`${STAGEPLOTS_PUBLISH_PATH}/`)) return routeStagePlotsPublish(method, url.pathname);
+  // The landing list. A Worker from before landing pages answers 404 here: "deploy the Worker".
+  if (url.pathname === `${PUBLISH_BASE_PATH}${LANDING_PUBLISH_PATH}`) return method === "PUT" ? { kind: "putLanding" } : notAllowed("PUT");
   const parts = url.pathname.slice(PUBLISH_BASE_PATH.length).split("/");
   // parts[0] is "" — the path began with the slash that follows the base.
 
@@ -131,8 +136,10 @@ export function routePublish(method: string, url: URL): PublishRoute {
 // anyway is a path it does not name, so a 404.
 
 export type PublicRoute =
-  /** The bare address: sent on to the ServiceCue landing page. */
+  /** The bare address: the landing page while a venue is listed on it, else sent on to ServiceCue. */
   | { kind: "home" }
+  /** The landing page's list of venues. */
+  | { kind: "landing" }
   /** The viewer's document, whichever ServiceCue address asked for it. */
   | { kind: "viewer" }
   | { kind: "doc"; key: string }
@@ -175,6 +182,7 @@ function matchPublic(url: URL): Exclude<PublicRoute, Rejection> | null {
   }
 
   if (pathname === HEARTBEAT_PATH) return search === "" ? { kind: "heartbeat" } : null;
+  if (pathname === LANDING_PATH) return search === "" ? { kind: "landing" } : null;
   if (pathname === LIVE_PATH) return search === "" ? { kind: "live" } : null;
 
   const key = docKeyForRequest(pathname, search);

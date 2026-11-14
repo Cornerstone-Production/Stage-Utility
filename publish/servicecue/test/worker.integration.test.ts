@@ -65,6 +65,7 @@ before(async () => {
   mkdirSync(path.join(assets, "assets", "nested"), { recursive: true });
   writeFileSync(path.join(assets, "servicecue.html"), `<!doctype html><title>viewer</title>${BUILD_META}`);
   writeFileSync(path.join(assets, "stageplots.html"), "<!doctype html><title>stage plots</title>");
+  writeFileSync(path.join(assets, "landing.html"), "<!doctype html><title>landing</title>");
   writeFileSync(path.join(assets, "assets", "app-abc123.js"), "console.log(1)");
   writeFileSync(path.join(assets, "assets", "nested", "x.js"), "console.log(2)");
   writeFileSync(path.join(assets, "assets", "readme.txt"), "not a file the build writes");
@@ -313,6 +314,33 @@ describe("a venue's stage plots", () => {
     const keep = await sp("PUT", s, "", { keys: ["plot/p-0"] });
     assert.equal((await keep.json()).removed.length, 99);
     assert.equal((await sp("PUT", s, "plot/one-more", {})).status, 204);
+  });
+});
+
+describe("the landing list", () => {
+  const listed = (secret: string) => ({ venues: [{ name: "Main Auditorium", secret, plots: 3 }] });
+
+  test("is kept in the object, read at /api/landing, makes / the landing page, and an empty one sends / on again", async () => {
+    const s = randomBytes(32).toString("base64url");
+    assert.equal((await send("PUT", "/_publish/v1/landing", listed(s), {})).status, 401);
+    assert.equal((await send("PUT", "/_publish/v1/landing", listed(s))).status, 204);
+    assert.deepEqual(await (await fetch(`${base}/api/landing`)).json(), listed(s));
+    const home = await fetch(`${base}/`, { redirect: "manual" });
+    assert.equal(home.status, 200);
+    assert.equal(await home.text(), "<!doctype html><title>landing</title>");
+    assert.equal((await fetch(`${base}/landing.html`)).status, 404, "the document was served at its own name");
+    assert.equal((await send("PUT", "/_publish/v1/landing", { venues: [] })).status, 204);
+    const away = await fetch(`${base}/`, { redirect: "manual" });
+    assert.deepEqual([away.status, away.headers.get("location")], [302, "/servicecue"]);
+  });
+
+  test("is absent from the status answer and untouched by the ServiceCue manifest", async () => {
+    const s = randomBytes(32).toString("base64url");
+    assert.equal((await send("PUT", "/_publish/v1/landing", listed(s))).status, 204);
+    assert.equal((await (await send("GET", "/_publish/v1/status")).text()).includes(s), false, "the status answer named a secret");
+    assert.equal((await send("PUT", "/_publish/v1/manifest", { docs: [], assets: [] })).status, 200);
+    assert.deepEqual(await (await fetch(`${base}/api/landing`)).json(), listed(s));
+    assert.equal((await send("PUT", "/_publish/v1/landing", { venues: [] })).status, 204);
   });
 });
 

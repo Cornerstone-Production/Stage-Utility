@@ -7,12 +7,12 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { buildManifest } from "./main/services/install-metadata";
 import { tsconfigAliases } from "./main/services/vite-aliases";
-import { PUBLIC_STATIC_FILES, STAGEPLOTS_HTML, VIEWER_HTML, viewerBuildTag } from "./main/types/servicecue-publish";
+import { LANDING_HTML, PUBLIC_STATIC_FILES, STAGEPLOTS_HTML, VIEWER_HTML, viewerBuildTag } from "./main/types/servicecue-publish";
 import { STATIC_HEADERS_FILE, staticHeaders } from "./publish/servicecue/src/headers";
 
-// The public ServiceCue viewer: servicecue.html and what it loads, and the published
-// stage plots page, stageplots.html, built into the folder the Worker in
-// publish/servicecue/ serves as its static assets.
+// The public ServiceCue viewer: servicecue.html and what it loads, the published
+// stage plots page, stageplots.html, and the landing page, landing.html, built into
+// the folder the Worker in publish/servicecue/ serves as its static assets.
 //
 //   npm run servicecue:build
 //
@@ -34,10 +34,10 @@ const MANIFEST = "/manifest.webmanifest";
  *    this build, because public/ also holds control.html and whatever else gets put
  *    there, and copying the folder would put it on the public host;
  *  - the headers file the asset service reads, for the files it answers itself;
- *  - the document's build id (VIEWER_BUILD_META), the hash of both documents as Vite wrote
- *    them (servicecue.html, then stageplots.html). Their script and style names carry their
- *    own content hashes, so a document differs whenever either does, and the server that
- *    keeps the page up to date redeploys for a change to either page; an icon or a
+ *  - the document's build id (VIEWER_BUILD_META), the hash of the three documents as Vite
+ *    wrote them (servicecue.html, stageplots.html, then landing.html). Their script and style
+ *    names carry their own content hashes, so a document differs whenever any does, and the
+ *    server that keeps the page up to date redeploys for a change to any page; an icon or a
  *    manifest that changes alone is not a new build, and does not reload an open page.
  *
  * And takes one thing out: api.ts names the operator app's shared worker, which Vite
@@ -69,8 +69,9 @@ function viewerFiles(): Plugin {
       };
       const { asset: document, html } = text(VIEWER_HTML);
       const { html: plotsHtml } = text(STAGEPLOTS_HTML);
+      const { html: landingHtml } = text(LANDING_HTML);
       if (!html.includes("</head>")) throw new Error(`${VIEWER_HTML.slice(1)} has no </head> to put the build id before`);
-      const id = createHash("sha256").update(html).update("\0").update(plotsHtml).digest("hex").slice(0, 12);
+      const id = createHash("sha256").update(html).update("\0").update(plotsHtml).update("\0").update(landingHtml).digest("hex").slice(0, 12);
       document.source = html.replace("</head>", `${viewerBuildTag(id)}</head>`);
     },
   };
@@ -96,7 +97,7 @@ export default defineConfig({
     // not for fonts, and a small font inlined into the stylesheet would be blocked.
     assetsInlineLimit: 0,
     rollupOptions: {
-      input: { servicecue: resolve(__dirname, "servicecue.html"), stageplots: resolve(__dirname, "stageplots.html") },
+      input: { servicecue: resolve(__dirname, "servicecue.html"), stageplots: resolve(__dirname, "stageplots.html"), landing: resolve(__dirname, "landing.html") },
     },
   },
 });

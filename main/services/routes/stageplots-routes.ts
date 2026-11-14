@@ -53,6 +53,10 @@
 //   POST   /api/stageplots/venues/:id/unpublish     → the venue, its link deleted from the page; with no
 //                                                   page to ask, queued, and the answer adds notice
 //   POST   /api/stageplots/venues/:id/publish-now   → the venue, everything sent again
+//   POST   /api/stageplots/venues/:id/listed        { listed } → the venue, shown on (or taken off) its
+//                                                   page's landing page, once the page has the list;
+//                                                   409 when it is not published, notice beside it
+//                                                   when the page could not take the list
 //   POST   /api/stageplots/pending/remove           → { removed, left, waiting }: Remove now
 //                                                   Each venue action: 404 for an unknown venue, 409
 //                                                   when it is (not) published, no page is set up
@@ -127,7 +131,7 @@ import {
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
 /** The document as browsers get it: secrets left out, and the publisher's follow notice beside it. */
-const toView = (doc: StagePlotsDoc) => stagePlotsView(doc, stageplotsPublisher.notice());
+const toView = (doc: StagePlotsDoc) => stagePlotsView(doc, stageplotsPublisher.notice(), stageplotsPublisher.landingNotice());
 
 const PREFIX = "/api/stageplots";
 
@@ -941,6 +945,18 @@ async function publishAction(c: RouteCtx, action: string, id: string, run: (id: 
   else json(c.res, { error: r.error }, r.status);
 }
 
+/** Show a published venue on its page's landing page, or take it off. */
+async function setListed(c: RouteCtx, id: string): Promise<void> {
+  const body = await readObjectBody(c.req, c.res);
+  if (!body) return;
+  const listed = body.listed;
+  if (typeof listed !== "boolean") {
+    console.warn(`[stageplots] landing page listing refused for venue ${scrub(id)}: listed is not true or false`);
+    return error(c.res, "listed must be true or false");
+  }
+  await publishAction(c, "landing page listing", id, (venueId) => stageplotsPublisher.setListed(venueId, listed));
+}
+
 /** Remove now: every old link queued against the page set up is dropped from it. Answers how many went, failed and wait for another page. */
 async function removePending(c: RouteCtx): Promise<void> {
   const r = await stageplotsPublisher.removePending();
@@ -976,6 +992,8 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);
+  id = idIn(pathname, "venues", "listed");
+  if (id && method === "POST") return setListed(c, id);
   for (const [action, run] of PUBLISH_ACTIONS) {
     const venueId = idIn(pathname, "venues", action);
     if (venueId && method === "POST") return publishAction(c, action, venueId, run);

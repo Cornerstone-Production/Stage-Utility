@@ -644,6 +644,7 @@ export type IpcChannel =
   | "stageplots:removePending"
   | "stageplots:saveItems"
   | "stageplots:setDefault"
+  | "stageplots:setListed"
   | "stageplots:setOverride"
   | "stageplots:unpublish"
   | "stageplots:updateBackground"
@@ -887,6 +888,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "stageplots:regenerate":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/regenerate`);
+
+    case "stageplots:setListed":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/listed`, { listed: p.listed });
 
     case "stageplots:unpublish":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/unpublish`);

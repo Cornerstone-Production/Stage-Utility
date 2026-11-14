@@ -194,12 +194,75 @@ describe("the publisher's token", () => {
     assert.equal((await s.run("GET", "/servicecue")).status, 200);
   });
 
-  test("the bare address is sent on to the landing page, with nothing else said", async () => {
+  test("the bare address is sent on to ServiceCue while no venue is listed, with nothing else said", async () => {
     const s = setup();
     const res = await s.run("GET", "/");
     assert.equal(res.status, 302);
     assert.equal(res.headers.get("Location"), "/servicecue");
     assert.equal(await res.text(), "");
+    // An empty list, sent when the last venue is taken off, is no venue listed.
+    s.hub.landing = json({ venues: [] });
+    assert.equal((await s.run("GET", "/")).status, 302);
+  });
+});
+
+describe("the landing page", () => {
+  const SECRET = `${"a".repeat(42)}A`;
+  const LIST = { venues: [{ name: "Main Auditorium", secret: SECRET, plots: 3 }] };
+  const put = (s: Setup, body: unknown, headers: Record<string, string> = AUTH) =>
+    s.run("PUT", "/_publish/v1/landing", { headers: { ...headers, "Content-Type": "application/json" }, body: json(body) });
+
+  test("the publisher puts the list, and only the fields a list has are kept", async () => {
+    const s = setup();
+    const res = await put(s, { venues: [{ ...LIST.venues[0], notes: "Load in at the side" }], extra: true });
+    assert.equal(res.status, 204);
+    assert.deepEqual(JSON.parse(s.hub.landing!), LIST);
+  });
+
+  test("a list that is not one is a 400, and nothing is stored; without the token, a 401", async () => {
+    const s = setup();
+    for (const bad of [{}, { venues: [{ name: "Hall", secret: "not-a-secret", plots: 1 }] }, { venues: [{ name: "", secret: SECRET, plots: 1 }] }, { venues: [{ name: "Hall", secret: SECRET, plots: 99 }] }]) {
+      assert.equal((await put(s, bad)).status, 400, json(bad));
+    }
+    assert.equal((await put(s, LIST, {})).status, 401);
+    assert.equal(s.hub.landing, null);
+    assert.equal((await s.run("GET", "/_publish/v1/landing", { headers: AUTH })).status, 405);
+  });
+
+  test("with a venue listed, the bare address is the landing page, with the policy and no caching", async () => {
+    const s = setup();
+    FILES.set("/landing.html", { body: "<!doctype html><title>landing</title>", type: "text/html; charset=utf-8" });
+    try {
+      s.hub.landing = json(LIST);
+      const res = await s.run("GET", "/");
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-security-policy"), htmlCsp(new URL(`${ORIGIN}/`)));
+      assert.equal(res.headers.get("cache-control"), "no-cache");
+      assert.match(await res.text(), /<title>landing<\/title>/);
+      assert.deepEqual(s.assetCalls, ["GET /landing.html"]);
+      // Never at its own name.
+      assert.equal((await s.run("GET", "/landing.html")).status, 404);
+    } finally {
+      FILES.delete("/landing.html");
+    }
+  });
+
+  test("the page reads the list at /api/landing, uncached; none before the first", async () => {
+    const s = setup();
+    let res = await s.run("GET", "/api/landing");
+    assert.deepEqual([res.status, await res.json()], [200, { venues: [] }]);
+    s.hub.landing = json(LIST);
+    res = await s.run("GET", "/api/landing");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), LIST);
+    assert.equal((await s.run("GET", "/api/landing?x=1")).status, 404);
+  });
+
+  test("the list is never in the status answer", async () => {
+    const s = setup();
+    s.hub.landing = json(LIST);
+    const status = await (await s.run("GET", "/_publish/v1/status", { headers: AUTH })).text();
+    assert.doesNotMatch(status, new RegExp(SECRET));
   });
 });
 
