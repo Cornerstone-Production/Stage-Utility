@@ -223,15 +223,27 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
   if (!body) return;
   const problem = validateVenueInput(body, { partial: true });
   if (problem) return error(c.res, problem);
+  const order = body.plotIds;
+  if (order !== undefined && (!Array.isArray(order) || !order.every((x) => typeof x === "string"))) {
+    console.warn(`[stageplots] plot order refused for venue ${scrub(id)}: plotIds is not a list of plot ids`);
+    return error(c.res, "plotIds must be the venue's plot ids, in their new order");
+  }
   await mutate(
     c.res,
     (doc) => {
       const v = findVenue(doc, id);
+      // A new tab order names exactly the venue's plots, each once: anything else would
+      // drop or duplicate a plot, so it is refused whole.
+      if (order !== undefined && (order.length !== v.plotIds.length || new Set(order).size !== order.length || !order.every((x) => v.plotIds.includes(x)))) {
+        console.warn(`[stageplots] plot order refused for venue ${scrub(id)}: it does not name each of its ${scrub(v.plotIds.length)} plots once`);
+        throw new Refused(400, "plotIds must name each of the venue's plots exactly once");
+      }
       return replaceIn<Venue>(doc, "venues", {
         ...v,
         ...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
         ...(body.kind !== undefined ? { kind: body.kind as VenueKind } : {}),
         ...(typeof body.notes === "string" ? { notes: body.notes } : {}),
+        ...(order !== undefined ? { plotIds: order as string[] } : {}),
       });
     },
     (doc) => findVenue(doc, id),
@@ -420,29 +432,39 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
 
 /**
  * Delete a plot, and the overrides that named it: a plan whose override is
- * gone shows its venue's default. The answer lists those plans, and the log
- * says how many (the editor's confirm named them before the delete was sent).
+ * gone shows its venue's default. Deleting the default makes the first plot
+ * left in tab order the default, and deleting the last plot leaves the venue
+ * with none. The answer lists the cleared plans and the new default, and the
+ * log says both (the editor's confirm named them before the delete was sent).
  */
 async function deletePlot(c: RouteCtx, id: string): Promise<void> {
   let cleared: string[] = [];
+  let promoted: string | null = null;
+  let wasDefault = false;
   const saved = await mutate(
     c.res,
     (doc) => {
       const p = findPlot(doc, id);
       const venue = findVenue(doc, p.venueId);
-      if (venue.defaultPlotId === id) throw new Refused(409, "this is the venue's default plot; make another plot the default before deleting it");
+      const plotIds = venue.plotIds.filter((x) => x !== id);
+      wasDefault = venue.defaultPlotId === id;
+      promoted = wasDefault ? (plotIds[0] ?? null) : null;
       cleared = overridesOfPlot(doc, id).map((o) => o.planId);
       return {
         ...doc,
         plots: doc.plots.filter((x) => x.id !== id),
-        venues: doc.venues.map((v) => (v.id === venue.id ? { ...v, plotIds: v.plotIds.filter((x) => x !== id) } : v)),
+        venues: doc.venues.map((v) => (v.id === venue.id ? { ...v, plotIds, defaultPlotId: wasDefault ? promoted : v.defaultPlotId } : v)),
         overrides: doc.overrides.filter((o) => o.plotId !== id),
       };
     },
-    () => ({ ok: true, clearedPlans: cleared }),
+    () => ({ ok: true, clearedPlans: cleared, defaultPlotId: promoted }),
   );
-  if (saved && cleared.length > 0) {
+  if (!saved) return;
+  if (cleared.length > 0) {
     console.log(`[stageplots] plot ${scrub(id)} deleted; ${scrub(cleared.length)} plan overrides cleared (plans ${scrub(cleared.join(", "))}), which show the default now`);
+  }
+  if (wasDefault) {
+    console.log(`[stageplots] plot ${scrub(id)} was its venue's default; ${promoted ? `plot ${scrub(promoted)} is the default now` : "the venue has no plots left"}`);
   }
 }
 

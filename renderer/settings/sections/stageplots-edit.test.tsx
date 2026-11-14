@@ -105,7 +105,8 @@ function heightOf(p: Plot): number {
 }
 
 function broadcast() {
-  FakeEventSource.last?.push("stageplots:updated", DOC);
+  // A copy, as the real stream's JSON is: the same object again would be no change to React.
+  FakeEventSource.last?.push("stageplots:updated", structuredClone(DOC));
 }
 
 /** The fake routes: just enough of each to answer the way the server does. */
@@ -169,13 +170,15 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   if (method === "DELETE" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
     const v = venue(p.venueId);
-    if (v.defaultPlotId === p.id) return { status: 409, json: { error: "this is the venue's default plot" } };
-    // As the route does: the plot, its place in its venue, and the overrides naming it.
+    // As the route does: the plot, its place in its venue, the overrides naming it,
+    // and the first plot left as the default when it was the default.
     const clearedPlans = overridesOfPlot(DOC, p.id).map((o) => o.planId);
     DOC.plots = DOC.plots.filter((x) => x.id !== p.id);
     v.plotIds = v.plotIds.filter((x) => x !== p.id);
+    const promoted = v.defaultPlotId === p.id ? (v.plotIds[0] ?? null) : null;
+    if (v.defaultPlotId === p.id) v.defaultPlotId = promoted;
     DOC.overrides = DOC.overrides.filter((o) => o.plotId !== p.id);
-    return { status: 200, json: { ok: true, clearedPlans } };
+    return { status: 200, json: { ok: true, clearedPlans, defaultPlotId: promoted } };
   }
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
@@ -191,7 +194,8 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const u = new URL(String(url), "http://localhost");
   const method = init?.method ?? "GET";
   let status = 200;
-  let json: unknown = DOC;
+  // A copy, as a real read is: the same object again would be no change to React.
+  let json: unknown = structuredClone(DOC);
   if (u.pathname === "/api/stageplots/patch") {
     if (PATCH_HOLD) await PATCH_HOLD;
     const [st, body] = PATCH_DOWN ? [503, { error: "patch.json could not be read (EIO)" }] : [200, PATCH];
@@ -434,19 +438,58 @@ describe("/stageplots/edit", () => {
     assert.equal(starOn(), 1);
   });
 
-  test("deleting the default plot is not offered", async () => {
+  test("deleting the default plot says which plot takes over, and it does", async () => {
     await mount();
     await openMenu();
-    const del = screen.getByRole("menuitem", { name: /Delete/ });
-    assert.equal(del.getAttribute("aria-disabled"), "true");
-    assert.match(del.textContent!, /Make another the default first/);
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /Special becomes the default\./);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.ok(writes().includes("DELETE /api/stageplots/plots/p-1"));
+    assert.equal(DOC.venues[0].defaultPlotId, "p-2");
+    await settle();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Special"]);
+    assert.ok(within(tabs()[0]).getByRole("img", { name: "Default plot" }));
+  });
+
+  test("deleting the last plot leaves the venue empty, offering Add plot", async () => {
+    DOC.venues[0].plotIds = ["p-1"];
+    DOC.plots = DOC.plots.filter((p) => p.id === "p-1");
+    await mount();
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    assert.match(screen.getByRole("alertdialog").textContent!, /Room One is left with no plots\./);
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete plot" }));
+    assert.equal(DOC.venues[0].defaultPlotId, null);
+    await settle();
+    assert.equal(screen.queryAllByRole("tab").length, 0);
+    assert.ok(screen.getByRole("button", { name: "Add plot" }));
+    assert.equal(screen.queryByRole("button", { name: "New plot" }), null);
+  });
+
+  test("Move right and Move left reorder the tabs, saved as the venue's plotIds", async () => {
+    await mount();
+    await openMenu();
+    assert.equal(screen.getByRole("menuitem", { name: "Move left" }).getAttribute("aria-disabled"), "true");
+    await click(screen.getByRole("menuitem", { name: "Move right" }));
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/venues/v-1", body: { plotIds: ["p-2", "p-1"] } });
+    await settle();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Special", "Standard"]);
+  });
+
+  test("a double-click on a tab renames it in place", async () => {
+    await mount();
     await act(async () => {
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      fireEvent.doubleClick(tabs()[1]);
+    });
+    const field = screen.getByRole("textbox", { name: "Plot name" }) as HTMLInputElement;
+    assert.equal(document.activeElement, field);
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "Christmas" } });
+      fireEvent.blur(field);
     });
     await settle();
-    await click(tabs()[1]);
-    await openMenu();
-    assert.equal(screen.getByRole("menuitem", { name: /Delete/ }).getAttribute("aria-disabled"), null);
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/plots/p-2", body: { name: "Christmas" } });
   });
 
   test("a failed save shows the error beside the control and keeps the saved value", async () => {

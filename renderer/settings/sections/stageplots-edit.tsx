@@ -639,7 +639,7 @@ function EditorBody({
                   patch={patch}
                 />
               ) : (
-                <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with the + beside the tabs." />
+                <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with Add plot above." />
               )}
             </>
           )}

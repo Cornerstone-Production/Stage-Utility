@@ -13,8 +13,9 @@ the floor pockets are) and up to 20 **plots**.
 A plot is a drawing of the venue for one kind of service: a name, a background,
 and how far the background is faded toward the paper. One plot per venue is its
 **default**, marked with a star in the editor and *Default* on `/stageplots`. A
-venue's first plot becomes its default. The default cannot be deleted until
-another plot is made the default; deleting a venue deletes its plots.
+venue's first plot becomes its default. Deleting the default makes the first plot
+left, in tab order, the default; deleting a venue's last plot leaves it with none.
+Deleting a venue deletes its plots.
 
 A plot is 1000 units wide, and its height follows its background's shape. A plot
 with no background is drawn on a plain 16:9 grid.
@@ -149,10 +150,14 @@ plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
   its **Clean-up** switch and **Delete background…**.
 - **This week**: which plot the selected venue shows for the live or next plan,
   and for other upcoming plans (see [Default and this week](#default-and-this-week)).
-- **Plots**: a tab per plot, **+** for a new one (it starts on the selected plot's
-  background), and **⋯** on the selected tab for **Rename**, **Duplicate** (an
-  independent copy named "… copy", which opens), **Set as default** and
-  **Delete…**.
+- **Plots**: a tab per plot, **+** for a new one (**Add plot** while the venue has
+  none; it starts on the selected plot's background), and **⋯** on the selected tab
+  for **Rename**, **Duplicate** (an independent copy named "… copy", which opens),
+  **Set as default**, **Move left**, **Move right** and **Delete…**. Double-click a
+  tab to rename it, and drag a tab along the row to reorder the plots; the order
+  saves when it is let go, and Escape during the drag cancels it. `/stageplots`
+  shows the tabs in the same order. Deleting the default plot says in its confirm
+  which plot becomes the default.
 - **Toolbar**: undo and redo, zoom, the plot's **Background** (or **None (grid)**),
   **Fade**, which previews on the plot while dragged and saves when let go, and
   **Print**.
@@ -495,7 +500,8 @@ not a JSON object or is too large, an unknown plot, an item that breaks a rule, 
 version that is not a whole number, "changed elsewhere"), how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
-overrides cleared with a deleted plot, and plan overrides in `stageplots.json`
+overrides cleared with a deleted plot, a deleted default and the plot that took
+over, a new plot order refused and why, and plan overrides in `stageplots.json`
 that were not a list and were read as none. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
