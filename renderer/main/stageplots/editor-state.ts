@@ -19,7 +19,7 @@
 import { fitToHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type CablePoint, type PatchLink, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
 
-import { clampPoint, fitItem, resizeInFrame, round1, snapRotation, withCableBox } from "./geometry";
+import { clampPoint, fitItem, keepsShape, resizeInFrame, round1, scaledToFit, snapRotation, withCableBox } from "./geometry";
 import { SYMBOLS } from "./symbols";
 
 /** What the palette adds: a type, a kind of text, or a symbol. */
@@ -83,7 +83,8 @@ export type EditorAction =
   /** An arrow key: one step of its own. */
   | { type: "nudge"; id: string; dx: number; dy: number }
   | { type: "resize"; id: string; point: { x: number; y: number }; pad?: number }
-  | { type: "rotate"; id: string; angle: number }
+  /** `step`: the degrees it snaps to, 1 unless Shift is held. */
+  | { type: "rotate"; id: string; angle: number; step?: number }
   | { type: "movePoint"; id: string; index: number; point: { x: number; y: number } }
   /** A field edit; `live` while typing (one step, committed when it settles). */
   | { type: "patch"; id: string; fields: Partial<Omit<PlotItem, "id" | "type">>; live?: boolean }
@@ -190,8 +191,14 @@ function newItem(kind: AddKind, at: { x: number; y: number }, id: string): PlotI
 }
 
 /** Fields set from the inspector. A width or height keeps the centre; a new
- *  text kind takes that kind's size. */
-function patched(it: PlotItem, fields: Partial<Omit<PlotItem, "id" | "type">>): PlotItem {
+ *  text kind takes that kind's size. A symbol or connection point keeps its
+ *  shape: a new width brings the height with it, and the other way round, in the
+ *  proportions of `shape` (the item as the gesture began, so typing a number
+ *  digit by digit never drifts it). */
+function patched(it: PlotItem, fields: Partial<Omit<PlotItem, "id" | "type">>, shape: PlotItem = it): PlotItem {
+  if (keepsShape(it) && (fields.w !== undefined) !== (fields.h !== undefined)) {
+    fields = { ...fields, ...scaledToFit(shape.w, shape.h, fields.w ?? null, fields.h ?? null) };
+  }
   let next: PlotItem = { ...it, ...fields };
   if (fields.textKind && fields.textKind !== it.textKind) {
     const [w, h] = DEFAULT_SIZES[fields.textKind];
@@ -232,7 +239,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "resize":
       return live(state, action.id, (_, start) => (start.type === "cable" ? start : { ...start, ...resizeInFrame(start, action.point, action.pad) }));
     case "rotate":
-      return live(state, action.id, (current) => (current.type === "cable" ? current : { ...current, rotation: snapRotation(action.angle) }));
+      return live(state, action.id, (current) => (current.type === "cable" ? current : { ...current, rotation: snapRotation(action.angle, action.step) }));
     case "movePoint":
       return live(state, action.id, (current) => {
         if (!current.points || action.index < 0 || action.index >= current.points.length) return current;
@@ -241,7 +248,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         return { ...current, points };
       });
     case "patch":
-      if (action.live) return live(state, action.id, (current) => patched(current, action.fields));
+      if (action.live) return live(state, action.id, (current, start) => patched(current, action.fields, start));
       return stepItem(state, action.id, (it) => patched(it, action.fields));
     case "link":
       return stepItem(state, action.id, (it) =>

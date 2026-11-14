@@ -6,7 +6,7 @@
 // colour follow its device, so both are locked while the link holds.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { CopyIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CopyIcon, LockIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 
 import { PATCH_COLORS, PATCH_COLOR_NAMES } from "@main/types/patch";
 import { STAGEPLOT_LIMITS, type PlotItem, type TextKind } from "@main/types/stageplots";
@@ -19,6 +19,7 @@ import { Switch } from "../../components/ui/switch";
 import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
 import type { EditorAction } from "../../main/stageplots/editor-state";
+import { keepsShape } from "../../main/stageplots/geometry";
 import { labelSuggestions, venueLabels } from "../../main/stageplots/label-suggestions";
 import { Mono } from "../../main/stageplots/mono";
 import { TYPE_NAMES, iconKeyOf, itemTypeName } from "../../main/stageplots/symbols";
@@ -321,11 +322,17 @@ export function StagePlotsInspector({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2">
+          <div className={cn("grid gap-2", keepsShape(item) ? "grid-cols-[minmax(0,1fr)_14px_minmax(0,1fr)]" : "grid-cols-2")}>
             <div className="flex min-w-0 flex-col gap-[5px]">
               <span className={eyebrow}>Width</span>
               <NumberInput aria-label="Width" value={item.w} min={STAGEPLOT_LIMITS.itemMinSize} max={STAGEPLOT_LIMITS.itemMaxSize} step={4} onChange={(w) => live({ w })} onCommit={settle} />
             </div>
+            {/* A symbol or connection point keeps its shape: the lock says why the other number moves. */}
+            {keepsShape(item) && (
+              <span className="grid h-7 self-end place-items-center text-accent" title="Keeps its shape" data-testid="keeps-shape">
+                <LockIcon className="size-3.5" aria-label="Keeps its shape" />
+              </span>
+            )}
             <div className="flex min-w-0 flex-col gap-[5px]">
               <span className={eyebrow}>Height</span>
               <NumberInput aria-label="Height" value={item.h} min={STAGEPLOT_LIMITS.itemMinSize} max={STAGEPLOT_LIMITS.itemMaxSize} step={4} onChange={(h) => live({ h })} onCommit={settle} />
@@ -334,7 +341,7 @@ export function StagePlotsInspector({
           <div className="grid grid-cols-2 gap-2">
             <div className="flex min-w-0 flex-col gap-[5px]">
               <span className={eyebrow}>Rotation</span>
-              <NumberInput aria-label="Rotation" value={item.rotation} step={5} suffix="°" onChange={(rotation) => live({ rotation })} onCommit={settle} />
+              <NumberInput aria-label="Rotation" value={item.rotation} step={1} suffix="°" onChange={(rotation) => live({ rotation })} onCommit={settle} />
             </div>
           </div>
         </>

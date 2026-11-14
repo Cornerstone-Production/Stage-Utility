@@ -101,9 +101,11 @@ describe("editor state", () => {
     assert.deepEqual(cable.points, [[375, 300], [625, 300]]);
   });
 
-  test("rotate snaps to 5 degrees and a cable point moves alone", () => {
-    let s = run(start(), { type: "rotate", id: "b", angle: 93 }, { type: "commitGesture" });
-    assert.equal(s.items[0].rotation, 95);
+  test("rotate snaps to whole degrees, 15 with Shift, and a cable point moves alone", () => {
+    let s = run(start(), { type: "rotate", id: "b", angle: 93.4 }, { type: "commitGesture" });
+    assert.equal(s.items[0].rotation, 93);
+    s = run(start(), { type: "rotate", id: "b", angle: 93.4, step: 15 }, { type: "commitGesture" });
+    assert.equal(s.items[0].rotation, 90);
     s = run(start([box({ id: "c", type: "cable", points: [[10, 10], [200, 10]], dashed: true, x: 10, y: 10, w: 190, h: 0 })]), {
       type: "movePoint",
       id: "c",
@@ -199,13 +201,40 @@ describe("geometry", () => {
     assert.deepEqual([tiny.w, tiny.h], [8, 8]);
   });
 
-  test("snapRotation rounds to 5° within (-180, 180]", () => {
-    assert.equal(snapRotation(93), 95);
-    assert.equal(snapRotation(181), 180);
-    assert.equal(snapRotation(183), -175);
+  test("snapRotation rounds to 1° within (-180, 180], or to 15° with Shift", () => {
+    assert.equal(snapRotation(93.4), 93);
+    assert.equal(snapRotation(93.6), 94);
+    assert.equal(snapRotation(181), -179);
     assert.equal(snapRotation(-180), 180);
-    assert.equal(snapRotation(-178), 180);
-    assert.equal(snapRotation(-177), -175);
+    assert.equal(snapRotation(-179.6), 180);
+    assert.equal(snapRotation(97, 15), 90);
+    assert.equal(snapRotation(98, 15), 105);
+  });
+
+  test("a symbol or connection point keeps its shape when its corner is dragged; a box does not", () => {
+    for (const type of ["symbol", "conn"] as const) {
+      const it = box({ type, w: 120, h: 60, ...(type === "symbol" ? { symbol: "piano" as const } : {}) });
+      // Centre (160, 130); the pointer asks for 200 wide and 60 high: the width wins, the height follows.
+      const r = resizeInFrame(it, { x: 260, y: 160 });
+      assert.deepEqual([r.w, r.h], [200, 100], type);
+      // Asked smaller than the minimum on one side: both stop where the shape still fits the limits.
+      const small = resizeInFrame(it, { x: 161, y: 131 });
+      assert.deepEqual([small.w, small.h], [16, 8], type);
+    }
+    const free = resizeInFrame(box({ w: 120, h: 60 }), { x: 260, y: 160 });
+    assert.deepEqual([free.w, free.h], [200, 60]);
+  });
+
+  test("the inspector's width or height brings the other with it on a symbol, from the shape the edit began with", () => {
+    const sym = box({ type: "symbol", symbol: "drumkit", w: 117, h: 104 });
+    // Typed digit by digit, live: 2, 23, 234. Each step is from the starting shape, so nothing drifts.
+    let s = run(start([sym]), ...[2, 23, 234].map((w): EditorAction => ({ type: "patch", id: "b", fields: { w }, live: true })), { type: "commitGesture" });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [234, 208]);
+    s = run(start([sym]), { type: "patch", id: "b", fields: { h: 52 } });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [58.5, 52]);
+    // A box takes the one number it was given.
+    s = run(start(), { type: "patch", id: "b", fields: { w: 200 } });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [200, 60]);
   });
 });
 

@@ -25,7 +25,7 @@ import { useLatestRef } from "../../lib/use-latest-ref";
 import { HANDLE_PAD } from "../../main/stageplots/plot-items";
 import { PlotSvg } from "../../main/stageplots/plot-svg";
 import type { EditorAction } from "../../main/stageplots/editor-state";
-import { angleTo } from "../../main/stageplots/geometry";
+import { ROTATE_STEP, ROTATE_STEP_SHIFT, angleTo } from "../../main/stageplots/geometry";
 import type { PanZoom } from "../../main/stageplots/use-pan-zoom";
 
 /** Arrow keys move this far, in plot units, and Shift with them this far. */
@@ -112,7 +112,7 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
         else if (d.mode === "size") dispatch({ type: "resize", id: d.id, point: p, pad: HANDLE_PAD * p.k });
         else if (d.mode === "rot") {
           const it = itemsRef.current.find((x) => x.id === d.id);
-          if (it) dispatch({ type: "rotate", id: d.id, angle: angleTo(it, p) + (d.below ? 180 : 0) });
+          if (it) dispatch({ type: "rotate", id: d.id, angle: angleTo(it, p) + (d.below ? 180 : 0), step: e.shiftKey ? ROTATE_STEP_SHIFT : ROTATE_STEP });
         } else if (d.mode === "pt") dispatch({ type: "movePoint", id: d.id, index: d.index, point: p });
       }
     }

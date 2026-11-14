@@ -218,9 +218,11 @@ selected item.
 - **Select**: press an item. Press the empty plot to clear the selection; dragging
   the empty plot pans it.
 - **Move**: drag the item. **Resize**: drag the square at its corner; it grows
-  about its centre along its own sides, even when turned. **Rotate**: drag the
-  circle above it (below it when the item is at the top edge), in 5° steps. A cable's points each have a handle; drag one to
-  move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
+  about its centre along its own sides, even when turned. Symbols and connection
+  points keep their shape; boxes, circles, zones and text stretch freely.
+  **Rotate**: drag the circle above it (below it when the item is at the top
+  edge), in 1° steps, or 15° with Shift held. A cable's points each have a
+  handle; drag one to move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
 - **Keys**, while the plot has focus (pressing it gives it focus): the arrow keys
   move the selected item 4 units, 20 with Shift; Delete or Backspace removes it.
   Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes, anywhere on the page but in a
@@ -228,7 +230,9 @@ selected item.
 - **Inspector**: the item's kind with **Duplicate** (a copy a little down and
   right) and **Delete**; its label; for text, Label, Callout or Dimension; a colour,
   one of the patch sheet's ten swatches or none; width, height and rotation (a
-  cable shows **Dashed** and its point count instead); notes, shown when someone
+  cable shows **Dashed** and its point count instead; on a symbol or connection
+  point a lock between width and height shows that changing one changes the
+  other); notes, shown when someone
   taps it; and its inputs.
 - **Undo and redo** cover the draft. A drag, a resize, a rotate or typing in one
   field is one step, however long it takes.
