@@ -4,11 +4,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import type { PlotItem } from "@main/types/stageplots";
+import { SYMBOL_KINDS, type PlotItem } from "@main/types/stageplots";
 
 import { itemsWithin, validateItems } from "@main/services/stageplots-store";
 
-import { editorReducer, initialEditorState, isDirty, type EditorAction, type EditorState } from "./editor-state";
+import { DEFAULT_SIZES, editorReducer, initialEditorState, isDirty, type EditorAction, type EditorState } from "./editor-state";
+import { SYMBOLS } from "./symbols";
 import { resizeInFrame, snapRotation } from "./geometry";
 
 const H = 562.5;
@@ -90,6 +91,15 @@ describe("editor state", () => {
     assert.equal(s.selectedId, "b2");
     assert.notEqual(copy.inputs, s.items[0].inputs, "the copy shares its inputs list");
     assert.equal(s.undo.length, 1);
+  });
+
+  test("a new symbol is added at its drawing's proportions (to 2%, for rounding), so the drawing fills its box", () => {
+    const mismatched = SYMBOL_KINDS.filter((k) => {
+      const [w, h] = DEFAULT_SIZES[k];
+      const [bw, bh] = SYMBOLS[k].box;
+      return Math.abs(w / h / (bw / bh) - 1) > 0.02;
+    });
+    assert.deepEqual(mismatched, []);
   });
 
   test("add places the item centred where asked, at its default size, with its default label", () => {

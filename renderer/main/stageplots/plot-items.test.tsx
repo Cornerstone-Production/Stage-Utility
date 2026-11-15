@@ -82,6 +82,15 @@ describe("drawing items", () => {
     for (const g of drawn) assert.ok(g.children.length >= 2, `${g.getAttribute("data-symbol")} draws nothing`);
   });
 
+  test("a symbol keeps its proportions, centred in its box, on the plot and in the legend", () => {
+    // The console's drawing is 38 x 24; a 150 x 58 box fits it 58 tall and about 92 wide.
+    const desk = item({ id: "c", type: "symbol", symbol: "console", label: "Console", w: 150, h: 58 });
+    const svg = draw([desk]);
+    assert.equal(svg.querySelector('[data-symbol="console"]')!.getAttribute("transform"), "translate(-45.917 -29) scale(2.417)");
+    const { container } = render(React.createElement(PlotLegend, { items: [desk] }));
+    assert.equal(container.querySelector('[data-symbol="console"]')!.getAttribute("transform"), "translate(1 1.053) scale(0.579)");
+  });
+
   test("text: a label, a numbered callout, and a dimension line with its words", () => {
     const svg = draw([
       item({ id: "t1", type: "text", textKind: "label", label: "Load-in door" }),

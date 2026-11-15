@@ -24,7 +24,7 @@ import type { PlotItem } from "@main/types/stageplots";
 import { layer } from "./draw-layer";
 import { calloutNumbers } from "./legend";
 import { MonoTspans } from "./mono";
-import { Part, SYMBOLS } from "./symbols";
+import { SymbolDrawing } from "./symbols";
 
 const INK = "var(--su-plot-ink)";
 const LABEL = "var(--su-plot-label)";
@@ -147,24 +147,8 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
         </>
       );
     }
-    case "symbol": {
-      const def = it.symbol ? SYMBOLS[it.symbol] : null;
-      return (
-        <g
-          data-symbol={it.symbol}
-          transform={`translate(${-hw} ${-hh}) scale(${w / 100} ${h / 100})`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          style={{ color: col }}
-          className="[&>*]:[vector-effect:non-scaling-stroke]"
-        >
-          {def?.parts.map((p, i) => <Part key={i} part={p} />)}
-        </g>
-      );
-    }
+    case "symbol":
+      return it.symbol ? <SymbolDrawing kind={it.symbol} x={-hw} y={-hh} w={w} h={h} strokeWidth={1.75} color={col} /> : null;
     case "text": {
       if (it.textKind === "callout") {
         const m = Math.min(w, h) / 2;
