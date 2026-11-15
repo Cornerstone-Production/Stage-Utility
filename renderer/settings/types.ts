@@ -4,7 +4,7 @@ import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
 import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
-import type { AppIconInput } from "@main/services/app-icon";
+import type { BrandingPatch } from "../app/set-branding";
 
 /**
  * One bindable wireless channel, as `/api/integrations/wireless/channels`
@@ -51,22 +51,7 @@ export interface SectionHandlers {
   handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetPlanSwitcherMode: (mode: PlanSwitcherMode) => Promise<void>;
-  handleSetBranding: (partial: {
-    name?: string;
-    accentColor?: string | null;
-    logo?: string | null;
-    monochrome?: boolean;
-    logoOriginal?: string | null;
-    logoCrop?: { scale: number; x: number; y: number } | null;
-    emptyLogo?: string | null;
-    emptyLogoOriginal?: string | null;
-    emptyLogoCrop?: { scale: number; x: number; y: number } | null;
-    avatar?: string | null;
-    avatarOriginal?: string | null;
-    avatarCrop?: { scale: number; x: number; y: number } | null;
-    /** The tab and home-screen icon, set as a whole; `null` removes it. */
-    icon?: AppIconInput | null;
-  }) => Promise<boolean>;
+  handleSetBranding: (partial: BrandingPatch) => Promise<boolean>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;

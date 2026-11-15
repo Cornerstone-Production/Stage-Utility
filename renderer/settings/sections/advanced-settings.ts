@@ -70,13 +70,22 @@ export const ADVANCED_SETTINGS = [
     keywords: ["12 hour", "24 hour", "12h", "24h", "am", "pm", "military", "time"],
   },
   {
+    id: "sidebar",
+    tab: "general",
+    card: "Layout",
+    name: "Sidebar",
+    description:
+      "Which pages appear in the sidebar, in which sections and in what order. Right-clicking the sidebar opens the same thing.",
+    keywords: ["navigation", "nav", "menu", "rail", "pages", "sections", "hide", "reorder", "customize", "arrange", "group"],
+  },
+  {
     id: "context-bar",
     tab: "general",
-    card: "General",
+    card: "Layout",
     name: "Context bar",
     description:
-      "Which readings appear above every page, and where they sit. Right-clicking the bar itself opens the same thing.",
-    keywords: ["header", "strip", "readings", "items", "configure", "top bar"],
+      "Which readings appear above every page, and where they sit. Right-clicking the bar opens the same thing.",
+    keywords: ["header", "strip", "readings", "items", "configure", "customize", "top bar"],
   },
 
   {

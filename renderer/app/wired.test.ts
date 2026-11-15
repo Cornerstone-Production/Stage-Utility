@@ -49,6 +49,11 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
     helper: "setBarItems",
     usedBy: "app/bar-configurator.tsx",
   },
+  {
+    what: "the sidebar's arrangement is saved",
+    helper: "setSidebar",
+    usedBy: "app/customize-mode.tsx",
+  },
 ];
 
 /**

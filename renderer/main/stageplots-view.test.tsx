@@ -46,7 +46,8 @@ const { PrintSheet, printedDate, printLayout, legendLines } = await import("./st
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
-const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
+const { DESTINATIONS } = await import("../app/destinations.js");
+const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 
@@ -410,7 +411,7 @@ describe("/stageplots", () => {
     assert.ok(isOperatorPath("/stageplots"));
     assert.ok(isOperatorPath("/stageplots/edit"));
     assert.ok(DESTINATIONS.some((d) => d.path === "/stageplots" && d.label === "Stage plots"));
-    assert.ok(NAV_GROUPS.find((g) => g.label === "Content")?.paths.includes("/stageplots"));
+    assert.ok(DEFAULT_SIDEBAR.find((g) => g.label === "Content")?.members.includes("stageplots"));
   });
 });
 

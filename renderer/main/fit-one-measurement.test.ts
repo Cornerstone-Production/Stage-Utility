@@ -126,6 +126,9 @@ describe("one fit-to-box measurement", () => {
     const found = sources(RENDERER).flatMap(measurements).sort();
     assert.deepEqual(found, [
       "app/bar-fit.ts:useBarFit",
+      // Not a fit: the Customize tray publishes its own height, for the pinned
+      // sidebar and the toasts to sit above it.
+      "app/sidebar-tray.tsx:SidebarTray",
       "lib/use-element-width.ts:useElementTier",
       "main/layout-renderer.tsx:ServiceOrderObject",
       "main/pvp-object.tsx:useClippedRows",

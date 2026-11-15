@@ -29,6 +29,12 @@ interface SplitViewProps {
   /** Suppress the collapse width animation — set while the sidebar is being
    *  dragged, where a 150ms transition turns direct manipulation into lag. */
   resizing?: boolean;
+  /**
+   * Hold the sidebar open on a phone, as a plain panel rather than the modal
+   * drawer, while something beside it must stay usable: Customize mode's tray
+   * sits under it. Its bottom is `--su-tray-h`, which the tray publishes.
+   */
+  pinned?: boolean;
   className?: string;
 }
 
@@ -66,6 +72,7 @@ export function SplitView({
   expandedWidth = 200,
   railWidth = 56,
   resizing = false,
+  pinned = false,
   className,
 }: SplitViewProps) {
   const isMobile = useIsMobile();
@@ -75,6 +82,13 @@ export function SplitView({
   // Never leave a drawer open when we transition back to desktop.
   useResyncOn([isMobile], () => {
     if (!isMobile) setDrawerOpen(false);
+  });
+
+  // Pinning replaces the drawer, so the drawer closes for good. Masking it with
+  // `drawerOpen && !pinned` alone left `drawerOpen` true when the pin came from
+  // the drawer's own menu (Customize sidebar…), and Done reopened the drawer.
+  useResyncOn([pinned], () => {
+    if (pinned) setDrawerOpen(false);
   });
 
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
@@ -145,7 +159,20 @@ export function SplitView({
           </Button>
         )}
 
-        <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
+        {/* Pinned: not the drawer. A modal dialog would trap focus and block
+            the tray it is pinned beside. */}
+        {pinned && (
+          <aside
+            aria-label="Sidebar"
+            data-rail-scroller
+            className="fixed left-0 top-0 z-40 w-[300px] max-w-[82vw] overflow-y-auto overflow-x-hidden bg-rail pt-[env(safe-area-inset-top)] shadow-xl"
+            style={{ bottom: "var(--su-tray-h, 0px)" }}
+          >
+            <SidebarChromeProvider value={chrome}>{sidebar}</SidebarChromeProvider>
+          </aside>
+        )}
+
+        <DialogPrimitive.Root open={drawerOpen && !pinned} onOpenChange={setDrawerOpen}>
           <DialogPrimitive.Portal>
             <DialogOverlay ref={overlayRef} />
             <DialogPrimitive.Content
@@ -168,7 +195,12 @@ export function SplitView({
             >
               <DialogPrimitive.Title className="sr-only">Settings navigation</DialogPrimitive.Title>
               <SidebarChromeProvider value={chrome}>
-                <div className="flex-1 min-h-0 overflow-y-auto">{sidebar}</div>
+                {/* Not while pinned: the drawer's exit animation keeps its content
+                    mounted, and a second copy of the sidebar meant two of every
+                    draggable row under one id; the closing one unregistered the
+                    pinned one's, and a touch drag on the pinned sidebar never
+                    started. */}
+                <div data-rail-scroller className="flex-1 min-h-0 overflow-y-auto">{!pinned && sidebar}</div>
               </SidebarChromeProvider>
             </DialogPrimitive.Content>
           </DialogPrimitive.Portal>
@@ -180,6 +212,7 @@ export function SplitView({
   return (
     <div className={cn("flex h-full w-full overflow-hidden", className)}>
       <div
+        data-rail-scroller
         className={cn(
           // SCROLLS VERTICALLY, clips horizontally.
           //

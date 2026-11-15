@@ -10,6 +10,7 @@ import { stageController } from "../stage-controller.js";
 import { parseAppIcon, parseCrop } from "../app-icon.js";
 import { brandingImageProblem, isStoredBrandingImage, looksLikeStoredRef } from "../branding-image-store.js";
 import { isHex6 } from "../settings-rules.js";
+import { appNameProblem } from "../app-name.js";
 
 export async function brandingRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -25,7 +26,14 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
       // Carries data-URL logos, so it needs headroom over the plain-JSON cap.
       const body = await readBody(req, MAX_IMAGE_BODY_BYTES) as Record<string, unknown>;
       const partial: Record<string, unknown> = {};
-      if (typeof body.name === "string") partial.name = body.name;
+      if (typeof body.name === "string") {
+        const problem = appNameProblem(body.name);
+        if (problem) {
+          error(res, problem);
+          return;
+        }
+        partial.name = body.name;
+      }
       if (typeof body.monochrome === "boolean") partial.monochrome = body.monochrome;
       if ("accentColor" in body) {
         const v = body.accentColor;

@@ -316,7 +316,7 @@ export function ContextBar({ active }: { active: ActivePage | null }) {
   const rows = barRowsFor(ctx.state?.barItems, ctx.state?.barMobileItems, isMobile);
 
   const menuItems: ContextMenuItem[] = [
-    { label: "Configure bar…", onSelect: () => setConfiguring(true) },
+    { label: "Customize bar…", onSelect: () => setConfiguring(true) },
   ];
 
   const trigger = useContextMenuTrigger((pt) => setMenu(pt));
