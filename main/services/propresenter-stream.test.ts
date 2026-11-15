@@ -1222,6 +1222,9 @@ describe("one run, one publish at a time", () => {
 
     await until("a stream to be held", () => streams.length > 0);
     await sleep(200); // room for the abandoned run to open a second one
+    // The burst's publish reads the playlist; let it land so no read is still in
+    // flight when the case ends and bleeds into the next one's request count.
+    await until("the burst's publish to land", () => status().nextServiceItem === "Message");
 
     assert.equal(
       subscribes().length,
@@ -1430,6 +1433,15 @@ describe("a playlist the API refuses", () => {
     await sleep(PUBLISH_SETTLE_MS);
   }
 
+  /** Push the playlist frame and wait for the failed read to LAND: the service sets its back-off
+   *  deadline when it has handled the answer. How long the read takes is the machine's load, so
+   *  this is what a case waits on before asserting about the read; `frameAndSettle` stays only
+   *  for frames that must change nothing (an absence cannot be waited into being true). */
+  async function firstFailureLands(): Promise<void> {
+    push(frame(WIRE.playlist, PLAYLIST_FRAME));
+    await until("the broken playlist's failure to be recorded", () => inner(propresenterService).playlistRetryAt > 0);
+  }
+
   it("is read once, not once per frame, for as long as it keeps failing", async () => {
     // The bug: the uuid was recorded only on the success path, so the "has the
     // playlist changed?" guard never became false and the read went out again on
@@ -1440,7 +1452,8 @@ describe("a playlist the API refuses", () => {
     heartbeatOn = false;
     await streaming();
 
-    for (let i = 0; i < 8; i++) await frameAndSettle();
+    await firstFailureLands();
+    for (let i = 0; i < 7; i++) await frameAndSettle();
 
     assert.deepEqual(
       playlistReads(),
@@ -1455,7 +1468,8 @@ describe("a playlist the API refuses", () => {
     burstOn = false;
     heartbeatOn = false;
     await streaming();
-    for (let i = 0; i < 4; i++) await frameAndSettle();
+    await firstFailureLands();
+    for (let i = 0; i < 3; i++) await frameAndSettle();
 
     const lines = loggedMatching(/playlist unreadable/);
     assert.equal(lines.length, 1, `logged ${lines.length} times, not once`);
@@ -1485,15 +1499,15 @@ describe("a playlist the API refuses", () => {
     burstOn = false;
     heartbeatOn = false;
     await streaming();
-    await frameAndSettle();
+    await firstFailureLands();
     assert.equal(playlistReads().length, 1);
 
     // Bring the retry forward rather than waiting thirty seconds for it.
     inner(propresenterService).playlistRetryAt = Date.now() - 1;
     playlistStatus = 200;
-    await frameAndSettle();
-    assert.equal(playlistReads().length, 2, "the back-off never came due — one failure is permanent");
+    push(frame(WIRE.playlist, PLAYLIST_FRAME));
     await until("the recovered playlist to publish", () => status().nextServiceItem === "Message");
+    assert.equal(playlistReads().length, 2, "the back-off never came due — one failure is permanent");
 
     // Recovered: the back-off is cleared, so the cache is a cache again.
     for (let i = 0; i < 4; i++) await frameAndSettle();
@@ -1502,18 +1516,20 @@ describe("a playlist the API refuses", () => {
 
   it("sets the deadline itself, doubles it, and stops at the ceiling", async () => {
     // The producer half. resolveServiceItems SETS playlistRetryAt and reads it
-    // one frame later; the case below writes the field itself, so it exercises
+    // one frame later; the case above writes the field itself, so it exercises
     // only the read half — replacing the line that sets the deadline with
-    // `= 0` left all of this file green. Here the real deadlines are allowed to
-    // elapse, shortened the way the idle watchdog is, and what is asserted is
-    // the gaps between the reads the STUB saw.
+    // `= 0` left all of this file green. Here the deadline the service sets is
+    // read at the moment it is set (a setter on the instance sees the value and
+    // the clock in the same synchronous step, so a loaded machine cannot skew
+    // it), and each retry is then brought due by hand rather than waited out.
+    // The old form let real deadlines elapse and timed the gaps between reads,
+    // which a slow read or a busy machine moves by hundreds of ms.
     //
     // A Planning Center linked playlist 404s, which the docs describe as the
     // normal Sunday, so a producer that never comes due is not an edge case: it
     // is the next-item name staying null for the rest of the run.
     const BASE = 200;
     const CEILING = 500; // reached at the third failure — 200, 400, 800 capped
-    const SLACK = 150; // a deadline is noticed on the next frame, not on the dot
     playlistStatus = 404;
     burstOn = false;
     heartbeatOn = false;
@@ -1522,26 +1538,38 @@ describe("a playlist the API refuses", () => {
     const svc = inner(propresenterService);
     svc.playlistRetryBaseMs = BASE;
     svc.playlistRetryMaxMs = CEILING;
-    // The retry is frame-driven, so something has to keep sending frames.
-    const ticker = setInterval(() => push(frame(WIRE.playlist, PLAYLIST_FRAME)), 10);
+    let deadline = svc.playlistRetryAt;
+    const setBy: number[] = [];
+    Object.defineProperty(svc, "playlistRetryAt", {
+      configurable: true,
+      get: () => deadline,
+      set: (v: number) => {
+        if (v > 0) setBy.push(v - Date.now());
+        deadline = v;
+      },
+    });
     try {
-      await until("five playlist reads to come due", () => playlistReadAt.length >= 5, 6000);
+      for (let n = 0; n < 4; n++) {
+        push(frame(WIRE.playlist, PLAYLIST_FRAME));
+        await until(`failure ${n + 1} to set its deadline`, () => setBy.length === n + 1);
+        deadline = Date.now() - 1; // due now; the service's own write above is what is under test
+      }
     } finally {
-      clearInterval(ticker);
+      delete (svc as { playlistRetryAt?: number }).playlistRetryAt;
+      svc.playlistRetryAt = 0;
       svc.playlistRetryBaseMs = 30_000;
       svc.playlistRetryMaxMs = 10 * 60_000;
     }
 
-    const gaps = playlistReadAt.slice(1).map((at, i) => at - playlistReadAt[i]);
     const wanted = [BASE, BASE * 2, CEILING, CEILING];
     wanted.forEach((want, i) => {
+      // Read in the same tick as the write, so only the clock's own tick can separate them.
       const why =
-        `retry ${i + 2} came ${gaps[i]}ms after retry ${i + 1}, not ${want}ms. ` +
-        `All four gaps: ${gaps.join(", ")}ms, against ${wanted.join(", ")}ms — ` +
+        `the deadline set by failure ${i + 1} was ${setBy[i]}ms away, not ${want}ms. ` +
+        `All four: ${setBy.join(", ")}ms, against ${wanted.join(", ")}ms — ` +
         "the deadline is set by resolveServiceItems, doubles per consecutive " +
         "failure, and stops at the ceiling rather than reaching 800 and 1600";
-      assert.ok(gaps[i] >= want, why);
-      assert.ok(gaps[i] < want + SLACK, why);
+      assert.ok(setBy[i] <= want && setBy[i] >= want - 5, why);
     });
   });
 
@@ -1552,7 +1580,7 @@ describe("a playlist the API refuses", () => {
     burstOn = false;
     heartbeatOn = false;
     await streaming();
-    await frameAndSettle();
+    await firstFailureLands();
     assert.equal(playlistReads().length, 1);
 
     playlistStatus = 200;
@@ -1568,7 +1596,6 @@ describe("a playlist the API refuses", () => {
     await until(
       "the new playlist to be read immediately",
       () => seen.includes(`GET /v1/playlist/${other}`),
-      1000,
     );
   });
 });
