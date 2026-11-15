@@ -30,7 +30,7 @@ export interface BarConfig {
    * EMPTY MEANS "FOLLOW THE DESKTOP BAR", not "an empty bar on a phone" — the
    * same convention `items` already uses, where empty means the renderer
    * decides. It cannot be ambiguous: `normalizeBarRows` guarantees anything the
-   * configurator saves carries at least one spacer, so a saved mobile set is
+   * bar editor saves carries at least one spacer, so a saved mobile set is
    * never the empty array.
    *
    * That default is what stops an upgrade moving anybody's bar. An operator who
@@ -174,7 +174,7 @@ export const barConfigStore = {
    * Replace one or both orders. Awaited — this is the operator's arrangement,
    * and a write that silently failed would read as saved until the next restart.
    *
-   * Each list is optional and an omitted one is KEPT. The configurator edits one
+   * Each list is optional and an omitted one is KEPT. The bar editor edits one
    * set at a time, and a caller that had to send both would send whatever it
    * last read for the other — so a second operator's edit to the desktop bar
    * would be undone by the next save from a phone.
@@ -190,7 +190,7 @@ export const barConfigStore = {
       items: next.items ?? cache.items,
       mobileItems: next.mobileItems ?? cache.mobileItems,
       // Re-stamped on every write, not carried from `cache`. What this file now
-      // holds is what the configurator just saved against the current catalogue,
+      // holds is what the bar editor just saved against the current catalogue,
       // whether or not `init` managed to write its stamp — and an unstamped save
       // would be migrated on the next start, putting back a service type the
       // operator had just dragged off.

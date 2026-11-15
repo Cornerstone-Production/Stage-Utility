@@ -26,7 +26,7 @@ import {
 // build cannot produce a broken bar.
 
 describe("the bar registry", () => {
-  test("every item describes itself for the configurator", () => {
+  test("every item describes itself for the bar editor", () => {
     // A palette tile with no hint is a choice made blind.
     for (const [id, item] of Object.entries(BAR_ITEMS)) {
       assert.equal(item.id, id, `${id} disagrees with its key`);
@@ -139,7 +139,7 @@ describe("visibleBarItems", () => {
   });
 
   test("but a bar the operator EMPTIED stays empty", () => {
-    // Drag every item out and the configurator commits [], which
+    // Drag every item out and the bar editor commits [], which
     // normalizeBarRows saves as ["spacer"]. Reading that back as "empty, use
     // the defaults" refilled the strip with five items nobody asked for, while
     // the editor below it still said "Drag something in." — the two disagreed
@@ -229,7 +229,7 @@ describe("a bar saved before spacers existed", () => {
 });
 
 describe("normalizeBarRows", () => {
-  // What the configurator saves. Its contract with visibleBarItems is that a
+  // What the bar editor saves. Its contract with visibleBarItems is that a
   // saved order ALWAYS contains a spacer — which is what lets "no spacer" keep
   // meaning "saved before spacers existed" for good.
   test("an arrangement with no spacer gets a trailing one", () => {
@@ -326,7 +326,7 @@ describe("whether the 320px sentence is about the set being edited", () => {
 describe("which readings are prose", () => {
   test("THE GUARD: prose is named EXACTLY, so a new item cannot join it by accident", () => {
     // This set decides two things at once: which items may ellipsise at the
-    // floor, and which ones the configurator warns a phone about. An item that
+    // floor, and which ones the bar editor warns a phone about. An item that
     // wandered in would start being cut without anyone deciding it could be; one
     // that wandered out would be cut with no warning that it would be.
     //
@@ -341,7 +341,7 @@ describe("which readings are prose", () => {
     for (const [id, reading] of Object.entries(BAR_PROSE_ITEMS)) {
       assert.ok(id in BAR_ITEMS, `${id} is named as prose but is not a bar item`);
       // The name has to read as a thing inside a sentence, because that is where
-      // the configurator puts it: "… and <reading> will be cut short."
+      // the bar editor puts it: "… and <reading> will be cut short."
       assert.match(reading, /^the /, `${id}'s prose name does not read in a sentence: ${reading}`);
     }
   });

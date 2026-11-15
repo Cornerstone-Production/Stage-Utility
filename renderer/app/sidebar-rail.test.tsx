@@ -210,7 +210,7 @@ describe("the rail and its saved arrangement", () => {
 
   test("in the mode, another browser's change is taken in and kept by the next save", async () => {
     await mount();
-    await act(async () => api!.open());
+    await act(async () => api!.open("sidebar"));
     // Another browser hides Baptisms.
     await act(async () => {
       state = { ...state, sidebar: { sections: [], hidden: ["baptisms"] } };
@@ -235,6 +235,26 @@ describe("the rail and its saved arrangement", () => {
     await act(async () => fireEvent.click(undos[undos.length - 1]));
     await eventually(() => assert.equal(saves.length, 3));
     assert.deepEqual(saves[2].hidden, ["baptisms"]);
+  });
+});
+
+describe("leaving the mode", () => {
+  test("Escape leaves it, as Done does", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    await eventually(() => assert.equal(api!.customizing, true));
+    await act(async () => fireEvent.keyDown(document.body, { key: "Escape" }));
+    await eventually(() => assert.equal(api!.customizing, false, "Escape did not leave Customize mode"));
+  });
+
+  test("Escape in the name field cancels that edit and keeps the mode", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    const name = await eventually(() => screen.getByLabelText("App name"));
+    await act(async () => fireEvent.change(name, { target: { value: "Something else" } }));
+    await act(async () => fireEvent.keyDown(name, { key: "Escape" }));
+    assert.equal(api!.customizing, true, "Escape in a field left the mode");
+    assert.equal((name as HTMLInputElement).value, "Rail test app");
   });
 });
 

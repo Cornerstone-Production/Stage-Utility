@@ -22,7 +22,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // reads the same strip.
     //
     // Two sets, `items` for a desktop page and `mobileItems` for a phone. BOTH
-    // are optional and an omitted one is left as it stands — the configurator
+    // are optional and an omitted one is left as it stands — the bar editor
     // edits one at a time. A present one still has to be a string[]: a request
     // that sent `items: "clock"` used to be rejected and must go on being
     // rejected now that its absence is legal.

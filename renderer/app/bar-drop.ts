@@ -1,47 +1,9 @@
-// Where a drag ended, and whether that counts as "on the bar".
-//
-// Its own module because getting this wrong is invisible: the configurator
-// still renders, still animates, still reorders — it just silently refuses to
-// remove anything. Two plausible implementations were both wrong before this
-// one, and neither could be tested where it lived.
-//
-//   `over` — closestCenter returns the NEAREST droppable however far the
-//   pointer is from it, so `over` is never null and "released over nothing"
-//   never happens.
-//
-//   the dragged node's rect — with a DragOverlay the source node stays exactly
-//   where it was, so its rect says "still in the bar" for the whole drag.
-//
-// The activator event plus the drag delta is the pointer, and it is the only
-// one of the three that moves.
+// Where a drag over the context bar lands, from the pointer and the readings'
+// boxes: geometry rather than droppables, because closestCenter's `over` is
+// never null, so nothing could ever be dropped OUT. The arithmetic is here,
+// where it can be tested.
 
-/** Just enough of dnd-kit's DragEndEvent to decide. */
-export interface DragEndGeometry {
-  activatorEvent: Event;
-  delta: { x: number; y: number };
-}
-
-/** Just enough of a DOMRect. */
-export interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
-/** The pointer position the drag started from, mouse or touch. */
-function activatorPoint(ev: Event): { x: number; y: number } | null {
-  const e = ev as MouseEvent & TouchEvent;
-  const touch = e.touches?.[0] ?? e.changedTouches?.[0];
-  if (touch) return { x: touch.clientX, y: touch.clientY };
-  return typeof e.clientX === "number" ? { x: e.clientX, y: e.clientY } : null;
-}
-
-/** Where the pointer was when the drag ended. */
-export function dropPoint(e: DragEndGeometry): { x: number; y: number } | null {
-  const from = activatorPoint(e.activatorEvent);
-  return from ? { x: from.x + e.delta.x, y: from.y + e.delta.y } : null;
-}
+import { dropPoint, pointInBox, type Box, type DragEndGeometry } from "./drag-geometry";
 
 /**
  * Did the drag finish over the bar?
@@ -50,13 +12,17 @@ export function dropPoint(e: DragEndGeometry): { x: number; y: number } | null {
  * while aiming at it, and every pixel outside it deletes an item.
  *
  * Answers TRUE when there is no pointer to judge by: with nothing to go on,
- * keeping the item is recoverable and deleting it on a guess is not.
+ * keeping the item is recoverable and deleting it on a guess is not. Answers
+ * FALSE when there is no bar.
  */
 export function droppedOnBar(e: DragEndGeometry, bar: Box | null, pad = 16): boolean {
   const p = dropPoint(e);
-  if (!bar || !p) return true;
-  return p.x >= bar.left - pad && p.x <= bar.right + pad
-    && p.y >= bar.top - pad && p.y <= bar.bottom + pad;
+  if (!p) return true;
+  // NO BAR IS NOT A PLACE. A page with no context bar (a console without the
+  // app's chrome) has no strip to measure, and answering "on the bar" there put
+  // a dropped tile into an empty arrangement and saved it over the whole bar.
+  if (!bar) return false;
+  return pointInBox(bar, p, pad);
 }
 
 /**
@@ -77,4 +43,44 @@ export function gapFromMidpoints(mids: readonly number[], x: number): number {
     gap++;
   }
   return gap;
+}
+
+/** A reading measured at the start of a drag. */
+export interface MeasuredRow {
+  key: string;
+  box: Box;
+  /** The one being dragged: left out of the count, kept for its line. */
+  dragged?: boolean;
+}
+
+/**
+ * Which gap the pointer sits in, among rows that may WRAP onto several lines.
+ *
+ * The editing strip wraps when it runs out of room, and a midpoint along x alone
+ * cannot tell a row on the first line from one under it. So the rows are read
+ * as lines: the pointer's line is the first one whose bottom is below it (or the
+ * last), and within that line it is the midpoint rule, gapFromMidpoints.
+ *
+ * The dragged row is counted for its LINE but not for the gap: a chip alone on
+ * the last line, let go where it sits, must find that line rather than fall back
+ * to the one above and jump to the front. Returns 0..(rows not dragged).
+ */
+export function gapFromBoxes(rows: readonly MeasuredRow[], p: { x: number; y: number }): number {
+  const lines: { before: number; rows: MeasuredRow[]; bottom: number }[] = [];
+  let staying = 0;
+  for (const r of rows) {
+    const line = lines.at(-1);
+    // A row that starts below the current line's middle starts a new line.
+    if (line && r.box.top < (line.rows[0].box.top + line.rows[0].box.bottom) / 2) {
+      line.rows.push(r);
+      line.bottom = Math.max(line.bottom, r.box.bottom);
+    } else {
+      lines.push({ before: staying, rows: [r], bottom: r.box.bottom });
+    }
+    if (!r.dragged) staying++;
+  }
+  if (lines.length === 0) return 0;
+  const line = lines.find((l) => p.y <= l.bottom) ?? lines[lines.length - 1];
+  const mids = line.rows.filter((r) => !r.dragged).map((r) => (r.box.left + r.box.right) / 2);
+  return line.before + gapFromMidpoints(mids, p.x);
 }

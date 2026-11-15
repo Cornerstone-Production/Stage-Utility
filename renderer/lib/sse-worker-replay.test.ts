@@ -4,7 +4,7 @@
 // BUG 1 — no replay at all. Found by instrumenting a real return visit to Home
 // under Playwright/CDP throttling: the context bar holds a `pco:live` (and
 // obs/reaper/scores/…) subscription open for the whole life of the tab —
-// `useBarContext` in context-bar.tsx never unmounts. From the shared worker's
+// `useBarContext` in bar-strip.tsx never unmounts. From the shared worker's
 // point of view, "which channels does this tab want" therefore never actually
 // SHRANK when Home unmounted and never GREW again when Home remounted on a
 // return visit, because the context bar was already holding the channel open

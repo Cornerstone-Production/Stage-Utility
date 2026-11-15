@@ -35,7 +35,7 @@ import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
 import { ShellOutlet } from "./screens/kept-screens";
 import { CustomizeProvider, useCustomize } from "./customize-mode";
-import { SidebarTray } from "./sidebar-tray";
+import { CustomizeTray } from "./sidebar-tray";
 import { useIsMobile } from "../lib/use-media-query";
 
 /** The shell, inside the provider Customize mode lives in. */
@@ -99,7 +99,7 @@ function ShellFrame() {
   const { collapsed, toggle } = useSidebarCollapsed();
   // Customize mode opens a collapsed rail out, without touching the saved
   // preference, and it folds back on Done.
-  const { customizing } = useCustomize();
+  const { customizing, tab } = useCustomize();
   const isMobile = useIsMobile();
   const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
@@ -215,7 +215,9 @@ function ShellFrame() {
       <PageActionsProvider>
       <SplitView
         collapsed={collapsed && !customizing}
-        pinned={customizing}
+        // A phone pins the sidebar beside the tray only while the sidebar is
+        // what is being arranged; the bar is edited at the top of the page.
+        pinned={customizing && tab === "sidebar"}
         expandedWidth={width}
         railWidth={RAIL_WIDTH}
         resizing={dragging}
@@ -244,7 +246,7 @@ function ShellFrame() {
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
           {content}
-          {customizing && <SidebarTray isMobile={isMobile} />}
+          {customizing && <CustomizeTray isMobile={isMobile} barOnPage={!chromeless} />}
         </div>
       </SplitView>
       </PageActionsProvider>

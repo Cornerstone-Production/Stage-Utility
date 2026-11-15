@@ -674,7 +674,7 @@ describe("a card names its game once, not twice", () => {
 
   test("and the capsule still names the game, with its own suffix", () => {
     // NOT preview: a preview chip renders an inert <span> with no label at all
-    // (it is the configurator's dead sample), so asserting on it asserts nothing.
+    // (it is the bar editor's dead sample), so asserting on it asserts nothing.
     const { container } = render(<ScoreCapsule game={game()} scored={null} />);
     const el = container.querySelector("[aria-label]");
     const label = el?.getAttribute("aria-label") ?? "";

@@ -11,14 +11,14 @@
 // THE RAIL DRAWS A DRAFT AHEAD OF THE SAVED ARRANGEMENT. It reads the live SSE
 // state, which an optimistic write to React Query never reaches, so a change
 // would otherwise show only once its broadcast came back, and a refused save
-// would leave nothing to put back (bar-configurator.tsx learned the same). Every
+// would leave nothing to put back. Every
 // change sets the draft and saves; a refusal puts the draft back to what is
 // saved. When the saved arrangement changes BY VALUE and no save of ours is in
 // flight, the draft follows it: outside the mode it is dropped, and inside it
 // is rebased, so another browser's change is not overwritten by our next drag.
 
-import { createContext, createElement, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { DndContext, DragOverlay, type Modifier } from "@dnd-kit/core";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DndContext, DragOverlay, type DragEndEvent, type DragMoveEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { SlidersHorizontalIcon } from "lucide-react";
 
@@ -36,69 +36,20 @@ import {
 import { toast } from "../components/ui";
 import { useResyncOn } from "../lib/use-resync-on";
 import { useStageState } from "../main/use-stage-state";
-import { dropPoint } from "./bar-drop";
-import { NO_AIM, type RailAim, type RailDrag } from "./rail-drop";
+import { dropPoint } from "./drag-geometry";
+import { CustomizeContext, useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
 import { setSidebar } from "./set-sidebar";
 import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
 import { hidePage } from "./sidebar-edits";
-import { RailDragGhost } from "./rail-drag-ghost";
+import { BarDragGhost, RailDragGhost } from "./rail-drag-ghost";
+import { isBarDrag, useBarEditor } from "./bar-editor";
+import { usePointerSensors } from "./drag-parts";
+import { useIsMobile } from "../lib/use-media-query";
 import { ALL_DESTINATIONS } from "./destinations";
 import { resolveIcon } from "../components/icon-set";
 import { useRailDrag } from "./use-rail-drag";
 
-export interface CustomizeValue {
-  customizing: boolean;
-  open: () => void;
-  done: () => void;
-  /** The sidebar to draw: the draft while one is held, else what is saved. */
-  resolved: ResolvedSidebar;
-  /** The arrangement held ahead of the SSE state, or null. */
-  draft: SidebarArrangement | null;
-  consoles: SidebarConsoles;
-  /**
-   * Save a change. Null (an edit that broke a rule) does nothing. `said` is
-   * toasted; with `undoable` it carries an Undo, which a newer change retires,
-   * so an Undo only ever puts back the change it was offered for.
-   */
-  apply: (next: ResolvedSidebar | null, said?: string, undoable?: boolean) => void;
-  /** List a console in the sidebar, or take it out, through its own switch. */
-  setConsoleShown: (id: string, shown: boolean, said?: string) => void;
-  /** Hide a page or a console, saying so with an Undo. Advanced says why not. */
-  hide: (id: string, label: string) => void;
-  drag: RailDrag | null;
-  aim: RailAim;
-  /** The rail list, which the rail registers so the drag can measure it. */
-  listRef: RefObject<HTMLDivElement | null>;
-  /** The tray, likewise. */
-  trayRef: RefObject<HTMLDivElement | null>;
-  /** A page's or console's name and icon, for the tray and the drag ghost. */
-  describe: (id: string) => { label: string; icon: ReactNode } | null;
-}
-
-const noop = () => {};
-const EMPTY_CONSOLES: SidebarConsoles = { all: [], hidden: new Set() };
-
-/** Outside a shell (a test rendering one page) the mode is closed and inert. */
-const CustomizeContext = createContext<CustomizeValue>({
-  customizing: false,
-  open: noop,
-  done: noop,
-  resolved: resolveSidebar(null, EMPTY_CONSOLES),
-  draft: null,
-  consoles: EMPTY_CONSOLES,
-  apply: noop,
-  setConsoleShown: noop,
-  hide: noop,
-  drag: null,
-  aim: NO_AIM,
-  listRef: { current: null },
-  trayRef: { current: null },
-  describe: () => null,
-});
-
-export function useCustomize(): CustomizeValue {
-  return use(CustomizeContext);
-}
+export { useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
 
 /** The drawn sidebar and its consoles, from a reading of the state and a draft. */
 function useResolvedFromState(
@@ -181,31 +132,38 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
-  /** The Undo toast on screen, retired by the next change. */
+  /** The Undo toast on screen, retired by the next change on either tab. */
   const undoToast = useRef<string | null>(null);
-
-  const apply = useCallback(
-    (next: ResolvedSidebar | null, said?: string, undoable = false) => {
-      if (!next) return;
-      if (undoToast.current) toast.dismiss(undoToast.current);
-      undoToast.current = null;
-      const before = toSavedSidebar(resolved, consoles);
-      void commit(toSavedSidebar(next, consoles));
-      if (!said) return;
-      if (!undoable) {
-        toast.info(said);
-        return;
-      }
+  const retireUndo = useCallback(() => {
+    if (undoToast.current) toast.dismiss(undoToast.current);
+    undoToast.current = null;
+  }, []);
+  const offerUndo = useCallback(
+    (said: string, undo: () => void) => {
+      retireUndo();
       const id = toast.withAction(said, {
         label: "Undo",
         onSelect: () => {
           if (undoToast.current === id) undoToast.current = null;
-          void commit(before);
+          undo();
         },
       });
       undoToast.current = id;
     },
-    [commit, consoles, resolved],
+    [retireUndo],
+  );
+
+  const apply = useCallback(
+    (next: ResolvedSidebar | null, said?: string, undoable = false) => {
+      if (!next) return;
+      retireUndo();
+      const before = toSavedSidebar(resolved, consoles);
+      void commit(toSavedSidebar(next, consoles));
+      if (!said) return;
+      if (undoable) offerUndo(said, () => void commit(before));
+      else toast.info(said);
+    },
+    [commit, consoles, offerUndo, resolved, retireUndo],
   );
 
   const setConsoleShown = useCallback(
@@ -235,14 +193,24 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     [apply, resolved, setConsoleShown],
   );
 
-  const open = useCallback(() => {
+  const [tab, setTab] = useState<CustomizeTab>("sidebar");
+  const open = useCallback((which: CustomizeTab) => {
     setDraft(savedRef.current);
+    setTab(which);
     setCustomizing(true);
   }, []);
   const done = useCallback(() => {
     setCustomizing(false);
     setDraft(null);
   }, []);
+  // On a phone the bar starts on its own set, the one that device shows.
+  const isMobile = useIsMobile();
+  const bar = useBarEditor({
+    active: customizing && tab === "bar",
+    opened: customizing,
+    startOn: isMobile ? "mobile" : "desktop",
+    undo: { offer: offerUndo, retire: retireUndo },
+  });
 
   const glyphs = state?.iconGlyphs;
   const views = state?.views;
@@ -263,11 +231,44 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const trayRef = useRef<HTMLDivElement | null>(null);
   const railDrag = useRailDrag(resolved, listRef, { apply, hide, setConsoleShown, describe });
+  const sensors = usePointerSensors();
+  // One drag context for both editors; each drag goes to the editor it came from.
+  /** Each drag goes to the editor it came from. */
+  const route = (e: { active: { data: { current?: unknown } } }) => (isBarDrag(e.active.data.current) ? bar : railDrag);
+  const drags = {
+    onDragStart: (e: DragStartEvent) => route(e).onDragStart(e),
+    onDragMove: (e: DragMoveEvent) => route(e).onDragMove(e),
+    onDragEnd: (e: DragEndEvent) => route(e).onDragEnd(e),
+    onDragCancel: () => {
+      bar.onDragCancel();
+      railDrag.onDragCancel();
+    },
+  };
+
+  // Escape leaves the mode, as Done does. Not from a field: there Escape cancels
+  // that field's edit (a heading's rename, the app name) and the mode stays. Not
+  // while a menu or dialog is open, which Escape closes first, and not mid-drag,
+  // where it cancels the drag.
+  const dragging = railDrag.drag !== null || bar.dragging !== null;
+  useEffect(() => {
+    if (!customizing || dragging) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (document.querySelector("[role='menu'], [role='dialog'], [role='alertdialog']")) return;
+      done();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [customizing, dragging, done]);
 
   const value: CustomizeValue = {
     customizing,
+    tab,
+    setTab,
     open,
     done,
+    bar: customizing && tab === "bar" ? bar : null,
     resolved,
     draft,
     consoles,
@@ -284,19 +285,21 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   return (
     <CustomizeContext value={value}>
       <DndContext
-        sensors={railDrag.sensors}
+        sensors={sensors}
         // The rail's own autoscroll (use-rail-drag.ts): dnd-kit's scrolls the
         // ancestors of the dragged node, which for a tray tile is the tray.
         autoScroll={false}
-        onDragStart={railDrag.onDragStart}
-        onDragMove={railDrag.onDragMove}
-        onDragEnd={railDrag.onDragEnd}
-        onDragCancel={railDrag.onDragCancel}
+        {...drags}
       >
         {children}
-        <DragOverlay dropAnimation={null} modifiers={[besidePointer]}>
+        {/* A bar drop that was not a place flies back where it came from, which
+            is what "that did not take" looks like; anything else lands where it
+            was let go. */}
+        <DragOverlay dropAnimation={bar.dragging && !bar.wasPlaceable ? undefined : null} modifiers={[besidePointer]}>
           {railDrag.drag ? (
-            <RailDragGhost drag={railDrag.drag} out={railDrag.aim.hiding} describe={describe} resolved={resolved} />
+            <RailDragGhost drag={railDrag.drag} out={railDrag.aim.hiding} blocked={railDrag.aim.blocked} describe={describe} resolved={resolved} />
+          ) : bar.dragging ? (
+            <BarDragGhost id={bar.dragging} out={bar.removing} />
           ) : null}
         </DragOverlay>
       </DndContext>

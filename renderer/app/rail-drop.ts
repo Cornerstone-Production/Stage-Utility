@@ -25,9 +25,11 @@ export interface RailAim {
   dz: string | null;
   /** Released here, the dragged row would be hidden. */
   hiding: boolean;
+  /** Released here, the dragged row would be hidden but cannot be (Advanced). */
+  blocked: boolean;
 }
 
-export const NO_AIM: RailAim = { caretY: null, dz: null, hiding: false };
+export const NO_AIM: RailAim = { caretY: null, dz: null, hiding: false, blocked: false };
 
 /** One measured thing in the rail list, in display order. */
 export interface RailItem {
@@ -87,9 +89,4 @@ export function sectionPlace(
     if (y <= (h.top + h.bottom) / 2) return { before: h.section, caretY: h.top - 5 };
   }
   return { before: null, caretY: endY };
-}
-
-/** Is the point inside the box? */
-export function inside(box: { left: number; right: number; top: number; bottom: number } | null, x: number, y: number): boolean {
-  return !!box && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
 }

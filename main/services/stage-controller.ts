@@ -5332,7 +5332,7 @@ export class StageController {
    * Set which context-bar items appear, and in what order. Global config.
    *
    * Two independent sets: the bar above a desktop page and the one a phone
-   * shows. Each is optional and an omitted one is left alone — the configurator
+   * shows. Each is optional and an omitted one is left alone — the bar editor
    * edits one at a time, so a save from a phone must not carry a stale copy of
    * the desktop order back over somebody else's edit.
    */
