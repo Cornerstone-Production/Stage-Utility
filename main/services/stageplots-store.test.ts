@@ -246,6 +246,7 @@ describe("stageplots overrides in the restore check", () => {
     for (const [venue, says] of [
       [{ slug: "Bad Slug" }, /address: An address is lower-case/],
       [{ slug: "edit" }, /editor's own/],
+      [{ slug: "manage" }, /app's own Stage plots page/],
       [{ slug: "x", oldSlugs: ["x"] }, /more than once/],
       [{ slug: "x", oldSlugs: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }, /more than 10 old addresses/],
       [{ slug: "x", oldSlugs: ["v-0123456789ab"] }, /old address "v-0123456789ab": An address shaped like a venue id/],

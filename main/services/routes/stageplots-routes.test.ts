@@ -555,6 +555,8 @@ describe("venue addresses", () => {
     assert.equal(await made("!!!"), "venue");
     // The editor's own address is never a venue's.
     assert.equal(await made("Edit"), "edit-2");
+    // Nor the app's own Stage plots page.
+    assert.equal(await made("Manage"), "manage-2");
     const long = await made("A".repeat(60));
     assert.equal(long, "a".repeat(60));
     const longer = await made("A".repeat(60));
@@ -628,6 +630,7 @@ describe("venue addresses", () => {
       ["a".repeat(61), /1 to 60/],
       [42, /lower-case letters/],
       ["edit", /editor's own/],
+      ["manage", /app's own Stage plots page/],
       ["v-0123456789ab", /venue id/],
       [null, /changed, not removed/],
     ] as const) {

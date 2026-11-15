@@ -136,15 +136,19 @@ export function validatePlotInput(body: unknown, { partial }: { partial: boolean
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /** The shape of the ids this server mints for venues (`v-` and 12 hex): an address is never one. */
 const VENUE_ID_SHAPE = /^v-[0-9a-f]{12}$/;
-/** /stageplots/edit is the editor's own address. */
-const RESERVED_SLUGS = new Set(["edit"]);
+/** /stageplots/edit is the editor's own address, and /stageplots/manage the app's own page. */
+const RESERVED_SLUGS = new Map([
+  ["edit", "That address is the editor's own"],
+  ["manage", "That address is the app's own Stage plots page"],
+]);
 
 /** Why `v` cannot be a venue's address, as a sentence, or null. Says nothing about other venues: see addressOwners. */
 export function venueSlugProblem(v: unknown): string | null {
   if (typeof v !== "string" || v.length === 0 || v.length > STAGEPLOT_LIMITS.slugChars || !SLUG.test(v)) {
     return `An address is lower-case letters, digits and single hyphens, 1 to ${STAGEPLOT_LIMITS.slugChars} characters`;
   }
-  if (RESERVED_SLUGS.has(v)) return "That address is the editor's own";
+  const reserved = RESERVED_SLUGS.get(v);
+  if (reserved) return reserved;
   if (VENUE_ID_SHAPE.test(v)) return "An address shaped like a venue id is kept for venue ids";
   return null;
 }

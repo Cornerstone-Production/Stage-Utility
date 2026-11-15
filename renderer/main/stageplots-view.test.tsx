@@ -41,7 +41,7 @@ let PATCH: PatchFile | null = null;
 const { render, cleanup, screen, fireEvent, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { act } = await import("react");
-const { StagePlotsPage, StagePlotsVenueRoute, LAST_VENUE_KEY } = await import("./stageplots-view.js");
+const { StagePlotsManagePage, StagePlotsPage, StagePlotsVenueRoute, LAST_VENUE_KEY } = await import("./stageplots-view.js");
 const { PrintSheet, printedDate, printLayout, legendLines } = await import("./stageplots-print.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -81,11 +81,12 @@ function doc(): StagePlotsView {
   };
 }
 
-async function mount() {
+/** The page as the app shows it (`manage`, with Edit), or as the crew's chromeless /stageplots. */
+async function mount({ manage = true }: { manage?: boolean } = {}) {
   await act(async () => {
     // The page reads the upcoming plans through react-query, as in the app.
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(StagePlotsPage)));
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(manage ? StagePlotsManagePage : StagePlotsPage)));
   });
   await settle();
   await settle();
@@ -406,11 +407,28 @@ describe("/stageplots", () => {
     }
   });
 
-  test("/stageplots is an operator page in the rail's Content group", () => {
+  test("/stageplots/manage is the rail's Stage plots, in the Content group; /stageplots is served by the app too", () => {
     assert.ok(isOperatorPath("/stageplots"));
+    assert.ok(isOperatorPath("/stageplots/manage"));
     assert.ok(isOperatorPath("/stageplots/edit"));
-    assert.ok(DESTINATIONS.some((d) => d.path === "/stageplots" && d.label === "Stage plots"));
-    assert.ok(NAV_GROUPS.find((g) => g.label === "Content")?.paths.includes("/stageplots"));
+    assert.ok(DESTINATIONS.some((d) => d.path === "/stageplots/manage" && d.label === "Stage plots"));
+    assert.ok(NAV_GROUPS.find((g) => g.label === "Content")?.paths.includes("/stageplots/manage"));
+    assert.ok(!NAV_GROUPS.some((g) => g.paths.includes("/stageplots")), "the crew's page is not in the rail");
+  });
+
+  test("the crew's page is read-only: its own heading, no Edit, no Add a plot", async () => {
+    await mount({ manage: false });
+    assert.equal(screen.getByRole("heading", { level: 1 }).textContent, "Stage plots");
+    fireEvent.click(screen.getByText("Room Two"));
+    await settle();
+    assert.ok(screen.getByText("No plots yet"));
+    assert.equal(screen.queryByRole("link", { name: "Add a plot" }), null);
+    fireEvent.click(screen.getByRole("button", { name: "Stage plots" }));
+    await settle();
+    fireEvent.click(screen.getByText("Room One"));
+    await settle();
+    assert.equal(screen.queryByRole("link", { name: "Edit" }), null);
+    assert.ok(screen.getByRole("button", { name: "Print" }));
   });
 });
 

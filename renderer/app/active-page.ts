@@ -173,7 +173,10 @@ export function isSharedChromelessPath(pathname: string): boolean {
   // bar belong to the operator and not the reader. `/servicecue/presets` edits
   // layouts and stays an ordinary settings page, so only the exact launcher
   // path and the three-deep rundown path qualify.
-  return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
+  if (bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare)) return true;
+  // The crew's stage plots: the list and one venue, the link and QR code handed out at
+  // load-in. /stageplots/manage (the app's own, with Edit) and the editor keep the shell.
+  return bare === "/stageplots" || /^\/stageplots\/(?!edit$|manage$)[^/]+$/.test(bare);
 }
 
 /**

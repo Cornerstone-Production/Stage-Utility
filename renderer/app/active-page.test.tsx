@@ -94,7 +94,7 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly six dynamic routes", () => {
+  test("there are exactly seven dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
@@ -106,6 +106,7 @@ describe("the route table", () => {
       "/servicecue/$serviceType/$layout",
       "/settings/advanced/$tab",
       "/stageplots/$venueId",
+      "/stageplots/manage/$venueId",
     ]);
   });
 });
@@ -166,6 +167,8 @@ describe("every registered route resolves a title", () => {
         "/stageplots",
         "/stageplots/$venueId",
         "/stageplots/edit",
+        "/stageplots/manage",
+        "/stageplots/manage/$venueId",
         "/video-feeds",
         "/views",
       ],
@@ -205,6 +208,8 @@ describe("every registered route resolves a title", () => {
         "/stageplots",
         "/stageplots/$venueId",
         "/stageplots/edit",
+        "/stageplots/manage",
+        "/stageplots/manage/$venueId",
         "/video-feeds",
       ],
       "a route's title status changed; update this list deliberately",
@@ -247,6 +252,20 @@ describe("/stageplots/<venue id>", () => {
     assert.equal(matched("/stageplots/edit"), "/stageplots/edit");
     assert.equal(matched("/stageplots"), "/stageplots");
   });
+
+  test("/stageplots/manage is the app's own page, never a venue called manage", () => {
+    assert.equal(matched("/stageplots/manage"), "/stageplots/manage");
+    assert.equal(matched("/stageplots/manage/main-room"), "/stageplots/manage/$venueId");
+  });
+
+  test("the crew's pages hide the chrome; the app's own and the editor keep it", () => {
+    for (const p of ["/stageplots", "/stageplots/", "/stageplots/main-room", "/stageplots/v-0123456789ab"]) {
+      assert.equal(hidesChrome(p, VIEWS), true, `${p} should be chromeless`);
+    }
+    for (const p of ["/stageplots/manage", "/stageplots/manage/main-room", "/stageplots/edit"]) {
+      assert.equal(hidesChrome(p, VIEWS), false, `${p} should keep the shell`);
+    }
+  });
 });
 
 describe("exact versus prefix", () => {
@@ -260,7 +279,7 @@ describe("exact versus prefix", () => {
       ["/patch/edit", "Patch"],
       ["/settings/advanced/$tab", "Advanced"],
       ["/automation/$tab", "Automation"],
-      ["/stageplots/$venueId", "Stage plots"],
+      ["/stageplots/manage/$venueId", "Stage plots"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
       assert.equal(active?.page.label, section, `${pattern} lost its section name`);
@@ -274,6 +293,13 @@ describe("exact versus prefix", () => {
     assert.equal(active?.exact, true);
     // And the operator's own page still wins its own URL.
     assert.equal(resolvePage("/history/manage", CONSOLES)?.page.path, "/history/manage");
+  });
+
+  test("the crew's stage plots is its own page, not a child of the operator's", () => {
+    const active = resolvePage("/stageplots", CONSOLES);
+    assert.equal(active?.page.label, "Stage plots");
+    assert.equal(active?.exact, true);
+    assert.equal(resolvePage("/stageplots/manage", CONSOLES)?.page.path, "/stageplots/manage");
   });
 
   test("the tablet's ServiceCue is its own page, not a child of the operator's", () => {
@@ -315,9 +341,9 @@ describe("exact versus prefix", () => {
       "/settings/branding -> /settings/branding",
       "/settings/integrations -> /settings/integrations",
       "/settings/messages -> /settings/messages",
-      "/stageplots -> /stageplots",
-      "/stageplots/$venueId -> /stageplots",
-      "/stageplots/edit -> /stageplots",
+      "/stageplots/edit -> /stageplots/manage",
+      "/stageplots/manage -> /stageplots/manage",
+      "/stageplots/manage/$venueId -> /stageplots/manage",
       "/video-feeds -> /video-feeds",
     ]);
     // A child, not the page itself: the editor draws its own heading.
