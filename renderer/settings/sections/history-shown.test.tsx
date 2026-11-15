@@ -85,7 +85,6 @@ function holdListReads(): void {
     return ok(list === "timeline" ? server.services.map(timeline) : server.services.map(attendance));
   }
   if (url === "/api/spl/summary") return ok([]);
-  if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
   if (url === "/api/baptism/sessions") return ok([]);
   return ok(null);
 };

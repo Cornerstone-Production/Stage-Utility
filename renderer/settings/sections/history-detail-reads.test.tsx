@@ -129,7 +129,6 @@ function stubFetch({ failing, recordFor, attendanceFor, splFor }: Setup = {}) {
     if (url === "/api/service-timeline") return ok([A.timeline, B.timeline]);
     if (url === "/api/attendance/history?summary=1") return ok([A.attendance, B.attendance]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
     if (url === "/api/history/milestones") return ok([]);
     if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });

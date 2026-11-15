@@ -114,7 +114,6 @@ const gate = () => {
     return ok(server.attendance);
   }
   if (url === "/api/spl/summary") return ok([]);
-  if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
   if (url === "/api/baptism/sessions") return ok([]);
   const spl = /^\/api\/spl\/history\/([^/?]+)$/.exec(url);
   if (spl) {

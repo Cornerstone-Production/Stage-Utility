@@ -167,15 +167,6 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       json(res, await splHistoryStore.summary());
       return;
     }
-    if (method === "GET" && pathname === "/api/spl/trend") {
-      json(res, await splHistoryStore.getTrendPrefs());
-      return;
-    }
-    if (method === "POST" && pathname === "/api/spl/trend") {
-      const body = (await readBody(req)) as Record<string, unknown>;
-      json(res, await splHistoryStore.setTrendPrefs(body));
-      return;
-    }
     if (method === "GET" && pathname === "/api/spl/visible-metrics") {
       json(res, { metrics: await splHistoryStore.getVisibleMetrics() });
       return;

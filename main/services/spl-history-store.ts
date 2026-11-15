@@ -102,32 +102,6 @@ class SplHistoryStore extends KeyedRecordStore<ServiceSplHistory> {
     return s.splVisibleMetrics ?? [];
   }
 
-  /**
-   * Whether History draws the SPL trend line, and which metric it plots.
-   *
-   * Beside the visible-metrics pair and for the same stated reason: it is not
-   * record storage, it lives in settings, and it belongs to the SPL history
-   * surface the History tab reads. A third get/set channel through the stage
-   * controller for two fields would be plumbing for its own sake.
-   */
-  async getTrendPrefs(): Promise<{ shown: boolean; metric: string | null }> {
-    const s = await settingsStore.get();
-    return { shown: s.splTrendShown ?? false, metric: s.splTrendMetric ?? null };
-  }
-
-  async setTrendPrefs(p: {
-    shown?: unknown;
-    metric?: unknown;
-  }): Promise<{ shown: boolean; metric: string | null }> {
-    const patch: { splTrendShown?: boolean; splTrendMetric?: string | null } = {};
-    if (typeof p.shown === "boolean") patch.splTrendShown = p.shown;
-    // `null` clears back to the preferred default and is a real choice, so it is
-    // accepted; anything else that is not a string is ignored rather than stored.
-    if (p.metric === null || typeof p.metric === "string") patch.splTrendMetric = p.metric;
-    if (Object.keys(patch).length) await settingsStore.patch(patch);
-    return this.getTrendPrefs();
-  }
-
   async setVisibleMetrics(metrics: string[]): Promise<string[]> {
     const clean = metrics.filter((m): m is string => typeof m === "string");
     await settingsStore.patch({ splVisibleMetrics: clean });

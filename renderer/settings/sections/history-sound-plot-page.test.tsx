@@ -108,7 +108,6 @@ function installFetch(opts: { timelineRecords?: unknown[] } = {}) {
     if (url === "/api/spl/summary") return ok(splSummary());
     // The organisation's Trends metric: LCeq 2, not the LAeq 2 default.
     if (url === "/api/history/trends-prefs") return ok({ rev: 1, soundMetric: "LCeq 2" });
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
     if (/\/series\?/.test(url)) {
       const metric = new URL(url, "http://x").searchParams.get("metric") ?? "";

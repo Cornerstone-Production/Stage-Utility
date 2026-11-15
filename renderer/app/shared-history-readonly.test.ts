@@ -166,7 +166,6 @@ describe("the shared /history link", () => {
         if (url === "/api/service-timeline") return ok([rec]);
         if (url === "/api/attendance/history?summary=1") return ok([]);
         if (url === "/api/spl/summary") return ok([]);
-        if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
         if (url === "/api/baptism/sessions") return ok([]);
         return ok(null);
       };
@@ -261,7 +260,6 @@ describe("the shared /history link", () => {
         if (url === "/api/service-timeline") return ok([rec]);
         if (url === "/api/attendance/history?summary=1") return ok([]);
         if (url === "/api/spl/summary") return ok([]);
-        if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
         if (url === "/api/baptism/sessions") return ok([session]);
         if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
         if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(rec);

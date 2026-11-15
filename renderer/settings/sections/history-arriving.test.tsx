@@ -86,7 +86,6 @@ function installFetch(state: { list: unknown[]; attList: unknown[]; heldAttendan
     if (url === "/api/service-timeline") return ok(state.list);
     if (url === "/api/attendance/history?summary=1") return ok(state.attList);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     const tlGet = url.match(/^\/api\/service-timeline\/([^/]+)$/);
     if (tlGet) {
