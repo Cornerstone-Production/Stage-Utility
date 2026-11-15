@@ -1,5 +1,8 @@
-// stageplots-view.tsx — /stageplots, read-only: every venue's stage plots, for a
-// volunteer at load-in as much as for the desk.
+// stageplots-view.tsx — every venue's stage plots, read-only, at two addresses: the
+// crew's /stageplots (chromeless, see active-page.ts: the link and QR code handed out
+// at load-in) and the app's /stageplots/manage (in the shell, where the rail leads,
+// with Edit in the bar and beside Print, and Add a plot on an empty venue). Everything
+// below holds on both; the address-following keeps to the page it was opened on.
 //
 // The venue list (home venues, then offsite) opens one venue: its plots as
 // tabs, the default selected and marked, the plot itself with pinch zoom and
@@ -7,7 +10,7 @@
 // notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
 // on one landscape page. With exactly one home venue it opens that venue
 // straight away, and the browser remembers the last venue opened. A venue has
-// its own address, /stageplots/<address> (its id until it has one), which
+// its own address, /stageplots/<address> or /stageplots/manage/<address> (its id until it has one), which
 // opening or leaving one keeps current (as a replace) and which wins over the
 // remembered venue. Its id and its old addresses open it too, and the bar then
 // shows its address; one that names no venue shows the list and leaves the

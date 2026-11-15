@@ -1,7 +1,8 @@
 // stageplots-venues-card.tsx — the editor's Venues card: add, pick, rename,
 // its address, Home or Offsite, notes, delete. Each change saves at once. A
 // right-click or long press on a venue opens its menu: Rename (selects it and puts
-// the cursor in its name), Home or Offsite, Open in Stage plots (/stageplots/manage), Copy its address (the crew's /stageplots link),
+// the cursor in its name), Home or Offsite, Open in Stage plots (/stageplots/manage),
+// Copy its address (the crew's /stageplots link),
 // Delete venue.
 //
 // The address is /stageplots/<address>, made from the name when the venue is
@@ -131,7 +132,11 @@ export function VenuesCard({
       label: "Open in Stage plots",
       // Through the router when there is one (no page load); else the browser goes there.
       // The app's own page for it; Copy its address below gives the crew's link.
-      onSelect: () => (router ? void router.navigate({ to: venuePath(v, STAGEPLOTS_MANAGE_PATH), search: {} }) : window.location.assign(venuePath(v, STAGEPLOTS_MANAGE_PATH))),
+      onSelect: () => {
+        const here = venuePath(v, STAGEPLOTS_MANAGE_PATH);
+        if (router) void router.navigate({ to: here, search: {} });
+        else window.location.assign(here);
+      },
     },
     { label: "Copy its address", onSelect: () => copyAddress(v) },
     { separator: true },

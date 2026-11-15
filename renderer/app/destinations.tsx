@@ -72,6 +72,9 @@ export interface Destination {
 }
 
 /** Work surfaces — the rail proper. */
+/** Stage plots' name and description: the app's page in the rail, and the crew's /stageplots. */
+const STAGEPLOTS_PAGE = { label: "Stage plots", description: "Every venue's stage plots, read-only, for load-in and the desk." } as const;
+
 export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/",
@@ -128,8 +131,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // crew's: the link and QR code handed out, chromeless (active-page.ts), read-only.
     // The split /servicecue and /history make.
     path: "/stageplots/manage",
-    label: "Stage plots",
-    description: "Every venue's stage plots, read-only, for load-in and the desk.",
+    ...STAGEPLOTS_PAGE,
     icon: <MapIcon className="size-4" />,
     // The editor is /stageplots/edit, linked from here.
     Component: StagePlotsManagePage,
@@ -338,7 +340,7 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   { path: "/patch/edit", Component: PatchSection },
   // The crew's stage plots, chromeless (active-page.ts). Titled here because
   // /stageplots/manage does not prefix-match it, as /history is.
-  { path: "/stageplots", Component: StagePlotsPage, label: "Stage plots", description: "Every venue's stage plots, read-only, for load-in and the desk." },
+  { path: "/stageplots", Component: StagePlotsPage, ...STAGEPLOTS_PAGE },
   // The stage plots editor, reached from /stageplots/manage. It draws its own heading and
   // lights Stage plots in the rail.
   { path: "/stageplots/edit", Component: StagePlotsEdit, parent: "/stageplots/manage" },

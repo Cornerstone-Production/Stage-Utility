@@ -38,6 +38,7 @@ import { DataStore } from "./data-store.js";
 import { errorMessage } from "./errors.js";
 import { isRecord } from "./is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
+import { scrub } from "./scrub.js";
 import { fitToHeight, plotHeight, sortPending, withCableBox } from "./stageplots-doc.js";
 
 const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] };
@@ -708,6 +709,24 @@ export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
   if (Array.isArray(out.venues) && out.venues.some((v) => isRecord(v) && (v.slug === undefined || v.oldSlugs === undefined))) {
     out = { ...out, venues: out.venues.map((v) => (isRecord(v) ? { ...v, slug: v.slug ?? null, oldSlugs: v.oldSlugs ?? [] } : v)) };
   }
+  // An address the app has since taken for a page of its own (`manage` became /stageplots/manage)
+  // cannot stay a venue's: kept, every save would be refused for it. The venue answers at its id
+  // until a new address is set, and the log says so once per venue.
+  const isReserved = (s: unknown) => typeof s === "string" && RESERVED_SLUGS.has(s);
+  if (Array.isArray(out.venues) && out.venues.some((v) => isRecord(v) && (isReserved(v.slug) || (Array.isArray(v.oldSlugs) && v.oldSlugs.some(isReserved))))) {
+    out = {
+      ...out,
+      venues: out.venues.map((v) => {
+        if (!isRecord(v)) return v;
+        const taken = [v.slug, ...(Array.isArray(v.oldSlugs) ? v.oldSlugs : [])].filter(isReserved);
+        if (taken.length === 0) return v;
+        console.warn(
+          `[stageplots] venue ${scrub(String(v.id))}: the address ${scrub(taken.join(", "))} is the app's own page now and no longer opens it; set a new address in the editor`,
+        );
+        return { ...v, slug: isReserved(v.slug) ? null : v.slug, oldSlugs: Array.isArray(v.oldSlugs) ? v.oldSlugs.filter((s) => !isReserved(s)) : v.oldSlugs };
+      }),
+    };
+  }
   const pending = (out as { pendingRemovals?: unknown }).pendingRemovals;
   if (pending === undefined) out = { ...out, pendingRemovals: [] };
   // Never read as none: each may be a link still live on a page, and forgetting it would leave
@@ -717,7 +736,8 @@ export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
 }
 
 const store = new DataStore<StagePlotsDoc>("stageplots.json", EMPTY, "config", {
-  restoreCheck: checked(checkStagePlotsDoc),
+  // Normalized first, as a load is, so a backup from before an address was reserved restores.
+  restoreCheck: checked((raw) => checkStagePlotsDoc(normalizeStagePlots(raw as StagePlotsDoc))),
   normalize: normalizeStagePlots,
 });
 

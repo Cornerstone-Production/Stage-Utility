@@ -136,8 +136,8 @@ selected, the plot itself, its legend, and the venue's notes.
 - With exactly one home venue, `/stageplots` opens it directly.
 - A venue has its own address on the server's local address (see
   [Its own address](#its-own-address)). Opening a venue puts it in the address bar
-  and leaving it goes back to `/stageplots`, so the bar can be copied or made into
-  a QR code, and the address opens that venue on a fresh load. It wins over the
+  and leaving it goes back to the list on the page it was opened on, so the bar can be
+  copied or made into a QR code, and the address opens that venue on a fresh load. It wins over the
   remembered venue; an address that names no venue shows the list.
 - On `/stageplots/manage`, a venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
@@ -230,7 +230,7 @@ switch**, or **Cancel**; it never switches under unsaved work.
 
 Each venue has a default plot, the starred tab, set from a plot's **⋯** with
 **Set as default**. Any Planning Center plan can show a different plot in that
-venue instead, for that plan only; [/stageplots](#stageplots) shows it while
+venue instead, for that plan only; [/stageplots](#stageplots-and-stageplotsmanage) shows it while
 that plan is live or next, then goes back to the default. The patch sheet's
 standing per-service-type layer has no equivalent here: a plan's plot is the
 default unless that plan says otherwise.
@@ -629,7 +629,7 @@ list the page would not take (once, with why, and again once it does),
 how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
-overrides cleared with a deleted plot, a deleted default and the plot that took
+overrides cleared with a deleted plot, a venue whose address the app has since taken for a page of its own (it answers at its id until a new one is set), a deleted default and the plot that took
 over, a new plot order refused and why, and plan overrides in `stageplots.json`
 that were not a list and were read as none, every venue address change (the new
 address and the old one that still opens it), old addresses dropped, and every

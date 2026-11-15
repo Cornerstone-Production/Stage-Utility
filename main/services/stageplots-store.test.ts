@@ -235,6 +235,21 @@ describe("stageplots overrides in the restore check", () => {
     assert.equal(warned.filter((w) => w.startsWith("[stageplots]") && /overrides/.test(w)).length, 1, warned.join(" | "));
   });
 
+  test("a venue whose address the app has since taken loads at its id, saves and restores, and says so once", (t) => {
+    const warned: string[] = [];
+    t.mock.method(console, "warn", (...a: unknown[]) => void warned.push(a.join(" ")));
+    const doc = { ...goodDoc(), overrides: [], pendingRemovals: [] };
+    doc.venues[0] = { ...doc.venues[0], slug: "manage", oldSlugs: ["edit", "old-hall"] } as (typeof doc.venues)[number];
+    const read = normalizeStagePlots(doc as unknown as Parameters<typeof normalizeStagePlots>[0]);
+    assert.equal(read.venues[0].slug, null);
+    assert.deepEqual(read.venues[0].oldSlugs, ["old-hall"]);
+    // What every save checks, and what a restore of it writes: neither refuses it now.
+    assert.doesNotThrow(() => checkStagePlotsDoc(read));
+    assert.equal(warned.filter((w) => w.startsWith("[stageplots]") && /manage, edit/.test(w)).length, 1, warned.join(" | "));
+    // A document with nothing reserved comes back as the same object.
+    assert.equal(normalizeStagePlots(read), read);
+  });
+
   test("a venue read from a file saved before addresses existed has none, and keeps one it has", () => {
     const doc = { ...goodDoc(), overrides: [], pendingRemovals: [] };
     doc.venues.push({ ...doc.venues[0], id: "v-2", slug: "chapel", oldSlugs: ["hall"] } as (typeof doc.venues)[number]);
