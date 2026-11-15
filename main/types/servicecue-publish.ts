@@ -9,12 +9,17 @@
 //   - the publisher inside the app, which sends it.
 //
 // It holds names, patterns and pure functions and nothing else: no Node, no DOM,
-// no Workers API, no import. The Worker bundles it and the browser bundles it, and
-// the root test suite runs it. docs/reference/servicecue-publishing.md describes
-// the protocol these constants define.
+// no Workers API. Its one import is the app's StagePlots limits (stageplots.ts,
+// which imports nothing), so the landing list is held to the numbers the app keeps
+// rather than a copy of them; it names the .ts file because plain Node runs this
+// module for the deploy script. The Worker bundles it and the browser bundles it,
+// and the root test suite runs it. docs/reference/servicecue-publishing.md
+// describes the protocol these constants define.
 //
 // Every list below is sorted, one entry per line, so two branches that each add an
 // entry merge without a conflict and a test can pin the exact list.
+
+import { STAGEPLOT_LIMITS } from "./stageplots.ts";
 
 /** The protocol's version: the `v1` in every publish path, and `protocol` in the status answer. */
 export const PUBLISH_PROTOCOL_VERSION = 1;
@@ -504,4 +509,70 @@ export function stagePlotsPath(pathname: string, base: string = STAGEPLOTS_PATH)
 /** `pathname` with anything that could be a secret under a StagePlots path replaced, for a log line. */
 export function loggablePath(pathname: string): string {
   return pathname.replace(/(\/stageplots\/)[^/]*/, "$1<secret>");
+}
+
+// ── The landing page ──────────────────────────────────────────────────────────
+//
+// The page's own address, `/`, is a landing page while at least one venue is listed on it: a
+// ServiceCue card and a Stage plots card naming each listed venue, which opens through its own
+// secret link. With none listed, `/` goes on to `/servicecue` as it always has.
+//
+//   PUT /_publish/v1/landing   { venues: [{ name, secret, plots }] }, the whole list, replacing it
+//   GET /api/landing           that list, for the landing page
+//
+// Its own path, outside /_publish/v1/stageplots/, so a Worker from before landing pages answers
+// 404 there, which the server says as "needs updating". The list is names and links only: never
+// notes, plots or patch. A secret on it is public to anyone who opens the page; listing a venue
+// is that choice.
+
+/** Under PUBLISH_BASE_PATH: where the publisher puts the landing list. */
+export const LANDING_PUBLISH_PATH = "/landing";
+
+/** Where the landing page reads the list. */
+export const LANDING_PATH = "/api/landing";
+
+/** The landing page's document, served at `/` while a venue is listed. Never at its own name. */
+export const LANDING_HTML = "/landing.html";
+
+/** The most venues the list holds: the app's own limit. */
+export const LANDING_MAX_VENUES = STAGEPLOT_LIMITS.venues;
+/** The longest name: the app's own limit. */
+const LANDING_NAME_CHARS = STAGEPLOT_LIMITS.nameChars;
+/** The most plots a venue can have: the app's own limit. */
+const LANDING_MAX_PLOTS = STAGEPLOT_LIMITS.plotsPerVenue;
+
+/** One listed venue: its name, its secret link and how many plots it has. */
+export interface LandingVenue {
+  name: string;
+  secret: string;
+  plots: number;
+}
+
+export interface LandingList {
+  venues: LandingVenue[];
+}
+
+/**
+ * The list `raw` is, rebuilt field by field, or why it is not one. The Worker holds a PUT to
+ * this, and the landing page reads what it is answered through it, so a page never draws
+ * anything but names, counts and secrets of the one shape a server makes.
+ */
+export function readLandingList(raw: unknown): { ok: true; list: LandingList } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, error: "The landing list must be an object" };
+  const venues = (raw as { venues?: unknown }).venues;
+  if (!Array.isArray(venues)) return { ok: false, error: "venues must be a list" };
+  if (venues.length > LANDING_MAX_VENUES) return { ok: false, error: `At most ${LANDING_MAX_VENUES} venues` };
+  const out: LandingVenue[] = [];
+  const secrets = new Set<string>();
+  for (const v of venues as unknown[]) {
+    if (typeof v !== "object" || v === null) return { ok: false, error: "Each venue must be an object" };
+    const { name, secret, plots } = v as Record<string, unknown>;
+    if (typeof name !== "string" || name.trim() === "" || name.length > LANDING_NAME_CHARS) return { ok: false, error: `Each venue needs a name of 1 to ${LANDING_NAME_CHARS} characters` };
+    if (!isStagePlotsSecret(secret)) return { ok: false, error: "Each venue needs a StagePlots secret" };
+    if (typeof plots !== "number" || !Number.isInteger(plots) || plots < 0 || plots > LANDING_MAX_PLOTS) return { ok: false, error: `Each venue's plots must be a whole number up to ${LANDING_MAX_PLOTS}` };
+    if (secrets.has(secret)) return { ok: false, error: "A secret is listed twice" };
+    secrets.add(secret);
+    out.push({ name, secret, plots });
+  }
+  return { ok: true, list: { venues: out } };
 }

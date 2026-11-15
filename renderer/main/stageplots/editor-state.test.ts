@@ -314,3 +314,23 @@ describe("a height change", () => {
     assert.equal(validateItems(server, GRID), null);
   });
 });
+
+describe("restoring a kept draft", () => {
+  test("shows the draft's items over the saved ones, unsaved, with no history and nothing selected", () => {
+    const saved = [box({ id: "saved" })];
+    const kept = [box({ id: "kept", x: 300 })];
+    const s = run({ ...start(saved), selectedId: "saved" }, { type: "restore", items: kept });
+    assert.deepEqual(s.items, kept);
+    assert.equal(s.savedItems, saved, "the saved items are what Discard goes back to");
+    assert.ok(isDirty(s));
+    assert.deepEqual([s.undo, s.redo, s.gesture, s.selectedId], [[], [], null, null]);
+    assert.deepEqual(run(s, { type: "discard" }).items, saved);
+  });
+
+  test("fits a draft kept before the plot got shorter, so its Save is never refused for an item's y", () => {
+    const low = box({ id: "low", y: H - 20, h: 50 });
+    const s = run(start([]), { type: "restore", items: [low] });
+    assert.ok(s.items[0].y + s.items[0].h <= H, `y ${s.items[0].y} + h ${s.items[0].h} is below ${H}`);
+    assert.equal(validateItems(s.items, H), null);
+  });
+});

@@ -27,6 +27,16 @@
 //                  points): each published venue is sent what changed, after a short wait, one
 //                  run at a time per venue. A change that alters nothing published (the publish
 //                  state this writes, a patch channel no published point lists) sends nothing.
+//   The landing    the page's own address lists the venues marked listed on it: their names,
+//                  plot counts and secret links, nothing else. The list is made from the
+//                  document after every change to it and sent whenever it differs from what
+//                  that page was last sent (a listing, a rename, a plot added, a regenerate, an
+//                  unpublish, a delete, a move); a page moved away from is sent an empty one. A
+//                  Worker from before landing pages answers 404: "needs updating". A failure is
+//                  shown on the Publish card and tried again, after a minute and then longer,
+//                  and the next list goes whatever that page was sent before. A page moved away
+//                  from that will not take its empty list is said on the follow's notice and
+//                  not tried again: nothing here can reach it after the move.
 //
 // A linked connection point goes out as the device's name and colour and the channels through
 // it, resolved here at publish time (stageplots-patch-link.ts), never as the link itself. While
@@ -49,6 +59,7 @@ import { resolvePlot } from "./stageplots-doc.js";
 import { publishedItems, type PatchContext, type PatchRead, type UnresolvedLink } from "./stageplots-patch-link.js";
 import {
   PUBLISH_MAX_BODY_BYTES,
+  type LandingList,
   STAGEPLOTS_IMAGE_TYPE,
   STAGEPLOTS_INDEX_KEY,
   stagePlotsImageKey,
@@ -98,6 +109,8 @@ export interface StagePlotsPublishDeps {
   debounceMs?: number;
   /** How long after a failed patch read it is tried again, doubling up to `maxMs`. A seam for a test. */
   patchRetry?: { firstMs: number; maxMs: number };
+  /** How long after a landing list that did not get through it is tried again, doubling up to `maxMs`. A seam for a test. */
+  landingRetry?: { firstMs: number; maxMs: number };
   now?: () => number;
 }
 
@@ -248,6 +261,26 @@ const DAMAGED_QUEUE = "stageplots.json's pending removals are not a list, so the
 /** The chain a saved page address is handled on. */
 const ADDRESS_CHAIN = "\u0000address";
 
+/** The chain the landing list is sent on. */
+const LANDING_CHAIN = "\u0000landing";
+
+/** A landing list the page would not take is tried again after a minute, then two, four… up to fifteen. */
+export const LANDING_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
+
+/** What the landing page on `origin` lists: the venues published there and marked listed, home ones first. Names, plot counts and links only. */
+export function landingList(doc: StagePlotsDoc, origin: string): LandingList {
+  const listed = doc.venues.filter((v) => v.publish?.listed && v.publish.origin === origin);
+  return {
+    venues: [...listed.filter((v) => v.kind === "home"), ...listed.filter((v) => v.kind !== "home")].map((v) => ({
+      name: v.name.trim(),
+      secret: v.publish!.secret,
+      plots: v.plotIds.length,
+    })),
+  };
+}
+
+const NONE_LISTED: LandingList = { venues: [] };
+
 // ── The publisher ────────────────────────────────────────────────────────────
 
 export class StagePlotsPublisher {
@@ -292,6 +325,9 @@ export class StagePlotsPublisher {
     this.planKey = this.currentPlanKey();
     this.deps.listen?.((channel) => this.heard(channel));
     void this.drainQueued(true);
+    // What the page lists may have changed while this server was down (an un-list that never
+    // reached it): sent once now, and after that whenever it changes.
+    void this.syncLanding();
     // What the page holds was sent before this start, maybe against a patch that could not be
     // read then: once it reads, the venues that link it are sent again (only what differs from
     // what this process has sent goes, which after a start is their plots). Unreadable now, it
@@ -303,6 +339,8 @@ export class StagePlotsPublisher {
   async stop(): Promise<void> {
     this.stopped = true;
     this.cancelWait();
+    if (this.landingRetryTimer) clearTimeout(this.landingRetryTimer);
+    this.landingRetryTimer = null;
     if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
     this.patchRetryTimer = null;
     await Promise.all([...this.chains.values()]);
@@ -319,12 +357,26 @@ export class StagePlotsPublisher {
     await Promise.all([...this.chains.values()]);
     return () => {
       this.paused = false;
+      // A change heard while paused, or a retry that came due, was skipped: the list is made again now.
+      void this.syncLanding();
     };
   }
 
   /** Whether a config restore holds the publisher: the Public link save refuses then (servicecue-publish-routes.ts). */
   get restoring(): boolean {
     return this.paused;
+  }
+
+  /** What the last landing list send could not do, shown on the Publish card's listing line; null once one goes through. */
+  private landingNote: { at: string; message: string } | null = null;
+  /** The landing list each page was last sent, by origin, as JSON. */
+  private readonly landingSent = new Map<string, string>();
+  private landingRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private landingRetryMs = 0;
+
+  /** What the last landing list send could not do; null when the page holds the list. */
+  landingNotice(): { at: string; message: string } | null {
+    return this.landingNote;
   }
 
   /** What the last page-address follow could not do, shown on the Publish card; null when it did it all. */
@@ -425,7 +477,13 @@ export class StagePlotsPublisher {
     if (this.stopped || this.paused) return;
     // A patch save may rename, recolour or re-patch a device a published point links to. The
     // fingerprint tells whether it did: a venue that shows nothing of it is sent nothing.
-    if (channel === "stageplots:updated" || channel === "patch:updated") return this.changed();
+    if (channel === "stageplots:updated") {
+      // Every write to the document, this publisher's own included, is broadcast here: the one
+      // place the landing list is made from what was saved.
+      void this.syncLanding();
+      return this.changed();
+    }
+    if (channel === "patch:updated") return this.changed();
     // The state is broadcast often; only the plan it follows moving is a change to what is published.
     if (channel === "stage:state-changed") {
       const key = this.currentPlanKey();
@@ -518,7 +576,7 @@ export class StagePlotsPublisher {
       }
       const { secret, r } = fresh;
       const at = this.at();
-      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, [secret]), null);
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, [secret], false), null);
       if (!landed.ok) {
         say("error", [secret], `"${venue.name}" was not published: ${landed.message}`);
         return { ok: false, status: 503, error: hide(landed.message, [secret]) };
@@ -532,6 +590,28 @@ export class StagePlotsPublisher {
       this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
       say("log", [secret], `"${venue.name}" published to ${host}: ${plural(plotsOf(doc, venue).length, "plot")} and ${plural(r.held.length, "background")}${missingNote(r)}`);
       return { ok: true, venue: saved };
+    });
+  }
+
+  /**
+   * List the venue on its page's landing page, or take it off. Only a published venue: its secret
+   * link is what the landing page opens. Answers once the page has been sent the new list, with
+   * the reason beside the venue when it could not be.
+   */
+  setListed(venueId: string, listed: boolean): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const venue = await this.venueNow(venueId);
+      const what = listed ? "Show on the landing page" : "Take off the landing page";
+      if (!venue) return this.refused(what, venueId, null, 404, "no such venue");
+      if (!venue.publish) return this.refused(what, venueId, venue, 409, "The venue is not published: publish it first, and its link is what the landing page opens.");
+      let saved: Venue | null = venue;
+      if (venue.publish.listed !== listed) {
+        saved = await this.savePublish(venueId, (p) => ({ ...p, listed }));
+        if (!saved) return { ok: false, status: 404, error: "no such venue" };
+        say("log", [venue.publish.secret], `"${venue.name}" ${listed ? "listed on" : "taken off"} the landing page of ${hostOf(venue.publish.origin)}`);
+      }
+      await this.syncLanding();
+      return { ok: true, venue: saved, ...(this.landingNote ? { notice: this.landingNote.message } : {}) };
     });
   }
 
@@ -559,7 +639,7 @@ export class StagePlotsPublisher {
       const at = this.at();
       // One write: the new link onto the venue and the old one into the queue, so a crash after it
       // leaves the old secret queued for removal rather than nowhere.
-      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, all), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, all, pub.listed), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
       if (!landed.ok) {
         const message = `The link was not changed: ${landed.message}`;
         await this.venueFailed(venue, message);
@@ -729,7 +809,7 @@ export class StagePlotsPublisher {
       return { ok: false, status: fresh.status, error: hide(message, all) };
     }
     const at = this.at();
-    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, fresh.r, all), {
+    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, fresh.r, all, pub.listed), {
       secret: pub.secret,
       origin: pub.origin,
       since: at,
@@ -781,6 +861,18 @@ export class StagePlotsPublisher {
     const hadNote = this.followNote !== null;
     this.followNote = null;
     const notes: string[] = [];
+    // The page left lists nothing of this server's any more: with its old token, while there is
+    // one. A failure is this follow's to say, not the landing line's (which the next list sent to
+    // the page set up now clears), and nothing tries it again: after this nothing here can reach
+    // that page.
+    if (away) {
+      const failed = await this.sendLanding(old!, NONE_LISTED);
+      if (failed) {
+        const message = `${failed} Its landing page keeps listing what it listed until ${hostOf(old!.origin)} is set up here again, or its Worker is taken down.`;
+        say("warn", [], message);
+        notes.push(message);
+      }
+    }
     let target: PublishTarget | null = null;
     try {
       target = await this.deps.target();
@@ -812,6 +904,73 @@ export class StagePlotsPublisher {
     }
     if (notes.length > 0) this.followNote = { at: this.at(), message: notes.join(" ") };
     if (hadNote || this.followNote) await this.tellCard();
+  }
+
+  /** Send the page set up the landing list made from the document, when it differs from what it was last sent. On its own chain. */
+  private syncLanding(): Promise<void> {
+    return this.serial(LANDING_CHAIN, async () => {
+      if (this.stopped || this.paused) return;
+      let target: PublishTarget;
+      let doc: StagePlotsDoc;
+      try {
+        [target, doc] = await Promise.all([this.deps.target(), this.deps.store.get()]);
+      } catch (err) {
+        await this.landingFailed([], `The landing page could not be updated: ${errorMessage(err)}`);
+        return;
+      }
+      // No page set up: there is nowhere to send a list, and no venue can be published.
+      if (!target.ok) return;
+      const list = landingList(doc, target.origin);
+      const failed = await this.sendLanding(target, list);
+      if (failed) return this.landingFailed(list.venues.map((v) => v.secret), failed);
+      this.landingRetryMs = 0;
+      if (this.landingNote) {
+        this.landingNote = null;
+        say("log", [], `the landing page on ${hostOf(target.origin)} is up to date again`);
+        await this.tellCard();
+      }
+    });
+  }
+
+  /**
+   * Send `list` to the page `target` when it is not what that page was last sent. Null once the
+   * page holds it; otherwise why not, for the caller to say. A send that fails forgets what that
+   * page was last sent: the page may have taken it and the answer been lost, so the next list goes
+   * whatever it is, the one it was sent before included.
+   */
+  private async sendLanding(target: Target, list: LandingList): Promise<string | null> {
+    const text = JSON.stringify(list);
+    if (this.landingSent.get(target.origin) === text) return null;
+    const host = hostOf(target.origin);
+    const r = await this.client(target).putLanding(list);
+    // A Worker from before landing pages has none: with nothing to list there is nothing it lacks.
+    const notThere = !r.ok && r.kind === "refused" && r.status === 404;
+    if (r.ok || (notThere && list.venues.length === 0)) {
+      const before = this.landingSent.get(target.origin);
+      this.landingSent.set(target.origin, text);
+      if (r.ok && before !== undefined) say("log", list.venues.map((v) => v.secret), `the landing page on ${host} lists ${plural(list.venues.length, "venue")} now`);
+      return null;
+    }
+    this.landingSent.delete(target.origin);
+    return notThere ? `${host} needs updating before it can show a landing page: deploy the Worker.` : `The landing page on ${host} could not be updated: ${sentence(r, host)}`;
+  }
+
+  /** The landing list of the page set up that did not get through: shown on the card, said once, and the list made and sent again later. */
+  private async landingFailed(secrets: readonly string[], message: string): Promise<void> {
+    const changed = this.landingNote?.message !== message;
+    this.landingNote = { at: this.at(), message };
+    if (changed) {
+      say("warn", secrets, `${message} It is tried again after a minute, and on every change.`);
+      await this.tellCard();
+    }
+    if (this.landingRetryTimer || this.stopped) return;
+    const retry = this.deps.landingRetry ?? LANDING_RETRY;
+    this.landingRetryMs = Math.min(retry.maxMs, this.landingRetryMs === 0 ? retry.firstMs : this.landingRetryMs * 2);
+    this.landingRetryTimer = setTimeout(() => {
+      this.landingRetryTimer = null;
+      void this.syncLanding();
+    }, this.landingRetryMs);
+    this.landingRetryTimer.unref?.();
   }
 
   /** Broadcast the document again, so the Publish card shows (or drops) the follow's notice. */
@@ -1119,7 +1278,7 @@ export class StagePlotsPublisher {
       const saved = await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, r.message, secrets) }));
       return { ok: false, status: saved ? r.status : 404, error: saved ? hide(r.message, secrets) : "no such venue" };
     }
-    const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, r, secrets));
+    const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, r, secrets, p.listed));
     if (!saved) return { ok: false, status: 404, error: "no such venue" };
     say("log", secrets, `"${venue.name}" ${what} on ${host}: ${plural(r.sent, "request")}${missingNote(r)}`);
     for (const w of r.warnings) say("warn", secrets, `"${venue.name}": ${w}`);
@@ -1232,7 +1391,10 @@ export class StagePlotsPublisher {
       if (sent.get(key) === h) return null;
       const r = await client.putStagePlot(secret, key, text, "application/json");
       count++;
+      // A failure may have been stored and its answer lost: what the page holds is not known, so
+      // the next send of this key goes whatever it is, the text sent before this one included.
       if (r.ok) sent.set(key, h);
+      else sent.delete(key);
       return r;
     };
     for (const { plot, bg, items, unresolved } of plots) {
@@ -1250,8 +1412,12 @@ export class StagePlotsPublisher {
     if (opts.force || this.kept.get(secret) !== keep) {
       const r = await client.keepStagePlots(secret, keys);
       count++;
+      // As a put: a keep that failed may have been applied, so the next one goes whatever it is.
       if (r.ok) this.kept.set(secret, keep);
-      else warnings.push(`What was taken off this venue could not be removed from ${host} yet: ${sentence(r, host)}`);
+      else {
+        this.kept.delete(secret);
+        warnings.push(`What was taken off this venue could not be removed from ${host} yet: ${sentence(r, host)}`);
+      }
     }
     return { ok: true, sent: count, held: [...held].sort(), unpublished, warnings };
   }
@@ -1264,14 +1430,14 @@ export class StagePlotsPublisher {
  * (backgrounds not yet published, or what could not be pruned). One rule for a first publish,
  * a regenerate, a move and every republish.
  */
-function stateAfterSend(secret: string, origin: string, at: string, r: Sent, secrets: readonly string[]): VenuePublish {
+function stateAfterSend(secret: string, origin: string, at: string, r: Sent, secrets: readonly string[], listed: boolean): VenuePublish {
   const lastError =
     r.unpublished.length > 0
       ? errorAt(at, `${plural(r.unpublished.length, "background")} not yet published: ${r.unpublished[0]!.why}`, secrets)
       : r.warnings.length > 0
         ? errorAt(at, r.warnings[0]!, secrets)
         : null;
-  return { secret, origin, publishedAt: at, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort() };
+  return { secret, origin, publishedAt: at, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort(), listed };
 }
 
 /** A [stageplots] line for a plot just sent with linked points that went out unlinked, naming each and why. */

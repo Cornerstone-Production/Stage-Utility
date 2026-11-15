@@ -14,17 +14,22 @@
 // Markup is a draft (editor-state.ts) saved with the version of the plot it
 // was loaded at. Nothing reaches /stageplots until Save; Discard puts back
 // what the server holds. A save from a version that is no longer current is
-// refused (409): the banner says the plot changed elsewhere and offers Reload,
+// refused (409): the banner says the plot was saved elsewhere and offers Reload,
 // and nothing is overwritten. When the plot changes while the draft is clean
 // the new items are taken; when its items are unchanged (a rename, a fade) only
-// the version is. Leaving the page, or switching plot or venue, with unsaved
-// changes asks first.
+// the version is.
+//
+// The draft is kept on the server a second after each change (use-draft-keeper.ts,
+// stageplot-drafts.json), so a reload, a closed tab or another device opens it
+// again. Switching plot or venue stores it and goes on; it asks only when the draft
+// could not be stored. Leaving the page asks only while the newest change has not
+// reached the server.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type Dispatch, type ReactNode } from "react";
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
-import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotItem, type StagePlotsView, type Venue } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotDraft, type PlotItem, type StagePlotsView, type Venue } from "@main/types/stageplots";
 
 import { LeaveGuard } from "../../components/leave-guard";
 import { Button } from "../../components/ui/button";
@@ -48,10 +53,13 @@ import { PlotLegend } from "../../main/stageplots/plot-legend";
 import { PrintControl } from "../../main/stageplots-print";
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { resolveItems, stampLinks, type PatchRead, type ResolvedItems } from "@main/services/stageplots-patch-link";
-import { stageplotsApi } from "../../main/stageplots/stageplots-api";
+import { stageplotsApi, type DraftNotice } from "../../main/stageplots/stageplots-api";
 import { usePanZoom } from "../../main/stageplots/use-pan-zoom";
 import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-patch";
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
+import { useDraftKeeper } from "../../main/stageplots/use-draft-keeper";
+import { usePlotDrafts, type PlotDraftsState } from "../../main/stageplots/use-plot-drafts";
+import { formatClock } from "../../lib/clock-format";
 import { useSearchParam } from "../../lib/use-search-param";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
 import { StagePlotsCanvas, toPlot } from "./stageplots-canvas";
@@ -61,7 +69,7 @@ import { PlotTabs } from "./stageplots-plot-tabs";
 import { SaveError, iconButton, type Save } from "./stageplots-shared";
 import { useCurrentPlan } from "../../main/stageplots/plan-following";
 import { planNamer } from "./plan-date-label";
-import { PendingLinksCard, PublishCard } from "./stageplots-publish-card";
+import { PendingLinksCard, PublishCard, whenLabel } from "./stageplots-publish-card";
 import { ThisWeekCard } from "./stageplots-this-week-card";
 import { VenuesCard } from "./stageplots-venues-card";
 
@@ -323,6 +331,11 @@ function PlotEditor({
   );
 }
 
+/** The unsaved banner's dot: amber while unsaved, red when the draft could not be kept. */
+function BannerDot({ tone }: { tone: "warn" | "danger" }) {
+  return <span aria-hidden className={cn("size-2 shrink-0 rounded-full", tone === "danger" ? "bg-danger-11" : "bg-warn-11")} />;
+}
+
 /** Undo and redo keys, anywhere on the page but in a field, which keeps its own. */
 function useUndoKeys(dispatch: Dispatch<EditorAction>, active: boolean) {
   useEffect(() => {
@@ -345,7 +358,8 @@ export interface StagePlotsEditProps {
 }
 
 export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
-  const { doc, loading, error, refresh } = useStagePlots();
+  const { doc, error, refresh } = useStagePlots();
+  const drafts = usePlotDrafts();
   // `/stageplots/edit?venue=<id>&plot=<id>` opens on that venue and plot; a pick in the page wins after.
   const [asked] = useSearchParam(VENUE_PARAM);
   const [askedPlot] = useSearchParam(PLOT_PARAM);
@@ -353,13 +367,17 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [plotPick, setPlotPick] = useState<{ venueId: string; plotId: string } | null>(null);
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
+  /** What the drafts file could not do after the last save that touched a draft, or null. The save itself landed. */
+  const [draftNote, setDraftNote] = useState<string | null>(null);
 
   // Every save reads the document again after it, landed or not: a refused
-  // change leaves the page showing what the server holds.
+  // change leaves the page showing what the server holds. One that landed says
+  // what the drafts could not do after it (a rename, a delete), or clears that.
   const save: Save = useCallback(
     async (run) => {
       try {
         const value = await run();
+        setDraftNote(draftNoticeOf(value));
         void refresh();
         return { ok: true, value };
       } catch (err) {
@@ -386,11 +404,20 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
     </div>
   );
 
-  if (!doc) {
+  // Held until the drafts are read as well: a draft this page has not seen must never be
+  // stored over, so a failed read stops here rather than reading as none.
+  if (!doc || !drafts.drafts) {
+    const failed = (error && !doc) || drafts.error;
     return (
       <div className="pt-5 pb-[50vh] max-sm:pt-4">
         {header}
-        {error ? <ErrorNote>Couldn&apos;t load the stage plots.</ErrorNote> : loading ? <p className="text-footnote text-fg-subtle">Loading…</p> : null}
+        {failed ? (
+          <ErrorNote>
+            {error && !doc ? "Couldn't load the stage plots." : "Couldn't read the unsaved drafts, so the editor waits rather than store over one. Reload to try again."}
+          </ErrorNote>
+        ) : (
+          <p className="text-footnote text-fg-subtle">Loading…</p>
+        )}
       </div>
     );
   }
@@ -413,8 +440,18 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
       backgroundId={backgroundId}
       onBackground={setBackgroundId}
       openPdf={openPdf}
+      drafts={drafts}
+      keptDrafts={drafts.drafts}
+      draftNote={draftNote}
+      onDraftNote={setDraftNote}
     />
   );
+}
+
+/** A save's `draftNotice` (stageplots-api.ts), or null. */
+function draftNoticeOf(value: unknown): string | null {
+  const notice = typeof value === "object" && value !== null ? (value as DraftNotice).draftNotice : undefined;
+  return typeof notice === "string" ? notice : null;
 }
 
 function EditorBody({
@@ -431,6 +468,10 @@ function EditorBody({
   backgroundId,
   onBackground,
   openPdf,
+  drafts,
+  keptDrafts,
+  draftNote,
+  onDraftNote,
 }: {
   doc: StagePlotsView;
   venue: Venue | null;
@@ -445,6 +486,12 @@ function EditorBody({
   backgroundId: string | null;
   onBackground: (id: string | null) => void;
   openPdf?: (bytes: ArrayBuffer) => Promise<OpenPdf>;
+  drafts: PlotDraftsState;
+  /** Every kept draft by plot, read before the editor was drawn. */
+  keptDrafts: ReadonlyMap<string, PlotDraft>;
+  /** What the drafts file could not do after the last save that landed; shown beside the banner. */
+  draftNote: string | null;
+  onDraftNote: (note: string | null) => void;
 }) {
   const height = plotHeight(backgroundOf(doc, plot));
   // The plan and the names plans go by, once, for the This week card and the
@@ -468,19 +515,36 @@ function EditorBody({
   // move the canvas under the pointer and the item would jump across the plot,
   // so a gesture that began on a clean draft brings it up when it ends.
   const showBanner = dirty && !(draft.gesture && sameItems(draft.gesture.items, draft.savedItems));
+  const keeper = useDraftKeeper({ plotId: plot?.id ?? null, items: draft.items, dirty, baseVersion: base, onKept: drafts.kept, onDropped: drafts.dropped, onWriting: drafts.writing });
+  /** The kept draft this plot opened with, while nothing has changed since: the banner says when it is from. */
+  const [restored, setRestored] = useState<{ plotId: string; savedAt: string } | null>(null);
+  /** The plot the draft was loaded for: the render that picks another still holds the one before. */
+  const [loadedFor, setLoadedFor] = useState(plot?.id ?? null);
 
-  // Another plot: its items, its version, nothing pending.
+  // Another plot: its items, its version, nothing pending; or its kept draft over them. A draft
+  // drawn on an older version than the plot's (its items changed since: a rename or a fade
+  // carries the draft along) opens as saved elsewhere, and Reload drops it.
   useResyncOn([plot?.id], () => {
+    const kept = plot ? (keptDrafts.get(plot.id) ?? null) : null;
     dispatch({ type: "load", items: plot?.items ?? [], height });
-    setBase(plot?.version ?? 0);
-    setConflict(false);
+    if (kept) dispatch({ type: "restore", items: kept.items });
+    setBase(kept ? kept.baseVersion : (plot?.version ?? 0));
+    setConflict(!!kept && !!plot && kept.baseVersion !== plot.version && !sameItems(kept.items, plot.items));
+    setRestored(kept ? { plotId: kept.plotId, savedAt: kept.savedAt } : null);
     setSaveError(null);
+    setLoadedFor(plot?.id ?? null);
+    keeper.reset(kept);
   });
   // The same plot, changed (a broadcast or a read after a save), and again when
   // the draft turns clean (Discard, or undo back to the start) so a save from
   // elsewhere that landed meanwhile is taken then rather than left behind.
   useResyncOn([plot, dirty], () => {
-    if (!plot) return;
+    // Another plot: the resync above loads it, and this render's draft is still the last
+    // plot's, whose saved items would load over the kept draft just restored and drop it.
+    if (!plot || plot.id !== loadedFor) return;
+    // Saved elsewhere over this draft's base: its base stays, so Save stays refused. A kept
+    // draft opened that way holds the plot's newer items as "saved" ones, which are not its base.
+    if (conflict && isDirty(draft)) return;
     if (sameItems(plot.items, draft.savedItems)) setBase(plot.version);
     else if (!isDirty(draft)) {
       dispatch({ type: "load", items: plot.items, height });
@@ -494,20 +558,37 @@ function EditorBody({
   useResyncOn([height], () => dispatch({ type: "height", height }));
   useUndoKeys(dispatch, plot !== null);
 
+  const drafted = useMemo(() => new Set(keptDrafts.keys()), [keptDrafts]);
   const where = venue && plot ? `${venue.name} · ${plot.name}` : "this plot";
 
-  /** Before anything that leaves this plot: true to go on. Unsaved changes ask first, and are dropped on yes. */
+  /**
+   * Before anything that leaves this plot: true to go on. Unsaved changes are stored as the
+   * plot's draft first and it goes on without asking; only a draft that could not be stored
+   * asks, and is dropped on yes.
+   */
   const confirmLeave = useCallback(async (): Promise<boolean> => {
     if (!isDirty(draftRef.current)) return true;
+    if (await keeper.flush()) return true;
     const ok = await confirm({
       title: "Discard unsaved changes?",
-      message: `Your changes to ${where} are not saved. Going on loses them.`,
+      message: `The draft of ${where} could not be kept on the server, so going on loses your changes.`,
       confirmLabel: "Discard changes",
       destructive: true,
     });
-    if (ok) dispatch({ type: "discard" });
+    if (ok) {
+      keeper.hold();
+      dispatch({ type: "discard" });
+    }
     return ok;
-  }, [draftRef, where]);
+  }, [draftRef, where, keeper]);
+
+  /** Discard: the draft goes here, and the keeper deletes it on the server once nothing is unsaved (a failure is shown under the banner). */
+  const discard = () => {
+    keeper.hold();
+    dispatch({ type: "discard" });
+    setRestored(null);
+    setSaveError(null);
+  };
 
   /**
    * Save the draft; true when it landed. A 409 reads the plot again first: if
@@ -523,21 +604,34 @@ function EditorBody({
     // list, so the saved reducer still knows the draft is the one that was saved.
     const stamped = stampLinks(sent, shown.links);
     setSaving(true);
-    const send = async (version: number) => {
-      const r = await stageplotsApi.saveItems(plot.id, version, stamped);
+    let version = base;
+    const send = async (on: number) => {
+      const r = await stageplotsApi.saveItems(plot.id, on, stamped);
+      onDraftNote(r.draftNotice ?? null);
       dispatch({ type: "saved", sent, items: r.plot.items });
       setBase(r.plot.version);
+      version = r.plot.version;
       setSaveError(null);
     };
+    // After any draft write already on its way, and before any after: the server deletes the
+    // draft as the save lands, and no draft write may land after that and bring it back.
+    keeper.hold();
     try {
-      try {
-        await send(base);
-      } catch (err) {
-        if ((err as ApiError).status !== 409) throw err;
-        const fresh = (await stageplotsApi.get()).plots.find((p) => p.id === plot.id);
-        if (!fresh || !sameItems(fresh.items, based)) throw err;
-        await send(fresh.version);
-      }
+      await keeper.saving(sent, async () => {
+        try {
+          await send(base);
+        } catch (err) {
+          if ((err as ApiError).status !== 409) throw err;
+          const fresh = (await stageplotsApi.get()).plots.find((p) => p.id === plot.id);
+          if (!fresh || !sameItems(fresh.items, based)) throw err;
+          await send(fresh.version);
+        }
+      });
+      keeper.forget();
+      drafts.dropped(plot.id);
+      setRestored(null);
+      // Changed again while the save was on its way: that is a draft on the saved version.
+      if (!sameItems(draftRef.current.items, sent)) void keeper.flush(version);
       return true;
     } catch (err) {
       if ((err as ApiError).status === 409) setConflict(true);
@@ -549,9 +643,10 @@ function EditorBody({
     }
   };
 
-  /** After a 409: take what the server holds now, dropping the draft. */
+  /** After a 409, or a kept draft drawn on an older version: take what the server holds now. The draft goes here, and the keeper deletes it on the server once nothing is unsaved. */
   const reload = async () => {
     if (!plot) return;
+    keeper.hold();
     try {
       const fresh = (await stageplotsApi.get()).plots.find((p) => p.id === plot.id);
       if (fresh) {
@@ -559,6 +654,7 @@ function EditorBody({
         setBase(fresh.version);
       }
       setConflict(false);
+      setRestored(null);
       setSaveError(null);
     } catch (err) {
       setSaveError(errorMessage(err));
@@ -569,13 +665,21 @@ function EditorBody({
   return (
     <div className="pt-5 pb-[50vh] max-sm:pt-4">
       {header}
-      {router && <LeaveGuard dirty={dirty} message={`Your changes to ${where} are not saved. Leaving loses them.`} />}
+      {/* Asks only while the newest change has not reached the server; a link or Back stores it first. */}
+      {router && (
+        <LeaveGuard
+          dirty={keeper.unstored}
+          flush={keeper.flush}
+          message={`Your latest changes to ${where} have not reached the server, so they are not kept. Leaving loses them.`}
+        />
+      )}
       {conflict ? (
         <UnsavedBanner
           className="mb-3"
+          marker={<BannerDot tone="warn" />}
           message={
             <>
-              <b className="font-medium text-fg">This plot changed elsewhere.</b> Reload to see it; your changes here are not saved.
+              <b className="font-medium text-fg">This plot was saved elsewhere</b> after your draft began. Reload shows the saved plot and drops the draft.
             </>
           }
           actions={
@@ -584,25 +688,64 @@ function EditorBody({
             </Button>
           }
         />
+      ) : restored && restored.plotId === plot?.id && keeper.status.kind === "kept" && keeper.status.savedAt === restored.savedAt ? (
+        <UnsavedBanner
+          className="mb-3"
+          marker={<BannerDot tone="warn" />}
+          message={
+            <>
+              <b className="font-medium text-fg">Unsaved draft from {whenLabel(restored.savedAt, plan.timeZone)}</b> on {where}. /stageplots still shows the saved plot.
+            </>
+          }
+          actions={
+            <>
+              <Button variant="transparent" size="small" onClick={() => void discard()} disabled={saving}>
+                Discard draft
+              </Button>
+              <Button variant="accent" size="small" onClick={() => void saveDraft()} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </>
+          }
+        />
       ) : (
         showBanner && (
           <UnsavedBanner
             className="mb-3"
             saving={saving}
+            marker={<BannerDot tone={keeper.status.kind === "failed" ? "danger" : "warn"} />}
             message={
-              <>
-                Unsaved changes to <b className="font-medium text-fg">{where}</b>. Nothing reaches /stageplots until you save.
-              </>
+              keeper.status.kind === "failed" ? (
+                <>
+                  Unsaved changes to <b className="font-medium text-fg">{where}</b>. <b className="font-medium text-danger-11">The draft could not be kept</b> (
+                  {keeper.status.reason}); leaving now loses it. Trying again.
+                </>
+              ) : (
+                <>
+                  Unsaved changes to <b className="font-medium text-fg">{where}</b>. Nothing reaches /stageplots until you save.{" "}
+                  {keeper.status.kind === "kept" ? (
+                    <span className="font-mono text-fg-subtle tabular-nums" data-testid="draft-kept">
+                      Draft kept {formatClock(Date.parse(keeper.status.savedAt), { timeZone: plan.timeZone })}
+                    </span>
+                  ) : (
+                    <span className="text-fg-subtle" data-testid="draft-keeping">
+                      Keeping draft…
+                    </span>
+                  )}
+                </>
+              )
             }
             onSave={() => void saveDraft()}
-            onDiscard={() => {
-              dispatch({ type: "discard" });
-              setSaveError(null);
-            }}
+            onDiscard={() => void discard()}
           />
         )
       )}
-      <SaveError message={saveError} className="mb-3" />
+      <SaveError message={saveError ?? (keeper.dropError ? `The server still holds a draft of this plot that was meant to go (${keeper.dropError}); it opens again next time.` : null)} className="mb-3" />
+      {draftNote && (
+        <p role="status" data-testid="draft-note" className="-mt-1 mb-3 text-caption1 text-fg-muted">
+          {draftNote}
+        </p>
+      )}
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
       <div className="grid items-start gap-4 lg:grid-cols-[268px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-3">
@@ -616,11 +759,12 @@ function EditorBody({
               return ok;
             }}
             save={save}
+            drafted={drafted}
           />
           <BackgroundsCard doc={doc} selectedId={backgroundId} onSelect={onBackground} save={save} {...(openPdf ? { openPdf } : {})} />
           {venue && <ThisWeekCard doc={doc} venue={venue} plan={plan} nameOf={planName} save={save} />}
           {venue ? (
-            <PublishCard venue={venue} pending={doc.pendingRemovals} save={save} timeZone={plan.timeZone} follow={doc.notice} />
+            <PublishCard venue={venue} pending={doc.pendingRemovals} save={save} timeZone={plan.timeZone} follow={doc.notice} landing={doc.landing} />
           ) : (
             <PendingLinksCard pending={doc.pendingRemovals} save={save} notice={doc.notice} timeZone={plan.timeZone} />
           )}
@@ -641,6 +785,7 @@ function EditorBody({
                   void confirmLeave().then((ok) => ok && onPlot({ venueId: venue.id, plotId }));
                 }}
                 save={save}
+                drafted={drafted}
               />
               {plot ? (
                 <PlotEditor

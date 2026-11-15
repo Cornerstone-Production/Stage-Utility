@@ -57,6 +57,21 @@ export function backgroundOf(doc: StagePlotsView, plot: Plot | null | undefined)
   return plot?.backgroundId ? (doc.backgrounds.find((b) => b.id === plot.backgroundId) ?? null) : null;
 }
 
+/** The segment a venue's own address ends in: its address by name, or its id until it has one. */
+export function venueSegment(venue: Venue): string {
+  return venue.slug ?? venue.id;
+}
+
+/** A venue's own address on /stageplots. */
+export function venuePath(venue: Venue): string {
+  return `/stageplots/${encodeURIComponent(venueSegment(venue))}`;
+}
+
+/** The venue `/stageplots/<segment>` opens: the one whose id, address or old address it is. */
+export function venueAt(venues: readonly Venue[], segment: string): Venue | null {
+  return venues.find((v) => v.id === segment) ?? venues.find((v) => v.slug === segment || v.oldSlugs.includes(segment)) ?? null;
+}
+
 /** "412 KB", "3.1 MB". */
 export function formatBytes(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

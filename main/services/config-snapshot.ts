@@ -405,7 +405,7 @@ function linksOnly(json: unknown, httpOrigin: (v: unknown) => string | null): St
   };
   const venues = (Array.isArray(d?.venues) ? d.venues : []).map((raw, i) => {
     const p = link(o(o(raw)?.publish));
-    return { id: `live-${i}`, name: "", kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: { ...p, publishedAt: "", lastError: null, publishedImages: [], unpublishedImages: [] } } : {}) };
+    return { id: `live-${i}`, name: "", slug: null, oldSlugs: [], kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null, ...(p ? { publish: { ...p, publishedAt: "", lastError: null, publishedImages: [], unpublishedImages: [], listed: false } } : {}) };
   });
   const pendingRemovals = (Array.isArray(d?.pendingRemovals) ? d.pendingRemovals : []).flatMap((raw) => {
     const l = link(o(raw));

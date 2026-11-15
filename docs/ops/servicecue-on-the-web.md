@@ -115,13 +115,39 @@ the LAN.
 
 | | |
 |---|---|
-| `/servicecue` | the landing page, as a stage tablet sees it, without the **Edit layouts** link |
+| `/servicecue` | the ServiceCue index, as a stage tablet sees it, without the **Edit layouts** link |
 | `/servicecue/<service type>/<layout>` | a rundown. The same links as the app's: `weekend/audio`, a layout by id, `all-columns`, `?plan=`, `?text=` |
-| `/` | sends the visitor on to `/servicecue` |
+| `/` | the [landing page](#the-landing-page) while a stage plots venue is listed on it; otherwise sends the visitor on to `/servicecue` |
 | anything else | `404`. There is no `/servicecue/presets` and no settings of any kind |
 
 Give people the `/servicecue` link; every rundown they open from it works like the
 app's own, and its back arrow returns to it.
+
+## The landing page
+
+Once at least one [published stage plots venue](../features/stageplots.md#publishing) is
+listed on it, the page's own address (`https://<page>/`) is a landing page: a
+**ServiceCue** card that opens `/servicecue`, and a **Stage plots** card naming each listed
+venue with how many plots it has. A venue opens through its own secret link, so it reads
+exactly as it does for a crew member who was sent the link. Listing a venue puts that link
+in front of anyone who finds the page.
+
+- Turn it on per venue with **Show on the landing page** on the editor's Publish card,
+  while the venue is published. Every venue starts off it.
+- The page holds one small list: each listed venue's name, plot count and link, never its
+  notes, plots or patch. Stage Utility sends it again whenever it changes: a venue listed or
+  taken off, renamed, given a plot or losing one, its link regenerated, unpublished,
+  deleted, or moved to a new page address (the old page is sent an empty list with its
+  old token; if it will not take it, the Publish card says so, and the old page keeps its
+  list until it is set up here again or its Worker is taken down).
+- With no venue listed, `/` goes straight on to `/servicecue`, as it always has.
+- The page follows the visitor's light or dark setting.
+
+The landing page needs a Worker from this release or later. An older one keeps sending
+`/` on to `/servicecue`; the listing is still saved, and the Publish card says "*host*
+needs updating before it can show a landing page: deploy the Worker." Update the page as
+below; the list is sent again on the next change, and tried again on its own every few
+minutes.
 
 ## Your own domain
 
@@ -165,7 +191,8 @@ The same Worker serves [published stage plots](../features/stageplots.md#publish
 those addresses: publishing a venue is refused with "*host* needs updating before it can show
 stage plots: deploy the Worker", and nothing else changes; the plots still save and show on
 `/stageplots` on the local network. Update the page either way above and
-publish again.
+publish again. The same goes for the [landing page](#the-landing-page), which a Worker
+from before it does not have.
 
 ### Keeping it up to date
 

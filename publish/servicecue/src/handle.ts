@@ -8,6 +8,7 @@
 
 import {
   ASSET_CONTENT_TYPES,
+  LANDING_HTML,
   PUBLISH_MAX_BODY_BYTES,
   STAGEPLOTS_HTML,
   STAGEPLOTS_IMAGE_TYPE,
@@ -16,7 +17,9 @@ import {
   VIEWER_HTML,
   assetContentType,
   loggablePath,
+  readLandingList,
   stagePlotsKeyKind,
+  type LandingList,
 } from "../../../main/types/servicecue-publish.js";
 import { authorize } from "./auth.js";
 import { BodyTooLarge, readCappedBody } from "./body.js";
@@ -24,7 +27,7 @@ import { viewerBuild } from "./build.js";
 import { SVG_CSP, htmlCsp, json, jsonText, noContent, secured } from "./headers.js";
 import type { HubApi } from "./hub-api.js";
 import { UNKNOWN, isPublishArea, routePublic, routePublish, type Rejection } from "./routes.js";
-import { docText, frameBody, heartbeatBody, isWebp, manifestBody, parseJson, stagePlotsDocText, stagePlotsKeepBody, type Parsed } from "./validate.js";
+import { docText, frameBody, heartbeatBody, isWebp, landingBody, manifestBody, parseJson, stagePlotsDocText, stagePlotsKeepBody, type Parsed } from "./validate.js";
 
 export interface HandlerDeps {
   hub: HubApi;
@@ -202,7 +205,29 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
     case "dropStagePlots":
       await deps.hub.dropStagePlots(r.secret);
       return noContent();
+
+    case "putLanding": {
+      const body = await readValidated(request, landingBody);
+      if (!body.ok) return body.response;
+      await deps.hub.putLanding(body.value);
+      return noContent();
+    }
   }
+}
+
+/** The landing list as stored; none listed before the first, or when what is held does not read as one. */
+async function landingList(hub: HubApi): Promise<LandingList> {
+  const text = await hub.getLanding();
+  let parsed: unknown = null;
+  try {
+    parsed = text === null ? null : JSON.parse(text);
+  } catch (err) {
+    // Stored only after landingBody rebuilt it, so this is storage that changed under the Worker.
+    console.error("[servicecue-worker] the landing list held does not parse; showing none until the next is sent:", err);
+  }
+  const r = readLandingList(parsed);
+  if (!r.ok && text !== null) console.error(`[servicecue-worker] the landing list held is not one (${r.error}); showing none until the next is sent`);
+  return r.ok ? r.list : { venues: [] };
 }
 
 /**
@@ -239,9 +264,13 @@ async function serve(request: Request, url: URL, deps: HandlerDeps): Promise<Res
       return rejection(r);
 
     case "home":
-      // A domain of its own opens on the landing page. Temporary, so a browser asks
-      // again if the page ever moves.
+      // The landing page while at least one venue is listed on it: it has something besides
+      // ServiceCue to offer. Otherwise on to ServiceCue, temporary, so a browser asks again.
+      if ((await landingList(deps.hub)).venues.length > 0) return viewerDocument(request, url, deps, LANDING_HTML);
       return new Response(null, { status: 302, headers: { Location: "/servicecue" } });
+
+    case "landing":
+      return forMethod(request, json(await landingList(deps.hub)));
 
     case "doc": {
       const text = await deps.hub.getDoc(r.key);

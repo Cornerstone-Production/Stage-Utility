@@ -42,6 +42,14 @@ export class MemoryHub implements HubApi {
   async getAsset(name: string): Promise<{ type: AssetContentType; body: ArrayBuffer } | null> {
     return this.assets.get(name) ?? null;
   }
+  /** The landing list's JSON text, as stored; null before the first. */
+  landing: string | null = null;
+  async putLanding(text: string): Promise<void> {
+    this.landing = text;
+  }
+  async getLanding(): Promise<string | null> {
+    return this.landing;
+  }
   async putStagePlot(secret: string, key: string, type: string, body: ArrayBuffer): Promise<"stored" | "full"> {
     const id = `${secret}/${key}`;
     if (!this.stageplots.has(id) && this.stagePlotKeys(secret).length >= STAGEPLOTS_MAX_KEYS) return "full";

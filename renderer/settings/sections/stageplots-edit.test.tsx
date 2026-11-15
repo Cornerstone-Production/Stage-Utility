@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import type { BackgroundView, Plot, StagePlotsView } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotDraft, StagePlotsView } from "@main/types/stageplots";
 
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@main/services/stageplots-store";
@@ -39,6 +39,24 @@ let PATCH: PatchFile;
 let PATCH_DOWN = false;
 /** While set, GET /api/stageplots/patch waits for it: a patch that has not answered yet. */
 let PATCH_HOLD: Promise<void> | null = null;
+/** The kept drafts GET /api/stageplots/drafts answers, kept and deleted as the server does. */
+let DRAFTS: PlotDraft[] = [];
+/** While set, every draft request fails as a server that does not answer. */
+let DRAFTS_DOWN = false;
+/** While set, a draft PUT waits for it before it lands: one still on its way. */
+let DRAFT_HOLD: Promise<void> | null = null;
+/** While set, a save of a plot's items lands on the server and waits for it before it answers. */
+let ITEMS_HOLD: Promise<void> | null = null;
+/** While set, a save, rename or delete of a plot answers this as its `draftNotice`: the drafts file did not take it. */
+let DRAFT_NOTICE: string | null = null;
+/** Draft PUTs sent, landed or not. */
+let draftPutsOut = 0;
+/** GET /api/stageplots/drafts asked, from any page. */
+let draftReads = 0;
+/** The drafts note the server broadcasts on stageplots:drafts after any change to them. */
+function announceDrafts() {
+  FakeEventSource.last?.push("stageplots:drafts", { drafts: DRAFTS.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
+}
 
 function patchFile(): PatchFile {
   return {
@@ -92,7 +110,7 @@ function plot(id: string, venueId: string, name: string, backgroundId: string | 
 
 function doc(): StagePlotsView {
   return {
-    venues: [{ id: "v-1", name: "Room One", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    venues: [{ id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [bg("b-1", "Plan one.jpg")],
     plots: [plot("p-1", "v-1", "Standard", "b-1"), plot("p-2", "v-1", "Special")],
     overrides: [],
@@ -114,7 +132,7 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const venue = (id: string) => DOC.venues.find((v) => v.id === id)!;
   let m: RegExpExecArray | null;
   if (method === "POST" && path === "/api/stageplots/venues") {
-    const v = { id: `v-new${++ids}`, plotIds: [], defaultPlotId: null, notes: "", ...(body as object) } as unknown as StagePlotsView["venues"][number];
+    const v = { id: `v-new${++ids}`, slug: `new-venue-${ids}`, oldSlugs: [], plotIds: [], defaultPlotId: null, notes: "", ...(body as object) } as unknown as StagePlotsView["venues"][number];
     DOC.venues.push(v);
     return { status: 201, json: v };
   }
@@ -146,7 +164,21 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     venue(m[1]).defaultPlotId = (body as { plotId: string }).plotId;
     return { status: 200, json: venue(m[1]) };
   }
+  if (method === "PUT" && (m = /^\/api\/stageplots\/plots\/([^/]+)\/draft$/.exec(path))) {
+    const { baseVersion, items } = body as { baseVersion: number; items: PlotDraft["items"] };
+    const draft = { plotId: m[1], baseVersion, items, savedAt: `2026-11-14T14:${String(32 + DRAFTS.length).padStart(2, "0")}:00.000Z` };
+    DRAFTS = [...DRAFTS.filter((d) => d.plotId !== m![1]), draft];
+    // As the server does: the note goes out before the answer.
+    announceDrafts();
+    return { status: 200, json: { plotId: m[1], baseVersion, savedAt: draft.savedAt } };
+  }
+  if (method === "DELETE" && (m = /^\/api\/stageplots\/plots\/([^/]+)\/draft$/.exec(path))) {
+    DRAFTS = DRAFTS.filter((d) => d.plotId !== m![1]);
+    return { status: 200, json: { ok: true } };
+  }
   if (method === "PUT" && (m = /^\/api\/stageplots\/plots\/([^/]+)\/items$/.exec(path))) {
+    // The server deletes the plot's draft as a save lands.
+    DRAFTS = DRAFTS.filter((d) => d.plotId !== m![1]);
     // As the server does, in its order: the items are held to the real rules on
     // the plot's height, then the version decides; never a canned answer.
     const p = DOC.plots.find((x) => x.id === m![1])!;
@@ -195,6 +227,16 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   let status = 200;
   // A copy, as a real read is: the same object again would be no change to React.
   let json: unknown = structuredClone(DOC);
+  if (/\/draft$/.test(u.pathname)) {
+    if (DRAFTS_DOWN) throw new TypeError("Failed to fetch");
+    if (method === "PUT") draftPutsOut++;
+    if (DRAFT_HOLD && method === "PUT") await DRAFT_HOLD;
+  }
+  if (u.pathname === "/api/stageplots/drafts") {
+    draftReads++;
+    const body = { drafts: structuredClone(DRAFTS) };
+    return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
+  }
   if (u.pathname === "/api/stageplots/patch") {
     if (PATCH_HOLD) await PATCH_HOLD;
     const [st, body] = PATCH_DOWN ? [503, { error: "patch.json could not be read (EIO)" }] : [200, PATCH];
@@ -214,7 +256,9 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     } else {
       ({ status, json } = route(method, u.pathname, u.searchParams, body));
       if (status < 300) broadcast();
+      if (status < 300 && DRAFT_NOTICE && /^\/api\/stageplots\/plots\/[^/]+(\/items)?$/.test(u.pathname)) json = { ...(json as object), draftNotice: DRAFT_NOTICE };
     }
+    if (ITEMS_HOLD && method === "PUT" && u.pathname.endsWith("/items")) await ITEMS_HOLD;
   }
   return { ok: status < 300, status, statusText: String(status), json: async () => json, text: async () => JSON.stringify(json) };
 };
@@ -311,6 +355,13 @@ beforeEach(() => {
   PATCH = patchFile();
   PATCH_DOWN = false;
   PATCH_HOLD = null;
+  DRAFTS = [];
+  DRAFTS_DOWN = false;
+  DRAFT_HOLD = null;
+  ITEMS_HOLD = null;
+  DRAFT_NOTICE = null;
+  draftPutsOut = 0;
+  draftReads = 0;
   STATE = {};
   UPCOMING = { plans: [], cacheAgeMs: 0 };
   localStorage.clear();
@@ -330,7 +381,7 @@ after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("/stageplots/edit", () => {
   test("a venue picked after opening with ?venue= wins over the parameter", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
     window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
     try {
       await mount();
@@ -343,7 +394,7 @@ describe("/stageplots/edit", () => {
   });
 
   test("?venue= opens the editor on that venue", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
     window.history.replaceState(null, "", "/stageplots/edit?venue=v-2");
     try {
       await mount();
@@ -385,13 +436,41 @@ describe("/stageplots/edit", () => {
     assert.ok(within(publish).getByRole("button", { name: "Publish Room One" }));
   });
 
-  test("adding a venue shows it selected", async () => {
+  test("adding a venue asks its name first, adds it under that name and shows it selected", async () => {
     await mount();
     await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    assert.deepEqual(writes(), [], "nothing is added before it has a name");
+    const field = screen.getByLabelText("New venue name") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "  Main Auditorium " } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    await settle();
     assert.deepEqual(writes(), ["POST /api/stageplots/venues"]);
+    // The name goes with the create, so the address the server makes from it is the venue's name.
+    assert.deepEqual(sent[0].body, { name: "Main Auditorium", kind: "home", notes: "" });
     const current = within(card("Venues")).getAllByRole("button").find((b) => b.getAttribute("aria-current") === "true");
-    assert.equal(current?.textContent, "New venue0 plots");
-    assert.equal((screen.getByLabelText("Venue name") as HTMLInputElement).value, "New venue");
+    assert.equal(current?.textContent, "Main Auditorium0 plots");
+    assert.equal((screen.getByLabelText("Venue name") as HTMLInputElement).value, "Main Auditorium");
+    assert.equal(screen.queryByLabelText("New venue name"), null);
+  });
+
+  test("Escape, or leaving the new venue's name empty, adds nothing", async () => {
+    await mount();
+    await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    let field = screen.getByLabelText("New venue name");
+    fireEvent.change(field, { target: { value: "Chapel" } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Escape" });
+    });
+    assert.equal(screen.queryByLabelText("New venue name"), null);
+    await click(within(card("Venues")).getByRole("button", { name: "Venue" }));
+    field = screen.getByLabelText("New venue name");
+    await act(async () => {
+      fireEvent.blur(field);
+    });
+    await settle();
+    assert.deepEqual(writes(), []);
   });
 
   test("upload a JPEG posts raw bytes and lists the background", async () => {
@@ -955,13 +1034,13 @@ describe("the plot editor", () => {
     await settle();
     assert.ok(drawn(mine), "a change elsewhere replaced the draft");
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.match(document.body.textContent!, /This plot changed elsewhere/);
+    assert.match(document.body.textContent!, /This plot was saved elsewhere/);
     assert.ok(drawn(mine), "the draft was dropped");
     assert.equal(DOC.plots[0].items[0].id, "theirs", "the other save was overwritten");
     await click(screen.getByRole("button", { name: "Reload" }));
     assert.ok(drawn("theirs"));
     assert.ok(canvas().querySelector(`[data-id="${mine}"]`) === null);
-    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.doesNotMatch(document.body.textContent!, /saved elsewhere/);
     assert.ok(banner() === null);
   });
 
@@ -976,7 +1055,7 @@ describe("the plot editor", () => {
     assert.ok(canvas().querySelector('[data-id="theirs"]') !== null, "Discard went back to the plot as it was before the other save");
     await addFromPalette("circle");
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.doesNotMatch(document.body.textContent!, /saved elsewhere/);
     assert.equal(DOC.plots[0].version, 2);
   });
 
@@ -991,7 +1070,7 @@ describe("the plot editor", () => {
     await settle();
     assert.equal(DOC.plots[0].version, 1, "the fade did not bump the version");
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/, "my own fade made my Save a 409");
+    assert.doesNotMatch(document.body.textContent!, /saved elsewhere/, "my own fade made my Save a 409");
     assert.equal((sent.at(-1)!.body as { version: number }).version, 1);
     assert.equal(DOC.plots[0].items.length, 1);
   });
@@ -1015,16 +1094,38 @@ describe("the plot editor", () => {
     assert.ok(banner() === null);
   });
 
-  test("switching plot with unsaved changes asks first", async () => {
+  test("switching plot with unsaved changes keeps them as the plot's draft and switches without asking; back again, they open", async () => {
     await mount();
     const mine = await addFromPalette("box");
     await click(tabs()[1]);
+    await settle();
+    assert.equal(screen.queryByRole("alertdialog"), null, "it asked although the draft could be kept");
+    assert.equal(tabs()[1].getAttribute("aria-selected"), "true");
+    assert.ok(writes().includes("PUT /api/stageplots/plots/p-1/draft"), writes().join(", "));
+    assert.deepEqual(DRAFTS.map((d) => [d.plotId, d.items.map((it) => it.id)]), [["p-1", [mine]]]);
+    // The plot with a draft carries a dot on its tab, and so does its venue.
+    assert.ok(within(tabs()[0]).queryByLabelText("Unsaved draft"), "no dot on the tab with a draft");
+    assert.equal(within(tabs()[1]).queryByLabelText("Unsaved draft"), null);
+    assert.ok(within(card("Venues")).queryByLabelText("Unsaved draft"), "no dot on the venue");
+    await click(tabs()[0]);
+    await settle();
+    assert.ok(drawn(mine), "the kept draft did not open");
+    assert.match(document.body.textContent!, /Unsaved draft from \w{3} \d{1,2} \w{3}, \d{1,2}:\d{2} on Room One · Standard\. \/stageplots still shows the saved plot\./);
+  });
+
+  test("switching plot when the draft cannot be kept asks first, and Discard changes switches", async () => {
+    DRAFTS_DOWN = true;
+    await mount();
+    const mine = await addFromPalette("box");
+    await click(tabs()[1]);
+    await settle();
     const dialog = screen.getByRole("alertdialog");
-    assert.match(dialog.textContent!, /Room One · Standard are not saved/);
+    assert.match(dialog.textContent!, /The draft of Room One · Standard could not be kept on the server/);
     await click(within(dialog).getByRole("button", { name: "Cancel" }));
     assert.equal(tabs()[0].getAttribute("aria-selected"), "true", "Cancel left the plot");
     assert.ok(drawn(mine), "Cancel dropped the draft");
     await click(tabs()[1]);
+    await settle();
     await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
     assert.equal(tabs()[1].getAttribute("aria-selected"), "true");
     assert.ok(banner() === null);
@@ -1152,6 +1253,8 @@ describe("the plot editor", () => {
   });
 
   test("right-click Delete on a tab that is not the selected one deletes it without asking about, or discarding, the selected plot's changes", async () => {
+    // The draft cannot be kept, so leaving the selected plot would ask: deleting another must not.
+    DRAFTS_DOWN = true;
     await mount();
     const mine = await addFromPalette("box");
     assert.ok(banner(), "Standard has unsaved changes");
@@ -1170,7 +1273,9 @@ describe("the plot editor", () => {
   });
 
   test("a venue's Rename declined at the discard prompt leaves nothing waiting: picking it later does not grab the name field", async () => {
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    // The prompt comes only when the draft cannot be kept.
+    DRAFTS_DOWN = true;
     await mount();
     await addFromPalette("box");
     const rowTwo = () => within(card("Venues")).getByRole("button", { name: /Room Two/ });
@@ -1186,6 +1291,37 @@ describe("the plot editor", () => {
     assert.equal(rowTwo().getAttribute("aria-current"), "true", "Room Two is selected now");
     const field = screen.getByLabelText("Venue name") as HTMLInputElement;
     assert.notEqual(document.activeElement, field, "the declined Rename was still waiting and took the cursor");
+  });
+
+  test("an address the server refuses shows under the field as the server wrote it, a venue's name in its own case", async () => {
+    await mount();
+    refuse = { what: "PATCH /api/stageplots/venues/v-1", error: "chapel already uses that address" };
+    const field = screen.getByLabelText("Address") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "chapel" } });
+      fireEvent.blur(field);
+    });
+    await settle();
+    assert.equal(field.value, "chapel", "the refused address was not kept as typed");
+    assert.equal(screen.getByRole("alert").textContent, "chapel already uses that address.", "the card rewrote the server's sentence");
+  });
+
+  test("a venue's menu copies and opens its address by name, not its id", async () => {
+    DOC.venues[0].slug = "room-one";
+    const router = await mountRouted("/stageplots/edit?venue=v-1");
+    const row = () => within(card("Venues")).getByRole("button", { name: /Room One/ });
+    const menu = async (name: string) => {
+      await act(async () => {
+        fireEvent.contextMenu(row(), { clientX: 30, clientY: 30 });
+      });
+      await click(screen.getByRole("menuitem", { name }));
+      await settle();
+    };
+    await menu("Copy its address");
+    // No clipboard here, so it shows the address to copy by hand: the address is the point.
+    assert.match(within(card("Venues")).getByRole("status").textContent!, /\/stageplots\/room-one$/);
+    await menu("Open on /stageplots");
+    assert.equal(router.state.location.pathname, "/stageplots/room-one");
   });
 
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
@@ -1222,7 +1358,7 @@ describe("the plot editor", () => {
   });
 
   // ── A background change over unsaved work (the fake moves items as the route does) ──
-  const refusedOrConflict = () => /changed elsewhere|must be a number/.test(document.body.textContent!);
+  const refusedOrConflict = () => /saved elsewhere|must be a number/.test(document.body.textContent!);
   async function chooseBackground(value: string, choice: "Save and switch" | "Discard and switch" | "Cancel") {
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Background"), { target: { value } });
@@ -1241,7 +1377,7 @@ describe("the plot editor", () => {
     const switching = writes().slice();
     await addFromPalette("circle");
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(changed elsewhere|must be a number)[^.]*/)?.[0]}`);
+    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(saved elsewhere|must be a number)[^.]*/)?.[0]}`);
     assert.deepEqual(switching.slice(-2), ["PUT /api/stageplots/plots/p-1/items", "PATCH /api/stageplots/plots/p-1"]);
     assert.ok(DOC.plots[0].items.every((it) => it.y <= 562.5));
   });
@@ -1259,7 +1395,7 @@ describe("the plot editor", () => {
       fireEvent.keyDown(canvas(), { key: "ArrowUp" });
     });
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(changed elsewhere|must be a number)[^.]*/)?.[0]}`);
+    assert.ok(!refusedOrConflict(), `the save after switching was refused: ${document.body.textContent!.match(/[^.]*(saved elsewhere|must be a number)[^.]*/)?.[0]}`);
     assert.equal(DOC.plots[0].items[0].y, 562.5 - 60 - 4);
   });
 
@@ -1278,7 +1414,7 @@ describe("the plot editor", () => {
     // A rename elsewhere lands; its broadcast has not arrived yet.
     Object.assign(DOC.plots[0], { name: "Renamed", version: 1 });
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/);
+    assert.doesNotMatch(document.body.textContent!, /saved elsewhere/);
     assert.equal(DOC.plots[0].version, 2);
     assert.equal(DOC.plots[0].items.length, 1);
   });
@@ -1291,9 +1427,9 @@ describe("the plot editor", () => {
     await act(async () => broadcast());
     await settle();
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.match(document.body.textContent!, /changed elsewhere/);
+    assert.match(document.body.textContent!, /saved elsewhere/);
     await click(screen.getByTestId("undo"));
-    assert.doesNotMatch(document.body.textContent!, /changed elsewhere/, "the banner stayed with nothing unsaved");
+    assert.doesNotMatch(document.body.textContent!, /saved elsewhere/, "the banner stayed with nothing unsaved");
     assert.ok(drawn("theirs"));
   });
 
@@ -1344,7 +1480,7 @@ describe("the plot editor", () => {
     await dragItem(mine, 0, 600 - at(mine).y);
     await backgroundChangedElsewhere();
     await click(screen.getByRole("button", { name: "Save" }));
-    assert.doesNotMatch(document.body.textContent!, /must be a number|changed elsewhere/);
+    assert.doesNotMatch(document.body.textContent!, /must be a number|saved elsewhere/);
     assert.ok(DOC.plots[0].items[0].y <= 562.5, `saved at y ${DOC.plots[0].items[0].y}`);
   });
 
@@ -1355,7 +1491,301 @@ describe("the plot editor", () => {
     await backgroundChangedElsewhere();
     await click(screen.getByRole("button", { name: "Save" }));
     assert.doesNotMatch(document.body.textContent!, /must be a number/, "the save was refused for an item's y");
-    assert.match(document.body.textContent!, /This plot changed elsewhere/);
+    assert.match(document.body.textContent!, /This plot was saved elsewhere/);
+  });
+});
+
+describe("the kept draft", () => {
+  /** Real time passing, for the second the editor waits before it keeps a change. */
+  const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
+  /** Until `ok`, in real time (the editor waits a second before it keeps a change, two before it tries again), or fail after 6 s. */
+  const until = async (ok: () => boolean, what: string) => {
+    for (const end = Date.now() + 6000; !ok(); ) {
+      if (Date.now() > end) assert.fail(`still waiting for ${what}`);
+      await wait(50);
+    }
+  };
+  const isKept = () => screen.queryByTestId("draft-kept") !== null;
+  const draftWrites = () => writes().filter((w) => w.endsWith("/draft"));
+  const ids = () => [...canvas().querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id"));
+  const kept = (over: Partial<PlotDraft> = {}): PlotDraft => ({ plotId: "p-1", baseVersion: DOC.plots[0].version, items: [item({ id: "drafted" })], savedAt: "2026-11-14T14:32:00.000Z", ...over });
+
+  test("a change is kept a second after it, and the banner says when", async () => {
+    await mount();
+    await addFromPalette("box");
+    assert.deepEqual(draftWrites(), [], "kept before the second was up");
+    assert.ok(screen.getByTestId("draft-keeping"));
+    await until(isKept, "the draft to be kept");
+    assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft"]);
+    assert.match(screen.getByTestId("draft-kept").textContent!, /^Draft kept \d{1,2}:\d{2}/);
+    assert.equal(sent.at(-1)!.body && (sent.at(-1)!.body as { baseVersion: number }).baseVersion, DOC.plots[0].version);
+  });
+
+  test("Save deletes the draft, and no draft write lands after it", async () => {
+    await mount();
+    await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.deepEqual(DRAFTS, [], "the save left the draft");
+    await wait(1200);
+    assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft"], "a draft write after the Save");
+    assert.equal(within(tabs()[0]).queryByLabelText("Unsaved draft"), null);
+  });
+
+  test("a Save pressed while a draft write is on its way goes after it, so the draft does not come back", async () => {
+    await mount();
+    await addFromPalette("box");
+    let release!: () => void;
+    DRAFT_HOLD = new Promise((r) => (release = r));
+    await until(() => draftPutsOut > 0, "the draft write to go out");
+    // The draft write is out and has not landed; Save is pressed now.
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    await settle();
+    release();
+    DRAFT_HOLD = null;
+    for (let i = 0; i < 4; i++) await settle();
+    assert.deepEqual(
+      writes().filter((w) => w.startsWith("PUT")),
+      ["PUT /api/stageplots/plots/p-1/draft", "PUT /api/stageplots/plots/p-1/items"],
+      "the save went out before the draft write it should wait for",
+    );
+    assert.deepEqual(DRAFTS, [], "a draft of what was just saved was left on the server");
+  });
+
+  test("a plot's draft survives a save on another plot, and opens again when its tab is picked", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    await click(tabs()[1]);
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"], "the save on Special took Standard's draft");
+    await click(tabs()[0]);
+    for (let i = 0; i < 3; i++) await settle();
+    assert.ok(ids().includes(mine), "Standard opened without its draft");
+    assert.match(document.body.textContent!, /Unsaved draft from/);
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"], "opening Standard deleted its draft");
+  });
+
+  test("closing the page while a Save is on its way sends no draft of what it is saving, so the draft does not come back over it", async () => {
+    await mount();
+    await addFromPalette("box");
+    let release!: () => void;
+    ITEMS_HOLD = new Promise((r) => (release = r));
+    // Saved before the second was up: nothing kept yet, so a closing page would send it.
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    await until(() => writes().includes("PUT /api/stageplots/plots/p-1/items"), "the save to go out");
+    // The save has landed on the server and its answer is not back: the tab closes now.
+    await act(async () => void window.dispatchEvent(new Event("pagehide")));
+    await settle();
+    release();
+    ITEMS_HOLD = null;
+    for (let i = 0; i < 4; i++) await settle();
+    assert.deepEqual(draftWrites(), [], "the page sent a draft of the items its Save was carrying");
+    assert.deepEqual(DRAFTS, [], "a draft came back over the save that deleted it");
+  });
+
+  test("the plot's version moving under an unchanged draft (a rename elsewhere) keeps it again on the new version, so it never opens as saved elsewhere", async () => {
+    await mount();
+    await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    assert.equal(DRAFTS[0].baseVersion, 0);
+    // Renamed on another desk; the server's draft stayed on version 0 (its write landed after the
+    // rename carried the drafts, or the carry could not be written).
+    DOC.plots[0] = { ...DOC.plots[0], name: "Renamed", version: 1 };
+    await act(async () => broadcast());
+    await until(() => DRAFTS[0]?.baseVersion === 1, "the draft to be kept again on version 1");
+    assert.ok(isKept(), "the banner does not say the draft is kept");
+    cleanup();
+    await settle();
+    await mount();
+    assert.equal(screen.queryByText(/This plot was saved elsewhere/), null, "the draft opened as saved elsewhere");
+    assert.match(document.body.textContent!, /Unsaved draft from/);
+  });
+
+  test("a save, or a rename through its card, whose draft the server could not tidy says so in a note, and stands", async () => {
+    DRAFT_NOTICE = "Saved, but the plot's unsaved draft could not be deleted, so it may open again: disk full";
+    await mount();
+    await addFromPalette("box");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.equal(banner(), null, "the save did not land");
+    assert.equal(screen.getByTestId("draft-note").textContent, DRAFT_NOTICE);
+    // Through a card's save: a rename.
+    DRAFT_NOTICE = "Saved, but the plot's unsaved draft could not be moved onto this version, so it may open as saved elsewhere: disk full";
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: "Rename" }));
+    const field = screen.getByLabelText("Plot name") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "Renamed" } });
+      fireEvent.keyDown(field, { key: "Enter" });
+      field.blur();
+    });
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(tabs()[0].textContent, "Renamed");
+    assert.equal(screen.getByTestId("draft-note").textContent, DRAFT_NOTICE);
+    // The next save that leaves nothing undone clears it.
+    DRAFT_NOTICE = null;
+    await addFromPalette("circle");
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.equal(screen.queryByTestId("draft-note"), null);
+  });
+
+  test("closing the tab asks only while the newest change has not reached the server", async () => {
+    const { createRootRoute, createRoute, createRouter, createBrowserHistory, RouterProvider, Outlet } = await import("@tanstack/react-router");
+    window.history.replaceState(null, "", "/stageplots/edit");
+    const root = createRootRoute({ component: () => React.createElement(React.Fragment, null, React.createElement(Outlet), React.createElement(ConfirmHost)) });
+    const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement(StagePlotsEdit, { openPdf: fakePdf }) });
+    const history = createBrowserHistory();
+    const router = createRouter({ routeTree: root.addChildren([edit]), history });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    try {
+      await act(async () => {
+        render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+      });
+      for (let i = 0; i < 4; i++) await settle();
+      const closing = () => {
+        const e = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      assert.equal(closing(), false, "it asked with nothing unsaved");
+      await addFromPalette("box");
+      assert.equal(closing(), true, "it let the tab close before the change was kept");
+      await until(isKept, "the draft to be kept");
+      assert.equal(closing(), false, "it asked although the change is kept");
+    } finally {
+      cleanup();
+      history.destroy();
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  test("its own kept changes are not read back: one read of the drafts on mount, and one for a draft kept elsewhere", async () => {
+    await mount();
+    assert.equal(draftReads, 1);
+    await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    await addFromPalette("circle");
+    await until(() => draftPutsOut === 2 && isKept(), "the second change to be kept");
+    assert.equal(draftReads, 1, "the editor read back a draft it had just written");
+    // Another desk keeps a draft of the other plot: that is news, read once, and its tab gets the dot.
+    DRAFTS = [...DRAFTS, { plotId: "p-2", baseVersion: 0, items: [item({ id: "theirs" })], savedAt: "2026-11-14T15:00:00.000Z" }];
+    await act(async () => announceDrafts());
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(draftReads, 2);
+    assert.ok(within(tabs()[1]).queryByLabelText("Unsaved draft"), "the other desk's draft has no dot");
+  });
+
+  test("undo back to the saved plot deletes the draft", async () => {
+    await mount();
+    await addFromPalette("box");
+    await until(isKept, "the draft to be kept");
+    await click(screen.getByTestId("undo"));
+    await settle();
+    assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft", "DELETE /api/stageplots/plots/p-1/draft"]);
+    assert.deepEqual(DRAFTS, []);
+  });
+
+  test("a kept draft opens over the saved plot, says when it is from, and Discard draft deletes it on the server", async () => {
+    DOC.plots[0].items = [item({ id: "saved" })];
+    DRAFTS = [kept()];
+    await mount();
+    assert.deepEqual(ids(), ["drafted"]);
+    assert.match(document.body.textContent!, /Unsaved draft from Sat 14 Nov, \d{1,2}:32 on Room One · Standard\./);
+    await click(screen.getByRole("button", { name: "Discard draft" }));
+    await settle();
+    assert.deepEqual(ids(), ["saved"]);
+    assert.deepEqual(draftWrites(), ["DELETE /api/stageplots/plots/p-1/draft"]);
+    assert.deepEqual(DRAFTS, []);
+    assert.equal(banner(), null);
+  });
+
+  test("a kept draft saved from the banner it opened with saves on its base and deletes the draft", async () => {
+    DRAFTS = [kept()];
+    await mount();
+    await click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    const put = sent.find((w) => w.what === "PUT /api/stageplots/plots/p-1/items")!;
+    assert.equal((put.body as { version: number }).version, 0);
+    assert.deepEqual((put.body as { items: { id: string }[] }).items.map((it) => it.id), ["drafted"]);
+    assert.deepEqual(DRAFTS, []);
+  });
+
+  test("a kept draft drawn on a version whose items changed since opens as saved elsewhere, and Reload drops it", async () => {
+    DOC.plots[0].items = [item({ id: "theirs" })];
+    DOC.plots[0].version = 3;
+    DRAFTS = [kept({ baseVersion: 2 })];
+    await mount();
+    assert.deepEqual(ids(), ["drafted"]);
+    assert.match(document.body.textContent!, /This plot was saved elsewhere after your draft began\. Reload shows the saved plot and drops the draft\./);
+    assert.equal(screen.queryByRole("button", { name: "Save" }), null);
+    await click(screen.getByRole("button", { name: "Reload" }));
+    await settle();
+    assert.deepEqual(ids(), ["theirs"]);
+    assert.ok(draftWrites().includes("DELETE /api/stageplots/plots/p-1/draft"), writes().join(", "));
+    assert.deepEqual(DRAFTS, []);
+  });
+
+  test("a draft the server cannot take turns the banner red, is tried again, and is kept once it can", async () => {
+    DRAFTS_DOWN = true;
+    await mount();
+    await addFromPalette("box");
+    await until(() => /could not be kept/.test(document.body.textContent!), "the store to fail");
+    assert.match(document.body.textContent!, /The draft could not be kept \(the server did not answer\); leaving now loses it\. Trying again\./);
+    DRAFTS_DOWN = false;
+    await until(() => DRAFTS.length === 1, "the retry to keep it");
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"]);
+    assert.ok(screen.getByTestId("draft-kept"));
+  });
+
+  test("a failed read of the drafts holds the editor rather than store over one it has not seen", async () => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input), "http://x").pathname === "/api/stageplots/drafts") throw new TypeError("Failed to fetch");
+      return real(input, init);
+    }) as typeof fetch;
+    try {
+      await mount();
+      assert.match(document.body.textContent!, /Couldn't read the unsaved drafts/);
+      assert.equal(screen.queryByTestId("canvas"), null);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  test("leaving asks only while the newest change has not reached the server", async () => {
+    const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider, Outlet } = await import("@tanstack/react-router");
+    const root = createRootRoute({ component: () => React.createElement(React.Fragment, null, React.createElement(Outlet), React.createElement(ConfirmHost)) });
+    const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement(StagePlotsEdit, { openPdf: fakePdf }) });
+    const list = createRoute({ getParentRoute: () => root, path: "/stageplots", component: () => React.createElement("p", null, "the list") });
+    const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: ["/stageplots/edit"] }) });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    await act(async () => {
+      render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+    });
+    for (let i = 0; i < 4; i++) await settle();
+    const leave = async () => {
+      await act(async () => void router.navigate({ to: "/stageplots" } as never));
+      for (let i = 0; i < 3; i++) await settle();
+    };
+    // The newest change not kept, and the server not answering: it asks; Cancel stays.
+    DRAFTS_DOWN = true;
+    await addFromPalette("box");
+    await leave();
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /have not reached the server/);
+    await click(within(dialog).getByRole("button", { name: "Cancel" }));
+    assert.equal(router.state.location.pathname, "/stageplots/edit");
+    // The server back: the change is kept on the way out, and nothing asks.
+    DRAFTS_DOWN = false;
+    await leave();
+    assert.equal(screen.queryByRole("alertdialog"), null, "it asked although the change could be kept");
+    assert.equal(router.state.location.pathname, "/stageplots");
+    assert.deepEqual(DRAFTS.map((d) => d.plotId), ["p-1"]);
   });
 });
 
@@ -1371,7 +1801,7 @@ describe("the This week card", () => {
     DOC.venues[0].plotIds.push("p-3");
     DOC.plots.push(plot("p-3", "v-1", "Baptism"));
     // Another venue's plots must never be offered here.
-    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    DOC.venues.push({ id: "v-2", name: "Room Two", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
     DOC.plots.push(plot("p-9", "v-2", "Elsewhere"));
   }
   const thisWeek = () => card("This week");

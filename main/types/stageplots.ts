@@ -5,12 +5,23 @@
 // follows its background's aspect ratio (16:9 when it has none), so items keep
 // their place on the drawing when the background changes or is re-converted.
 // See docs/features/stageplots.md.
+//
+// It imports nothing: the public page's contract (servicecue-publish.ts) takes
+// STAGEPLOT_LIMITS from here, and the ServiceCue Worker and plain Node load it.
 
 export type VenueKind = "home" | "offsite";
 
 export interface Venue {
   id: string;
   name: string;
+  /**
+   * The venue's address on /stageplots: `/stageplots/<slug>`. Made from its name when the
+   * venue is created and never changed by a rename. Null for a venue created before addresses
+   * existed, which answers at its id until one is set. See venueSlugProblem for the rules.
+   */
+  slug: string | null;
+  /** Addresses it had before, newest last, at most STAGEPLOT_LIMITS.oldSlugs: each still opens it. */
+  oldSlugs: string[];
   /** Only groups the list: home venues first. */
   kind: VenueKind;
   notes: string;
@@ -41,6 +52,12 @@ export interface VenuePublish {
   publishedImages: string[];
   /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
   unpublishedImages: string[];
+  /**
+   * Shown on the page's landing page, its own address: the venue's name, plot count and link,
+   * to anyone who opens it. Off until turned on; kept through a regenerate and a page move,
+   * gone with an unpublish. See docs/ops/servicecue-on-the-web.md#the-landing-page.
+   */
+  listed: boolean;
 }
 
 /** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
@@ -236,6 +253,8 @@ export interface StagePlotsView {
   pendingRemovals: PendingRemovalView[];
   /** What following the last Public link save could not do (stageplots-publish.ts), for the Publish card. Absent when it did it all. */
   notice?: { at: string; message: string };
+  /** Why the page's landing page does not show the venues listed on it (an older Worker, a page that refused), for the Publish card. Absent when it does. */
+  landing?: { at: string; message: string };
 }
 
 /** A venue's `index` on the public page, as the server publishes it. */
@@ -293,10 +312,37 @@ export const STAGEPLOT_LIMITS = {
   pendingRemovals: 1000,
   /** Past this many, a regenerate or a publish is refused rather than queue another. */
   pendingRemovalsQueue: 200,
+  /** A venue's address, in characters. */
+  slugChars: 60,
+  /** Old addresses a venue keeps answering to; past this the oldest goes. */
+  oldSlugs: 10,
 } as const;
 
 /** The plot canvas is this many units wide. */
 export const PLOT_UNITS_WIDE = 1000;
+
+/**
+ * A plot's unsaved items, kept on the server so the editor loses nothing to a reload, a
+ * closed tab or a crash (stageplot-drafts.json). One per plot. Never the plot itself: not on
+ * /stageplots, not published, until Save.
+ */
+export interface PlotDraft {
+  plotId: string;
+  /** The plot's version the draft was drawn on. Behind the plot's (its items changed since), it opens as saved elsewhere. */
+  baseVersion: number;
+  items: PlotItem[];
+  /** When it was last kept, as an ISO instant. */
+  savedAt: string;
+}
+
+/** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
+export interface PlotDraftNotes {
+  drafts: { plotId: string; savedAt: string }[];
+}
+
+/** Broadcast with PlotDraftNotes whenever a draft is kept or goes. Not hydrated: the
+ *  editor reads GET /api/stageplots/drafts on mount. */
+export const STAGEPLOT_DRAFTS_CHANNEL = "stageplots:drafts";
 
 /** Broadcast with the whole StagePlotsView after every change. Not hydrated:
  *  a page reads GET /api/stageplots on mount, like patch:updated. */

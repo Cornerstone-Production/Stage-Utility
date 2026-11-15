@@ -437,6 +437,7 @@ class means for backups.
 | `signals.json` | runtime | The values the Companion module reads |
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
+| `stageplot-drafts.json` | config | The [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts, one per plot |
 | `stageplots.json` | config | [Stage plot](../features/stageplots.md) venues, plots, the backgrounds they draw on, and each plan's plot overrides |
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `trends-prefs.json` | config | Which Smaart metric the Trends card plots under Sound |

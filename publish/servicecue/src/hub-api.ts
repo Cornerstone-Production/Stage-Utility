@@ -52,6 +52,15 @@ export interface HubApi {
   /** Delete everything under the secret, at once. Resolves to how many keys went. */
   dropStagePlots(secret: string): Promise<number>;
 
+  /**
+   * The landing page's list (LandingList, as validated JSON text), replacing the one held. It
+   * names secrets, so like a venue's plots it is never in the status answer, never touched by a
+   * manifest and never sent to a viewer.
+   */
+  putLanding(text: string): Promise<void>;
+  /** The landing list as stored, or null before the first. */
+  getLanding(): Promise<string | null>;
+
   /** Delete every doc and asset not named, and name the docs on `publish:docs`. Resolves to what it deleted. */
   applyManifest(docs: string[], assets: string[]): Promise<{ removedDocs: string[]; removedAssets: string[] }>;
   status(): Promise<HubStatus>;

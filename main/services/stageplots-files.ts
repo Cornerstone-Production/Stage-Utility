@@ -62,9 +62,14 @@ export function backgroundView(b: Background): BackgroundView {
 }
 
 /** The document as GET /api/stageplots and every stageplots:updated frame carry it. */
-export function stagePlotsView(doc: StagePlotsDoc, notice: { at: string; message: string } | null = null): StagePlotsView {
+export function stagePlotsView(
+  doc: StagePlotsDoc,
+  notice: { at: string; message: string } | null = null,
+  landing: { at: string; message: string } | null = null,
+): StagePlotsView {
   return {
     ...(notice ? { notice } : {}),
+    ...(landing ? { landing } : {}),
     venues: doc.venues,
     plots: doc.plots,
     backgrounds: doc.backgrounds.map(backgroundView),

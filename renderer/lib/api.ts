@@ -303,8 +303,8 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
-  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown, keepalive?: boolean): Promise<T> {
+  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined, ...(keepalive ? { keepalive } : {}) });
 }
 
 function post<T>(path: string, body?: unknown): Promise<T> {
@@ -315,9 +315,13 @@ function patch<T>(path: string, body?: unknown): Promise<T> {
   return sendJson<T>("PATCH", path, body);
 }
 
-function put<T>(path: string, body?: unknown): Promise<T> {
-  return sendJson<T>("PUT", path, body);
+/** `keepalive`: the request is still sent once the page has gone (a page closing). */
+function put<T>(path: string, body?: unknown, { keepalive }: { keepalive?: boolean } = {}): Promise<T> {
+  return sendJson<T>("PUT", path, body, keepalive);
 }
+
+/** A stage plot's kept draft. */
+const draftPath = (p: Record<string, unknown>) => `/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`;
 
 function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
@@ -629,8 +633,12 @@ export type IpcChannel =
   | "stageplots:deleteBackground"
   | "stageplots:deletePlot"
   | "stageplots:deleteVenue"
+  | "stageplots:discardDraft"
+  | "stageplots:drafts"
   | "stageplots:duplicatePlot"
   | "stageplots:get"
+  | "stageplots:keepDraft"
+  | "stageplots:keepDraftOnLeave"
   | "stageplots:patch"
   | "stageplots:publish"
   | "stageplots:publishNow"
@@ -638,6 +646,7 @@ export type IpcChannel =
   | "stageplots:removePending"
   | "stageplots:saveItems"
   | "stageplots:setDefault"
+  | "stageplots:setListed"
   | "stageplots:setOverride"
   | "stageplots:unpublish"
   | "stageplots:updateBackground"
@@ -853,6 +862,20 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     // The whole item list, against the version it was loaded at: 409 when the
     // plot changed since (the error carries status 409 and the current version).
+    case "stageplots:drafts":
+      return apiFetch<T>("/api/stageplots/drafts");
+
+    case "stageplots:keepDraft":
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items });
+
+    // The page is going: a keepalive request is still sent once it has. Browsers cap its body
+    // at 64 KB, so a very large draft is refused here, and the leave guard has already asked.
+    case "stageplots:keepDraftOnLeave":
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items }, { keepalive: true });
+
+    case "stageplots:discardDraft":
+      return del<T>(draftPath(p));
+
     case "stageplots:saveItems":
       return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
 
@@ -863,6 +886,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "stageplots:regenerate":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/regenerate`);
+
+    case "stageplots:setListed":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/listed`, { listed: p.listed });
 
     case "stageplots:unpublish":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/unpublish`);

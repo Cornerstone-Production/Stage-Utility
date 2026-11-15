@@ -30,6 +30,7 @@ import { JSDOM } from "jsdom";
 import { build } from "vite";
 
 import {
+  LANDING_HTML,
   PUBLIC_STATIC_FILES,
   STAGEPLOTS_HTML,
   STATIC_ASSET_PREFIX,
@@ -85,8 +86,8 @@ function runWorkerFirst(): string[] {
 describe("what the build writes", () => {
   test("is the page, its headers file, the files the Worker names beside it, and hashed files under assets/", () => {
     const files = [...emitted].filter((f) => !f.startsWith("assets/")).sort();
-    assert.deepEqual(files, [VIEWER_HTML.slice(1), STAGEPLOTS_HTML.slice(1), STATIC_HEADERS_FILE, ...PUBLIC_STATIC_FILES.map((f) => f.slice(1))].sort());
-    for (const file of emitted) assert.ok(file === "servicecue.html" || file === "stageplots.html" || !file.endsWith(".html"), `a third document: ${file}`);
+    assert.deepEqual(files, [VIEWER_HTML.slice(1), STAGEPLOTS_HTML.slice(1), LANDING_HTML.slice(1), STATIC_HEADERS_FILE, ...PUBLIC_STATIC_FILES.map((f) => f.slice(1))].sort());
+    for (const file of emitted) assert.ok(file === "servicecue.html" || file === "stageplots.html" || file === "landing.html" || !file.endsWith(".html"), `a fourth document: ${file}`);
   });
 
   test("has every file the asset service answers by itself named in wrangler.jsonc, and names no other", () => {
@@ -144,8 +145,10 @@ describe("what is in the bundle", () => {
     ]);
   });
 
-  test("of renderer/public, the viewer's own three and the stage plots page's two", () => {
+  test("of renderer/public, the viewer's own three, the stage plots page's two and the landing page's two", () => {
     assert.deepEqual(within("renderer/public"), [
+      "renderer/public/landing-public-page.tsx",
+      "renderer/public/landing-public.tsx",
       "renderer/public/public-router.tsx",
       "renderer/public/servicecue-public.tsx",
       "renderer/public/stageplots-public-page.tsx",
@@ -266,6 +269,28 @@ describe("what is in the bundle", () => {
   });
 });
 
+describe("the landing document", () => {
+  const html = read(LANDING_HTML.slice(1));
+  const doc = new JSDOM(html).window.document;
+
+  test("is not the ServiceCue page, keeps out of search engines and sends no referrer", () => {
+    assert.equal(doc.documentElement.hasAttribute("data-servicecue-public"), false);
+    assert.equal(doc.querySelector('meta[name="robots"]')?.getAttribute("content"), "noindex");
+    assert.equal(doc.querySelector('meta[name="referrer"]')?.getAttribute("content"), "no-referrer");
+    assert.equal(doc.title, "Welcome");
+  });
+
+  test("has no inline script, and loads only files the build wrote, from its own origin", () => {
+    assert.deepEqual([...doc.querySelectorAll("script:not([src])")].map((s) => s.textContent), []);
+    const refs = [...doc.querySelectorAll("script[src], link[href]")].map((el) => el.getAttribute("src") ?? el.getAttribute("href")!);
+    assert.ok(refs.length >= 3, refs.join(", "));
+    for (const ref of refs) {
+      assert.match(ref, /^\/[^/]/, `${ref} is not an address on this origin`);
+      assert.ok(emitted.has(ref.slice(1)), `${ref} is not a file the build wrote`);
+    }
+  });
+});
+
 describe("the stage plots document", () => {
   const html = read(STAGEPLOTS_HTML.slice(1));
   const doc = new JSDOM(html).window.document;
@@ -326,10 +351,15 @@ describe("the document", () => {
     assert.equal(doc.querySelectorAll(`meta[name="${VIEWER_BUILD_META}"]`).length, 1);
     const before = html.replace(viewerBuildTag(stamped), "");
     assert.ok(!before.includes(VIEWER_BUILD_META), "the stamp is not the one tag the document was given");
-    // Both documents: a change to the stage plots page alone is a new build too, so the server
-    // that keeps the page up to date redeploys for it.
+    // All three documents: a change to the stage plots page or the landing page alone is a new
+    // build too, so the server that keeps the page up to date redeploys for it.
     const plots = read(STAGEPLOTS_HTML.slice(1));
-    assert.equal(stamped, createHash("sha256").update(before).update("\0").update(plots).digest("hex").slice(0, 12), "the id is not the hash of the documents it stamps");
+    const landing = read(LANDING_HTML.slice(1));
+    assert.equal(
+      stamped,
+      createHash("sha256").update(before).update("\0").update(plots).update("\0").update(landing).digest("hex").slice(0, 12),
+      "the id is not the hash of the documents it stamps",
+    );
   });
 
   test("gives the Worker and the page one id: what the Worker reads out of this document is what the page reads", async () => {

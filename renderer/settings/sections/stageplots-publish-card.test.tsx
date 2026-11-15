@@ -33,6 +33,8 @@ let refuse: { status: number; error: string } | null = null;
 let notice: string | null = null;
 /** What the server says following the last Public link save could not do (StagePlotsView.notice). */
 let FOLLOW: { at: string; message: string } | undefined;
+/** What the server says the landing page could not take (StagePlotsView.landing). */
+let LANDING: { at: string; message: string } | undefined;
 
 function published(extra: Partial<VenuePublish> = {}): VenuePublish {
   return {
@@ -42,6 +44,7 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     lastError: null,
     publishedImages: [],
     unpublishedImages: [],
+    listed: false,
     ...extra,
   };
 }
@@ -57,6 +60,12 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     const here = PENDING.filter((e) => e.origin === ORIGIN).length;
     PENDING = PENDING.filter((e) => e.origin !== ORIGIN);
     json = { removed: here, left: 0, waiting: PENDING.length };
+  }
+  else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/listed$/.test(u.pathname)) {
+    sent.push(`${method} ${u.pathname} ${String(init?.body)}`);
+    const listed = (JSON.parse(String(init?.body)) as { listed: boolean }).listed;
+    VENUE = { ...VENUE, publish: { ...VENUE.publish!, listed } };
+    json = VENUE;
   }
   else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/(publish|regenerate|unpublish|publish-now)$/.test(u.pathname)) {
     sent.push(`${method} ${u.pathname}`);
@@ -97,7 +106,7 @@ async function mount() {
       { client },
       VENUE.id === "none"
         ? React.createElement(PendingLinksCard, { pending: PENDING, save, notice: FOLLOW, timeZone: "America/Chicago" })
-        : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW }),
+        : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW, landing: LANDING }),
       React.createElement(ConfirmHost),
     );
   let rerender!: (ui: React.ReactElement) => void;
@@ -119,13 +128,14 @@ const card = () => screen.getByRole("region", { name: "Publish" });
 const text = () => card().textContent ?? "";
 
 beforeEach(() => {
-  VENUE = { id: "v-1", name: "Room One", kind: "home", notes: "", plotIds: [], defaultPlotId: null };
+  VENUE = { id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null };
   SETTINGS = { url: ORIGIN, token: "••••" };
   sent = [];
   refuse = null;
   notice = null;
   PENDING = [];
   FOLLOW = undefined;
+  LANDING = undefined;
   setDisplayHourCycle("24h");
 });
 afterEach(async () => {
@@ -158,6 +168,36 @@ describe("the Publish card, off", () => {
     assert.equal((screen.getByRole("button", { name: "Publish Room One" }) as HTMLButtonElement).disabled, true);
     assert.match(text(), /Set up the public link first, in Settings > Advanced > Public link\./);
     assert.equal(screen.getByRole("link", { name: "Settings > Advanced > Public link" }).getAttribute("href"), "/settings/advanced/public-link");
+  });
+});
+
+describe("the landing page switch", () => {
+  const sw = () => screen.getByRole("switch", { name: "Show on the landing page" });
+
+  test("is off to start, says who sees the venue, and turning it on lists the venue", async () => {
+    VENUE.publish = published();
+    const { refresh } = await mount();
+    assert.equal(sw().getAttribute("aria-checked"), "false");
+    assert.match(text(), /Show on the landing pageAnyone who opens plots\.example\.workers\.dev sees Room One and can open its plots\./);
+    await click(sw());
+    assert.deepEqual(sent, ['POST /api/stageplots/venues/v-1/listed {"listed":true}']);
+    await refresh();
+    assert.equal(sw().getAttribute("aria-checked"), "true");
+    await click(sw());
+    assert.equal(sent.at(-1), 'POST /api/stageplots/venues/v-1/listed {"listed":false}');
+  });
+
+  test("is not there while the venue is not published", async () => {
+    await mount();
+    assert.equal(screen.queryByRole("switch", { name: "Show on the landing page" }), null);
+  });
+
+  test("says the page needs updating when the page could not take the list", async () => {
+    VENUE.publish = published({ listed: true });
+    LANDING = { at: "2026-11-14T14:32:00.000Z", message: "plots.example.workers.dev needs updating before it can show a landing page: deploy the Worker." };
+    await mount();
+    assert.equal(screen.getByTestId("landing-note").textContent, LANDING.message);
+    assert.doesNotMatch(text(), /Anyone who opens/);
   });
 });
 

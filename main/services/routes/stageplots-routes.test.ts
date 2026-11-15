@@ -20,7 +20,8 @@ const { stageplotsRoutes } = await import("./stageplots-routes.js");
 const { stageplotsStore } = await import("../stageplots-store.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { RemoteServer } = await import("../remote-server.js");
-const { STAGEPLOTS_CHANNEL } = await import("../../types/stageplots.js");
+const { STAGEPLOTS_CHANNEL, STAGEPLOT_DRAFTS_CHANNEL } = await import("../../types/stageplots.js");
+const { plotDraftsStore } = await import("../stageplot-drafts-store.js");
 const { STAGEPLOT_IMAGE_DIR, STAGEPLOT_ORIGINAL_DIR } = await import("../stageplots-files.js");
 type View = import("../../types/stageplots.js").StagePlotsView;
 
@@ -97,12 +98,12 @@ describe("stage plot routes", () => {
     assert.deepEqual(r.json, { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
   });
 
-  test("venues: create, rename, change kind and notes, delete with its plots", async () => {
+  test("venues: create, rename (the address stays), change kind and notes, delete with its plots", async () => {
     const v = await venue();
     const p = await plot(v.id);
     let r = await call("PATCH", `/api/stageplots/venues/${v.id}`, { name: "  Chapel ", kind: "offsite", notes: "Side door" });
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(r.json, { id: v.id, name: "Chapel", kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
+    assert.deepEqual(r.json, { id: v.id, name: "Chapel", slug: "main-room", oldSlugs: [], kind: "offsite", notes: "Side door", plotIds: [p.id], defaultPlotId: p.id });
     r = await call("DELETE", `/api/stageplots/venues/${v.id}`);
     assert.equal(r.status, 200, r.body);
     assert.deepEqual(await stageplotsStore.get(), { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] });
@@ -516,7 +517,7 @@ describe("stage plot routes", () => {
   test("the 51st venue is 400", async () => {
     await stageplotsStore.update((d) => ({
       ...d,
-      venues: Array.from({ length: 50 }, (_, i) => ({ id: `v-${i}`, name: `Room ${i}`, kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null })),
+      venues: Array.from({ length: 50 }, (_, i) => ({ id: `v-${i}`, name: `Room ${i}`, slug: null, oldSlugs: [], kind: "home" as const, notes: "", plotIds: [], defaultPlotId: null })),
     }));
     const r = await call("POST", "/api/stageplots/venues", { name: "One too many", kind: "home" });
     assert.equal(r.status, 400);
@@ -526,6 +527,133 @@ describe("stage plot routes", () => {
   test("a path it does not own falls through", async () => {
     const r = await call("GET", "/api/stageplotsx");
     assert.equal(r.responded, false);
+  });
+});
+
+describe("venue addresses", () => {
+  const patchVenue = (id: string, body: unknown) => call("PATCH", `/api/stageplots/venues/${id}`, body);
+  const venueNow = async (id: string) => (await stageplotsStore.get()).venues.find((v) => v.id === id)!;
+  /** Every line `run` logs under [stageplots]. */
+  async function logs(run: () => Promise<unknown>): Promise<string[]> {
+    const seen: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void seen.push(a.join(" "));
+    try {
+      await run();
+    } finally {
+      console.log = real;
+    }
+    return seen.filter((l) => l.startsWith("[stageplots]"));
+  }
+
+  test("a new venue's address is made from its name, with -2, -3 when it is taken", async () => {
+    const made = async (name: string) => ((await call("POST", "/api/stageplots/venues", { name, kind: "home" })).json as { slug: string }).slug;
+    assert.equal(await made("Main Auditorium"), "main-auditorium");
+    assert.equal(await made("Main  Auditorium!"), "main-auditorium-2");
+    assert.equal(await made("main auditorium"), "main-auditorium-3");
+    assert.equal(await made("Café Été"), "cafe-ete");
+    assert.equal(await made("!!!"), "venue");
+    // The editor's own address is never a venue's.
+    assert.equal(await made("Edit"), "edit-2");
+    const long = await made("A".repeat(60));
+    assert.equal(long, "a".repeat(60));
+    const longer = await made("A".repeat(60));
+    assert.equal(longer, `${"a".repeat(58)}-2`);
+  });
+
+  test("a changed address keeps the old one as an alias; going back takes it off the list; both logged", async () => {
+    const v = await venue("Main room");
+    const said = await logs(async () => {
+      const r = await patchVenue(v.id, { slug: "hall" });
+      assert.equal(r.status, 200, r.body);
+    });
+    assert.deepEqual(said, [`[stageplots] venue ${v.id} now at /stageplots/hall; /stageplots/main-room still opens it`]);
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["hall", ["main-room"]]);
+    await patchVenue(v.id, { slug: "big-hall" });
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["big-hall", ["main-room", "hall"]]);
+    // An old address taken back is its address again, and off the list.
+    await patchVenue(v.id, { slug: "main-room" });
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["main-room", ["hall", "big-hall"]]);
+    // A rename leaves it alone.
+    await patchVenue(v.id, { name: "The Big Hall" });
+    assert.equal((await venueNow(v.id)).slug, "main-room");
+  });
+
+  test("old addresses can only be dropped, and a drop is logged", async () => {
+    const v = await venue("Main room");
+    await patchVenue(v.id, { slug: "hall" });
+    await patchVenue(v.id, { slug: "big-hall" });
+    let r = await patchVenue(v.id, { oldSlugs: ["main-room", "elsewhere"] });
+    assert.equal(r.status, 400);
+    assert.equal((r.json as { error: string }).error, "Old addresses can only be dropped from the venue's own list, never added");
+    const said = await logs(async () => assert.equal((await patchVenue(v.id, { oldSlugs: ["hall"] })).status, 200));
+    assert.deepEqual(said, [`[stageplots] venue ${v.id} no longer answers to /stageplots/main-room`]);
+    assert.deepEqual((await venueNow(v.id)).oldSlugs, ["hall"]);
+    r = await patchVenue(v.id, { oldSlugs: "hall" });
+    assert.equal(r.status, 400);
+  });
+
+  test("at most ten old addresses are kept, the newest", async () => {
+    const v = await venue("Room");
+    for (let i = 1; i <= 12; i++) assert.equal((await patchVenue(v.id, { slug: `room-${i}` })).status, 200);
+    const now = await venueNow(v.id);
+    assert.equal(now.slug, "room-12");
+    assert.deepEqual(now.oldSlugs, ["room-2", "room-3", "room-4", "room-5", "room-6", "room-7", "room-8", "room-9", "room-10", "room-11"]);
+  });
+
+  test("an address another venue answers to, by its address, an old one or its id, is refused naming it, and said", async () => {
+    const chapel = await venue("Chapel");
+    await patchVenue(chapel.id, { slug: "the-chapel" });
+    const main = await venue("Main room");
+    await stageplotsStore.update((d) => ({ ...d, venues: [...d.venues, { id: "side-room", name: "Side room", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
+    for (const taken of ["the-chapel", "chapel", "side-room"]) {
+      const said = await warnings(async () => {
+        const r = await patchVenue(main.id, { slug: taken });
+        assert.equal(r.status, 400, taken);
+        assert.equal((r.json as { error: string }).error, taken === "side-room" ? "Side room already uses that address" : "Chapel already uses that address");
+      });
+      assert.equal(said.length, 1, taken);
+      assert.match(said[0], new RegExp(`address refused for venue ${main.id}: .*already uses that address`));
+    }
+    assert.equal((await venueNow(main.id)).slug, "main-room");
+  });
+
+  test("an address that breaks the rules is refused, and saves nothing", async () => {
+    const v = await venue("Main room");
+    for (const [slug, says] of [
+      ["Main Room", /lower-case letters/],
+      ["-room", /lower-case letters/],
+      ["room--two", /lower-case letters/],
+      ["", /lower-case letters/],
+      ["a".repeat(61), /1 to 60/],
+      [42, /lower-case letters/],
+      ["edit", /editor's own/],
+      ["v-0123456789ab", /venue id/],
+      [null, /changed, not removed/],
+    ] as const) {
+      const r = await patchVenue(v.id, { slug });
+      assert.equal(r.status, 400, String(slug));
+      assert.match((r.json as { error: string }).error, says, String(slug));
+      // The Venues card shows it as written: a sentence, never capitalised there.
+      assert.match((r.json as { error: string }).error, /^[A-Z]/, `the refusal of ${String(slug)} is not a sentence`);
+    }
+    assert.deepEqual(await venueNow(v.id).then((x) => [x.slug, x.oldSlugs]), ["main-room", []]);
+  });
+
+  test("a venue saved before addresses existed has none, answers at its id, and can be given one", async () => {
+    await stageplotsStore.update((d) => ({ ...d, venues: [{ id: "v-old", name: "Old room", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] }));
+    const r = await patchVenue("v-old", { slug: "old-room" });
+    assert.equal(r.status, 200, r.body);
+    // Its id was never an old address: it opens the venue anyway, as every id does.
+    assert.deepEqual(await venueNow("v-old").then((x) => [x.slug, x.oldSlugs]), ["old-room", []]);
+  });
+
+  test("a document where two venues answer to one address is refused", async () => {
+    await venue("Chapel");
+    await assert.rejects(
+      stageplotsStore.update((d) => ({ ...d, venues: [...d.venues, { id: "v-2", name: "Another", slug: "x", oldSlugs: ["chapel"], kind: "home", notes: "", plotIds: [], defaultPlotId: null }] })),
+      /both answer to the address "chapel"/,
+    );
   });
 });
 
@@ -737,6 +865,191 @@ describe("plot items: PUT /api/stageplots/plots/:id/items", () => {
   });
 });
 
+describe("plot drafts", () => {
+  const box = (id = "i-1", x = 10) => ({ id, type: "box", x, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] });
+  const keep = (plotId: string, body: unknown) => call("PUT", `/api/stageplots/plots/${plotId}/draft`, body);
+  const draftsNow = async () => ((await call("GET", "/api/stageplots/drafts")).json as { drafts: { plotId: string; baseVersion: number; items: unknown[]; savedAt: string }[] }).drafts;
+  const notes: unknown[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel === STAGEPLOT_DRAFTS_CHANNEL) notes.push(payload);
+  });
+  beforeEach(async () => {
+    await plotDraftsStore.update(() => []);
+    notes.length = 0;
+  });
+
+  test("a kept draft is listed, says which plot on stageplots:drafts, and never touches the plot", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    const before = (await stageplotsStore.get()).plots[0];
+    frames.length = 0;
+    const r = await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal(r.status, 200, r.body);
+    const { savedAt } = r.json as { savedAt: string };
+    assert.deepEqual(r.json, { plotId: p.id, baseVersion: 0, savedAt });
+    assert.deepEqual(await draftsNow(), [{ plotId: p.id, baseVersion: 0, items: [box()], savedAt }]);
+    // Which plot, and since when: never the items.
+    assert.deepEqual(notes, [{ drafts: [{ plotId: p.id, savedAt }] }]);
+    assert.equal(frames.length, 0, "a draft broadcast stageplots:updated");
+    assert.deepEqual((await stageplotsStore.get()).plots[0], before, "a draft changed the plot");
+  });
+
+  test("a draft is held to a save's rules; a refusal stores nothing and is said on [stageplots]", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    for (const [plotId, body, status, says] of [
+      ["p-nowhere", { baseVersion: 0, items: [] }, 404, /no such plot/],
+      [p.id, { baseVersion: -1, items: [] }, 400, /baseVersion/],
+      [p.id, { baseVersion: 0, items: [{ ...box(), type: "blob" }] }, 400, /type must be one of/],
+      [p.id, { baseVersion: 0, items: [{ ...box(), y: 9999 }] }, 400, /y must be a number/],
+      [p.id, { baseVersion: 0, items: Array.from({ length: 501 }, (_, i) => box(`i-${i}`)) }, 400, /at most 500 items/],
+    ] as const) {
+      const said = await warnings(async () => {
+        const r = await keep(plotId, body);
+        assert.equal(r.status, status, r.body);
+        assert.match((r.json as { error: string }).error, says);
+      });
+      assert.equal(said.length, 1, String(says));
+      assert.match(said[0], new RegExp(`draft refused for plot ${plotId}`));
+    }
+    assert.deepEqual(await draftsNow(), []);
+    assert.deepEqual(notes, []);
+  });
+
+  test("one draft per plot: keeping again replaces it", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await keep(p.id, { baseVersion: 0, items: [box("i-1", 300)] });
+    const drafts = await draftsNow();
+    assert.equal(drafts.length, 1);
+    assert.equal((drafts[0].items[0] as { x: number }).x, 300);
+  });
+
+  test("a save deletes the plot's draft, an unchanged save too, before it answers", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 0, items: [box()] })).status, 200);
+    assert.deepEqual(await draftsNow(), []);
+    assert.deepEqual(notes.at(-1), { drafts: [] });
+    await keep(p.id, { baseVersion: 1, items: [box("i-1", 50)] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 1, items: [box()] })).status, 200);
+    assert.deepEqual(await draftsNow(), [], "an unchanged save left the draft");
+  });
+
+  test("a refused save keeps the draft", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 7, items: [box()] })).status, 409);
+    assert.equal((await draftsNow()).length, 1);
+  });
+
+  test("Discard deletes it; a plot with none is not an error", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    assert.deepEqual((await call("DELETE", `/api/stageplots/plots/${p.id}/draft`)).json, { ok: true });
+    assert.deepEqual(await draftsNow(), []);
+    const r = await call("DELETE", `/api/stageplots/plots/${p.id}/draft`);
+    assert.deepEqual([r.status, r.json], [200, { ok: true }]);
+  });
+
+  test("deleting a plot, or its venue, deletes its draft and leaves another plot's", async () => {
+    const v = await venue("Main room");
+    const a = await plot(v.id, "Standard");
+    const b = await plot(v.id, "Baptism");
+    const w = await venue("Chapel");
+    const c = await plot(w.id, "Standard");
+    for (const p of [a, b, c]) await keep(p.id, { baseVersion: 0, items: [box()] });
+    // Read from the store, not GET, which leaves a draft whose plot is gone out of its answer.
+    await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId).sort(), [a.id, c.id].sort());
+    await call("DELETE", `/api/stageplots/venues/${v.id}`);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId), [c.id]);
+  });
+
+  test("a rename or a fade moves a draft's base to the new version; a background that moved items does not", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { name: "Renamed" });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { bgFade: 0.7 });
+    assert.equal((await stageplotsStore.get()).plots[0].version, 2);
+    assert.equal((await draftsNow())[0].baseVersion, 2, "a change that left the items alone made the draft look stale");
+    // A draft drawn on an older version stays behind: its items were not these.
+    await keep(p.id, { baseVersion: 1, items: [box()] });
+    await call("PATCH", `/api/stageplots/plots/${p.id}`, { name: "Again" });
+    assert.equal((await draftsNow())[0].baseVersion, 1);
+  });
+
+  test("a background switch that moves items leaves the draft's base behind", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    // An item low on the 16:9 grid, then a wide background that is shorter.
+    assert.equal((await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: 0, items: [{ ...box(), y: 500 }] })).status, 200);
+    await keep(p.id, { baseVersion: 1, items: [{ ...box(), y: 500 }, box("i-2")] });
+    const bytes = await jpeg(1600, 400);
+    const bg = (await upload("/api/stageplots/backgrounds?name=Wide", bytes)).json as { id: string };
+    assert.equal((await call("PATCH", `/api/stageplots/plots/${p.id}`, { backgroundId: bg.id })).status, 200);
+    assert.equal((await stageplotsStore.get()).plots[0].version, 2);
+    assert.equal((await draftsNow())[0].baseVersion, 1);
+  });
+
+  test("a draft whose plot is gone is left out when the drafts are read, said once, and never deleted by the read", async () => {
+    const v = await venue();
+    const p = await plot(v.id);
+    await keep(p.id, { baseVersion: 0, items: [box()] });
+    await plotDraftsStore.update((d) => [...d, { plotId: "p-gone", baseVersion: 3, items: [], savedAt: "2026-11-14T14:32:00.000Z" }]);
+    const said = await warnings(async () => assert.deepEqual((await draftsNow()).map((d) => d.plotId), [p.id]));
+    assert.deepEqual(said, ["[stageplots] 1 unsaved drafts left out: their plots are not in stageplots.json (p-gone); they stay in stageplot-drafts.json"]);
+    assert.deepEqual((await plotDraftsStore.all()).map((d) => d.plotId).sort(), [p.id, "p-gone"].sort(), "a read deleted a draft");
+    assert.deepEqual(await warnings(() => draftsNow()), [], "the same draft left out was said again on the next read");
+  });
+
+  test("a drafts store that cannot be written never turns a save, a rename or a delete into a failure: the answer says so", async (t) => {
+    const v = await venue("Main room");
+    const a = await plot(v.id, "Standard");
+    const b = await plot(v.id, "Baptism");
+    const w = await venue("Chapel");
+    await plot(w.id, "Standard");
+    await keep(a.id, { baseVersion: 0, items: [box()] });
+    t.mock.method(plotDraftsStore, "update", async () => {
+      throw new Error("stageplot-drafts.json could not be written (ENOSPC)");
+    });
+    const errors: string[] = [];
+    t.mock.method(console, "error", (...m: unknown[]) => void errors.push(m.join(" ")));
+    const notice = (r: { json: unknown }) => (r.json as { draftNotice?: string }).draftNotice ?? "";
+
+    let r = await call("PUT", `/api/stageplots/plots/${a.id}/items`, { version: 0, items: [box("i-2")] });
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { plot: { version: number } }).plot.version, 1);
+    assert.match(notice(r), /^Saved, but the plot's unsaved draft could not be deleted, so it may open again: .*ENOSPC/);
+
+    r = await call("PATCH", `/api/stageplots/plots/${a.id}`, { name: "Renamed" });
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { name: string }).name, "Renamed");
+    assert.match(notice(r), /^Saved, but the plot's unsaved draft could not be moved onto this version, so it may open as saved elsewhere: /);
+
+    r = await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { ok: boolean }).ok, true);
+    assert.match(notice(r), /^The plot was deleted, but its unsaved draft could not be deleted with it: /);
+
+    r = await call("DELETE", `/api/stageplots/venues/${w.id}`);
+    assert.equal(r.status, 200, r.body);
+    assert.match(notice(r), /^The venue was deleted, but the unsaved drafts of its plots could not be deleted with it: /);
+
+    assert.deepEqual(
+      (await stageplotsStore.get()).plots.map((p) => p.name),
+      ["Renamed"],
+      "a save, a rename or a delete did not land",
+    );
+    assert.equal(errors.filter((e) => e.startsWith("[stageplots] a draft could not be written")).length, 4, errors.join(" | "));
+  });
+});
+
 describe("per-plan overrides", () => {
   const put = (body: unknown) => call("PUT", "/api/stageplots/overrides", body);
   /** Every [stageplots] line `run` logs. */
@@ -933,6 +1246,158 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
     assert.equal((await call("POST", "/api/stageplots/venues/v-nope/publish")).status, 404);
   });
 
+  /** A page set up as the Public link card saves one, the publisher started, and `run` handed it. */
+  async function withPage(run: (page: Awaited<ReturnType<(typeof import("../fixtures/publish-receiver.js"))["FakeReceiver"]["start"]>>) => Promise<void>) {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      stageplotsPublisher.start();
+      await run(page);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
+  }
+  const settled = async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    await stageplotsPublisher.settle();
+    // The landing list goes on its own chain, after the broadcast that settle does not wait for.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 20));
+    await stageplotsPublisher.settle();
+  };
+  const landingOn = (page: { hub: { landing: string | null } }) => (page.hub.landing === null ? null : (JSON.parse(page.hub.landing) as { venues: { name: string; secret: string; plots: number }[] }));
+
+  test("a listed venue is on its page's landing list, names and links only, and the list follows every change to it", async () => {
+    await withPage(async (page) => {
+      const id = await venueWithPlot();
+      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      await settled();
+      assert.deepEqual(landingOn(page)?.venues ?? [], [], "a venue was listed before it was asked");
+      let r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+      assert.equal(r.status, 200, r.body);
+      assert.equal((r.json as { publish: { listed: boolean } }).publish.listed, true);
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main room", secret, plots: 1 }] });
+      // A rename and a new plot: sent again.
+      await call("PATCH", `/api/stageplots/venues/${id}`, { name: "Main Auditorium", notes: "Side door" });
+      await call("POST", "/api/stageplots/plots", { venueId: id, name: "Baptism" });
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret, plots: 2 }] }, "the notes, or a stale name or count, reached the list");
+      // A regenerate lists the new link, still listed.
+      r = await call("POST", `/api/stageplots/venues/${id}/regenerate`);
+      assert.equal(r.status, 200, r.body);
+      const fresh = (r.json as { publish: { secret: string; listed: boolean } }).publish;
+      assert.equal(fresh.listed, true, "the regenerate dropped the listing");
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret: fresh.secret, plots: 2 }] });
+      // Unpublished: off the list.
+      await call("POST", `/api/stageplots/venues/${id}/unpublish`);
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [] });
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
+  test("taking a venue off the landing page, or deleting it, takes it off the list", async () => {
+    await withPage(async (page) => {
+      const a = await venueWithPlot();
+      const b = (await call("POST", "/api/stageplots/venues", { name: "Chapel", kind: "offsite" })).json as { id: string };
+      for (const id of [a, b.id]) {
+        assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+        assert.equal((await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true })).status, 200);
+      }
+      assert.deepEqual(landingOn(page)!.venues.map((v) => v.name), ["Main room", "Chapel"]);
+      assert.equal((await call("POST", `/api/stageplots/venues/${a}/listed`, { listed: false })).status, 200);
+      assert.deepEqual(landingOn(page)!.venues.map((v) => v.name), ["Chapel"]);
+      await call("DELETE", `/api/stageplots/venues/${b.id}`);
+      await settled();
+      assert.deepEqual(landingOn(page), { venues: [] });
+      await call("DELETE", `/api/stageplots/venues/${a}`);
+    });
+  });
+
+  test("only a published venue can be listed, and listed is true or false", async () => {
+    await withPage(async () => {
+      const id = await venueWithPlot();
+      const said = await warnings(async () => {
+        const r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+        assert.equal(r.status, 409);
+        assert.match((r.json as { error: string }).error, /not published/);
+      });
+      assert.equal(said.length, 1);
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: "yes" })).status, 400);
+      assert.equal((await call("POST", "/api/stageplots/venues/v-nowhere/listed", { listed: true })).status, 404);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
+  test("a page whose Worker predates landing pages: the listing is saved, the card says the page needs updating, said once", async () => {
+    await withPage(async (page) => {
+      const real = page.respond;
+      page.respond = (req) => (req.path === "/_publish/v1/landing" ? { status: 404, body: '{"error":"Not found"}' } : real(req));
+      const id = await venueWithPlot();
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+      const said = await warnings(async () => {
+        const r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+        assert.equal(r.status, 200, r.body);
+        assert.match((r.json as { notice: string }).notice, /needs updating before it can show a landing page: deploy the Worker\./);
+        await settled();
+      });
+      assert.equal(said.filter((w) => /landing page/.test(w)).length, 1, said.join(" | "));
+      const view = (await call("GET", "/api/stageplots")).json as View;
+      assert.match(view.landing!.message, /needs updating before it can show a landing page/);
+      assert.equal(view.venues[0].publish!.listed, true, "the listing was not kept");
+      // The Worker deployed: the next change sends the list, and the card's line goes.
+      page.respond = real;
+      await call("PATCH", `/api/stageplots/venues/${id}`, { notes: "x" });
+      await call("PATCH", `/api/stageplots/venues/${id}`, { name: "Main room 2" });
+      await settled();
+      assert.equal(landingOn(page)!.venues.length, 1);
+      assert.equal(((await call("GET", "/api/stageplots")).json as View).landing, undefined);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+    });
+  });
+
+  test("a draft kept on a published venue's plot sends nothing to the page and broadcasts no change to the plots", async () => {
+    const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
+    const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    const page = await FakeReceiver.start();
+    try {
+      page.token = TOKEN;
+      const parsed = parsePublishUrl(page.origin);
+      assert.ok(parsed.ok);
+      await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
+      await savePublishToken(parsed.origin, TOKEN);
+      const id = await venueWithPlot();
+      assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 200);
+      stageplotsPublisher.start();
+      await stageplotsPublisher.settle();
+      const plotId = (await stageplotsStore.get()).venues.find((v) => v.id === id)!.plotIds[0]!;
+      const sent = page.requests.length;
+      frames.length = 0;
+      const item = { id: "i-1", type: "box", x: 10, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] };
+      assert.equal((await call("PUT", `/api/stageplots/plots/${plotId}/draft`, { baseVersion: 0, items: [item] })).status, 200);
+      await stageplotsPublisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(frames.length, 0, "a draft broadcast stageplots:updated");
+      assert.equal(page.requests.length, sent, "a draft reached the page");
+      assert.deepEqual((await stageplotsStore.get()).plots.find((p) => p.id === plotId)!.items, []);
+      await call("DELETE", `/api/stageplots/venues/${id}`);
+      await stageplotsPublisher.settle();
+    } finally {
+      await page.close();
+    }
+  });
+
   test("publishes to the page, follows a change, unpublishes, and deletes a published venue by unpublishing it first", async () => {
     const { FakeReceiver } = await import("../fixtures/publish-receiver.js");
     const { servicecuePublishStore, savePublishToken } = await import("../servicecue-publish-store.js");
@@ -1023,7 +1488,7 @@ describe("a restore landing", () => {
     const secret = "A".repeat(42) + "E";
     await stageplotsStore.update((d) => ({
       ...d,
-      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [] } } : v)),
+      venues: d.venues.map((v) => (v.id === id.id ? { ...v, publish: { secret, origin: "https://page.example", publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], listed: false } } : v)),
     }));
     const resume = await stageplotsPublisher.pause();
     try {
@@ -1127,6 +1592,27 @@ describe("the page address changing under published venues", () => {
       assert.equal(t.a.hub.stageplots.size, 0, "the old page still serves the venue");
       assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
     } finally {
+      await t.close();
+    }
+  });
+
+  test("a listed venue moves onto the new page's landing list, still listed, and the old page lists nothing", async () => {
+    const { stageplotsPublisher } = await import("../stageplots-publish-instance.js");
+    stageplotsPublisher.start();
+    const t = await twoPages();
+    try {
+      assert.equal((await call("POST", `/api/stageplots/venues/${t.id}/listed`, { listed: true })).status, 200);
+      assert.deepEqual(JSON.parse(t.a.hub.landing!), { venues: [{ name: "Main room", secret: t.first, plots: 1 }] });
+      await t.moveTo();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 20));
+      await stageplotsPublisher.settle();
+      const pub = (await t.venue()).publish!;
+      assert.equal(pub.listed, true, "the move dropped the listing");
+      assert.deepEqual(JSON.parse(t.b.hub.landing!), { venues: [{ name: "Main room", secret: pub.secret, plots: 1 }] });
+      assert.deepEqual(JSON.parse(t.a.hub.landing!), { venues: [] }, "the old page still lists the venue");
+    } finally {
+      await call("DELETE", `/api/stageplots/venues/${t.id}`);
+      await stageplotsPublisher.settle();
       await t.close();
     }
   });

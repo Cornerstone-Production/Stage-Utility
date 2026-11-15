@@ -95,6 +95,7 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
 | `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots, backgrounds and per-plan overrides |
+| `stageplot-drafts.json` | the [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts |
 | `branding-images/`, `layout-images/`, `stageplot-images/` | uploaded images, named by content hash |
 | `stageplot-originals/` | uploaded stage-plot PDFs, kept but never served |
 

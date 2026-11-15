@@ -88,8 +88,18 @@ const GOOD: Record<string, unknown> = {
     wirelessMeterRateMs: 250,
   },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
+  "stageplot-drafts.json": {
+    drafts: [
+      {
+        plotId: "p-1",
+        baseVersion: 0,
+        items: [{ id: "i-1", type: "box", x: 10, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] }],
+        savedAt: "2026-11-14T14:32:00.000Z",
+      },
+    ],
+  },
   "stageplots.json": {
-    venues: [{ id: "v-1", name: "Main room", kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    venues: [{ id: "v-1", name: "Main room", slug: "main-room", oldSlugs: ["main-hall"], kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
     backgrounds: [],
     plots: [
       { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
@@ -136,6 +146,10 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "servicecue-roles.json": { value: { roles: [] }, says: "list" },
   "settings.json": { value: { ...(GOOD["settings.json"] as object), accentColor: "red" }, says: "accentColor" },
   "slots.json": { value: { version: 3, defaults: { v1: { "123": "s1" } }, overrides: {} }, says: "slots" },
+  "stageplot-drafts.json": {
+    value: { drafts: [{ plotId: "p-1", baseVersion: 0, items: [{ id: "i-1", type: "box" }], savedAt: "2026-11-14T14:32:00.000Z" }] },
+    says: "item",
+  },
   "stageplots.json": {
     value: { venues: [], backgrounds: [], plots: [{ id: "p-1", venueId: "v-gone", name: "Standard", backgroundId: null, bgFade: 0, items: [], version: 0 }] },
     says: "venue",

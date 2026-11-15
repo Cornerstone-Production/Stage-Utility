@@ -15,6 +15,7 @@ import {
   isDocKey,
   isFrameChannel,
   isRecord,
+  readLandingList,
   stagePlotsKeyKind,
   type FixedDocKey,
   type PublicState,
@@ -168,6 +169,12 @@ export function stagePlotsDocText(json: unknown, text: string): Parsed<string> {
 export function isWebp(bytes: Uint8Array): boolean {
   const tag = (at: number, text: string) => [...text].every((c, i) => bytes[at + i] === c.charCodeAt(0));
   return bytes.byteLength >= 12 && tag(0, "RIFF") && tag(8, "WEBP");
+}
+
+/** A landing list (readLandingList), stored as the canonical text of what it rebuilt: never a field it does not know. */
+export function landingBody(json: unknown): Parsed<string> {
+  const r = readLandingList(json);
+  return r.ok ? { ok: true, value: JSON.stringify(r.list) } : refuse(r.error);
 }
 
 /** What to keep under a secret: `{ keys: [...] }`, every one a StagePlots key. One bad entry refuses it whole. */

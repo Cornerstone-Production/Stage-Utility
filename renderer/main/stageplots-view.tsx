@@ -7,9 +7,11 @@
 // notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
 // on one landscape page. With exactly one home venue it opens that venue
 // straight away, and the browser remembers the last venue opened. A venue has
-// its own address, /stageplots/<id>, which opening or leaving one keeps current
-// (as a replace) and which wins over the remembered venue; an id that names no
-// venue shows the list and leaves the address as it was typed. Live: an edit
+// its own address, /stageplots/<address> (its id until it has one), which
+// opening or leaving one keeps current (as a replace) and which wins over the
+// remembered venue. Its id and its old addresses open it too, and the bar then
+// shows its address; one that names no venue shows the list and leaves the
+// address as it was typed. Live: an edit
 // anywhere redraws it without a reload (useStagePlots).
 //
 // It follows the live or next Planning Center plan the way /patch does
@@ -39,18 +41,13 @@ import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
 import { useInAppLink, useRouterHandle } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
-import { PLOT_PARAM, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueGroups } from "./stageplots/doc-helpers";
+import { PLOT_PARAM, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueAt, venueGroups, venuePath, venueSegment } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
 import { usePatchContext, useStagePlotsPatch } from "./stageplots/use-patch";
 import { useStagePlots } from "./stageplots/use-stageplots";
 import { BackLink, VenuePlots, type ChannelsOf } from "./stageplots/venue-plots";
-
-/** A venue's own address. */
-export function venuePath(id: string): string {
-  return `/stageplots/${encodeURIComponent(id)}`;
-}
 
 /** Where the browser keeps the last venue opened. */
 export const LAST_VENUE_KEY = "stageplots:lastVenue";
@@ -106,7 +103,7 @@ function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: V
   );
 }
 
-function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (id: string) => void }) {
+function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (venue: Venue) => void }) {
   if (doc.venues.length === 0) {
     return (
       <EmptyState
@@ -127,7 +124,7 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
           <span className={cn(eyebrow, "mt-2")}>{g.label}</span>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-2">
             {g.venues.map((v) => (
-              <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v.id)} />
+              <VenueCard key={v.id} doc={doc} venue={v} plan={plan} onOpen={() => onOpen(v)} />
             ))}
           </div>
         </div>
@@ -226,13 +223,15 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
     return id ? { kind: "venue", id } : { kind: "auto" };
   });
   // The address names whatever venue is shown, however it was opened (a card, the only
-  // home venue, the remembered one): that is the link to copy or make a QR code of.
-  const shownId = doc ? (venueId ? (doc.venues.find((v) => v.id === venueId) ?? null) : openVenue(doc, open))?.id : undefined;
+  // home venue, the remembered one, its id or an old address): that is the link to copy or
+  // make a QR code of. Compared as the segment, so an address already right is left alone.
+  const shownVenue = doc ? (venueId ? venueAt(doc.venues, venueId) : openVenue(doc, open)) : null;
+  const shownSegment = shownVenue ? venueSegment(shownVenue) : null;
   useEffect(() => {
-    if (shownId && shownId !== venueId) goTo(venuePath(shownId));
+    if (shownSegment && shownSegment !== venueId) goTo(`/stageplots/${encodeURIComponent(shownSegment)}`);
     // goTo changes every render; the address only needs to follow the venue shown.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownId, venueId]);
+  }, [shownSegment, venueId]);
   usePageActions(
     <Button asChild variant="filled" size="small">
       <a href="/stageplots/edit">Edit</a>
@@ -249,8 +248,8 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
       </div>
     );
   }
-  // An address that names a venue wins over the remembered one; an unknown id shows the list.
-  const venue = venueId ? (doc.venues.find((v) => v.id === venueId) ?? null) : openVenue(doc, open);
+  // An address that names a venue wins over the remembered one; one that names none shows the list.
+  const venue = shownVenue;
   return (
     <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3">
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
@@ -271,10 +270,10 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
         <VenueList
           doc={doc}
           plan={plan}
-          onOpen={(id) => {
-            remember(id);
-            setOpen({ kind: "venue", id });
-            goTo(venuePath(id));
+          onOpen={(v) => {
+            remember(v.id);
+            setOpen({ kind: "venue", id: v.id });
+            goTo(venuePath(v));
           }}
         />
       )}
@@ -282,7 +281,7 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
   );
 }
 
-/** `/stageplots/<venue id>`: the page with that venue open. */
+/** `/stageplots/<venue address, id or old address>`: the page with that venue open. */
 export function StagePlotsVenueRoute() {
   const { venueId } = useParams({ strict: false }) as { venueId?: string };
   return <StagePlotsPage {...(venueId ? { venueId } : {})} />;

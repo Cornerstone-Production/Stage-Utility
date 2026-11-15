@@ -12,6 +12,7 @@ import { isMain } from "./is-main.ts";
 export const BUILD_INPUT_PREFIXES = [
   "app.html",
   "index.html",
+  "landing.html",
   "main/", // the interface and the page's Worker both build from shared modules here
   "postcss.config",
   "public/", // copied into the interface, and the page's icons are read from it

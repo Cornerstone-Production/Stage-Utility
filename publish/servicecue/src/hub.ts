@@ -151,6 +151,16 @@ export class PublishHub extends DurableObject<Env> implements HubApi {
     return this.sql.exec("DELETE FROM stageplots WHERE secret = ? RETURNING key", secret).toArray().length;
   }
 
+  // ── The landing list ────────────────────────────────────────────────────────
+
+  async putLanding(text: string): Promise<void> {
+    this.ctx.storage.kv.put("landing", text);
+  }
+
+  async getLanding(): Promise<string | null> {
+    return this.ctx.storage.kv.get<string>("landing") ?? null;
+  }
+
   // ── Heartbeat ───────────────────────────────────────────────────────────────
 
   async heartbeat(sentAt: number, version: string, build: string | null): Promise<number> {

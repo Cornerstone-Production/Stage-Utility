@@ -17,6 +17,30 @@ venue's first plot becomes its default. Deleting the default makes the first plo
 left, in tab order, the default; deleting a venue's last plot leaves it with none.
 Deleting a venue deletes its plots.
 
+### Its own address
+
+Each venue has an address by name, `/stageplots/main-auditorium`, on the
+server's local address (`http://<server>:8788/stageplots/main-auditorium`, or
+port 80 where the friendly port is set up). It is made from the venue's name when
+the venue is added: lower case, accents dropped, everything else a hyphen, with
+`-2`, `-3` added when another venue already answers to it. A rename never changes
+it, so a printed QR code keeps working.
+
+Change it in the venue's **Address** field in the editor; it saves when you leave
+the field. An address is lower-case letters, digits and single hyphens, up to 60
+characters. The server refuses one another venue answers to (naming that venue),
+`edit` (the editor's own address) and one shaped like a venue id (`v-` and twelve
+hex digits). The old address keeps working: the venue lists its **Old addresses,
+still working** with a × that stops one answering, after asking. A venue keeps up
+to ten; past that the oldest stops working.
+
+A venue's id always opens it too: `/stageplots/v-1a2b3c4d5e6f`. A venue added
+before addresses existed has none until one is set, and its address is its id.
+Opening a venue by its id or an old address puts its address in the bar.
+
+The published link on the public page is the secret one, whatever the address
+(see [Publishing](#publishing)).
+
 A plot is 1000 units wide, and its height follows its background's shape. A plot
 with no background is drawn on a plain 16:9 grid.
 
@@ -94,12 +118,11 @@ plan" or "1 plot · Default". A venue opens to its plots as tabs with that plot
 selected, the plot itself, its legend, and the venue's notes.
 
 - With exactly one home venue, `/stageplots` opens it directly.
-- A venue has its own address, `/stageplots/<venue id>`, on the server's local
-  address (`http://<server>:8788/stageplots/<venue id>`, or port 80 where the
-  friendly port is set up). Opening a venue puts it in the address bar and leaving
-  it goes back to `/stageplots`, so the bar can be copied or made into a QR code,
-  and the address opens that venue on a fresh load. It wins over the remembered
-  venue; an id that names no venue shows the list.
+- A venue has its own address on the server's local address (see
+  [Its own address](#its-own-address)). Opening a venue puts it in the address bar
+  and leaving it goes back to `/stageplots`, so the bar can be copied or made into
+  a QR code, and the address opens that venue on a fresh load. It wins over the
+  remembered venue; an address that names no venue shows the list.
 - A venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
   named in `?venue=` when it exists, and on its plot named in `?plot=`.
@@ -155,8 +178,9 @@ and every open `/stageplots` follows them. A change the server refuses says why
 beside the control, and the page goes back to what is saved. What is drawn on a
 plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
 
-- **Venues**: **+ Venue** adds one and selects it. The selected venue's name and
-  notes save when you leave the field; Home or Offsite saves at once. Right-click
+- **Venues**: **+ Venue** asks for the name (Enter adds it, Escape does not) and selects the new venue. The selected venue's name,
+  address (with a button that copies it in full) and notes save when you leave the
+  field; Home or Offsite saves at once. Right-click
   a venue (or press and hold on a touch screen) for **Rename** (selects it and puts
   the cursor in its name), **Home** or **Offsite**, **Open on /stageplots**, **Copy
   its address** and **Delete venue…**.
@@ -266,19 +290,52 @@ selected item.
 Every change stays inside the plot and within the size limits, so a draft can
 always be saved.
 
-**Save and Discard.** While the draft differs from what is saved, a banner says
-so: **Save** sends it, **Discard** puts back what is saved. Nothing reaches
-`/stageplots` until Save. Each save carries the version of the plot it started
-from. If the plot was saved from somewhere else since, the save is refused and
-nothing is overwritten: the banner says the plot changed elsewhere and offers
+### Save and Discard
+
+While the draft differs from what is saved, a banner says so: **Save** sends it,
+**Discard** puts back what is saved. Nothing reaches `/stageplots` until Save.
+Each save carries the version of the plot it started from. If the plot was saved
+from somewhere else since, the save is refused and nothing is overwritten: the
+banner says the plot was saved elsewhere after your draft began and offers
 **Reload**, which shows the saved plot and drops the draft. A change elsewhere to
 the plot's name or fade does not count, nor does a background change that moved no
 items; a save refused for one of those before its news arrived is sent again on the
 new version. A background change that moved items does count. Nothing counts while
 the draft has nothing unsaved, which simply shows the new plot; undoing back to
-that clears the banner. Leaving the page,
-switching venue or plot, or **+**, **Duplicate** or **Delete…** on a plot ask
-first while there are unsaved changes.
+that clears the banner.
+
+**The draft is kept on the server.** About a second after the last change, and as
+the page closes, the editor stores the draft, so a reload, a closed tab, a crash or
+another device picks it up. The banner ends with **Draft kept 14:32** once it is
+stored and **Keeping draft…** while it is on its way. A stored draft is not the plot:
+it is never on `/stageplots` or the public page, is never published, and changes
+nothing anyone else sees until **Save**, which saves the plot and deletes the draft.
+**Discard**, and undoing back to what is saved, delete it too.
+
+- **Opening a plot with a draft** shows the draft, with a banner naming when it was
+  kept (**Unsaved draft from Sat 14 Nov, 14:32**), **Discard draft** and **Save**. A
+  plot with a draft carries a dot on its tab, and its venue a dot in the list.
+- **One draft per plot.** Two devices editing the same plot share it; the last
+  change kept wins. A draft drawn on a version of the plot whose items were saved
+  from elsewhere since opens as saved elsewhere, and **Reload** drops it. A rename, a
+  fade or a background change that moved no items does not make a draft stale.
+- **When the server cannot take it**, the banner turns red: "The draft could not be
+  kept (the server did not answer); leaving now loses it. Trying again." It is tried
+  again after 2 seconds, then 4, 8 and so on up to 30.
+- **Leaving.** Switching venue or plot, **+**, **Duplicate**, or **Delete…** on the
+  plot being edited, stores the draft and goes on without asking; it asks only when
+  the draft could not be stored, and going on then drops it. Deleting another plot
+  leaves the open plot's draft alone. Leaving the page asks only while
+  the newest change has not reached the server: a link or Back stores it first, and
+  closing the tab asks until it is stored. A very large draft (past about 64 KB,
+  hundreds of items) may not get out as the tab closes, because browsers cap what a
+  closing page can send; it is safe once **Draft kept** shows. A tab closed while
+  **Save** is on its way sends no draft of what that save carries: the save itself
+  keeps it.
+- A draft whose plot is deleted, with the plot or its venue, is deleted with it.
+  Should the drafts file not take that (or a save's delete of its draft, or a
+  rename's move of it onto the new version), the save, rename or delete still
+  stands and a small note under the banner says what was left undone.
 
 ### Item types
 
@@ -386,9 +443,19 @@ says so rather than drawing an empty stage.
 **Anyone with the link can see that venue's plots, item notes and inputs included.** For each
 [linked connection point](#patch-link) that includes the patch sheet's name and the channels a
 tap lists. The link is 43 random characters, so it cannot be guessed, and nothing on the page
-lists venues; but whoever is sent it can send it on. A link that was never published, one that
-was regenerated or unpublished, and a mistyped one all answer exactly as an address the
-page does not know.
+lists venues unless you list them (below); but whoever is sent it can send it on. A link that
+was never published, one that was regenerated or unpublished, and a mistyped one all answer
+exactly as an address the page does not know.
+
+**Show on the landing page** lists a published venue on the page's own address, the
+[landing page](../ops/servicecue-on-the-web.md#the-landing-page): its name, plot count and
+link, beside a ServiceCue card, for anyone who opens the page. That makes the link public to
+anyone who finds the page, which the switch's line says. Every venue starts off it. A
+listed venue stays listed through a regenerate (the new link is listed) and a page move,
+and comes off with an unpublish or a delete. With no venue listed, the page's address goes
+straight to ServiceCue as before. A page deployed before landing pages keeps doing that, and
+the switch's line says "*host* needs updating before it can show a landing page: deploy the
+Worker."
 
 It uses the page address and publishing token saved under **Settings → Advanced →
 Public link**; ServiceCue publishing itself does not have to be switched
@@ -401,7 +468,7 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 | | |
 |---|---|
 | **Off** | **Publish *venue***. Nothing is sent until it is pressed |
-| **Published** | When it was last published, the link with **Copy**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
+| **Published** | When it was last published, the link with **Copy**, **Show on the landing page**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
 | **Old links still live** | Under either state, and on its own when no venue is selected: "*n* old links still live on *host*", with **Remove now** when that page is the one set up, and "Set that page up again to remove it" when not. See [Old links](#old-links) |
 
 - **Publish** makes the secret on the server, sends every background the venue's plots
@@ -514,7 +581,7 @@ lists up to 128 patch channels.
 ## Backups
 
 A config backup carries `stageplots.json` (venues, plots, backgrounds, every
-plan's override, each published venue's secret link and the old links waiting to be removed), both folders of background files and
+plan's override, each published venue's secret link and the old links waiting to be removed), `stageplot-drafts.json` (the editor's unsaved drafts), both folders of background files and
 every PDF original, and a restore brings them all back. A photo background is
 about 1 to 3 MB of source plus at most 1 MB of WebP. One made from a PDF carries
 the PDF as uploaded too (up to 25 MB), beside its page's source, which for a
@@ -537,12 +604,18 @@ because its source is missing, a venue or background deleted, files tidied away 
 left behind, the tidy skipped and why, image processing unavailable because sharp
 did not load, a save that failed, every item save refused and why (a body that is
 not a JSON object or is too large, an unknown plot, an item that breaks a rule, a
-version that is not a whole number, "changed elsewhere"), how many items moved
+version that is not a whole number, "changed elsewhere"), every draft refused and
+why, drafts left out because their plot is not in `stageplots.json` (kept in the file), a draft that could not be written, each
+venue listed on or taken off the landing page, each new landing list a page took, and a
+list the page would not take (once, with why, and again once it does),
+how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
 overrides cleared with a deleted plot, a deleted default and the plot that took
 over, a new plot order refused and why, and plan overrides in `stageplots.json`
-that were not a list and were read as none. Publishing logs each publish (with how
+that were not a list and were read as none, every venue address change (the new
+address and the old one that still opens it), old addresses dropped, and every
+address refused and why. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
 that failed and why, every one refused before anything was sent (an unknown venue, one
@@ -552,6 +625,7 @@ failure that could not be taken back, and each venue moved to a new page. The se
 never logged. A publish that cannot read the patch sheet says so once (linked points go
 out unlinked) and again when it can, and each plot sent with linked points that went out
 unlinked names them and why (the device is gone, or the sheet cannot be read).
+The editor logs a draft it could not keep (once, until it is kept again, and then that it is), one it could not delete, one it could not send as the page closed, and a failed read of the drafts.
 A page that cannot read the plots logs that too, so does one that cannot read the patch
 sheet for its linked points, so does a print whose
 background did not load, and so does a page that finds Planning Center

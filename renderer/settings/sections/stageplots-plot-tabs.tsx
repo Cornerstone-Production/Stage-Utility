@@ -27,7 +27,7 @@ import { cn } from "../../lib/cn";
 import { usePressDrag } from "../../lib/use-press-drag";
 import { tabClass } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
-import { SaveError, iconButton, type Save } from "./stageplots-shared";
+import { DraftDot, SaveError, iconButton, type Save } from "./stageplots-shared";
 
 /** How far, in screen pixels, a press on a tab moves before it is a drag and not a click. */
 const DRAG_SLOP_PX = 5;
@@ -71,13 +71,17 @@ export function PlotTabs({
   beforeSwitch,
   plansUsing,
   save,
+  drafted,
 }: {
   venue: Venue;
   plots: Plot[];
   selected: Plot | null;
   onSelect: (plotId: string) => void;
+  /** Plots with an unsaved draft kept on the server: each tab carries a dot. */
+  drafted?: ReadonlySet<string>;
   /** Asked before anything that leaves the selected plot (New, Duplicate,
-   *  Delete); false stops it. The editor asks about unsaved changes. */
+   *  Delete); false stops it. The editor stores the unsaved draft first, and
+   *  asks only when it could not. */
   beforeSwitch?: () => Promise<boolean>;
   /** The plans whose override names a plot, by name ("Sun 15 Nov"): its delete hands them back to the default. */
   plansUsing?: (plotId: string) => string[];
@@ -246,6 +250,7 @@ export function PlotTabs({
                   >
                     {p.name}
                     {isDefault && <Star />}
+                    {drafted?.has(p.id) && <DraftDot />}
                   </TabButton>
                 )}
                 {isSelected && renaming !== p.id && (

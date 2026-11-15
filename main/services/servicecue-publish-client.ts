@@ -23,12 +23,14 @@ import { pinToOrigin } from "./pinned-origin.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";
 import {
+  LANDING_PUBLISH_PATH,
   PUBLISH_BASE_PATH,
   PUBLISH_MAX_BODY_BYTES,
   PUBLISH_MAX_VERSION_LENGTH,
   PUBLISH_PROTOCOL_VERSION,
   isViewerBuildId,
   viewerBuildFromHtml,
+  type LandingList,
   type PublishStatus,
 } from "../types/servicecue-publish.js";
 
@@ -135,6 +137,8 @@ export interface PushClient {
   keepStagePlots(secret: string, keys: readonly string[]): Promise<PushResult>;
   /** Everything under the secret is deleted. */
   dropStagePlots(secret: string): Promise<PushResult>;
+  /** The landing page's whole list of listed venues, replacing the one the page holds. A Worker from before landing pages answers 404. */
+  putLanding(list: LandingList): Promise<PushResult>;
 }
 
 export interface PushClientOptions {
@@ -340,6 +344,10 @@ export function createPushClient(opts: PushClientOptions): PushClient {
 
     async dropStagePlots(secret) {
       return statusOnly(await request("DELETE", `/stageplots/${secret}`), "item");
+    },
+
+    async putLanding(list) {
+      return statusOnly(await request("PUT", LANDING_PUBLISH_PATH, json(JSON.stringify(list))), "item");
     },
 
     async status() {

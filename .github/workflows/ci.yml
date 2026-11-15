@@ -133,7 +133,8 @@ jobs:
   #
   # The package's dependencies are installed first and the Worker's checks run on
   # them alone: the type-check includes the shared contract
-  # (main/types/servicecue-publish.ts), which imports nothing, and the test builds its
+  # (main/types/servicecue-publish.ts) and the limits it imports from
+  # main/types/stageplots.ts, which imports nothing, and the test builds its
   # own stand-in for the page. The root dependencies come after, for the two tests at
   # the end that need both packages or a PowerShell: the bundle against wrangler, and
   # the update scripts run whole.
