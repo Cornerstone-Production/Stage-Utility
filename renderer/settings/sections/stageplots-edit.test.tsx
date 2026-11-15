@@ -105,7 +105,8 @@ function heightOf(p: Plot): number {
 }
 
 function broadcast() {
-  FakeEventSource.last?.push("stageplots:updated", DOC);
+  // A copy, as the real stream's JSON is: the same object again would be no change to React.
+  FakeEventSource.last?.push("stageplots:updated", structuredClone(DOC));
 }
 
 /** The fake routes: just enough of each to answer the way the server does. */
@@ -169,13 +170,14 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   if (method === "DELETE" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
     const v = venue(p.venueId);
-    if (v.defaultPlotId === p.id) return { status: 409, json: { error: "this is the venue's default plot" } };
-    // As the route does: the plot, its place in its venue, and the overrides naming it.
+    // As the route does: the plot, its place in its venue, the overrides naming it,
+    // and the first plot left as the default when it was the default.
     const clearedPlans = overridesOfPlot(DOC, p.id).map((o) => o.planId);
     DOC.plots = DOC.plots.filter((x) => x.id !== p.id);
     v.plotIds = v.plotIds.filter((x) => x !== p.id);
+    if (v.defaultPlotId === p.id) v.defaultPlotId = v.plotIds[0] ?? null;
     DOC.overrides = DOC.overrides.filter((o) => o.plotId !== p.id);
-    return { status: 200, json: { ok: true, clearedPlans } };
+    return { status: 200, json: { ok: true, clearedPlans, defaultPlotId: v.defaultPlotId } };
   }
   if (method === "PATCH" && (m = /^\/api\/stageplots\/plots\/([^/]+)$/.exec(path))) {
     const p = DOC.plots.find((x) => x.id === m![1])!;
@@ -191,7 +193,8 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   const u = new URL(String(url), "http://localhost");
   const method = init?.method ?? "GET";
   let status = 200;
-  let json: unknown = DOC;
+  // A copy, as a real read is: the same object again would be no change to React.
+  let json: unknown = structuredClone(DOC);
   if (u.pathname === "/api/stageplots/patch") {
     if (PATCH_HOLD) await PATCH_HOLD;
     const [st, body] = PATCH_DOWN ? [503, { error: "patch.json could not be read (EIO)" }] : [200, PATCH];
@@ -226,6 +229,10 @@ const { itemRenderProbe } = await import("../../main/stageplots/plot-items.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
+const { CleanupPreview } = await import("./stageplots-cleanup-preview.js");
+const { clearClipboard } = await import("../../main/stageplots/clipboard.js");
+const { DUPLICATE_OFFSET } = await import("../../main/stageplots/editor-state.js");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 
@@ -264,6 +271,20 @@ async function mount({ viewer = false }: { viewer?: boolean } = {}) {
   for (let i = 0; i < 4; i++) await settle();
 }
 
+/** The editor and /stageplots as two routes of a real router over a memory history, opened at `url`. */
+async function mountRouted(url: string) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const root = createRootRoute({});
+  const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement(StagePlotsEdit, { openPdf: fakePdf }) });
+  const list = createRoute({ getParentRoute: () => root, path: "/stageplots", component: () => React.createElement(StagePlotsPage) });
+  const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: [url] }) });
+  await act(async () => {
+    render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
+  });
+  for (let i = 0; i < 6; i++) await settle();
+  return router;
+}
+
 async function click(el: Element) {
   await act(async () => {
     fireEvent.click(el);
@@ -285,6 +306,7 @@ const tabs = () => screen.getAllByRole("tab");
 const writes = () => sent.map((s) => s.what);
 
 beforeEach(() => {
+  clearClipboard();
   DOC = doc();
   PATCH = patchFile();
   PATCH_DOWN = false;
@@ -329,6 +351,30 @@ describe("/stageplots/edit", () => {
     } finally {
       window.history.replaceState(null, "", "/");
     }
+  });
+
+  test("?venue=&plot= opens the editor on that venue with that plot selected", async () => {
+    await mountRouted("/stageplots/edit?venue=v-1&plot=p-2");
+    assert.equal(tabs().find((t) => t.textContent === "Special")?.getAttribute("aria-selected"), "true");
+    assert.equal(tabs().find((t) => t.textContent === "Standard")?.getAttribute("aria-selected"), "false");
+  });
+
+  test("the back link goes to the venue list inside the app, no page load; a modified click is left to the browser", async () => {
+    const router = await mountRouted("/stageplots/edit?venue=v-1");
+    const back = screen.getByRole("link", { name: "Stage plots" });
+    // Cmd-click: not ours, so the browser opens it in a new tab.
+    const modified = fireEvent.click(back, { metaKey: true });
+    assert.equal(modified, true, "a Cmd-click was taken over");
+    assert.equal(router.state.location.pathname, "/stageplots/edit");
+    let notPrevented = true;
+    await act(async () => {
+      notPrevented = fireEvent.click(back);
+    });
+    for (let i = 0; i < 4; i++) await settle();
+    assert.equal(notPrevented, false, "a plain click was left to the browser, which loads the page");
+    assert.equal(router.state.location.pathname, "/stageplots");
+    assert.equal(screen.queryAllByRole("tab").length, 0, "the plot editor is gone");
+    assert.ok(screen.getByText("Room One"), "the venue list shows");
   });
 
   test("the Publish card sits last in the left column, for the selected venue", async () => {
@@ -407,6 +453,50 @@ describe("/stageplots/edit", () => {
     assert.equal(screen.getByRole("switch", { name: "Clean-up" }).getAttribute("aria-checked"), "false");
   });
 
+  test("Before and After open large, switch with the arrow keys, and Escape closes back to the thumbnail", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Open Before large" }));
+    const dialog = screen.getByRole("dialog", { name: /before and after clean-up/ });
+    assert.equal(within(dialog).getByRole("button", { name: "Before" }).getAttribute("aria-pressed"), "true");
+    assert.match(screen.getByTestId("cleanup-meta").textContent!, /^Source · /);
+    assert.equal(document.activeElement, within(dialog).getByRole("button", { name: "Close" }));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "ArrowRight" });
+    });
+    assert.match(screen.getByTestId("cleanup-meta").textContent!, /^Web image · WebP · .* · 2400 × 1600$/);
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle();
+    assert.equal(screen.queryByRole("dialog"), null);
+    assert.equal(document.activeElement, screen.getByRole("button", { name: "Open After large" }), "focus returns to the thumbnail it shrank into");
+  });
+
+  test("both thumbnails load lazily", async () => {
+    await mount();
+    const imgs = ["Open Before large", "Open After large"].map((name) => screen.getByRole("button", { name }).querySelector("img")!);
+    assert.deepEqual(imgs.map((i) => i.getAttribute("loading")), ["lazy", "lazy"]);
+  });
+
+  test("a preview that goes away while it shrinks never calls onClose or takes focus afterwards", async () => {
+    let closed = 0;
+    const thumb = document.createElement("button");
+    thumb.getBoundingClientRect = () => ({ left: 10, top: 10, right: 110, bottom: 80, width: 100, height: 70, x: 10, y: 10, toJSON: () => ({}) }) as DOMRect;
+    document.body.appendChild(thumb);
+    const view = render(React.createElement(CleanupPreview, { background: DOC.backgrounds[0], side: "before", thumbOf: () => thumb, onClose: () => void closed++, kindLabel: "JPEG" }));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    view.unmount();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    thumb.remove();
+    assert.equal(closed, 0, "the shrink's timer outlived the preview");
+    assert.notEqual(document.activeElement, thumb);
+  });
+
   test("deleting a used background shows the plot names", async () => {
     await mount();
     await click(screen.getByRole("button", { name: "Delete background…" }));
@@ -434,19 +524,164 @@ describe("/stageplots/edit", () => {
     assert.equal(starOn(), 1);
   });
 
-  test("deleting the default plot is not offered", async () => {
+  test("deleting the default plot says which plot takes over, and it does", async () => {
     await mount();
     await openMenu();
-    const del = screen.getByRole("menuitem", { name: /Delete/ });
-    assert.equal(del.getAttribute("aria-disabled"), "true");
-    assert.match(del.textContent!, /Make another the default first/);
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /Special becomes the default\./);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.ok(writes().includes("DELETE /api/stageplots/plots/p-1"));
+    assert.equal(DOC.venues[0].defaultPlotId, "p-2");
+    await settle();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Special"]);
+    assert.ok(within(tabs()[0]).getByRole("img", { name: "Default plot" }));
+  });
+
+  test("deleting the last plot leaves the venue empty, offering Add plot", async () => {
+    DOC.venues[0].plotIds = ["p-1"];
+    DOC.plots = DOC.plots.filter((p) => p.id === "p-1");
+    await mount();
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    assert.match(screen.getByRole("alertdialog").textContent!, /Room One is left with no plots\./);
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete plot" }));
+    assert.equal(DOC.venues[0].defaultPlotId, null);
+    await settle();
+    assert.equal(screen.queryAllByRole("tab").length, 0);
+    assert.ok(screen.getByRole("button", { name: "Add plot" }));
+    assert.equal(screen.queryByRole("button", { name: "New plot" }), null);
+  });
+
+  test("Move right and Move left reorder the tabs, saved as the venue's plotIds", async () => {
+    await mount();
+    await openMenu();
+    assert.equal(screen.getByRole("menuitem", { name: "Move left" }).getAttribute("aria-disabled"), "true");
+    await click(screen.getByRole("menuitem", { name: "Move right" }));
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/venues/v-1", body: { plotIds: ["p-2", "p-1"] } });
+    await settle();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Special", "Standard"]);
+  });
+
+  test("deleting the default, with the tabs reordered, names the first tab left, and the server makes that plot the default", async () => {
+    // Created p-1, p-2, p-3; the tabs read Third, Standard, Special.
+    DOC.plots.push(plot("p-3", "v-1", "Third"));
+    DOC.venues[0].plotIds = ["p-3", "p-1", "p-2"];
+    await mount();
+    assert.deepEqual(tabs().map((t) => t.textContent), ["Third", "Standard", "Special"]);
+    // Standard (the default) moves right, so the tab order is Third, Special, Standard.
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: "Move right" }));
+    await settle();
+    assert.deepEqual(DOC.venues[0].plotIds, ["p-3", "p-2", "p-1"]);
+    await openMenu();
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    // The FIRST plot left in tab order (Third), not the last (Special) and not creation order's (Special).
+    assert.match(dialog.textContent!, /Third becomes the default\./);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.equal(DOC.venues[0].defaultPlotId, "p-3", "the server made the plot the confirm named the default");
+  });
+
+  // jsdom lays nothing out, so the tabs are given boxes: `[left, top]` each, 100 x 30.
+  function stubTabs(boxes: Record<string, [number, number]>) {
+    for (const tab of tabs()) {
+      const [left, top] = boxes[tab.dataset.plotTab!];
+      tab.getBoundingClientRect = () => ({ left, top, right: left + 100, bottom: top + 30, width: 100, height: 30, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    }
+  }
+  const tabOf = (id: string) => tabs().find((t) => t.dataset.plotTab === id)!;
+  async function tabEvent(kind: "pointerDown" | "pointerMove" | "pointerUp", id: string, x: number, y: number) {
     await act(async () => {
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      fireEvent[kind](tabOf(id), { pointerId: 1, clientX: x, clientY: y, button: 0, isPrimary: true });
+    });
+  }
+  /** Press on the middle of `id`, drag to (x, y) in two moves, let go. */
+  async function dragTab(id: string, boxes: Record<string, [number, number]>, x: number, y: number) {
+    stubTabs(boxes);
+    const [left, top] = boxes[id];
+    await tabEvent("pointerDown", id, left + 50, top + 15);
+    await tabEvent("pointerMove", id, left + 50 + (x - left - 50) / 2, y);
+    await tabEvent("pointerMove", id, x, y);
+    await tabEvent("pointerUp", id, x, y);
+    await settle();
+  }
+
+  test("dragging a tab along the row reorders the plots, saved as the venue's plotIds", async () => {
+    DOC.plots.push(plot("p-3", "v-1", "Third"));
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3"];
+    await mount();
+    // Standard let go at 240: right of Special's middle (150), left of Third's (250), so slot 1.
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [200, 0] }, 240, 15);
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/venues/v-1", body: { plotIds: ["p-2", "p-1", "p-3"] } });
+    // The click the browser sends after the drag does not select the tab.
+    await act(async () => {
+      fireEvent.click(tabOf("p-1"), { detail: 1 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "false");
+  });
+
+  test("dragging across a wrapped row lands in the slot under the pointer, by row", async () => {
+    DOC.plots.push(plot("p-3", "v-1", "Third"), plot("p-4", "v-1", "Fourth"));
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
+    await mount();
+    // Two rows of two: Standard, Special over Third, Fourth. Fourth dragged into the first
+    // row's left end is slot 0, not decided by the horizontal position alone.
+    await dragTab("p-4", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [0, 40], "p-4": [100, 40] }, 10, 15);
+    assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-4", "p-1", "p-2", "p-3"] });
+    sent = [];
+    DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
+    broadcast();
+    await settle();
+    // Standard dragged to the second row's left end (x 10, y 55): after the whole first row's
+    // other tab (Special) and before Third.
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0], "p-3": [0, 40], "p-4": [100, 40] }, 10, 55);
+    assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-2", "p-1", "p-3", "p-4"] });
+  });
+
+  test("a drag with no click after it does not swallow a later click on a tab", async () => {
+    await mount();
+    await dragTab("p-1", { "p-1": [0, 0], "p-2": [100, 0] }, 160, 15);
+    // The browser sent no click after the release (it ended off the tab). Time passes.
+    await settle();
+    await act(async () => {
+      fireEvent.click(tabOf("p-2"), { detail: 1 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "true");
+  });
+
+  test("Escape cancels a tab drag and sends nothing; the next keyboard click still selects", async () => {
+    await mount();
+    stubTabs({ "p-1": [0, 0], "p-2": [100, 0] });
+    await tabEvent("pointerDown", "p-1", 50, 15);
+    await tabEvent("pointerMove", "p-1", 160, 15);
+    assert.ok(screen.getByTestId("tab-drop-marker"));
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    assert.equal(screen.queryByTestId("tab-drop-marker"), null);
+    await tabEvent("pointerUp", "p-1", 160, 15);
+    assert.deepEqual(writes(), [], "nothing was saved");
+    // A keyboard Enter or Space on a tab is a click with no detail: not the one that follows a drag.
+    await act(async () => {
+      fireEvent.click(tabOf("p-2"), { detail: 0 });
+    });
+    assert.equal(tabOf("p-2").getAttribute("aria-selected"), "true");
+  });
+
+  test("a double-click on a tab renames it in place", async () => {
+    await mount();
+    await act(async () => {
+      fireEvent.doubleClick(tabs()[1]);
+    });
+    const field = screen.getByRole("textbox", { name: "Plot name" }) as HTMLInputElement;
+    assert.equal(document.activeElement, field);
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "Christmas" } });
+      fireEvent.blur(field);
     });
     await settle();
-    await click(tabs()[1]);
-    await openMenu();
-    assert.equal(screen.getByRole("menuitem", { name: /Delete/ }).getAttribute("aria-disabled"), null);
+    assert.deepEqual(sent.at(-1), { what: "PATCH /api/stageplots/plots/p-2", body: { name: "Christmas" } });
   });
 
   test("a failed save shows the error beside the control and keeps the saved value", async () => {
@@ -556,12 +791,67 @@ async function addFromPalette(testId: string): Promise<string> {
   return added;
 }
 
+/** A press on a palette item, moves, and a release, as a drag from the palette. */
+async function paletteDrag(testId: string, to: { x: number; y: number }, { release = true, thenClick = false }: { release?: boolean; thenClick?: boolean } = {}) {
+  const btn = screen.getByTestId(`add-${testId}`);
+  const ev = async (kind: "pointerDown" | "pointerMove" | "pointerUp", x: number, y: number) => {
+    await act(async () => {
+      fireEvent[kind](btn, { pointerId: 1, clientX: x, clientY: y, button: 0, isPrimary: true });
+      // The browser sends the click in the same task as the release.
+      if (kind === "pointerUp" && thenClick) fireEvent.click(btn, { detail: 1 });
+    });
+  };
+  await ev("pointerDown", 20, 200);
+  await ev("pointerMove", 25, 205);
+  await ev("pointerMove", to.x, to.y);
+  if (release) await ev("pointerUp", to.x, to.y);
+  await settle();
+}
+const itemIds = () => [...canvas().querySelectorAll("[data-id]")].map((g) => g.getAttribute("data-id")!);
+
 describe("the plot editor", () => {
+  test("a palette item dragged onto the plot lands centred on the drop point", async () => {
+    await mount();
+    stubBox();
+    await paletteDrag("box", { x: 400, y: 300 }, { thenClick: true });
+    assert.equal(itemIds().length, 1, "the click after a drop added a second item");
+    const [id] = itemIds();
+    assert.ok(id, "the drop added nothing");
+    const w = Number(drawn(id).querySelector("rect")!.getAttribute("width"));
+    const h = Number(drawn(id).querySelector("rect")!.getAttribute("height"));
+    assert.ok(Math.abs(at(id).x + w / 2 - 400) <= 1 && Math.abs(at(id).y + h / 2 - 300) <= 1, `centred on (400, 300), at ${JSON.stringify(at(id))} ${w}x${h}`);
+  });
+
+  test("a palette drag let go off the plot, or ended with Escape, adds nothing; a plain click after still adds", async () => {
+    await mount();
+    stubBox();
+    // Off the plot: below its box (it is 666 px tall).
+    await paletteDrag("box", { x: 400, y: 900 });
+    assert.deepEqual(itemIds(), [], "dropped off the plot");
+    // Escape mid-drag, then let go over the plot.
+    await paletteDrag("box", { x: 400, y: 300 }, { release: false });
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(screen.getByTestId("add-box"), { pointerId: 1, clientX: 400, clientY: 300, button: 0, isPrimary: true });
+    });
+    await settle();
+    assert.deepEqual(itemIds(), [], "Escape cancelled the drag");
+    assert.equal(screen.queryByTestId("palette-ghost"), null);
+    // A later keyboard (or any plain) click adds, as it always did.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-box"), { detail: 0 });
+    });
+    await settle();
+    assert.equal(itemIds().length, 1, "a plain click after a cancelled drag still adds");
+  });
+
   test("clicking Drum kit in the palette adds a selected drum kit", async () => {
     await mount();
     const id = await addFromPalette("drumkit");
     assert.equal(drawn(id).querySelector("[data-symbol]")?.getAttribute("data-symbol"), "drumkit");
-    assert.ok(drawn(id).querySelector('[data-hd="size"]'), "the new item is not selected");
+    assert.ok(canvas().querySelector(`[data-selection-of="${id}"] [data-hd="size"]`), "the new item is not selected");
     assert.match(screen.getByTestId("inspector").textContent!, /Symbol · Drum kit/);
     assert.ok(banner(), "no unsaved banner");
     assert.deepEqual(writes(), [], "adding saved something");
@@ -740,6 +1030,164 @@ describe("the plot editor", () => {
     assert.ok(banner() === null);
   });
 
+  // ── Keys, and the right-click menus ───────────────────────────────────────
+
+  /** Two boxes, `a` then `b` in drawing order, with `id` selected by a press on it. */
+  async function twoBoxes(select: "a" | "b") {
+    DOC.plots[0].items = [item({ id: "a", x: 100, y: 100 }), item({ id: "b", x: 400, y: 300 })];
+    await mount();
+    stubBox();
+    const p = at(select);
+    await pointer("pointerDown", drawn(select).querySelector("rect")!, p.x + 5, p.y + 5);
+    await pointer("pointerUp", canvas(), p.x + 5, p.y + 5);
+    await settle();
+  }
+  const orderNow = () => [...canvas().querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id")!);
+  async function key(init: KeyboardEventInit & { key: string }) {
+    await act(async () => {
+      fireEvent.keyDown(canvas(), init);
+    });
+  }
+  /** Where the menu opens: over an item (what is drawn there is what elementFromPoint says), or the empty plot. */
+  async function rightClick(over: "a" | "b" | null, x = 600, y = 500) {
+    stubBox();
+    (document as unknown as { elementFromPoint: unknown }).elementFromPoint = () => (over ? drawn(over).querySelector("rect")! : canvas());
+    await act(async () => {
+      fireEvent.contextMenu(over ? drawn(over).querySelector("rect")! : canvas(), { clientX: x, clientY: y });
+    });
+    await settle();
+  }
+
+  test("Cmd or Ctrl with C and V copy and paste, each paste a step further on; X cuts, and its first paste lands where it was", async () => {
+    await twoBoxes("a");
+    const origin = at("a");
+    await key({ key: "c", metaKey: true });
+    await key({ key: "v", metaKey: true });
+    assert.equal(itemIds().length, 3, "Cmd+V pasted");
+    const first = itemIds().find((id) => id !== "a" && id !== "b")!;
+    assert.deepEqual(at(first), { x: origin.x + DUPLICATE_OFFSET, y: origin.y + DUPLICATE_OFFSET }, "the first paste of a copy is one step on");
+    await key({ key: "v", ctrlKey: true });
+    const second = itemIds().find((id) => ![first, "a", "b"].includes(id))!;
+    assert.deepEqual(at(second), { x: origin.x + 2 * DUPLICATE_OFFSET, y: origin.y + 2 * DUPLICATE_OFFSET }, "the next paste is a step further");
+    // Cut the selected (pasted) item: it goes, and its first paste lands where it was.
+    const where = at(second);
+    await key({ key: "x", ctrlKey: true });
+    assert.equal(itemIds().includes(second), false, "Ctrl+X removed it");
+    await key({ key: "v", ctrlKey: true });
+    const back = itemIds().find((id) => ![first, "a", "b"].includes(id))!;
+    assert.deepEqual(at(back), where, "a cut's first paste is at offset 0");
+  });
+
+  test("Cmd or Ctrl with D duplicates the selected item", async () => {
+    await twoBoxes("b");
+    await key({ key: "d", metaKey: true });
+    assert.equal(itemIds().length, 3);
+    await key({ key: "d", ctrlKey: true });
+    assert.equal(itemIds().length, 4);
+  });
+
+  test("the arrange keys: Cmd+[ and ] a step, Alt+Cmd+[ and ] all the way, and the order shows while the item is selected", async () => {
+    DOC.plots[0].items = [item({ id: "a", x: 100, y: 100 }), item({ id: "b", x: 400, y: 300 }), item({ id: "c", x: 700, y: 100 })];
+    await mount();
+    stubBox();
+    const p = at("b");
+    await pointer("pointerDown", drawn("b").querySelector("rect")!, p.x + 5, p.y + 5);
+    await pointer("pointerUp", canvas(), p.x + 5, p.y + 5);
+    await settle();
+    assert.deepEqual(orderNow(), ["a", "b", "c"]);
+    await key({ key: "[", code: "BracketLeft", metaKey: true });
+    assert.deepEqual(orderNow(), ["b", "a", "c"], "backward one step, drawn there while selected");
+    await key({ key: "]", code: "BracketRight", ctrlKey: true });
+    assert.deepEqual(orderNow(), ["a", "b", "c"], "forward one step");
+    await key({ key: "‘", code: "BracketLeft", metaKey: true, altKey: true });
+    assert.deepEqual(orderNow(), ["b", "a", "c"], "Alt+Cmd+[ sends it to the back");
+    await key({ key: "’", code: "BracketRight", metaKey: true, altKey: true });
+    assert.deepEqual(orderNow(), ["a", "c", "b"], "Alt+Cmd+] brings it to the front");
+    // Shift+Cmd+[ is the browser's (it switches tabs): the page does nothing with it.
+    await key({ key: "{", code: "BracketLeft", metaKey: true, shiftKey: true });
+    assert.deepEqual(orderNow(), ["a", "c", "b"]);
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'), "it is still the selected item");
+  });
+
+  test("right-click on an item selects it and offers Cut, Copy, Paste, Duplicate, Arrange and Delete; Arrange moves it while selected", async () => {
+    await twoBoxes("a");
+    await rightClick("b");
+    const menu = screen.getByRole("menu");
+    assert.deepEqual(
+      within(menu).getAllByRole("menuitem").map((m) => m.textContent!.replace(/[⌘⌥⇧⌫›].*$/, "")),
+      ["Cut", "Copy", "Paste", "Duplicate", "Arrange", "Delete"],
+    );
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'), "the item under the click was selected first");
+    assert.equal(within(menu).getByRole("menuitem", { name: /^Paste/ }).hasAttribute("disabled"), true, "nothing copied yet");
+    await act(async () => {
+      fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /Arrange/ }).parentElement!);
+    });
+    const sub = within(screen.getAllByRole("menu")[1]);
+    assert.deepEqual(
+      sub.getAllByRole("menuitem").map((m) => m.textContent),
+      ["Bring to front⌥⌘]", "Bring forward⌘]", "Send backward⌘[", "Send to back⌥⌘["],
+    );
+    await click(sub.getByRole("menuitem", { name: /Send to back/ }));
+    assert.deepEqual(orderNow(), ["b", "a"], "Send to back shows at once, with b still selected");
+    assert.ok(canvas().querySelector('[data-selection-of="b"]'));
+  });
+
+  test("right-click on the empty plot offers Paste here, Add here, Undo, Redo and Fit", async () => {
+    await twoBoxes("a");
+    await rightClick(null, 800, 500);
+    const menu = screen.getByRole("menu");
+    assert.deepEqual(
+      within(menu).getAllByRole("menuitem").map((m) => m.textContent!.replace(/[⌘⇧›].*$/, "")),
+      ["Paste here", "Add here", "Undo", "Redo", "Fit the whole plot"],
+    );
+    assert.equal(within(menu).getByRole("menuitem", { name: /^Paste here/ }).hasAttribute("disabled"), true);
+    await act(async () => {
+      fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /Add here/ }).parentElement!);
+    });
+    await click(within(screen.getAllByRole("menu")[1]).getByRole("menuitem", { name: "Box" }));
+    const added = itemIds().find((id) => id !== "a" && id !== "b");
+    assert.ok(added, "Add here > Box added a box");
+    const w = Number(drawn(added).querySelector("rect")!.getAttribute("width"));
+    assert.ok(Math.abs(at(added).x + w / 2 - 800) <= 1, "centred where it was clicked");
+  });
+
+  test("right-click Delete on a tab that is not the selected one deletes it without asking about, or discarding, the selected plot's changes", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    assert.ok(banner(), "Standard has unsaved changes");
+    await act(async () => {
+      fireEvent.contextMenu(tabs().find((t) => t.textContent === "Special")!, { clientX: 50, clientY: 20 });
+    });
+    await click(screen.getByRole("menuitem", { name: /Delete/ }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent!, /Delete Special\?/);
+    await click(within(dialog).getByRole("button", { name: "Delete plot" }));
+    assert.ok(writes().includes("DELETE /api/stageplots/plots/p-2"), "Special was deleted");
+    assert.equal(screen.queryByText(/Discard unsaved changes\?/), null, "no discard prompt");
+    assert.equal(screen.queryByRole("alertdialog"), null);
+    assert.ok(drawn(mine), "Standard's draft is intact");
+    assert.ok(banner(), "and still unsaved");
+  });
+
+  test("a venue's Rename declined at the discard prompt leaves nothing waiting: picking it later does not grab the name field", async () => {
+    DOC.venues.push({ id: "v-2", name: "Room Two", kind: "home", notes: "", plotIds: [], defaultPlotId: null });
+    await mount();
+    await addFromPalette("box");
+    const rowTwo = () => within(card("Venues")).getByRole("button", { name: /Room Two/ });
+    await act(async () => {
+      fireEvent.contextMenu(rowTwo(), { clientX: 30, clientY: 30 });
+    });
+    await click(screen.getByRole("menuitem", { name: "Rename" }));
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    assert.equal(rowTwo().getAttribute("aria-current"), "false", "the switch was declined");
+    // Later, by a plain pick: the same prompt, accepted. The name field must not take focus.
+    await click(rowTwo());
+    await click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
+    assert.equal(rowTwo().getAttribute("aria-current"), "true", "Room Two is selected now");
+    const field = screen.getByLabelText("Venue name") as HTMLInputElement;
+    assert.notEqual(document.activeElement, field, "the declined Rename was still waiting and took the cursor");
+  });
+
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
     DOC.plots[0].items = Array.from({ length: 500 }, (_, i) => item({ id: `i-${i}`, x: (i % 25) * 38, y: Math.floor(i / 25) * 30, w: 30, h: 20 }));
     await mount();
@@ -868,7 +1316,7 @@ describe("the plot editor", () => {
     const t = at("t");
     await pointer("pointerDown", drawn("t").querySelector("rect")!, t.x + 5, t.y + 5);
     await pointer("pointerUp", canvas(), t.x + 5, t.y + 5);
-    const rot = drawn("t").querySelector('[data-hd="rot"]')!;
+    const rot = canvas().querySelector('[data-selection-of="t"] [data-hd="rot"]')!;
     assert.ok(rot.hasAttribute("data-below"), "the rotate handle is not under the item");
     // The handle sits straight under the centre (140, 20); drag it a little right of there.
     const [cx, cy] = [140, 20 + 20 + 6 + 26];

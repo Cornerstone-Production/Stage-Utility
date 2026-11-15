@@ -2,8 +2,10 @@
 // editor, /stageplots, print and the published page.
 //
 // Draw order: zones, then boxes and circles, then cables, then symbols and
-// connection points, then text; within a layer, the order they were added. The
-// selected item is drawn last, on top of everything.
+// connection points, then text; within a layer, the order they were added (or
+// Arrange put them). The selected item is drawn in its place like any other, so
+// Arrange shows at once; only its outline and handles are drawn last, on top of
+// everything, where a press reaches them.
 //
 // Shapes and symbols scale with the plot. Labels do not: their font size is a
 // fixed number of screen pixels (`fs` is that size in plot units, recomputed as
@@ -19,6 +21,7 @@ import { memo, type ReactNode } from "react";
 
 import type { PlotItem } from "@main/types/stageplots";
 
+import { layer } from "./draw-layer";
 import { calloutNumbers } from "./legend";
 import { MonoTspans } from "./mono";
 import { Part, SYMBOLS } from "./symbols";
@@ -33,20 +36,11 @@ function r1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
-/** Draw order layer: zones under shapes under cables under symbols under text. */
-function layer(it: PlotItem): number {
-  if (it.type === "zone") return 0;
-  if (it.type === "box" || it.type === "circle") return 1;
-  if (it.type === "cable") return 2;
-  if (it.type === "text") return 4;
-  return 3;
-}
-
-/** `items` in the order they are drawn: by layer, then as added, the selected one last. */
-export function drawOrder(items: readonly PlotItem[], selectedId: string | null | undefined): PlotItem[] {
+/** `items` in the order they are drawn: by layer, then as added. */
+export function drawOrder(items: readonly PlotItem[]): PlotItem[] {
   return items
     .map((it, i) => ({ it, i }))
-    .sort((a, b) => Number(a.it.id === selectedId) - Number(b.it.id === selectedId) || layer(a.it) - layer(b.it) || a.i - b.i)
+    .sort((a, b) => layer(a.it) - layer(b.it) || a.i - b.i)
     .map((x) => x.it);
 }
 
@@ -62,7 +56,6 @@ interface ItemProps {
   k: number;
   /** Label font size, in plot units. */
   fs: number;
-  selected: boolean;
   tapped: boolean;
   calloutNo: number | undefined;
   labels: boolean;
@@ -84,7 +77,7 @@ function Label({ x, y, fs, anchor, children }: { x: number; y: number; fs: numbe
   );
 }
 
-function CableItem({ item: it, k, fs, selected, tapped, labels }: ItemProps) {
+function CableItem({ item: it, k, fs, tapped, labels }: ItemProps) {
   const pts = it.points ?? [];
   const col = it.color ?? INK;
   const line = pts.map((p) => p.join(",")).join(" ");
@@ -117,21 +110,6 @@ function CableItem({ item: it, k, fs, selected, tapped, labels }: ItemProps) {
           {it.label}
         </Label>
       )}
-      {selected &&
-        pts.map((p, i) => (
-          <circle
-            key={i}
-            data-hd="pt"
-            data-pi={i}
-            data-testid={`h-pt-${i}`}
-            cx={p[0]}
-            cy={p[1]}
-            r={r1(6 * k)}
-            strokeWidth={r1(1.5 * k)}
-            className="cursor-crosshair"
-            style={{ fill: PAPER, stroke: ACCENT }}
-          />
-        ))}
     </>
   );
 }
@@ -248,6 +226,28 @@ export function rotateHandleBelow(it: Pick<PlotItem, "y" | "h" | "rotation">, k:
   return it.y + it.h / 2 - reach * Math.cos((it.rotation * Math.PI) / 180) < 0;
 }
 
+/** A selected cable's points, each a handle. */
+function CablePoints({ pts, k }: { pts: PlotItem["points"]; k: number }) {
+  return (
+    <>
+      {(pts ?? []).map((p, i) => (
+        <circle
+          key={i}
+          data-hd="pt"
+          data-pi={i}
+          data-testid={`h-pt-${i}`}
+          cx={p[0]}
+          cy={p[1]}
+          r={r1(6 * k)}
+          strokeWidth={r1(1.5 * k)}
+          className="cursor-crosshair"
+          style={{ fill: PAPER, stroke: ACCENT }}
+        />
+      ))}
+    </>
+  );
+}
+
 function Selection({ hw, hh, k, below }: { hw: number; hh: number; k: number; below: boolean }) {
   const pad = HANDLE_PAD * k;
   const hs = 10 * k;
@@ -266,8 +266,9 @@ function Selection({ hw, hh, k, below }: { hw: number; hh: number; k: number; be
         strokeWidth={lw}
         strokeDasharray={`${r1(4 * k)} ${r1(3 * k)}`}
         style={{ stroke: ACCENT }}
+        pointerEvents="none"
       />
-      <line x1={0} y1={r1(dir * (hh + pad))} x2={0} y2={r1(dir * (hh + pad + rl))} strokeWidth={lw} style={{ stroke: ACCENT }} />
+      <line pointerEvents="none" x1={0} y1={r1(dir * (hh + pad))} x2={0} y2={r1(dir * (hh + pad + rl))} strokeWidth={lw} style={{ stroke: ACCENT }} />
       <circle
         data-hd="rot"
         data-testid="h-rot"
@@ -322,7 +323,7 @@ function ItemLabel({ it, fs }: { it: PlotItem; fs: number }) {
 }
 
 const PlotItemView = memo(function PlotItemView(props: ItemProps) {
-  const { item: it, k, fs, selected, tapped, calloutNo, labels } = props;
+  const { item: it, k, fs, tapped, calloutNo, labels } = props;
   itemRenderProbe.current?.(it.id);
   const data = {
     "data-id": it.id,
@@ -362,15 +363,32 @@ const PlotItemView = memo(function PlotItemView(props: ItemProps) {
         <rect x={-hw} y={-hh} width={it.w} height={it.h} fill="transparent" />
       </g>
       {labels && it.label && it.type !== "text" && <ItemLabel it={it} fs={fs} />}
-      {/* The handles after the label: a turned item's label can sit over a handle, and must not take its press. */}
-      {selected && (
-        <g transform={frame}>
-          <Selection hw={hw} hh={hh} k={k} below={rotateHandleBelow(it, k)} />
-        </g>
-      )}
     </g>
   );
 });
+
+/**
+ * The selected item's outline and handles, drawn after every item so nothing, not even
+ * another item's label, sits over a handle and takes its press. A press on a handle
+ * names no item (the canvas takes the selected one); the outline takes no press.
+ */
+function SelectionOverlay({ item: it, k }: { item: PlotItem; k: number }) {
+  if (it.type === "cable") {
+    return (
+      <g data-selection-of={it.id}>
+        <CablePoints pts={it.points} k={k} />
+      </g>
+    );
+  }
+  const [hw, hh] = [it.w / 2, it.h / 2];
+  return (
+    <g data-selection-of={it.id}>
+      <g transform={`translate(${r1(it.x + hw)} ${r1(it.y + hh)}) rotate(${it.rotation})`}>
+        <Selection hw={hw} hh={hh} k={k} below={rotateHandleBelow(it, k)} />
+      </g>
+    </g>
+  );
+}
 
 export interface PlotItemsProps {
   items: readonly PlotItem[];
@@ -378,7 +396,7 @@ export interface PlotItemsProps {
   k: number;
   /** Label size in screen pixels. */
   labelPx: number;
-  /** The selected item, drawn last with its handles (the editor). */
+  /** The selected item, with its outline and handles on top (the editor). */
   selectedId?: string | null;
   /** The item whose details are open, ringed (the read-only page). */
   tappedId?: string | null;
@@ -389,20 +407,21 @@ export interface PlotItemsProps {
 export function PlotItems({ items, k, labelPx, selectedId = null, tappedId = null, labels = true }: PlotItemsProps) {
   const numbers = calloutNumbers(items);
   const fs = labelPx * k;
+  const selected = selectedId ? items.find((it) => it.id === selectedId) : undefined;
   return (
     <g data-items="">
-      {drawOrder(items, selectedId).map((it) => (
+      {drawOrder(items).map((it) => (
         <PlotItemView
           key={it.id}
           item={it}
           k={k}
           fs={fs}
-          selected={it.id === selectedId}
           tapped={it.id === tappedId}
           calloutNo={numbers.get(it.id)}
           labels={labels}
         />
       ))}
+      {selected && <SelectionOverlay item={selected} k={k} />}
     </g>
   );
 }

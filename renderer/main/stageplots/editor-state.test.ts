@@ -101,9 +101,11 @@ describe("editor state", () => {
     assert.deepEqual(cable.points, [[375, 300], [625, 300]]);
   });
 
-  test("rotate snaps to 5 degrees and a cable point moves alone", () => {
-    let s = run(start(), { type: "rotate", id: "b", angle: 93 }, { type: "commitGesture" });
-    assert.equal(s.items[0].rotation, 95);
+  test("rotate snaps to whole degrees, 15 with Shift, and a cable point moves alone", () => {
+    let s = run(start(), { type: "rotate", id: "b", angle: 93.4 }, { type: "commitGesture" });
+    assert.equal(s.items[0].rotation, 93);
+    s = run(start(), { type: "rotate", id: "b", angle: 93.4, step: 15 }, { type: "commitGesture" });
+    assert.equal(s.items[0].rotation, 90);
     s = run(start([box({ id: "c", type: "cable", points: [[10, 10], [200, 10]], dashed: true, x: 10, y: 10, w: 190, h: 0 })]), {
       type: "movePoint",
       id: "c",
@@ -199,13 +201,75 @@ describe("geometry", () => {
     assert.deepEqual([tiny.w, tiny.h], [8, 8]);
   });
 
-  test("snapRotation rounds to 5° within (-180, 180]", () => {
-    assert.equal(snapRotation(93), 95);
-    assert.equal(snapRotation(181), 180);
-    assert.equal(snapRotation(183), -175);
+  test("snapRotation rounds to 1° within (-180, 180], or to 15° with Shift", () => {
+    assert.equal(snapRotation(93.4), 93);
+    assert.equal(snapRotation(93.6), 94);
+    assert.equal(snapRotation(181), -179);
     assert.equal(snapRotation(-180), 180);
-    assert.equal(snapRotation(-178), 180);
-    assert.equal(snapRotation(-177), -175);
+    assert.equal(snapRotation(-179.6), 180);
+    assert.equal(snapRotation(97, 15), 90);
+    assert.equal(snapRotation(98, 15), 105);
+  });
+
+  test("a symbol or connection point keeps its shape when its corner is dragged; a box does not", () => {
+    for (const type of ["symbol", "conn"] as const) {
+      const it = box({ type, w: 120, h: 60, ...(type === "symbol" ? { symbol: "piano" as const } : {}) });
+      // Centre (160, 130); the pointer asks for 200 wide and 60 high: the width wins, the height follows.
+      const r = resizeInFrame(it, { x: 260, y: 160 });
+      assert.deepEqual([r.w, r.h], [200, 100], type);
+      // Asked smaller than the minimum on one side: both stop where the shape still fits the limits.
+      const small = resizeInFrame(it, { x: 161, y: 131 });
+      assert.deepEqual([small.w, small.h], [16, 8], type);
+    }
+    const free = resizeInFrame(box({ w: 120, h: 60 }), { x: 260, y: 160 });
+    assert.deepEqual([free.w, free.h], [200, 60]);
+  });
+
+  test("the inspector's width or height brings the other with it on a symbol, from the shape the edit began with", () => {
+    const sym = box({ type: "symbol", symbol: "drumkit", w: 117, h: 104 });
+    // Typed digit by digit, live: 2, 23, 234. Each step is from the starting shape, so nothing drifts.
+    let s = run(start([sym]), ...[2, 23, 234].map((w): EditorAction => ({ type: "patch", id: "b", fields: { w }, live: true })), { type: "commitGesture" });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [234, 208]);
+    s = run(start([sym]), { type: "patch", id: "b", fields: { h: 52 } });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [58.5, 52]);
+    // A box takes the one number it was given.
+    s = run(start(), { type: "patch", id: "b", fields: { w: 200 } });
+    assert.deepEqual([s.items[0].w, s.items[0].h], [200, 60]);
+  });
+});
+
+describe("paste and arrange", () => {
+  const zone = (id: string) => box({ id, type: "zone" });
+  const shape = (id: string) => box({ id });
+  const ids = (st: EditorState) => st.items.map((it) => it.id);
+
+  test("paste moves by an offset, or centres on a point; the last pasted is selected and it is one undo step", () => {
+    const copy = box({ id: "c1" });
+    let s = run(start([]), { type: "paste", items: [copy], dx: 16, dy: 16 });
+    assert.deepEqual([s.items[0].x, s.items[0].y, s.selectedId], [116, 116, "c1"]);
+    s = run(start([]), { type: "paste", items: [box({ id: "c2" })], at: { x: 500, y: 300 } });
+    assert.deepEqual([s.items[0].x + s.items[0].w / 2, s.items[0].y + s.items[0].h / 2], [500, 300]);
+    s = run(s, { type: "undo" });
+    assert.deepEqual(s.items, []);
+  });
+
+  test("a paste near the edge stays on the plot", () => {
+    const s = run(start([]), { type: "paste", items: [box({ id: "c" })], at: { x: 995, y: 5 } });
+    const it = s.items[0];
+    assert.ok(it.x + it.w <= 1000 && it.y >= 0, JSON.stringify(it));
+  });
+
+  test("arrange moves an item within its own layer only", () => {
+    // Drawn: zones z1 z2 under shapes a b c.
+    const items = [shape("a"), zone("z1"), shape("b"), zone("z2"), shape("c")];
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "a", to: "front" })), ["z1", "b", "z2", "c", "a"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "a", to: "forward" })), ["z1", "b", "a", "z2", "c"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c", to: "backward" })), ["a", "z1", "c", "b", "z2"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c", to: "back" })), ["c", "a", "z1", "b", "z2"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "z2", to: "back" })), ["a", "z2", "z1", "b", "c"]);
+    // Already there: nothing changes, and no undo step is made.
+    const same = run(start(items), { type: "arrange", id: "c", to: "front" });
+    assert.equal(same.undo.length, 0);
   });
 });
 

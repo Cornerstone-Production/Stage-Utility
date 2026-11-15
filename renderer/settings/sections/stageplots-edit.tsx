@@ -40,8 +40,8 @@ import { uid } from "../../lib/uid";
 import { useElementSize } from "../../lib/use-element-size";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { useRouterHandle } from "../../lib/use-search-param";
-import { VENUE_PARAM, backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
+import { useInAppLink, useRouterHandle } from "../../lib/use-search-param";
+import { PLOT_PARAM, VENUE_PARAM, backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
 import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, type EditorAction, type EditorState } from "../../main/stageplots/editor-state";
 import { round1 } from "../../main/stageplots/geometry";
 import { PlotLegend } from "../../main/stageplots/plot-legend";
@@ -54,7 +54,7 @@ import { usePatchContext, useStagePlotsPatch } from "../../main/stageplots/use-p
 import { useStagePlots } from "../../main/stageplots/use-stageplots";
 import { useSearchParam } from "../../lib/use-search-param";
 import { BackgroundsCard } from "./stageplots-backgrounds-card";
-import { StagePlotsCanvas } from "./stageplots-canvas";
+import { StagePlotsCanvas, toPlot } from "./stageplots-canvas";
 import { StagePlotsInspector } from "./stageplots-inspector";
 import { PALETTE_ICONS_PX, PALETTE_PX, StagePlotsPalette } from "./stageplots-palette";
 import { PlotTabs } from "./stageplots-plot-tabs";
@@ -161,6 +161,17 @@ function PlotEditor({
     svgRef.current?.focus({ preventScroll: true });
   };
 
+  /** A palette item let go at a screen point: added there, centred on it, when the point is on the plot. */
+  const drop = (kind: AddKind, at: { x: number; y: number }) => {
+    const svg = svgRef.current;
+    const r = svg?.getBoundingClientRect();
+    if (!svg || !r || at.x < r.left || at.x > r.right || at.y < r.top || at.y > r.bottom) return;
+    const p = toPlot(svg, at.x, at.y);
+    if (!p) return;
+    dispatch({ type: "add", kind, at: { x: round1(p.x), y: round1(p.y) }, id: uid("i") });
+    svg.focus({ preventScroll: true });
+  };
+
   const selected = shown.items.find((it) => it.id === draft.selectedId) ?? null;
   // The label field suggests what this venue already uses: the draft, then its other plots.
   const labelSources: PlotItem[][] = [shown.items, ...plotsOf(doc, venue).filter((p) => p.id !== plot.id).map((p) => p.items)];
@@ -261,7 +272,7 @@ function PlotEditor({
           iconPalette ? "grid-cols-[44px_minmax(0,1fr)] xl:grid-cols-[44px_minmax(0,1fr)_280px]" : "grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_280px]",
         )}
       >
-        <StagePlotsPalette onAdd={add} icons={iconPalette} />
+        <StagePlotsPalette onAdd={add} onDrop={drop} icons={iconPalette} />
         <div className="flex min-w-0 flex-col gap-3" ref={canvasColumn}>
           <div className="su-card overflow-hidden p-0">
             <StagePlotsCanvas
@@ -273,6 +284,8 @@ function PlotEditor({
               pz={pz}
               svgRef={svgRef}
               dispatch={dispatch}
+              canUndo={draft.undo.length > 0 || !!draft.gesture}
+              canRedo={draft.redo.length > 0}
             />
           </div>
           <PlotLegend items={shown.items} emptyHint="Labelled items are listed here." className="su-card px-3.5 py-2.5" />
@@ -335,8 +348,10 @@ export interface StagePlotsEditProps {
 
 export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   const { doc, loading, error, refresh } = useStagePlots();
-  // `/stageplots/edit?venue=<id>` opens on that venue; a pick in the page wins after.
+  // `/stageplots/edit?venue=<id>&plot=<id>` opens on that venue and plot; a pick in the page wins after.
   const [asked] = useSearchParam(VENUE_PARAM);
+  const [askedPlot] = useSearchParam(PLOT_PARAM);
+  const goInApp = useInAppLink();
   const [venueId, setVenueId] = useState<string | null>(null);
   const [plotPick, setPlotPick] = useState<{ venueId: string; plotId: string } | null>(null);
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
@@ -361,6 +376,9 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
     <div className="pt-1 pb-3">
       <a
         href="/stageplots"
+        // In the app, not a page load: a full load fetched the whole app again
+        // and every status read, and opened the remembered venue rather than the list.
+        onClick={(e) => goInApp(e, { to: "/stageplots", search: {}, state: { list: true } })}
         className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-caption1 text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <ChevronLeftIcon className="size-3.5" />
@@ -381,7 +399,7 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
 
   const venue = doc.venues.find((v) => v.id === venueId) ?? doc.venues.find((v) => v.id === asked) ?? doc.venues[0] ?? null;
   const plots = venue ? plotsOf(doc, venue) : [];
-  const plot = selectedPlot(venue, plots, plotPick);
+  const plot = selectedPlot(venue, plots, plotPick ?? (venue && askedPlot ? { venueId: venue.id, plotId: askedPlot } : null));
   return (
     <EditorBody
       doc={doc}
@@ -593,9 +611,11 @@ function EditorBody({
           <VenuesCard
             doc={doc}
             selected={venue}
-            onSelect={(id) => {
-              if (id === venue?.id) return;
-              void confirmLeave().then((ok) => ok && onVenue(id));
+            onSelect={async (id) => {
+              if (id === venue?.id) return true;
+              const ok = await confirmLeave();
+              if (ok) onVenue(id);
+              return ok;
             }}
             save={save}
           />
@@ -639,7 +659,7 @@ function EditorBody({
                   patch={patch}
                 />
               ) : (
-                <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with the + beside the tabs." />
+                <EmptyState title={`No plots in ${venue.name} yet`} hint="Add one with Add plot above." />
               )}
             </>
           )}

@@ -25,9 +25,33 @@ export function normalizeAngle(deg: number): number {
   return a > 180 ? a - 360 : a;
 }
 
-/** An angle snapped to the nearest 5°, within (-180, 180]. */
-export function snapRotation(deg: number): number {
-  return normalizeAngle(Math.round(deg / 5) * 5);
+/** How far a rotate drag turns in one step, and with Shift held. */
+export const ROTATE_STEP = 1;
+export const ROTATE_STEP_SHIFT = 15;
+
+/** An angle snapped to the nearest `step` degrees (1° unless Shift is held), within (-180, 180]. */
+export function snapRotation(deg: number, step = ROTATE_STEP): number {
+  return normalizeAngle(Math.round(deg / step) * step);
+}
+
+/** Whether an item keeps its shape when resized: symbols and connection points
+ *  are drawings that distort when stretched; boxes, zones and text are free. */
+export function keepsShape(it: Pick<PlotItem, "type">): boolean {
+  return it.type === "symbol" || it.type === "conn";
+}
+
+/**
+ * A width and height scaled together from `w` x `h` so that the larger of the two
+ * asked-for sides wins, both kept within the 8 to 1000 limits without changing
+ * the shape. `askW` or `askH` null means only the other side was asked for.
+ */
+export function scaledToFit(w: number, h: number, askW: number | null, askH: number | null): { w: number; h: number } {
+  const k = Math.max(askW === null ? 0 : askW / w, askH === null ? 0 : askH / h);
+  // The factor that keeps both sides within the limits, shape unchanged.
+  const lo = Math.max(MIN / w, MIN / h);
+  const hi = Math.min(MAX / w, MAX / h);
+  const s = clamp(k, lo, Math.max(lo, hi));
+  return { w: round1(w * s), h: round1(h * s) };
 }
 
 /** The angle, in degrees, from an item's centre to a point: 0 straight up, clockwise. */
@@ -52,8 +76,11 @@ export function resizeInFrame(it: PlotItem, pointer: { x: number; y: number }, p
   const vy = pointer.y - cy;
   const lx = vx * Math.cos(a) - vy * Math.sin(a);
   const ly = vx * Math.sin(a) + vy * Math.cos(a);
-  const w = within1(2 * Math.abs(lx) - 2 * pad, MIN, MAX);
-  const h = it.type === "text" && it.textKind === "dimension" ? it.h : within1(2 * Math.abs(ly) - 2 * pad, MIN, MAX);
+  const askW = 2 * Math.abs(lx) - 2 * pad;
+  const askH = 2 * Math.abs(ly) - 2 * pad;
+  const { w, h } = keepsShape(it)
+    ? scaledToFit(it.w, it.h, askW, askH)
+    : { w: within1(askW, MIN, MAX), h: it.type === "text" && it.textKind === "dimension" ? it.h : within1(askH, MIN, MAX) };
   return { x: round1(cx - w / 2), y: round1(cy - h / 2), w, h };
 }
 

@@ -98,7 +98,7 @@ describe("drawing items", () => {
     assert.equal(svg.querySelector('[data-id="t3"] tspan.font-mono')?.textContent, "32");
   });
 
-  test("the selected item is drawn last, with its handles", () => {
+  test("the selected item is drawn in its place, and only its outline and handles are drawn last", () => {
     const items = [
       item({ id: "zone", type: "zone" }),
       item({ id: "sel", type: "box" }),
@@ -106,17 +106,27 @@ describe("drawing items", () => {
     ];
     const svg = draw(items, "sel");
     const order = [...svg.querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id"));
-    assert.deepEqual(order, ["zone", "text", "sel"]);
-    assert.ok(svg.querySelector('[data-id="sel"] [data-hd="size"]'));
-    assert.ok(svg.querySelector('[data-id="sel"] [data-hd="rot"]'));
+    assert.deepEqual(order, ["zone", "sel", "text"], "the selected box is in the box layer, under the text");
+    const overlay = svg.querySelector("[data-items]")!.lastElementChild!;
+    assert.equal(overlay.getAttribute("data-selection-of"), "sel", "the handles are the last thing drawn");
+    assert.ok(overlay.querySelector('[data-hd="size"]'));
+    assert.ok(overlay.querySelector('[data-hd="rot"]'));
     assert.equal(svg.querySelectorAll("[data-hd]").length, 2, "an unselected item has handles");
   });
 
-  test("a selected item's handles are drawn over its own label", () => {
+  test("Arrange shows while the item is selected: an item sent to the back stays under the others", () => {
+    // Two boxes in one layer; `back` was sent to the back, so it is first in the list. Selected, it must not jump to the top.
+    const items = [item({ id: "back", type: "box" }), item({ id: "front", type: "box" })];
+    const order = (selected: string | null) =>
+      [...draw(items, selected).querySelectorAll("[data-items] > [data-id]")].map((g) => g.getAttribute("data-id"));
+    assert.deepEqual(order("back"), ["back", "front"]);
+    assert.deepEqual(order(null), ["back", "front"]);
+  });
+
+  test("a selected item's handles are drawn over every label, its own included", () => {
     // Turned 55°, a drum kit's label sits on its corner handle: the handle must be on top to take the press.
     const svg = draw([item({ id: "k", type: "symbol", symbol: "drumkit", label: "Drum kit", rotation: 55 })], "k");
-    const g = svg.querySelector('[data-id="k"]')!;
-    const all = [...g.querySelectorAll("text, [data-hd]")];
+    const all = [...svg.querySelectorAll("[data-items] text, [data-items] [data-hd]")];
     const label = all.findIndex((el) => el.textContent === "Drum kit");
     const handles = all.map((el, i) => (el.hasAttribute("data-hd") ? i : -1)).filter((i) => i >= 0);
     assert.ok(label >= 0 && handles.length === 2 && handles.every((i) => i > label), `label at ${label}, handles at ${handles}`);

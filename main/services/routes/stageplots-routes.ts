@@ -6,7 +6,8 @@
 //   GET    /api/stageplots/patch                    the patch file, for linked connection points;
 //                                                   503 when it cannot be read, never the seed sheets
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue
-//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes? }
+//   PATCH  /api/stageplots/venues/:id               { name?, kind?, notes?, plotIds? }; plotIds
+//                                                   names each of its plots once, in tab order
 //   DELETE /api/stageplots/venues/:id               the venue, its plots and its overrides; a published
 //                                                   one is unpublished first → { ok, notice? };
 //                                                   503 while a config restore is landing
@@ -21,9 +22,10 @@
 //   POST   /api/stageplots/plots                    { venueId, name, backgroundId? } → 201 plot
 //   POST   /api/stageplots/plots/:id/duplicate      → 201 the copy, "<name> copy"
 //   PATCH  /api/stageplots/plots/:id                { name?, backgroundId?, bgFade? }
-//   DELETE /api/stageplots/plots/:id                409 while it is its venue's default;
-//                                                   → { ok, clearedPlans }, the plans whose
-//                                                   override named it, which go with it
+//   DELETE /api/stageplots/plots/:id                → { ok, clearedPlans, defaultPlotId }: the
+//                                                   plans whose override named it, which go
+//                                                   with it, and the venue's default after
+//                                                   (the first plot left when it was the default)
 //   PUT    /api/stageplots/plots/:id/items          { version, items } → { plot }, version + 1;
 //                                                   409 { error, version } when the plot
 //                                                   changed since that version
@@ -223,15 +225,30 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
   if (!body) return;
   const problem = validateVenueInput(body, { partial: true });
   if (problem) return error(c.res, problem);
+  const order = body.plotIds;
   await mutate(
     c.res,
     (doc) => {
       const v = findVenue(doc, id);
+      // A new tab order is a list of strings naming exactly the venue's plots, each once:
+      // anything else would drop or duplicate a plot, so it is refused whole.
+      if (
+        order !== undefined &&
+        (!Array.isArray(order) ||
+          !order.every((x) => typeof x === "string") ||
+          order.length !== v.plotIds.length ||
+          new Set(order).size !== order.length ||
+          !order.every((x) => v.plotIds.includes(x as string)))
+      ) {
+        console.warn(`[stageplots] plot order refused for venue ${scrub(id)}: it is not each of its ${scrub(v.plotIds.length)} plot ids once`);
+        throw new Refused(400, "plotIds must name each of the venue's plots exactly once");
+      }
       return replaceIn<Venue>(doc, "venues", {
         ...v,
         ...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
         ...(body.kind !== undefined ? { kind: body.kind as VenueKind } : {}),
         ...(typeof body.notes === "string" ? { notes: body.notes } : {}),
+        ...(order !== undefined ? { plotIds: order as string[] } : {}),
       });
     },
     (doc) => findVenue(doc, id),
@@ -420,29 +437,39 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
 
 /**
  * Delete a plot, and the overrides that named it: a plan whose override is
- * gone shows its venue's default. The answer lists those plans, and the log
- * says how many (the editor's confirm named them before the delete was sent).
+ * gone shows its venue's default. Deleting the default makes the first plot
+ * left in tab order the default, and deleting the last plot leaves the venue
+ * with none. The answer lists the cleared plans and the venue's default as it now is, and the
+ * log says both (the editor's confirm named them before the delete was sent).
  */
 async function deletePlot(c: RouteCtx, id: string): Promise<void> {
   let cleared: string[] = [];
+  let nowDefault: string | null = null;
+  let wasDefault = false;
   const saved = await mutate(
     c.res,
     (doc) => {
       const p = findPlot(doc, id);
       const venue = findVenue(doc, p.venueId);
-      if (venue.defaultPlotId === id) throw new Refused(409, "this is the venue's default plot; make another plot the default before deleting it");
+      const plotIds = venue.plotIds.filter((x) => x !== id);
+      wasDefault = venue.defaultPlotId === id;
+      nowDefault = wasDefault ? (plotIds[0] ?? null) : venue.defaultPlotId;
       cleared = overridesOfPlot(doc, id).map((o) => o.planId);
       return {
         ...doc,
         plots: doc.plots.filter((x) => x.id !== id),
-        venues: doc.venues.map((v) => (v.id === venue.id ? { ...v, plotIds: v.plotIds.filter((x) => x !== id) } : v)),
+        venues: doc.venues.map((v) => (v.id === venue.id ? { ...v, plotIds, defaultPlotId: nowDefault } : v)),
         overrides: doc.overrides.filter((o) => o.plotId !== id),
       };
     },
-    () => ({ ok: true, clearedPlans: cleared }),
+    () => ({ ok: true, clearedPlans: cleared, defaultPlotId: nowDefault }),
   );
-  if (saved && cleared.length > 0) {
+  if (!saved) return;
+  if (cleared.length > 0) {
     console.log(`[stageplots] plot ${scrub(id)} deleted; ${scrub(cleared.length)} plan overrides cleared (plans ${scrub(cleared.join(", "))}), which show the default now`);
+  }
+  if (wasDefault) {
+    console.log(`[stageplots] plot ${scrub(id)} was its venue's default; ${nowDefault ? `plot ${scrub(nowDefault)} is the default now` : "the venue has no plots left"}`);
   }
 }
 

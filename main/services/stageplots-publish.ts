@@ -207,7 +207,7 @@ export function publishedVenue(doc: StagePlotsDoc, venue: Venue, plan: Pick<Publ
 /** The sentence a failure is said as on the card, the log and the answer. */
 function sentence(f: PushFailure, host: string): string {
   // Every well-formed StagePlots request the Worker knows is answered something other than 404.
-  if (f.kind === "refused" && f.status === 404) return `${host} does not know StagePlots yet: deploy the Worker.`;
+  if (f.kind === "refused" && f.status === 404) return `${host} needs updating before it can show stage plots: deploy the Worker.`;
   const timeout = /^No answer from .+ within (\d+) seconds\.$/.exec(f.message);
   if (f.kind === "unreachable" && timeout) return `${host} did not answer (timed out after ${timeout[1]} s).`;
   if (f.kind === "unreachable") return `${host} could not be reached: ${f.message.replace(/\.$/, "")}.`;

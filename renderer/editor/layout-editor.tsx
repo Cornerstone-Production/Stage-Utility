@@ -91,7 +91,7 @@ import { HOME_VIEW_ID } from "@main/services/home-view";
 import { useInspectorWidth } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
 import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-gesture";
-import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
@@ -1311,7 +1311,7 @@ export function LayoutEditor({
   // Items are captured when the menu OPENS, not rebuilt on render: they depend on
   // the clipboard, which is a ref, and a menu should describe the moment it was
   // summoned rather than quietly re-deciding underneath the cursor.
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const { menu, open: openMenu, close: closeMenu } = useContextMenuState();
   // Layers-panel drag-to-reorder: where the dragged row would land — a row and
   // which SIDE of it, not just which row. Highlighting the row itself could not
   // say whether the drop lands above or below it, and the old "always insert
@@ -1866,7 +1866,7 @@ export function LayoutEditor({
     if (objectId && !selectedIds.has(objectId)) selection = new Set([objectId]);
     else if (!objectId) selection = new Set();
     if (selection !== selectedIds) setSelectedIds(selection);
-    setMenu({ x: e.clientX, y: e.clientY, items: contextMenuItems(selection) });
+    openMenu({ x: e.clientX, y: e.clientY }, contextMenuItems(selection));
   }
 
   /** Items for the current right-click, built fresh so counts and enablement are
@@ -2457,7 +2457,7 @@ export function LayoutEditor({
             x={menu.x}
             y={menu.y}
             items={menu.items}
-            onClose={() => setMenu(null)}
+            onClose={closeMenu}
           />
         )}
 

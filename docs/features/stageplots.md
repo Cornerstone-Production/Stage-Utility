@@ -13,8 +13,9 @@ the floor pockets are) and up to 20 **plots**.
 A plot is a drawing of the venue for one kind of service: a name, a background,
 and how far the background is faded toward the paper. One plot per venue is its
 **default**, marked with a star in the editor and *Default* on `/stageplots`. A
-venue's first plot becomes its default. The default cannot be deleted until
-another plot is made the default; deleting a venue deletes its plots.
+venue's first plot becomes its default. Deleting the default makes the first plot
+left, in tab order, the default; deleting a venue's last plot leaves it with none.
+Deleting a venue deletes its plots.
 
 A plot is 1000 units wide, and its height follows its background's shape. A plot
 with no background is drawn on a plain 16:9 grid.
@@ -51,7 +52,10 @@ calls the original. An uploaded PDF is kept as it was.
 greyscale, contrast evened out, then faded 40% toward white. It is on for a new
 upload. Switching it converts again from the kept source, so it can be switched
 back. The background's detail shows the source and the result side by side, the
-original's size, the web image's size and pixels, and which plots use it.
+original's size, the web image's size and pixels, and which plots use it. Press
+either picture and it opens large over the page; **Before** and **After** (or the
+left and right arrow keys) switch between them in place, and Escape, the close
+button or a press outside closes it.
 
 A background that a plot uses cannot be deleted; the refusal names the plots.
 A file no background names any more (a deleted background, the image a clean-up
@@ -98,7 +102,7 @@ selected, the plot itself, its legend, and the venue's notes.
   venue; an id that names no venue shows the list.
 - A venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
-  named in `?venue=` when it exists.
+  named in `?venue=` when it exists, and on its plot named in `?plot=`.
 - The plot is drawn as large as fits: never taller than the screen, centred in the
   column on a wide display.
 - The browser remembers the last venue opened and opens it next time; **Stage
@@ -106,14 +110,22 @@ selected, the plot itself, its legend, and the venue's notes.
 - Pinch or Ctrl/Cmd-scroll to zoom, drag to pan, and the buttons in the plot's
   corner zoom in, out and back to the whole plot. An ordinary scroll pans only
   once the plot is zoomed in, so the page still scrolls past it.
+- **Full window**, the last button in that corner, lays the plot over the whole
+  window on its paper, with nothing of the app around it: the venue, the plot and
+  its badge top left, zoom, fit and **Exit full window** top right. Where the browser
+  allows it (a desktop or Android browser) it is the browser's own fullscreen too;
+  iPhone Safari keeps its bars. Pinch, pan and a tap for an item's details work as
+  on the page. Escape, the exit button or leaving the browser's fullscreen closes it.
 - Tap an item for its label, kind, notes and numbered inputs: beside the item on a
   desk, as a sheet along the bottom on a phone. A connection point linked to the
   patch lists its patch channels instead (see [Patch link](#patch-link)). A tap on
   the empty plot, anywhere off the plot, or Escape closes it; text has no details.
-- **Print** beside the venue's name prints the plot (see [Printing](#printing)).
+- **Edit** beside the venue's name opens the editor on this venue and the plot on
+  screen; **Print** prints the plot (see [Printing](#printing)).
 - A saved edit anywhere shows without a reload.
 
-**Edit** in the bar opens the editor.
+**Edit** in the bar opens the editor. **Stage plots** above the editor's heading
+comes back to the venue list without reloading the page.
 
 ### Following the plan
 
@@ -144,15 +156,23 @@ beside the control, and the page goes back to what is saved. What is drawn on a
 plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
 
 - **Venues**: **+ Venue** adds one and selects it. The selected venue's name and
-  notes save when you leave the field; Home or Offsite saves at once.
+  notes save when you leave the field; Home or Offsite saves at once. Right-click
+  a venue (or press and hold on a touch screen) for **Rename** (selects it and puts
+  the cursor in its name), **Home** or **Offsite**, **Open on /stageplots**, **Copy
+  its address** and **Delete venue…**.
 - **Backgrounds**: **Upload**, the list, and the selected background's detail with
   its **Clean-up** switch and **Delete background…**.
 - **This week**: which plot the selected venue shows for the live or next plan,
   and for other upcoming plans (see [Default and this week](#default-and-this-week)).
-- **Plots**: a tab per plot, **+** for a new one (it starts on the selected plot's
-  background), and **⋯** on the selected tab for **Rename**, **Duplicate** (an
-  independent copy named "… copy", which opens), **Set as default** and
-  **Delete…**.
+- **Plots**: a tab per plot, **+** for a new one (**Add plot** while the venue has
+  none; it starts on the selected plot's background), and **⋯** on the selected tab
+  for **Rename**, **Duplicate** (an independent copy named "… copy", which opens),
+  **Set as default**, **Move left**, **Move right** and **Delete…**. Double-click a
+  tab to rename it, and drag a tab along the row to reorder the plots; the order
+  saves when it is let go, and Escape during the drag cancels it. `/stageplots`
+  shows the tabs in the same order. Right-click any tab (or press and hold on a
+  touch screen) for the same menu as its **⋯**. Deleting the default plot says in its confirm
+  which plot becomes the default.
 - **Toolbar**: undo and redo, zoom, the plot's **Background** (or **None (grid)**),
   **Fade**, which previews on the plot while dragged and saves when let go, and
   **Print**.
@@ -199,24 +219,47 @@ Under the toolbar: the palette, the plot, its legend, and the inspector for the
 selected item.
 
 - **Add**: press an item in the palette. It lands in the middle of what the plot
-  shows, selected, each one a little further down and right than the last. When the
+  shows, selected, each one a little further down and right than the last. Or drag
+  it from the palette onto the plot: it lands centred where it is let go. Let go
+  anywhere else, or press Escape during the drag, and nothing is added. When the
   palette with its names would leave the plot under 600 pixels wide, it shows icons
   only, each named by its tooltip.
 - **Select**: press an item. Press the empty plot to clear the selection; dragging
   the empty plot pans it.
 - **Move**: drag the item. **Resize**: drag the square at its corner; it grows
-  about its centre along its own sides, even when turned. **Rotate**: drag the
-  circle above it (below it when the item is at the top edge), in 5° steps. A cable's points each have a handle; drag one to
-  move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
+  about its centre along its own sides, even when turned. Symbols and connection
+  points keep their shape; boxes, circles, zones and text stretch freely.
+  **Rotate**: drag the circle above it (below it when the item is at the top
+  edge), in 1° steps, or 15° with Shift held. A cable's points each have a
+  handle; drag one to move that point. Mouse, pen and touch work alike, and two fingers pinch to zoom.
 - **Keys**, while the plot has focus (pressing it gives it focus): the arrow keys
-  move the selected item 4 units, 20 with Shift; Delete or Backspace removes it.
+  move the selected item 4 units, 20 with Shift; Delete or Backspace removes it;
+  Cmd/Ctrl with C, X, V and D copy, cut, paste and duplicate; Cmd/Ctrl with ] and
+  [ bring it forward or send it backward a step, and Alt+Cmd/Ctrl with ] and [ all
+  the way to the front or the back (Shift+Cmd+[ and ] are the browser's, to switch tabs).
   Cmd/Ctrl+Z undoes and Shift+Cmd/Ctrl+Z redoes, anywhere on the page but in a
   field.
 - **Inspector**: the item's kind with **Duplicate** (a copy a little down and
   right) and **Delete**; its label; for text, Label, Callout or Dimension; a colour,
   one of the patch sheet's ten swatches or none; width, height and rotation (a
-  cable shows **Dashed** and its point count instead); notes, shown when someone
+  cable shows **Dashed** and its point count instead; on a symbol or connection
+  point a lock between width and height shows that changing one changes the
+  other); notes, shown when someone
   taps it; and its inputs.
+- **Menus**: right-click an item (or press and hold it on a touch screen) for
+  **Cut**, **Copy**, **Paste**, **Duplicate**, **Arrange** (**Bring to front**,
+  **Bring forward**, **Send backward**, **Send to back**) and **Delete**; right-click
+  the empty plot for **Paste here**, **Add here** (every palette item, placed where
+  you clicked), **Undo**, **Redo** and **Fit the whole plot**. Arrange moves an item
+  within its layer only: a zone brought to the front stays under the shapes and
+  gear (see [Item types](#item-types)).
+- **Copy and paste** use the editor's own clipboard, not the system's: a copy
+  pastes into any plot, in any venue, in this browser, in another tab of it too.
+  Each paste of one copy lands a little further down and right than the last; the
+  first paste after a cut lands where the item was; **Paste here** centres it where
+  you clicked. A linked connection point pastes still linked. What another tab or an older
+  version left in the browser's storage is pasted only if it is a plot item the
+  server would save; anything else is ignored.
 - **Undo and redo** cover the draft. A drag, a resize, a rotate or typing in one
   field is one step, however long it takes.
 
@@ -251,7 +294,9 @@ first while there are unsaved changes.
 | Text: Dimension | a line with end ticks and arrowheads, its label above |
 
 Zones are drawn under shapes, shapes under cables, cables under symbols and
-connection points, and text on top; the selected item is drawn above everything.
+connection points, and text on top; within each, in the order **Arrange** gives
+them, newest on top by default. The selected item is drawn in its place, so Arrange
+shows at once; only its outline and handles are drawn above everything.
 A new symbol is labelled with its name, a new cable is dashed, and a new label,
 dimension or callout reads "Text", "10 ft" or "Note".
 
@@ -332,8 +377,8 @@ A venue can be put on the [ServiceCue public page](../ops/servicecue-on-the-web.
 behind a secret link, for a crew who are not on the building's network:
 `<page address>/stageplots/<secret>`. The page is the venue as `/stageplots` shows it,
 read-only: its plots as tabs, the one it showed when it was published selected and marked
-**Default** or **For this plan · Sun 16 Nov**, pinch zoom and pan, a tap on an item for its
-label, notes and inputs, the legend and the venue's notes. There is no venue list, no
+**Default** or **For this plan · Sun 16 Nov**, pinch zoom and pan, **Full window**, a tap on
+an item for its label, notes and inputs, the legend and the venue's notes. There is no venue list, no
 editor and no print. The page reads the venue again when it comes back into view; a plot whose read
 fails keeps the copy it had and says it could not refresh, and one that has never loaded
 says so rather than drawing an empty stage.
@@ -348,7 +393,7 @@ page does not know.
 It uses the page address and publishing token saved under **Settings → Advanced →
 Public link**; ServiceCue publishing itself does not have to be switched
 on. The page must be deployed from a release with StagePlots in it: an older one is
-refused with "*host* does not know StagePlots yet: deploy the Worker", and is fixed by
+refused with "*host* needs updating before it can show stage plots: deploy the Worker", and is fixed by
 [updating the page](../ops/servicecue-on-the-web.md#updating-it).
 
 The **Publish** card, at the foot of the editor's left column, is per venue:
@@ -495,7 +540,8 @@ not a JSON object or is too large, an unknown plot, an item that breaks a rule, 
 version that is not a whole number, "changed elsewhere"), how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
-overrides cleared with a deleted plot, and plan overrides in `stageplots.json`
+overrides cleared with a deleted plot, a deleted default and the plot that took
+over, a new plot order refused and why, and plan overrides in `stageplots.json`
 that were not a list and were read as none. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one

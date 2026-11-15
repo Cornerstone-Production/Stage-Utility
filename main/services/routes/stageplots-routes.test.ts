@@ -122,15 +122,57 @@ describe("stage plot routes", () => {
     assert.equal((await call("POST", `/api/stageplots/venues/${v.id}/default`, { plotId: "p-nowhere" })).status, 400);
   });
 
-  test("deleting the default plot is 409, another plot deletes", async () => {
+  test("deleting the default makes the first plot left the default; the last plot deletes too", async () => {
     const v = await venue();
     const a = await plot(v.id, "Standard");
     const b = await plot(v.id, "Baptism");
+    const c = await plot(v.id, "Christmas");
+    const d = await plot(v.id, "Easter");
+    // Not the default: the default stays, and the answer names it.
+    const other = await call("DELETE", `/api/stageplots/plots/${b.id}`);
+    assert.equal(other.status, 200);
+    assert.equal((other.json as { defaultPlotId: string | null }).defaultPlotId, a.id, "the answer is the default as it is after the delete");
+    let doc = await stageplotsStore.get();
+    assert.equal(doc.venues[0].defaultPlotId, a.id);
+    // Tab order now differs from creation order: d, then c, then a.
+    assert.equal((await call("PATCH", `/api/stageplots/venues/${v.id}`, { plotIds: [d.id, c.id, a.id] })).status, 200);
+    // The default: the FIRST plot left in tab order (d) takes over, not the last (c), and the
+    // answer says which.
     const r = await call("DELETE", `/api/stageplots/plots/${a.id}`);
-    assert.equal(r.status, 409);
-    assert.match((r.json as { error: string }).error, /default/);
-    assert.equal((await call("DELETE", `/api/stageplots/plots/${b.id}`)).status, 200);
-    assert.deepEqual((await stageplotsStore.get()).plots.map((p) => p.id), [a.id]);
+    assert.equal(r.status, 200, r.body);
+    assert.equal((r.json as { defaultPlotId: string | null }).defaultPlotId, d.id);
+    doc = await stageplotsStore.get();
+    assert.deepEqual(doc.venues[0].plotIds, [d.id, c.id]);
+    assert.equal(doc.venues[0].defaultPlotId, d.id);
+    assert.equal((await call("DELETE", `/api/stageplots/plots/${d.id}`)).status, 200);
+    doc = await stageplotsStore.get();
+    assert.equal(doc.venues[0].defaultPlotId, c.id);
+    assert.equal(doc.venues[0].plotIds.length, 1);
+    // The last plot: the venue is left with none.
+    const last = await call("DELETE", `/api/stageplots/plots/${c.id}`);
+    assert.equal(last.status, 200, last.body);
+    assert.equal((last.json as { defaultPlotId: string | null }).defaultPlotId, null, "null only when no plot is left");
+    doc = await stageplotsStore.get();
+    assert.deepEqual(doc.venues[0].plotIds, []);
+    assert.equal(doc.venues[0].defaultPlotId, null);
+    assert.deepEqual(doc.plots, []);
+  });
+
+  test("a venue's plots reorder by naming each exactly once", async () => {
+    const v = await venue();
+    const a = await plot(v.id, "Standard");
+    const b = await plot(v.id, "Baptism");
+    const c = await plot(v.id, "Christmas");
+    const r = await call("PATCH", `/api/stageplots/venues/${v.id}`, { plotIds: [c.id, a.id, b.id] });
+    assert.equal(r.status, 200, r.body);
+    let doc = await stageplotsStore.get();
+    assert.deepEqual(doc.venues[0].plotIds, [c.id, a.id, b.id]);
+    assert.equal(doc.venues[0].defaultPlotId, a.id, "a reorder leaves the default where it was");
+    for (const bad of [[c.id, a.id], [c.id, a.id, a.id], [c.id, a.id, "p-nowhere"], [c.id, a.id, b.id, b.id], "nope", [1, 2, 3]]) {
+      assert.equal((await call("PATCH", `/api/stageplots/venues/${v.id}`, { plotIds: bad })).status, 400, JSON.stringify(bad));
+    }
+    doc = await stageplotsStore.get();
+    assert.deepEqual(doc.venues[0].plotIds, [c.id, a.id, b.id], "a refused order changes nothing");
   });
 
   test("duplicate is independent (renaming the copy leaves the original)", async () => {
@@ -437,7 +479,7 @@ describe("stage plot routes", () => {
     const v = await venue();
     const a = await plot(v.id);
     frames.length = 0;
-    await call("DELETE", `/api/stageplots/plots/${a.id}`);
+    await call("PATCH", `/api/stageplots/venues/${v.id}`, { plotIds: [a.id, a.id] });
     await call("PATCH", `/api/stageplots/venues/${v.id}`, { kind: "garage" });
     assert.equal(frames.length, 0);
   });
@@ -798,7 +840,7 @@ describe("per-plan overrides", () => {
   });
 
   test("deleting a plot removes its overrides and names the plans", async () => {
-    const { v, bap, xmas } = await room();
+    const { v, std, bap, xmas } = await room();
     await put({ planId: "101", venueId: v.id, plotId: bap.id });
     await put({ planId: "102", venueId: v.id, plotId: xmas.id });
     await put({ planId: "103", venueId: v.id, plotId: bap.id });
@@ -807,7 +849,7 @@ describe("per-plan overrides", () => {
       r = await call("DELETE", `/api/stageplots/plots/${bap.id}`);
     });
     assert.equal(r.status, 200, r.body);
-    assert.deepEqual(r.json, { ok: true, clearedPlans: ["101", "103"] });
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["101", "103"], defaultPlotId: std.id });
     assert.deepEqual(
       (await stageplotsStore.get()).overrides.map((o) => o.planId),
       ["102"],
@@ -815,7 +857,7 @@ describe("per-plan overrides", () => {
     assert.ok(lines.some((l) => /2 plan overrides cleared/.test(l)), lines.join("\n"));
     // A plot no plan overrides clears none.
     r = await call("DELETE", `/api/stageplots/plots/${xmas.id}`);
-    assert.deepEqual(r.json, { ok: true, clearedPlans: ["102"] });
+    assert.deepEqual(r.json, { ok: true, clearedPlans: ["102"], defaultPlotId: std.id });
   });
 
   test("deleting a venue takes its overrides with it, and leaves another venue's", async () => {
@@ -1110,7 +1152,7 @@ describe("the page address changing under published venues", () => {
       await t.moveTo();
       const pub = (await t.venue()).publish!;
       assert.deepEqual([pub.origin, pub.secret], [t.pa, t.first], "the venue left a page that still serves it");
-      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ does not know StagePlots yet: deploy the Worker\./);
+      assert.match(pub.lastError?.message ?? "", /^Not moved to 127\.0\.0\.1:\d+: 127\.0\.0\.1:\d+ needs updating before it can show stage plots: deploy the Worker\./);
       assert.equal(t.a.hub.stagePlotKeys(t.first).length > 0, true, "the link of a venue that did not move was taken down");
       assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
     } finally {
