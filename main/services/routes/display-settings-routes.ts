@@ -12,6 +12,8 @@ import { type RouteCtx, json, error, readBody } from "./context.js";
 import { hostNames } from "../host-names.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";
 import { stageController } from "../stage-controller.js";
+import { validateSidebarArrangement } from "../sidebar-arrangement.js";
+import { scrub } from "../scrub.js";
 
 export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -42,6 +44,25 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
         items: body.items as string[] | undefined,
         mobileItems: body.mobileItems as string[] | undefined,
       }));
+      return;
+    }
+
+    // ── Sidebar arrangement ───────────────────────────────────────────────
+    // Sections, their order and names, and the pages hidden. Global config, so
+    // every operator reads the same sidebar. Refused whole, with the reason, when
+    // any part breaks a rule: a half-applied arrangement is one nobody made.
+    if (method === "POST" && pathname === "/api/sidebar") {
+      const body = await readBody(req);
+      let next;
+      try {
+        next = validateSidebarArrangement(body);
+      } catch (err) {
+        const reason = errorMessage(err);
+        console.log(`[sidebar] save refused: ${scrub(reason)}`);
+        error(res, reason);
+        return;
+      }
+      json(res, await stageController.setSidebar(next));
       return;
     }
 

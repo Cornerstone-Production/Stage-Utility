@@ -87,6 +87,14 @@ const GOOD: Record<string, unknown> = {
     captionChannelColors: { Pastor: "#ffcc00" },
     wirelessMeterRateMs: 250,
   },
+  "sidebar-config.json": {
+    sections: [
+      { id: "top", label: "", kind: "top", members: ["home", "patch"] },
+      { id: "consoles", label: "Consoles", kind: "consoles", members: ["console:view-1"] },
+      { id: "content", label: "Show", kind: "pages", members: ["servicecue"] },
+    ],
+    hidden: ["baptisms"],
+  },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
   "stageplot-drafts.json": {
     drafts: [
@@ -145,6 +153,10 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "servicecue-publish.json": { value: { enabled: true, url: "http://cue.example.org" }, says: "https" },
   "servicecue-roles.json": { value: { roles: [] }, says: "list" },
   "settings.json": { value: { ...(GOOD["settings.json"] as object), accentColor: "red" }, says: "accentColor" },
+  "sidebar-config.json": {
+    value: { sections: [{ id: "consoles", label: "Consoles", kind: "consoles", members: ["patch"] }], hidden: [] },
+    says: "consoles only",
+  },
   "slots.json": { value: { version: 3, defaults: { v1: { "123": "s1" } }, overrides: {} }, says: "slots" },
   "stageplot-drafts.json": {
     value: { drafts: [{ plotId: "p-1", baseVersion: 0, items: [{ id: "i-1", type: "box" }], savedAt: "2026-11-14T14:32:00.000Z" }] },

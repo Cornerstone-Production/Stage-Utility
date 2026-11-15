@@ -894,7 +894,7 @@ class ConfigSnapshotService {
       if (!result.ok) failures.push(`${name}: ${result.reason}`);
     }
     for (const f of failures) {
-      console.warn(`[config-snapshot] ${scrub(f, 400)} -- a save would refuse this; left in use as it is`);
+      console.warn(`[config-snapshot] ${scrub(f, 400)} -- a save would refuse this; left on disk as it is, and the store's own line says how it is used`);
     }
     return failures;
   }

@@ -243,6 +243,9 @@ const REQUEST_FACING = [
   // Names the settings.json keys a restore dropped, out of a bundle anyone on the
   // LAN can post to POST /api/config/import.
   "settings-restore-check.ts",
+  // Its one line names why a saved arrangement was refused, and the reason
+  // quotes ids and headings a config restore put in the file.
+  "sidebar-config-store.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
   // The tidy runs after DELETE /api/stageplots/backgrounds/:id and a clean-up
@@ -596,6 +599,9 @@ function requestFacingFiles(): string[] {
     // Its one line names the settings.json keys it dropped, which arrive in a
     // bundle POST /api/config/import takes from anyone on the LAN.
     path.join(HERE, "settings-restore-check.ts"),
+    // Its one line says why a saved arrangement was refused, quoting ids and
+    // headings a config restore put in the file.
+    path.join(HERE, "sidebar-config-store.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
     // Run by the stage-plot delete and clean-up routes; logs file names and errors.

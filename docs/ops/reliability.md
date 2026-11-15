@@ -88,7 +88,7 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
 | `wireless-connections.json` | receivers and chargers (never their passwords) |
 | `kiosk-devices.json` | which machine drives which screen |
-| `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colors |
+| `bar-config.json`, `sidebar-config.json`, `saved-colors.json` | the context bar's and the sidebar's arrangements, and your colors |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |

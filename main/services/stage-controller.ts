@@ -33,6 +33,8 @@ import {
   type PlanChecklistDTO,
 } from "./plan-note-checklist.js";
 import { barConfigStore } from "./bar-config-store.js";
+import { sidebarConfigStore } from "./sidebar-config-store.js";
+import { keepKnownConsoles, resolveSidebar, sidebarConsolesOf, type SidebarArrangement } from "./sidebar-arrangement.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
@@ -448,6 +450,7 @@ export class StageController {
     slotsByView: {},
     barItems: [],
     barMobileItems: [],
+    sidebar: { sections: [], hidden: [] },
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
@@ -668,6 +671,7 @@ export class StageController {
         scrub(barMigration.message),
       );
     }
+    await sidebarConfigStore.init();
     await savedColorsStore.init();
     // Loaded here so an entry with an unusable date is reported at boot, on the
     // line the Trends chart's absence of a mark would otherwise be the only
@@ -730,6 +734,7 @@ export class StageController {
       // until the first edit — the content would look lost.
       barItems: barConfigStore.get().items,
       barMobileItems: barConfigStore.get().mobileItems,
+      sidebar: sidebarConfigStore.get(),
       savedColors: savedColorsStore.all(),
       notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
@@ -781,6 +786,9 @@ export class StageController {
       baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
+    // After the views are in: whether a saved id is still a console is a question
+    // about them.
+    this.reportDroppedSidebarIds(this.state.sidebar);
     this.publicUrl = settings.publicUrl ?? null;
     this.applyRemoteUrl();
     serviceWindow.setSchedule(this.state.reconnectSchedule);
@@ -5338,6 +5346,45 @@ export class StageController {
     );
     this.broadcast();
     return this.state;
+  }
+
+  /**
+   * Save how the sidebar is arranged. Global config, like the bar. `next` has
+   * already been through validateSidebarArrangement, in the route.
+   */
+  async setSidebar(next: SidebarArrangement): Promise<StageState> {
+    // Console ids are taken on their prefix by validation, which a restore shares
+    // and which cannot see the views; here they are held to the consoles that exist.
+    const consoles = sidebarConsolesOf(this.state.views);
+    const { arrangement, dropped } = keepKnownConsoles(next, consoles);
+    const saved = await sidebarConfigStore.set(arrangement);
+    this.state = { ...this.state, sidebar: saved };
+    // A save is the moment a dropped id leaves the file, so the ids reported
+    // before it are forgotten, which also keeps this set from growing for ever.
+    this.sidebarDropsReported.clear();
+    this.reportDroppedSidebarIds(saved, dropped);
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Ids already reported as dropped, so a page removed by an update, or a
+   *  console deleted, is said once rather than on every broadcast. Cleared on a
+   *  save. */
+  private readonly sidebarDropsReported = new Set<string>();
+
+  /**
+   * Say which ids a saved arrangement names that this server no longer has: a page
+   * a release removed, or a console since deleted. They are left out of the
+   * sidebar, and out of the file from the next save.
+   */
+  private reportDroppedSidebarIds(arrangement: SidebarArrangement, alsoDropped: readonly string[] = []): void {
+    const { dropped } = resolveSidebar(arrangement, sidebarConsolesOf(this.state.views));
+    const fresh = [...alsoDropped, ...dropped].filter((id) => !this.sidebarDropsReported.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) this.sidebarDropsReported.add(id);
+    console.log(
+      `[sidebar] left ${scrub(fresh.length)} id(s) out of the sidebar that this server no longer has: ${scrub(fresh.join(", "))}`,
+    );
   }
 
   /** Keep a colour, or forget one. Global config, like the bar — see the store. */
