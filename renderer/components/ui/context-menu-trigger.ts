@@ -4,7 +4,7 @@
 // event, which a right-click fires and a touch never does. iPad Safari synthesizes
 // nothing in its place: the platform's own "long-press to select text" is a
 // different gesture aimed at a different target, and it does not reach a
-// `contextmenu` handler at all. So every menu — the context bar's configurator,
+// `contextmenu` handler at all. So every menu — the context bar's editor,
 // the Home card pickers, the History chart's menu — was unreachable on a touch
 // device, full stop.
 //

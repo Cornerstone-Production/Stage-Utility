@@ -1,25 +1,21 @@
-// The drag over the sidebar in Customize mode: sensors, measuring, aim, the
+// The drag over the sidebar in Customize mode: measuring, aim, the
 // rail's own autoscroll, and what a drop does.
 //
-// Geometry, not droppables, as in the bar's editor (bar-configurator.tsx explains
+// Geometry, not droppables, as in the bar's editor (bar-editor.tsx explains
 // why): the rows that hold still are measured once when the drag starts, and one
 // function answers both "where is the caret" and "where does the drop go". The
 // arithmetic is in rail-drop.ts, where it is tested.
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
-  MouseSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 
 import { canPlace, isConsoleId, LOCKED_PAGE, type ResolvedSidebar } from "@main/services/sidebar-arrangement";
-import { dropPoint } from "./bar-drop";
-import { inside, NO_AIM, rowPlace, sectionPlace, type RailAim, type RailDrag, type RailItem } from "./rail-drop";
+import { dropPoint, pointInBox } from "./drag-geometry";
+import { NO_AIM, rowPlace, sectionPlace, type RailAim, type RailDrag, type RailItem } from "./rail-drop";
 import { moveSection, movePage, sectionOf } from "./sidebar-edits";
 
 /** How far from the rail list's edge a drag starts scrolling it, and how fast. */
@@ -51,14 +47,6 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const scrollTimer = useRef<number | null>(null);
 
-  const sensors = useSensors(
-    // The same pair as the bar's editor: never a lone PointerSensor, which claims
-    // the gesture on touch-down. A touch drag starts only after a still 200 ms
-    // hold, so a swipe scrolls the rail.
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-  );
-
   const scroller = () => listRef.current?.closest<HTMLElement>("[data-rail-scroller]") ?? null;
 
   /** ONE function for the caret and the drop. */
@@ -66,7 +54,7 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
     const list = listRef.current;
     const box = scroller()?.getBoundingClientRect() ?? list?.getBoundingClientRect() ?? null;
     if (!list || !p) return { kind: "none" };
-    if (!inside(box, p.x, p.y)) return d.kind === "head" ? { kind: "none" } : { kind: "out" };
+    if (!pointInBox(box, p)) return d.kind === "head" ? { kind: "none" } : { kind: "out" };
     const y = p.y - list.getBoundingClientRect().top;
     if (d.kind === "head") return { kind: "head", ...sectionPlace(still.current.heads, y, still.current.endY) };
     const place = rowPlace(still.current.items, still.current.sections, y);
@@ -78,9 +66,12 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
   }
 
   function aimFor(d: RailDrag, t: Target): RailAim {
-    if (t.kind === "out") return { caretY: null, dz: null, hiding: d.kind === "row" && d.id !== LOCKED_PAGE };
-    if (t.kind === "row") return { caretY: t.caretY, dz: t.caretY === null ? t.section : null, hiding: false };
-    if (t.kind === "head") return { caretY: t.caretY, dz: null, hiding: false };
+    if (t.kind === "out") {
+      const row = d.kind === "row";
+      return { caretY: null, dz: null, hiding: row && d.id !== LOCKED_PAGE, blocked: row && d.id === LOCKED_PAGE };
+    }
+    if (t.kind === "row") return { caretY: t.caretY, dz: t.caretY === null ? t.section : null, hiding: false, blocked: false };
+    if (t.kind === "head") return { caretY: t.caretY, dz: null, hiding: false, blocked: false };
     return NO_AIM;
   }
 
@@ -208,5 +199,5 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
     if (d.kind === "tile" && isConsoleId(d.id)) act.setConsoleShown(d.id, true);
   }
 
-  return { sensors, drag, aim, onDragStart, onDragMove, onDragEnd, onDragCancel: endDrag };
+  return { drag, aim, onDragStart, onDragMove, onDragEnd, onDragCancel: endDrag };
 }

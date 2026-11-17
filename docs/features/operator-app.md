@@ -54,7 +54,10 @@ sidebar…**, or use **Settings → Advanced → General → Layout → Sidebar*
 sidebar becomes editable in place, the page beside it dims, and a tray docks under
 the page (a bottom sheet on a phone). The arrangement is saved as you go, on the
 server, so every browser on every device sees the same sidebar and a config backup
-carries it. **Done** closes the mode.
+carries it. **Done**, or Escape, closes the mode; in a field, Escape first
+cancels that edit. The tray's **Context bar** tab arranges the
+[context bar](context-bar.md#customizing-the-bar) the same way, in place,
+without leaving the mode.
 
 | To | Do |
 |---|---|

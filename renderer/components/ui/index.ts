@@ -17,6 +17,7 @@ export {
   SelectItem,
 } from "./select";
 export { Switch } from "./switch";
+export { SegmentedSwitch, type SegmentedOption } from "./segmented-switch";
 export { MultiSelect, type MultiSelectOption } from "./multi-select";
 export { Separator } from "./separator";
 export { Collapsible } from "./collapsible";

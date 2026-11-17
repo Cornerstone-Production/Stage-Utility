@@ -1,7 +1,8 @@
 // Saving the context bar's arrangement.
 //
-// Its own module because there are two ways in — the configurator opened from
-// the bar's own right-click menu, and the one opened from Advanced. The
+// Its own module, apart from the editor that calls it: the bar is arranged in
+// place, in Customize mode's Context bar tab (bar-editor.tsx), whichever way the
+// mode was opened (the bar's own right-click menu, or Advanced > Layout). The
 // optimistic-update-then-roll-back dance itself lives in lib/optimistic.
 
 import type { QueryClient } from "@tanstack/react-query";

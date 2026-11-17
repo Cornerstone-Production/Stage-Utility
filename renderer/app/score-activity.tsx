@@ -311,7 +311,7 @@ export function ScoreCapsule({
   game: ScoreGameDTO;
   /** Which side a score just landed on, or null. Reduced motion already applied. */
   scored: "away" | "home" | null;
-  /** Rendered as a chip in the bar configurator: shows the reading, does nothing.
+  /** Rendered as a chip in the bar editor: shows the reading, does nothing.
    *  A live button in there would toggle the panel behind the dialog on the very
    *  press that was reaching for the drag handle. */
   preview?: boolean;
@@ -532,7 +532,7 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
   }, [isOpen]);
 
   // Escape, with focus returned to the capsule. Scoped to the real bar so the
-  // configurator's inert preview chip can never be the thing that takes focus.
+  // bar editor's inert preview chip can never be the thing that takes focus.
   useEffect(() => {
     if (!isOpen) return;
     function onKey(e: KeyboardEvent) {

@@ -565,7 +565,7 @@ describe("what a rung leaves behind", () => {
     //
     // Read off BAR_PROSE_ITEMS rather than listed here, so an item added to that
     // set without a `.bar-prose` hook fails by name instead of being warned
-    // about in the configurator and then silently clipped in the bar.
+    // about in the bar editor and then silently clipped in the bar.
     for (const id of Object.keys(BAR_PROSE_ITEMS) as (keyof typeof BAR_PROSE_ITEMS)[]) {
       const html = renderToStaticMarkup(renderBarItem(id, loaded) as never);
       assert.match(html, /bar-prose/, `${id} is prose but carries no bar-prose hook`);

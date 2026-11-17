@@ -195,7 +195,7 @@ export function Rail({
   // The rail's own menu: from a heading, the brand or empty space, and under
   // every page's own items.
   const railMenuItems: ContextMenuItem[] = [
-    { label: "Customize sidebar…", icon: <PencilIcon className="size-3.5" />, onSelect: customize.open },
+    { label: "Customize sidebar…", icon: <PencilIcon className="size-3.5" />, onSelect: () => customize.open("sidebar") },
     ...(isMobile
       ? []
       : [

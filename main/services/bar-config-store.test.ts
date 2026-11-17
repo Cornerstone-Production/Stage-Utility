@@ -82,7 +82,7 @@ describe("the context bar's two saved orders", () => {
 
   test("an explicit empty phone set hands the phone back to the desktop bar", async () => {
     // NOT the same as omitting it, and the difference is load-bearing: `[]` means
-    // "follow the desktop bar", so it has to be writable or the configurator's
+    // "follow the desktop bar", so it has to be writable or the bar editor's
     // way out of a fork would silently do nothing.
     await save({ mobileItems: [] });
     assert.deepEqual(saved().mobileItems, []);

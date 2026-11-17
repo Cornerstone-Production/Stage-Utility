@@ -10,10 +10,9 @@
 // The drag itself lives in use-rail-drag.ts, under the provider the tray shares;
 // this file registers what can be dragged and draws the caret where it says.
 //
-// Rows and headings are `touch-pan-y`, never `touch-none`: in the mode the list
-// is taller than a phone, and a finger has to be able to scroll it. A touch drag
-// starts only after a still ~200 ms hold (the TouchSensor's delay), so a swipe
-// scrolls and a long-press then move drags.
+// Rows and headings carry DRAGGABLE (drag-parts.tsx): in the mode the list is
+// taller than a phone, and a finger has to be able to scroll it, so a touch drag
+// starts only after a still hold.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useDraggable } from "@dnd-kit/core";
@@ -31,6 +30,7 @@ import { cn } from "../lib/cn";
 import { useStageState } from "../main/use-stage-state";
 import { BRANDING_HREF, REPLACE_LOGO_HREF } from "../settings/sections/branding-links";
 import { useCustomize } from "./customize-mode";
+import { Caret, DRAGGABLE } from "./drag-parts";
 import type { RailDrag } from "./rail-drop";
 import type { Destination } from "./destinations";
 import { setBranding } from "./set-branding";
@@ -99,13 +99,7 @@ export function RailEditor({
           <PlusIcon className="size-3.5" />
           New section
         </button>
-        {aim.caretY !== null && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3.5 right-3.5 z-[5] h-0.5 rounded-sm bg-accent before:absolute before:-left-1 before:-top-[3px] before:size-2 before:rounded-full before:border-2 before:border-accent before:bg-rail"
-            style={{ top: aim.caretY }}
-          />
-        )}
+        {aim.caretY !== null && <Caret along="column" at={aim.caretY} />}
       </div>
     </>
   );
@@ -145,7 +139,7 @@ function SectionEditor({
           aria-label={`${section.label} section`}
           data-rail-item="head"
           data-section={section.id}
-          className="group mt-3.5 mb-0.5 flex h-[26px] cursor-grab touch-pan-y select-none [-webkit-touch-callout:none] items-center gap-2 rounded-md pl-1 pr-2 text-[10px] font-medium uppercase leading-3 tracking-[0.07em] text-fg-muted hover:bg-fill active:cursor-grabbing"
+          className={cn(DRAGGABLE, "group mt-3.5 mb-0.5 flex h-[26px] items-center gap-2 rounded-md pl-1 pr-2 text-[10px] font-medium uppercase leading-3 tracking-[0.07em] text-fg-muted hover:bg-fill")}
         >
           <Grip />
           {renaming ? (
@@ -224,7 +218,8 @@ function RowEditor({
       data-section={section}
       data-id={d.id}
       className={cn(
-        "group relative flex h-[34px] cursor-grab touch-pan-y select-none [-webkit-touch-callout:none] items-center gap-2 rounded-lg pl-1 pr-2 text-[13.5px] font-medium text-fg hover:bg-fill active:cursor-grabbing",
+        DRAGGABLE,
+        "group relative flex h-[34px] items-center gap-2 rounded-lg pl-1 pr-2 text-[13.5px] font-medium text-fg hover:bg-fill",
         dragging && "opacity-35",
       )}
     >

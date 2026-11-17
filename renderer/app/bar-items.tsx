@@ -57,7 +57,7 @@ export type BarItemId =
  *
  * It is a position in the order rather than a per-item `side` property because
  * `side` cannot express "centred", and because a spacer is a thing you can see
- * and drag in the configurator where a boolean on an item is not.
+ * and drag in the bar editor where a boolean on an item is not.
  *
  * It is NOT in BAR_ITEMS: it shows no reading, so it is not an item.
  */
@@ -113,7 +113,7 @@ export interface BarItem {
    * The reflow this re-admits is bounded in a way the old one was not: the
    * capsule appears when a followed game goes live and leaves when it ends, a
    * handful of times a season, rather than integration health arriving the
-   * moment something broke. context-bar.tsx drops the whole row when an item
+   * moment something broke. bar-strip.tsx drops the whole row when an item
    * renders empty, so a vanishing item leaves no gap and no dangling separator.
    *
    * The guard in context-bar.test.tsx reads THIS FLAG: every item without it
@@ -126,7 +126,7 @@ export interface BarItem {
 /**
  * Every item the bar can show.
  *
- * Rendering lives in context-bar.tsx: this is the catalogue and the ORDER
+ * Rendering lives in bar-strip.tsx: this is the catalogue and the ORDER
  * default, deliberately data-only so the chooser can read it without importing
  * the bar.
  */
@@ -199,7 +199,7 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = externKeyed({
 });
 
 /**
- * How the spacer presents itself in the configurator.
+ * How the spacer presents itself in the bar editor.
  *
  * Beside BAR_ITEMS rather than in it: the palette needs a label and an icon for
  * it, but nothing else does, and putting it in the registry would oblige the
@@ -211,7 +211,7 @@ export const BAR_SPACER_ITEM: Omit<BarItem, "id"> = {
   hint: "Pushes what follows it away from what comes before. Use two to center a group.",
 };
 
-/** How the fixed gap presents itself in the configurator. */
+/** How the fixed gap presents itself in the bar editor. */
 export const BAR_SPACE_ITEM: Omit<BarItem, "id"> = {
   label: "Space",
   icon: SquareIcon,
@@ -294,7 +294,7 @@ function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
  *
  * A saved order with NO spacer predates them, and gets one where the old rule
  * cut. That inference is safe only because `normalizeBarRows` — which is what
- * the configurator saves through — always writes at least one: an operator who
+ * the bar editor saves through — always writes at least one: an operator who
  * wants everything hard left gets a trailing spacer, which looks identical and
  * keeps "no spacer" meaning "not yet migrated" for good.
  */
@@ -312,7 +312,7 @@ export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[
 }
 
 /**
- * What the configurator saves.
+ * What the bar editor saves.
  *
  * Collapses adjacent spacers, and guarantees at least one — see
  * `visibleBarItems` for why that last part is load-bearing rather than tidiness.
@@ -328,7 +328,7 @@ export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
  * An empty list means FOLLOW THE DESKTOP BAR — the same convention `barItems`
  * already uses, where empty means "nobody has configured this". It cannot
  * collide with a deliberately empty phone bar, because `normalizeBarRows`
- * guarantees at least a spacer in anything the configurator writes, so a saved
+ * guarantees at least a spacer in anything the bar editor writes, so a saved
  * mobile set is never `[]`.
  *
  * This is also the whole of the upgrade story: every install that exists today
@@ -341,7 +341,7 @@ export function hasMobileBar(saved: readonly string[] | undefined): boolean {
 /**
  * Does the set being edited actually reach a phone?
  *
- * The configurator's 320px sentence is about what a narrow screen does to an
+ * The bar editor's 320px sentence is about what a narrow screen does to an
  * arrangement, so it may only be said about an arrangement a narrow screen
  * renders. The phone's own set always qualifies. The desktop set qualifies only
  * while the phone is still following it: once the phone has been forked,
@@ -359,7 +359,7 @@ export function phoneShowsEditedSet(
 /**
  * The rows to render, for a viewport.
  *
- * ONE function, used by the bar and by the configurator's preview, so what the
+ * ONE function, used by the bar and by the bar editor's preview, so what the
  * operator arranges is what appears — a preview that resolved the set by its own
  * rule would be a preview of a bar nobody has.
  */
@@ -388,7 +388,7 @@ export function barRowsFor(
  * instead be clipped by `overflow: hidden` on the strip, with nothing to tell
  * the reader a word had gone: the one failure this bar must not have quietly.
  *
- * Named here rather than inside the fitter because the CONFIGURATOR is the one
+ * Named here rather than inside the fitter because the BAR EDITOR is the one
  * that has to act on it: on a phone these are what the operator curates out, and
  * a set that keeps one is warned that a narrow phone will have to cut it.
  *
