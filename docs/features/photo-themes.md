@@ -67,8 +67,9 @@ people it is made for are the people the plan's boards put in a slot: every boar
 a screen or a slots widget shows, at that plan, against that plan's roster.
 
 **Generate** (`POST …/plans/:planId/generate`) sends to OpenAI only the people with
-no photo in the theme, or whose last attempt failed; anyone who already has one is
-reused at no cost, and someone with no Planning Center photo (or one served from
+no approved photo in the theme and none waiting for review. Anyone with an approved
+photo is reused at no cost, even when a later Redo of theirs failed (only Redo
+tries that again), and someone with no Planning Center photo (or one served from
 anywhere but Planning Center) is skipped. Edits go
 two at a time. Each comes back **ready to review**, and is shown on screens only
 once **approved** (one at a time, or every ready one made for the plan).
@@ -89,7 +90,8 @@ theme does that for everyone in it.
 
 ### When an edit fails
 
-A failed edit keeps its reason on the person, and the next Generate tries them again.
+A failed edit keeps its reason on the person. The next Generate tries them again
+when they have no approved photo; a failed Redo is tried again only by Redo.
 
 | Reason | |
 |---|---|

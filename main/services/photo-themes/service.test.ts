@@ -177,8 +177,78 @@ describe("generating", () => {
     const started = Date.now();
     await generated();
     assert.equal(calls, 2);
-    assert.ok(Date.now() - started >= 950, "the second try waited the second OpenAI asked for");
+    const waited = Date.now() - started;
+    assert.ok(waited >= 950, "the second try waited the second OpenAI asked for");
+    assert.ok(waited < 5000, `the second try waited what OpenAI asked, not its own default (${waited} ms)`);
     assert.equal(statusOf(theme.id, "1"), "ready");
+  });
+
+  it("gives up after its retries when OpenAI keeps rate limiting", async () => {
+    const theme = await themed([person("1")]);
+    fake.edit = () => ({ status: 429, body: errorBody("rate_limit_exceeded", null), headers: { "retry-after": "1" } });
+    await generated();
+    assert.equal(fake.edits(), 1 + 2, "the first try and exactly two retries");
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    assert.match(photoThemes.state().themes[0]!.people[0]!.pending!.reason!, /^Rate limited by OpenAI/);
+  });
+});
+
+describe("paying once", () => {
+  /** Edits that take a while, counting how many run at once. */
+  function slowEdits(): { most: () => number } {
+    let inFlight = 0;
+    let most = 0;
+    const base = fake.edit;
+    fake.edit = async (r) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((res) => setTimeout(res, 40));
+      inFlight--;
+      return base(r);
+    };
+    return { most: () => most };
+  }
+
+  it("a double-clicked Redo sends one edit", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    await generated();
+    await photoThemes.approveAll(PLAN);
+    fake.requests.length = 0;
+    const edits = slowEdits();
+    const from = { planId: PLAN, serviceTypeId: TYPE };
+    const both = await Promise.allSettled([photoThemes.redo(theme.id, "1", from), photoThemes.redo(theme.id, "1", from), photoThemes.redo(theme.id, "2", from)]);
+    assert.deepEqual(both.map((r) => r.status), ["fulfilled", "rejected", "fulfilled"]);
+    assert.match(String((both[1] as PromiseRejectedResult).reason), /already being made/);
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 2, "one edit for each person");
+    assert.ok(edits.most() <= 2);
+  });
+
+  it("a double-clicked Generate after a prompt change sends each person once", async () => {
+    const theme = await themed([person("1"), person("2"), person("3")]);
+    await generated();
+    await photoThemes.approveAll(PLAN);
+    await photoThemes.updateTheme(theme.id, { prompt: "Snow, keep the face the same" });
+    fake.requests.length = 0;
+    const edits = slowEdits();
+    const [a, b] = await Promise.all([photoThemes.generate(PLAN, TYPE, "all"), photoThemes.generate(PLAN, TYPE, "all")]);
+    assert.equal(a.queued + b.queued, 3);
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 3, "each person once");
+    assert.ok(edits.most() <= 2, "never more than two at once");
+  });
+
+  it("Generate does not spend again on somebody with an approved photo whose Redo failed", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await photoThemes.approve(theme.id, "1");
+    fake.edit = () => ({ status: 400, body: { error: { code: "moderation_blocked" } } });
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await photoThemes.idle();
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    fake.requests.length = 0;
+    assert.deepEqual(await generated(), { queued: 0, reused: 1, skipped: [] });
+    assert.equal(fake.edits(), 0);
+    assert.equal((await photoThemes.planPeople(PLAN, TYPE)).toGenerate, 0);
   });
 });
 
@@ -206,6 +276,15 @@ describe("what screens are given", () => {
     await generated();
     await photoThemes.approve(theme.id, "1");
     assert.equal(photoThemes.state().plans[0]!.show, "themed");
+  });
+
+  it("an approval leaves a plan set to Original alone when its roster cannot be read", async () => {
+    const theme = await themed([person("1")]);
+    await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "original" });
+    await generated();
+    srv.unreadable.set(PLAN, "Planning Center did not answer");
+    await photoThemes.approve(theme.id, "1");
+    assert.equal(photoThemes.state().plans[0]!.show, "original");
   });
 
   it("keeps the approved photo on screen while a redo is made, until the redo is approved", async () => {
@@ -328,6 +407,19 @@ describe("retention", () => {
     assert.equal(photoThemes.state().themes[0]!.keptUntil, "2027-07-04", "switching a plan away does not shorten it");
     await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "themed" });
     assert.equal(photoThemes.state().themes[0]!.keptUntil, "2027-07-04", "touching an earlier plan does not shorten it");
+  });
+
+  it("does not clear a theme chosen for a later service while the sweep waited its turn", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await photoThemes.approve(theme.id, "1");
+    now = Date.parse("2027-03-25T12:00:00Z");
+    // Queued first, so it lands before the sweep's write.
+    const chosen = photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2027-04-04T15:00:00Z", themeId: theme.id });
+    const swept = photoThemes.sweep();
+    await chosen;
+    assert.equal((await swept).photos, 0);
+    assert.equal(statusOf(theme.id, "1"), "approved");
   });
 
   it("leaves alone a theme a plan with no known date uses", async () => {

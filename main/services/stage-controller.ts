@@ -3308,7 +3308,7 @@ export class StageController {
     // the plan to be missing one.
     const noCapsule =
       members.length > 0 && this.prepTags.map.size > 0
-        ? noCapsuleSlots(boards.map((b) => ({ id: b.id, name: b.name, slots: this.resolve(b.slots, members, "column", planId) })))
+        ? noCapsuleSlots(boards.map((b) => ({ id: b.id, name: b.name, slots: this.resolve(b.slots, members) })))
         : [];
     const prepTagsNobody = this.prepTags.nobodyVisible;
     return {

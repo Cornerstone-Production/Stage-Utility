@@ -160,7 +160,16 @@ describe("a themed photo on the wall", () => {
 
   it("is not drawn for another plan, or a type's default board", async () => {
     assert.ok((await previewPhoto(OTHER_PLAN))?.startsWith("https://avatars.planningcenteronline.com/"));
-    assert.ok((await previewPhoto(null)) === null || !(await previewPhoto(null))?.startsWith(THEMED_PHOTO_REF_PREFIX));
+    // A default board has no roster, so only a by-person slot puts somebody on
+    // it: read from Planning Center by id, through the person directory.
+    (ctl as unknown as { personDirectory: { known: Map<string, { name: string; photoUrl: string }> } }).personDirectory.known.set("1001", {
+      name: "Alex R.",
+      photoUrl: pcoPhoto("1001"),
+    });
+    const byPerson = { ...ROW, id: "s2", link: { kind: "pco", matchBy: "person", personId: "1001" } } as unknown as Slot;
+    const onDefault = (await stageController.resolveSlotsPreview([byPerson], { serviceTypeId: TYPE, planId: null })).slots[0]!;
+    assert.equal(onDefault.displayName, "Alex R.", "the slot is filled, so the photo below is a real answer");
+    assert.ok(onDefault.photoUrl?.startsWith("https://avatars.planningcenteronline.com/"), `a default board drew ${onDefault.photoUrl}`);
   });
 
   it("goes back to the original when the plan is switched to Original, and returns on Themed", async () => {

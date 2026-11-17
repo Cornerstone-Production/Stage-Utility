@@ -44,233 +44,157 @@ const PLAN = /^\/api\/photo-themes\/plans\/([^/]+)$/;
 const PLAN_ACTION = /^\/api\/photo-themes\/plans\/([^/]+)\/(generate|approve-all)$/;
 const IMAGE = /^\/api\/photo-themes\/images\/([^/]+)$/;
 
-/** Answer a refusal with its status, or rethrow anything else for the server's 500. */
-function answer(res: http.ServerResponse, err: unknown): void {
-  if (err instanceof PhotoThemeRefused) error(res, err.message, err.status);
-  else throw err;
+/**
+ * Run `work` and answer with what it resolves to, or with a refusal's status
+ * and reason. Anything else is rethrown for the server's 500: a failed write
+ * must not read as a refusal.
+ */
+async function respond(res: http.ServerResponse, work: () => Promise<unknown>, status = 200): Promise<void> {
+  try {
+    json(res, await work(), status);
+  } catch (err) {
+    if (err instanceof PhotoThemeRefused) error(res, err.message, err.status);
+    else throw err;
+  }
 }
 
-function themeIdOr400(res: http.ServerResponse, id: string): boolean {
-  if (isThemeId(id)) return true;
-  error(res, "that is not a theme id");
-  return false;
+function refuse(message: string): never {
+  throw new PhotoThemeRefused(message);
 }
 
-function personIdOr400(res: http.ServerResponse, id: string): boolean {
-  if (isPersonId(id)) return true;
-  error(res, "that is not a Planning Center person id");
-  return false;
+function themeId(id: string): string {
+  return isThemeId(id) ? id : refuse("that is not a theme id");
 }
 
-function planIdOr400(res: http.ServerResponse, id: string): boolean {
-  if (isPlanId(id)) return true;
-  error(res, "that is not a Planning Center plan id");
-  return false;
+function personId(id: string): string {
+  return isPersonId(id) ? id : refuse("that is not a Planning Center person id");
+}
+
+function planId(id: string): string {
+  return isPlanId(id) ? id : refuse("that is not a Planning Center plan id");
+}
+
+function serviceTypeId(v: unknown): string {
+  return isPcoId(v) ? v : refuse("serviceTypeId must be a Planning Center id");
 }
 
 export async function photoThemeRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method, url } = c;
   if (!pathname.startsWith("/api/openai") && !pathname.startsWith("/api/photo-themes")) return;
+  /** The JSON object body, or null having answered 400. */
+  const body = () => readObjectBody(req, res);
 
   // ── The OpenAI connection ────────────────────────────────────────────────
 
-  if (pathname === "/api/openai" && method === "GET") {
-    json(res, photoThemes.connection.status());
-    return;
-  }
+  if (pathname === "/api/openai" && method === "GET") return respond(res, async () => photoThemes.connection.status());
   if (pathname === "/api/openai/key" && method === "PUT") {
-    const body = await readObjectBody(req, res);
-    if (!body) return;
-    try {
-      json(res, await photoThemes.connection.saveKey(body.apiKey));
-    } catch (err) {
-      answer(res, err);
-    }
+    const b = await body();
+    if (b) await respond(res, () => photoThemes.connection.saveKey(b.apiKey));
     return;
   }
-  if (pathname === "/api/openai/key" && method === "DELETE") {
-    json(res, await photoThemes.connection.clearKey());
-    return;
-  }
-  if (pathname === "/api/openai/test" && method === "POST") {
-    json(res, await photoThemes.connection.test());
-    return;
-  }
+  if (pathname === "/api/openai/key" && method === "DELETE") return respond(res, () => photoThemes.connection.clearKey());
+  if (pathname === "/api/openai/test" && method === "POST") return respond(res, () => photoThemes.connection.test());
 
   // ── Themes ───────────────────────────────────────────────────────────────
 
-  if (pathname === "/api/photo-themes" && method === "GET") {
-    json(res, photoThemes.state());
-    return;
-  }
+  if (pathname === "/api/photo-themes" && method === "GET") return respond(res, async () => photoThemes.state());
 
   if (pathname === "/api/photo-themes/themes" && method === "POST") {
-    const body = await readObjectBody(req, res);
-    if (!body) return;
-    try {
-      json(res, await photoThemes.createTheme({ name: body.name, prompt: body.prompt }), 201);
-    } catch (err) {
-      answer(res, err);
-    }
+    const b = await body();
+    if (b) await respond(res, () => photoThemes.createTheme({ name: b.name, prompt: b.prompt }), 201);
     return;
   }
 
   const theme = THEME.exec(pathname);
-  if (theme && (method === "PATCH" || method === "DELETE")) {
-    const id = theme[1]!;
-    if (!themeIdOr400(res, id)) return;
-    try {
-      if (method === "DELETE") {
-        json(res, await photoThemes.deleteTheme(id));
-      } else {
-        const body = await readObjectBody(req, res);
-        if (!body) return;
-        json(res, await photoThemes.updateTheme(id, { name: body.name, prompt: body.prompt }));
-      }
-    } catch (err) {
-      answer(res, err);
-    }
+  if (theme && method === "DELETE") return respond(res, () => photoThemes.deleteTheme(themeId(theme[1]!)));
+  if (theme && method === "PATCH") {
+    if (!isThemeId(theme[1])) return respond(res, async () => themeId(theme[1]!));
+    const b = await body();
+    if (b) await respond(res, () => photoThemes.updateTheme(theme[1]!, { name: b.name, prompt: b.prompt }));
     return;
   }
 
   const keepPrompt = KEEP_PROMPT.exec(pathname);
-  if (keepPrompt && method === "POST") {
-    const id = keepPrompt[1]!;
-    if (!themeIdOr400(res, id)) return;
-    try {
-      json(res, await photoThemes.keepPrompt(id));
-    } catch (err) {
-      answer(res, err);
-    }
-    return;
-  }
+  if (keepPrompt && method === "POST") return respond(res, () => photoThemes.keepPrompt(themeId(keepPrompt[1]!)));
 
   const person = PERSON.exec(pathname);
   if (person && method === "DELETE") {
-    const [, id, pid] = person as unknown as [string, string, string];
-    if (!themeIdOr400(res, id) || !personIdOr400(res, pid)) return;
-    try {
-      await photoThemes.remove(id, pid);
-      json(res, { removed: true });
-    } catch (err) {
-      answer(res, err);
-    }
-    return;
+    return respond(res, async () => {
+      await photoThemes.remove(themeId(person[1]!), personId(person[2]!));
+      return { removed: true };
+    });
   }
 
   const action = PERSON_ACTION.exec(pathname);
   if (action && method === "POST") {
-    const [, id, pid, verb] = action as unknown as [string, string, string, string];
-    if (!themeIdOr400(res, id) || !personIdOr400(res, pid)) return;
-    try {
-      if (verb === "approve") {
-        json(res, await photoThemes.approve(id, pid));
-      } else if (verb === "keep") {
-        json(res, await photoThemes.keep(id, pid));
-      } else if (verb === "redo") {
-        const body = await readObjectBody(req, res);
-        if (!body) return;
-        let from: { planId: string; serviceTypeId: string } | null = null;
-        if (body.planId !== undefined || body.serviceTypeId !== undefined) {
-          if (!isPlanId(body.planId) || !isPcoId(body.serviceTypeId)) {
-            error(res, "planId and serviceTypeId must both be Planning Center ids, or both absent");
-            return;
+    const [, rawTheme, rawPerson, verb] = action as unknown as [string, string, string, string];
+    if (!isThemeId(rawTheme) || !isPersonId(rawPerson)) return respond(res, async () => [themeId(rawTheme), personId(rawPerson)]);
+    if (verb === "approve") return respond(res, () => photoThemes.approve(rawTheme, rawPerson));
+    if (verb === "keep") return respond(res, () => photoThemes.keep(rawTheme, rawPerson));
+    const b = await body();
+    if (!b) return;
+    if (verb === "redo") {
+      return respond(
+        res,
+        () => {
+          let from: { planId: string; serviceTypeId: string } | null = null;
+          if (b.planId !== undefined || b.serviceTypeId !== undefined) {
+            if (!isPlanId(b.planId) || !isPcoId(b.serviceTypeId)) refuse("planId and serviceTypeId must both be Planning Center ids, or both absent");
+            from = { planId: b.planId, serviceTypeId: b.serviceTypeId };
           }
-          from = { planId: body.planId, serviceTypeId: body.serviceTypeId };
-        }
-        json(res, await photoThemes.redo(id, pid, from), 202);
-      } else {
-        const body = await readObjectBody(req, res);
-        if (!body) return;
-        if (!isThemeId(body.to)) {
-          error(res, "to must be a theme id");
-          return;
-        }
-        await photoThemes.transfer(id, pid, body.to, verb === "move" ? "move" : "copy");
-        json(res, { [verb === "move" ? "moved" : "copied"]: true });
-      }
-    } catch (err) {
-      answer(res, err);
+          return photoThemes.redo(rawTheme, rawPerson, from);
+        },
+        202,
+      );
     }
-    return;
+    return respond(res, async () => {
+      if (!isThemeId(b.to)) refuse("to must be a theme id");
+      await photoThemes.transfer(rawTheme, rawPerson, b.to, verb === "move" ? "move" : "copy");
+      return { [verb === "move" ? "moved" : "copied"]: true };
+    });
   }
 
   // ── Plans ────────────────────────────────────────────────────────────────
 
   const plan = PLAN.exec(pathname);
   if (plan && method === "GET") {
-    const planId = plan[1]!;
-    if (!planIdOr400(res, planId)) return;
-    const serviceTypeId = url.searchParams.get("serviceTypeId");
-    if (!isPcoId(serviceTypeId)) {
-      error(res, "serviceTypeId must be a Planning Center id");
-      return;
-    }
-    json(res, await photoThemes.planPeople(planId, serviceTypeId));
-    return;
+    return respond(res, () => photoThemes.planPeople(planId(plan[1]!), serviceTypeId(url.searchParams.get("serviceTypeId"))));
   }
   if (plan && method === "PATCH") {
-    const planId = plan[1]!;
-    if (!planIdOr400(res, planId)) return;
-    const body = await readObjectBody(req, res);
-    if (!body) return;
-    if (!isPcoId(body.serviceTypeId)) {
-      error(res, "serviceTypeId must be a Planning Center id");
-      return;
-    }
-    if (body.themeId !== undefined && body.themeId !== null && !isThemeId(body.themeId)) {
-      error(res, "themeId must be a theme id or null");
-      return;
-    }
-    if (body.show !== undefined && body.show !== "original" && body.show !== "themed") {
-      error(res, 'show must be "original" or "themed"');
-      return;
-    }
-    if (body.themeId === undefined && body.show === undefined) {
-      error(res, "send a themeId, a show or both");
-      return;
-    }
-    try {
-      json(
-        res,
-        await photoThemes.choosePlan(planId, {
-          serviceTypeId: body.serviceTypeId,
-          sortDate: body.sortDate === undefined ? undefined : sortDate(body.sortDate),
-          ...(body.themeId !== undefined ? { themeId: body.themeId as string | null } : {}),
-          ...(body.show !== undefined ? { show: body.show as "original" | "themed" } : {}),
-        }),
-      );
-    } catch (err) {
-      answer(res, err);
-    }
-    return;
+    if (!isPlanId(plan[1])) return respond(res, async () => planId(plan[1]!));
+    const b = await body();
+    if (!b) return;
+    return respond(res, () => {
+      const st = serviceTypeId(b.serviceTypeId);
+      if (b.themeId !== undefined && b.themeId !== null && !isThemeId(b.themeId)) refuse("themeId must be a theme id or null");
+      if (b.show !== undefined && b.show !== "original" && b.show !== "themed") refuse('show must be "original" or "themed"');
+      if (b.themeId === undefined && b.show === undefined) refuse("send a themeId, a show or both");
+      return photoThemes.choosePlan(plan[1]!, {
+        serviceTypeId: st,
+        sortDate: b.sortDate === undefined ? undefined : sortDate(b.sortDate),
+        ...(b.themeId !== undefined ? { themeId: b.themeId as string | null } : {}),
+        ...(b.show !== undefined ? { show: b.show as "original" | "themed" } : {}),
+      });
+    });
   }
 
   const planAction = PLAN_ACTION.exec(pathname);
   if (planAction && method === "POST") {
-    const [, planId, verb] = planAction as unknown as [string, string, string];
-    if (!planIdOr400(res, planId)) return;
-    try {
-      if (verb === "approve-all") {
-        json(res, await photoThemes.approveAll(planId));
-        return;
-      }
-      const body = await readObjectBody(req, res);
-      if (!body) return;
-      if (!isPcoId(body.serviceTypeId)) {
-        error(res, "serviceTypeId must be a Planning Center id");
-        return;
-      }
-      const mode = body.mode ?? "missing";
-      if (mode !== "missing" && mode !== "all") {
-        error(res, 'mode must be "missing" or "all"');
-        return;
-      }
-      json(res, await photoThemes.generate(planId, body.serviceTypeId, mode), 202);
-    } catch (err) {
-      answer(res, err);
-    }
-    return;
+    const [, rawPlan, verb] = planAction as unknown as [string, string, string];
+    if (verb === "approve-all") return respond(res, () => photoThemes.approveAll(planId(rawPlan)));
+    if (!isPlanId(rawPlan)) return respond(res, async () => planId(rawPlan));
+    const b = await body();
+    if (!b) return;
+    return respond(
+      res,
+      () => {
+        const st = serviceTypeId(b.serviceTypeId);
+        const mode = b.mode ?? "missing";
+        if (mode !== "missing" && mode !== "all") refuse('mode must be "missing" or "all"');
+        return photoThemes.generate(rawPlan, st, mode);
+      },
+      202,
+    );
   }
 
   const image = IMAGE.exec(pathname);

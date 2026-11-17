@@ -128,7 +128,7 @@ machine's history rather than how you set it up:
 | `video-relay/` | the video relay's pinned MediaMTX download and its generated config, fetched again on a fresh machine. See [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch) |
 | `update-track`, `update-progress.json`, `update-result.json`, `update-live.log`, `update-restart-pending` | the updater's own state: the track this install follows, and the files an update in flight and one waiting for its restart leave |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
-| `secrets.bin` | integration and wireless credentials and the ServiceCue publishing token, AES-256-GCM encrypted |
+| `secrets.bin` | integration and wireless credentials, the ServiceCue publishing token and the [photo themes](../features/photo-themes.md) OpenAI API key, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 | `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
 

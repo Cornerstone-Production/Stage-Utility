@@ -115,6 +115,10 @@ and a trailing `#` (`%23`) crops to exactly that shape. Without it PCO sends the
 original upload, which is about 1000px and, for a PNG, often over 1 MB. The
 parameter is not in PCO's published API docs; the behaviour here was measured.
 
+A `u` of `photo-theme:<file>` is a [themed photo](../features/photo-themes.md#what-screens-show)
+approved for the plan, served from the server's own store at the size it was made;
+Planning Center is not asked.
+
 Two sides choose the size:
 
 - **The server** picks the shape. A slots display gets a crop to its column; an

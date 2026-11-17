@@ -190,37 +190,56 @@ function editExtension(bytes: Buffer): "webp" | "png" | null {
 
 export class PhotoThemesService {
   readonly connection: OpenAiConnection;
-  private book: Book = emptyBook();
   private deps: PhotoThemesDeps | null = null;
   private writes = new WriteQueue();
-  /** Why the file could not be used, when it could not: nothing is saved over it. */
-  private unusable: string | null = null;
-  private paused = false;
-  private stopped = false;
-
   private readonly epoch = randomBytes(8).toString("hex");
   private seq = 0;
   private nextJobId = 1;
   private nextRunId = 1;
-  private queue: Job[] = [];
-  private running = new Map<string, Job>();
-  /** The job each (theme, person) is waiting on. A finished job no longer here was
-   *  removed, moved or deleted meanwhile, and its result is not kept. */
-  private expected = new Map<string, number>();
-  private runs = new Map<number, Run>();
-  private holdUntil = 0;
   private pumpTimer: NodeJS.Timeout | null = null;
   private sweepBootTimer: NodeJS.Timeout | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
+
+  // What resetState() sets: everything a fresh start begins without.
+  private book!: Book;
+  /** Why the file could not be used, when it could not: nothing is saved over it. */
+  private unusable!: string | null;
+  private paused!: boolean;
+  private stopped!: boolean;
+  private queue!: Job[];
+  /** Running jobs, by (theme, person). enqueue() refuses a key here, so two jobs never share one. */
+  private running!: Map<string, Job>;
+  /** The job each (theme, person) is waiting on. A finished job no longer here was
+   *  removed, moved or deleted meanwhile, and its result is not kept. */
+  private expected!: Map<string, number>;
+  private runs!: Map<number, Run>;
+  private holdUntil!: number;
   /** Photos seen on rosters read here, for noticing a newer one. */
-  private seen = new Map<string, string>();
-  private shownCache = new Map<string, ReadonlyMap<string, string>>();
-  private shownSignature = "";
+  private seen!: Map<string, string>;
+  private shownCache!: Map<string, ReadonlyMap<string, string>>;
+  private shownSignature!: string;
   /** Files the book names that are not on disk (see findMissingFiles). */
-  private missing = new Set<string>();
+  private missing!: Set<string>;
 
   constructor() {
     this.connection = new OpenAiConnection(() => this.now());
+    this.resetState();
+  }
+
+  private resetState(): void {
+    this.book = emptyBook();
+    this.unusable = null;
+    this.paused = false;
+    this.stopped = false;
+    this.queue = [];
+    this.running = new Map();
+    this.expected = new Map();
+    this.runs = new Map();
+    this.holdUntil = 0;
+    this.seen = new Map();
+    this.shownCache = new Map();
+    this.shownSignature = "";
+    this.missing = new Set();
   }
 
   private now(): number {
@@ -356,7 +375,7 @@ export class PhotoThemesService {
       roster: read.roster,
       ...(read.reason ? { reason: read.reason } : {}),
       people,
-      toGenerate: theme ? people.filter((p) => p.originalUrl && (p.status === "none" || p.status === "failed")).length : 0,
+      toGenerate: theme ? people.filter((p) => p.originalUrl && !p.approved && (p.status === "none" || p.status === "failed")).length : 0,
     };
   }
 
@@ -577,6 +596,9 @@ export class PhotoThemesService {
       const choice = this.book.plans.get(planId);
       if (!theme || choice?.themeId !== themeId || choice.show !== "original") continue;
       const read = await this.deps!.planPeople(choice.serviceTypeId, planId);
+      // Not knowing who is on the plan is not knowing that nobody shows a
+      // themed photo: the operator's Original stands.
+      if (read.roster === "unavailable") continue;
       if (!read.people.some((p) => theme.people.get(p.personId)?.approved)) out.push(planId);
     }
     return out;
@@ -636,8 +658,8 @@ export class PhotoThemesService {
 
   /**
    * Queue edits for the people on a plan. `missing` sends only those with no
-   * photo in the theme or whose last attempt failed: anyone with one is reused
-   * at no cost. `all` redoes everyone (after a prompt change), and takes the new
+   * approved photo in the theme and none waiting for review: anyone with an
+   * approved one is reused at no cost. `all` redoes everyone (after a prompt change), and takes the new
    * prompt as the one the photos are made under.
    */
   async generate(planId: string, serviceTypeId: string, mode: "missing" | "all"): Promise<GenerateResultDTO> {
@@ -658,7 +680,9 @@ export class PhotoThemesService {
       const entry = theme.people.get(p.personId);
       if (this.expected.has(jobKey(themeId, p.personId))) {
         result.skipped.push({ personId: p.personId, name: p.name, reason: "Already being made" });
-      } else if (mode === "missing" && entry?.approved && entry.pending?.status !== "failed") {
+      } else if (mode === "missing" && entry?.approved) {
+        // On screen already: reused at no cost, whatever a later Redo did.
+        // A failed Redo is tried again only by Redo.
         result.reused++;
       } else if (mode === "missing" && entry?.pending?.status === "ready") {
         result.skipped.push({ personId: p.personId, name: p.name, reason: "Made, waiting for review" });
@@ -677,18 +701,20 @@ export class PhotoThemesService {
       });
     }
     const runId = this.nextRunId++;
-    this.runs.set(runId, {
-      label: `plan ${planId}`,
-      themeName: theme.name,
-      made: 0,
-      failed: 0,
-      reused: result.reused,
-      skipped: result.skipped.length,
-      outstanding: toSend.length,
-    });
-    for (const p of toSend) this.enqueue({ themeId, personId: p.personId, name: cleanName(p.name), sourceUrl: p.photoUrl!, planId, serviceDate: choice.sortDate, runId });
-    result.queued = toSend.length;
-    if (toSend.length === 0) this.finishRun(runId);
+    const run: Run = { label: `plan ${planId}`, themeName: theme.name, made: 0, failed: 0, reused: result.reused, skipped: 0, outstanding: 0 };
+    this.runs.set(runId, run);
+    // Queued here, after every await: a second Generate that read the same
+    // roster meanwhile finds these already queued and sends nobody twice.
+    for (const p of toSend) {
+      if (this.enqueue({ themeId, personId: p.personId, name: cleanName(p.name), sourceUrl: p.photoUrl!, planId, serviceDate: choice.sortDate, runId })) {
+        result.queued++;
+      } else {
+        result.skipped.push({ personId: p.personId, name: p.name, reason: "Already being made" });
+      }
+    }
+    run.skipped = result.skipped.length;
+    run.outstanding = result.queued;
+    if (result.queued === 0) this.finishRun(runId);
     this.changedNow();
     this.pump();
     return result;
@@ -721,17 +747,29 @@ export class PhotoThemesService {
     if (!isAllowedPhotoUrl(sourceUrl)) throw new PhotoThemeRefused("Their photo is not on Planning Center", 409);
     name = cleanName(name);
     const runId = this.nextRunId++;
+    // After the roster read: the check above can be passed by two Redos at once.
+    if (!this.enqueue({ themeId, personId, name, sourceUrl, planId: from?.planId ?? null, serviceDate, runId })) {
+      throw new PhotoThemeRefused("Their photo is already being made", 409);
+    }
     this.runs.set(runId, { label: `${name}`, themeName: theme.name, made: 0, failed: 0, reused: 0, skipped: 0, outstanding: 1 });
-    this.enqueue({ themeId, personId, name, sourceUrl, planId: from?.planId ?? null, serviceDate, runId });
     this.changedNow();
     this.pump();
     return this.personDto(theme, personId, name);
   }
 
-  private enqueue(j: Omit<Job, "id" | "key" | "attempts" | "notBefore">): void {
-    const job: Job = { ...j, id: this.nextJobId++, key: jobKey(j.themeId, j.personId), attempts: 0, notBefore: 0 };
-    this.expected.set(job.key, job.id);
+  /**
+   * Queue one edit, or refuse (false) when that person is already queued or
+   * running in that theme. Synchronous, and the only place a job is queued: a
+   * caller checks before its awaits, but only this check, made with nothing
+   * awaited between it and the push, stops two requests paying for one photo.
+   */
+  private enqueue(j: Omit<Job, "id" | "key" | "attempts" | "notBefore">): boolean {
+    const key = jobKey(j.themeId, j.personId);
+    if (this.expected.has(key) || this.running.has(key) || this.queue.some((q) => q.key === key)) return false;
+    const job: Job = { ...j, id: this.nextJobId++, key, attempts: 0, notBefore: 0 };
+    this.expected.set(key, job.id);
     this.queue.push(job);
+    return true;
   }
 
   /** Forget a queued or running job for this (theme, person). A running one's result is not kept. */
@@ -989,25 +1027,35 @@ export class PhotoThemesService {
       return { photos: 0, plans: 0 };
     }
     const today = zonedDateKey(this.now());
-    const expired: { id: string; name: string; until: string; photos: number }[] = [];
-    for (const t of this.book.themes.values()) {
-      if (t.people.size === 0) continue;
-      const undated = [...this.book.plans.values()].some((p) => p.themeId === t.id && !p.sortDate);
-      const until = keptUntil(t);
-      if (!undated && today > until) expired.push({ id: t.id, name: t.name, until, photos: t.people.size });
-    }
-    const oldPlans = [...this.book.plans.values()].filter((p) => {
-      const day = serviceDay(p.sortDate);
-      return day !== null && today > addMonths(day, KEEP_MONTHS);
-    });
-    if (expired.length === 0 && oldPlans.length === 0) return { photos: 0, plans: 0 };
+    const due = (b: Book) => {
+      const expired: { id: string; name: string; until: string; photos: number }[] = [];
+      for (const t of b.themes.values()) {
+        if (t.people.size === 0) continue;
+        const undated = [...b.plans.values()].some((p) => p.themeId === t.id && !p.sortDate);
+        const until = keptUntil(t);
+        if (!undated && today > until) expired.push({ id: t.id, name: t.name, until, photos: t.people.size });
+      }
+      const oldPlans = [...b.plans.values()].filter((p) => {
+        const day = serviceDay(p.sortDate);
+        return day !== null && today > addMonths(day, KEEP_MONTHS);
+      });
+      return { expired, oldPlans };
+    };
+    // A first look, to write nothing on the days nothing is due.
+    const glance = due(this.book);
+    if (glance.expired.length === 0 && glance.oldPlans.length === 0) return { photos: 0, plans: 0 };
+    // Decided again inside the write, on the book as it is then: a theme chosen
+    // for a later service while this waited its turn is no longer due.
+    let found = glance;
     await this.mutate((b) => {
-      for (const e of expired) {
+      found = due(b);
+      for (const e of found.expired) {
         b.themes.get(e.id)?.people.clear();
         this.cancelTheme(e.id);
       }
-      for (const p of oldPlans) b.plans.delete(p.planId);
+      for (const p of found.oldPlans) b.plans.delete(p.planId);
     });
+    const { expired, oldPlans } = found;
     for (const e of expired) {
       console.log(`[photo-theme] retention: removed ${scrub(e.photos)} photo(s) from "${scrub(e.name)}", kept until ${scrub(e.until)}`);
     }
@@ -1044,16 +1092,7 @@ export class PhotoThemesService {
   /** Tests: start again from the file. */
   async reloadForTests(): Promise<void> {
     await store.reload();
-    this.book = emptyBook();
-    this.unusable = null;
-    this.queue = [];
-    this.running.clear();
-    this.expected.clear();
-    this.runs.clear();
-    this.seen.clear();
-    this.shownCache.clear();
-    this.holdUntil = 0;
-    this.paused = false;
+    this.resetState();
     if (this.deps) await this.start(this.deps, { sweep: false });
   }
 }
