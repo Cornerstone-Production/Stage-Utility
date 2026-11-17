@@ -508,6 +508,10 @@ export type IpcChannel =
   | "messaging:set"
   | "notes:set"
   | "obs:getStatus"
+  | "openai:clearKey"
+  | "openai:getStatus"
+  | "openai:saveKey"
+  | "openai:testKey"
   | "osc:addTarget"
   | "osc:getFeedback"
   | "osc:getFeedbackPort"
@@ -1846,6 +1850,15 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/osc/feedback-port", p);
 
     // ── Photo themes (the Mic slots page's Theme photos) ───────────────
+    case "openai:getStatus":
+      return apiFetch<T>("/api/openai");
+    // The key goes in and never comes back: the answer carries only its hint.
+    case "openai:saveKey":
+      return put<T>("/api/openai/key", { apiKey: p.apiKey });
+    case "openai:clearKey":
+      return del<T>("/api/openai/key");
+    case "openai:testKey":
+      return post<T>("/api/openai/test");
     case "photoThemes:getState":
       return apiFetch<T>("/api/photo-themes");
     case "photoThemes:getPlanPeople":
