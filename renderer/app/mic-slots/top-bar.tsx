@@ -10,8 +10,8 @@ import { PlanSwitcher } from "../../settings/sections/plan-switcher";
 import { namedType } from "../../settings/sections/slots-target-pill";
 import { useInAppLink } from "../../lib/use-search-param";
 import { CopyFromDialog } from "./board-dialogs";
-import { ShowSwitch } from "./photo-themes/photo-themes-panel";
-import { themePhotosReason } from "./photo-themes/theme-photos-reason";
+import { ShowSwitch } from "./photo-themes/photo-bits";
+import type { ThemePhotosReason } from "./photo-themes/theme-photos-reason";
 import type { PhotoPlan, PhotoThemes } from "./photo-themes/use-photo-themes";
 import { SavedLayouts } from "./saved-layouts";
 import type { MicSlots } from "./use-mic-slots";
@@ -23,6 +23,7 @@ export function TopBar({
   savedBoardId,
   photos,
   photoPlan,
+  photoReason,
   photoPanelOpen,
   onPhotoPanel,
 }: {
@@ -33,21 +34,20 @@ export function TopBar({
   photos: PhotoThemes;
   /** The plan Theme photos would be for; null on a Default, or with no plan. */
   photoPlan: PhotoPlan | null;
+  /** Why Theme photos is off, or null when it is on. */
+  photoReason: ThemePhotosReason | null;
   photoPanelOpen: boolean;
   onPhotoPanel: (open: boolean) => void;
 }) {
   const [copyAll, setCopyAll] = useState(false);
-  const goInApp = useInAppLink();
-  const photoReason = themePhotosReason({ hasServiceType: !!mic.serviceTypeId, hasPlan: mic.hasPlan, side: mic.side, connection: photos.state?.connection });
   const photoPanelShown = photoPanelOpen && !photoReason;
   const noType = !mic.serviceTypeId;
   const planActions = mic.hasPlan && mic.hasOverride && mic.side === "plan";
   const typeLabel = mic.typeName ? `${mic.typeName} default` : "Default";
   return (
-    <>
-    {/* The shell pads its scroller by 1rem from sm up, and a sticky bar holds at the
-        padding edge rather than the scroller's: the bar cancels that padding, so
-        nothing scrolls visibly above it. */}
+    // The shell pads its scroller by 1rem from sm up, and a sticky bar holds at the
+    // padding edge rather than the scroller's: the bar cancels that padding, so
+    // nothing scrolls visibly above it.
     <div className="sticky top-0 z-20 -mx-2 flex flex-wrap items-center gap-2.5 border-b border-line bg-bg px-2 py-2 max-sm:-mx-3 max-sm:px-3 sm:-top-4 sm:-mt-4 sm:pt-6">
       <PlanSwitcher disabled={noType} />
       <span className="h-[22px] w-px bg-line" />
@@ -137,27 +137,31 @@ export function TopBar({
         />
       )}
     </div>
-    {photoReason && (
-      <p
-        id="theme-photos-reason"
-        role="note"
-        data-theme-photos-reason
-        className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-lg bg-fill px-3 py-2 text-caption1 text-fg-muted"
-      >
-        <SparklesIcon className="size-3.5 flex-none" aria-hidden />
-        <span>Theme photos is off. {photoReason.why}.</span>
-        {photoReason.fix === "integrations" && (
-          <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className="font-semibold text-accent underline">
-            Open Integrations
-          </a>
-        )}
-        {photoReason.fix === "plan" && (
-          <button type="button" className="font-semibold text-accent underline" onClick={() => void mic.setSide("plan")}>
-            Switch to this plan
-          </button>
-        )}
-      </p>
-    )}
-    </>
+  );
+}
+
+/** Why Theme photos is off, in words, under the bar: a tooltip needs a hover and a phone has none. */
+export function ThemePhotosReasonLine({ reason, mic }: { reason: ThemePhotosReason; mic: MicSlots }) {
+  const goInApp = useInAppLink();
+  return (
+    <p
+      id="theme-photos-reason"
+      role="note"
+      data-theme-photos-reason
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-lg bg-fill px-3 py-2 text-caption1 text-fg-muted"
+    >
+      <SparklesIcon className="size-3.5 flex-none" aria-hidden />
+      <span>Theme photos is off. {reason.why}.</span>
+      {reason.fix === "integrations" && (
+        <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className="font-semibold text-accent underline">
+          Open Integrations
+        </a>
+      )}
+      {reason.fix === "plan" && (
+        <button type="button" className="font-semibold text-accent underline" onClick={() => void mic.setSide("plan")}>
+          Switch to this plan
+        </button>
+      )}
+    </p>
   );
 }

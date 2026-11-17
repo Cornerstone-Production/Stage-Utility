@@ -10,43 +10,25 @@
 // billed edit made from text the operator can no longer see on the server would
 // be the worst way to find out the save was refused.
 
-import { CheckIcon, ImageIcon, SparklesIcon, XIcon } from "lucide-react";
+import { CheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, type PlanChoiceDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
 import { errorMessage } from "@main/services/errors";
 
-import { Button, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SegmentedSwitch, Skeleton } from "../../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
 import { useInAppLink } from "../../../lib/use-search-param";
 import { useCardOps } from "./card-ops";
 import { ManageThemes } from "./manage-themes";
 import { STATES } from "./openai-wording";
-import { Num } from "./photo-bits";
+import { Num, ShowSwitch } from "./photo-bits";
 import { PersonCard, type CardAction } from "./person-card";
 import { DeleteTheme, ThemeFacts, themeLabel } from "./theme-boxes";
 import { type PhotoPlan, type PhotoThemes, usePlanPeople } from "./use-photo-themes";
 
 const NEW_THEME = "__new";
-
-/** The Original | Themed switch: what this service's screens show. Shared by the top bar and the panel's header. */
-export function ShowSwitch({ choice, plan, photos }: { choice: PlanChoiceDTO | null; plan: PhotoPlan; photos: PhotoThemes }) {
-  const show = choice?.show ?? "themed";
-  return (
-    <SegmentedSwitch
-      label="Photos shown on screens for this service"
-      value={show}
-      onChange={(next) =>
-        void photos.write("show", () => ipc("photoThemes:choosePlan", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, sortDate: plan.sortDate, show: next }))
-      }
-      options={[
-        { id: "original", label: "Original", Icon: ImageIcon },
-        { id: "themed", label: "Themed", Icon: SparklesIcon },
-      ]}
-    />
-  );
-}
 
 export function PhotoThemesPanel({ plan, planLabel, photos, onClose }: { plan: PhotoPlan; planLabel: string; photos: PhotoThemes; onClose: () => void }) {
   const [manage, setManage] = useState<{ themeId: string | null } | null>(null);
@@ -71,7 +53,7 @@ export function PhotoThemesPanel({ plan, planLabel, photos, onClose }: { plan: P
   return (
     <>
       {/* A phone's sheet has the page behind it dimmed; tapping that closes it. */}
-      <div aria-hidden onClick={onClose} className="fixed inset-0 z-30 bg-black/35 lg:hidden" />
+      <div aria-hidden onClick={onClose} className="fixed inset-0 z-30 bg-scrim lg:hidden" />
       <section
         ref={root}
         role="dialog"
@@ -79,19 +61,18 @@ export function PhotoThemesPanel({ plan, planLabel, photos, onClose }: { plan: P
         tabIndex={-1}
         data-photo-themes-panel
         className={cn(
-          "flex min-h-0 flex-col bg-surface-raised outline-none",
-          // Phone and tablet: a bottom sheet over the page. Solid: the dark raised surface is a
-          // see-through tint meant for sitting on a page, and the page would show through it.
-          "max-lg:bg-bg max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-40 max-lg:h-[82%] max-lg:rounded-t-2xl max-lg:border-t max-lg:border-line-strong max-lg:shadow-[0_-10px_30px_rgba(0,0,0,0.18)]",
+          "flex min-h-0 flex-col bg-surface-raised text-footnote outline-none",
+          // Phone and tablet: a bottom sheet, on a solid ground (the dark raised surface is a see-through tint).
+          "max-lg:bg-bg max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-40 max-lg:h-[82%] max-lg:rounded-t-2xl max-lg:border-t max-lg:border-line-strong max-lg:shadow-(--su-shadow-2)",
           // Desktop: a side sheet that sits in the page's own flow, as the inspector does.
           "lg:max-h-[calc(100dvh-9.25rem)] lg:rounded-xl lg:border lg:border-line-strong lg:shadow-(--su-shadow-1)",
         )}
       >
         <div aria-hidden className="mx-auto mt-2 h-1 w-9 flex-none rounded-sm bg-line-strong lg:hidden" />
-        <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line py-3 pl-4 pr-3">
-          <h3 className="min-w-0 flex-[1_1_10rem] text-[14px] font-semibold leading-[18px] text-fg">Theme photos · {planLabel}</h3>
+        <div className="flex flex-none items-center gap-2 border-b border-line py-3 pl-4 pr-3">
+          <h3 className="min-w-0 flex-1 truncate text-[14px] font-semibold leading-[18px] text-fg">Theme photos · {planLabel}</h3>
           {photos.hasApproved && <ShowSwitch choice={photos.choice} plan={plan} photos={photos} />}
-          <Button variant="transparent" size="small" iconOnly aria-label="Close Theme photos" onClick={onClose}>
+          <Button variant="transparent" size="small" iconOnly className="ml-auto flex-none" aria-label="Close Theme photos" onClick={onClose}>
             <XIcon className="size-4" />
           </Button>
         </div>
@@ -110,7 +91,6 @@ export function PhotoThemesPanel({ plan, planLabel, photos, onClose }: { plan: P
               photos={photos}
               themes={themes}
               themeId={manage.themeId}
-              originals={originalsOf(people.data?.people)}
               onPick={(themeId) => setManage({ themeId })}
               onBack={() => setManage(manage.themeId ? { themeId: null } : null)}
             />
@@ -121,11 +101,6 @@ export function PhotoThemesPanel({ plan, planLabel, photos, onClose }: { plan: P
       </section>
     </>
   );
-}
-
-/** Each person's Planning Center photo where this service's roster knows it. */
-function originalsOf(people: PlanPersonDTO[] | undefined): ReadonlyMap<string, string | null> {
-  return new Map((people ?? []).map((p) => [p.personId, p.originalUrl]));
 }
 
 function PanelBody({
@@ -179,15 +154,10 @@ function PanelBody({
       setDraft(null);
       return true;
     }
-    const saved = await photos.write(`prompt:${theme.id}`, () => ipc("photoThemes:updateTheme", { id: theme.id, prompt: draft.text }));
-    if (!saved.ok) {
-      // Put the box back to what the server holds, and send nothing.
-      setDraft(null);
-      return false;
-    }
-    await photos.reread();
+    const kept = await photos.savePrompt(theme.id, draft.text);
+    // Kept or refused, the box goes back to what the server holds (refused: so nothing is sent from text it lacks).
     setDraft(null);
-    return true;
+    return kept;
   }
 
   async function generate(mode: "missing" | "all") {
@@ -245,25 +215,23 @@ function PanelBody({
           <label htmlFor="new-theme-name" className="font-medium">
             Name
           </label>
-          <input
+          <Input
             id="new-theme-name"
             value={newTheme.name}
             maxLength={MAX_THEME_NAME}
             placeholder="Easter 2027"
             onChange={(e) => setNewTheme({ ...newTheme, name: e.target.value, error: null })}
-            className="h-7 w-full rounded-md border border-line-strong bg-field px-2.5 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
           />
           <label htmlFor="new-theme-prompt" className="mt-1.5 font-medium">
             Prompt
           </label>
-          <textarea
+          <Textarea
             id="new-theme-prompt"
             rows={3}
             value={newTheme.prompt}
             maxLength={MAX_THEME_PROMPT}
             placeholder="Describe the look. Say to keep the face the same."
             onChange={(e) => setNewTheme({ ...newTheme, prompt: e.target.value, error: null })}
-            className="block min-h-[74px] w-full resize-y rounded-md border border-line-strong bg-field px-2.5 py-2 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
           />
           {newTheme.error && (
             <span role="alert" className="text-caption1 text-danger-11">
@@ -287,7 +255,7 @@ function PanelBody({
             <label htmlFor="photo-theme-prompt" className="mb-1.5 block font-medium text-fg">
               Prompt
             </label>
-            <textarea
+            <Textarea
               id="photo-theme-prompt"
               rows={3}
               value={prompt}
@@ -295,7 +263,6 @@ function PanelBody({
               onChange={(e) => setDraft({ themeId: theme.id, text: e.target.value })}
               // Kept when the box is left: a theme's prompt is every service's, so it is not written per keystroke.
               onBlur={() => void flushPrompt()}
-              className="block min-h-[74px] w-full resize-y rounded-md border border-line-strong bg-field px-2.5 py-2 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
             />
             <div className="mt-1 flex justify-between gap-2 text-[11.5px] leading-[15px] text-fg-subtle">
               <span>Changes the prompt for every service using {themeLabel(theme)}</span>

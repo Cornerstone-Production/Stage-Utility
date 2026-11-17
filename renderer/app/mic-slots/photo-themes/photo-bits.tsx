@@ -1,10 +1,15 @@
 // Small parts the Theme photos panel and the Manage themes view share: a photo
 // in a circle, a numeral, a status chip, a pair of photos with an arrow.
 
-import { AlertCircleIcon, ChevronRightIcon, ImageIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { AlertCircleIcon, ChevronRightIcon, ImageIcon, SparklesIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import type { PlanChoiceDTO } from "@main/types/photo-themes";
+
+import { SegmentedSwitch } from "../../../components/ui";
+import { invoke as ipc } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
+import type { PhotoPlan, PhotoThemes } from "./use-photo-themes";
 
 /** A numeral, in Plex Mono. */
 export function Num({ children }: { children: ReactNode }) {
@@ -99,5 +104,40 @@ export function InlineBox({ label, children, danger }: { label: string; children
     <div role="group" aria-label={label} className={cn("flex flex-col gap-1.5 rounded-lg bg-fill p-2 text-caption1", danger && "ring-1 ring-danger-9/30")}>
       {children}
     </div>
+  );
+}
+
+/**
+ * Escape closes an open confirm and nothing else. The sheet puts itself away on Escape
+ * too, from a listener further out, so this takes the key first (capture) and marks it
+ * handled: the confirm goes, the sheet stays, wherever focus happens to be.
+ */
+export function useEscapeFirst(onEscape: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      onEscape();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onEscape]);
+}
+
+/** The Original | Themed switch: what this service's screens show. Shared by the top bar and the panel's header. */
+export function ShowSwitch({ choice, plan, photos }: { choice: PlanChoiceDTO | null; plan: PhotoPlan; photos: PhotoThemes }) {
+  const show = choice?.show ?? "themed";
+  return (
+    <SegmentedSwitch
+      label="Photos shown on screens for this service"
+      value={show}
+      onChange={(next) =>
+        void photos.write("show", () => ipc("photoThemes:choosePlan", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, sortDate: plan.sortDate, show: next }))
+      }
+      options={[
+        { id: "original", label: "Original", Icon: ImageIcon },
+        { id: "themed", label: "Themed", Icon: SparklesIcon },
+      ]}
+    />
   );
 }

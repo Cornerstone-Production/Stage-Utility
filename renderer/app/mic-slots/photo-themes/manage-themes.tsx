@@ -11,7 +11,7 @@ import { useState } from "react";
 
 import { MAX_THEME_NAME, MAX_THEME_PROMPT, type ThemeDTO, type ThemePersonDTO } from "@main/types/photo-themes";
 
-import { Button } from "../../../components/ui";
+import { Button, Input, Textarea } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { useCardOps } from "./card-ops";
 import { Num } from "./photo-bits";
@@ -24,15 +24,12 @@ export function ManageThemes({
   photos,
   themes,
   themeId,
-  originals,
   onPick,
   onBack,
 }: {
   photos: PhotoThemes;
   themes: ThemeDTO[];
   themeId: string | null;
-  /** Planning Center photos where this service's roster knows them. Others are left out. */
-  originals: ReadonlyMap<string, string | null>;
   onPick: (themeId: string) => void;
   onBack: () => void;
 }) {
@@ -70,7 +67,7 @@ export function ManageThemes({
           <p className="m-0 text-caption1 text-fg-muted">Open a theme to rename it, change its prompt, and see every person in it across all weeks.</p>
         </>
       ) : (
-        <ThemeDetail key={theme.id} theme={theme} photos={photos} ops={ops} originals={originals} onDeleted={onBack} />
+        <ThemeDetail key={theme.id} theme={theme} photos={photos} ops={ops} onDeleted={onBack} />
       )}
     </>
   );
@@ -80,13 +77,11 @@ function ThemeDetail({
   theme,
   photos,
   ops,
-  originals,
   onDeleted,
 }: {
   theme: ThemeDTO;
   photos: PhotoThemes;
   ops: ReturnType<typeof useCardOps>;
-  originals: ReadonlyMap<string, string | null>;
   onDeleted: () => void;
 }) {
   // What is typed and not yet kept. The boxes show it over what the server holds,
@@ -95,22 +90,33 @@ function ThemeDetail({
   const name = draft.name ?? theme.name;
   const prompt = draft.prompt ?? theme.prompt;
 
-  /** Keep a field when it is left. A refusal puts the box back to what the server holds. */
-  async function keep(field: "name" | "prompt") {
+  /** Keep a field when it is left, and say whether the server holds what was typed. A refusal puts the box back to what it holds. */
+  async function keep(field: "name" | "prompt"): Promise<boolean> {
     const typed = draft[field];
-    if (typed === undefined) return;
+    if (typed === undefined) return true;
     const value = field === "name" ? typed.trim() : typed;
     const clear = () => setDraft(({ [field]: _gone, ...rest }) => rest);
-    if (value === theme[field] || !value.trim()) return clear();
-    const r = await photos.write(`${field}:${theme.id}`, () => ipc("photoThemes:updateTheme", { id: theme.id, [field]: value }));
-    // Landed: read it back before the box stops showing what was typed, so it never flashes the old text.
-    if (r.ok) await photos.reread();
+    if (value === theme[field] || !value.trim()) {
+      clear();
+      return true;
+    }
+    let ok: boolean;
+    if (field === "prompt") ok = await photos.savePrompt(theme.id, value);
+    else {
+      ok = (await photos.write(`name:${theme.id}`, () => ipc("photoThemes:updateTheme", { id: theme.id, name: value }))).ok;
+      // Read it back before the box stops showing what was typed.
+      if (ok) await photos.reread();
+    }
     clear();
+    return ok;
   }
 
   async function act(p: ThemePersonDTO, action: CardAction) {
-    if (action === "redo") await photos.write(`redo:${theme.id}:${p.personId}`, () => ipc("photoThemes:redo", { id: theme.id, personId: p.personId }));
-    else if (action === "approve") await photos.write(`approve:${theme.id}:${p.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: p.personId }));
+    // A redo is billed from the prompt the server holds: keep what was typed first, and send nothing if it is refused.
+    if (action === "redo") {
+      if (!(await keep("prompt"))) return;
+      await photos.write(`redo:${theme.id}:${p.personId}`, () => ipc("photoThemes:redo", { id: theme.id, personId: p.personId }));
+    } else if (action === "approve") await photos.write(`approve:${theme.id}:${p.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: p.personId }));
     else await photos.write(`keep:${theme.id}:${p.personId}`, () => ipc("photoThemes:keep", { id: theme.id, personId: p.personId }));
   }
 
@@ -119,7 +125,6 @@ function ThemeDetail({
     for (const a of ["redo", "approve", "keep"] as const) if (photos.isBusy(`${a}:${theme.id}:${p.personId}`)) out.add(a);
     return out;
   };
-  const field = "block w-full rounded-md border border-line-strong bg-field px-2.5 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
 
   return (
     <>
@@ -127,29 +132,27 @@ function ThemeDetail({
         <label htmlFor="manage-theme-name" className="mb-1.5 block font-medium text-fg">
           Name
         </label>
-        <input
+        <Input
           id="manage-theme-name"
           value={name}
           maxLength={MAX_THEME_NAME}
           onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           onBlur={() => void keep("name")}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          className={`${field} h-7`}
-        />
+                  />
       </div>
       <div>
         <label htmlFor="manage-theme-prompt" className="mb-1.5 block font-medium text-fg">
           Prompt
         </label>
-        <textarea
+        <Textarea
           id="manage-theme-prompt"
           rows={3}
           value={prompt}
           maxLength={MAX_THEME_PROMPT}
           onChange={(e) => setDraft((d) => ({ ...d, prompt: e.target.value }))}
           onBlur={() => void keep("prompt")}
-          className={`${field} min-h-[74px] resize-y py-2`}
-        />
+                  />
         <div className="mt-1 text-[11.5px] leading-[15px] text-fg-subtle">Changes the prompt for every service using {themeLabel(theme)}; existing approved photos stay until redone.</div>
       </div>
       <ThemeFacts theme={theme} />
@@ -166,7 +169,7 @@ function ThemeDetail({
               <PersonCard
                 person={p}
                 theme={theme}
-                original={originals.has(p.personId) ? originals.get(p.personId) : undefined}
+                original={p.originalUrl}
                 context={{}}
                 editedCaption="Themed"
                 busy={busy(p)}

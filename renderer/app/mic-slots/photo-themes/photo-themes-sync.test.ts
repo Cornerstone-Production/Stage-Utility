@@ -30,5 +30,7 @@ describe("readFrame", () => {
   test("a new epoch is a restart, whatever the seq", () => {
     assert.deepEqual(readFrame(frame(5), frame(1, "e2"), false), { reread: true, why: "restart" });
     assert.deepEqual(readFrame(frame(5), frame(6, "e2"), false), { reread: true, why: "restart" });
+    // A restarted server's first frame can repeat the last seq the page saw: still a restart, not "nothing new".
+    assert.deepEqual(readFrame(frame(5), frame(5, "e2"), false), { reread: true, why: "restart" });
   });
 });

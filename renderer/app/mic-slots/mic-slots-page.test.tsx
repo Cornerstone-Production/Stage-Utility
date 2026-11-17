@@ -1818,10 +1818,91 @@ describe("Theme photos in the top bar", () => {
     assert.ok(screen.getByRole("group", { name: /Photos shown on screens/ }));
   });
 
-  test("opening the sheet puts the inspector away", async () => {
+  const inspectorState = () => document.querySelector("[data-mic-inspector]")?.getAttribute("data-mic-inspector");
+  /** What a real click does: down (focus lands here, and selects), then up, then click. */
+  const press = async (el: Element) => {
+    await act(async () => {
+      fireEvent.pointerDown(el, { button: 0 });
+      fireEvent.mouseDown(el, { button: 0 });
+      (el as HTMLElement).focus();
+      fireEvent.pointerUp(el, { button: 0 });
+      fireEvent.mouseUp(el, { button: 0 });
+      fireEvent.click(el);
+    });
+    await settle();
+  };
+  const sheet = () => document.querySelector("[data-photo-themes-panel]");
+
+  test("a slot is selected, then Theme photos opens: the inspector gives way", async () => {
+    planId = "p1";
+    await mount();
+    await press(card("a"));
+    assert.equal(inspectorState(), "open", "selecting a slot opens the inspector");
+    await click(button());
+    assert.ok(sheet());
+    assert.equal(inspectorState(), "closed", "one sheet at a time on the right");
+  });
+
+  test("Theme photos is open, then a slot is selected: the sheet gives way to the inspector", async () => {
     planId = "p1";
     await mount();
     await click(button());
-    assert.equal(document.querySelector("[data-mic-inspector]")?.getAttribute("data-mic-inspector"), "closed");
+    assert.ok(sheet());
+    await press(card("a"));
+    assert.equal(sheet(), null, "selecting a slot puts Theme photos away");
+    assert.equal(inspectorState(), "open");
+  });
+
+  test("with a plan present, switching to its Default turns Theme photos off and offers the plan", async () => {
+    planId = "p1";
+    await mount();
+    assert.equal(button().disabled, false);
+    await click(screen.getByRole("button", { name: /default$/ }));
+    assert.equal(button().disabled, true);
+    const line = document.querySelector("[data-theme-photos-reason]")!;
+    assert.match(line.textContent ?? "", /per service: pick a plan/);
+    await click(within(line as HTMLElement).getByRole("button", { name: "Switch to this plan" }));
+    assert.equal(button().disabled, false, "and the offered switch goes back to the plan");
+  });
+
+  test("a key that tested invalid turns it off, saying to connect OpenAI", async () => {
+    planId = "p1";
+    photoState = { ...PHOTO_STATE(), connection: { method: "api-key", hint: "sk-…3f2a", state: "invalid-key", reason: "OpenAI rejected the API key", checkedAt: "" } };
+    await mount();
+    assert.equal(button().disabled, true);
+    assert.match(document.querySelector("[data-theme-photos-reason]")?.textContent ?? "", /Connect OpenAI in Integrations/);
+  });
+
+  test("a reason that appears while the sheet is open closes it, and it does not reopen when the reason clears", async () => {
+    planId = "p1";
+    await mount();
+    await click(button());
+    assert.ok(sheet());
+    photoState = { ...PHOTO_STATE(), connection: { method: "api-key", hint: "sk-…3f2a", state: "invalid-key", reason: "x", checkedAt: "" } };
+    await act(async () => emit("photo-themes:changed", { epoch: "e", seq: 1, running: 0, queued: 0, active: [] }));
+    await settle();
+    assert.equal(sheet(), null);
+    assert.equal(button().disabled, true);
+    photoState = PHOTO_STATE();
+    await act(async () => emit("photo-themes:changed", { epoch: "e", seq: 2, running: 0, queued: 0, active: [] }));
+    await settle();
+    assert.equal(button().disabled, false);
+    assert.equal(sheet(), null, "it stays shut until the operator opens it");
+  });
+
+  test("Escape in a board's rename box ends the rename and leaves Theme photos open", async () => {
+    planId = "p1";
+    await mount();
+    await click(button());
+    await openMenu(screen.getByRole("button", { name: "Board actions for Left wall" }));
+    await choose(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByLabelText("Rename Left wall");
+    // jsdom leaves the closed menu's Radix layer registered, and it eats one Escape on the way: spend it
+    // on the body (the sheet and the rename must both survive that), so the next one reaches the input.
+    await act(async () => void fireEvent.keyDown(document.body, { key: "Escape" }));
+    assert.ok(sheet());
+    await act(async () => void fireEvent.keyDown(input, { key: "Escape" }));
+    assert.equal(screen.queryByLabelText("Rename Left wall"), null, "the rename ended");
+    assert.ok(sheet(), "the sheet did not");
   });
 });

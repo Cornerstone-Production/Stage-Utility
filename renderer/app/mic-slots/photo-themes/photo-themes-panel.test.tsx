@@ -94,7 +94,7 @@ const theme = (id: string, name: string, over: Record<string, unknown> = {}) => 
   ...over,
 });
 const state = () => ({
-  themes: themes.map((t) => (t.id === choice?.themeId ? { ...t, people } : t)),
+  themes: themes.map((t) => (t.id === choice?.themeId ? { ...t, people: people.map((p) => ({ ...p, originalUrl: p.personId === "9003" ? null : `https://avatars.example/${p.personId}` })) } : t)),
   plans: choice ? [choice] : [],
   connection,
   running: 0,
@@ -443,12 +443,50 @@ describe("what costs money", () => {
     assert.match(document.body.textContent ?? "", /The prompt is too long/);
   });
 
-  test("Redo sends the plan and the person, after saving a pending prompt", async () => {
+  test("Redo sends the plan and the person, after the typed prompt is kept", async () => {
     await mount();
+    const box = screen.getByLabelText("Prompt");
+    fireEvent.change(box, { target: { value: "Snow, keep the face the same" } });
+    await act(async () => void fireEvent.blur(box));
+    await settle();
     await click(screen.getByRole("button", { name: "Redo Alex R." }));
-    const redo = writes().find((c) => c.path.endsWith("/people/9001/redo"))!;
-    assert.deepEqual(redo.body, { planId: "7001", serviceTypeId: "100" });
+    const order = writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`);
+    assert.deepEqual(order, ["PATCH /api/photo-themes/themes/T", "POST /api/photo-themes/themes/T/people/9001/redo"]);
+    assert.deepEqual(writes()[1]!.body, { planId: "7001", serviceTypeId: "100" });
   });
+
+  test("Redo clicked with the prompt typed and never blurred (a keyboard press) keeps it first", async () => {
+    await mount();
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Snow, keep the face the same" } });
+    await click(screen.getByRole("button", { name: "Redo Alex R." }));
+    const order = writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`);
+    assert.deepEqual(order, ["PATCH /api/photo-themes/themes/T", "POST /api/photo-themes/themes/T/people/9001/redo"]);
+  });
+
+  // A real click is mousedown (the box loses focus, so its blur starts the save), then click.
+  // The save is still out when the click lands. The click must WAIT for it, not refuse and send nothing.
+  for (const [what, press] of [
+    ["Generate", () => screen.getByRole("button", { name: /Generate 1 for/ })],
+    ["Redo", () => screen.getByRole("button", { name: "Redo Alex R." })],
+  ] as const) {
+    test(`blur, then click ${what}, with the save still out: the save finishes, then ${what} is sent, once`, async () => {
+      people = [person("9001", "Alex R.", "approved"), person("9004", "Dana K.", "none")];
+      let release!: () => void;
+      hold = new Promise<void>((r) => (release = r));
+      await mount();
+      const box = screen.getByLabelText("Prompt");
+      fireEvent.change(box, { target: { value: "Snow, keep the face the same" } });
+      const btn = press();
+      await act(async () => {
+        fireEvent.blur(box);
+        fireEvent.click(btn);
+      });
+      release();
+      await settle();
+      const order = writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`);
+      assert.deepEqual(order, ["PATCH /api/photo-themes/themes/T", what === "Generate" ? "POST /api/photo-themes/plans/7001/generate" : "POST /api/photo-themes/themes/T/people/9001/redo"]);
+    });
+  }
 
   test("Redo all, from the prompt-changed banner, is Generate over everyone", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
@@ -523,6 +561,46 @@ describe("themes: creating one, and Manage themes", () => {
     assert.equal(document.querySelectorAll("[data-person-card]").length, 3, "everyone in the theme, across weeks");
   });
 
+  test("Redo in Manage sends nothing when the typed prompt is refused: it would be billed from the old one", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Manage themes" }));
+    await click(screen.getByRole("button", { name: /Christmas 2026/ }));
+    refuse[`PATCH /api/photo-themes/themes/${XMAS}`] = { status: 400, error: "The prompt is too long" };
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Snow" } });
+    await click(screen.getByRole("button", { name: "Redo Alex R." }));
+    assert.deepEqual(writes().filter((c) => c.path.endsWith("/redo")), []);
+    assert.equal((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value, "Christmas lights, keep the face the same");
+  });
+
+  test("Redo in Manage keeps the typed prompt first, also with the save still out from the blur", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Manage themes" }));
+    await click(screen.getByRole("button", { name: /Christmas 2026/ }));
+    let release!: () => void;
+    hold = new Promise<void>((r) => (release = r));
+    const box = screen.getByLabelText("Prompt");
+    fireEvent.change(box, { target: { value: "Snow" } });
+    const redo = screen.getByRole("button", { name: "Redo Alex R." });
+    await act(async () => {
+      fireEvent.blur(box);
+      fireEvent.click(redo);
+    });
+    release();
+    await settle();
+    assert.deepEqual(writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`), ["PATCH /api/photo-themes/themes/T", "POST /api/photo-themes/themes/T/people/9001/redo"]);
+  });
+
+  test("every Manage card draws the person's original beside the edit, from the server's person; none for a person with no photo", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Manage themes" }));
+    await click(screen.getByRole("button", { name: /Christmas 2026/ }));
+    const original = (id: string) => card(id).querySelector("img[alt$='original photo']")?.getAttribute("src") ?? null;
+    assert.equal(original("9001"), "/photos?u=" + encodeURIComponent("https://avatars.example/9001") + "&s=136");
+    assert.equal(original("9002"), "/photos?u=" + encodeURIComponent("https://avatars.example/9002") + "&s=136");
+    assert.equal(original("9003"), null, "no Planning Center photo, no image");
+    assert.ok(card("9003").textContent?.includes("Original"), "but the card still has its Original slot");
+  });
+
   test("a manage card can be Approved: a redo made there waits for review like every other", async () => {
     await mount();
     await click(screen.getByRole("button", { name: "Manage themes" }));
@@ -563,5 +641,33 @@ describe("the keyboard", () => {
     assert.equal(document.activeElement?.getAttribute("data-photo-themes-panel"), "true", "focus moved into the sheet, not onto <body>");
     await act(async () => void fireEvent.keyDown(document.body, { key: "Escape" }));
     assert.equal(closed, 1);
+  });
+});
+
+describe("Escape takes the confirm first", () => {
+  const esc = async () => act(async () => void fireEvent.keyDown(document.body, { key: "Escape" }));
+
+  test("an open Move, Copy or Remove confirm closes on Escape and the sheet stays; the next Escape closes the sheet", async () => {
+    await mount();
+    await openMenu(screen.getByRole("button", { name: "More for Alex R." }));
+    await choose(screen.getByRole("menuitem", { name: "Remove from theme…" }));
+    assert.ok(screen.getByRole("group", { name: "Confirm remove" }));
+    await esc();
+    assert.equal(screen.queryByRole("group", { name: "Confirm remove" }), null, "the confirm is gone");
+    assert.equal(closed, 0, "the sheet is not");
+    // A Radix tooltip left open by the pointer takes one Escape of its own first, as it does anywhere: so up to two.
+    for (let i = 0; i < 2 && closed === 0; i++) await esc();
+    assert.equal(closed, 1);
+  });
+
+  test("an open Delete theme confirm closes on Escape and the sheet stays", async () => {
+    await mount();
+    await click(screen.getByRole("button", { name: "Manage themes" }));
+    await click(screen.getByRole("button", { name: /Christmas 2026/ }));
+    await click(screen.getByRole("button", { name: "Delete theme…" }));
+    await esc();
+    assert.equal(screen.queryByRole("group", { name: "Confirm delete theme" }), null);
+    assert.equal(closed, 0);
+    assert.deepEqual(writes(), [], "closing it sends nothing");
   });
 });

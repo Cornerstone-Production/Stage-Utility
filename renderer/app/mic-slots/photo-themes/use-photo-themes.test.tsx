@@ -140,6 +140,10 @@ describe("what a photo-themes:changed frame makes the page read", () => {
     await act(async () => emit(frame(11, "e2")));
     await settle();
     assert.equal(gets(), before + 1);
+    // And when the restarted server's first frame repeats the seq this page last saw.
+    await act(async () => emit(frame(11, "e3")));
+    await settle();
+    assert.equal(gets(), before + 2, "a new epoch is a restart even when its seq is the one already seen");
   });
 
   test("a replayed frame, from the cache a later page mounts onto, reads nothing", async () => {

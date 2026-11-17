@@ -8,7 +8,7 @@ import type { ThemeDTO } from "@main/types/photo-themes";
 
 import { invoke as ipc } from "../../../lib/api";
 import { Button } from "../../../components/ui";
-import { Num } from "./photo-bits";
+import { Num, useEscapeFirst } from "./photo-bits";
 import { keptDay, usedBy } from "./photo-format";
 import type { PhotoThemes } from "./use-photo-themes";
 
@@ -36,20 +36,22 @@ export function ThemeFacts({ theme, showPeople }: { theme: ThemeDTO; showPeople?
 /** "Delete theme…", and once pressed the confirm that names what it takes with it. */
 export function DeleteTheme({ theme, photos, onDeleted }: { theme: ThemeDTO; photos: PhotoThemes; onDeleted?: () => void }) {
   const [asking, setAsking] = useState(false);
+  if (asking) return <DeleteConfirm theme={theme} photos={photos} onDeleted={onDeleted} close={() => setAsking(false)} />;
+  return (
+    <div>
+      <Button variant="transparent" size="small" className="text-danger-11" onClick={() => setAsking(true)}>
+        <TrashIcon className="size-3.5" />
+        Delete theme…
+      </Button>
+    </div>
+  );
+}
+
+function DeleteConfirm({ theme, photos, onDeleted, close }: { theme: ThemeDTO; photos: PhotoThemes; onDeleted?: () => void; close: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  useEscapeFirst(close);
   const used = usedBy(theme);
   const photoCount = theme.people.filter((p) => p.approved || p.pending?.url).length;
-
-  if (!asking) {
-    return (
-      <div>
-        <Button variant="transparent" size="small" className="text-danger-11" onClick={() => setAsking(true)}>
-          <TrashIcon className="size-3.5" />
-          Delete theme…
-        </Button>
-      </div>
-    );
-  }
   return (
     <div role="group" aria-label="Confirm delete theme" className="flex flex-col gap-1.5 rounded-[10px] border border-line px-3 py-2.5 text-[12.5px] leading-[17px]">
       <span>
@@ -75,7 +77,7 @@ export function DeleteTheme({ theme, photos, onDeleted }: { theme: ThemeDTO; pho
         >
           Delete theme
         </Button>
-        <Button variant="filled" size="small" onClick={() => (setAsking(false), setError(null))}>
+        <Button variant="filled" size="small" onClick={close}>
           Cancel
         </Button>
       </span>

@@ -9,9 +9,9 @@ import { useState, type ReactNode } from "react";
 
 import type { ThemeDTO, ThemePersonDTO } from "@main/types/photo-themes";
 
-import { Button, MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "../../../components/ui";
+import { Button, MENU_ITEM, MENU_ITEM_DANGER, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, menuContent } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
-import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, type ChipTone } from "./photo-bits";
+import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, useEscapeFirst, type ChipTone } from "./photo-bits";
 import { serviceDay } from "./photo-format";
 
 export type CardAction = "redo" | "approve" | "keep";
@@ -224,6 +224,7 @@ export function OpBox({
   onGo: () => void;
   onCancel: () => void;
 }) {
+  useEscapeFirst(onCancel);
   const services = theme.plans.length;
   const serviceWord = services === 1 ? "service" : "services";
   const themeName = theme.name.trim() || "Untitled theme";
@@ -261,24 +262,21 @@ export function OpBox({
     ) : (
       <>Copies {person.name}'s photo. Nothing changes here.</>
     );
-  const selectId = `op-target-${theme.id}-${person.personId}`;
   return (
     <InlineBox label={`Confirm ${verb.toLowerCase()}`}>
-      <label htmlFor={selectId} className="font-medium">
-        {verb} to theme
-      </label>
-      <select
-        id={selectId}
-        value={op.target ?? ""}
-        onChange={(e) => onTarget(e.target.value)}
-        className="h-7 w-full rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
-      >
-        {others.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name.trim() || "Untitled theme"}
-          </option>
-        ))}
-      </select>
+      <span className="font-medium">{verb} to theme</span>
+      <Select value={op.target ?? ""} onValueChange={onTarget}>
+        <SelectTrigger aria-label={`${verb} to theme`} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {others.map((t) => (
+            <SelectItem key={t.id} value={t.id}>
+              {t.name.trim() || "Untitled theme"}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <span>
         {what}
         {clash}

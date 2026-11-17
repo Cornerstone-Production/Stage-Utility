@@ -160,6 +160,29 @@ describe("Save", () => {
   });
 });
 
+describe("the key and the console", () => {
+  test("a key that is saved, and then tested, is written to no console method", async () => {
+    current = conn({ method: null, hint: null, state: "not-connected" });
+    answers["PUT /api/openai/key"] = () => ({ body: conn({ state: "unchecked" }) });
+    answers["POST /api/openai/test"] = () => ({ body: conn({ state: "connected" }) });
+    const seen: string[] = [];
+    const methods = ["log", "info", "warn", "error", "debug"] as const;
+    const real = Object.fromEntries(methods.map((m) => [m, console[m]]));
+    for (const m of methods) console[m] = (...a: unknown[]) => void seen.push(a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" "));
+    try {
+      const { container } = await mount();
+      type(container, KEY);
+      await act(async () => void fireEvent.click(button(container, /^Save/)!));
+      await settle();
+      await act(async () => void fireEvent.click(button(container, /^Test/)!));
+      await settle();
+    } finally {
+      for (const m of methods) console[m] = real[m] as never;
+    }
+    assert.deepEqual(seen.filter((l) => l.includes(KEY)), [], "the key must reach no console line");
+  });
+});
+
 describe("Test and Remove key", () => {
   test("Test says the key works", async () => {
     answers["POST /api/openai/test"] = () => ({ body: conn({ state: "connected" }) });

@@ -43,7 +43,7 @@ import { usePhotoThemes, type PhotoPlan } from "./photo-themes/use-photo-themes"
 import { PlanCheck } from "./plan-check";
 import { SlotInspector, SpacerInspector } from "./slot-inspector";
 import { makeSharesWith } from "./shares-with";
-import { TopBar } from "./top-bar";
+import { ThemePhotosReasonLine, TopBar } from "./top-bar";
 import { displayWidthOf, showTargets, useMicSlots, type ShowTarget } from "./use-mic-slots";
 
 /** The slot zones win over a card's own, and a pointer picks by where it is; a
@@ -96,7 +96,9 @@ export function MicSlotsPage() {
   const photos = usePhotoThemes(photoPlan);
   const [photoOpen, setPhotoOpen] = useState(false);
   const photoReason = themePhotosReason({ hasServiceType: !!mic.serviceTypeId, hasPlan: mic.hasPlan, side: mic.side, connection: photos.state?.connection });
-  // Off (a Default, a key removed) closes it: it never lingers over a page it cannot act on.
+  // Off (a Default, a key removed) closes it, and it stays closed when the reason clears:
+  // it never lingers over a page it cannot act on, or reopens unasked.
+  if (photoReason && photoOpen) setPhotoOpen(false);
   const photoPanel = photoOpen && !photoReason && photoPlan !== null ? photoPlan : null;
   const closePhotoPanel = () => {
     setPhotoOpen(false);
@@ -231,15 +233,11 @@ export function MicSlotsPage() {
         savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null}
         photos={photos}
         photoPlan={photoPlan}
+        photoReason={photoReason}
         photoPanelOpen={photoOpen}
-        onPhotoPanel={(open) => {
-          setPhotoOpen(open);
-          if (open) {
-            mic.select(null);
-            setHelpOpen(false);
-          }
-        }}
+        onPhotoPanel={setPhotoOpen}
       />
+      {photoReason && <ThemePhotosReasonLine reason={photoReason} mic={mic} />}
       {mic.targetsFailed != null && (
         <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>
       )}
@@ -355,7 +353,7 @@ export function MicSlotsPage() {
         </aside>
         {photoPanel && (
           <div className="lg:sticky lg:top-14 lg:ml-4 lg:w-[430px] lg:shrink-0">
-            <PhotoThemesPanel plan={photoPanel} planLabel={mic.label} photos={photos} onClose={closePhotoPanel} />
+            <PhotoThemesPanel plan={photoPanel} planLabel={mic.typeName ? `${mic.label} · ${mic.typeName}` : mic.label} photos={photos} onClose={closePhotoPanel} />
           </div>
         )}
       </div>

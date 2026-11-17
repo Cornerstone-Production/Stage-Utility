@@ -120,7 +120,43 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
     [qc],
   );
 
-  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, reread, write, isBusy };
+  /**
+   * Keep a typed prompt, and say whether the server holds it afterwards.
+   *
+   * ONE save per theme is in flight at a time, remembered with the text it carries. A
+   * click on Generate or Redo arrives right behind the blur that started the save (the
+   * button's mousedown is what blurs the box), so a second ask for the SAME text waits
+   * for the first and answers what it answered; a refusal there is a refusal here, and
+   * nothing billed goes out. Different text waits for the one before, then saves.
+   */
+  const saves = useRef(new Map<string, { text: string; done: Promise<boolean> }>());
+  const savePrompt = useCallback(
+    async (themeId: string, text: string): Promise<boolean> => {
+      const prior = saves.current.get(themeId);
+      if (prior) {
+        const ok = await prior.done;
+        if (prior.text === text) return ok;
+      }
+      const entry = {
+        text,
+        done: (async () => {
+          const r = await write(`prompt:${themeId}`, () => ipc("photoThemes:updateTheme", { id: themeId, prompt: text }));
+          // Read back before anyone stops showing what was typed, so the box never flashes the old text.
+          if (r.ok) await reread();
+          return r.ok;
+        })(),
+      };
+      saves.current.set(themeId, entry);
+      try {
+        return await entry.done;
+      } finally {
+        if (saves.current.get(themeId) === entry) saves.current.delete(themeId);
+      }
+    },
+    [write, reread],
+  );
+
+  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, reread, write, savePrompt, isBusy };
 }
 
 export type PhotoThemes = ReturnType<typeof usePhotoThemes>;
