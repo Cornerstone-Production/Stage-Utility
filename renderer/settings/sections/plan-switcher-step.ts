@@ -88,10 +88,12 @@ export const UPCOMING_DROPDOWN_LIMIT = 10;
 /**
  * What the middle control's dropdown lists.
  *
- * In `upcoming` this is a WINDOW of the sequence starting at the current target,
- * plus every type's default. The window always contains the current target — a
- * Select whose value is not among its options renders empty, and an operator
- * cannot tell that from "no plan selected".
+ * In `upcoming` this is a WINDOW of the sequence with the current target in its
+ * middle, held full at either end of the list, plus every type's default. The
+ * window always contains the current target — a Select whose value is not among
+ * its options renders empty, and an operator cannot tell that from "no plan
+ * selected". It is centred rather than starting at the target so that, after
+ * jumping ahead, the earlier dates are still in the dropdown to jump back to.
  */
 export function switcherOptions(
   plans: UpcomingPlan[],
@@ -102,7 +104,7 @@ export function switcherOptions(
   if (mode === "within-type") return { plans: seq, defaults: [] };
 
   const at = seq.findIndex((e) => sameTarget(e, current));
-  const from = at === -1 ? 0 : at;
+  const from = at === -1 ? 0 : Math.max(0, Math.min(at - Math.floor(UPCOMING_DROPDOWN_LIMIT / 2), seq.length - UPCOMING_DROPDOWN_LIMIT));
   const window = seq.slice(from, from + UPCOMING_DROPDOWN_LIMIT);
 
   // One default per service type the list carries, in the order the types first
