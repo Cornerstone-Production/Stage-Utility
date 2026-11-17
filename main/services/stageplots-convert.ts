@@ -12,7 +12,9 @@
 // librsvg and libheif inside sharp out of reach of an upload. A PDF is never
 // decoded here; the browser renders its page to a PNG and that is converted.
 
-import type { Metadata, OutputInfo, Sharp, SharpOptions } from "sharp";
+import type { Metadata, OutputInfo } from "sharp";
+
+import { loadSharp } from "./sharp-load.js";
 
 import { errorMessage } from "./errors.js";
 
@@ -24,31 +26,6 @@ export const CONVERTED_LONG_EDGE = 2400;
 export const CONVERTED_MAX_BYTES = 1_000_000;
 /** WebP qualities tried in turn until one comes in under the cap. */
 const QUALITIES = [80, 70, 60, 50, 40] as const;
-
-type SharpFn = (input?: Buffer, options?: SharpOptions) => Sharp;
-let sharpLoad: Promise<SharpFn> | null = null;
-
-/**
- * sharp, loaded the first time a background needs it rather than when the
- * server starts: a platform whose native build is missing or will not load
- * then fails its stage-plot uploads, with the reason, and nothing else. A
- * failed load is tried again on the next upload.
- */
-function loadSharp(): Promise<SharpFn> {
-  sharpLoad ??= import("sharp").then(
-    (m) => {
-      // A Raspberry Pi has little memory to spare, and a background is converted once.
-      m.default.cache({ memory: 20, files: 0 });
-      return m.default as unknown as SharpFn;
-    },
-    (err: unknown) => {
-      sharpLoad = null;
-      // The reason stays on `cause` for the log: it names paths on this machine.
-      throw new Error("image processing is not available on this server: sharp did not load", { cause: err });
-    },
-  );
-  return sharpLoad;
-}
 
 const INPUT = { failOn: "error", limitInputPixels: MAX_SOURCE_PIXELS } as const;
 
