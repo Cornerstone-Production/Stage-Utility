@@ -325,6 +325,19 @@ describe("made from an older photo", () => {
   });
 });
 
+describe("a person's original photo, for Manage themes", () => {
+  it("is their current Planning Center photo where this server has seen it", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    await generated();
+    await photoThemes.approve(theme.id, "1");
+    const of = (id: string) => photoThemes.state().themes.find((t) => t.id === theme.id)!.people.find((p) => p.personId === id)!.originalUrl;
+    assert.equal(of("1"), pcoPhoto("1", 1));
+    // A new upload is what Manage should draw as their original, so it shows what the edit was NOT made from.
+    srv.rosters.set(PLAN, [person("1", 2), person("2")]);
+    assert.equal(of("1"), pcoPhoto("1", 2));
+  });
+});
+
 describe("move, copy and remove", () => {
   it("copy shares the file, move takes it out, remove drops it when nothing else holds it", async () => {
     const a = await themed([person("1")]);
