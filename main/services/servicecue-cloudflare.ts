@@ -16,7 +16,8 @@
 //   4. PUT  /accounts/:id/workers/scripts/:name        the module, its bindings and the assets token
 //
 // Cloudflare swaps a Worker's version atomically, so a deploy that fails at any step leaves the
-// page as it was.
+// page as it was, unless the failure is step 4's answer lost after the swap: the deployer asks
+// what the Worker holds before it calls that a failure.
 //
 // THE TOKEN is an API token with the Workers Scripts edit permission on this one Worker. It goes
 // out only as an `Authorization: Bearer` header, through `cloudflareFetch`, which pins every URL
@@ -77,6 +78,9 @@ export function cloudflareFetch(origin: CloudflareOrigin, url: CloudflareUrl, in
 
 // ── What a failure says ──────────────────────────────────────────────────────
 
+/** The step whose request swaps the Worker: the only one whose failure may have changed the page. */
+export const UPLOAD_WORKER_STEP = "upload the Worker";
+
 /** One request's failure: the HTTP status and Cloudflare's own code and words, when it gave them. */
 export class CloudflareError extends Error {
   constructor(
@@ -95,6 +99,11 @@ export class CloudflareError extends Error {
   /** 401 or 403: the token is not accepted, or not allowed to do this. Waiting does not change that. */
   get refused(): boolean {
     return this.status === 401 || this.status === 403;
+  }
+
+  /** The upload that swaps the Worker, with no answer, a 5xx, or an ok it could not read: the page may run the new build all the same. A 4xx is an answer that it does not, and no earlier step changes the page. */
+  get mayHaveLanded(): boolean {
+    return this.step === UPLOAD_WORKER_STEP && (this.status === null || this.status < 400 || this.status >= 500);
   }
 
   /** For the log and the terminal: `at "upload the files" (HTTP 500, code 10013): <Cloudflare's words>`. */
@@ -513,7 +522,7 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
     form.set("metadata", JSON.stringify(metadata));
     form.set(manifest.mainModule, new File([new Uint8Array(bundle.worker)], manifest.mainModule, { type: "application/javascript+module" }));
     // excludeScript keeps the whole module out of the answer; bindings_inherit=strict is wrangler's, for a Worker that already has secrets.
-    await call("upload the Worker", "PUT", scriptPath, { body: form, query: { excludeScript: "true", bindings_inherit: "strict" } });
+    await call(UPLOAD_WORKER_STEP, "PUT", scriptPath, { body: form, query: { excludeScript: "true", bindings_inherit: "strict" } });
     return { uploaded: assets.uploaded, held: assets.held };
   }
 

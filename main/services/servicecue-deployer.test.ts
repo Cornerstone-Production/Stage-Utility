@@ -476,6 +476,92 @@ describe("a failure", () => {
   });
 });
 
+describe("a deploy whose answer was lost", () => {
+  // Cloudflare swapped the Worker and the answer to the script PUT never arrived, or came back a 5xx. A deploy asked for
+  // with no page read behind it (publishing off, or not yet verified) has no retry to settle it, so the deployer asks.
+  const SCRIPT_PUT = (r: { method: string; path: string }) => r.method === "PUT" && r.path.startsWith(`/accounts/${ACCOUNT_ID}/workers/scripts/`);
+
+  for (const [name, lost] of [
+    ["the connection drops", "drop"],
+    ["Cloudflare answers 502", failure(502, 10013, "bad gateway")],
+  ] as const) {
+    it(`counts as deployed when Cloudflare holds this build: ${name}`, async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      fake.lose = (r) => (SCRIPT_PUT(r) ? lost : undefined);
+      const d = makeDeployer();
+      let told = 0;
+      d.onDeployed(() => (told += 1));
+      const outcome = await d.deployNow();
+      assert.equal(fake.deployed?.tag, BUILD_B, "Cloudflare did not take the deploy; the test is not testing a lost answer");
+      assert.equal(outcome.kind, "deployed", JSON.stringify(outcome));
+      const s = d.status();
+      assert.equal(s.state, "current");
+      assert.equal(s.error, null);
+      assert.equal(s.page?.build, BUILD_B);
+      assert.equal(told, 1, "a held publisher was not told the page was deployed");
+      assert.equal(puts(), 1);
+      assert.ok(lines.some((l) => /^\[servicecue-deploy\] the update failed at "upload the Worker" .*, but Cloudflare holds build bbbbbbbbbbbb as 1\.28\.0: it went through/.test(l)), lines.join("\n"));
+      assert.ok(!lines.some((l) => /The page is unchanged/.test(l)), "a deploy that went through was said to have left the page unchanged");
+    });
+  }
+
+  it("is not known when what Cloudflare holds cannot be read either, and says so instead of the page being unchanged", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    fake.lose = (r) => (SCRIPT_PUT(r) ? "drop" : undefined);
+    fake.respond = (r) => (fake.puts.length > 0 && r.method === "GET" && r.path.endsWith("/deployments") ? failure(500, 10013, "internal error") : undefined);
+    const d = makeDeployer();
+    const outcome = await d.deployNow();
+    assert.equal(outcome.kind, "failed");
+    assert.equal(d.status().state, "failed");
+    assert.equal(d.status().error?.unsure, true, "the card was not told whether the page took it is not known");
+    assert.ok(lines.some((l) => /what Cloudflare holds could not be read to see whether it went through: .*internal error/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => /the update failed at "upload the Worker" \(no answer\).*Whether the page took it is not known\./.test(l)), lines.join("\n"));
+    assert.ok(!lines.some((l) => /The page is unchanged/.test(l)), lines.join("\n"));
+  });
+
+  // A 502 the fake never applies, with Cloudflare already holding a near miss: each half of "this build at this version" is needed.
+  for (const [name, held, confirmDowngrade] of [
+    ["this build at another version", { tag: BUILD_B, message: "Stage Utility 1.20.0" }, false],
+    ["another build at this version", { tag: BUILD_A, message: "Stage Utility 1.28.0" }, true],
+  ] as const) {
+    it(`is a failure when Cloudflare holds ${name}`, async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      fake.deployed = { ...held, at: new Date().toISOString() };
+      fake.respond = (r) => (SCRIPT_PUT(r) ? failure(502, 10013, "bad gateway") : undefined);
+      const d = makeDeployer();
+      const outcome = await d.deployNow({ confirmDowngrade });
+      assert.equal(outcome.kind, "failed", JSON.stringify(outcome));
+      assert.equal(d.status().state, "failed");
+      assert.ok(!lines.some((l) => /it went through/.test(l)), lines.join("\n"));
+    });
+  }
+
+  it("is only asked about for the script upload: an earlier step's failure cannot have changed the page", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    let checked = false;
+    fake.lose = (r) => {
+      if (r.method !== "GET" || !r.path.endsWith("/settings")) return undefined;
+      checked = true;
+      return "drop";
+    };
+    // Were Cloudflare asked after that, it could not answer, and the failure would read as not known.
+    fake.respond = (r) => (checked && r.method === "GET" && r.path.endsWith("/deployments") ? failure(500, 10013, "internal error") : undefined);
+    const d = makeDeployer();
+    assert.equal((await d.deployNow()).kind, "failed");
+    assert.equal(d.status().error?.step, "check the Worker exists");
+    assert.equal(d.status().error?.unsure, undefined, "a failure before the upload was reported as one the page may have taken");
+    assert.ok(lines.some((l) => /at "check the Worker exists" \(no answer\).*The page is unchanged\./.test(l)), lines.join("\n"));
+  });
+
+  it("is a failure when Cloudflare does not hold this build: the answer was an answer", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    fake.respond = (r) => (SCRIPT_PUT(r) ? failure(502, 10013, "bad gateway") : undefined);
+    const d = makeDeployer();
+    assert.equal((await d.deployNow()).kind, "failed");
+    assert.ok(lines.some((l) => /the update failed at "upload the Worker" \(HTTP 502, code 10013\): bad gateway\. The page is unchanged\./.test(l)), lines.join("\n"));
+  });
+});
+
 describe("Update the page now", () => {
   const deployedFrom = (version: string) => {
     fake.deployed = { tag: BUILD_A, message: `Stage Utility ${version}`, at: new Date().toISOString() };

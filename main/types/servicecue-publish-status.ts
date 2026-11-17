@@ -81,7 +81,7 @@ export interface PublisherStatus {
  *  current    the page is the build this server carries
  *  updating   a deploy is under way
  *  waiting    a service is live, or the live state is not known yet after a restart; the update goes out when that is over
- *  failed     the last attempt did not work, or a read of what is deployed did not; the page is unchanged
+ *  failed     the last attempt did not work, or a read of what is deployed did not; the page is unchanged, unless `error.unsure`
  *  newer      the page was deployed from a newer version than this server runs; it is left as it is
  *  other-build  the page was deployed from this server's own version by another build; it is left as it is
  *  no-bundle  this build carries no copy of the page, so there is nothing to deploy
@@ -103,6 +103,8 @@ export interface DeployError {
   refused: boolean;
   /** Epoch ms of the next attempt, or null when there will not be one on its own. */
   retryAt: number | null;
+  /** The deploy got no answer, and what Cloudflare holds could not be read either: the page may have taken it. Absent otherwise. */
+  unsure?: true;
 }
 
 export interface DeployStatus {
