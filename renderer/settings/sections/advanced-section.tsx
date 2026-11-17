@@ -41,7 +41,7 @@ import { WhatsNewButton } from "./whats-new";
 import { PublicLinkPanel } from "./servicecue-public-link";
 import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
-import { BarConfigurator } from "../../app/bar-configurator";
+import { useCustomize } from "../../app/customize-mode";
 import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
@@ -1352,7 +1352,7 @@ export function AdvancedSection({
 }) {
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
-  const [configuringBar, setConfiguringBar] = useState(false);
+  const customize = useCustomize();
   // Bulky and rarely needed — collapsed by default, expanded with a plain
   // inline text button rather than a Collapsible.
   const [showCommands, setShowCommands] = useState(false);
@@ -1409,14 +1409,31 @@ export function AdvancedSection({
         {show("clock-format") && (
           <HourCycleField hourCycle={stageState.hourCycle ?? "24h"} onChange={handlers.handleSetHourCycle} />
         )}
+      </FieldCard>
+    ),
+
+    // How the app's chrome is arranged: the sidebar and the bar above every page.
+    "general/Layout": (show, title) => (
+      <FieldCard title={title}>
+        {show("sidebar") && (
+          <Field orientation="horizontal" data-setting-id="sidebar">
+            <FieldContent>
+              <FieldLabel>{settingText("sidebar").name}</FieldLabel>
+              <FieldDescription>{settingText("sidebar").description}</FieldDescription>
+            </FieldContent>
+            <Button variant="filled" size="small" onClick={() => customize.open("sidebar")}>
+              Customize…
+            </Button>
+          </Field>
+        )}
         {show("context-bar") && (
           <Field orientation="horizontal" data-setting-id="context-bar">
             <FieldContent>
               <FieldLabel>{settingText("context-bar").name}</FieldLabel>
               <FieldDescription>{settingText("context-bar").description}</FieldDescription>
             </FieldContent>
-            <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
-              Configure…
+            <Button variant="filled" size="small" onClick={() => customize.open("bar")}>
+              Customize…
             </Button>
           </Field>
         )}
@@ -1779,7 +1796,6 @@ export function AdvancedSection({
         {panel}
       </div>
 
-      <BarConfigurator open={configuringBar} onOpenChange={setConfiguringBar} />
     </div>
   );
 }

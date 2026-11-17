@@ -20,9 +20,9 @@
 // in an editable field, a ServiceCue plan draws ServiceCueHeader), so the shell
 // adding the section's name above it would be a second, wronger title.
 
-import { screensListViews } from "@main/services/home-view";
-import { viewShownInSidebar, viewSurface, type View } from "@main/types/views";
+import { viewShownInSidebar, type View } from "@main/types/views";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
+import { consoleViews } from "@main/services/sidebar-arrangement";
 
 /** What the chrome needs to know about a page. A Destination minus its icon and
  *  its component, so a page that has no rail entry can still have a name. */
@@ -53,7 +53,9 @@ export interface ActivePage {
  * `/consoles/home` redirects to `/`.
  */
 export function consoleViewList(views: readonly View[] | undefined): View[] {
-  return screensListViews(views ?? []).filter((v) => viewSurface(v) === "console");
+  // The sidebar's own reading of the same question, shared with the server,
+  // which validates and resolves a saved sidebar against it.
+  return consoleViews(views);
 }
 
 /**

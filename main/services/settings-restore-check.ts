@@ -352,6 +352,9 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   // Branding
   appName: (v, k) => {
     required(v, "string", k);
+    // No length limit here. MAX_APP_NAME is enforced where a name is typed; a
+    // backup taken before the limit existed may carry a longer one, and refusing
+    // it would refuse the operator's whole backup over a cosmetic field.
     return (v as string).trim() || "Stage Utility";
   },
   accentColor: (v, k) => (v === null ? null : hex6(v, k)),

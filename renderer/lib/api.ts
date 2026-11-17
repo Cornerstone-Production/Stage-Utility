@@ -597,6 +597,7 @@ export type IpcChannel =
   | "settings:setReconnectSchedule"
   | "settings:setTaperWindow"
   | "settings:setTimezone"
+  | "sidebar:set"
   | "spl:deleteHistory"
   | "spl:getHistory"
   | "spl:getHistoryCurrent"
@@ -1791,6 +1792,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "barItems:set":
       return post<T>("/api/bar-items", p);
+
+    case "sidebar:set":
+      return post<T>("/api/sidebar", p);
 
     case "savedColors:set":
       return post<T>("/api/saved-colors", p);

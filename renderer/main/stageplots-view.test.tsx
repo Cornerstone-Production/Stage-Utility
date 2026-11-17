@@ -46,7 +46,8 @@ const { PrintSheet, printedDate, printLayout, legendLines } = await import("./st
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
-const { DESTINATIONS, NAV_GROUPS } = await import("../app/destinations.js");
+const { DESTINATIONS } = await import("../app/destinations.js");
+const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 
@@ -430,9 +431,10 @@ describe("/stageplots", () => {
     assert.ok(isOperatorPath("/stageplots"));
     assert.ok(isOperatorPath("/stageplots/manage"));
     assert.ok(isOperatorPath("/stageplots/edit"));
-    assert.ok(DESTINATIONS.some((d) => d.path === "/stageplots/manage" && d.label === "Stage plots"));
-    assert.ok(NAV_GROUPS.find((g) => g.label === "Content")?.paths.includes("/stageplots/manage"));
-    assert.ok(!NAV_GROUPS.some((g) => g.paths.includes("/stageplots")), "the crew's page is not in the rail");
+    assert.ok(DESTINATIONS.some((d) => d.id === "stageplots" && d.path === "/stageplots/manage" && d.label === "Stage plots"));
+    assert.ok(DEFAULT_SIDEBAR.find((g) => g.label === "Content")?.members.includes("stageplots"));
+    const inRail = new Set(DEFAULT_SIDEBAR.flatMap((g) => g.members));
+    assert.ok(!DESTINATIONS.some((d) => inRail.has(d.id) && d.path === "/stageplots"), "the crew's page is not in the rail");
   });
 
   test("the crew's page is read-only: its own heading, no Edit, no Add a plot", async () => {

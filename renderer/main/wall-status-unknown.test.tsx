@@ -62,6 +62,7 @@ const STATE = {
   timezone: null,
   barItems: [],
   barMobileItems: [],
+  sidebar: { sections: [], hidden: [] },
   views: [],
   outputs: [{ id: "out-1", name: "Left Display", viewId: null }],
   devices: [],

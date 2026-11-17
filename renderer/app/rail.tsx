@@ -15,7 +15,7 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { ConsoleRailIcon } from "../components/console-rail-icon";
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { EyeOffIcon, LockIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PencilIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarGroupLabel,
@@ -27,7 +27,7 @@ import { BrandHeader } from "../settings/brand-header";
 import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
-import { ContextMenu } from "../components/ui/context-menu";
+import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
 import { plural } from "@main/services/plural";
@@ -40,14 +40,11 @@ import { errorMessage } from "@main/services/errors";
 import { useUpdateStatus } from "./queries";
 import { useNotSetUpCount } from "./screens/use-devices";
 import { advancedRailPath, useAdvancedSignals } from "./advanced-signals";
-import {
-  ALL_DESTINATIONS,
-  DESTINATIONS,
-  NAV_GROUPS,
-  SETTINGS_DESTINATIONS,
-  UNGROUPED_PATHS,
-  type Destination,
-} from "./destinations";
+import { ALL_DESTINATIONS, destinationsById, type Destination } from "./destinations";
+import { consoleMemberId, isConsoleId, LOCKED_PAGE } from "@main/services/sidebar-arrangement";
+import { useCustomize, useResolvedSidebar } from "./customize-mode";
+import { movePage, sectionOf } from "./sidebar-edits";
+import { RailEditor } from "./rail-editor";
 import { cn } from "../lib/cn";
 
 /** The Screens page's route: the row that carries the count of screens not set up. */
@@ -145,6 +142,8 @@ export function Rail({
   const activePath = resolvePage(pathname, consoleEntries.map((c) => c.page))?.page.path ?? null;
 
   const consoles: Destination[] = consoleEntries.map(({ view, page }) => ({
+    // The sidebar's id for it: the view's, never the path.
+    id: consoleMemberId(view.id),
     // path, label and description all come from consolePageFor, so the rail row
     // and the page header cannot name the same console two different things.
     ...page,
@@ -158,8 +157,118 @@ export function Rail({
 
   const active = [...ALL_DESTINATIONS, ...consoles].find((d) => d.path === activePath) ?? null;
 
+  // Every row the sidebar can draw, by its id: a page's route, a console's path.
+  // A Map, because the ids come from a saved arrangement.
+  const byId = destinationsById([...ALL_DESTINATIONS, ...consoles]);
+  const customize = useCustomize();
+  const resolved = useResolvedSidebar();
+
+  /** A row's status mark and its spoken form. */
+  function marksFor(d: Destination): { badge?: ReactNode; ariaLabel?: string } {
+    if (d.path === SCREENS_PATH) {
+      const waiting = notSetUpCount;
+      return waiting > 0
+        ? { badge: <CountBadge count={waiting} compact={railed} />, ariaLabel: `${d.label}, ${waiting} not set up` }
+        : {};
+    }
+    if (d.path !== ADVANCED_PATH) return {};
+    // Advanced is where an update is installed, so it is where the dot goes. It
+    // follows AVAILABILITY, not whether the toast fired: dismiss a toast and the
+    // dot stays until the update is actually taken. Host names waiting for a
+    // decision live there too, and take the badge as a count, the way Screens
+    // counts devices not set up.
+    const names = hostNamesWaiting;
+    const duplicate = duplicateServers > 0;
+    const said: string[] = [];
+    if (duplicate) said.push("another server is using this server's id");
+    if (updateAvailable) said.push("update available");
+    if (names > 0) said.push(`${plural(names, "host name")} waiting`);
+    let badge: ReactNode;
+    // Red, and first: screens are switching between two servers now. The
+    // other marks are things waiting, not things wrong.
+    if (duplicate) badge = <span title="Another server is using this server's id" className="block size-1.5 rounded-full bg-danger-9" />;
+    else if (names > 0) badge = <CountBadge count={names} compact={railed} />;
+    else if (updateAvailable) badge = <span title="Update available" className="block size-1.5 rounded-full bg-accent" />;
+    return { badge, ariaLabel: said.length > 0 ? `${d.label}, ${said.join(", ")}` : undefined };
+  }
+
+  // The rail's own menu: from a heading, the brand or empty space, and under
+  // every page's own items.
+  const railMenuItems: ContextMenuItem[] = [
+    { label: "Customize sidebar…", icon: <PencilIcon className="size-3.5" />, onSelect: () => customize.open("sidebar") },
+    ...(isMobile
+      ? []
+      : [
+          {
+            label: railed ? "Expand sidebar" : "Collapse sidebar",
+            icon: railed ? <PanelLeftOpenIcon className="size-3.5" /> : <PanelLeftCloseIcon className="size-3.5" />,
+            onSelect: onToggleCollapsed,
+          },
+          { label: "Reset sidebar width", onSelect: onResetWidth },
+        ]),
+  ];
+
+  /** A page's menu: Hide and Move to, so a one-off change never needs the mode.
+   *  A console offers Hide only: it stays in Consoles. */
+  function rowMenuItems(d: Destination): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [];
+    if (d.id === LOCKED_PAGE) {
+      items.push({ label: "Advanced can't be hidden", icon: <LockIcon className="size-3.5" />, disabled: true });
+    } else {
+      items.push({
+        label: `Hide “${d.label}”`,
+        icon: <EyeOffIcon className="size-3.5" />,
+        onSelect: () => customize.hide(d.id, d.label),
+      });
+    }
+    if (!isConsoleId(d.id)) {
+      const current = sectionOf(resolved, d.id);
+      const targets = resolved.sections.filter((s) => s !== current && s.kind !== "consoles");
+      if (targets.length > 0) {
+        items.push({ heading: true, label: "Move to" });
+        for (const s of targets) {
+          items.push({
+            label: s.label || "Top, beside Home",
+            onSelect: () =>
+              customize.apply(movePage(resolved, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
+          });
+        }
+      }
+    }
+    return [...items, { separator: true }, ...railMenuItems];
+  }
+
+  const [railMenu, setRailMenu] = useState<{ x: number; y: number } | null>(null);
+  const railTrigger = useContextMenuTrigger((point) => setRailMenu(point));
+
+  // Customize mode draws the same sidebar as an editor, in place.
+  if (customize.customizing) {
+    return (
+      <Sidebar className="relative bg-[color-mix(in_srgb,var(--su-rail),var(--su-accent)_4%)] shadow-[inset_-2px_0_0_var(--su-accent)]">
+        <RailEditor byId={byId} marksFor={marksFor} />
+        <RailFooter
+          railed={false}
+          isMobile={isMobile}
+          theme={theme}
+          versionError={versionError}
+          updateStatus={updateStatus}
+          onToggleCollapsed={onToggleCollapsed}
+        />
+      </Sidebar>
+    );
+  }
+
   return (
-    <Sidebar className="relative">
+    <Sidebar
+      className="relative"
+      onContextMenu={railTrigger.onContextMenu}
+      onPointerDown={railTrigger.onPointerDown}
+      onPointerMove={railTrigger.onPointerMove}
+      onPointerUp={railTrigger.onPointerUp}
+      onPointerCancel={railTrigger.onPointerCancel}
+      onClickCapture={railTrigger.onClickCapture}
+      style={railTrigger.style}
+    >
       {railed ? (
         state?.appLogo ? (
           <div className="flex flex-col items-center pt-2">
@@ -205,135 +314,33 @@ export function Rail({
         }}
         getItemKey={(d: Destination) => d.path}
       >
-        {/* Home first, above the group labels — it is the front door, not a
-            member of a category. */}
-        {DESTINATIONS.filter((d) => UNGROUPED_PATHS.includes(d.path)).map((d) => (
-          <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
-        ))}
-        {/* One row per console, above the fixed groups: a console is a place you
-            work, and the spec's rail puts them one click from anywhere rather
-            than behind a picker. Absent entirely until a console exists, so an
-            install that has none sees the rail it has today. */}
-        {consoles.length > 0 && (
-          <Fragment key="consoles">
-            <SidebarGroupLabel>Consoles</SidebarGroupLabel>
-            {consoles.map((c) => (
-              <SidebarListItem
-                key={c.path}
-                item={c}
-                icon={c.icon}
-                title={c.label}
-              />
-            ))}
-          </Fragment>
-        )}
-        {NAV_GROUPS.map((g) => {
-          const items = DESTINATIONS.filter((d) => g.paths.includes(d.path));
-          if (items.length === 0) return null;
+        {/* The operator's arrangement, drawn from the one resolver the server
+            validates against: the unnamed top group (Home), then each section
+            under its heading. A section with nothing in it is not drawn. A
+            console appears only once one exists, so an install that has none
+            sees no Consoles heading. */}
+        {resolved.sections.map((section) => {
+          const rows = section.members.map((id) => byId.get(id)).filter((d): d is Destination => d !== undefined);
+          if (rows.length === 0) return null;
           return (
-            <Fragment key={g.label}>
-              <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
-              {items.map((d) => {
-                const waiting = d.path === SCREENS_PATH ? notSetUpCount : 0;
-                return (
-                  <SidebarListItem
-                    key={d.path}
-                    item={d}
-                    icon={d.icon}
-                    title={d.label}
-                    ariaLabel={waiting > 0 ? `${d.label}, ${waiting} not set up` : undefined}
-                    badge={waiting > 0 ? <CountBadge count={waiting} compact={railed} /> : undefined}
-                  />
-                );
-              })}
+            <Fragment key={section.id}>
+              {section.kind !== "top" && <SidebarGroupLabel>{section.label}</SidebarGroupLabel>}
+              {rows.map((d) => (
+                <RailRow key={d.id} d={d} {...marksFor(d)} menuItems={() => rowMenuItems(d)} />
+              ))}
             </Fragment>
-          );
-        })}
-        <SidebarGroupLabel>Settings</SidebarGroupLabel>
-        {SETTINGS_DESTINATIONS.map((d) => {
-          // Advanced is where an update is installed, so it is where the dot
-          // goes. It follows AVAILABILITY, not whether the toast fired: dismiss
-          // a toast and the dot stays until the update is actually taken.
-          // Host names waiting for a decision live there too, and take the
-          // badge as a count, the way Screens counts devices not set up.
-          const advanced = d.path === ADVANCED_PATH;
-          const flagged = updateAvailable && advanced;
-          const names = advanced ? hostNamesWaiting : 0;
-          const duplicate = advanced && duplicateServers > 0;
-          const said: string[] = [];
-          if (duplicate) said.push("another server is using this server's id");
-          if (flagged) said.push("update available");
-          if (names > 0) said.push(`${plural(names, "host name")} waiting`);
-          let badge: ReactNode;
-          // Red, and first: screens are switching between two servers now. The
-          // other marks are things waiting, not things wrong.
-          if (duplicate) badge = <span title="Another server is using this server's id" className="block size-1.5 rounded-full bg-danger-9" />;
-          else if (names > 0) badge = <CountBadge count={names} compact={railed} />;
-          else if (flagged) badge = <span title="Update available" className="block size-1.5 rounded-full bg-accent" />;
-          return (
-            <SidebarListItem
-              key={d.path}
-              item={d}
-              icon={d.icon}
-              title={d.label}
-              ariaLabel={said.length > 0 ? `${d.label}, ${said.join(", ")}` : undefined}
-              badge={badge}
-            />
           );
         })}
       </SidebarList>
 
-      <div className="mt-auto">
-        {/* Version, theme and collapse. Rail-aware: collapsed stacks a compact
-            toggle over the expand button so the wide pill and the version never
-            clip the narrow rail. */}
-        {railed ? (
-          <div className="flex flex-col items-center gap-1.5 px-2 py-2.5">
-            <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
-            <button
-              type="button"
-              aria-label="Expand sidebar"
-              onClick={onToggleCollapsed}
-              className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
-            >
-              <PanelLeftOpenIcon className="size-4" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-            {/* Clipped, NOT ellipsised. `truncate` spends four characters on "…"
-                to save the same four — "v1.…" where "v1.10" would have fit. The
-                hover carries the whole build identity anyway: version, track,
-                commit and date, which is what gets asked for when something
-                needs diagnosing. */}
-            <Tooltip
-              label={versionError ? `Could not read the build version — ${versionError}` : buildLabel(updateStatus)}
-              side="top"
-            >
-              <span className="min-w-0 overflow-hidden whitespace-nowrap text-clip text-[11.5px] leading-none text-fg-subtle tabular-nums">
-                {versionError
-                  ? "version unavailable"
-                  : `${updateStatus?.version ? `v${updateStatus.version}` : ""}${updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}`}
-              </span>
-            </Tooltip>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
-              {/* No collapse control in the mobile drawer: there is nothing to
-                  collapse to. The drawer is open or dismissed. */}
-              {!isMobile && (
-                <button
-                  type="button"
-                  aria-label="Collapse sidebar"
-                  onClick={onToggleCollapsed}
-                  className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
-                >
-                  <PanelLeftCloseIcon className="size-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <RailFooter
+        railed={railed}
+        isMobile={isMobile}
+        theme={theme}
+        versionError={versionError}
+        updateStatus={updateStatus}
+        onToggleCollapsed={onToggleCollapsed}
+      />
 
       {/* Resize handle on the right edge. Absent when collapsed (the icon rail is
           a fixed width) and on mobile (the drawer sizes itself).
@@ -361,7 +368,11 @@ export function Rail({
           onPointerMove={resizeTrigger.onPointerMove}
           onPointerUp={resizeTrigger.onPointerUp}
           onPointerCancel={resizeTrigger.onPointerCancel}
-          onContextMenu={resizeTrigger.onContextMenu}
+          onContextMenu={(e) => {
+            // Its own one-item menu, not the rail's as well.
+            e.stopPropagation();
+            resizeTrigger.onContextMenu(e);
+          }}
           onClickCapture={resizeTrigger.onClickCapture}
           onDoubleClick={onResetWidth}
           style={resizeTrigger.style}
@@ -380,6 +391,130 @@ export function Rail({
           onClose={() => setResizeMenu(null)}
         />
       )}
+      {railMenu && (
+        <ContextMenu x={railMenu.x} y={railMenu.y} items={railMenuItems} onClose={() => setRailMenu(null)} />
+      )}
     </Sidebar>
+  );
+}
+
+/**
+ * One page or console in the sidebar, with its own right-click and long-press
+ * menu.
+ *
+ * Its own trigger, on the ROW: the row is a <button>, and a trigger on the rail
+ * around it treats a press on a control inside as that control's own (see
+ * context-menu-trigger.ts), so the rail's menu would never open from a row on a
+ * phone. A console's glyph keeps its own menu for the icon: a press there is
+ * left to it.
+ */
+function RailRow({
+  d,
+  badge,
+  ariaLabel,
+  menuItems,
+}: {
+  d: Destination;
+  badge?: ReactNode;
+  ariaLabel?: string;
+  menuItems: () => ContextMenuItem[];
+}) {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const trigger = useContextMenuTrigger((point) => setMenu({ ...point, items: menuItems() }));
+  const onGlyph = (e: React.SyntheticEvent) => e.target instanceof Element && e.target.closest("[data-rail-glyph]") !== null;
+  return (
+    <>
+      <SidebarListItem
+        item={d}
+        icon={d.icon}
+        title={d.label}
+        ariaLabel={ariaLabel}
+        badge={badge}
+        onContextMenu={(e) => {
+          // The rail's own menu must not open on top of this one.
+          e.stopPropagation();
+          trigger.onContextMenu(e);
+        }}
+        onPointerDown={(e) => {
+          if (!onGlyph(e)) trigger.onPointerDown(e);
+        }}
+        onPointerMove={trigger.onPointerMove}
+        onPointerUp={trigger.onPointerUp}
+        onPointerCancel={trigger.onPointerCancel}
+        onClickCapture={trigger.onClickCapture}
+        style={trigger.style}
+      />
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+    </>
+  );
+}
+
+/** Version, theme and collapse. Rail-aware: collapsed stacks a compact toggle
+ *  over the expand button so the wide pill and the version never clip the
+ *  narrow rail. */
+function RailFooter({
+  railed,
+  isMobile,
+  theme,
+  versionError,
+  updateStatus,
+  onToggleCollapsed,
+}: {
+  railed: boolean;
+  isMobile: boolean;
+  theme: ReturnType<typeof useTheme>;
+  versionError: string | null;
+  updateStatus: ReturnType<typeof useUpdateStatus>["data"];
+  onToggleCollapsed: () => void;
+}) {
+  return (
+    <div className="mt-auto">
+      {railed ? (
+        <div className="flex flex-col items-center gap-1.5 px-2 py-2.5">
+          <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
+          <button
+            type="button"
+            aria-label="Expand sidebar"
+            onClick={onToggleCollapsed}
+            className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
+          >
+            <PanelLeftOpenIcon className="size-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+          {/* Clipped, NOT ellipsised. `truncate` spends four characters on "…"
+              to save the same four — "v1.…" where "v1.10" would have fit. The
+              hover carries the whole build identity anyway: version, track,
+              commit and date, which is what gets asked for when something
+              needs diagnosing. */}
+          <Tooltip
+            label={versionError ? `Could not read the build version — ${versionError}` : buildLabel(updateStatus)}
+            side="top"
+          >
+            <span className="min-w-0 overflow-hidden whitespace-nowrap text-clip text-[11.5px] leading-none text-fg-subtle tabular-nums">
+              {versionError
+                ? "version unavailable"
+                : `${updateStatus?.version ? `v${updateStatus.version}` : ""}${updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}`}
+            </span>
+          </Tooltip>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
+            {/* No collapse control in the mobile drawer: there is nothing to
+                collapse to. The drawer is open or dismissed. */}
+            {!isMobile && (
+              <button
+                type="button"
+                aria-label="Collapse sidebar"
+                onClick={onToggleCollapsed}
+                className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
+              >
+                <PanelLeftCloseIcon className="size-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

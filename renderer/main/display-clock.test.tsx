@@ -47,6 +47,7 @@ const STATE = {
   timezone: null,
   barItems: ["clock"],
   barMobileItems: [],
+  sidebar: { sections: [], hidden: [] },
   outputs: [],
   views: [],
   devices: [],

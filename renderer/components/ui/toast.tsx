@@ -40,7 +40,7 @@ function notify() {
   for (const l of _listeners) l([..._toasts]);
 }
 
-function addToast(type: ToastEntry["type"], message: string, opts?: { action?: ToastAction }) {
+function addToast(type: ToastEntry["type"], message: string, opts?: { action?: ToastAction }): string {
   const id = String(_nextId++);
   const entry: ToastEntry = { id, type, message, action: opts?.action };
   // The same message again while its toast is still up REPLACES it: the old one
@@ -54,6 +54,7 @@ function addToast(type: ToastEntry["type"], message: string, opts?: { action?: T
     : _toasts.filter((t) => !(t.type === type && t.message === message && !t.action));
   _toasts = [...kept, entry].slice(-MAX_HELD);
   notify();
+  return id;
   // No timer of our own: the countdown is Radix's (the `duration` on the Root
   // below), which stops while the pointer is over the toasts or focus is in them.
   // A timer here ran on regardless and took an Undo out from under the pointer.
@@ -65,9 +66,13 @@ function removeToast(id: string) {
 }
 
 export const toast = {
-  success: (message: string) => addToast("success", message),
-  error: (message: string) => addToast("error", message),
-  info: (message: string, opts?: { action?: ToastAction }) => addToast("info", message, opts),
+  success: (message: string): void => void addToast("success", message),
+  error: (message: string): void => void addToast("error", message),
+  info: (message: string, opts?: { action?: ToastAction }): void => void addToast("info", message, opts),
+  /** An info toast carrying an action, returning its id for `dismiss`. */
+  withAction: (message: string, action: ToastAction): string => addToast("info", message, { action }),
+  /** Take a toast down early: an Undo a newer change has made stale. */
+  dismiss: (id: string) => removeToast(id),
 };
 
 // ── Toaster component ─────────────────────────────────────────────────────────
@@ -127,8 +132,11 @@ export function Toaster() {
           </ToastPrimitive.Close>
         </ToastPrimitive.Root>
       ))}
+      {/* Above the Customize tray while it is open (it publishes its height
+          as --su-tray-h), so an Undo never covers its Done button. */}
       <ToastPrimitive.Viewport
         className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-80"
+        style={{ bottom: "calc(var(--su-tray-h, 0px) + 1rem)" }}
       />
     </ToastPrimitive.Provider>
   );

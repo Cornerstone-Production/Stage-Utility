@@ -434,6 +434,7 @@ class means for backups.
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
 | `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone, and `serverId`, the id kiosks and Mac outputs bind to, which a restore keeps unless told otherwise |
+| `sidebar-config.json` | config | How the [sidebar](../features/operator-app.md#customizing-the-sidebar) is arranged: its sections, their order and names, and the pages hidden, by each page's stable id (`console:<view id>` for a console). Empty is the default. A file that breaks the rules at start-up is copied beside it as `sidebar-config.json.invalid-<time>` before the next save replaces it |
 | `signals.json` | runtime | The values the Companion module reads |
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |

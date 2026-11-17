@@ -127,6 +127,8 @@ const EXPECTED_CONFIG = [
   "servicecue-publish.json",
   "servicecue-roles.json",
   "settings.json",
+  // The operator's sidebar: its sections, their order and the pages hidden.
+  "sidebar-config.json",
   "slots.json",
   // The stage plot editor's unsaved drafts, one per plot: the operator's work.
   "stageplot-drafts.json",

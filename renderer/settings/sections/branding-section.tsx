@@ -14,6 +14,9 @@ import { ART_MAX, renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
 import { AvatarDialog, EmptySlotDialog, IconDialog, LogoDialog, type EditorSlot, type PickOptions } from "./branding-dialogs";
 import { LogoCropper } from "./logo-cropper";
+import { useSearchParam } from "../../lib/use-search-param";
+import { MAX_APP_NAME } from "@main/services/app-name";
+import { LOGO_REQUEST_PARAM, LOGO_REQUEST_VALUE } from "./branding-links";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
 // Kept non-generic: a considered blue plus a few distinct hues. Semantic status
@@ -98,6 +101,18 @@ export function BrandingSection({
       window.removeEventListener("drop", refuse);
     };
   }, []);
+
+  // Replace logo… in the sidebar's logo menu links here with `?logo=replace`:
+  // the dialog opens, and the request leaves the address at once, so it is never
+  // left waiting to open on a later visit. An address, not a flag, so it works
+  // the same when Branding is already the page.
+  const [logoRequest, setLogoRequest] = useSearchParam(LOGO_REQUEST_PARAM);
+  useEffect(() => {
+    if (logoRequest !== LOGO_REQUEST_VALUE) return;
+    setLogoRequest(null, { replace: true });
+    openDialog("app");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logoRequest]);
 
   useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
@@ -444,6 +459,7 @@ export function BrandingSection({
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
               placeholder="Stage Utility"
+              maxLength={MAX_APP_NAME}
               className="mt-2 h-9 w-full text-[14px]"
               aria-label="App name"
             />

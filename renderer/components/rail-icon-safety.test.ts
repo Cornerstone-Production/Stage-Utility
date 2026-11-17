@@ -65,40 +65,29 @@ describe("the console rail's icon", () => {
     assert.doesNotMatch(ICON, /color:\s*(DEFAULT_TINT|"var\()/, "a fallback colour here overrides the row");
   });
 
-  test("opens on the GLYPH, not on the row", () => {
-    // A right-click anywhere on the row would fire while aiming at the label.
-    assert.match(ICON, /onContextMenu=/);
-    // The rail's OWN `onContextMenu` — added for the resize handle's
-    // tap-and-hold "Reset sidebar width" menu (see context-menu-trigger.ts) —
-    // is a different control on a different edge of the sidebar, not the row
-    // this guard is about; only THAT one use is allowed. Any other
-    // `onContextMenu` in this file would be exactly the regression this
-    // guard exists to catch — a right-click reaching the row (or its label)
-    // instead of staying on the glyph.
-    //
-    // An earlier version of this test only looped over whatever matched and
-    // asserted each was the resize handle's own — with zero matches (a rename,
-    // or `{...resizeTrigger}` swallowing the attribute into a spread) the loop
-    // never ran and the test passed having checked nothing. Asserting an EXACT
-    // count first closes that: a rename, an added raw handler, or a spread
-    // that hides the attribute name all fail the count before the content
-    // check ever gets a chance to pass vacuously.
+  test("opens on the GLYPH, and the row's own menu never opens over it", () => {
+    // The icon menu is the glyph's. A right-click anywhere else on the row opens
+    // the ROW's menu (Hide, Move to, Customize sidebar…), which customizing the
+    // sidebar added; before that, the row had no menu and this guard said so.
+    // What must hold now is that the two never both open: the glyph stops its
+    // right-click before it reaches the row.
+    assert.match(ICON, /onContextMenu=\{\(e\) => \{\s*e\.stopPropagation\(\);\s*trigger\.onContextMenu\(e\);/);
     assert.match(
       RAIL,
       /import\s*\{[^}]*\buseContextMenuTrigger\b[^}]*\}\s*from\s*["']\.\.\/components\/ui\/context-menu-trigger["']/,
-      "rail.tsx no longer imports useContextMenuTrigger — the resize handle's tap-and-hold menu must ride it, not a raw onContextMenu",
+      "rail.tsx no longer imports useContextMenuTrigger — its menus must ride it, not a raw onContextMenu",
     );
-    const uses = RAIL.match(/onContextMenu=\{[^}]*\}/g) ?? [];
-    assert.equal(
-      uses.length,
-      1,
-      `expected exactly one onContextMenu attribute in rail.tsx (the resize handle's own), found ${uses.length}: ${JSON.stringify(uses)}`,
-    );
-    assert.match(
-      uses[0],
-      /resizeTrigger\.onContextMenu/,
-      `the one onContextMenu in rail.tsx must be the resize handle's own: ${uses[0]}`,
-    );
+    // Every right-click handler in rail.tsx, by the trigger it hands to: the
+    // rail's own menu, the resize handle's one-item menu, and each row's. A
+    // sorted list, one per line: a new raw handler, or one of these lost into a
+    // spread, changes it. An EXACT list, because a loop over whatever matched
+    // once passed having checked nothing.
+    const uses = (RAIL.match(/onContextMenu=\{[^}]*\}/g) ?? []).map((u) => /(\w+)\.onContextMenu/.exec(u)?.[1] ?? u);
+    assert.deepEqual(uses.sort(), [
+      "railTrigger",
+      "resizeTrigger",
+      "trigger",
+    ]);
   });
 });
 

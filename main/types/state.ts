@@ -10,6 +10,7 @@ import type { ReleaseSection } from "../services/update/release-notes.js";
 import type { BaptismAutoStart } from "./baptism.js";
 import type { ServerIdentity } from "./kiosk.js";
 import type { PlanSwitcherMode } from "./pco.js";
+import type { SidebarArrangement } from "../services/sidebar-arrangement.js";
 
 export interface StageState {
   serviceTypeId: string | null;
@@ -35,6 +36,9 @@ export interface StageState {
   /** The phone's own context-bar set. Empty = follow `barItems`. See
    *  bar-config-store.ts for why empty means inherit rather than "show nothing". */
   barMobileItems: string[];
+  /** How the sidebar is arranged. Empty sections = the default; see
+   *  sidebar-arrangement.ts, which draws it. */
+  sidebar: SidebarArrangement;
   /** Colours the operator has kept, newest first. Global, like the bar: the same
    *  person mixes a colour on a laptop and reaches for it on a tablet. */
   savedColors: string[];

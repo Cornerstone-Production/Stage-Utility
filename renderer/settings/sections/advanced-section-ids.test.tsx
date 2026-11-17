@@ -56,6 +56,7 @@ const EXPECTED_IDS = [
   "reconnect-tail",
   "reconnect-wake",
   "server-id",
+  "sidebar",
   "taper-post",
   "taper-pre",
   "timezone",

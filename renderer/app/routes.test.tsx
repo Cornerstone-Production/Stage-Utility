@@ -7,7 +7,8 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, NAV_GROUPS, UNGROUPED_PATHS } = await import("./destinations.js");
+const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, destinationsById } = await import("./destinations.js");
+const { DEFAULT_SIDEBAR, SIDEBAR_PAGE_IDS, resolveSidebar } = await import("@main/services/sidebar-arrangement");
 const { isOperatorPath } = await import("../../main/services/routes/operator-paths.js");
 const { OPERATOR_PATHS } = await import("../../main/services/routes/operator-paths.js");
 
@@ -82,8 +83,8 @@ describe("operator destinations", () => {
     assert.ok(DESTINATIONS.some((d) => d.path === "/mic-slots"), "no /mic-slots destination");
     assert.ok(isOperatorPath("/mic-slots"));
     assert.ok(isOperatorPath("/mic-slots?board=b-1"));
-    const screens = NAV_GROUPS.find((g) => g.label === "Screens");
-    assert.ok(screens?.paths.includes("/mic-slots"), "Mic slots is not in the Screens group");
+    const screens = DEFAULT_SIDEBAR.find((g) => g.label === "Screens");
+    assert.ok(screens?.members.includes("mic-slots"), "Mic slots is not in the Screens group");
   });
 
   test("paths and labels are unique", () => {
@@ -91,25 +92,40 @@ describe("operator destinations", () => {
     assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.label)).size, ALL_DESTINATIONS.length);
   });
 
-  test("every work destination appears in exactly one nav group", () => {
-    // In no group it renders outside the list; in two it renders twice. Both
-    // are silent - the rail simply looks wrong, with nothing failing.
-    const grouped = NAV_GROUPS.flatMap((g) => g.paths);
-    // Home sits above the groups rather than inside one - it is the front door,
-    // not a member of a category.
-    for (const d of DESTINATIONS.filter((d) => !UNGROUPED_PATHS.includes(d.path))) {
-      const count = grouped.filter((p) => p === d.path).length;
-      assert.equal(count, 1, `${d.path} appears in ${count} nav groups`);
-    }
+  test("the sidebar's default arrangement lists every destination exactly once, and nothing else", () => {
+    // The server validates a saved sidebar against DEFAULT_SIDEBAR and cannot
+    // import this file, so the two lists are held to each other here. A
+    // destination missing from it is a page the sidebar never draws; one listed
+    // twice is drawn twice; one that is not a destination is a dead row.
+    assert.equal(new Set(SIDEBAR_PAGE_IDS).size, SIDEBAR_PAGE_IDS.length, "a page is in two default sections");
+    assert.deepEqual([...SIDEBAR_PAGE_IDS].sort(), ALL_DESTINATIONS.map((d) => d.id).sort());
+    assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.id)).size, ALL_DESTINATIONS.length, "two destinations share an id");
   });
 
-  test("nav groups name no path that is not a destination", () => {
-    const known = new Set(DESTINATIONS.map((d) => d.path));
-    for (const g of NAV_GROUPS) {
-      for (const p of g.paths) {
-        assert.ok(known.has(p), `nav group "${g.label}" lists ${p}, which is not a destination`);
-      }
-    }
+  test("configuration sits in the Settings section and work outside it", () => {
+    const settings = DEFAULT_SIDEBAR.find((s) => s.id === "settings")?.members ?? [];
+    assert.deepEqual([...settings].sort(), SETTINGS_DESTINATIONS.map((d) => d.id).sort());
+  });
+
+  test("a saved place survives a destination's path being renamed", () => {
+    // Saved with Stage plots moved up beside Home. A later release moves the
+    // page's route; the rail draws the saved arrangement through
+    // destinationsById, so the page must still be found, at its new path.
+    const saved = {
+      sections: DEFAULT_SIDEBAR.map((s) => ({
+        ...s,
+        members: s.id === "top" ? ["home", "stageplots"] : s.members.filter((m) => m !== "stageplots"),
+      })),
+      hidden: [],
+    };
+    const resolved = resolveSidebar(saved, { all: [], hidden: new Set<string>() });
+    const renamed = ALL_DESTINATIONS.map((d) => (d.id === "stageplots" ? { ...d, path: "/stageplots/manage" } : d));
+    const byId = destinationsById(renamed);
+    const top = resolved.sections[0].members.map((id) => byId.get(id));
+    assert.deepEqual(
+      top.map((d) => [d?.label, d?.path]),
+      [["Home", "/"], ["Stage plots", "/stageplots/manage"]],
+    );
   });
 
   test("settings destinations all live under /settings", () => {

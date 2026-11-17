@@ -28,7 +28,7 @@ export function useMediaQuery(query: string): boolean {
  * header goes, the gutter narrows — and the context bar reads its own item set.
  *
  * A NUMBER, exported, because more than one thing now needs it and only one of
- * them is CSS. The bar's configurator has to label which set it is editing and
+ * them is CSS. The bar's editor has to label which set it is editing and
  * size its preview to a phone, and the bar itself has to pick a set in JS; a
  * second literal in either place is two answers to "am I on a phone" that drift
  * apart, and the band between them is a bar configured for a viewport that

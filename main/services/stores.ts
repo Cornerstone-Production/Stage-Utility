@@ -33,6 +33,7 @@ import "./presets-store.js";
 import "./rosstalk-store.js";
 import "./bar-config-store.js";
 import "./saved-colors-store.js";
+import "./sidebar-config-store.js";
 import "./scores-store.js";
 import "./stream-start-store.js";
 import "./notes-store.js";

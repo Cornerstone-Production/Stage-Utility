@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { dropPoint, droppedOnBar, gapFromMidpoints, type Box } from "./bar-drop.js";
+import { droppedOnBar, gapFromBoxes, gapFromMidpoints, type MeasuredRow } from "./bar-drop.js";
+import { dropPoint, type Box } from "./drag-geometry.js";
 
 // The bar as it actually is: full width, and only 44px tall.
 const BAR: Box = { left: 240, right: 1400, top: 516, bottom: 560 };
@@ -70,10 +71,16 @@ describe("whether that counts as on the bar", () => {
     assert.equal(droppedOnBar(mouse(800, 538, 0, 30), BAR), true);
   });
 
-  test("no pointer, or no bar, keeps the item", () => {
+  test("no pointer keeps the item", () => {
     // Nothing to go on. Keeping is recoverable; deleting on a guess is not.
     assert.equal(droppedOnBar({ activatorEvent: {} as Event, delta: { x: 0, y: -400 } }, BAR), true);
-    assert.equal(droppedOnBar(mouse(800, 538, 0, -400), null), true);
+  });
+
+  test("no bar on the page is not a place", () => {
+    // A console without the app's chrome has no context bar. Answering "on the
+    // bar" there dropped a tile into an empty arrangement and saved it over the
+    // whole bar.
+    assert.equal(droppedOnBar(mouse(800, 538, 0, 0), null), false);
   });
 });
 
@@ -125,5 +132,39 @@ describe("where the caret goes", () => {
       assert.ok(g >= prev, `gap went backwards at x=${x}`);
       prev = g;
     }
+  });
+});
+
+describe("gapFromBoxes: a strip that wraps onto two lines", () => {
+  // Line one: three rows at x 0-40, 60-100, 120-160 (y 0-20). Line two: two rows
+  // at x 0-40, 60-100 (y 34-54).
+  const at = (key: string, left: number, top: number, dragged = false): MeasuredRow => ({
+    key,
+    box: { left, right: left + 40, top, bottom: top + 20 },
+    dragged,
+  });
+  const rows = [at("a", 0, 0), at("b", 60, 0), at("c", 120, 0), at("d", 0, 34), at("e", 60, 34)];
+
+  test("on the first line, the midpoint rule along that line", () => {
+    assert.equal(gapFromBoxes(rows, { x: 10, y: 10 }), 0);
+    assert.equal(gapFromBoxes(rows, { x: 90, y: 10 }), 2);
+    assert.equal(gapFromBoxes(rows, { x: 300, y: 10 }), 3);
+  });
+
+  test("on the second line, counted on from the rows above it", () => {
+    assert.equal(gapFromBoxes(rows, { x: 30, y: 44 }), 4);
+    assert.equal(gapFromBoxes(rows, { x: 10, y: 44 }), 3);
+    assert.equal(gapFromBoxes(rows, { x: 300, y: 80 }), 5);
+  });
+
+  test("a chip alone on the last line, let go where it sits, stays at the end", () => {
+    // Without the dragged chip that line has no rows, and the pointer used to
+    // fall back to the line above and land at its front.
+    const alone = [at("a", 0, 0), at("b", 60, 0), at("c", 120, 0), at("d", 0, 34, true)];
+    assert.equal(gapFromBoxes(alone, { x: 20, y: 44 }), 3);
+  });
+
+  test("no rows is the start", () => {
+    assert.equal(gapFromBoxes([], { x: 5, y: 5 }), 0);
   });
 });

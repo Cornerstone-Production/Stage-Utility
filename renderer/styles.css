@@ -925,22 +925,30 @@ body {
   }
 }
 
-/* The configurator's editing strip, and NOTHING else.
-   The bar never scrolls; this is not the bar. It is the surface the operator
-   drags rows on, and inside a dialog on a phone it is narrower than the bar it
-   speaks for — so an arrangement that fits the phone perfectly still runs past
-   the edge in here, and `overflow: hidden` would leave the last rows unreachable
-   and un-removable.
-   Horizontal only, and the row geometry is untouched: the drop maths reads the
-   rows' midpoints in viewport coordinates, so it survives a scroll but would not
-   survive a wrap. */
-.context-strip.bar-editor {
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none; /* Firefox */
+/* The bar editor's editing strip, and NOTHING else.
+   The bar never wraps; this is not the bar. It is the surface the operator drags
+   readings on, and an arrangement that fits the page's bar can still be wider
+   than this strip (a phone set held to a phone's width, a reading shown in full
+   rather than compacted), so it WRAPS rather than scrolling: a reading out of
+   sight is one you cannot take off, and a scrolled strip hid them. The gaps are
+   wide enough that a chip's corner × never reaches its neighbour or the next
+   line's. What a phone will actually do is the 320 px warning, measured by
+   NarrowProbe on the real, unwrapped strip, so wrapping here hides nothing. The
+   drop maths reads each row's box, line by line (gapFromBoxes in bar-drop.ts). */
+/* A reading longer than the whole strip (a long service type on a narrow phone)
+   is the one thing wrapping cannot place, so its prose gives way, here only. */
+.context-strip.bar-editor .bar-prose {
+  flex: 0 1 auto;
+  min-width: 0;
 }
-.context-strip.bar-editor::-webkit-scrollbar {
-  display: none;
+.context-strip.bar-editor {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 42px;
+  column-gap: 18px;
+  row-gap: 14px;
+  padding-block: 12px;
+  overflow: visible;
 }
 
 /* The page's name, at the head of the strip on a desktop. NOT an item: it is the
@@ -1044,7 +1052,7 @@ body {
    title — gives up its width and ellipsises.
 
    It is not meant to be reached. A phone has its own item set (see
-   bar-items.ts) so prose can be curated off it, and the configurator says which
+   bar-items.ts) so prose can be curated off it, and the bar editor says which
    arrangements land here while you are still arranging them. A bar carrying no
    prose item cannot land here at all.
 

@@ -33,6 +33,9 @@ done. Dismiss it and it stays dismissed.
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
 
+That is the default arrangement. Every install can rearrange it: see
+[Customizing the sidebar](#customizing-the-sidebar).
+
 **Screens** carries a number when devices have been heard on the network that are
 not set up, from any page, and it goes when they are set up or stop being heard.
 It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed ones included, and not a device set up on another server.
@@ -43,6 +46,65 @@ its right edge to resize it, or collapse it to icons; on a phone it becomes a
 drawer. Double-click the resize handle to reset the width — on a touch screen,
 tap and hold it for a **Reset sidebar width** item, since a finger has no
 double-click.
+
+### Customizing the sidebar
+
+Right-click the sidebar (tap and hold on a phone) and choose **Customize
+sidebar…**, or use **Settings → Advanced → General → Layout → Sidebar**. The real
+sidebar becomes editable in place, the page beside it dims, and a tray docks under
+the page (a bottom sheet on a phone). The arrangement is saved as you go, on the
+server, so every browser on every device sees the same sidebar and a config backup
+carries it. **Done**, or Escape, closes the mode; in a field, Escape first
+cancels that edit. The tray's **Context bar** tab arranges the
+[context bar](context-bar.md#customizing-the-bar) the same way, in place,
+without leaving the mode.
+
+| To | Do |
+|---|---|
+| Reorder a page, or move it to another section | Drag it. A caret shows where it will land |
+| Put a page beside Home | Drag it into the unnamed group at the top |
+| Hide a page | Drag it out of the sidebar, or press its **×**. It goes to the tray and still opens from a link, from Home and from settings search |
+| Bring a page back | Click its tile in the tray to return it to the section it came from, or drag the tile to a place |
+| Move a section | Drag its heading by the grip |
+| Rename a section | Click its name |
+| Remove a section | Press **×** on its heading. Its pages go to the tray, and the toast offers **Undo** |
+| Add a section | **New section**, in the sidebar or the tray. An empty section is not drawn outside the mode |
+| Start over | **Restore default sidebar** in the tray, with **Undo** |
+
+**Consoles** holds consoles only: new consoles join it at the end, a console
+cannot leave it and a page cannot enter it (a drop that would break this shows no
+caret and does nothing). It can be renamed and moved, not removed. Hiding a
+console turns off its **List in the sidebar** setting (see [Consoles](#consoles)),
+so the two places always agree, and **Restore default sidebar** leaves that
+setting alone.
+
+**Advanced** can move but never hide: it carries the update and duplicate-server
+warnings, and it is the way back to this editor.
+
+**The name and the logo.** In the mode the app name is a field: it is Branding's
+**App name**, the same setting. The logo opens a menu with **Replace logo…**
+(Branding's logo dialog), **Recolor to match theme** and **Open Branding**. Once a
+home-screen icon exists, the recolor switch hands over to Branding, which redraws
+the icon with it.
+
+**Without the mode.** Right-click a page (or tap and hold it) for **Hide** and
+**Move to**; both carry **Undo** on their toast. A console offers **Hide** only.
+
+A collapsed sidebar opens out while you customize and folds back on **Done**,
+and its headings are thin dividers.
+
+A page added in a later release appears in its default section on an install
+that has already customized its sidebar, and a page or console that no longer
+exists is left out, said on a `[sidebar]` line in the [log](../ops/updates-and-logs.md).
+A refused save is logged there with its reason. A `sidebar-config.json` that
+breaks the rules at start-up is copied beside it as
+`sidebar-config.json.invalid-<time>`, the sidebar is drawn from what in it can be
+read, and the next save replaces the original. A page keeps its place when its
+route is renamed: the arrangement names pages by a stable id, not by address.
+
+Each change's **Undo** puts back that change only: a newer change takes the
+older toast down. Two browsers customizing at once see each other's changes as
+they are saved.
 
 **On a phone the hamburger is the only way in.** There is no swipe from the left
 edge of the screen — that edge belongs to the browser's own back gesture, and a
@@ -544,7 +606,8 @@ list. That suits a console that lives on a stage display as a control surface an
 has no business being a place the operator works from. Turn off **List in the
 sidebar** in the [View settings](#view-settings) of the console or the
 [Screen settings](#screen-settings) of a screen showing it, or **Show in the
-sidebar** in the menu of a console no screen shows. It is a setting
+sidebar** in the menu of a console no screen shows, or choose **Hide** on its
+row in the sidebar (see [Customizing the sidebar](#customizing-the-sidebar)). It is a setting
 on the view, `showInSidebar`, and a console with none is listed — so every
 console you had before it existed still is. Only the *list* changes. A console kept out of it
 keeps its live controls on every screen showing it, still opens at

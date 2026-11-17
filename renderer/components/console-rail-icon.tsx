@@ -122,6 +122,9 @@ export function ConsoleRailIcon({
     <>
       <span
         ref={host}
+        // The rail row's own menu (Hide, Customize) leaves a press here to this
+        // one, which is about the icon.
+        data-rail-glyph
         className="contents"
         onContextMenu={(e) => {
           e.stopPropagation();
