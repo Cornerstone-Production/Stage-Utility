@@ -103,6 +103,62 @@ when they have no approved photo; a failed Redo is tried again only by Redo.
 | Could not reach OpenAI · OpenAI did not answer in time | the network, or OpenAI, did not answer |
 | Could not read their Planning Center photo | the original could not be fetched through the [photo cache](../integrations/planning-center.md#photos) |
 
+## Using it from the Mic slots page
+
+Theme photos is for one service, so it works on a plan, never on a Default.
+
+1. **Connect OpenAI.** On the Integrations page, the **OpenAI**
+   card under the integration tiles takes the API key: **Save**, **Test** (a free
+   call that lists models) and **Remove key**. The field shows only the saved key's
+   last four characters, and the key is not kept in the page after it is saved.
+   The card's status line says in plain words how the connection stands: *Connected*,
+   *Connected, out of credits*, *Image edits refused*, *Could not reach OpenAI*, or
+   *Not connected* when OpenAI rejected the key.
+2. **Open a plan on Mic slots** and choose **<plan> only**. **Theme photos**, beside
+   the **⋯** menu, opens the sheet: at the right of the boards on a wide screen, over
+   the bottom of the page on a phone. It is off, with the reason on hover and in a
+   line under the bar, on a Default (*Theme photos is per service: pick a plan*) and
+   without a working key (*Connect OpenAI in Integrations*).
+3. **Pick a theme**, or **New theme…** (a name and a prompt). Photos the theme
+   already has for people on this service arrive approved, marked *From <date>*.
+4. **Generate N for <theme>** sends only the people without a photo in it. Each
+   person's card shows their original beside the edit while it is made, then waits
+   for **Approve** (or **Approve all ready**, which approves the ready edits made
+   for this service). **Redo** makes one person again.
+5. **Original | Themed** appears beside the button, and in the sheet's header, once
+   the theme has an approved photo. It chooses what this service's screens show;
+   flipping it deletes and un-approves nothing.
+
+### What a card says
+
+| Chip | Meaning |
+|---|---|
+| Not themed yet | nobody has made a photo for this person in the theme |
+| Added after the last run | the theme has photos for others on this service and not for them |
+| No Planning Center photo | there is no original to edit; Generate skips them |
+| Generating… | queued or with OpenAI. An earlier approved photo stays on screens meanwhile |
+| Ready to review | an edit waiting for **Approve**. Not on screens |
+| Approved | on screens while the service is set to Themed. *From <date>* names the service it was made for, when another |
+| Made from an older photo | their Planning Center photo changed after this was made. **Redo** makes a new one, **Keep** accepts this one |
+| Failed | the reason is on the card (see [When an edit fails](#when-an-edit-fails)); **Redo** tries again |
+
+A card with an approved photo has a **⋯** menu: **Move to theme…**, **Copy to theme…**
+and **Remove from theme…**, each confirmed in place, naming how many services it
+affects. Changing the prompt of a theme shows a notice, since it changes the theme
+for every service using it, with **Redo all** (every person again) and **Keep these**.
+A prompt is saved when its box is left, or before any Generate or Redo; if the server
+refuses it, nothing is sent and the box goes back to the saved prompt.
+
+### Manage themes
+
+The **Themes** block at the foot of the sheet lists every theme with the services
+using it and its keep date. **Manage** (or **Manage themes**) opens a theme: rename it
+(saved when the box is left), edit its prompt, see the services using it and when it is
+kept until, and everyone in it across all weeks, each with **Redo**, **Approve**
+for a redo waiting for review, **Keep**, and the same **⋯** menu. **Delete theme…**
+names the photos and services it affects and asks before sending anything. A card
+here shows the original only when the open service's roster knows the person.
+
 ## What screens show
 
 A plan using a theme has an **Original | Themed** switch (`show`). Choosing a theme
