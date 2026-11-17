@@ -14,35 +14,13 @@ import { KeyRoundIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
-import type { OpenAiConnectionDTO, OpenAiState } from "@main/types/photo-themes";
+import type { OpenAiConnectionDTO } from "@main/types/photo-themes";
 
 import { Button, ErrorNote, Input } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { STATES, type Tone } from "../../app/mic-slots/photo-themes/openai-wording";
 import { OPENAI_KEY, PHOTO_THEMES_KEY } from "../../app/mic-slots/photo-themes/use-photo-themes";
-
-type Tone = "ok" | "warn" | "bad" | "off";
-
-/** How each state the server can report reads. Exhaustive: a state added on the server
- *  does not compile until it is worded here. `reason` is the server's own words, and
- *  wins where it has any. */
-const STATES: Record<OpenAiState, { tone: Tone; title: string; detail: string }> = {
-  "not-connected": { tone: "off", title: "Not connected", detail: "No API key is saved. Add one to use Theme photos." },
-  unchecked: { tone: "off", title: "Key saved", detail: "The key has not been used yet. Test it to check it works." },
-  connected: { tone: "ok", title: "Connected", detail: "Using the API key." },
-  "invalid-key": { tone: "bad", title: "Not connected", detail: "OpenAI rejected the saved API key. Save a new one." },
-  "out-of-credits": {
-    tone: "warn",
-    title: "Connected, out of credits",
-    detail: "Using the API key, but its credits are used up. Edits will fail until credits are added or the plan renews.",
-  },
-  forbidden: {
-    tone: "warn",
-    title: "Image edits refused",
-    detail: "OpenAI refused this key access to image edits. The organization may need verifying.",
-  },
-  unreachable: { tone: "warn", title: "Could not reach OpenAI", detail: "The last request did not get an answer. Test the key to try again." },
-};
 
 const CHIP: Record<Tone, string> = {
   ok: "bg-ok-9/15 text-ok-11",

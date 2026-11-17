@@ -543,8 +543,21 @@ export type IpcChannel =
   | "pco:liveNext"
   | "pco:livePrevious"
   | "people:getCount"
+  | "photoThemes:approve"
+  | "photoThemes:approveAll"
+  | "photoThemes:choosePlan"
+  | "photoThemes:copy"
+  | "photoThemes:createTheme"
+  | "photoThemes:deleteTheme"
+  | "photoThemes:generate"
   | "photoThemes:getPlanPeople"
   | "photoThemes:getState"
+  | "photoThemes:keep"
+  | "photoThemes:keepPrompt"
+  | "photoThemes:move"
+  | "photoThemes:redo"
+  | "photoThemes:remove"
+  | "photoThemes:updateTheme"
   | "plans:exportPreview"
   | "plans:upcoming"
   | "presets:delete"
@@ -1861,6 +1874,41 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/openai/test");
     case "photoThemes:getState":
       return apiFetch<T>("/api/photo-themes");
+    case "photoThemes:createTheme":
+      return post<T>("/api/photo-themes/themes", { name: p.name, prompt: p.prompt });
+    case "photoThemes:updateTheme":
+      return patch<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}`, {
+        ...("name" in p ? { name: p.name } : {}),
+        ...("prompt" in p ? { prompt: p.prompt } : {}),
+      });
+    case "photoThemes:deleteTheme":
+      return del<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}`);
+    case "photoThemes:keepPrompt":
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/keep-prompt`);
+    case "photoThemes:approve":
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/approve`);
+    case "photoThemes:keep":
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/keep`);
+    case "photoThemes:redo":
+      // `planId` and `serviceTypeId` name the plan the redo is for; both or neither.
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/redo`, p.planId ? { planId: p.planId, serviceTypeId: p.serviceTypeId } : {});
+    case "photoThemes:move":
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/move`, { to: p.to });
+    case "photoThemes:copy":
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/copy`, { to: p.to });
+    case "photoThemes:remove":
+      return del<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}`);
+    case "photoThemes:choosePlan":
+      return patch<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}`, {
+        serviceTypeId: p.serviceTypeId,
+        ...(p.sortDate !== undefined ? { sortDate: p.sortDate } : {}),
+        ...("themeId" in p ? { themeId: p.themeId } : {}),
+        ...("show" in p ? { show: p.show } : {}),
+      });
+    case "photoThemes:generate":
+      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/generate`, { serviceTypeId: p.serviceTypeId, mode: p.mode });
+    case "photoThemes:approveAll":
+      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/approve-all`);
     case "photoThemes:getPlanPeople":
       return apiFetch<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}?serviceTypeId=${encodeURIComponent(p.serviceTypeId as string)}`);
 

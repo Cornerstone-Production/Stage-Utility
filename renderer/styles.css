@@ -471,6 +471,23 @@
   @media (prefers-reduced-motion: reduce) {
     .video-probe-checking-dot { animation: none !important; }
   }
+  /* A themed photo being made: a soft sweep over the circle where it will go
+     (Theme photos). Reduced motion collapses it to one frame with the rest. */
+  @keyframes su-photo-shimmer {
+    to { transform: translateX(100%); }
+  }
+  .su-photo-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .su-photo-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, var(--su-fill-hover) 50%, transparent 80%);
+    transform: translateX(-100%);
+    animation: su-photo-shimmer 1.2s linear infinite;
+  }
   /* The stage-message alert banner arriving: it rises into place over 260ms. The
      global reduced-motion rule below collapses it to one frame. */
   @keyframes stage-alert-rise {

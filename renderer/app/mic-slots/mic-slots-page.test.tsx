@@ -85,6 +85,16 @@ function board(spec: string): Slot[] {
   return out;
 }
 
+/** What GET /api/photo-themes answers: the page reads it for Theme photos. */
+let photoState: Record<string, unknown> = {};
+const PHOTO_STATE = (): Record<string, unknown> => ({
+  themes: [],
+  plans: [],
+  connection: { method: "api-key", hint: "sk-…3f2a", state: "connected", reason: null, checkedAt: null },
+  running: 0,
+  queued: 0,
+});
+
 let layouts: Record<string, Slot[]> = {};
 /** A plan's own layout per board, returned when the target names a plan. */
 let overrides: Record<string, Slot[]> = {};
@@ -182,6 +192,7 @@ const STATE = () =>
       overrideRev: revOf(targets[1]!, "plan"),
     };
   } else if (path === "/api/plans/upcoming") out = { plans: upcomingPlans, cacheAgeMs: 0 };
+  else if (path === "/api/photo-themes" && method === "GET") out = photoState;
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
   else if (path === "/api/integrations/wireless/statuses") out = wirelessStatuses;
@@ -274,6 +285,7 @@ beforeEach(() => {
   __setEditingTargetForTests(null);
   registerTargetGuard("mic-slots", null);
   boards = BOARDS();
+  photoState = PHOTO_STATE();
   layouts = { "b-left": board("a | b+c | ~s | d"), "b-right": board("x | y") };
   overrides = {};
   typeLayouts = {};
@@ -1751,5 +1763,65 @@ describe("duplicating a board with unsaved changes", () => {
     assert.ok((alertDialog().textContent ?? "").includes("unsaved"), "it says the unsaved changes are not in the copy");
     await click(within(alertDialog()).getByRole("button", { name: "Cancel" }));
     assert.equal(requests.filter((r) => r.method === "POST" && r.url.endsWith("/duplicate")).length, 0);
+  });
+});
+
+// ── Theme photos, in the top bar ────────────────────────────────────────────
+
+describe("Theme photos in the top bar", () => {
+  const button = () => screen.getByRole("button", { name: "Theme photos" }) as HTMLButtonElement;
+
+  test("a Default says why it is off, in the line under the bar, and offers the plan", async () => {
+    await mount();
+    assert.equal(button().disabled, true);
+    assert.match(document.querySelector("[data-theme-photos-reason]")?.textContent ?? "", /Theme photos is off\. Theme photos is per service: pick a plan\./);
+  });
+
+  test("on a plan with a working key it is on, and there is no reason line", async () => {
+    planId = "p1";
+    await mount();
+    assert.equal(button().disabled, false);
+    assert.equal(document.querySelector("[data-theme-photos-reason]"), null);
+  });
+
+  test("on a plan with no key it says to connect OpenAI, and links to Integrations", async () => {
+    planId = "p1";
+    photoState = { ...PHOTO_STATE(), connection: { method: null, hint: null, state: "not-connected", reason: null, checkedAt: null } };
+    await mount();
+    assert.equal(button().disabled, true);
+    const line = document.querySelector("[data-theme-photos-reason]")!;
+    assert.match(line.textContent ?? "", /Connect OpenAI in Integrations/);
+    assert.equal(line.querySelector("a")?.getAttribute("href"), "/settings/integrations");
+  });
+
+  test("pressing it opens the sheet for this plan, and pressing it again puts it away", async () => {
+    planId = "p1";
+    await mount();
+    await click(button());
+    assert.ok(document.querySelector("[data-photo-themes-panel]"));
+    assert.equal(button().getAttribute("aria-pressed"), "true");
+    await click(button());
+    assert.equal(document.querySelector("[data-photo-themes-panel]"), null);
+  });
+
+  test("the Original | Themed switch is in the bar only when the plan's theme has an approved photo", async () => {
+    planId = "p1";
+    const person = { personId: "9001", name: "Alex", status: "approved", approved: { url: "u", fromPlanId: null, fromDate: null, approvedAt: "", stale: false }, pending: null };
+    const theme = (people: unknown[]) => ({ id: "th-aaaaaaaaaaaa", name: "Christmas", prompt: "p", promptChanged: false, createdAt: "", lastUsedDate: null, keptUntil: "2027-03-20", plans: [], people });
+    const choice = { planId: "p1", serviceTypeId: "st-1", sortDate: null, themeId: "th-aaaaaaaaaaaa", show: "themed" };
+    photoState = { ...PHOTO_STATE(), themes: [theme([])], plans: [choice] };
+    await mount();
+    assert.equal(screen.queryByRole("group", { name: /Photos shown on screens/ }), null);
+    cleanup();
+    photoState = { ...PHOTO_STATE(), themes: [theme([person])], plans: [choice] };
+    await mount();
+    assert.ok(screen.getByRole("group", { name: /Photos shown on screens/ }));
+  });
+
+  test("opening the sheet puts the inspector away", async () => {
+    planId = "p1";
+    await mount();
+    await click(button());
+    assert.equal(document.querySelector("[data-mic-inspector]")?.getAttribute("data-mic-inspector"), "closed");
   });
 });

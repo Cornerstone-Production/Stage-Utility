@@ -97,10 +97,10 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
    * with its channel at the call site (api-channels.test.ts follows a literal,
    * and refuses a channel handed through as a value). Always reads again
    * afterwards, whether it landed or was refused, and says the server's reason
-   * on a refusal.
+   * on a refusal (a toast, or quietly when the caller shows it itself).
    */
   const write = useCallback(
-    async <T,>(key: string, send: () => Promise<T>): Promise<WriteResult<T>> => {
+    async <T,>(key: string, send: () => Promise<T>, opts: { quiet?: boolean } = {}): Promise<WriteResult<T>> => {
       if (inFlight.current.has(key)) return { ok: false, message: "That is already running." };
       inFlight.current.add(key);
       setBusy(new Set(inFlight.current));
@@ -108,7 +108,8 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
         return { ok: true, value: await send() };
       } catch (err) {
         const message = errorMessage(err);
-        toast.error(message);
+        // `quiet`: the caller draws the reason where the operator is looking (inside a confirm).
+        if (!opts.quiet) toast.error(message);
         return { ok: false, message };
       } finally {
         inFlight.current.delete(key);
