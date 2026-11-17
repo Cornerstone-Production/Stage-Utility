@@ -113,7 +113,7 @@ Theme photos is for one service, so it works on a plan, never on a Default.
    last four characters, and the key is not kept in the page after it is saved.
    The card's status line says in plain words how the connection stands: *Connected*,
    *Connected, out of credits*, *Image edits refused*, *Could not reach OpenAI*, or
-   *Not connected* when OpenAI rejected the key.
+   *Not connected* when there is no key saved or OpenAI rejected the one that is.
 2. **Open a plan on Mic slots** and choose **<plan> only**. **Theme photos**, beside
    the **⋯** menu, opens the sheet: at the right of the boards on a wide screen, over
    the bottom of the page on a phone. It is off, with the reason on hover and in a
@@ -125,8 +125,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
    person's card shows their original beside the edit while it is made, then waits
    for **Approve** (or **Approve all ready**, which approves the ready edits made
    for this service). **Redo** makes one person again.
-5. **Original | Themed** appears beside the button, and in the sheet's header, once
-   the theme has an approved photo. It chooses what this service's screens show;
+5. **Original | Themed** appears beside the button once the theme has an approved
+   photo, and in the sheet's header while it is open (the bar's copy gives way, so
+   the bar does not wrap). It chooses what this service's screens show;
    flipping it deletes and un-approves nothing.
 
 ### What a card says
@@ -156,8 +157,9 @@ using it and its keep date. **Manage** (or **Manage themes**) opens a theme: ren
 (saved when the box is left), edit its prompt, see the services using it and when it is
 kept until, and everyone in it across all weeks, each with **Redo**, **Approve**
 for a redo waiting for review, **Keep**, and the same **⋯** menu. **Delete theme…**
-names the photos and services it affects and asks before sending anything. A card
-here shows the original only when the open service's roster knows the person.
+names the photos and services it affects and asks before sending anything. Every card
+here shows the person's original beside the themed photo (`originalUrl` on the person: the
+Planning Center photo this server last saw, else the one the edit was made from).
 
 ## What screens show
 
