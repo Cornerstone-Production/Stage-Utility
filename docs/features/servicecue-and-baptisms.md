@@ -420,12 +420,12 @@ page are not on the public page.
 
 | What | How often |
 |---|---|
-| The layouts, category roles and landing page settings | Every minute, and an edit is sent within a second or so. A document is sent only when its text changed |
+| The layouts, category roles and landing page settings | Every minute, and an edit is sent within a second or so. A document is sent only when its text changed, or when a send of it got no answer |
 | The service types, the plan list and the rundown each type opens on | Every minute from the app's own Planning Center cache while a [service window](../ops/reliability.md) is open or none is known; once an hour outside one, and at once after an edit to the landing page |
 | The other plans in the switcher | One at a time, 2 seconds apart, each read again at most every 15 minutes in a window and every 4 hours outside one |
 | The public state, the live position and the SPL peaks | As the app's own live updates happen, at most once a second each, and not again while only the clock moved. The page stores each as the document it belongs to, so none is sent twice |
 | A heartbeat | On first contact, then every 30 seconds, so the page can tell a quiet service from a server that has stopped sending |
-| What to keep | The server tells the page which documents and images it should hold, and the page deletes the rest: that is how a service type taken off the landing page, or a plan that has gone by, leaves the public page. It is sent once the landing page settings and the plan list have been read this run, and again only when the list changed or the page held something not on it. It also waits while a service type's plan list was read only in part and this run knows none of its plans (a restart during a partial Planning Center outage), so the plans the page holds for it stay |
+| What to keep | The server tells the page which documents and images it should hold, and the page deletes the rest: that is how a service type taken off the landing page, or a plan that has gone by, leaves the public page. It is sent once the landing page settings and the plan list have been read this run, and again only when the list changed, the last one got no answer, or the page holds, or may hold, something not on it. It also waits while a service type's plan list was read only in part and this run knows none of its plans (a restart during a partial Planning Center outage), so the plans the page holds for it stay |
 | What the page holds | Every 5 minutes the page is asked, and anything it lost (a redeploy that changed its storage) is sent again |
 
 Every Planning Center read goes through the same request gate and cache as the rest
@@ -440,6 +440,15 @@ to 5 minutes, counted for that request alone: a heartbeat that gets through in
 between does not reset it. The page keeps the last copy it was sent. The problem
 ends when the request that failed goes through, or a full pass finds nothing
 failing; the server then sends what changed meanwhile.
+
+A request that got no answer (a timeout, a dropped connection) or a 5xx may have
+been stored all the same, so the server takes it as neither sent nor not sent. A
+document or a live update goes again whatever it says, the text it had before
+included, and a rundown is read again at once rather than when it is next due; a
+document or image the page may hold and no longer should is a reason to send the
+list of what to keep; and a list of what to keep with no answer goes again, with
+whatever it may have removed sent again if it is still wanted. A page that took a
+change and lost its answer therefore never shows it after the source changes back.
 
 | The page answered | The card says | Then |
 |---|---|---|

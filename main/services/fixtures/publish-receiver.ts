@@ -10,6 +10,7 @@
 // second reading of docs/reference/servicecue-publishing.md. A test that needs a failure
 // sets `respond`, and can fall back to `worker()`.
 
+import assert from "node:assert/strict";
 import * as http from "node:http";
 
 // A page on this machine is plain http, which the address rules accept only under this switch (development).
@@ -39,6 +40,9 @@ export interface Answer {
   /** Wait this long before answering, so two requests can be seen overlapping. */
   delayMs?: number;
 }
+
+/** No answer: never one, or the connection closed instead. */
+export type Lost = "hang" | "drop";
 
 /** A status answer with nothing stored and no heartbeat yet, for a test that needs a fixed one. */
 export const PAGE_STATUS = { protocol: 1, docs: [] as string[], assets: [] as string[], lastHeartbeat: null, viewers: 0, build: null } satisfies PublishStatus;
@@ -71,8 +75,12 @@ export class FakeReceiver {
   token: string | null = null;
   /** The page's document, which the Worker reads its build id from. null: the deploy has none. */
   document: string | null = null;
-  /** How to answer. `"hang"` never does: the sender's own ceiling is what ends it. */
-  respond: (req: Received) => Answer | "hang" | Promise<Answer> = (req) => this.worker(req);
+  /**
+   * How to answer. `"hang"` never does: the sender's own ceiling is what ends it. `"drop"` closes the
+   * connection with no answer at all. After `worker()`, either is a request the page applied whose
+   * answer was lost.
+   */
+  respond: (req: Received) => Answer | Lost | Promise<Answer | Lost> = (req) => this.worker(req);
 
   private constructor(private readonly server: http.Server) {}
 
@@ -117,6 +125,10 @@ export class FakeReceiver {
         });
         void Promise.resolve(self.respond(got)).then((answer) => {
           if (answer === "hang") return;
+          if (answer === "drop") {
+            res.socket?.destroy();
+            return;
+          }
           const reply = () => {
             if (res.destroyed) return;
             res.writeHead(answer.status, answer.headers ?? {});
@@ -183,6 +195,23 @@ export class FakeReceiver {
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
+}
+
+/**
+ * The page does every request, as the Worker does, and the answer to each one `pick` chooses is lost:
+ * never sent ("hang"), the connection closed instead ("drop"), or another answer in its place (a 5xx
+ * from a page that stored it first).
+ */
+export function applyThenLose(page: FakeReceiver, answer: Lost | Answer, pick: (req: Received) => boolean): void {
+  page.respond = async (req) => {
+    const applied = await page.worker(req);
+    return pick(req) ? answer : applied;
+  };
+}
+
+/** That the page did take what it was sent, before its answer was lost: without it, a test of a lost answer tests nothing. */
+export function assertTook(took: boolean, what: string): void {
+  assert.ok(took, `the page did not take ${what}; the test is not testing a lost answer`);
 }
 
 /** Poll until `check` holds, or fail naming `what`. For a sender that works on its own timers. */
