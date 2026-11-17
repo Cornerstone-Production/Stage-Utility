@@ -20,7 +20,9 @@
 //                  and only then the old secret is queued for removal and removed.
 //   Unpublish      drops the venue's secret on its page. With no page to reach (none set up, or
 //                  the venue on another), it is queued for removal and the venue is unpublished.
-//                  A page that refuses the drop leaves the venue published, and says so.
+//                  A page that refuses the drop leaves the venue published, and says so. One
+//                  whose answer was lost may have dropped it all the same: the card says so, and
+//                  the next republish sends everything rather than only what changed.
 //   Publish now    everything again, every background included, and the queue drained. A venue
 //                  on a page other than the one set up moves to it under a new secret.
 //   A change       to the document, to the plan it follows, or to the patch (linked connection
@@ -52,7 +54,7 @@ import { randomBytes } from "node:crypto";
 import { errorMessage } from "./errors.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
-import { createPushClient, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";
@@ -676,10 +678,16 @@ export class StagePlotsPublisher {
         const host = hostOf(target.origin);
         const r = await this.client(target).dropStagePlots(pub.secret);
         if (!r.ok) {
-          const message = `${sentence(r, host)} Nothing was unpublished, so the link still works.`;
+          const lost = mayHaveLanded(r);
+          // The page may have dropped it before its answer was lost: nothing sent under the secret is
+          // known to be there, its backgrounds included, which the next republish reads from the store.
+          if (lost) this.forget(pub.secret);
+          const message = lost
+            ? `${sentence(r, host)} The page may have removed it all the same, so the link may no longer work: Unpublish again to be sure it is gone, or Publish now to put it back.`
+            : `${sentence(r, host)} Nothing was unpublished, so the link still works.`;
           say("warn", [pub.secret], `"${venue.name}" could not be unpublished: ${message}`);
           const at = this.at();
-          await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, [pub.secret]) }));
+          await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, [pub.secret]), ...(lost ? { publishedImages: [] } : {}) }));
           return { ok: false, status: 502, error: hide(message, [pub.secret]) };
         }
         this.forget(pub.secret);
@@ -1285,6 +1293,11 @@ export class StagePlotsPublisher {
     return { ok: true, venue: saved };
   }
 
+  /** A put under `secret` that may have been stored with its answer lost, before any keep named it: the next keep goes whatever it is. */
+  private unkeep(secret: string, r: PushResult): void {
+    if (!r.ok && mayHaveLanded(r)) this.kept.delete(secret);
+  }
+
   private forget(secret: string): void {
     this.sent.delete(secret);
     this.kept.delete(secret);
@@ -1377,6 +1390,7 @@ export class StagePlotsPublisher {
       }
       const r = await client.putStagePlot(secret, key, bytes, STAGEPLOTS_IMAGE_TYPE);
       count++;
+      this.unkeep(secret, r);
       if (r.ok) held.add(hash);
       else if (aboutThePage(r)) return fail(r);
       else unpublished.push({ hash, why: sentence(r, host) });
@@ -1394,7 +1408,10 @@ export class StagePlotsPublisher {
       // A failure may have been stored and its answer lost: what the page holds is not known, so
       // the next send of this key goes whatever it is, the text sent before this one included.
       if (r.ok) sent.set(key, h);
-      else sent.delete(key);
+      else {
+        sent.delete(key);
+        this.unkeep(secret, r);
+      }
       return r;
     };
     for (const { plot, bg, items, unresolved } of plots) {

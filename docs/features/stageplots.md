@@ -497,7 +497,10 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 - **Republishing** is automatic. Any saved change to the venue, its plots, its plan
   overrides or its backgrounds, and the followed plan moving, is sent about two seconds
   later; only what changed is sent. If it fails, the page keeps what it had, the card
-  shows the error, and the next change or **Publish now** tries again.
+  shows the error, and the next change or **Publish now** tries again. A send whose
+  answer never came back may have been stored all the same, so the next one sends it
+  whatever it is, and the list of what the venue keeps goes with it: a plot or
+  background stored that way and then taken off the venue does not stay on the page.
 - **Publish now** sends everything again, the backgrounds not yet published included.
 - **Regenerate…** publishes the venue under a new secret, every background the old link
   has included, and only then removes the old link. If anything fails, the old link keeps
@@ -506,7 +509,10 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
   removed, it waits as an [old link](#old-links). A regenerate is refused while 200 old
   links are waiting, before anything is sent.
 - **Unpublish…** removes the venue's page and backgrounds from the public page. If the
-  page refuses, the venue stays published and the card says the link still works. With no
+  page refuses, the venue stays published and the card says the link still works. If its
+  answer never came back, the page may have removed it all the same: the venue stays
+  published, the card says the link may no longer work, and the next change, or
+  **Publish now**, sends the whole venue again; **Unpublish…** again finishes it. With no
   page set up, or the venue published to a page other than the one set up, the venue is
   unpublished here and its link waits as an old link, and the card says it is left on that
   page until the page is set up again. Publishing again makes a new link.
