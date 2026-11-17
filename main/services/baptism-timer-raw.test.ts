@@ -859,6 +859,42 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
   });
 });
 
+// Undo after a Finish pressed mid-testimony reopens that testimony from what it
+// banked, in both modes. These are the two undo() branches (per-person and grouped,
+// finishedFrom === "testimony") that resumed through startSegment(last.testimonyMs)
+// with nothing in the suite able to tell it from startSegment(0): the Finish-then-
+// Undo paths above all finish out of a baptism. The clock is moved by hand, so the
+// reading right after the undo is exactly what the Finish banked.
+describe("undo after a Finish pressed during a testimony resumes it from its banked time", () => {
+  for (const mode of ["per-person", "grouped"] as const) {
+    it(`${mode}: the reopened testimony carries the time Finish banked, not zero`, () => {
+      openService(freshCtx());
+      baptismTimerService.reset();
+      baptismTimerService.setMode(mode);
+
+      baptismTimerService.start(); // person 1's testimony
+      tick(150);
+      const finished = baptismTimerService.finish(); // closed mid-testimony
+      assert.equal(finished.people.length, 1, "sanity: Finish pushed the person it closed");
+      assert.equal(finished.people[0]!.testimonyMs, 150, "sanity: and banked the whole testimony");
+      tick(40); // time after Finish, which the reopened testimony must not pick up as banked
+
+      const reopened = baptismTimerService.undo();
+      assert.equal(reopened.phase, "testimony", "sanity: Undo reopened the testimony");
+      assert.equal(reopened.people.length, 0, "sanity: the person is back in the in-progress testimony");
+      assert.equal(
+        reopened.segmentAccumMs,
+        150,
+        `the reopened testimony banked ${reopened.segmentAccumMs}ms — it must resume from the 150ms Finish banked, not restart at zero`,
+      );
+
+      tick(40);
+      const refinished = baptismTimerService.finish();
+      assert.equal(refinished.people[0]!.testimonyMs, 190, "150 banked plus the 40ms after the undo");
+    });
+  }
+});
+
 // F2: pause() and resume() were the only two of the sixteen emitRaw call sites
 // that could be deleted with the whole suite green. Nothing drove a pause with
 // a service OPEN — the one existing test that pauses runs with no service at
