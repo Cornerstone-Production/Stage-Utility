@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
-import { StagePlotsPage, StagePlotsVenueRoute } from "../main/stageplots-view";
+import { StagePlotsManagePage, StagePlotsManageVenueRoute, StagePlotsPage, StagePlotsVenueRoute } from "../main/stageplots-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
@@ -72,6 +72,9 @@ export interface Destination {
 }
 
 /** Work surfaces — the rail proper. */
+/** Stage plots' name and description: the app's page in the rail, and the crew's /stageplots. */
+const STAGEPLOTS_PAGE = { label: "Stage plots", description: "Every venue's stage plots, read-only, for load-in and the desk." } as const;
+
 export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/",
@@ -124,12 +127,14 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: PatchView,
   },
   {
-    path: "/stageplots",
-    label: "Stage plots",
-    description: "Every venue's stage plots, read-only, for load-in and the desk.",
+    // The OPERATOR's page, in the shell, with Edit. The same page at /stageplots is the
+    // crew's: the link and QR code handed out, chromeless (active-page.ts), read-only.
+    // The split /servicecue and /history make.
+    path: "/stageplots/manage",
+    ...STAGEPLOTS_PAGE,
     icon: <MapIcon className="size-4" />,
-    // Read-only, like /patch; the editor is /stageplots/edit, linked from here.
-    Component: StagePlotsPage,
+    // The editor is /stageplots/edit, linked from here.
+    Component: StagePlotsManagePage,
   },
   {
     path: "/automation",
@@ -228,7 +233,7 @@ export const UNGROUPED_PATHS = ["/"];
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/servicecue/manage", "/patch", "/stageplots"] },
+  { label: "Content", paths: ["/servicecue/manage", "/patch", "/stageplots/manage"] },
   // Where it shows.
   { label: "Screens", paths: ["/screens", "/mic-slots", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
@@ -333,12 +338,17 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // ServiceCue, whose rail entry it lights.
   { path: "/servicecue/presets", Component: ServiceCueSection, parent: "/servicecue/manage" },
   { path: "/patch/edit", Component: PatchSection },
-  // The stage plots editor, reached from /stageplots. It draws its own heading.
-  { path: "/stageplots/edit", Component: StagePlotsEdit },
-  // One venue's plots, the address to copy or make a QR code of. Static siblings such
-  // as /stageplots/edit win over the parameter. Untitled and nested: the page draws
-  // the venue's own heading, and the rail keeps Stage plots lit.
-  { path: "/stageplots/$venueId", Component: StagePlotsVenueRoute, parent: "/stageplots" },
+  // The crew's stage plots, chromeless (active-page.ts). Titled here because
+  // /stageplots/manage does not prefix-match it, as /history is.
+  { path: "/stageplots", Component: StagePlotsPage, ...STAGEPLOTS_PAGE },
+  // The stage plots editor, reached from /stageplots/manage. It draws its own heading and
+  // lights Stage plots in the rail.
+  { path: "/stageplots/edit", Component: StagePlotsEdit, parent: "/stageplots/manage" },
+  // A venue opened in the app. Untitled: the page draws the venue's own heading.
+  { path: "/stageplots/manage/$venueId", Component: StagePlotsManageVenueRoute },
+  // One venue on the crew's page: the address to copy or make a QR code of, chromeless.
+  // Static siblings (/stageplots/edit, /stageplots/manage) win over the parameter.
+  { path: "/stageplots/$venueId", Component: StagePlotsVenueRoute },
   // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.

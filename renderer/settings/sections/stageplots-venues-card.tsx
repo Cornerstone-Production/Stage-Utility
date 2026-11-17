@@ -1,7 +1,8 @@
 // stageplots-venues-card.tsx — the editor's Venues card: add, pick, rename,
 // its address, Home or Offsite, notes, delete. Each change saves at once. A
 // right-click or long press on a venue opens its menu: Rename (selects it and puts
-// the cursor in its name), Home or Offsite, Open on /stageplots, Copy its address,
+// the cursor in its name), Home or Offsite, Open in Stage plots (/stageplots/manage),
+// Copy its address (the crew's /stageplots link),
 // Delete venue.
 //
 // The address is /stageplots/<address>, made from the name when the venue is
@@ -21,7 +22,7 @@ import { copyText } from "../../lib/clipboard";
 import { useRouterHandle } from "../../lib/use-search-param";
 import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { venueGroups, venuePath, venueSegment } from "../../main/stageplots/doc-helpers";
+import { STAGEPLOTS_MANAGE_PATH, venueGroups, venuePath, venueSegment } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { CardHeader, CommitText, DraftDot, Num, SaveError, Segmented, eyebrow, iconButton, type Save } from "./stageplots-shared";
 
@@ -128,9 +129,14 @@ export function VenuesCard({
       },
     })),
     {
-      label: "Open on /stageplots",
+      label: "Open in Stage plots",
       // Through the router when there is one (no page load); else the browser goes there.
-      onSelect: () => (router ? void router.navigate({ to: venuePath(v), search: {} }) : window.location.assign(address(v))),
+      // The app's own page for it; Copy its address below gives the crew's link.
+      onSelect: () => {
+        const here = venuePath(v, STAGEPLOTS_MANAGE_PATH);
+        if (router) void router.navigate({ to: here, search: {} });
+        else window.location.assign(here);
+      },
     },
     { label: "Copy its address", onSelect: () => copyAddress(v) },
     { separator: true },

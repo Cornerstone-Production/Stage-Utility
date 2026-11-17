@@ -277,7 +277,7 @@ const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterP
 const { CleanupPreview } = await import("./stageplots-cleanup-preview.js");
 const { clearClipboard } = await import("../../main/stageplots/clipboard.js");
 const { DUPLICATE_OFFSET } = await import("../../main/stageplots/editor-state.js");
-const { StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
+const { StagePlotsManagePage, StagePlotsManageVenueRoute, StagePlotsPage, LAST_VENUE_KEY } = await import("../../main/stageplots-view.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 
 /** A PDF as the page picker sees it: three pages, each rendered to a labelled blob. */
@@ -320,8 +320,9 @@ async function mountRouted(url: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const root = createRootRoute({});
   const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement(StagePlotsEdit, { openPdf: fakePdf }) });
-  const list = createRoute({ getParentRoute: () => root, path: "/stageplots", component: () => React.createElement(StagePlotsPage) });
-  const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: [url] }) });
+  const list = createRoute({ getParentRoute: () => root, path: "/stageplots/manage", component: StagePlotsManagePage });
+  const venue = createRoute({ getParentRoute: () => root, path: "/stageplots/manage/$venueId", component: StagePlotsManageVenueRoute });
+  const router = createRouter({ routeTree: root.addChildren([edit, list, venue]), history: createMemoryHistory({ initialEntries: [url] }) });
   await act(async () => {
     render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
   });
@@ -423,7 +424,7 @@ describe("/stageplots/edit", () => {
     });
     for (let i = 0; i < 4; i++) await settle();
     assert.equal(notPrevented, false, "a plain click was left to the browser, which loads the page");
-    assert.equal(router.state.location.pathname, "/stageplots");
+    assert.equal(router.state.location.pathname, "/stageplots/manage");
     assert.equal(screen.queryAllByRole("tab").length, 0, "the plot editor is gone");
     assert.ok(screen.getByText("Room One"), "the venue list shows");
   });
@@ -1320,8 +1321,8 @@ describe("the plot editor", () => {
     await menu("Copy its address");
     // No clipboard here, so it shows the address to copy by hand: the address is the point.
     assert.match(within(card("Venues")).getByRole("status").textContent!, /\/stageplots\/room-one$/);
-    await menu("Open on /stageplots");
-    assert.equal(router.state.location.pathname, "/stageplots/room-one");
+    await menu("Open in Stage plots");
+    assert.equal(router.state.location.pathname, "/stageplots/manage/room-one");
   });
 
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {

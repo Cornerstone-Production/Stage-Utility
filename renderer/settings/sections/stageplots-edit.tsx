@@ -391,10 +391,10 @@ export function StagePlotsEdit({ openPdf }: StagePlotsEditProps) {
   const header = (
     <div className="pt-1 pb-3">
       <a
-        href="/stageplots"
+        href="/stageplots/manage"
         // In the app, not a page load: a full load fetched the whole app again
         // and every status read, and opened the remembered venue rather than the list.
-        onClick={(e) => goInApp(e, { to: "/stageplots", search: {}, state: { list: true } })}
+        onClick={(e) => goInApp(e, { to: "/stageplots/manage", search: {}, state: { list: true } })}
         className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-caption1 text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <ChevronLeftIcon className="size-3.5" />

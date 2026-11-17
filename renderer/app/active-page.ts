@@ -152,13 +152,13 @@ export function consoleHidesChrome(
 
 /**
  * Shared (non-console) pages that are always chromeless, keyed by their exact
- * path. `/history` is the first: it is the read-only link handed to
+ * path. `/history` was the first, `/stageplots` the second: each is the read-only link handed to
  * volunteers, and it must not flash the rail while `views` is still loading —
  * unlike a console, its chromelessness is not the operator's per-View setting,
  * it is a property of the route itself. A second shared chromeless page later
  * is a one-line addition here rather than a new matcher.
  */
-export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]);
+export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history", "/stageplots"]);
 
 /**
  * Is this a shared chromeless page? The router serves `/history/` as the same
@@ -173,7 +173,11 @@ export function isSharedChromelessPath(pathname: string): boolean {
   // bar belong to the operator and not the reader. `/servicecue/presets` edits
   // layouts and stays an ordinary settings page, so only the exact launcher
   // path and the three-deep rundown path qualify.
-  return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
+  if (bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare)) return true;
+  // One venue on the crew's stage plots (the list is in the set above): the link and QR code
+  // handed out at load-in. /stageplots/manage (the app's own, with Edit) and the editor keep
+  // the shell.
+  return /^\/stageplots\/(?!edit$|manage$)[^/]+$/.test(bare);
 }
 
 /**
