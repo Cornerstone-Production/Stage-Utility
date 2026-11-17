@@ -539,6 +539,8 @@ export type IpcChannel =
   | "pco:liveNext"
   | "pco:livePrevious"
   | "people:getCount"
+  | "photoThemes:getPlanPeople"
+  | "photoThemes:getState"
   | "plans:exportPreview"
   | "plans:upcoming"
   | "presets:delete"
@@ -1842,6 +1844,12 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "osc:setFeedbackPort":
       return post<T>("/api/osc/feedback-port", p);
+
+    // ── Photo themes (the Mic slots page's Theme photos) ───────────────
+    case "photoThemes:getState":
+      return apiFetch<T>("/api/photo-themes");
+    case "photoThemes:getPlanPeople":
+      return apiFetch<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}?serviceTypeId=${encodeURIComponent(p.serviceTypeId as string)}`);
 
     // ── Window / app ───────────────────────────────────────────────────
     case "window:closeSettings":
