@@ -1,8 +1,9 @@
 # StagePlots
 
 Stage diagrams for every room a team plays in and every place it visits. A
-volunteer opens `/stageplots` on a phone at load-in and sees the room's plot; the
-desk edits them at `/stageplots/edit`.
+volunteer opens `/stageplots` on a phone at load-in and sees the room's plot, with
+nothing of the app around it; the desk reaches the same plots from the rail at
+`/stageplots/manage` and edits them at `/stageplots/edit`.
 
 ## Venues and plots
 
@@ -29,7 +30,7 @@ it, so a printed QR code keeps working.
 Change it in the venue's **Address** field in the editor; it saves when you leave
 the field. An address is lower-case letters, digits and single hyphens, up to 60
 characters. The server refuses one another venue answers to (naming that venue),
-`edit` (the editor's own address) and one shaped like a venue id (`v-` and twelve
+`edit` and `manage` (the editor's and the app's own pages) and one shaped like a venue id (`v-` and twelve
 hex digits). The old address keeps working: the venue lists its **Old addresses,
 still working** with a × that stops one answering, after asking. A venue keeps up
 to ten; past that the oldest stops working.
@@ -110,7 +111,22 @@ contents:
 Converting runs one image at a time, so a Raspberry Pi converting a 12-megapixel
 photo does not hold two in memory.
 
-## /stageplots
+## /stageplots and /stageplots/manage
+
+One page, at two addresses, the split [ServiceCue](servicecue-and-baptisms.md) and
+[History](operator-app.md) make:
+
+| | `/stageplots` | `/stageplots/manage` |
+|---|---|---|
+| For | the crew: the link and QR code handed out | the desk, inside Stage Utility |
+| Around it | nothing: no rail, no bar | the rail (Stage plots), the bar |
+| Edit | none | **Edit** in the bar, and beside each venue's Print |
+| A venue | `/stageplots/<address>` | `/stageplots/manage/<address>` |
+
+A venue opened from one stays on it: its back link, and the address bar, keep to the
+page it was opened on. Copy its address, in the editor, always gives the crew's
+`/stageplots/<address>`. Everything below holds on both, except where it says
+otherwise.
 
 Read-only, and as wide as the page. The venues as cards in a grid, home then offsite, each with a thumbnail of the
 plot it shows this week and a line saying which: "3 plots · Baptism for this
@@ -120,10 +136,10 @@ selected, the plot itself, its legend, and the venue's notes.
 - With exactly one home venue, `/stageplots` opens it directly.
 - A venue has its own address on the server's local address (see
   [Its own address](#its-own-address)). Opening a venue puts it in the address bar
-  and leaving it goes back to `/stageplots`, so the bar can be copied or made into
-  a QR code, and the address opens that venue on a fresh load. It wins over the
+  and leaving it goes back to the list on the page it was opened on, so the bar can be
+  copied or made into a QR code, and the address opens that venue on a fresh load. It wins over the
   remembered venue; an address that names no venue shows the list.
-- A venue with no plots offers **Add a plot**, which opens
+- On `/stageplots/manage`, a venue with no plots offers **Add a plot**, which opens
   `/stageplots/edit?venue=<id>` on that venue; the editor opens on the venue
   named in `?venue=` when it exists, and on its plot named in `?plot=`.
 - The plot is drawn as large as fits: never taller than the screen, centred in the
@@ -143,12 +159,13 @@ selected, the plot itself, its legend, and the venue's notes.
   desk, as a sheet along the bottom on a phone. A connection point linked to the
   patch lists its patch channels instead (see [Patch link](#patch-link)). A tap on
   the empty plot, anywhere off the plot, or Escape closes it; text has no details.
-- **Edit** beside the venue's name opens the editor on this venue and the plot on
-  screen; **Print** prints the plot (see [Printing](#printing)).
+- **Print** beside the venue's name prints the plot (see [Printing](#printing)). On
+  `/stageplots/manage` **Edit** sits beside it and opens the editor on this venue
+  and the plot on screen.
 - A saved edit anywhere shows without a reload.
 
-**Edit** in the bar opens the editor. **Stage plots** above the editor's heading
-comes back to the venue list without reloading the page.
+On `/stageplots/manage`, **Edit** in the bar opens the editor. **Stage plots** above
+the editor's heading comes back to `/stageplots/manage` without reloading the page.
 
 ### Following the plan
 
@@ -182,8 +199,9 @@ plot is a draft until **Save** (see [Editing a plot](#editing-a-plot)).
   address (with a button that copies it in full) and notes save when you leave the
   field; Home or Offsite saves at once. Right-click
   a venue (or press and hold on a touch screen) for **Rename** (selects it and puts
-  the cursor in its name), **Home** or **Offsite**, **Open on /stageplots**, **Copy
-  its address** and **Delete venue…**.
+  the cursor in its name), **Home** or **Offsite**, **Open in Stage plots** (its
+  page at `/stageplots/manage/<address>`), **Copy its address** (the crew's
+  `/stageplots/<address>`) and **Delete venue…**.
 - **Backgrounds**: **Upload**, the list, and the selected background's detail with
   its **Clean-up** switch and **Delete background…**.
 - **This week**: which plot the selected venue shows for the live or next plan,
@@ -212,7 +230,7 @@ switch**, or **Cancel**; it never switches under unsaved work.
 
 Each venue has a default plot, the starred tab, set from a plot's **⋯** with
 **Set as default**. Any Planning Center plan can show a different plot in that
-venue instead, for that plan only; [/stageplots](#stageplots) shows it while
+venue instead, for that plan only; [/stageplots](#stageplots-and-stageplotsmanage) shows it while
 that plan is live or next, then goes back to the default. The patch sheet's
 standing per-service-type layer has no equivalent here: a plan's plot is the
 default unless that plan says otherwise.
@@ -611,7 +629,7 @@ list the page would not take (once, with why, and again once it does),
 how many items moved
 up onto a plot once its background change is saved, every plan override set or
 handed back to the default, every override refused and why, the plan
-overrides cleared with a deleted plot, a deleted default and the plot that took
+overrides cleared with a deleted plot, a venue whose address the app has since taken for a page of its own (it answers at its id until a new one is set), a deleted default and the plot that took
 over, a new plot order refused and why, and plan overrides in `stageplots.json`
 that were not a list and were read as none, every venue address change (the new
 address and the old one that still opens it), old addresses dropped, and every

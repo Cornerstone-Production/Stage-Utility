@@ -62,9 +62,14 @@ export function venueSegment(venue: Venue): string {
   return venue.slug ?? venue.id;
 }
 
-/** A venue's own address on /stageplots. */
-export function venuePath(venue: Venue): string {
-  return `/stageplots/${encodeURIComponent(venueSegment(venue))}`;
+/** The read-only stage plots page with no app around it: the link handed to a crew, and a venue's QR code. */
+export const STAGEPLOTS_SHARED_PATH = "/stageplots";
+/** The same page inside the app, where the rail leads: with Edit, and the app's rail and bar around it. */
+export const STAGEPLOTS_MANAGE_PATH = "/stageplots/manage";
+
+/** A venue's own address: under /stageplots (the crew's, chromeless) unless `base` is the app's /stageplots/manage. */
+export function venuePath(venue: Venue, base: string = STAGEPLOTS_SHARED_PATH): string {
+  return `${base}/${encodeURIComponent(venueSegment(venue))}`;
 }
 
 /** The venue `/stageplots/<segment>` opens: the one whose id, address or old address it is. */

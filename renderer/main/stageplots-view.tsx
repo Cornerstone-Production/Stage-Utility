@@ -1,5 +1,8 @@
-// stageplots-view.tsx — /stageplots, read-only: every venue's stage plots, for a
-// volunteer at load-in as much as for the desk.
+// stageplots-view.tsx — every venue's stage plots, read-only, at two addresses: the
+// crew's /stageplots (chromeless, see active-page.ts: the link and QR code handed out
+// at load-in) and the app's /stageplots/manage (in the shell, where the rail leads,
+// with Edit in the bar and beside Print, and Add a plot on an empty venue). Everything
+// below holds on both; the address-following keeps to the page it was opened on.
 //
 // The venue list (home venues, then offsite) opens one venue: its plots as
 // tabs, the default selected and marked, the plot itself with pinch zoom and
@@ -7,7 +10,7 @@
 // notes and inputs beside it (a bottom sheet on a phone); Print lays the plot
 // on one landscape page. With exactly one home venue it opens that venue
 // straight away, and the browser remembers the last venue opened. A venue has
-// its own address, /stageplots/<address> (its id until it has one), which
+// its own address, /stageplots/<address> or /stageplots/manage/<address> (its id until it has one), which
 // opening or leaving one keeps current (as a replace) and which wins over the
 // remembered venue. Its id and its old addresses open it too, and the bar then
 // shows its address; one that names no venue shows the list and leaves the
@@ -41,7 +44,7 @@ import { cn } from "../lib/cn";
 import { readStored, removeStored, writeStored } from "../lib/safe-storage";
 import { useInAppLink, useRouterHandle } from "../lib/use-search-param";
 import { PrintControl } from "./stageplots-print";
-import { PLOT_PARAM, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueAt, venueGroups, venuePath, venueSegment } from "./stageplots/doc-helpers";
+import { PLOT_PARAM, STAGEPLOTS_MANAGE_PATH, STAGEPLOTS_SHARED_PATH, VENUE_PARAM, backgroundOf, eyebrow, plotsOf, venueAt, venueGroups, venuePath, venueSegment } from "./stageplots/doc-helpers";
 import { Mono } from "./stageplots/mono";
 import { PlotSvg } from "./stageplots/plot-svg";
 import { useFollowedPlan, type FollowedPlan } from "./stageplots/plan-following";
@@ -103,9 +106,9 @@ function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: V
   );
 }
 
-function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (venue: Venue) => void }) {
+function VenueList({ doc, plan, onOpen, manage }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (venue: Venue) => void; manage: boolean }) {
   if (doc.venues.length === 0) {
-    return (
+    return manage ? (
       <EmptyState
         title="No venues yet"
         hint="Add a venue and its plots in the editor."
@@ -115,6 +118,8 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
           </Button>
         }
       />
+    ) : (
+      <EmptyState title="No venues yet" hint="Stage plots show here once they are added in Stage Utility." />
     );
   }
   return (
@@ -133,7 +138,22 @@ function VenueList({ doc, plan, onOpen }: { doc: StagePlotsView; plan: FollowedP
   );
 }
 
-function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onBack: () => void; channelsOf: ChannelsOf }) {
+function VenuePage({
+  doc,
+  venue,
+  plan,
+  onBack,
+  channelsOf,
+  manage,
+}: {
+  doc: StagePlotsView;
+  venue: Venue;
+  plan: FollowedPlan;
+  onBack: () => void;
+  channelsOf: ChannelsOf;
+  /** Inside the app: Edit beside Print, and Add a plot on an empty venue. The crew's page is read-only. */
+  manage: boolean;
+}) {
   const goInApp = useInAppLink();
   /** Edit opens the editor on this venue and the plot on screen, in the app rather than as a page load; a modified click still opens a new tab. */
   const editLink = (plotId: string) => {
@@ -157,20 +177,26 @@ function VenuePage({ doc, venue, plan, onBack, channelsOf }: { doc: StagePlotsVi
       planDay={plan.label}
       backgroundOf={(p) => backgroundOf(doc, p)}
       channelsOf={channelsOf}
-      emptyAction={
-        <Button asChild variant="filled" size="small">
-          <a href={`/stageplots/edit?venue=${encodeURIComponent(venue.id)}`}>Add a plot</a>
-        </Button>
-      }
+      {...(manage
+        ? {
+            emptyAction: (
+              <Button asChild variant="filled" size="small">
+                <a href={`/stageplots/edit?venue=${encodeURIComponent(venue.id)}`}>Add a plot</a>
+              </Button>
+            ),
+          }
+        : {})}
       before={<BackLink onClick={onBack} />}
       actions={(shown) => (
         <span className="ml-auto flex items-center gap-1.5">
-          <Button asChild variant="filled" size="small">
-            <a {...editLink(shown.plot.id)}>
-              <PencilIcon className="size-3.5" />
-              Edit
-            </a>
-          </Button>
+          {manage && (
+            <Button asChild variant="filled" size="small">
+              <a {...editLink(shown.plot.id)}>
+                <PencilIcon className="size-3.5" />
+                Edit
+              </a>
+            </Button>
+          )}
           <PrintControl
             venueName={venue.name}
             plotName={shown.plot.name}
@@ -199,7 +225,13 @@ const NO_OVERRIDES: readonly PlotOverride[] = [];
 
 const NO_LINKS = new Map<string, Map<string, LinkResolution>>();
 
-export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
+/**
+ * `manage`: the page inside the app, at /stageplots/manage, where the rail leads, with Edit.
+ * Without it, the crew's page at /stageplots: no rail or bar (the shell hides them for this
+ * path, see active-page.ts), read-only, and drawing its own heading.
+ */
+export function StagePlotsPage({ venueId, manage = false }: { venueId?: string; manage?: boolean } = {}) {
+  const base = manage ? STAGEPLOTS_MANAGE_PATH : STAGEPLOTS_SHARED_PATH;
   const { doc: stored, loading, error } = useStagePlots();
   const plan = useFollowedPlan(stored?.overrides ?? NO_OVERRIDES);
   // Every plot drawn with its linked points resolved: the cards, the plot, its legend and print.
@@ -228,15 +260,17 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
   const shownVenue = doc ? (venueId ? venueAt(doc.venues, venueId) : openVenue(doc, open)) : null;
   const shownSegment = shownVenue ? venueSegment(shownVenue) : null;
   useEffect(() => {
-    if (shownSegment && shownSegment !== venueId) goTo(`/stageplots/${encodeURIComponent(shownSegment)}`);
+    if (shownSegment && shownSegment !== venueId) goTo(`${base}/${encodeURIComponent(shownSegment)}`);
     // goTo changes every render; the address only needs to follow the venue shown.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownSegment, venueId]);
+  }, [shownSegment, venueId, base]);
   usePageActions(
-    <Button asChild variant="filled" size="small">
-      <a href="/stageplots/edit">Edit</a>
-    </Button>,
-    [],
+    manage ? (
+      <Button asChild variant="filled" size="small">
+        <a href="/stageplots/edit">Edit</a>
+      </Button>
+    ) : null,
+    [manage],
   );
 
   // Held until the plan is known too: drawn on the plots alone, a venue would
@@ -251,7 +285,9 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
   // An address that names a venue wins over the remembered one; one that names none shows the list.
   const venue = shownVenue;
   return (
-    <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3">
+    <div className={cn("pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:pt-3", !manage && "mx-auto w-full max-w-[1400px] px-4 sm:px-6")}>
+      {/* The crew's page has no app bar above it to name it. */}
+      {!manage && !venue && <h1 className="mb-1 text-title3 font-semibold text-fg">Stage plots</h1>}
       {error && <ErrorNote className="mb-3">Couldn&apos;t refresh the stage plots; showing the last ones read.</ErrorNote>}
       {plan.unreachable && <UnreachableNotice />}
       {venue ? (
@@ -260,20 +296,22 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
           venue={venue}
           plan={plan}
           channelsOf={channelsOf}
+          manage={manage}
           onBack={() => {
             remember(null);
             setOpen({ kind: "list" });
-            goTo("/stageplots", { list: true });
+            goTo(base, { list: true });
           }}
         />
       ) : (
         <VenueList
           doc={doc}
           plan={plan}
+          manage={manage}
           onOpen={(v) => {
             remember(v.id);
             setOpen({ kind: "venue", id: v.id });
-            goTo(venuePath(v));
+            goTo(venuePath(v, base));
           }}
         />
       )}
@@ -281,8 +319,19 @@ export function StagePlotsPage({ venueId }: { venueId?: string } = {}) {
   );
 }
 
-/** `/stageplots/<venue address, id or old address>`: the page with that venue open. */
+/** `/stageplots/<venue address, id or old address>`: the crew's page with that venue open. */
 export function StagePlotsVenueRoute() {
   const { venueId } = useParams({ strict: false }) as { venueId?: string };
   return <StagePlotsPage {...(venueId ? { venueId } : {})} />;
+}
+
+/** `/stageplots/manage`: the page inside the app, where the rail leads. */
+export function StagePlotsManagePage() {
+  return <StagePlotsPage manage />;
+}
+
+/** `/stageplots/manage/<venue>`: a venue opened inside the app. */
+export function StagePlotsManageVenueRoute() {
+  const { venueId } = useParams({ strict: false }) as { venueId?: string };
+  return <StagePlotsPage manage {...(venueId ? { venueId } : {})} />;
 }
