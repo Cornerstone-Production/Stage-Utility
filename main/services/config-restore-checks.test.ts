@@ -57,6 +57,34 @@ const GOOD: Record<string, unknown> = {
     ],
     updatedAt: "",
   },
+  "photo-themes.json": {
+    version: 1,
+    themes: [
+      {
+        id: "th-0123456789ab",
+        name: "Christmas 2026",
+        prompt: "Warm lights, keep the face the same",
+        baselinePrompt: "Warm lights, keep the face the same",
+        createdAt: "2026-11-17T12:00:00.000Z",
+        lastUsedDate: "2026-12-24",
+        people: [
+          {
+            personId: "1001",
+            name: "Alex R.",
+            approved: {
+              file: "0123456789abcdef.webp",
+              madeFrom: "fedcba9876543210",
+              sourceUrl: "https://avatars.planningcenteronline.com/uploads/person/1001-1/avatar.jpg",
+              planId: "2001",
+              serviceDate: "2026-12-24T16:00:00Z",
+              approvedAt: "2026-11-18T12:00:00.000Z",
+            },
+          },
+        ],
+      },
+    ],
+    plans: [{ planId: "2001", serviceTypeId: "100", sortDate: "2026-12-24T16:00:00Z", themeId: "th-0123456789ab", show: "themed" }],
+  },
   "presets.json": [{ id: "p1", name: "Sunday", slots: [] }],
   "rosstalk-settings.json": { simulate: true },
   "rosstalk-targets.json": [{ id: "rt1", name: "Carbonite", enabled: false, config: { port: 7788, family: "carbonite" } }],
@@ -143,6 +171,10 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "notes.json": { value: { "not an id!": { text: "x" } }, says: "object id" },
   "osc-targets.json": { value: [{ id: "o1", name: "Board", enabled: "yes", config: {} }], says: "enabled" },
   "patch.json": { value: { sheets: [42] }, says: "sheet" },
+  "photo-themes.json": {
+    value: { ...(GOOD["photo-themes.json"] as object), plans: [{ planId: "2001", serviceTypeId: "100", sortDate: null, themeId: null, show: "sometimes" }] },
+    says: "show",
+  },
   "presets.json": { value: [{ id: "p1", name: "   ", slots: [] }], says: "no name" },
   "rosstalk-settings.json": { value: { simulate: 1 }, says: "simulate" },
   "rosstalk-targets.json": { value: [{ id: "rt1", name: 5, enabled: false, config: {} }], says: "name" },

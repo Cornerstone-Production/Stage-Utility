@@ -96,7 +96,8 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
 | `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots, backgrounds and per-plan overrides |
 | `stageplot-drafts.json` | the [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts |
-| `branding-images/`, `layout-images/`, `stageplot-images/` | uploaded images, named by content hash |
+| `photo-themes.json` | [photo themes](../features/photo-themes.md): prompts, approvals and each plan's theme. The OpenAI key is in `secrets.bin`, never here |
+| `branding-images/`, `layout-images/`, `stageplot-images/`, `photo-theme-images/` | uploaded images and themed photos, named by content hash |
 | `stageplot-originals/` | uploaded stage-plot PDFs, kept but never served |
 
 **What it observed** — deliberately not restored, because it describes this

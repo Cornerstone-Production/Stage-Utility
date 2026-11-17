@@ -718,6 +718,43 @@ swatch or `null`. It is never checked against the patch, so a link to a device t
 gone saves; on any other type it is a `400`. A plot holds up to 500 items, each `id`
 once. Any other field is dropped.
 
+### Photo themes
+
+Themed mic slot photos and the OpenAI key that makes them. See
+[Photo themes](../features/photo-themes.md). A theme id is the one these routes
+issue (`th-` and twelve hex digits); a person id is a Planning Center person id
+and a plan or service type id a Planning Center id (digits only). An id of the
+wrong shape is a `400` before anything is looked up; an unknown theme, or a person
+with no photo in it, is a `404`. A refusal is `{error}` naming the field or saying
+why: `409` for something not possible now (no key, a key OpenAI rejected, a plan
+with no theme, nothing waiting for review), `502` when the plan's roster cannot be
+read from Planning Center, `503` while `photo-themes.json` cannot be used or a
+config restore is landing. No answer carries the key: the connection is always
+described by its hint.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/openai` | The connection: `{method, hint, state, reason, checkedAt}`. `method` is `api-key` or `null`, `hint` the key's last four characters (`sk-…3f2a`), `state` one of `not-connected`, `unchecked`, `connected`, `invalid-key`, `out-of-credits`, `forbidden`, `unreachable` |
+| PUT | `/api/openai/key` | `{apiKey}`: save the key, replacing any. Trimmed; 20 to 512 printable characters with no space, else `400`. Answers the connection |
+| DELETE | `/api/openai/key` | Remove the key. Answers the connection |
+| POST | `/api/openai/test` | Lists OpenAI's models with the key, which costs nothing. Answers the connection, its `reason` saying why when it does not work |
+| GET | `/api/photo-themes` | `{themes, plans, connection, running, queued}`. Each theme is `{id, name, prompt, promptChanged, createdAt, lastUsedDate, keptUntil, plans, people}`; `keptUntil` is the last day (app time zone) its photos are kept, `plans` the plans using it, and each person `{personId, name, status, approved, pending}`: `status` is `none`, `generating`, `ready`, `approved`, `stale` or `failed`, `approved` is `{url, fromPlanId, fromDate, approvedAt, stale}` or `null`, `pending` `{status, url, reason, planId}` or `null`. Each plan choice is `{planId, serviceTypeId, sortDate, themeId, show}` |
+| POST | `/api/photo-themes/themes` | `{name, prompt}`: a name of 1 to 80 characters on one line, a prompt of 1 to 2000. `201` with the theme |
+| PATCH | `/api/photo-themes/themes/:id` | Any of `{name, prompt}`, held to the same rules. A new prompt on a theme with photos sets `promptChanged` |
+| DELETE | `/api/photo-themes/themes/:id` | The theme and its photos; plans using it go back to their original photos. `{plans, photos}`: how many of each |
+| POST | `/api/photo-themes/themes/:id/keep-prompt` | Keep the photos made under the old prompt: clears `promptChanged` |
+| POST | `/api/photo-themes/themes/:id/people/:personId/approve` | Approve the edit waiting for review; it replaces any approved photo and goes on screens. `409` when none is waiting |
+| POST | `/api/photo-themes/themes/:id/people/:personId/keep` | Keep an approved photo made from an older Planning Center photo. `409` when their current photo is not known yet |
+| POST | `/api/photo-themes/themes/:id/people/:personId/redo` | `{planId, serviceTypeId}` (both or neither): make their photo again from their Planning Center photo on that plan (`404` when they are not on it), or, with neither, from the last one the server saw. `202` with the person. `409` while one is already being made |
+| POST | `/api/photo-themes/themes/:id/people/:personId/move` | `{to}`, another theme: move their approved photo there, replacing any photo they have there. `409` when they have no approved photo, or one is being made |
+| POST | `/api/photo-themes/themes/:id/people/:personId/copy` | `{to}`: the same, leaving this theme's photo in place. A copy shares the stored file |
+| DELETE | `/api/photo-themes/themes/:id/people/:personId` | Take them out of the theme; every plan using it shows their original again |
+| GET | `/api/photo-themes/plans/:planId?serviceTypeId=` | `{planId, serviceTypeId, choice, roster, reason?, people, toGenerate}`: the people the plan's shown boards put in a slot, each as a theme person plus `originalUrl` (their Planning Center photo, or `null`), and how many a Generate would send. `roster` is `live`, `plan` or `unavailable` with a `reason` |
+| PATCH | `/api/photo-themes/plans/:planId` | `{serviceTypeId, sortDate?, themeId?, show?}`, at least one of `themeId` and `show`. `themeId` a theme or `null`; choosing one sets `show` to `themed`. `show` is `original` or `themed`. `sortDate` is the plan's Planning Center sort date (an ISO date and time) or `null`; omitted, the one already stored is kept, or the current plan's is filled in. Answers the plan choice |
+| POST | `/api/photo-themes/plans/:planId/generate` | `{serviceTypeId, mode?}`. `mode` `missing` (the default) sends only people with no photo in the plan's theme or whose last attempt failed; `all` redoes everyone and clears `promptChanged`. `202` with `{queued, reused, skipped: [{personId, name, reason}]}`. Progress arrives on `photo-themes:changed` |
+| POST | `/api/photo-themes/plans/:planId/approve-all` | Approve every edit made for this plan that is waiting for review. `{approved}` |
+| GET | `/api/photo-themes/images/:file` | A stored edit, ready or approved, served immutable with the stored-image policy. `404` for a name that is not one |
+
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
@@ -815,7 +852,11 @@ something to change:
 `wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
 `video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
-[Network traffic](../ops/network-traffic.md#slot-boards))
+[Network traffic](../ops/network-traffic.md#slot-boards)) · `photo-themes:changed`
+(`{epoch, seq, running, queued, active: [{themeId, personId}]}`: theme photos being
+made or waiting, sent when the queue or a theme changes and only while somebody is
+subscribed; a `seq` that is not the next one, or a new `epoch`, says a change was
+missed and `GET /api/photo-themes` should be read again)
 
 **Pushed only when something happens:**
 
@@ -872,7 +913,7 @@ Either channel having a subscriber starts the five-second read.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
+| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos). A `u` of `photo-theme:<file>` is an approved [themed photo](../features/photo-themes.md#what-screens-show), served from the server's own store as it was made (`s` is ignored), immutable, `404` for a name it does not hold |
 | GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
 | GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |

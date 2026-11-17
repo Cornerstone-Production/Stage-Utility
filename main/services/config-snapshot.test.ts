@@ -113,6 +113,9 @@ const EXPECTED_CONFIG = [
   "notes.json",
   "osc-targets.json",
   "patch.json",
+  // Theme photo prompts, approvals and which theme each plan uses. The edits
+  // themselves ride in the snapshot's images (photo-theme-images/).
+  "photo-themes.json",
   "presets.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
