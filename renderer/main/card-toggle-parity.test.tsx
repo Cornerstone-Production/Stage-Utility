@@ -301,7 +301,18 @@ const reads = readLedger();
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   // The live-update subscription posts on its own schedule and lands whenever it
   // likes; it is neither a read the page waits on nor one of these counts.
-  if (isPlumbing(String(input))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  //
+  // Nor is a line the page logs for the operator. logToServer is fire and forget:
+  // it sends the POST and never reads the answer, so counted as a read it would
+  // never be "taken" and every wait below would time out for good. The serverClock
+  // logs one the first time it is fed a server stamp (the fixtures' NOW is long
+  // past, so this browser's clock reads as hundreds of hours fast), and it only
+  // takes a reading once two stamps arrive a second apart, which an idle machine
+  // never gets through in a run and a loaded one always does.
+  const where = String(input);
+  if (isPlumbing(where) || where.startsWith("/api/log/client")) {
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  }
   reads.begin();
   const url = String(input);
   const pick = <T,>(live: T, idle: T): T => (happening ? live : idle);
