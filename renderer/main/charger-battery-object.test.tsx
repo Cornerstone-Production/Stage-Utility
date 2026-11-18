@@ -16,32 +16,34 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
-const teardown = installDom();
+const teardown = installRenderDom();
 
 // The widget draws the render context's bays until `wireless:chargers` answers,
 // and its read of /api/integrations/wireless/chargers answers the same bays, as
 // the server would. Everything else this reaches is answered empty.
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 let served: ChargerBayDTO[] = [];
+const reads = readLedger();
 (globalThis as { fetch?: unknown }).fetch = async (input: unknown) => {
+  // The live-update subscription posts on its own schedule; it is not a read the widget waits on.
+  if (isPlumbing(String(input))) return { ok: true, status: 200, statusText: "OK", json: async () => ({}), text: async () => "{}" };
+  reads.begin();
   const body = String(input).includes("/api/integrations/wireless/chargers") ? served : {};
-  return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
+  return reads.answer({ ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) });
 };
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 
-after(async () => {
-  cleanup();
-  // Let the reads the widget started land before the DOM goes.
-  await new Promise((r) => setTimeout(r, 50));
-  teardown();
-});
+// Unmount, let React finish what the renders started, then take the DOM away. A fixed wait
+// here was a guess at how long the effect flush takes; it flushes after the DOM is gone on a
+// machine slow enough, and the file fails with "window is not defined".
+after(() => unmountAndTeardown(cleanup, teardown));
 
 const BASE_BAY = {
   id: "c1::7",
@@ -61,8 +63,10 @@ const BASE_BAY = {
   storageMode: null,
 } satisfies ChargerBayDTO;
 
-/** Render the charger object over one bay and return the text it drew. */
-function textFor(bay: Partial<ChargerBayDTO>, show: Record<string, boolean> = { battery: true, charging: true }): string {
+/** Render the charger object over one bay and return the text it drew. The render is inside
+ *  act, and the widget's own read of the bays is waited for, so nothing it started is left
+ *  for React's scheduler to run after the test has ended. */
+async function textFor(bay: Partial<ChargerBayDTO>, show: Record<string, boolean> = { battery: true, charging: true }): Promise<string> {
   cleanup();
   const merged = { ...BASE_BAY, ...bay };
   served = [merged];
@@ -75,78 +79,82 @@ function textFor(bay: Partial<ChargerBayDTO>, show: Record<string, boolean> = { 
     config: { type: "charger-battery", bays: [{ id: merged.id }], show },
     style: {},
   } as never;
-  const { container } = render(React.createElement(ObjectContent as never, { o: obj, ctx }));
+  let container!: HTMLElement;
+  await act(async () => {
+    ({ container } = render(React.createElement(ObjectContent as never, { o: obj, ctx })));
+  });
+  await eventually(reads.landed);
   return container.textContent ?? "";
 }
 
 describe("the charger widget draws a faulted bay as faulted", () => {
-  test("the error code is on screen", () => {
-    const text = textFor({ fault: "Error 007" });
+  test("the error code is on screen", async () => {
+    const text = await textFor({ fault: "Error 007" });
     assert.ok(
       text.includes("Error 007"),
       `a faulted bay drew no fault. Saw: ${JSON.stringify(text)}`,
     );
   });
 
-  test("and it does not pretend the bay is empty", () => {
+  test("and it does not pretend the bay is empty", async () => {
     // "empty" is what a spare shelf reads. A pack that has failed in the dock is
     // the opposite of a bay with nothing in it.
-    assert.ok(!textFor({ fault: "Error 007" }).includes("empty"));
+    assert.ok(!(await textFor({ fault: "Error 007" })).includes("empty"));
   });
 
-  test("a bay with no battery in it still reads empty", () => {
-    assert.ok(textFor({ online: false }).includes("empty"));
+  test("a bay with no battery in it still reads empty", async () => {
+    assert.ok((await textFor({ online: false })).includes("empty"));
   });
 
-  test("a healthy bay draws its figures and no fault", () => {
-    const text = textFor({ battery: 100, fault: null });
+  test("a healthy bay draws its figures and no fault", async () => {
+    const text = await textFor({ battery: 100, fault: null });
     assert.ok(text.includes("100%"));
     assert.ok(!text.includes("Error"));
   });
 });
 
 describe("time to full and storage mode", () => {
-  test("a charging bay says when it will be ready", () => {
-    const text = textFor({ battery: 62, charging: true, timeToFullMinutes: 83 });
+  test("a charging bay says when it will be ready", async () => {
+    const text = await textFor({ battery: 62, charging: true, timeToFullMinutes: 83 });
     assert.ok(
       text.includes("1:23"),
       `"will this pack be ready before the service" went unanswered. Saw: ${JSON.stringify(text)}`,
     );
   });
 
-  test("a full bay reports no time to full and draws none", () => {
-    assert.ok(!textFor({ battery: 100, timeToFullMinutes: null }).includes(":"));
+  test("a full bay reports no time to full and draws none", async () => {
+    assert.ok(!(await textFor({ battery: 100, timeToFullMinutes: null })).includes(":"));
   });
 
-  test("storage mode explains a shelf of bays stopped at 40%", () => {
-    const text = textFor({ battery: 40, storageMode: true });
+  test("storage mode explains a shelf of bays stopped at 40%", async () => {
+    const text = await textFor({ battery: 40, storageMode: true });
     assert.ok(
       text.includes("storage"),
       `nothing explained why a full charger stopped at 40%. Saw: ${JSON.stringify(text)}`,
     );
   });
 
-  test("and a charger not in storage mode says nothing about it", () => {
-    assert.ok(!textFor({ battery: 100, storageMode: false }).includes("storage"));
+  test("and a charger not in storage mode says nothing about it", async () => {
+    assert.ok(!(await textFor({ battery: 100, storageMode: false })).includes("storage"));
   });
 });
 
 describe("the bay label", () => {
-  test("the operator's connection name still wins", () => {
-    assert.ok(textFor({}).includes("Rack charger · Bay 7"));
+  test("the operator's connection name still wins", async () => {
+    assert.ok((await textFor({})).includes("Rack charger · Bay 7"));
   });
 
-  test("an unnamed connection falls back to the charger's own DEVICE_ID", () => {
+  test("an unnamed connection falls back to the charger's own DEVICE_ID", async () => {
     // This is what used to read "Charger 1 · Bay 7" while the unit itself was
     // called "RF: 5-8".
-    const text = textFor({ connectionName: null });
+    const text = await textFor({ connectionName: null });
     assert.ok(
       text.includes("RF: 5-8 · Bay 7"),
       `the device's own name went unused. Saw: ${JSON.stringify(text)}`,
     );
   });
 
-  test("and with neither, the index is still better than nothing", () => {
-    assert.ok(textFor({ connectionName: null, name: null }).includes("Charger 1 · Bay 7"));
+  test("and with neither, the index is still better than nothing", async () => {
+    assert.ok((await textFor({ connectionName: null, name: null })).includes("Charger 1 · Bay 7"));
   });
 });
