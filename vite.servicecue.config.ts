@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin } from "vite";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { createHash } from "crypto";
@@ -7,6 +7,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { buildManifest } from "./main/services/install-metadata";
 import { tsconfigAliases } from "./main/services/vite-aliases";
+import { reactCompiler } from "./main/services/vite-react-compiler";
 import { LANDING_HTML, PUBLIC_STATIC_FILES, STAGEPLOTS_HTML, VIEWER_HTML, viewerBuildTag } from "./main/types/servicecue-publish";
 import { STATIC_HEADERS_FILE, staticHeaders } from "./publish/servicecue/src/headers";
 
@@ -81,7 +82,7 @@ export default defineConfig({
   plugins: [
     react(),
     // The same React Compiler setup as the operator app.
-    babel({ presets: [reactCompilerPreset()] }),
+    babel({ presets: [reactCompiler()] }),
     tailwindcss(),
     viewerFiles(),
   ],
