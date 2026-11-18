@@ -92,11 +92,11 @@ beforeEach(() => {
       const body = JSON.parse(String(init?.body)) as PutBody;
       puts.push(body as Config);
       if (gate) return gate.then(() => answerPut(body));
-      reads.begin();
+      reads.begin(url);
       if (refuse) return reads.answer(reply(400, { error: refuse }));
       return reads.answer(answerPut(body));
     }
-    reads.begin();
+    reads.begin(url);
     if (readFails) {
       reads.failed();
       throw new TypeError("fetch failed");

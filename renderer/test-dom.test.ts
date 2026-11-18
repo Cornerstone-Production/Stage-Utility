@@ -88,7 +88,7 @@ describe("readLedger", () => {
 
   test("a read is on its way until a caller takes its body, once", async () => {
     const reads = readLedger();
-    reads.begin();
+    reads.begin("/api/x");
     const res = reads.answer(response({ a: 1 }));
     assert.equal(reads.pending(), 1, "an answer nobody has read is still on its way");
     assert.throws(() => reads.landed(), /1 read\(s\) still on their way/);
@@ -99,12 +99,36 @@ describe("readLedger", () => {
     assert.equal(reads.pending(), 0, "reading the body twice must not take two reads");
   });
 
+  test("the page's own log line is not a read: nobody takes its answer", () => {
+    const reads = readLedger();
+    reads.begin("/api/log/client");
+    assert.equal(reads.pending(), 0);
+    reads.landed();
+  });
+
+  test("only the log line itself is let off: every other /api/log read still counts", () => {
+    for (const url of ["/api/log", "/api/log/tail", "/api/log/client-history", "/api/logs"]) {
+      const reads = readLedger();
+      reads.begin(url);
+      assert.equal(reads.pending(), 1, `${url} is a read a test may wait on`);
+    }
+    const reads = readLedger();
+    reads.begin("/api/log/client?level=warn");
+    assert.equal(reads.pending(), 0, "the log line with a query is still the log line");
+  });
+
+  test("an answer taken for a read never begun is caught, not cancelled out", async () => {
+    const reads = readLedger();
+    await reads.answer(response({ a: 1 })).json();
+    assert.throws(() => reads.landed(), /1 answer\(s\) taken for reads that were never begun/);
+  });
+
   test("a read that failed is not left pending, and reset starts again", () => {
     const reads = readLedger();
-    reads.begin();
+    reads.begin("/api/x");
     reads.failed();
     assert.equal(reads.pending(), 0);
-    reads.begin();
+    reads.begin("/api/x");
     reads.reset();
     assert.equal(reads.pending(), 0);
   });

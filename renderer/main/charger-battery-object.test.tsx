@@ -30,7 +30,7 @@ const reads = readLedger();
 (globalThis as { fetch?: unknown }).fetch = async (input: unknown) => {
   // The live-update subscription posts on its own schedule; it is not a read the widget waits on.
   if (isPlumbing(String(input))) return { ok: true, status: 200, statusText: "OK", json: async () => ({}), text: async () => "{}" };
-  reads.begin();
+  reads.begin(String(input));
   const body = String(input).includes("/api/integrations/wireless/chargers") ? served : {};
   return reads.answer({ ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) });
 };

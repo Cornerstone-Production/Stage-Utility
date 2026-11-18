@@ -62,7 +62,7 @@ function stubFetch(failing: Read[], state: Record<string, unknown> = CONNECTED) 
     // likes; it is neither a read the page waits on nor one of these counts.
     if (isPlumbing(url)) return ok({});
     asked.push(url);
-    reads.begin();
+    reads.begin(url);
     const answer = (json: unknown) => reads.answer(ok(json));
     const read = (name: Read, json: unknown) => {
       if (failing.includes(name)) {
