@@ -67,6 +67,10 @@ jobs:
           languages: ${{ inputs.language }}
           build-mode: ${{ inputs.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
+          # Added to the configuration's queries, not substituted for them (the plus).
+          # A JavaScript query, so only the JavaScript run asks for it: the
+          # configuration drops the stock query it replaces for every language.
+          queries: ${{ inputs.language == 'javascript-typescript' && '+./.github/codeql/queries' || '' }}
       # What the tracer watches. The Swift leg builds the whole package, which also
       # compiles the DeckLink shim; the C/C++ leg builds only the shim and the vendored
       # SDK dispatch it links, so it does not repeat the Swift build on a second macOS

@@ -204,8 +204,10 @@ describe("the per-language workflow", () => {
     assert.equal(init?.with?.["languages"], "${{ inputs.language }}");
     assert.equal(init?.with?.["build-mode"], "${{ inputs.build-mode }}");
     assert.equal(init?.with?.["config-file"], "./.github/codeql/codeql-config.yml");
-    // An input here overrides the configuration's own queries.
-    assert.equal(init?.with?.["queries"], undefined);
+    // An input here overrides the configuration's own queries unless it begins with a plus,
+    // which adds to them. The one added query is JavaScript, so only that run asks for it;
+    // see "the http-to-file-access replacement".
+    assert.equal(init?.with?.["queries"], "${{ inputs.language == 'javascript-typescript' && '+./.github/codeql/queries' || '' }}");
   });
 
   it("selects Xcode and builds by hand, before analysing, for a manual build", () => {
@@ -522,6 +524,8 @@ function exportsFunction(file: string, name: string): boolean {
   );
 }
 
+const queryFilters = () => (parse(read(".github/codeql/codeql-config.yml")) as { "query-filters": unknown })["query-filters"];
+
 describe("the shared CodeQL configuration", () => {
   const config = parse(read(".github/codeql/codeql-config.yml")) as { queries: { uses: string }[]; "paths-ignore": string[] };
   const ignored = (file: string) => config["paths-ignore"].some((g) => globToRegExp(g).test(file));
@@ -681,6 +685,57 @@ describe("the model pack", () => {
     assert.equal(setup?.with?.["languages"], "javascript-typescript");
     const run = job.steps?.find((s) => s.run?.includes("test run"));
     assert.equal(run?.env?.["CODEQL"], `\${{ steps.${setup?.id}.outputs.codeql-path }}`);
-    assert.match(String(run?.run), /"\$CODEQL" test run \.github\/codeql\/tests --additional-packs="\$GITHUB_WORKSPACE\/\.github\/codeql\/extensions"/);
+    assert.match(String(run?.run), /"\$CODEQL" test run \.github\/codeql\/tests --additional-packs="\$GITHUB_WORKSPACE\/\.github\/codeql\/extensions:\$GITHUB_WORKSPACE\/\.github\/codeql\/queries"/);
+  });
+});
+
+// The stock js/http-to-file-access reads no model, so the model pack cannot teach it that
+// encodeRow's result is safe to write. A copy of the query, with that one barrier, replaces
+// it. Its behaviour is tested by CodeQL (.github/codeql/tests/queries); what is checked here
+// is the wiring CodeQL cannot see: that the copy is the rule the repository's alerts are
+// filed under, that the stock one is dropped and the copy is not, and that the barrier
+// names a function that exists.
+describe("the http-to-file-access replacement", () => {
+  const QUERIES = ".github/codeql/queries";
+  const ql = read(`${QUERIES}/HttpToFileAccess.ql`);
+  /** The QL without its comments, so prose that names the function satisfies nothing. */
+  const code = ql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+  it("is a query pack for the JavaScript run, and keeps the stock rule's id", () => {
+    const pack = parse(read(`${QUERIES}/qlpack.yml`)) as { name: string; library: boolean; extractor: string; dependencies: Record<string, string> };
+    assert.equal(pack.name, "stage-utility/javascript-queries");
+    assert.equal(pack.library, false);
+    assert.equal(pack.extractor, "javascript");
+    assert.deepEqual(Object.keys(pack.dependencies), ["codeql/javascript-all"]);
+    // A new id would file the repository's open alerts as fixed and the same findings as new.
+    assert.match(ql, /^ \* @id js\/http-to-file-access$/m);
+  });
+
+  it("drops the stock query by its path, which leaves this one", () => {
+    // A filter by id would drop both. The stock query lives at this path in codeql/javascript-queries.
+    assert.deepEqual(queryFilters(), [{ exclude: { "query path": "Security/CWE-912/HttpToFileAccess.ql" } }]);
+    assert.ok(tracked.includes(`${QUERIES}/HttpToFileAccess.ql`));
+  });
+
+  it("adds exactly one barrier, encodeRow in main/services/csv.ts, to the stock configuration", () => {
+    const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").replace(/\s+/g, " ").trim();
+    assert.equal(
+      strip(read(`${QUERIES}/EncodeRowBarrier.qll`)),
+      "import javascript import semmle.javascript.security.dataflow.HttpToFileAccessCustomizations " +
+        "class EncodeRowResult extends HttpToFileAccess::Sanitizer, DataFlow::CallNode { " +
+        "EncodeRowResult() { exists(Function f | " +
+        'f.getName() = "encodeRow" and f.getFile().getRelativePath() = "main/services/csv.ts" and this.getACallee() = f ) } }',
+    );
+    // The query is the stock one plus that import: no configuration of its own to drift from the stock.
+    assert.match(code, /^import EncodeRowBarrier$/m);
+    assert.doesNotMatch(code, /ConfigSig|isBarrier|isSource|isSink/);
+    assert.ok(exportsFunction("main/services/csv.ts", "encodeRow"), "main/services/csv.ts does not export encodeRow");
+  });
+
+  it("is tested against the real query, with a stand-in for the file it names", () => {
+    const tests = parse(read(".github/codeql/tests/qlpack.yml")) as { dependencies: Record<string, string> };
+    assert.ok("stage-utility/javascript-queries" in tests.dependencies, "the test pack does not depend on the query pack");
+    assert.equal(read(".github/codeql/tests/queries/HttpToFileAccess.qlref").trim(), "HttpToFileAccess.ql");
+    assert.ok(tracked.includes(".github/codeql/tests/queries/main/services/csv.ts"), "no stand-in for main/services/csv.ts");
   });
 });

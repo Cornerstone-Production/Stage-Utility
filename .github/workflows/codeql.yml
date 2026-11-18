@@ -189,7 +189,7 @@ jobs:
           CODEQL: ${{ steps.codeql.outputs.codeql-path }}
         run: |
           "$CODEQL" version
-          "$CODEQL" test run .github/codeql/tests --additional-packs="$GITHUB_WORKSPACE/.github/codeql/extensions"
+          "$CODEQL" test run .github/codeql/tests --additional-packs="$GITHUB_WORKSPACE/.github/codeql/extensions:$GITHUB_WORKSPACE/.github/codeql/queries"
 
   # Nearly every change touches it, and Linux runners are not scarce.
   javascript-typescript:

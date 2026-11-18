@@ -1,0 +1,41 @@
+edges
+| main/services/archive/rows.ts:3:27:3:32 | values [0] | main/services/archive/rows.ts:4:10:4:15 | values [0] | provenance |  |
+| main/services/archive/rows.ts:4:10:4:15 | values [0] | main/services/archive/rows.ts:4:10:4:25 | values.join(",") | provenance |  |
+| main/services/archive/rows.ts:4:10:4:25 | values.join(",") | main/services/archive/rows.ts:4:10:4:32 | values. ...  + "\\n" | provenance |  |
+| main/services/csv-appender.ts:17:21:17:25 | chunk | main/services/csv-appender.ts:18:17:18:21 | chunk | provenance |  |
+| main/services/csv-appender.ts:17:21:17:25 | chunk | main/services/csv-appender.ts:19:28:19:32 | chunk | provenance |  |
+| main/services/csv-appender.ts:19:27:19:33 | [chunk] [0] | main/services/csv-appender.ts:19:17:19:34 | lookalike([chunk]) | provenance |  |
+| main/services/csv-appender.ts:19:27:19:33 | [chunk] [0] | main/services/lookalike.ts:3:27:3:32 | values [0] | provenance |  |
+| main/services/csv-appender.ts:19:28:19:32 | chunk | main/services/csv-appender.ts:19:27:19:33 | [chunk] [0] | provenance |  |
+| main/services/lookalike.ts:3:27:3:32 | values [0] | main/services/lookalike.ts:4:10:4:15 | values [0] | provenance |  |
+| main/services/lookalike.ts:4:10:4:15 | values [0] | main/services/lookalike.ts:4:10:4:25 | values.join(",") | provenance |  |
+| main/services/lookalike.ts:4:10:4:25 | values.join(",") | main/services/lookalike.ts:4:10:4:32 | values. ...  + "\\n" | provenance |  |
+| main/services/network-path.ts:14:21:14:25 | chunk | main/services/network-path.ts:16:53:16:57 | chunk | provenance |  |
+| main/services/network-path.ts:16:52:16:58 | [chunk] [0] | main/services/archive/rows.ts:3:27:3:32 | values [0] | provenance |  |
+| main/services/network-path.ts:16:52:16:58 | [chunk] [0] | main/services/network-path.ts:16:45:16:59 | nearby([chunk]) | provenance |  |
+| main/services/network-path.ts:16:53:16:57 | chunk | main/services/network-path.ts:16:52:16:58 | [chunk] [0] | provenance |  |
+nodes
+| main/services/archive/rows.ts:3:27:3:32 | values [0] | semmle.label | values [0] |
+| main/services/archive/rows.ts:4:10:4:15 | values [0] | semmle.label | values [0] |
+| main/services/archive/rows.ts:4:10:4:25 | values.join(",") | semmle.label | values.join(",") |
+| main/services/archive/rows.ts:4:10:4:32 | values. ...  + "\\n" | semmle.label | values. ...  + "\\n" |
+| main/services/csv-appender.ts:17:21:17:25 | chunk | semmle.label | chunk |
+| main/services/csv-appender.ts:18:17:18:21 | chunk | semmle.label | chunk |
+| main/services/csv-appender.ts:19:17:19:34 | lookalike([chunk]) | semmle.label | lookalike([chunk]) |
+| main/services/csv-appender.ts:19:27:19:33 | [chunk] [0] | semmle.label | [chunk] [0] |
+| main/services/csv-appender.ts:19:28:19:32 | chunk | semmle.label | chunk |
+| main/services/lookalike.ts:3:27:3:32 | values [0] | semmle.label | values [0] |
+| main/services/lookalike.ts:4:10:4:15 | values [0] | semmle.label | values [0] |
+| main/services/lookalike.ts:4:10:4:25 | values.join(",") | semmle.label | values.join(",") |
+| main/services/lookalike.ts:4:10:4:32 | values. ...  + "\\n" | semmle.label | values. ...  + "\\n" |
+| main/services/network-path.ts:14:21:14:25 | chunk | semmle.label | chunk |
+| main/services/network-path.ts:16:45:16:59 | nearby([chunk]) | semmle.label | nearby([chunk]) |
+| main/services/network-path.ts:16:52:16:58 | [chunk] [0] | semmle.label | [chunk] [0] |
+| main/services/network-path.ts:16:53:16:57 | chunk | semmle.label | chunk |
+subpaths
+| main/services/csv-appender.ts:19:27:19:33 | [chunk] [0] | main/services/lookalike.ts:3:27:3:32 | values [0] | main/services/lookalike.ts:4:10:4:32 | values. ...  + "\\n" | main/services/csv-appender.ts:19:17:19:34 | lookalike([chunk]) |
+| main/services/network-path.ts:16:52:16:58 | [chunk] [0] | main/services/archive/rows.ts:3:27:3:32 | values [0] | main/services/archive/rows.ts:4:10:4:32 | values. ...  + "\\n" | main/services/network-path.ts:16:45:16:59 | nearby([chunk]) |
+#select
+| main/services/csv-appender.ts:18:17:18:21 | chunk | main/services/csv-appender.ts:17:21:17:25 | chunk | main/services/csv-appender.ts:18:17:18:21 | chunk | Write to file system depends on $@. | main/services/csv-appender.ts:17:21:17:25 | chunk | Untrusted data |
+| main/services/csv-appender.ts:19:17:19:34 | lookalike([chunk]) | main/services/csv-appender.ts:17:21:17:25 | chunk | main/services/csv-appender.ts:19:17:19:34 | lookalike([chunk]) | Write to file system depends on $@. | main/services/csv-appender.ts:17:21:17:25 | chunk | Untrusted data |
+| main/services/network-path.ts:16:45:16:59 | nearby([chunk]) | main/services/network-path.ts:14:21:14:25 | chunk | main/services/network-path.ts:16:45:16:59 | nearby([chunk]) | Write to file system depends on $@. | main/services/network-path.ts:14:21:14:25 | chunk | Untrusted data |

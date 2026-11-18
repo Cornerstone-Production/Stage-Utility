@@ -4,3 +4,4 @@ extractor: javascript
 dependencies:
   codeql/javascript-queries: "*"
   stage-utility/javascript-models: "*"
+  stage-utility/javascript-queries: "*"
