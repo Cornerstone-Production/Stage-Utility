@@ -253,7 +253,7 @@ describe("at desk width", () => {
   test("each row carries its device colour as a left edge", async () => {
     await mount();
     const cell = within(tableFor("Alpha Rack")).getAllByRole("row")[1].querySelector("td")!;
-    assert.equal(cell.style.boxShadow, "inset 3px 0 0 #3377cc");
+    assert.equal(cell.style.boxShadow, "rgb(51, 119, 204) 3px 0px inset");
   });
 
   test("the changes card lists inputs AND outputs, the jump list names the racks on screen", async () => {
