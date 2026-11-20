@@ -154,12 +154,24 @@ export function TranscriptFeed({
     <div
       ref={scrollRef}
       onScroll={scrollable ? onScroll : undefined}
-      style={textStyle}
+      style={scrollable ? textStyle : { ...textStyle, overflow: "clip" }}
       className={cn(
         "flex flex-col min-h-0",
         // A CLIPPED feed has to overflow off the TOP: the newest line is the one
         // being read, so it is the one that must survive. justify-end does that.
         // mt-auto alone cannot — see the note on the inner element.
+        //
+        // And it must not be a scroll container, which is why the inline style
+        // above says `overflow: clip`. As `overflow: hidden` it is one, and Safari
+        // scrolls it: WebKit makes the overflow above a justify-end box
+        // reachable (a negative scrollTop), and on a console its scroll anchoring
+        // then held the lines on screen still while new ones were appended below
+        // them. The feed froze on old lines, cut off at the bottom, with the
+        // newest ones out of sight, until a reload reset the offset. A clipped
+        // box has no scroll offset, so nothing can move it.
+        //
+        // overflow-hidden stays as the class only as the fallback for an engine
+        // without `overflow: clip`, which drops the inline value and keeps this.
         scrollable ? "overflow-y-auto" : "overflow-hidden justify-end",
         className,
       )}
