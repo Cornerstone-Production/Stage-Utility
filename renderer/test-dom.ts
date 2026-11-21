@@ -269,8 +269,8 @@ const realNow = Date.now.bind(Date);
  *   await eventually(() => assert.ok(screen.getByText("Saved")));
  *   const button = await eventually(() => screen.getByRole("button", { name: "Add" }));
  *
- * It looks at once, then every 10 ms, each gap spent inside act() so React's work
- * is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
+ * It looks at once, then every 10 ms, each look and each gap spent inside act() so
+ * React's work is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
  * how long a real failure takes to report, and the failure is `check`'s own last
  * error, not a bare timeout.
  *
@@ -297,8 +297,14 @@ export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEO
   for (;;) {
     try {
       // `check` may be async (it may open a tooltip, say, to read it): a rejection
-      // is a failed look like a throw is.
-      return await check();
+      // is a failed look like a throw is. The look is inside act too: the fetch a
+      // click or a mount started resolves on the microtasks that run while the
+      // test awaits, and outside a scope React reports that update as unwrapped.
+      let found!: Awaited<T>;
+      await act(async () => {
+        found = await check();
+      });
+      return found;
     } catch (err) {
       if (realNow() >= deadline) throw err;
     }
