@@ -37,6 +37,17 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 });
 
 const { fireEvent, render, screen, cleanup, act } = await import("@testing-library/react");
+
+// jsdom drives requestAnimationFrame (pretendToBeVisual), and the provisional
+// tail's pulse sets state from every frame. A frame is the browser calling the
+// component back, so it runs inside act like any other event.
+const frame = window.requestAnimationFrame.bind(window);
+const inAct = (cb: FrameRequestCallback) => (t: number) => {
+  act(() => cb(t));
+};
+window.requestAnimationFrame = (cb) => frame(inAct(cb));
+globalThis.requestAnimationFrame = window.requestAnimationFrame;
+
 const { HistoryChart } = await import("./history-chart.js");
 const { CustomizePopover } = await import("./customize.js");
 const { formatClock } = await import("../../../lib/clock-format.js");
