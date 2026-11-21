@@ -55,13 +55,15 @@ async function mountHome() {
     extra: (url) => (url.endsWith("/api/state") ? jsonOk({ ...DEFAULT_STAGE_STATE, views: [HOME], onboardingDismissed: true }) : undefined),
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       RouterContextProvider as never,
       { router },
       React.createElement(QueryClientProvider, { client: qc }, React.createElement(TooltipProvider, null, React.createElement(HomeRoute))),
     ),
   );
+  });
   await act(async () => settle());
   return () => server.restore();
 }

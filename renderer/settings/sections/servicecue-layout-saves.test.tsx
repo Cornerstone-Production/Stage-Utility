@@ -82,13 +82,15 @@ function fakeServer(initial: ServiceCueLayout[], opts: { delayMs?: number } = {}
 }
 
 async function mount(): Promise<void> {
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
       React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
     ),
   );
+  });
   for (let i = 0; i < 4; i++) await settle();
 }
 

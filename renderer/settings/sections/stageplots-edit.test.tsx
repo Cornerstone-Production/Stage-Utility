@@ -302,7 +302,8 @@ const fakePdf = async () => {
 async function mount({ viewer = false }: { viewer?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
-    render(
+    await act(async () => {
+      render(
       React.createElement(
         QueryClientProvider,
         { client },
@@ -311,6 +312,7 @@ async function mount({ viewer = false }: { viewer?: boolean } = {}) {
         viewer ? React.createElement("div", { "data-testid": "viewer" }, React.createElement(StagePlotsPage)) : null,
       ),
     );
+    });
   });
   for (let i = 0; i < 4; i++) await settle();
 }
@@ -324,7 +326,9 @@ async function mountRouted(url: string) {
   const venue = createRoute({ getParentRoute: () => root, path: "/stageplots/manage/$venueId", component: StagePlotsManageVenueRoute });
   const router = createRouter({ routeTree: root.addChildren([edit, list, venue]), history: createMemoryHistory({ initialEntries: [url] }) });
   await act(async () => {
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
+    await act(async () => {
+      render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
+    });
   });
   for (let i = 0; i < 6; i++) await settle();
   return router;
@@ -1645,7 +1649,9 @@ describe("the kept draft", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     try {
       await act(async () => {
-        render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+        await act(async () => {
+          render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+        });
       });
       for (let i = 0; i < 4; i++) await settle();
       const closing = () => {
@@ -1766,7 +1772,9 @@ describe("the kept draft", () => {
     const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: ["/stageplots/edit"] }) });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     await act(async () => {
-      render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+      await act(async () => {
+        render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+      });
     });
     for (let i = 0; i < 4; i++) await settle();
     const leave = async () => {

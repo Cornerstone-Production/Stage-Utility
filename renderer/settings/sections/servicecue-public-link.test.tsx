@@ -187,7 +187,9 @@ function inApp(card: React.ReactElement): React.ReactElement {
 }
 
 async function mount(over: Partial<React.ComponentProps<typeof PublicLinkCard>> = {}): Promise<void> {
-  render(inApp(React.createElement(PublicLinkCard, { ...NAMES, ...over })));
+  await act(async () => {
+    render(inApp(React.createElement(PublicLinkCard, { ...NAMES, ...over })));
+  });
   await eventually(() => assert.ok(screen.getByRole("switch", { name: "Publish ServiceCue to the web" })));
   await settle();
 }
@@ -697,7 +699,9 @@ describe("Planning Center can't be read", () => {
 describe("a read that fails", () => {
   test("says so, instead of drawing a card that is off", async () => {
     server.failRead = true;
-    render(inApp(React.createElement(PublicLinkCard, NAMES)));
+    await act(async () => {
+      render(inApp(React.createElement(PublicLinkCard, NAMES)));
+    });
     await eventually(() => assert.match(alerts(), /Couldn't load the public link settings\./));
     assert.ok(screen.queryByRole("switch") === null, "a switch was drawn for settings that were never read");
     assert.ok(logs.some((l) => l.tag === "servicecue" && /public link/.test(l.message)), "the failure did not reach /log");

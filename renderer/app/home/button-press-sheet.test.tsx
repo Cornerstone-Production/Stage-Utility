@@ -23,7 +23,7 @@ import { NoStream } from "../../test-fixtures/no-stream.js";
 const teardown = installDom();
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen, act } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ButtonPressSheet } = await import("./button-press-sheet.js");
@@ -43,13 +43,14 @@ afterEach(() => {
 const card = (config: Record<string, unknown> = { type: "cue-button", cue: "", showDevice: true }): LayoutObject =>
   ({ id: "home-cue-button-5-4", x: 0, y: 0, w: 1, h: 1, z: 0, home: { size: "s" }, config }) as unknown as LayoutObject;
 
-function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = {}, cards: LayoutObject[] = [c]) {
+async function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = {}, cards: LayoutObject[] = [c]) {
   const server = serveButtons(serveOpts);
   restores.push(server.restore);
   const saved: LayoutObject[] = [];
   let closed = 0;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       QueryClientProvider as never,
       { client: qc },
@@ -61,6 +62,7 @@ function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>[0] = 
       }),
     ),
   );
+  });
   return { server, saved, closes: () => closed };
 }
 
@@ -71,8 +73,8 @@ const choice = (name: string) => {
 };
 
 describe("the Presses sheet", () => {
-  test("asks what the tile presses: a Label and the three choices", () => {
-    mount(card());
+  test("asks what the tile presses: a Label and the three choices", async () => {
+    await mount(card());
     assert.ok(screen.getByText("What this tile presses"));
     assert.ok(document.querySelector('input[aria-label="Label"]'));
     assert.deepEqual(
@@ -82,7 +84,7 @@ describe("the Presses sheet", () => {
   });
 
   test("a pick writes a command owned by this tile on Home, and Save stores the choice and the label", async () => {
-    const { server, saved } = mount(card());
+    const { server, saved } = await mount(card());
     fireEvent.change(document.querySelector('input[aria-label="Label"]')!, { target: { value: "Refresh" } });
     fireEvent.click(choice("App action"));
     await eventually(() => assert.ok(document.querySelector('[role="option"]')));
@@ -100,7 +102,7 @@ describe("the Presses sheet", () => {
   });
 
   test("Cancel stores nothing", async () => {
-    const { saved, closes } = mount(card());
+    const { saved, closes } = await mount(card());
     fireEvent.change(document.querySelector('input[aria-label="Label"]')!, { target: { value: "Nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     assert.equal(closes(), 1);
@@ -108,14 +110,14 @@ describe("the Presses sheet", () => {
   });
 
   test("a tile that already presses a command opens on A command, with it chosen", async () => {
-    mount(card({ type: "cue-button", cue: "stage_reset", showDevice: true }));
+    await mount(card({ type: "cue-button", cue: "stage_reset", showDevice: true }));
     await eventually(() => assert.equal(choice("A command").getAttribute("aria-pressed"), "true"));
   });
 
   test("Save waits for a pick that is still being written, and stores the tile with its command", async () => {
     let release: () => void = () => {};
     const hold = new Promise<void>((r) => (release = r));
-    const { server, saved } = mount(card(), { hold });
+    const { server, saved } = await mount(card(), { hold });
     fireEvent.click(choice("App action"));
     await eventually(() => assert.ok(document.querySelector('[role="option"]')));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
@@ -130,7 +132,7 @@ describe("the Presses sheet", () => {
 
   test("Save writes a field that is still waiting out its delay, and stores the tile with its command", async () => {
     timing.fieldWriteMs = 60_000;
-    const { server, saved } = mount(card());
+    const { server, saved } = await mount(card());
     fireEvent.click(choice("App action"));
     await eventually(() => assert.ok(document.querySelector('[role="option"]')));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Write a log message")!);
@@ -145,7 +147,7 @@ describe("the Presses sheet", () => {
   test("Save stays open and keeps the reason when the command could not be written", async () => {
     // A write that failed leaves the tile unbound: storing it and closing the sheet would show
     // the operator a saved tile and bury the error with the sheet.
-    const { server, saved, closes } = mount(card(), { refuse: true });
+    const { server, saved, closes } = await mount(card(), { refuse: true });
     fireEvent.click(choice("App action"));
     await eventually(() => assert.ok(document.querySelector('[role="option"]')));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
@@ -163,7 +165,7 @@ describe("the Presses sheet", () => {
     const mine = card({ type: "cue-button", cue: "btn_shared", showDevice: true });
     const copy = { ...card({ type: "cue-button", cue: "btn_shared", showDevice: true }), id: "home-copy" } as LayoutObject;
     const shared = owned("btn_shared", { id: "display.refresh", params: {} }, { ownedBy: { viewId: "home", objectId: mine.id } });
-    const { server } = mount(mine, { rules: [shared], usage: {} }, [mine, copy]);
+    const { server } = await mount(mine, { rules: [shared], usage: {} }, [mine, copy]);
     await eventually(() => assert.equal(choice("App action").getAttribute("aria-pressed"), "true"));
     await eventually(() => assert.ok([...document.querySelectorAll('[role="option"]')].some((o) => o.textContent === "Blank displays")));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Blank displays")!);

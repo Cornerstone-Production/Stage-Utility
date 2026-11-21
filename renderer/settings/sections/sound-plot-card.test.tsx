@@ -92,9 +92,11 @@ after(async () => {
 });
 
 async function mount(detail: ServiceSplHistory, trendsMetric: string | null = "SPL A Slow") {
-  render(
+  await act(async () => {
+    render(
     React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric }),
   );
+  });
   await eventually(() => assert.ok(document.querySelector("[data-series-line]"), "the raw line never drew"));
 }
 

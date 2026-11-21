@@ -274,7 +274,9 @@ const settle = async () => {
 let client: InstanceType<typeof QueryClient> | null = null;
 async function mount() {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null), React.createElement(Toaster, null))));
+  await act(async () => {
+    render(React.createElement(QueryClientProvider, { client: client! }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null), React.createElement(Toaster, null))));
+  });
   await settle();
 }
 
@@ -830,7 +832,9 @@ describe("unsaved work and the plan switcher", () => {
     const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
     const { requestEditingTarget } = await import("../../settings/sections/editing-target.js");
     client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null))));
+    await act(async () => {
+      render(React.createElement(QueryClientProvider, { client: client! }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null))));
+    });
     await settle();
     await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
     assert.ok(unsaved());
@@ -1273,10 +1277,11 @@ describe("Overwrite on a saved layout", () => {
 describe("the inspector folds away with nothing selected", () => {
   async function mountWithChrome() {
     client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(
+    await act(async () => {
+      render(
       React.createElement(
         QueryClientProvider,
-        { client },
+        { client: client! },
         React.createElement(
           TooltipProvider,
           null,
@@ -1286,6 +1291,7 @@ describe("the inspector folds away with nothing selected", () => {
         ),
       ),
     );
+    });
     await settle();
   }
   const inspector = () => document.querySelector("[data-mic-inspector]") as HTMLElement;

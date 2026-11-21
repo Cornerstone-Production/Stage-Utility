@@ -102,9 +102,11 @@ function stubFetch(serverMetrics: string[] = []): typeof fetch {
 }
 
 async function mount(detail: unknown = DETAIL): Promise<void> {
-  render(
+  await act(async () => {
+    render(
     React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric: null }),
   );
+  });
   // The chart's table is there once the series read has answered (here, 404),
   // and the seed read lands with it or just behind.
   await eventually(() =>

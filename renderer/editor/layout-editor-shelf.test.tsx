@@ -62,7 +62,8 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
     url.includes("/api/cues/manifest") ? ok(CUE_MANIFEST) : url.includes("/api/layout-groups") ? ok([]) : ok({}),
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       RouterContextProvider as unknown as React.FunctionComponent<Record<string, unknown>>,
       { router: testRouter },
@@ -85,6 +86,7 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
       ),
     ),
   );
+  });
   await settle();
   await settle();
   return f;

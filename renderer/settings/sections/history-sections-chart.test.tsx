@@ -210,8 +210,10 @@ after(async () => {
   teardown();
 });
 
-test("the attendance section is the chart module, not a chip row", () => {
-  render(attendance());
+test("the attendance section is the chart module, not a chip row", async () => {
+  await act(async () => {
+    render(attendance());
+  });
   assert.ok(screen.getByLabelText(/Attendance and in-room occupancy/), "no chart");
   assert.ok(screen.getByLabelText("Customize attendance"), "no Customize control");
   // The chip rows' group captions are gone from the page body.
@@ -220,11 +222,13 @@ test("the attendance section is the chart module, not a chip row", () => {
   assert.equal(document.querySelectorAll("[data-lane-segment]").length, 2);
 });
 
-test("the average is the SERVICE's average, not the whole recording's", () => {
+test("the average is the SERVICE's average, not the whole recording's", async () => {
   // Peak and Lowest have always been in-service. Averaging the arrival ramp and
   // the emptying-room taper in put Average BELOW Lowest on a real record —
   // peak 1,196, lowest 933, "average" 781 — which reads as a broken figure.
-  render(attendance());
+  await act(async () => {
+    render(attendance());
+  });
   // Read the figures from the DOM, not from innerText: jsdom does not implement
   // innerText's layout-aware line breaking, so labels and values run together
   // into one string and every regex over it is a guess.
@@ -243,8 +247,10 @@ test("the average is the SERVICE's average, not the whole recording's", () => {
   assert.ok(avg <= figure("Peak"), `average ${avg} is above the peak ${figure("Peak")}`);
 });
 
-test("the at-rest strip shows the default figures", () => {
-  render(attendance());
+test("the at-rest strip shows the default figures", async () => {
+  await act(async () => {
+    render(attendance());
+  });
   const strip = document.querySelector("[data-history-strip]") as HTMLElement;
   for (const label of ["Peak", "Lowest", "Average", "Samples"]) {
     assert.ok(strip.textContent?.includes(label), `${label} missing from the strip`);
@@ -267,7 +273,9 @@ test("unticking a figure in Customize survives a reload", async () => {
   await flushReact();
 
   // A fresh mount, reading the store again — this is the reload.
-  render(attendance());
+  await act(async () => {
+    render(attendance());
+  });
   const strip = document.querySelector("[data-history-strip]") as HTMLElement;
   assert.ok(!strip.textContent?.includes("Samples"), `Samples came back: ${strip.textContent}`);
   assert.ok(strip.textContent?.includes("Peak"), "the other figures were lost too");
@@ -277,12 +285,14 @@ test("the sound section draws the chart and offers Plot and Table columns in Cus
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
     );
+    });
 
     // The chart draws once the series read has answered (here, with a 404).
     await eventually(() => assert.ok(screen.getByLabelText(/Recorded sound level per plan item/), "no chart"));
@@ -311,12 +321,14 @@ test("the sound chart plots the real sample series when the route has one", asyn
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
     );
+    });
 
     // The raw series is a read behind the first paint.
     await eventually(() => assert.ok(document.querySelector("[data-series-line='max']"), "no peak line"));
@@ -348,12 +360,14 @@ test("the item peak is a triangle at the loudest bucket, named in the legend, an
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
     );
+    });
 
     await eventually(() => assert.ok(document.querySelector("[data-peak-mark]"), "no peak marker"));
     const mark = document.querySelector("[data-peak-mark]")!;
@@ -401,12 +415,14 @@ test("the dashed sound series is named Leq, never Average", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
     );
+    });
 
     await eventually(() => assert.ok(document.querySelector("[data-series-toggle='avg']"), "no legend entry for the dashed series"));
     const legend = document.querySelector("[data-series-toggle='avg']") as HTMLElement;
@@ -427,12 +443,14 @@ test("a 404 falls back to the per-item step, one run per item", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: TIMELINE,
       }),
     );
+    });
 
     // The fallback is what the 404 leaves; the raw line is read as absent after it.
     await eventually(() => assert.equal(document.querySelectorAll("[data-series-line='LAeq']").length, 2));
@@ -502,12 +520,14 @@ test("a record that is only arriving has no average at all", async () => {
     minOccupancy: null,
     samples: (ATTENDANCE as unknown as { samples: { phase?: string }[] }).samples.filter((s) => s.phase === "pre"),
   } as unknown as ServiceAttendance;
-  render(
+  await act(async () => {
+    render(
     React.createElement(AttendanceDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
       detail: arriving,
       timeline: null,
     }),
   );
+  });
   const strip = document.querySelector("[data-history-strip]") as HTMLElement;
   const cells = [...strip.querySelectorAll(":scope > div")].map((c) => {
     const spans = c.querySelectorAll("span");
@@ -529,7 +549,8 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: {
@@ -555,6 +576,7 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
         attendance: { serviceStartedAt: null, endedAt: new Date(T0 + 1 * MIN).toISOString() },
       }),
     );
+    });
     await eventually(() => assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound"));
     await eventually(() => assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound"));
     cleanup();
@@ -564,7 +586,7 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   }
 });
 
-test("the chart's colours come through the app's tokens, not raw Radix vars", () => {
+test("the chart's colours come through the app's tokens, not raw Radix vars", async () => {
   // The commit that switched these claimed a guard that did not exist.
   //
   // `--green-9` is Radix's own variable and it resolves — so the chart LOOKS
@@ -576,7 +598,9 @@ test("the chart's colours come through the app's tokens, not raw Radix vars", ()
   // Asserted on what the component PUT in the DOM, not on the source text: the
   // stroke is an inline style and a colour written anywhere else in the file
   // cannot satisfy it.
-  render(attendance());
+  await act(async () => {
+    render(attendance());
+  });
   const colours = [
     ...[...document.querySelectorAll("[data-series-line]")].map((e) => e.getAttribute("stroke") ?? ""),
     ...[...document.querySelectorAll("[data-series-toggle] span")].map(

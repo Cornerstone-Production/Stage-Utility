@@ -22,7 +22,7 @@ import { NoStream } from "../test-fixtures/no-stream.js";
 const teardown = installRenderDom();
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../components/ui/index.js");
@@ -60,14 +60,15 @@ const VIEW = {
   },
 } as unknown as View;
 
-function mount(serveOpts: Parameters<typeof serve>[0] = {}) {
+async function mount(serveOpts: Parameters<typeof serve>[0] = {}) {
   const server = serve({
     ...serveOpts,
     extra: (url) => (url.includes("/api/layout-groups") ? reply(200, []) : undefined),
   });
   const saved: LayoutObject[][] = [];
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       RouterContextProvider as unknown as React.FunctionComponent<Record<string, unknown>>,
       { router: testRouter },
@@ -92,6 +93,7 @@ function mount(serveOpts: Parameters<typeof serve>[0] = {}) {
       ),
     ),
   );
+  });
   return { server, saved };
 }
 
@@ -116,7 +118,7 @@ async function typeAMessage() {
 const cueOf = (objects: LayoutObject[]) => (objects[0]!.config as { cue: string }).cue;
 
 test("Save inside a typed field's delay waits for it, and stores the Button bound to its command", async () => {
-  const { server, saved } = mount();
+  const { server, saved } = await mount();
   await typeAMessage();
   // Well inside the 500 ms the field waits before writing.
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -126,7 +128,7 @@ test("Save inside a typed field's delay waits for it, and stores the Button boun
 });
 
 test("Save stores nothing when the command could not be written", async () => {
-  const { server, saved } = mount({ refuse: true });
+  const { server, saved } = await mount({ refuse: true });
   await typeAMessage();
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await eventually(() => assert.equal(server.posts.length, 1));

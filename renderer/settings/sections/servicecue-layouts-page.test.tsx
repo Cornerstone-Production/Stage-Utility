@@ -24,7 +24,7 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within, act } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -51,13 +51,15 @@ const LAYOUTS: ServiceCueLayout[] = [
 ];
 
 async function mount(): Promise<void> {
-  render(
+  await act(async () => {
+    render(
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
       React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
     ),
   );
+  });
   for (let i = 0; i < 5; i++) await settle();
 }
 
@@ -130,7 +132,9 @@ test("the shut Public link row keeps its summary current", async () => {
     return React.createElement("span", { "data-summary": true }, usePublishSummary(40));
   }
   try {
-    render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(Summary)));
+    await act(async () => {
+      render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(Summary)));
+    });
     await eventually(() => assert.equal(document.querySelector("[data-summary]")?.textContent, "Off"));
     enabled = true;
     await eventually(() => assert.equal(document.querySelector("[data-summary]")?.textContent, "Publishing", "the summary never read again"), 2000);
@@ -617,7 +621,8 @@ test("pointer: a page that scrolls mid-drag does not move the drop off the point
   // drag, the rects move up with it, and the pointer follows the tray to where it now is.
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
-    render(
+    await act(async () => {
+      render(
       React.createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
@@ -628,6 +633,7 @@ test("pointer: a page that scrolls mid-drag does not move the drop off the point
         ),
       ),
     );
+    });
     for (let i = 0; i < 5; i++) await settle();
     await openCard("Audio");
     placeRects("l-audio");

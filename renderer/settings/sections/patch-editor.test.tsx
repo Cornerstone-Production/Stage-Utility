@@ -97,7 +97,9 @@ function stubServer() {
 }
 
 async function mount(): Promise<void> {
-  render(React.createElement(TooltipProvider, null, React.createElement(PatchSection), React.createElement(ConfirmHost)));
+  await act(async () => {
+    render(React.createElement(TooltipProvider, null, React.createElement(PatchSection), React.createElement(ConfirmHost)));
+  });
   await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Analog" }), true, "the patch loaded"));
   await settle();
 }

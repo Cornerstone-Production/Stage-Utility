@@ -119,7 +119,9 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
+    await act(async () => {
+      render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
+    });
     await settle();
     await eventually(() => assert.ok(sessionCalls >= 1, "sanity: mounting fetches sessions at least once"));
     await settle();
