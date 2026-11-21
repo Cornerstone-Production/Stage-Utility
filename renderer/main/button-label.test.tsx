@@ -23,7 +23,6 @@ import { installDom, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");

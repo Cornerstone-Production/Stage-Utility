@@ -105,7 +105,10 @@ describe("useServerClockSample", () => {
     });
     // Real elapsed time, not a fake: the corroboration rule is about ARRIVAL
     // spread, and `performance.now()` is the thing it measures that on.
-    await new Promise((r) => setTimeout(r, SERVER_CLOCK_MIN_SPREAD_MS + 80));
+    // Inside a scope: Probe's one-second interval ticks, and sets state, while this waits.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, SERVER_CLOCK_MIN_SPREAD_MS + 80));
+    });
     const fresh = new Date(Date.now() + 90_000).toISOString();
     act(() => {
       view.rerender(<Probe serverNow={fresh} />);
@@ -159,7 +162,10 @@ describe("useServerNow", () => {
     act(() => {
       a.rerender(<Probe serverNow={new Date(Date.now() + 120_000).toISOString()} />);
     });
-    await new Promise((r) => setTimeout(r, SERVER_CLOCK_MIN_SPREAD_MS + 80));
+    // Inside a scope: Probe's one-second interval ticks, and sets state, while this waits.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, SERVER_CLOCK_MIN_SPREAD_MS + 80));
+    });
     const fresh = new Date(Date.now() + 120_000).toISOString();
     act(() => {
       a.rerender(<Probe serverNow={fresh} />);

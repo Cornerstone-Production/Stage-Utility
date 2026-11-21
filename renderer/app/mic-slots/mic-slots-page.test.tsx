@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, isPlumbing } from "../../test-dom.js";
+import { installRenderDom, isPlumbing, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -274,7 +274,7 @@ const settle = async () => {
 let client: InstanceType<typeof QueryClient> | null = null;
 async function mount() {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null), React.createElement(Toaster, null))));
+  await mountInAct(render, React.createElement(QueryClientProvider, { client: client! }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null), React.createElement(Toaster, null))));
   await settle();
 }
 
@@ -602,7 +602,7 @@ describe("the keyboard", () => {
     // refocus the browser drops focus to the page and a second Shift+Up goes nowhere.
     layouts["b-left"] = board("a | b | c");
     await mount();
-    card("b").focus();
+    act(() => { card("b").focus(); });
     await key(card("b"), "ArrowDown", true);
     assert.equal(shape("b-left"), "a+b | c");
     assert.ok(document.activeElement === card("b"), "focus is on the card that moved");
@@ -830,7 +830,7 @@ describe("unsaved work and the plan switcher", () => {
     const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
     const { requestEditingTarget } = await import("../../settings/sections/editing-target.js");
     client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null))));
+    await mountInAct(render, React.createElement(QueryClientProvider, { client: client! }, React.createElement(TooltipProvider, null, React.createElement(MicSlotsPage, null), React.createElement(ConfirmHost, null))));
     await settle();
     await click(screen.getAllByRole("button", { name: "Slot" })[0]!);
     assert.ok(unsaved());
@@ -1273,10 +1273,10 @@ describe("Overwrite on a saved layout", () => {
 describe("the inspector folds away with nothing selected", () => {
   async function mountWithChrome() {
     client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(
+    await mountInAct(render, 
       React.createElement(
         QueryClientProvider,
-        { client },
+        { client: client! },
         React.createElement(
           TooltipProvider,
           null,
@@ -1296,7 +1296,7 @@ describe("the inspector folds away with nothing selected", () => {
     await act(async () => {
       fireEvent.pointerDown(el, { button: 0 });
       fireEvent.mouseDown(el, { button: 0 });
-      el.focus();
+      act(() => { el.focus(); });
       fireEvent.pointerUp(el, { button: 0 });
       fireEvent.mouseUp(el, { button: 0 });
       fireEvent.click(el);
@@ -1339,7 +1339,7 @@ describe("the inspector folds away with nothing selected", () => {
       await act(async () => {
         fireEvent.pointerDown(source, { button: 0, clientX: s.x, clientY: s.y });
         fireEvent.mouseDown(source, { button: 0, clientX: s.x, clientY: s.y });
-        source.focus();
+        act(() => { source.focus(); });
         fireEvent.mouseMove(document, { clientX: s.x + 8, clientY: s.y + 8 });
       });
       await settle();
@@ -1391,7 +1391,7 @@ describe("the inspector folds away with nothing selected", () => {
   test("keyboard focus still selects, and opens the inspector", async () => {
     await mountWithChrome();
     await act(async () => {
-      card("b").focus();
+      act(() => { card("b").focus(); });
     });
     await settle();
     assert.equal(isOpen(), true);
@@ -1824,7 +1824,7 @@ describe("Theme photos in the top bar", () => {
     await act(async () => {
       fireEvent.pointerDown(el, { button: 0 });
       fireEvent.mouseDown(el, { button: 0 });
-      (el as HTMLElement).focus();
+      act(() => { (el as HTMLElement).focus(); });
       fireEvent.pointerUp(el, { button: 0 });
       fireEvent.mouseUp(el, { button: 0 });
       fireEvent.click(el);

@@ -11,7 +11,6 @@ import { after, afterEach, describe, test } from "node:test";
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installRenderDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");

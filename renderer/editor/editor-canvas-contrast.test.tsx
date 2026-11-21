@@ -54,10 +54,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STYLES = path.join(HERE, "..", "styles.css");
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 15 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Home's cards read live state through the app's SSE hooks, which open an
 // EventSource on mount. jsdom has none, and what this measures is the colour

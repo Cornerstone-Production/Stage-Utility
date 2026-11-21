@@ -28,10 +28,6 @@ import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import type { CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 12 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // CalendarMonth is handed its grid and fetches nothing; CalendarView does, and
 // the navigation suite at the bottom reads what it asked for. The stub also keeps

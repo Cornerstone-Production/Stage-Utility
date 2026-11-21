@@ -18,7 +18,6 @@ import { after, afterEach, describe, test } from "node:test";
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** api.ts opens an SSE stream on first use; nothing here pushes on it. */
 class FakeEventSource {

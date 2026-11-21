@@ -7,10 +7,6 @@ import { installDom, unmountAndTeardown } from "../../test-dom.js";
 // order context-menu.test.tsx uses, and for the same reason: a static import of
 // React/testing-library would evaluate before the DOM exists.
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 3 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { useContextMenuTrigger, LONG_PRESS_MS, MOVE_CANCEL_PX } = await import("./context-menu-trigger.js");

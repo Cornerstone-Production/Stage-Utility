@@ -24,10 +24,6 @@ import { eventually, installDom, settle, unmountAndTeardown } from "../../test-d
 import type { View } from "@main/types/views";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 1 update lands outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const view = (id: string, surface: "display" | "console") =>
   ({ id, name: id, kind: "custom", surface, ndiSource: null, createdAt: "" }) as unknown as View;
@@ -192,13 +188,16 @@ describe("the console tab reads that same key", () => {
       "the chosen glyph is indistinguishable from the fallback, so this proves nothing",
     );
 
+    // Drawn before the wait: glyphFor renders, and a render inside eventually's act
+    // scope is not committed until the scope ends.
+    const expected = glyphFor(chosen);
     const container = drawRail(false);
     await settle();
     // The stored icons are a read behind the first paint.
     await eventually(() =>
       assert.equal(
         glyphOf(container),
-        glyphFor(chosen),
+        expected,
         "the rail drew its fallback — it is not reading the key the Screens card writes",
       ),
     );
@@ -215,10 +214,11 @@ describe("the console tab reads that same key", () => {
   });
 
   test("but stays quiet when it is not, so the rail still says where you are", async () => {
+    const expected = glyphFor(resolveIcon(CHOSEN_GLYPH)!);
     const container = drawRail(false);
     await settle();
     // Read once the stored icons have landed: before them there is no colour to wear.
-    await eventually(() => assert.equal(glyphOf(container), glyphFor(resolveIcon(CHOSEN_GLYPH)!)));
+    await eventually(() => assert.equal(glyphOf(container), expected));
     const svg = container.querySelector("svg");
     assert.ok(svg);
     assert.equal(svg.style.color, "", "an inactive row wore the operator's colour");
@@ -259,10 +259,11 @@ describe("a glyph set before the key moved", () => {
     ).container;
     await settle();
 
+    const expected = glyphFor(legacy);
     await eventually(() =>
       assert.equal(
         glyphOf(container),
-        glyphFor(legacy),
+        expected,
         "the card drew its built-in icon — the glyph stored before the re-key is read by nothing",
       ),
     );

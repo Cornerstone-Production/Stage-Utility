@@ -24,11 +24,6 @@ import { eventually, installDom, settle, unmountAndTeardown } from "../../test-d
 import type { SectionProps } from "../types";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 10 updates land outside act — which is why it was
-// cleared the first time round.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** What the fake `checklist:sources` route answers. */
 let sourcesReply: () => Promise<unknown> = async () => ({ categories: [], teams: [] });

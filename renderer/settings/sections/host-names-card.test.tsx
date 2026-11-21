@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -28,7 +28,7 @@ const seen = (name: string, firstSeen: string, lastSeen: string, count = 3) => (
 
 let mountedClient: InstanceType<typeof QueryClient> | null = null;
 
-function mount(addAnswer: () => unknown, view: Record<string, unknown> = VIEW) {
+async function mount(addAnswer: () => unknown, view: Record<string, unknown> = VIEW) {
   const stub = stubFetchWithLog((url, init) => {
     if (url.includes("/api/security/host-names") && init?.method === "POST") return addAnswer();
     if (url.includes("/api/security/host-names")) return ok(view);
@@ -36,7 +36,7 @@ function mount(addAnswer: () => unknown, view: Record<string, unknown> = VIEW) {
   });
   const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } });
   mountedClient = queryClient;
-  render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: queryClient },
@@ -55,7 +55,7 @@ async function addName(name: string): Promise<HTMLInputElement> {
 }
 
 test("a refused add keeps what was typed, and says why", async () => {
-  const stub = mount(() => reply(400, { error: "The list is full (200 names); remove one first." }));
+  const stub = await mount(() => reply(400, { error: "The list is full (200 names); remove one first." }));
   try {
     const input = await addName("stage.example.org");
     await eventually(() => assert.ok((document.body.textContent ?? "").includes("The list is full"), "no toast said why"));
@@ -66,7 +66,7 @@ test("a refused add keeps what was typed, and says why", async () => {
 });
 
 test("control: an add the server takes clears the field", async () => {
-  const stub = mount(() => ok({ ...VIEW, accepted: [{ name: "stage.example.org", source: "added", at: "" }] }));
+  const stub = await mount(() => ok({ ...VIEW, accepted: [{ name: "stage.example.org", source: "added", at: "" }] }));
   try {
     const input = await addName("stage.example.org");
     await eventually(() => assert.equal(input.value, ""));
@@ -92,9 +92,9 @@ const CONFIRM_VIEW = {
 };
 
 /** Every POST to the host names route, as the body it carried. */
-function recordPosts(answer: () => unknown = () => ok({ ...CONFIRM_VIEW, enforce: true }), view: Record<string, unknown> = CONFIRM_VIEW) {
+async function recordPosts(answer: () => unknown = () => ok({ ...CONFIRM_VIEW, enforce: true }), view: Record<string, unknown> = CONFIRM_VIEW) {
   const bodies: Record<string, unknown>[] = [];
-  const stub = mount(() => answer(), view);
+  const stub = await mount(() => answer(), view);
   const inner = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     if (String(input).includes("/api/security/host-names") && init?.method === "POST") bodies.push(JSON.parse(String(init.body)));
@@ -120,7 +120,7 @@ const keep = (name: string) => screen.getByRole("checkbox", { name: `Keep ${name
 const ticked = (name: string) => keep(name).getAttribute("aria-checked") === "true";
 
 test("turning refusal on lists every candidate with first and last seen, and sends nothing yet", async () => {
-  const rec = recordPosts();
+  const rec = await recordPosts();
   try {
     await openConfirm();
     for (const name of ["ha.example.org", "old-panel.example.org", "tablet.example.org", "rebind-7f3a.attacker.example", "stage-box.example.org"]) {
@@ -136,7 +136,7 @@ test("turning refusal on lists every candidate with first and last seen, and sen
 });
 
 test("listed names start ticked, the Public address is ticked and fixed, waiting names start unticked", async () => {
-  const rec = recordPosts();
+  const rec = await recordPosts();
   try {
     await openConfirm();
     assert.equal(ticked("ha.example.org"), true);
@@ -151,7 +151,7 @@ test("listed names start ticked, the Public address is ticked and fixed, waiting
 });
 
 test("confirm posts exactly the ticked names: the defaults, then a waiting one added and a listed one dropped", async () => {
-  const rec = recordPosts();
+  const rec = await recordPosts();
   try {
     await openConfirm();
     fireEvent.click(keep("tablet.example.org"));
@@ -165,7 +165,7 @@ test("confirm posts exactly the ticked names: the defaults, then a waiting one a
 });
 
 test("confirm with the defaults alone never sends a waiting name", async () => {
-  const rec = recordPosts();
+  const rec = await recordPosts();
   try {
     await openConfirm();
     fireEvent.click(screen.getByRole("button", { name: "Turn on refusal" }));
@@ -177,7 +177,7 @@ test("confirm with the defaults alone never sends a waiting name", async () => {
 });
 
 test("cancel closes the dialog and changes nothing", async () => {
-  const rec = recordPosts();
+  const rec = await recordPosts();
   try {
     await openConfirm();
     fireEvent.click(keep("tablet.example.org"));
@@ -192,7 +192,7 @@ test("cancel closes the dialog and changes nothing", async () => {
 });
 
 test("a refusal from the server keeps the dialog open and says why", async () => {
-  const rec = recordPosts(() => reply(400, { error: 'You are using this server as "ha.example.org": keep it on the list, or turning refusal on would lock you out.' }));
+  const rec = await recordPosts(() => reply(400, { error: 'You are using this server as "ha.example.org": keep it on the list, or turning refusal on would lock you out.' }));
   try {
     await openConfirm();
     fireEvent.click(screen.getByRole("button", { name: "Turn on refusal" }));
@@ -204,7 +204,7 @@ test("a refusal from the server keeps the dialog open and says why", async () =>
 });
 
 test("turning refusal off posts at once, with no confirmation", async () => {
-  const rec = recordPosts(() => ok(VIEW), { ...CONFIRM_VIEW, enforce: true });
+  const rec = await recordPosts(() => ok(VIEW), { ...CONFIRM_VIEW, enforce: true });
   try {
     const toggle = await screen.findByRole("switch", { name: "Refuse names not on the list" });
     await eventually(() => assert.equal((toggle as HTMLButtonElement).disabled, false));
@@ -218,7 +218,7 @@ test("turning refusal off posts at once, with no confirmation", async () => {
 
 test("a name that left the card's lists while the dialog was open is not sent", async () => {
   const live = { ...CONFIRM_VIEW, accepted: [...CONFIRM_VIEW.accepted], waiting: [...CONFIRM_VIEW.waiting] };
-  const rec = recordPosts(undefined, live);
+  const rec = await recordPosts(undefined, live);
   try {
     await openConfirm();
     fireEvent.click(keep("tablet.example.org"));

@@ -27,7 +27,6 @@ import { eventually, installDom } from "../../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class StubEventSource {
   static readonly CONNECTING = 0;

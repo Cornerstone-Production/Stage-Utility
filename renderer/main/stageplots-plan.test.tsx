@@ -23,7 +23,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import type { StagePlotsView } from "@main/types/stageplots";
 import type { UpcomingPlansDTO } from "@main/types/pco";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -109,9 +109,7 @@ let client: InstanceType<typeof QueryClient>;
 async function mount(venueId: string | null = "v-main") {
   if (venueId) localStorage.setItem(LAST_VENUE_KEY, venueId);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => {
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(StagePlotsPage)));
-  });
+  await mountInAct(render, React.createElement(QueryClientProvider, { client }, React.createElement(StagePlotsPage)));
   for (let i = 0; i < 4; i++) await settle();
 }
 
