@@ -23,7 +23,7 @@ import type { SectionHandlers } from "../types.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { AdvancedSection } = await import("./advanced-section.js");
@@ -40,8 +40,8 @@ afterEach(async () => {
   resetReplayCache();
 });
 
-/** `eventually`, inside act: the card's queries settle while it polls, and React wants those updates wrapped. */
-const waitFor = (check: () => unknown) => act(async () => { await eventually(check); });
+/** `eventually` already polls inside act; a second scope around it would nest every one of its own. */
+const waitFor = (check: () => unknown) => eventually(check);
 
 const LAYOUTS: ServiceCueLayout[] = [
   { id: "l-audio", name: "Audio", order: 0, columnRoles: [] },
