@@ -357,3 +357,24 @@ test("the Category roles section carries the id Home's Open roles flashes", asyn
     s.restore();
   }
 });
+
+// ── F7: a note-category read that fails is said, not shown as nothing ───────
+
+test("the notice says so when a landing type's categories could not be read (a 502), instead of showing nothing", async () => {
+  const { reply } = await import("../../test-fixtures/fetch-log.js");
+  const s = serviceCueServer({
+    layouts: LAYOUTS,
+    roles: ROLES,
+    shown: ["sun"],
+    types: TYPES,
+    cats: { sun: ["Audio", "Prayer"] },
+    override: (url) => (url.includes("/api/servicecue/note-categories") ? reply(502, { error: "Planning Center is down" }) : undefined),
+  });
+  try {
+    await mount();
+    await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't load the note categories for Sunday Morning, so this page can't say which are in no role\./));
+    assert.equal(!!document.querySelector("[data-notice]"), false, "a notice was drawn from categories that were never read");
+  } finally {
+    s.restore();
+  }
+});

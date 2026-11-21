@@ -8,7 +8,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
-import { ok, stubFetchWithLog } from "../../../test-fixtures/fetch-log.js";
+import { ok, reply, stubFetchWithLog } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
@@ -24,7 +24,7 @@ type Input = ReturnType<typeof useNoteCategories>;
 const ROLES = [{ id: "r1", name: "Audio", members: ["Audio"] }];
 const readsOf = (urls: string[], part: string) => urls.filter((u) => u.includes(part)).length;
 
-function server(setup: { landing: string[]; failRoles?: boolean }) {
+function server(setup: { landing: string[]; failRoles?: boolean; categories502?: boolean }) {
   const urls: string[] = [];
   const f = stubFetchWithLog((url) => {
     urls.push(url);
@@ -33,7 +33,7 @@ function server(setup: { landing: string[]; failRoles?: boolean }) {
       if (setup.failRoles) throw new TypeError("fetch failed");
       return ok(ROLES);
     }
-    if (url.includes("/api/servicecue/note-categories")) return ok(["Audio", "Prayer"]);
+    if (url.includes("/api/servicecue/note-categories")) return setup.categories502 ? reply(502, { error: "Planning Center is down" }) : ok(["Audio", "Prayer"]);
     return ok({});
   });
   return { ...f, urls };
@@ -115,6 +115,17 @@ test("a failed read leaves it unknown, and says so in the log; it is not an empt
     const p = probe({ pcoConfigured: true, planId: "p1" });
     await eventually(() => assert.ok(s.logs.some((l) => l.tag === "home" && /note categories/.test(l.message)), JSON.stringify(s.logs)));
     assert.equal(p.box.input?.known, false);
+  } finally {
+    s.restore();
+  }
+});
+
+test("Planning Center answering 502 for the categories leaves it unknown and logs [home]; it is not an empty answer", async () => {
+  const s = server({ landing: ["wk"], categories502: true });
+  try {
+    const p = probe({ pcoConfigured: true, planId: "p1" });
+    await eventually(() => assert.ok(s.logs.some((l) => l.tag === "home" && /note categories/.test(l.message)), JSON.stringify(s.logs)));
+    assert.equal(p.box.input?.known, false, "a failed read said it knew, with nothing uncovered");
   } finally {
     s.restore();
   }

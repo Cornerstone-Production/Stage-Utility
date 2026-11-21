@@ -524,6 +524,8 @@ export function ServiceCueSection() {
   // Categories on the landing page's types that no role has, by type, for the notice.
   const noticeGroups = unassignedByType(roles, shownIds, catsByType).map((g) => ({ typeName: typeName(g.typeId) ?? g.typeId, cats: g.cats }));
 
+  const noticeReadFailed = shownIds.filter((id) => failed.has(`cats:${id}`));
+
   // One page-wide choice, drawn inside whichever card is open.
   const preview: PreviewSource = {
     types,
@@ -580,6 +582,13 @@ export function ServiceCueSection() {
           )}
         </MoreRow>
       </div>
+      {/* A landing type whose categories could not be read: said, rather than the notice just
+          not appearing, which would read as "every category is in a role". */}
+      {settingsRead && roles.length > 0 && noticeReadFailed.length > 0 && (
+        <ErrorNote className="mt-4">
+          Couldn't load the note categories for {listOf(noticeReadFailed.map((id) => typeName(id) ?? id))}, so this page can't say which are in no role.
+        </ErrorNote>
+      )}
       {/* Not on a first run: with no roles, the roles section already lists every
           category, with this same action. */}
       {settingsRead && roles.length > 0 && noticeGroups.length > 0 && (

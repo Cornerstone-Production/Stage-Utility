@@ -268,6 +268,9 @@ Two diagnostics flag problems you would otherwise notice only by absence:
   columns does. Each has a **+** that makes a role for it alone, and **Make a role for
   each** makes one for all of them. While any exist and at least one role does, a notice
   at the top of the page names them and their service types, and offers the same action.
+  A landing-page type whose categories Planning Center cannot be asked for is named in a
+  line there instead, saying the page can't tell which categories are in no role; it is
+  never read as "none", and is logged as `[pco]` on the server and `[servicecue]` in the browser.
 - Categories in more than one role are named under the roles: which column shows the
   note is ambiguous, since two would claim it.
 
