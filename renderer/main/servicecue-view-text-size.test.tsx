@@ -309,8 +309,8 @@ test("the page and a display keep separate sizes", async () => {
     await mountPage();
     assert.equal(zoom(), "", "the page does not read the display's size");
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    await eventually(() => assert.equal(zoom(), "1.1"));
-    assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY), 110, "the page remembers its own");
+    await eventually(() => assert.equal(zoom(), "1.05"));
+    assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY), 105, "the page remembers its own");
     assert.equal(readStoredSize(DISPLAY_KEY), 80, "and the display's is untouched");
   } finally {
     f.restore();
@@ -324,7 +324,7 @@ test("the page also starts from ?text=, and its control moves on from there", as
     await mountPage();
     await eventually(() => assert.equal(zoom(), "2"));
     await act(async () => void fireEvent.click(screen.getByLabelText("Smaller text")));
-    await eventually(() => assert.equal(zoom(), "1.9"));
+    await eventually(() => assert.equal(zoom(), "1.95"));
   } finally {
     f.restore();
   }
@@ -338,10 +338,10 @@ test("a size set from the page's control is written back to ?text=, so a refresh
     await mountPage();
     await eventually(() => assert.equal(zoom(), "1.5"));
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    await eventually(() => assert.equal(zoom(), "1.6"));
+    await eventually(() => assert.equal(zoom(), "1.55"));
     assert.equal(
       window.location.search + window.location.hash,
-      "?plan=p9&text=160#top",
+      "?plan=p9&text=155#top",
       "the address still says 150, so a refresh would start from it",
     );
     assert.equal(window.history.length, entries, "a press added a history entry");
@@ -349,7 +349,7 @@ test("a size set from the page's control is written back to ?text=, so a refresh
     // A refresh: the page mounts again on the same address.
     cleanup();
     await mountPage();
-    await eventually(() => assert.equal(zoom(), "1.6"));
+    await eventually(() => assert.equal(zoom(), "1.55"));
   } finally {
     f.restore();
   }
@@ -361,7 +361,7 @@ test("the page's control does not add ?text= to an address that had none", async
   try {
     await mountPage();
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    await eventually(() => assert.equal(zoom(), "1.1"));
+    await eventually(() => assert.equal(zoom(), "1.05"));
     assert.equal(window.location.search, "?plan=p9");
   } finally {
     f.restore();

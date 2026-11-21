@@ -352,9 +352,10 @@ absent.
 ## Text size
 
 The ServiceCue page's header carries **A−**, a percentage and **A+**. The buttons
-step the rundown's text in 10-point increments between 50% and 300%; from a size
-that is not a multiple of ten they land on the next one in the direction pressed
-(137% goes to 140% with A+ and 130% with A−). Click the percentage to type a size:
+step the rundown's text in 5-point increments between 50% and 300%, the same step as a
+screen's Text size; from a size that is not a multiple of five they land on the next one
+in the direction pressed (137% goes to 140% with A+ and 135% with A−). A caption under the
+control, **This browser only**, says where the size is kept. Click the percentage to type a size:
 Enter or leaving the field applies it, Escape puts the old one back, a decimal is
 rounded, a number outside 50–300 is held to the nearest end, and text that is not
 a number changes nothing.

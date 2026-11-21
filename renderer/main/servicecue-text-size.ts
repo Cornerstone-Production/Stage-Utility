@@ -9,18 +9,16 @@
 
 // The range and the clamp are the server's too (a display's size is kept there),
 // so they live in main/types/text-size.ts and are re-exported here.
-import { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "@main/types/text-size";
-export { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE };
+import { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE, TEXT_SIZE_STEP } from "@main/types/text-size";
+export { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE, TEXT_SIZE_STEP };
 import { browserStorage, readStored, writeStored, type StorageLike } from "../lib/safe-storage";
-
-export const TEXT_SIZE_STEP = 10;
 
 /**
  * One A+ or A- press.
  *
- * Lands on the next multiple of ten in the direction pressed, so a typed 137
- * steps to 140 going up and 130 going down rather than to 147 or 127. A value
- * already on a multiple of ten moves by exactly ten.
+ * Lands on the next multiple of five in the direction pressed, so a typed 137
+ * steps to 140 going up and 135 going down rather than to 142 or 132. A value
+ * already on a multiple of five moves by exactly five.
  */
 export function stepTextSize(size: number, direction: -1 | 1): number {
   const next =
