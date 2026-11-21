@@ -20,7 +20,7 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within, act } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -182,21 +182,44 @@ test("Landing page is the first section, above Layouts, and open while no type i
   }
 });
 
-test("Landing page is shut when a type is ticked, and the #landing address opens it, reload included", async () => {
+/** The address as a reload finds it: set before the page mounts, with replaceState, which fires no
+ *  hashchange, so only the read made at mount can open the row. */
+const addressIs = (hash: string) => window.history.replaceState(null, "", `${window.location.pathname}${hash}`);
+
+test("Landing page is shut when a type is ticked and the address has no hash", async () => {
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
-    await mount();
-    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "false"));
-    cleanup();
-    window.location.hash = "#landing";
-    await mount(); // a reload: a fresh page read at the same address
-    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
-    cleanup();
-    window.location.hash = "";
+    addressIs("");
     await mount();
     await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "false"));
   } finally {
-    window.location.hash = "";
+    s.restore();
+  }
+});
+
+test("a page loaded at #landing opens Landing page even with a type ticked: the read at mount, no event", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    addressIs("#landing");
+    await mount();
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
+  } finally {
+    addressIs("");
+    s.restore();
+  }
+});
+
+test("#landing arriving while the page is already open opens Landing page: hashchange alone", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    addressIs("");
+    await mount();
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "false"));
+    addressIs("#landing"); // no event of its own
+    await act(async () => void window.dispatchEvent(new window.HashChangeEvent("hashchange")));
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
+  } finally {
+    addressIs("");
     s.restore();
   }
 });

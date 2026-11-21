@@ -5,14 +5,14 @@
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { useNoteCategories } = await import("./use-note-categories.js");
 
@@ -85,6 +85,28 @@ test("with no landing type ticked it asks Planning Center nothing: no roles, no 
     assert.equal(readsOf(s.urls, "/api/servicecue/roles"), 0);
     assert.equal(readsOf(s.urls, "/note-categories"), 0);
   } finally {
+    s.restore();
+  }
+});
+
+test("no timer of any kind reads again: ten minutes of mocked interval and timeout ticks make no request", async () => {
+  // Mocked from before the mount, so a setInterval or setTimeout the hook schedules is one the clock owns.
+  // (eventually() waits on the real timers it captured at load, so it still works.)
+  const s = server({ landing: ["wk"] });
+  mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  try {
+    const p = probe({ pcoConfigured: true, planId: "p1" });
+    await eventually(() => assert.equal(p.box.input?.known, true));
+    const settled = s.urls.length;
+    for (let minute = 0; minute < 10; minute++) {
+      await act(async () => mock.timers.tick(60_000));
+      await act(async () => {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      });
+    }
+    assert.equal(s.urls.length, settled, `a timer read ${s.urls.length - settled} more time(s): ${JSON.stringify(s.urls.slice(settled))}`);
+  } finally {
+    mock.timers.reset();
     s.restore();
   }
 });
