@@ -100,8 +100,10 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
     ...globalLayouts.map((l) => ({ value: l.id, label: l.name })),
     { value: ALL_COLUMNS_LAYOUT_ID, label: "All columns" },
   ];
-  // The rows are left-aligned and the messages centred; Edit layouts follows whichever it is under.
-  const listed = pcoConfigured !== false && !notSent && !!types && !stateLoading && rows.length > 0;
+  // Edit layouts sits under a centred message, and stays at the left everywhere else, the loading
+  // spinner and the error included, so it does not jump left when the rows arrive.
+  const messageShown =
+    pcoConfigured === false || notSent || (!failed.has("load") && !!types && !stateLoading && rows.length === 0);
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
 
@@ -186,7 +188,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
           {!isPublicMode() && (
             <a
               href="/servicecue/presets"
-              className={cn("mt-2 text-caption1 text-accent hover:underline", listed || failed.has("load") ? "self-start" : "self-center")}
+              className={cn("mt-2 text-caption1 text-accent hover:underline", messageShown ? "self-center" : "self-start")}
             >
               Edit layouts
             </a>

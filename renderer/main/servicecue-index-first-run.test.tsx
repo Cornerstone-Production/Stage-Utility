@@ -88,3 +88,23 @@ test("with service types listed, Edit layouts stays at the left and no message l
     f.restore();
   }
 });
+
+test("while the service types are still loading, Edit layouts is already at the left, so it does not jump when the rows arrive", async () => {
+  // The spinner is not a message: the link was centred under it and moved left with the list.
+  const real = globalThis.fetch;
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    if (url.includes("/api/service-types")) return new Promise(() => {});
+    return ok([]);
+  });
+  try {
+    render(React.createElement(TooltipProvider, null, React.createElement(ServiceCueIndex)));
+    for (let i = 0; i < 4; i++) await settle();
+    const cls = screen.getByRole("link", { name: "Edit layouts" }).className;
+    assert.match(cls, /\bself-start\b/);
+    assert.doesNotMatch(cls, /self-center/);
+  } finally {
+    f.restore();
+    globalThis.fetch = real;
+  }
+});
