@@ -231,6 +231,11 @@ test("without Planning Center the open Landing page links to Integrations; the o
     await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
     assert.equal(screen.getByRole("link", { name: "Connect Planning Center" }).getAttribute("href"), "/settings/integrations");
     assert.equal(screen.getAllByRole("link", { name: /Connect Planning Center/ }).length, 1);
+    // The mockup shows the link alone: no sentence about ticks while there is nothing to tick.
+    assert.doesNotMatch(document.body.textContent ?? "", /Only these service types appear on the ServiceCue landing page/);
+    // And the link is the app's one inline-link style.
+    const { INLINE_LINK } = await import("../../lib/link-classes.js");
+    for (const cls of INLINE_LINK.split(" ")) assert.equal(screen.getByRole("link", { name: "Connect Planning Center" }).classList.contains(cls), true, cls);
   } finally {
     s.restore();
   }

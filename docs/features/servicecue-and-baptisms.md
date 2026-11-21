@@ -104,8 +104,8 @@ shut once one is; a notice when some category is in no role (see
 link to where it is set up. `/servicecue/presets#landing` opens the Landing page row,
 and keeps opening it on reload.
 
-**Landing page** opens to a tick box per service type (without Planning Center it says
-to connect it, and links to Integrations). Only the ticked types appear on
+**Landing page** opens to a tick box per service type (without Planning Center it says only
+to connect it, with a link to Integrations). Only the ticked types appear on
 the landing page, each with the layouts in the page's order, then All columns; the first
 layout is a type's default there. They are stored in Planning Center's order, whatever
 order they were ticked in.

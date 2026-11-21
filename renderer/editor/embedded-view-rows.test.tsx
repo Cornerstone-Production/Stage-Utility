@@ -147,6 +147,8 @@ test("a ServiceCue view's layout is named under the picker, with Change to its e
     mount({ type: "view-embed", viewId: "stage-left" });
     await eventually(() => assert.match(document.body.textContent ?? "", /Shows the Band layout/));
     assert.equal(screen.getByRole("link", { name: "Change" }).getAttribute("href"), "/screens/stage-left/edit");
+    const { INLINE_LINK } = await import("../lib/link-classes.js");
+    for (const cls of INLINE_LINK.split(" ")) assert.equal(screen.getByRole("link", { name: "Change" }).classList.contains(cls), true, cls);
     cleanup();
     mount({ type: "view-embed", viewId: "everything" });
     await eventually(() => assert.match(document.body.textContent ?? "", /Shows All columns/));

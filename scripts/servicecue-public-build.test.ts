@@ -170,6 +170,8 @@ describe("what is in the bundle", () => {
       "renderer/lib/cn.ts",
       "renderer/lib/drawer-drag.ts",
       "renderer/lib/icon-ink.ts",
+      // The one inline-link style the launcher's empty messages share with the layouts page.
+      "renderer/lib/link-classes.ts",
       "renderer/lib/live-refresh.ts",
       "renderer/lib/public-build.ts",
       "renderer/lib/public-live.ts",

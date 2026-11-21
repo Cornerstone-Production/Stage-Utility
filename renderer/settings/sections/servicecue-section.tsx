@@ -34,6 +34,7 @@ import {
   type Rich,
 } from "./servicecue-layouts-model";
 import { ROLES_FLASH_ID } from "../../app/flash";
+import { INLINE_LINK } from "../../lib/link-classes";
 import { byData, LayoutsDnd, LiftedList, useAnnouncer, type DropHandlers } from "./servicecue-drag";
 
 /** What can fail to save, each said on its own line at the top of the page. */
@@ -555,15 +556,19 @@ export function ServiceCueSection() {
           open={landingOpen === true}
           onOpenChange={setLandingOpen}
         >
-          <p className="text-caption1 text-fg-muted">
-            Only these service types appear on the ServiceCue landing page, each with the layouts below, in that order, then All
-            columns.
-          </p>
+          {/* Without Planning Center the row says one thing, and links it; the sentence about what the
+              ticks do has nothing to describe until there are types to tick. */}
+          {!(types.length === 0 && pcoConfigured === false) && (
+            <p className="text-caption1 text-fg-muted">
+              Only these service types appear on the ServiceCue landing page, each with the layouts below, in that order, then All
+              columns.
+            </p>
+          )}
           {types.length === 0 ? (
             <p className="text-caption1 text-fg-subtle">
               {pcoConfigured === false ? (
                 <>
-                  <a href="/settings/integrations" className="text-accent underline underline-offset-2 hover:no-underline">Connect Planning Center</a> to pick
+                  <a href="/settings/integrations" className={INLINE_LINK}>Connect Planning Center</a> to pick
                 </>
               ) : (
                 typesPending

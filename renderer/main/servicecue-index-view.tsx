@@ -8,12 +8,12 @@ import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { cn } from "../lib/cn";
+import { INLINE_LINK } from "../lib/link-classes";
 import { useOriginHref } from "../lib/back-target";
 import { ALL_COLUMNS_SLUG, slugOf, slugify } from "@main/services/servicecue-slug";
 import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
 
 const MESSAGE = "text-body text-fg-subtle text-center max-w-xs self-center";
-const MESSAGE_LINK = "text-accent underline underline-offset-2 hover:no-underline";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -137,7 +137,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
           {pcoConfigured === false ? (
             <p className={MESSAGE}>
               {/* Not on the public page, which has no settings to go to. */}
-              {isPublicMode() ? "Connect Planning Center" : <a href="/settings/integrations" className={MESSAGE_LINK}>Connect Planning Center</a>} to use ServiceCue.
+              {isPublicMode() ? "Connect Planning Center" : <a href="/settings/integrations" className={INLINE_LINK}>Connect Planning Center</a>} to use ServiceCue.
             </p>
           ) : notSent ? (
             <p className={MESSAGE}>{SERVICES_NOT_SENT}</p>
@@ -151,7 +151,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
               {isPublicMode() ? (
                 "Choose them on the ServiceCue layouts page, under Landing page."
               ) : (
-                <a href="/servicecue/presets#landing" className={MESSAGE_LINK}>Choose them on the ServiceCue layouts page, under Landing page.</a>
+                <a href="/servicecue/presets#landing" className={INLINE_LINK}>Choose them on the ServiceCue layouts page, under Landing page.</a>
               )}
             </p>
           ) : (

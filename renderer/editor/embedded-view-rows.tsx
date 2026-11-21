@@ -5,6 +5,8 @@
 
 import type { LayoutObjectConfig, ViewKind } from "@main/types/stage";
 import { flashTarget, VIEW_LAYOUT_FLASH_ID } from "../app/flash";
+import { cn } from "../lib/cn";
+import { INLINE_LINK } from "../lib/link-classes";
 import { useServiceCueLayouts } from "../lib/use-servicecue-layouts";
 import { useInAppLink } from "../lib/use-search-param";
 import { isOfferableInEmbedPicker } from "../main/layout-objects";
@@ -68,7 +70,7 @@ export function EmbeddedViewRows({
             // Only when the router took the click: a new tab has its own page to land on.
             if (e.defaultPrevented) flashTarget(VIEW_LAYOUT_FLASH_ID);
           }}
-          className="font-medium text-accent underline underline-offset-2 hover:no-underline"
+          className={cn(INLINE_LINK, "font-medium")}
         >
           Change
         </a>
