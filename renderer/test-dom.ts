@@ -287,12 +287,11 @@ const realNow = Date.now.bind(Date);
  * write behind the first would go unseen; wait for the first, then assert the
  * count plainly.
  *
- * The import is inside the function because Testing Library binds to `document`
- * when it loads, so a file must import it after installDom, and this module is
- * imported before.
+ * `act` is React's own, imported at the top, not Testing Library's: awaiting an
+ * import first would hand the microtask queue back to the test's pending fetches
+ * before any act scope was open, and their updates would land outside one.
  */
 export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<Awaited<T>> {
-  const { act } = await import("@testing-library/react");
   const deadline = realNow() + timeout;
   for (;;) {
     try {
