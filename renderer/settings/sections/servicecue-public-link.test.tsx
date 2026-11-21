@@ -28,6 +28,7 @@ const { TooltipProvider } = await import("../../components/ui/index.js");
 const { RouterContextProvider } = await import("@tanstack/react-router");
 const { routerAt } = await import("../../test-fixtures/router.js");
 const { FORM_MASK, MASK } = await import("../../../main/services/mask.js");
+const { checkPublishToken } = await import("../../../main/services/servicecue-publish-rules.js");
 import type { DeployStatus } from "../../../main/types/servicecue-publish-status.js";
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -208,6 +209,8 @@ function text(): string {
  *  that warns what a public page shows (finding 4), then the pill naming its state. */
 const WARNING = "Every note on these plans is public to anyone with the link.";
 const head = (pill: string) => `Public link ${WARNING} ${pill}`;
+/** A token the card accepts: the rule is 32 characters, so a short one is padded out. */
+const long = (token: string) => token.padEnd(32, "x");
 /** A field by its label, which also holds its hint: "Page address" + "Your Cloudflare Worker". */
 const input = (label: string) => screen.getByLabelText(new RegExp(`^${label}`)) as HTMLInputElement;
 
@@ -274,7 +277,7 @@ describe("Not set up", () => {
     assert.equal(sw().disabled, true, "the switch turned on with an address and no token");
     fireEvent.change(input("Publishing token"), { target: { value: "  " } });
     assert.equal(sw().disabled, true, "a token of spaces counts as a token");
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-typed" } });
+    fireEvent.change(input("Publishing token"), { target: { value: long("tok-typed") } });
     assert.equal(sw().disabled, false);
     fireEvent.change(input("Page address"), { target: { value: "" } });
     assert.equal(sw().disabled, true, "the switch stayed on with the address cleared");
@@ -283,12 +286,12 @@ describe("Not set up", () => {
   test("tests the page first, then saves and publishes: the switch is the connection test", async () => {
     await mount();
     fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-typed" } });
+    fireEvent.change(input("Publishing token"), { target: { value: long("tok-typed") } });
     fireEvent.click(sw());
     await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
     assert.deepEqual(server.posts, [
-      ["test", { url: ORIGIN, token: "tok-typed" }],
-      ["save", { url: ORIGIN, token: "tok-typed", enabled: true }],
+      ["test", { url: ORIGIN, token: long("tok-typed") }],
+      ["save", { url: ORIGIN, token: long("tok-typed"), enabled: true }],
     ]);
     // Typed over, then read back: the token is not on the page, only that one is stored.
     assert.equal(sw().getAttribute("aria-checked"), "true");
@@ -300,7 +303,7 @@ describe("Not set up", () => {
     ["the page does not accept the token", { ok: false, kind: "auth", status: 401, message: "m" }, "tok-wrong", /^Cloudflare answered 401: the publishing token doesn't match/],
     // The page treats a token under 32 characters as none and answers 503 to everything, so the server refuses
     // one at the connection test and the card says what it said.
-    ["the token is one the page would call not set", { ok: false, kind: "config", message: SHORT_TOKEN }, "too-short", new RegExp(`^${SHORT_TOKEN}$`)],
+    ["the server still refuses a token the card let through", { ok: false, kind: "config", message: SHORT_TOKEN }, "too-short", new RegExp(`^${SHORT_TOKEN}$`)],
     ["the page has no token of its own", { ok: false, kind: "no-token", status: 503, message: "m" }, "tok-unset-on-page", /^The page answered 503: it has no token set, or one under 32 characters/],
     ["nobody answers at the address", { ok: false, kind: "unreachable", message: "getaddrinfo ENOTFOUND nowhere.example" }, "tok", /^This server couldn't reach the page: getaddrinfo ENOTFOUND nowhere\.example\. Check the address below/],
   ];
@@ -309,7 +312,7 @@ describe("Not set up", () => {
       server.test = answer;
       await mount();
       fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
-      fireEvent.change(input("Publishing token"), { target: { value: token } });
+      fireEvent.change(input("Publishing token"), { target: { value: long(token) } });
       fireEvent.click(sw());
       await eventually(() => assert.match(alerts(), says));
       assert.deepEqual(server.posts.map(([p]) => p), ["test"], "an address that failed its test was saved and switched on");
@@ -327,7 +330,7 @@ describe("Not set up", () => {
     }) as typeof fetch;
     try {
       fireEvent.change(screen.getByLabelText(/^Page address/), { target: { value: ORIGIN } });
-      fireEvent.change(screen.getByLabelText(/^Publishing token/), { target: { value: "tok" } });
+      fireEvent.change(screen.getByLabelText(/^Publishing token/), { target: { value: long("tok") } });
       fireEvent.click(sw());
       await eventually(() => assert.ok(alerts().length > 0, "nothing says the switch did not take"));
       assert.ok(text().startsWith(head("Off")));
@@ -808,5 +811,81 @@ describe("The public warning", () => {
       assert.equal((warning()!.compareDocumentPosition(sw()) & 4) !== 0, true, `the warning is below the switch when ${name}`);
       cleanup();
     }
+  });
+});
+
+// ── Finding 9: the switch takes a token the server will take ────────────────
+
+describe("The token's length", () => {
+  const line = () => document.getElementById("pl-tokline")?.textContent ?? "";
+  const fill = (address: string, token: string) => {
+    fireEvent.change(input("Page address"), { target: { value: address } });
+    fireEvent.change(input("Publishing token"), { target: { value: token } });
+  };
+
+  test("a short token keeps the switch off and counts what is typed, under the field", async () => {
+    await mount();
+    fill(ORIGIN, "k3j9x0q2m8vb");
+    assert.equal(sw().disabled, true);
+    assert.equal(line(), "The token needs at least 32 characters (12 so far).");
+    // The switch points at the reason, for a screen reader.
+    assert.equal(sw().getAttribute("aria-describedby"), "pl-tokline");
+    assert.equal(document.getElementById(sw().getAttribute("aria-describedby")!) !== null, true);
+    fireEvent.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q" } });
+    assert.equal(line(), "The token needs at least 32 characters (31 so far).");
+    assert.equal(sw().disabled, true);
+    fireEvent.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q2" } });
+    assert.equal(line(), "The token is long enough.");
+    assert.equal(sw().disabled, false);
+  });
+
+  test("the length is counted after trimming, as the field is sent", async () => {
+    await mount();
+    fill(ORIGIN, `  ${"a".repeat(31)}  `);
+    assert.equal(line(), "The token needs at least 32 characters (31 so far).");
+    assert.equal(sw().disabled, true);
+  });
+
+  test("until both fields are filled the existing hint stays, whatever the token is", async () => {
+    await mount();
+    const HINT = "The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.";
+    assert.equal(line(), HINT);
+    fireEvent.change(input("Publishing token"), { target: { value: "short" } });
+    assert.equal(line(), HINT, "a reason was given for a token with no address beside it");
+    fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
+    assert.match(line(), /^The token needs at least 32 characters \(5 so far\)\.$/);
+    fireEvent.change(input("Page address"), { target: { value: "" } });
+    assert.equal(line(), HINT);
+  });
+
+  test("a space or a character outside printable ASCII gets the server's own sentence", async () => {
+    await mount();
+    fill(ORIGIN, `${"a".repeat(20)} ${"b".repeat(20)}`);
+    assert.equal(line(), "The publishing token can only use letters, digits and punctuation, with no spaces.");
+    assert.equal(sw().disabled, true);
+    fireEvent.change(input("Publishing token"), { target: { value: "é".repeat(40) } });
+    assert.equal(line(), "The publishing token can only use letters, digits and punctuation, with no spaces.");
+    assert.equal(sw().disabled, true);
+  });
+
+  test("the card allows exactly what the server's rule allows", async () => {
+    // Driven against the server's own function, so the two cannot drift: any token the
+    // server refuses leaves the switch off, and any it accepts turns it on.
+    const tokens = ["a", "a".repeat(31), "a".repeat(32), "a".repeat(64), `${"a".repeat(31)} `, `a b${"c".repeat(40)}`, `${"a".repeat(31)}\t`, "é".repeat(40), `${"a".repeat(31)}~`, `${"a".repeat(31)}!`, `${"a".repeat(30)}\u00a0a`];
+    await mount();
+    const seen: string[] = [];
+    for (const t of tokens) {
+      fill(ORIGIN, t);
+      const accepted = checkPublishToken(t.trim()) === null;
+      assert.equal(sw().disabled, !accepted, `${JSON.stringify(t)}: the server ${accepted ? "takes" : "refuses"} it`);
+      seen.push(`${accepted ? "on " : "off"} ${JSON.stringify(t)}`);
+    }
+    assert.equal(seen.filter((l) => l.startsWith("on ")).length > 0, true, "no token in the list was accepted");
+  });
+
+  test("a stored token still turns the switch on with nothing typed", async () => {
+    server.dto = { ...off(), url: ORIGIN, token: MASK };
+    await mount();
+    assert.equal(sw().disabled, false);
   });
 });
