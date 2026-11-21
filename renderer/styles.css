@@ -209,6 +209,7 @@
   --color-surface:        var(--su-surface);
   --color-surface-raised: var(--su-surface-raised);
   --color-popover:        var(--su-popover);
+  --color-scrim:          var(--su-scrim);
   --color-rail:           var(--su-rail);
   --color-line:           var(--su-line);
   --color-line-strong:    var(--su-line-strong);
@@ -265,6 +266,7 @@
   /* Popover/menu surface (Select, MultiSelect). Near-opaque glass — a touch of
      translucency + backdrop-blur where supported; still legible without it. */
   --su-popover:        rgba(255, 255, 255, 0.97);
+  --su-scrim:          rgba(0, 0, 0, 0.35);   /* behind a sheet that covers the page */
   --su-rail:           #f1f2f4;   /* sidebar — slightly grayer than content in light */
   --su-line:           #e7e9ec;
   --su-line-strong:    #d8dce1;
@@ -338,6 +340,7 @@
   /* Popover/menu surface — solid PURE-neutral (R=G=B) so menus never read
      transparent or purple over content; blur adds glass depth where supported. */
   --su-popover:        rgba(28, 28, 28, 0.97);
+  --su-scrim:          rgba(0, 0, 0, 0.55);   /* behind a sheet that covers the page */
   --su-rail:           #0e0e0e;   /* seamless with content in dark */
   --su-line:           rgba(255, 255, 255, 0.08);
   --su-line-strong:    rgba(255, 255, 255, 0.14);
@@ -365,6 +368,7 @@
   --su-surface:        rgba(255, 255, 255, 0.04);
   --su-surface-raised: rgba(255, 255, 255, 0.06);
   --su-popover:        #1a1a1a;   /* solid neutral — Pi-safe (no backdrop-filter reliance) */
+  --su-scrim:          rgba(0, 0, 0, 0.55);   /* behind a sheet that covers the page */
   --su-line:           rgba(255, 255, 255, 0.09);
   --su-line-strong:    rgba(255, 255, 255, 0.15);
   --su-fg:             rgba(255, 255, 255, 0.92);
@@ -470,6 +474,23 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .video-probe-checking-dot { animation: none !important; }
+  }
+  /* A themed photo being made: a soft sweep over the circle where it will go
+     (Theme photos). Reduced motion collapses it to one frame with the rest. */
+  @keyframes su-photo-shimmer {
+    to { transform: translateX(100%); }
+  }
+  .su-photo-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .su-photo-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, var(--su-fill-hover) 50%, transparent 80%);
+    transform: translateX(-100%);
+    animation: su-photo-shimmer 1.2s linear infinite;
   }
   /* The stage-message alert banner arriving: it rises into place over 260ms. The
      global reduced-motion rule below collapses it to one frame. */

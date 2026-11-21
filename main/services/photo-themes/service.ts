@@ -407,6 +407,8 @@ export class PhotoThemesService {
     return {
       personId,
       name: entry?.name ?? name,
+      // What Manage themes draws beside the edit: their photo as this server last saw it, else what the edit was made from.
+      originalUrl: this.currentPhoto(personId) ?? entry?.approved?.sourceUrl ?? entry?.pending?.sourceUrl ?? null,
       status,
       approved: entry?.approved
         ? {
@@ -1117,7 +1119,7 @@ function choiceDto(c: PlanChoice): PlanChoiceDTO {
 }
 
 function noneDto(personId: string, name: string): ThemePersonDTO {
-  return { personId, name, status: "none", approved: null, pending: null };
+  return { personId, name, status: "none", approved: null, pending: null, originalUrl: null };
 }
 
 export const photoThemes = new PhotoThemesService();

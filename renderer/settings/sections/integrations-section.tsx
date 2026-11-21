@@ -1,5 +1,6 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { IntegrationsPanel } from "../../components/integrations-panel";
+import { OpenAiCard } from "./openai-card";
 
 /**
  * The Integrations page, with the open settings dialog held in the URL.
@@ -40,6 +41,8 @@ export function IntegrationsSection() {
           } as never);
         }}
       />
+      {/* Not an integration tile: no config, no switch, one key (see openai-card.tsx). */}
+      <OpenAiCard />
     </div>
   );
 }

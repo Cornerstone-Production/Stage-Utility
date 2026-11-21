@@ -70,6 +70,8 @@ export interface ThemePersonDTO {
   status: ThemedPhotoStatus;
   approved: ApprovedPhotoDTO | null;
   pending: PendingPhotoDTO | null;
+  /** Their Planning Center photo, for a card to draw beside the edit: the one this server last saw, else the one the edit was made from. Null with none. */
+  originalUrl: string | null;
 }
 
 export interface ThemePlanUseDTO {
