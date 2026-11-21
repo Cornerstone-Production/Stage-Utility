@@ -5,6 +5,7 @@
 import type { AttentionSource } from "../types";
 import { duplicateServer } from "./duplicate-server";
 import { integrationDown } from "./integration-down";
+import { noteCategories } from "./note-categories";
 import { readiness } from "./readiness";
 import { recorderIdle } from "./recorder-idle";
 import { screenOffline } from "./screen-offline";
@@ -19,4 +20,5 @@ export const ATTENTION_SOURCES: readonly AttentionSource[] = [
   screenOffline,
   recorderIdle,
   integrationDown,
+  noteCategories,
 ];

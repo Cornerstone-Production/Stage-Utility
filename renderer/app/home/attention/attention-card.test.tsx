@@ -642,3 +642,27 @@ test("the all-clear tile offers Show N snoozed from its threshold height, not be
   };
   assert.deepEqual([await offered(111), await offered(112)], [false, true]);
 });
+
+test("categories in no column: the tile lists the row, singular and plural, with Snooze and Open roles, and clears at none", async () => {
+  const roles = [{ id: "r1", name: "Audio", members: ["Audio"] }];
+  const over = (cats: string[]) => ({
+    state: stateOf([OUTPUTS[0]]),
+    onlineOutputIds: ["o0"],
+    noteCategories: { known: true, roles, landingTypeIds: ["wk"], catsByType: new Map([["wk", cats]]) },
+  });
+  const two = view(over(["Audio", "Stage notes", "Prayer"]));
+  await settle();
+  assert.equal(mark(two.container), "warn");
+  assert.ok(/2 note categories are in no column/.test(text(two.container)), text(two.container));
+  assert.ok(/Stage notes and Prayer show only under All columns\./.test(text(two.container)), text(two.container));
+  assert.ok(screen.getByRole("button", { name: /Snooze/ }));
+  assert.equal(screen.getByRole("link", { name: "Open roles" }).getAttribute("href"), "/servicecue/presets");
+  two.unmount();
+  const one = view(over(["Audio", "Prayer"]));
+  await settle();
+  assert.ok(/1 note category is in no column/.test(text(one.container)), text(one.container));
+  one.unmount();
+  const none = view(over(["Audio"]));
+  await settle();
+  assert.equal(mark(none.container), "clear", "a Home with every category in a column says All clear");
+});

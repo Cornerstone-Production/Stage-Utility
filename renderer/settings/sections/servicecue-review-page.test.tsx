@@ -342,3 +342,17 @@ test("a copy the browser refuses says so instead of reading Copied", async () =>
     s.restore();
   }
 });
+
+// ── F7: Home's Open roles lands on the roles section ────────────────────────
+
+test("the Category roles section carries the id Home's Open roles flashes", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    const { ROLES_FLASH_ID } = await import("../../app/home/attention/sources/note-categories.js");
+    const section = await eventually(() => document.querySelector(`[data-flash-id="${ROLES_FLASH_ID}"]`) as HTMLElement);
+    assert.match(section.querySelector("h2")?.textContent ?? "", /^Category roles$/);
+  } finally {
+    s.restore();
+  }
+});

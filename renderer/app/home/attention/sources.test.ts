@@ -17,6 +17,7 @@ import { ATTENTION_SOURCES } from "./sources/index.js";
 const EXPECTED = [
   "duplicate-server",
   "integration-down",
+  "note-categories",
   "readiness",
   "recorder-idle",
   "screen-offline",
@@ -54,6 +55,7 @@ describe("attention sources", () => {
       "screen-offline",
       "recorder-idle",
       "integration-down",
+      "note-categories",
     ]);
   });
 });

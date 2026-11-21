@@ -44,6 +44,8 @@ export function attentionInput(over: Partial<AttentionInput> = {}): AttentionInp
     resiKnown: true,
     youtube: null,
     youtubeKnown: true,
+    // Answered, with nothing on the landing page: a test about something else sees no row.
+    noteCategories: { known: true, roles: [], landingTypeIds: [], catsByType: new Map() },
     ...over,
   };
 }

@@ -217,6 +217,11 @@ holds wherever it is placed, on Home or on a layout.
 | Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
 | Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which presses the built-in recording command in place, so Simulate and Disarm apply as they do to the Recording tile |
 | Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
+| Note categories | Planning Center note categories, on the ServiceCue landing page's service types, that no category role claims, so no layout can show them as a column: "2 note categories are in no column". Counted as the notice on the ServiceCue layouts page counts them, each name once. Not shown before any role exists, or when no landing type is ticked | Warn | **Open roles** (the Category roles section of the ServiceCue layouts page) |
+
+The note-categories row reads ServiceCue's roles and the landing types' categories when Home opens and again when the
+live plan changes, never on a timer, and only with Planning Center connected and a landing type ticked. A read that
+fails leaves it unknown, with a `[home]` line on [`/log`](../ops/updates-and-logs.md).
 
 A source that has not answered yet adds nothing: the page does not tell you to
 fix something it has not heard about, and a half-loaded Home draws no severity

@@ -8,6 +8,7 @@ import type { DeviceStatus } from "@main/types/devices";
 import type { AttentionSeverity } from "@main/types/home-snoozes";
 import type { IntegrationState } from "@main/types/integrations";
 import type { ObsStatusDTO, ReaperStatusDTO, StreamStatusDTO } from "@main/types/live";
+import type { CategoryRole } from "@main/types/servicecue-roles";
 
 export type { AttentionSeverity };
 
@@ -71,6 +72,18 @@ export interface AttentionInput {
   resiKnown: boolean;
   youtube: StreamStatusDTO | null;
   youtubeKnown: boolean;
+  /** ServiceCue's category roles, the landing page's service types and each one's note
+   *  categories: what "a category is in no column" is worked out from. */
+  noteCategories: NoteCategoryInput;
+}
+
+/** What the note-categories source reads. `known` is false until every read has answered,
+ *  and stays false when one failed, so a half-read set never says a category is uncovered. */
+export interface NoteCategoryInput {
+  known: boolean;
+  roles: readonly CategoryRole[];
+  landingTypeIds: readonly string[];
+  catsByType: ReadonlyMap<string, readonly string[]>;
 }
 
 /** One source: its id is the first half of every key it makes. */

@@ -33,6 +33,7 @@ import {
   type ColumnChange,
   type Rich,
 } from "./servicecue-layouts-model";
+import { ROLES_FLASH_ID } from "../../app/home/attention/sources/note-categories";
 import { byData, LayoutsDnd, LiftedList, useAnnouncer, type DropHandlers } from "./servicecue-drag";
 
 /** What can fail to save, each said on its own line at the top of the page. */
@@ -649,7 +650,7 @@ export function ServiceCueSection() {
       )}
       </section>
 
-      <section className="mt-7" aria-labelledby="sc-roles-h">
+      <section className="mt-7" aria-labelledby="sc-roles-h" data-flash-id={ROLES_FLASH_ID}>
         <SectionHead id="sc-roles-h" title="Category roles">
           A role is one column. It groups the names different service types give the same notes, like Audio and Sound. When several
           have a note, the first in the role is shown first.
