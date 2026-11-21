@@ -7,9 +7,13 @@ import { pcoConnected, useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
+import { cn } from "../lib/cn";
 import { useOriginHref } from "../lib/back-target";
 import { ALL_COLUMNS_SLUG, slugOf, slugify } from "@main/services/servicecue-slug";
 import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
+
+const MESSAGE = "text-body text-fg-subtle text-center max-w-xs self-center";
+const MESSAGE_LINK = "text-accent underline underline-offset-2 hover:no-underline";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -96,6 +100,8 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
     ...globalLayouts.map((l) => ({ value: l.id, label: l.name })),
     { value: ALL_COLUMNS_LAYOUT_ID, label: "All columns" },
   ];
+  // The rows are left-aligned and the messages centred; Edit layouts follows whichever it is under.
+  const listed = pcoConfigured !== false && !notSent && !!types && !stateLoading && rows.length > 0;
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
 
@@ -127,15 +133,25 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
         <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
           {pcoConfigured === false ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ServiceCue.</p>
+            <p className={MESSAGE}>
+              {/* Not on the public page, which has no settings to go to. */}
+              {isPublicMode() ? "Connect Planning Center" : <a href="/settings/integrations" className={MESSAGE_LINK}>Connect Planning Center</a>} to use ServiceCue.
+            </p>
           ) : notSent ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">{SERVICES_NOT_SENT}</p>
+            <p className={MESSAGE}>{SERVICES_NOT_SENT}</p>
           ) : failed.has("load") ? (
             <ErrorNote>Couldn't load ServiceCue's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ServiceCue layouts page, under Landing page.</p>
+            <p className={MESSAGE}>
+              No service types enabled.{" "}
+              {isPublicMode() ? (
+                "Choose them on the ServiceCue layouts page, under Landing page."
+              ) : (
+                <a href="/servicecue/presets#landing" className={MESSAGE_LINK}>Choose them on the ServiceCue layouts page, under Landing page.</a>
+              )}
+            </p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
@@ -170,7 +186,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
           {!isPublicMode() && (
             <a
               href="/servicecue/presets"
-              className="mt-2 self-start text-caption1 text-accent hover:underline"
+              className={cn("mt-2 text-caption1 text-accent hover:underline", listed || failed.has("load") ? "self-start" : "self-center")}
             >
               Edit layouts
             </a>

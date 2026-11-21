@@ -29,6 +29,10 @@ and the rundown's back arrow both carry them (and nothing else of the query). A 
 whose browser buffers the live stream, opened as `/servicecue?transport=poll`, therefore
 keeps polling from the launcher to the rundown and back, and keeps its text size.
 
+An empty launcher says why and links to the fix: **Connect Planning Center** goes to
+Integrations, and with no service types enabled the message goes to the layouts page with
+Landing page open.
+
 Configure it on the **ServiceCue layouts** page (`/servicecue/presets`, **Edit layouts** on the
 launcher), with a live preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
@@ -84,13 +88,16 @@ global: define one and it works across every service type.
 
 They are edited on the **ServiceCue layouts** page (`/servicecue/presets`), reached
 from **Edit layouts** on the launcher, with **ServiceCue** lit in the sidebar and a
-link back to it above the title. The page holds, in order: a notice when some category
-is in no role (see [Category roles](#category-roles)), **Layouts**, **Category roles**,
-a row shut at the foot of the page, **Landing page**, saying what it holds (the service
-types it shows), and a line beneath it, **Public link**, saying whether the page is
-publishing, with a **Settings in Advanced** link to where it is set up.
+link back to it above the title. The page holds, in order: **Landing page**, a row
+saying what it holds (the service types it shows), open while no type is ticked and
+shut once one is; a notice when some category is in no role (see
+[Category roles](#category-roles)); **Layouts**; **Category roles**; and a line,
+**Public link**, saying whether the page is publishing, with a **Settings in Advanced**
+link to where it is set up. `/servicecue/presets#landing` opens the Landing page row,
+and keeps opening it on reload.
 
-**Landing page** opens to a tick box per service type. Only the ticked types appear on
+**Landing page** opens to a tick box per service type (without Planning Center it says
+to connect it, and links to Integrations). Only the ticked types appear on
 the landing page, each with the layouts in the page's order, then All columns; the first
 layout is a type's default there. They are stored in Planning Center's order, whatever
 order they were ticked in.

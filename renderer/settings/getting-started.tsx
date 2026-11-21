@@ -53,7 +53,7 @@ export function GettingStarted({
     },
     {
       label: "Create a view",
-      hint: "Build what a screen shows — mic slots, a dashboard, transcription, or a custom layout.",
+      hint: "Build what a screen shows — mic slots, a dashboard, ServiceCue, transcription, or a custom layout.",
       done: madeOwnView,
       path: "/views",
       flash: "views-list",

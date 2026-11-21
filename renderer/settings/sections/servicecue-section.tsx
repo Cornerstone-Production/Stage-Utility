@@ -37,6 +37,10 @@ import { byData, LayoutsDnd, LiftedList, useAnnouncer, type DropHandlers } from 
 
 /** What can fail to save, each said on its own line at the top of the page. */
 const FAILURES = ["layouts", "roles", "seed", "landing"] as const;
+
+/** The address fragment that opens the Landing page row: the launcher's "no service
+ *  types" message links to it, and it still opens the row after a reload. */
+const LANDING_HASH = "#landing";
 type Failure = (typeof FAILURES)[number];
 
 /** Focus and select `ref`'s field once for each new `key`, once it has drawn. */
@@ -95,6 +99,11 @@ export function ServiceCueSection() {
   // one-layout list over every real one.
   const { failed, fail, clear } = useFailedReads<"settings" | "types" | "rundown" | CatsRead>("servicecue");
   const [settingsRead, setSettingsRead] = useState(false);
+  // The Landing page row: open on a first run (nothing ticked, so the launcher is empty
+  // and this is the setting that fills it) and when the address names it. Decided once,
+  // when the settings are read; after that it is the operator's to open and shut, so
+  // ticking the first type does not shut it under their pointer.
+  const [landingOpen, setLandingOpen] = useState<boolean | null>(null);
   // Everything Planning Center backs — the service types, and each type's note
   // categories and plan — is asked for only once it is connected, and until
   // then the preview says to connect it (see pcoConnected).
@@ -109,6 +118,15 @@ export function ServiceCueSection() {
     if (pcoConfigured === false) clear("types", "rundown", ...[...failed].filter((k): k is CatsRead => k.startsWith("cats:")));
   });
 
+  // The same address followed while the page is already open.
+  useEffect(() => {
+    const onHash = () => {
+      if (window.location.hash === LANDING_HASH) setLandingOpen(true);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
   // This app's own settings: the layouts, which types the landing page shows,
   // and the category roles. Read apart from Planning Center, so one that is not
   // connected, or is down, costs the previews and never the layouts editor.
@@ -122,6 +140,7 @@ export function ServiceCueSection() {
         adoptLayouts(l);
         adoptRoles(r);
         setShownIds(c.serviceTypeIds ?? []);
+        setLandingOpen((cur) => cur ?? (window.location.hash === LANDING_HASH || (c.serviceTypeIds ?? []).length === 0));
         // Preview against the first enabled type; Planning Center's first is
         // the fallback, below.
         setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? null);
@@ -526,6 +545,40 @@ export function ServiceCueSection() {
         <h1 className="mt-0.5 text-title3 font-semibold text-fg">ServiceCue layouts</h1>
       </div>
       {FAILURES.map((k) => failures[k] && <ErrorNote key={k} className="mt-3">{failures[k]}</ErrorNote>)}
+      <div id="landing" className="mt-4 scroll-mt-4">
+        <MoreRow
+          title="Landing page"
+          summary={shownNames.length ? shownNames.join(", ") : shownIds.length ? typesPending : "No service types"}
+          open={landingOpen === true}
+          onOpenChange={setLandingOpen}
+        >
+          <p className="text-caption1 text-fg-muted">
+            Only these service types appear on the ServiceCue landing page, each with the layouts below, in that order, then All
+            columns.
+          </p>
+          {types.length === 0 ? (
+            <p className="text-caption1 text-fg-subtle">
+              {pcoConfigured === false ? (
+                <>
+                  <a href="/settings/integrations" className="text-accent underline underline-offset-2 hover:no-underline">Connect Planning Center</a> to pick
+                </>
+              ) : (
+                typesPending
+              )}
+            </p>
+          ) : (
+            types.map((t) => (
+              <label key={t.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
+                <Checkbox
+                  checked={shownIds.includes(t.id)}
+                  onCheckedChange={(on) => void setShown(on === true ? [...shownIds, t.id] : shownIds.filter((id) => id !== t.id))}
+                />
+                {t.name}
+              </label>
+            ))
+          )}
+        </MoreRow>
+      </div>
       {/* Not on a first run: with no roles, the roles section already lists every
           category, with this same action. */}
       {settingsRead && roles.length > 0 && noticeGroups.length > 0 && (
@@ -626,29 +679,7 @@ export function ServiceCueSection() {
       </section>
       </LayoutsDnd>
 
-      <section className="mt-7 flex flex-col gap-2" aria-label="Landing page and public link">
-        <MoreRow
-          title="Landing page"
-          summary={shownNames.length ? shownNames.join(", ") : shownIds.length ? typesPending : "No service types"}
-        >
-          <p className="text-caption1 text-fg-muted">
-            Only these service types appear on the ServiceCue landing page, each with the layouts above, in that order, then All
-            columns.
-          </p>
-          {types.length === 0 ? (
-            <p className="text-caption1 text-fg-subtle">{typesPending}</p>
-          ) : (
-            types.map((t) => (
-              <label key={t.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
-                <Checkbox
-                  checked={shownIds.includes(t.id)}
-                  onCheckedChange={(on) => void setShown(on === true ? [...shownIds, t.id] : shownIds.filter((id) => id !== t.id))}
-                />
-                {t.name}
-              </label>
-            ))
-          )}
-        </MoreRow>
+      <section className="mt-7 flex flex-col gap-2" aria-label="Public link">
         <PublicLinkStatusRow />
       </section>
       {announcer}
@@ -705,15 +736,14 @@ function SectionHead({ id, title, children }: { id: string; title: string; child
   );
 }
 
-/** A collapsed row at the foot of the page: a title, what it holds, and its body when open. */
-function MoreRow({ title, summary, children }: { title: string; summary: ReactNode; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+/** A row that opens: a title, what it holds, and its body when open. */
+function MoreRow({ title, summary, open, onOpenChange, children }: { title: string; summary: ReactNode; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
   return (
     <div className="rounded-[10px] border border-line bg-surface">
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => onOpenChange(!open)}
         className="flex min-h-11 w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-footnote transition-colors hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <span className="whitespace-nowrap font-semibold text-fg">{title}</span>

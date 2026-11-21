@@ -77,7 +77,7 @@ test("the page: its title, a way back, and the sections in order", async () => {
     await mount();
     assert.deepEqual(headings(), ["ServiceCue layouts", "Layouts", "Category roles"]);
     assert.equal(screen.getByRole("link", { name: "ServiceCue" }).getAttribute("href"), "/servicecue/manage");
-    // The Landing page row sits last, shut, saying what it holds; the Public link is a status line
+    // The Landing page row leads, shut here because a type is ticked, saying what it holds; the Public link is a status line
     // beside it, since the card itself is on Settings > Advanced.
     await eventually(() => assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night false"]));
     await eventually(() => assert.equal(publicLinkRow().textContent, "Public link· OffSettings in Advanced"));

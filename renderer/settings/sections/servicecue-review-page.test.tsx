@@ -1,6 +1,6 @@
-// servicecue-review-card.test.tsx — the design-review changes to an open layout card
-// (Row color wording, empty roles, the address and Used by footer), driven through the
-// real ServiceCue layouts page over the stateful settings server.
+// servicecue-review-page.test.tsx — the design-review changes to the ServiceCue layouts page
+// and its open card (Landing page first, Row color wording, empty roles, the address and
+// Used by footer), driven through the real page over the stateful settings server.
 //
 // NOT unit-tested here, and driven in a browser instead (jsdom loads no stylesheet and
 // lays nothing out): the greyed, dotted look of an empty role's chip, where the footer
@@ -154,3 +154,60 @@ test("a role already a column keeps its place after losing its categories, and n
 });
 const roleRow = (layoutId: string) =>
   [...(document.querySelector(`[data-cols="${layoutId}"]`)?.querySelectorAll("[data-sort-id]") ?? [])].map((c) => c.textContent ?? "");
+
+// ── F5: Landing page leads, and is open on a first run ──────────────────────
+
+const landingRow = () => screen.getByRole("button", { name: /^Landing page/ });
+const headingsInOrder = () =>
+  [...document.querySelectorAll("h1, h2, button[aria-expanded]")]
+    .map((n) => (n.tagName === "BUTTON" ? (/^Landing page/.test(n.textContent ?? "") ? "Landing page" : "") : (n.textContent ?? "")))
+    .filter(Boolean);
+
+test("Landing page is the first section, above Layouts, and open while no type is ticked", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: [], types: TYPES });
+  try {
+    await mount();
+    assert.deepEqual(headingsInOrder().slice(0, 4), ["ServiceCue layouts", "Landing page", "Layouts", "Category roles"]);
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
+    assert.equal(!!screen.queryByRole("checkbox", { name: "Sunday Morning" }), true);
+    // Landing page leads now, so its layouts are below it, not above.
+    assert.match(document.body.textContent ?? "", /each with the layouts below, in that order, then All columns\./);
+    // Ticking the first type does not shut it under the pointer.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
+    await eventually(() => assert.deepEqual(s.shown(), ["sun"]));
+    assert.equal(landingRow().getAttribute("aria-expanded"), "true");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Landing page is shut when a type is ticked, and the #landing address opens it, reload included", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "false"));
+    cleanup();
+    window.location.hash = "#landing";
+    await mount(); // a reload: a fresh page read at the same address
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
+    cleanup();
+    window.location.hash = "";
+    await mount();
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "false"));
+  } finally {
+    window.location.hash = "";
+    s.restore();
+  }
+});
+
+test("without Planning Center the open Landing page links to Integrations; the other Connect sentences stay text", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: [], types: [], pcoConfigured: false });
+  try {
+    await mount();
+    await eventually(() => assert.equal(landingRow().getAttribute("aria-expanded"), "true"));
+    assert.equal(screen.getByRole("link", { name: "Connect Planning Center" }).getAttribute("href"), "/settings/integrations");
+    assert.equal(screen.getAllByRole("link", { name: /Connect Planning Center/ }).length, 1);
+  } finally {
+    s.restore();
+  }
+});
