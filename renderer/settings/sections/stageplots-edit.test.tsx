@@ -715,7 +715,7 @@ describe("/stageplots/edit", () => {
     assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-4", "p-1", "p-2", "p-3"] });
     sent = [];
     DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
-    broadcast();
+    await act(async () => broadcast());
     await settle();
     // Standard dragged to the second row's left end (x 10, y 55): after the whole first row's
     // other tab (Special) and before Third.
