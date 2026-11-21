@@ -55,6 +55,12 @@ describe("note-categories source", () => {
     assert.deepEqual(run(cover({ roles: [] })), [], "no roles at all: the layouts page does not warn on a first run either");
   });
 
+  it("reordering the landing types does not change the key, so it does not un-snooze the row", () => {
+    const a = run(cover({ landingTypeIds: ["wk", "mid"], catsByType: new Map([["wk", ["Prayer"]], ["mid", ["Stage notes"]]]) }))[0].key;
+    const b = run(cover({ landingTypeIds: ["mid", "wk"], catsByType: new Map([["wk", ["Prayer"]], ["mid", ["Stage notes"]]]) }))[0].key;
+    assert.equal(a, b);
+  });
+
   it("a change in the set is a different key, so a new category is not hidden by an old snooze", () => {
     const a = run(cover({ catsByType: new Map([["wk", ["Audio", "Prayer"]]]) }))[0].key;
     const b = run(cover({ catsByType: new Map([["wk", ["Audio", "Prayer", "Stage notes"]]]) }))[0].key;

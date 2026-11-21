@@ -373,7 +373,7 @@ test("the Category roles section carries the id Home's Open roles flashes", asyn
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
     await mount();
-    const { ROLES_FLASH_ID } = await import("../../app/home/attention/sources/note-categories.js");
+    const { ROLES_FLASH_ID } = await import("../../app/flash.js");
     const section = await eventually(() => document.querySelector(`[data-flash-id="${ROLES_FLASH_ID}"]`) as HTMLElement);
     assert.match(section.querySelector("h2")?.textContent ?? "", /^Category roles$/);
   } finally {

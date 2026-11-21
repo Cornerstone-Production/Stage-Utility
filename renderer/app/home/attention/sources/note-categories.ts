@@ -6,11 +6,9 @@
 // over the landing page's service types, so the page and Home cannot disagree, and
 // not on a first run with no roles, where the page says nothing either.
 
+import { ROLES_FLASH_ID } from "../../../flash";
 import { listOf, unassignedByType, unassignedDistinct } from "../../../../settings/sections/servicecue-layouts-model";
 import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSource } from "../types";
-
-/** The `data-flash-id` of the Category roles section on /servicecue/presets. */
-export const ROLES_FLASH_ID = "servicecue-roles";
 
 export const noteCategories: AttentionSource = {
   id: "note-categories",
@@ -22,8 +20,8 @@ export const noteCategories: AttentionSource = {
     const one = names.length === 1;
     return [
       {
-        // The set is the subject, so a category added later is a new problem, not the snoozed one.
-        key: attentionKey("note-categories", names.join("+")),
+        // The set is the subject (sorted, so reordering the landing types is not a new problem), and a category added later is.
+        key: attentionKey("note-categories", [...names].sort((a, b) => a.localeCompare(b)).join("+")),
         severity: "warn",
         title: `${names.length} note ${one ? "category is" : "categories are"} in no column`,
         detail: `${listOf(names)} ${one ? "shows" : "show"} only under All columns.`,

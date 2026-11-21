@@ -33,7 +33,7 @@ import {
   type ColumnChange,
   type Rich,
 } from "./servicecue-layouts-model";
-import { ROLES_FLASH_ID } from "../../app/home/attention/sources/note-categories";
+import { ROLES_FLASH_ID } from "../../app/flash";
 import { byData, LayoutsDnd, LiftedList, useAnnouncer, type DropHandlers } from "./servicecue-drag";
 
 /** What can fail to save, each said on its own line at the top of the page. */
