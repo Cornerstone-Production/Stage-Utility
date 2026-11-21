@@ -451,7 +451,8 @@ configuration is reviewed like code.
 | `.github/workflows/codeql-language.yml` | One language's analysis, or an empty result for a language that was skipped |
 | `.github/codeql/codeql-config.yml` | The query suite (`security-extended`) and the paths ignored, read by every language |
 | `.github/codeql/extensions/stage-utility-models/` | The model pack: data extensions that teach the JavaScript analysis about this code |
-| `.github/codeql/tests/` | The model pack's own CodeQL tests |
+| `.github/codeql/queries/` | A query pack: the one stock query this repository replaces (see Queries) |
+| `.github/codeql/tests/` | CodeQL tests for the model pack and for the query pack |
 
 An alert is fixed in the code, not dismissed. [Code scanning decisions](reference/code-scanning.md)
 lists the two rules whose alerts are dismissed once each, with the reason.
@@ -504,6 +505,26 @@ Making `c.url` and `c.req` reachable would mean changing how handlers are dispat
 A model's type is `file:<path>`, relative to the source root, naming the module the
 calling code imports.
 
+### Queries
+
+`js/http-to-file-access` has a `Sanitizer` class meant to be subclassed, but a data
+extension cannot add to it and the query reads no `barrierModel`, so the model pack
+cannot mark anything safe for it. `.github/codeql/queries/` holds the stock query
+unchanged (`HttpToFileAccess.ql`) plus `EncodeRowBarrier.qll`, which subclasses
+`Sanitizer` for the result of `encodeRow` in `main/services/csv.ts`. The stock
+configuration is reused as it is, so anything CodeQL adds to it applies here too.
+`codeql-config.yml` drops the stock query with a `query-filters` entry by path (a filter
+by id would drop the copy too), and the JavaScript run adds the copy through `init`'s
+`queries` input (`+`, so it adds to the configuration's queries; an empty input is
+unset, so the other languages ignore it). The rule id is kept so an alert the copy no
+longer reports closes rather than being replaced by a new one.
+
+The barrier asserts CSV structure only; `EncodeRowBarrier.qll` says what that leaves
+uncovered. When the CodeQL version moves, compare `HttpToFileAccess.ql` with the stock
+query (`Security/CWE-912/HttpToFileAccess.ql` in `codeql/javascript-queries`): a renamed
+module or class fails the build of the query and the CodeQL tests with it, and a
+changed select or metadata is for the comparison to catch.
+
 To add a model:
 
 1. Add the row to a file under `extensions/stage-utility-models/models/`, with a
@@ -518,7 +539,7 @@ To add a model:
 5. Delete the row and run the test again. It must fail.
 
 ```bash
-codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions --learn
+codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions:$PWD/.github/codeql/queries --learn
 ```
 
 Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes, with
