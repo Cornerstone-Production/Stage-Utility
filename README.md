@@ -40,6 +40,7 @@ the operator app and a phone remote from one port.
 | [ServiceCue on the web](docs/ops/servicecue-on-the-web.md) | a public address for ServiceCue on a free Cloudflare Worker, with no login |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
 | [StagePlots](docs/features/stageplots.md) | stage diagrams for every venue |
+| [Photo themes](docs/features/photo-themes.md) | themed mic slot photos for a service, made by OpenAI and approved before they show |
 | [Automation](docs/automation.md) | rules that fire on live events |
 | [Data archive](docs/data-archive.md) | raw sample retention, export and import |
 | [Reliability and data](docs/ops/reliability.md) | behaviour under load, where your data lives |

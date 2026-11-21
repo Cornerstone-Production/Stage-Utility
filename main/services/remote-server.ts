@@ -103,6 +103,9 @@ import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { messagesRoutes } from "./routes/messages-routes.js";
 import { homeRoutes } from "./routes/home-routes.js";
+import { photoThemeRoutes } from "./routes/photo-theme-routes.js";
+import { photoThemes } from "./photo-themes/service.js";
+import { PHOTO_THEMES_CHANNEL } from "../types/photo-themes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
 import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
@@ -166,6 +169,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   homeRoutes,
   hostNameRoutes,
   stageplotsRoutes,
+  photoThemeRoutes,
 ] as const;
 
 /**
@@ -595,6 +599,10 @@ export function writeHelloBurst(res: EventSink): void {
   // default until somebody chose again.
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "trends:prefs" satisfies typeof TRENDS_PREFS_CHANNEL, trendsPrefs.state());
+  // Theme photos being made and waiting: a Mic slots page opened mid-run shows
+  // the progress at once, and compares the sequence to know when to re-read.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "photo-themes:changed" satisfies typeof PHOTO_THEMES_CHANNEL, photoThemes.changed());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */
