@@ -17,10 +17,6 @@ import { installDom, settle } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
-// settle() below act-wraps a state update outside of render() itself (the
-// hydrate read's rejection), and React only recognizes that as inside a test
-// once it is told so explicitly.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Home's card reads live state through the app's SSE hook, which opens an
 // EventSource on mount. jsdom has none, and what this is about is which

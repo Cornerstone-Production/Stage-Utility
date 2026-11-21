@@ -23,7 +23,6 @@ import { after, beforeEach, describe, test } from "node:test";
 import { installDom } from "../../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
 // pointer against a zero-width box (that maps every x to NaN and the crosshair

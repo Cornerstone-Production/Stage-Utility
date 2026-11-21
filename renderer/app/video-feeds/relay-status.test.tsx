@@ -18,10 +18,6 @@ import { installDom } from "../../test-dom.js";
 import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installDom();
-// Sibling files set this so React act-wraps a
-// render and WARNS the moment an update escapes one — without it a file
-// reads as clean while updates land outside act, silently.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const { RelayPill, RelaySwitch, RelayDetailRow } = await import("./relay-status.js");

@@ -15,7 +15,6 @@ import { NoStream } from "../../test-fixtures/no-stream.js";
 import { serve } from "../../test-fixtures/button-server.js";
 
 const teardown = installRenderDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");

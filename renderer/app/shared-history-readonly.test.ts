@@ -27,10 +27,6 @@ import { settle, unmountAndTeardown } from "../test-dom.js";
 import { routerWithBaptismDestination } from "../test-fixtures/router.js";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 
-// Without this React neither act-wraps a render nor warns about an update
-// outside act — which is why this file reported no undrained work while
-// carrying the crash recorded at `rowControls` below.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const DEST = readFileSync(new URL("./destinations.tsx", import.meta.url), "utf8");
 

@@ -141,7 +141,15 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
     });
   }
 
+  // React runs act() quietly, and warns when an update escapes one, only when
+  // told it is in a test environment. Every file that installs a DOM renders
+  // React into it; a file that forgot the flag read as clean while its updates
+  // landed outside act, and the undrained work then ran after the DOM had gone
+  // ("window is not defined"). It is set here so no file can forget it.
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+
   return () => {
+    delete g.IS_REACT_ACT_ENVIRONMENT;
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(g, key, descriptor);
       else delete g[key];
@@ -151,10 +159,10 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
 }
 
 /**
- * installDom, plus the three things a REACT render needs on top of it.
+ * installDom, plus the two things a REACT render needs on top of it.
  *
  * Three files in renderer/main opened with byte-identical copies of exactly
- * this: the act-environment flag, one clientHeight for every element, and a
+ * this: the act-environment flag (now installDom's), one clientHeight for every element, and a
  * do-nothing EventSource. StubEventSource alone is at eleven copies across the
  * repo. Each was correct; three copies of a correct thing is still three places
  * a platform gap has to be patched, and installDom already stubs ResizeObserver
@@ -174,10 +182,6 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
 export function installRenderDom({ clientHeight }: { clientHeight?: number } = {}): () => void {
   const teardown = installDom();
   const g = globalThis as unknown as Record<string, unknown>;
-
-  // React runs act() quietly only when told it is in a test environment; without
-  // this every awaited render logs "not configured to support act(...)".
-  g.IS_REACT_ACT_ENVIRONMENT = true;
 
   if (clientHeight !== undefined) {
     Object.defineProperty((g.HTMLElement as { prototype: object }).prototype, "clientHeight", {
@@ -202,7 +206,6 @@ export function installRenderDom({ clientHeight }: { clientHeight?: number } = {
 
   return () => {
     delete g.EventSource;
-    delete g.IS_REACT_ACT_ENVIRONMENT;
     teardown();
   };
 }

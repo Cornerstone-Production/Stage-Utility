@@ -38,11 +38,6 @@ import { eventually, installDom, isPlumbing, readLedger, settle, unmountAndTeard
 import type { UpdateStatus } from "@main/types/state";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 75 updates land outside act — which is why it was
-// cleared the first time round.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom ships no EventSource, and this panel subscribes to four channels on
 // mount so the lock indicator stays fresh while a service starts or ends.

@@ -144,3 +144,22 @@ describe("isPlumbing", () => {
     }
   });
 });
+
+// React stays silent about updates that escape act() unless it is told it is in a
+// test environment, and undrained work then runs after the DOM is gone. This runs
+// the real installDom rather than reading its source.
+describe("installDom and the React act environment", () => {
+  test("turns the flag on for the file and removes it on teardown", () => {
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const outer = g.IS_REACT_ACT_ENVIRONMENT;
+    const inner = installDom();
+    try {
+      assert.equal(g.IS_REACT_ACT_ENVIRONMENT, true, "installDom left React outside its act environment");
+    } finally {
+      inner();
+    }
+    assert.equal("IS_REACT_ACT_ENVIRONMENT" in g, false, "the teardown left the act flag behind");
+    // The file-level installDom is still live; put its flag back for the tests after this.
+    if (outer !== undefined) g.IS_REACT_ACT_ENVIRONMENT = outer;
+  });
+});
