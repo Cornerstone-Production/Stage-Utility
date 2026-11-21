@@ -75,7 +75,14 @@ describe("eventually", () => {
     assert.equal(got, 3);
   });
 
-  test("reports the last failure, not a bare timeout, when the thing never arrives", async () => {
+  test("takes one more look after the last gap, as the wait always did", { timeout: 3000 }, async () => {
+    let looks = 0;
+    // A 5 ms budget is spent inside the first 10 ms gap: the look that follows it is the one that passes.
+    await eventually(() => assert.ok(++looks >= 2, `looked ${looks} time(s)`), 5);
+    assert.equal(looks, 2);
+  });
+
+  test("reports the last failure, not a bare timeout, when the thing never arrives", { timeout: 3000 }, async () => {
     await assert.rejects(
       eventually(() => assert.equal(1, 2, "the thing never arrived"), 100),
       /the thing never arrived/,
@@ -149,17 +156,36 @@ describe("isPlumbing", () => {
 // test environment, and undrained work then runs after the DOM is gone. This runs
 // the real installDom rather than reading its source.
 describe("installDom and the React act environment", () => {
-  test("turns the flag on for the file and removes it on teardown", () => {
+  test("turns the flag on for the file and puts the previous value back on teardown", () => {
     const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
     const outer = g.IS_REACT_ACT_ENVIRONMENT;
     const inner = installDom();
+    assert.equal(g.IS_REACT_ACT_ENVIRONMENT, true, "installDom left React outside its act environment");
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    inner();
+    assert.equal(g.IS_REACT_ACT_ENVIRONMENT, outer, "the teardown did not restore what it found");
+  });
+
+  test("the teardown fails the file when React reported an update outside act", () => {
+    const outerError = console.error;
+    // Swallow the message so it reaches neither the log nor this file's own recorder.
+    console.error = () => {};
     try {
-      assert.equal(g.IS_REACT_ACT_ENVIRONMENT, true, "installDom left React outside its act environment");
+      const inner = installDom();
+      console.error("An update to Probe inside a test was not wrapped in act(...).\n\nmore text");
+      console.error("an unrelated error");
+      assert.throws(inner, /1 React act warning\(s\).*An update to Probe inside a test was not wrapped in act/);
+      assert.equal(typeof console.error, "function");
     } finally {
-      inner();
+      console.error = outerError;
     }
-    assert.equal("IS_REACT_ACT_ENVIRONMENT" in g, false, "the teardown left the act flag behind");
-    // The file-level installDom is still live; put its flag back for the tests after this.
-    if (outer !== undefined) g.IS_REACT_ACT_ENVIRONMENT = outer;
+  });
+
+  test("a clean file tears down quietly and gives console.error back", () => {
+    const before = console.error;
+    const inner = installDom();
+    assert.notEqual(console.error, before, "the recorder is not installed");
+    inner();
+    assert.equal(console.error, before, "the teardown left its recorder behind");
   });
 });

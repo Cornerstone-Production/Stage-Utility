@@ -12,6 +12,7 @@
 //   teardown();
 
 import { registerHooks } from "node:module";
+import { format } from "node:util";
 
 import { act } from "react";
 import { JSDOM } from "jsdom";
@@ -89,6 +90,9 @@ const EXPOSED = [
   "sessionStorage",
 ] as const;
 
+/** What React says when an update lands outside act(), or act() runs without the flag. */
+const ACT_WARNING = /not wrapped in act|not configured to support act/;
+
 /**
  * Install a DOM onto globalThis and return the function that removes it again.
  *
@@ -146,15 +150,32 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
   // React into it; a file that forgot the flag read as clean while its updates
   // landed outside act, and the undrained work then ran after the DOM had gone
   // ("window is not defined"). It is set here so no file can forget it.
+  const previousActFlag = Object.getOwnPropertyDescriptor(g, "IS_REACT_ACT_ENVIRONMENT");
   g.IS_REACT_ACT_ENVIRONMENT = true;
 
+  // With the flag on, React reports an update that escaped act() with console.error
+  // and nothing else, which scrolls past in a 16,000-test log. Record them, and fail
+  // the file when its DOM comes down, so a new one is red instead of quiet.
+  const realConsoleError = console.error;
+  const actWarnings: string[] = [];
+  console.error = (...args: unknown[]) => {
+    const message = format(...args);
+    if (ACT_WARNING.test(message)) actWarnings.push(message);
+    realConsoleError.apply(console, args);
+  };
+
   return () => {
-    delete g.IS_REACT_ACT_ENVIRONMENT;
+    console.error = realConsoleError;
+    if (previousActFlag) Object.defineProperty(g, "IS_REACT_ACT_ENVIRONMENT", previousActFlag);
+    else delete g.IS_REACT_ACT_ENVIRONMENT;
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(g, key, descriptor);
       else delete g[key];
     }
     dom.window.close();
+    if (actWarnings.length > 0) {
+      throw new Error(`${actWarnings.length} React act warning(s) while this DOM was installed; the first: ${actWarnings[0].split("\n")[0]}`);
+    }
   };
 }
 
@@ -297,11 +318,14 @@ export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEO
     let found!: Awaited<T>;
     let failure: unknown;
     let looked = false;
+    let expired = false;
     // The look runs inside act, so a fetch a click or a mount started cannot land
     // on the microtasks between two scopes, where React reports it as unwrapped.
-    // A failed look is caught INSIDE the scope: act that rejects throws away the
-    // renders its scope had queued, and the page the next look reads never draws.
-    // The gap after a failed look shares the scope for the same seam's sake.
+    // A failed look is caught inside the scope rather than left to reject it, so
+    // the scope always ends normally and flushes what it queued; the gap after a
+    // failed look shares the scope, so there is no seam between the two. When the
+    // gap runs past the deadline the loop looks once more before it gives up: the
+    // last look follows the last flush.
     await act(async () => {
       try {
         // `check` may be async (it may open a tooltip, say, to read it): a
@@ -312,11 +336,14 @@ export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEO
       } catch (err) {
         failure = err;
       }
-      if (realNow() >= deadline) return;
+      if (realNow() >= deadline) {
+        expired = true;
+        return;
+      }
       await new Promise((resolve) => realSetTimeout(resolve, 10));
     });
     if (looked) return found;
-    if (realNow() >= deadline) throw failure;
+    if (expired) throw failure;
   }
 }
 
