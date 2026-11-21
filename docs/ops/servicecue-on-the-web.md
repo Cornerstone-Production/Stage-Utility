@@ -312,10 +312,18 @@ a successful "Update the page now".
 **If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
 all at once. The server records Cloudflare's error code and words, and tries again after
 a minute, then two, doubling to at most once an hour. A `401` or `403` is not tried again
-until the token changes. The status line says what failed, in Cloudflare's own
-words, that the page is unchanged, and when it tries again; for a refused token it says to
-make a new one and paste it. The same status is the `deploy` the `GET
-/api/servicecue/publish` answer carries ([API](../reference/api.md)).
+until the token changes. The status line says what failed, in Cloudflare's own words,
+that the page is unchanged (or, when that cannot be read, that whether the page took it
+is not known), and when it tries again; for a refused token it says to make a new one and
+paste it. The same status is the `deploy` the `GET /api/servicecue/publish` answer
+carries ([API](../reference/api.md)).
+
+**If the answer is lost.** The upload that swaps the Worker can go through and its
+answer never arrive, or come back a 5xx. The server then asks Cloudflare what the Worker
+holds: if it holds this build at this version, the update went through and is said as
+one. If that cannot be read either, the status line says whether the page took it is not
+known, rather than that the page is unchanged. A failure at any earlier step cannot have
+changed the page and is not asked about.
 
 **The status line** on the card says one of (a failed update, or a build with no copy of the page, opens **Cloudflare connection** by itself):
 
@@ -327,6 +335,7 @@ make a new one and paste it. The same status is the `deploy` the `GET
 | Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
 | Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
+| Couldn't update the page: *reason*. Whether the page took it is not known. | the last attempt got no answer, and what Cloudflare holds could not be read to see whether it went through |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
 | The page runs build X of this server's own version, deployed by another server | the page is left alone |
 | This server's build has no copy of the page | the reason is in the log |

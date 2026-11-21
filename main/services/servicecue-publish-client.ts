@@ -106,6 +106,38 @@ export function problemOf(f: PushFailure): PublishProblem {
   return { kind, ...(f.status !== undefined ? { status: f.status } : {}), message: f.message };
 }
 
+/**
+ * May the page have done what was asked, for all this failure says? True when no answer came back
+ * (a timeout, a dropped connection, which Node cannot tell from a refused one) and when the page
+ * answered that it failed itself (a 5xx, which a Worker can send after it stored the request). Every
+ * other kind is an answer that it did not, or a request that never left. A switch over every kind,
+ * so a new one fails to compile here until somebody decides.
+ */
+export function mayHaveLanded(f: PushFailure): boolean {
+  switch (f.kind) {
+    case "unreachable":
+    case "server":
+      return true;
+    case "auth":
+    case "blocked":
+    case "limited":
+    case "no-token":
+    case "rejected":
+    case "redirect":
+    case "intercepted":
+    case "protocol":
+    case "refused":
+      return false;
+    case "aborted":
+      // This side stopped it: never sent (held, or a run already replaced), or cut off for a run that is gone, with all it knew.
+      return false;
+    default: {
+      const unhandled: never = f.kind;
+      return unhandled;
+    }
+  }
+}
+
 /** What the page says it holds: the document keys and image names of its status answer, parsed field by field (the answer is untrusted). */
 export type PageHolds = Pick<PublishStatus, "docs" | "assets">;
 

@@ -6,7 +6,8 @@
 // upload, the completion token on the script PUT, and that every file the session asked for
 // arrived. It keeps what it was sent, so a test reads the exact upload metadata back.
 //
-// A test that needs a failure sets `respond`, which sees each request first and may answer it.
+// A test that needs a failure sets `respond`, which sees each request first and may answer it, or
+// `lose`, which sees it once the fake has done it and may lose the answer.
 
 import * as http from "node:http";
 
@@ -74,6 +75,8 @@ export class FakeCloudflare {
   serveAnnotations = true;
   /** Sees each request first. Returning an answer sends it; undefined carries on. */
   respond: (req: Seen) => FakeAnswer | undefined | Promise<FakeAnswer | undefined> = () => undefined;
+  /** Sees each request after the fake has done it. "drop" closes the connection with no answer; an answer replaces the fake's; undefined sends the fake's. */
+  lose: (req: Seen) => "drop" | FakeAnswer | undefined = () => undefined;
 
   private sessionJwt = "";
   private completionJwt = "";
@@ -89,6 +92,10 @@ export class FakeCloudflare {
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
         void holder.fake!.handle(req, Buffer.concat(chunks)).then((a) => {
+          if (a === "drop") {
+            res.socket?.destroy();
+            return;
+          }
           res.writeHead(a.status, { "Content-Type": "application/json", ...a.headers });
           res.end(JSON.stringify(a.body));
         });
@@ -116,6 +123,7 @@ export class FakeCloudflare {
     this.puts.length = 0;
     this.deployed = null;
     this.respond = () => undefined;
+    this.lose = () => undefined;
     this.singleUploads = false;
     this.accountToken = false;
     this.serveAnnotations = true;
@@ -133,7 +141,7 @@ export class FakeCloudflare {
     return { status: 200, body: { success: true, errors: [], messages: [], result } };
   }
 
-  private async handle(req: http.IncomingMessage, bytes: Buffer): Promise<FakeAnswer> {
+  private async handle(req: http.IncomingMessage, bytes: Buffer): Promise<FakeAnswer | "drop"> {
     const url = new URL(req.url ?? "/", "http://fake");
     const contentType = req.headers["content-type"];
     const seen: Seen = { method: req.method ?? "GET", path: `${url.pathname.replace(/^\/client\/v4/, "")}${url.search}`, authorization: req.headers.authorization, contentType, bytes };
@@ -141,11 +149,13 @@ export class FakeCloudflare {
     this.requests.push(seen);
     const forced = await this.respond(seen);
     if (forced) return forced;
+    let answer: FakeAnswer;
     try {
-      return await this.route(seen, url.pathname.replace(/^\/client\/v4/, ""), url.searchParams);
+      answer = await this.route(seen, url.pathname.replace(/^\/client\/v4/, ""), url.searchParams);
     } catch (err) {
-      return failure(500, 9999, `the fake could not read the request: ${errorMessage(err)}`);
+      answer = failure(500, 9999, `the fake could not read the request: ${errorMessage(err)}`);
     }
+    return this.lose(seen) ?? answer;
   }
 
   private bearer(req: Seen): string {

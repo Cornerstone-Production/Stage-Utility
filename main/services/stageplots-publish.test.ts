@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, mock, test } from "node:test";
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stageplots-publish-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { FakeReceiver, waitFor } = await import("./fixtures/publish-receiver.js");
+const { FakeReceiver, applyThenLose, assertTook, waitFor } = await import("./fixtures/publish-receiver.js");
 const { parsePublishUrl } = await import("./servicecue-publish-rules.js");
 const { stageplotsStore, checkStagePlotsDoc } = await import("./stageplots-store.js");
 const { StagePlotsPublisher, landingList } = await import("./stageplots-publish.js");
@@ -349,13 +349,6 @@ describe("a send whose answer is lost", () => {
       for (const m of q) m.mock.restore();
     }
   };
-  /** The page stores each request `lose` picks, and answers it 500. */
-  const losing = (h: Harness, lose: (req: Received) => boolean) => {
-    h.page.respond = async (req) => {
-      const a = await h.page.worker(req);
-      return lose(req) ? { status: 500, body: "" } : a;
-    };
-  };
   const labelled = (label: string) => (d: StagePlotsDoc) => ({ ...d, plots: d.plots.map((p) => ({ ...p, items: [item("i-0", { label })], version: p.version + 1 })) });
 
   test("a plot changed back to what it was before a lost answer is sent again", async () => {
@@ -363,12 +356,12 @@ describe("a send whose answer is lost", () => {
     assert.ok((await h.publisher.publish("v-1")).ok);
     const secret = (await h.venue()).publish!.secret;
     const shown = async () => (await visit(h.page, secret, "plot/p-0")).body;
-    losing(h, (req) => req.method === "PUT" && SP.exec(req.path)?.[2] === "plot/p-0");
+    applyThenLose(h.page, { status: 500, body: "" }, (req) => req.method === "PUT" && SP.exec(req.path)?.[2] === "plot/p-0");
     await quietly(async () => {
       await h.edit(labelled("Monitor"));
       await h.publisher.settle();
     });
-    assert.match(await shown(), /Monitor/, "the page did not take the change; the test is not testing a lost answer");
+    assertTook(/Monitor/.test(await shown()), "the change");
     h.page.respond = (req) => h.page.worker(req);
     await h.edit(labelled("Wedge"));
     await h.publisher.settle();
@@ -379,13 +372,13 @@ describe("a send whose answer is lost", () => {
     const h = await harness(venueDoc(1, 0));
     assert.ok((await h.publisher.publish("v-1")).ok);
     const secret = (await h.venue()).publish!.secret;
-    losing(h, (req) => req.method === "PUT" && SP.exec(req.path)?.[1] === secret && SP.exec(req.path)?.[2] === undefined);
+    applyThenLose(h.page, { status: 500, body: "" }, (req) => req.method === "PUT" && SP.exec(req.path)?.[1] === secret && SP.exec(req.path)?.[2] === undefined);
     const extra = { id: "p-1", venueId: "v-1", name: "Plot 1", backgroundId: null, bgFade: 0.4, items: [item("i-1")], version: 1 };
     await quietly(async () => {
       await h.edit((d) => ({ ...d, plots: [...d.plots, extra], venues: d.venues.map((v) => ({ ...v, plotIds: [...v.plotIds, "p-1"] })) }));
       await h.publisher.settle();
     });
-    assert.ok(h.page.hub.stagePlotKeys(secret).includes("plot/p-1"), "the page did not take the new plot; the test is not testing a lost answer");
+    assertTook(h.page.hub.stagePlotKeys(secret).includes("plot/p-1"), "the new plot");
     h.page.respond = (req) => h.page.worker(req);
     await quietly(async () => {
       await h.edit((d) => ({ ...d, plots: d.plots.filter((p) => p.id !== "p-1"), venues: d.venues.map((v) => ({ ...v, plotIds: ["p-0"] })) }));
@@ -393,6 +386,80 @@ describe("a send whose answer is lost", () => {
     });
     assert.deepEqual(h.page.hub.stagePlotKeys(secret).sort(), ["index", "plot/p-0"], "a deleted plot is still on the public page");
   });
+
+  const putOf = (secret: string, key: (k: string) => boolean) => (req: Received) => req.method === "PUT" && SP.exec(req.path)?.[1] === secret && key(SP.exec(req.path)?.[2] ?? "");
+
+  test("a new plot whose answer was lost, then taken off the venue, leaves the public page", async () => {
+    const h = await harness(venueDoc(1, 0));
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    applyThenLose(h.page, "drop", putOf(secret, (k) => k === "plot/p-1"));
+    const extra = { id: "p-1", venueId: "v-1", name: "Plot 1", backgroundId: null, bgFade: 0.4, items: [item("i-1")], version: 1 };
+    await quietly(async () => {
+      await h.edit((d) => ({ ...d, plots: [...d.plots, extra], venues: d.venues.map((v) => ({ ...v, plotIds: [...v.plotIds, "p-1"] })) }));
+      await h.publisher.settle();
+    });
+    assertTook(h.page.hub.stagePlotKeys(secret).includes("plot/p-1"), "the new plot");
+    h.page.respond = (req) => h.page.worker(req);
+    await quietly(async () => {
+      await h.edit((d) => ({ ...d, plots: d.plots.filter((p) => p.id !== "p-1"), venues: d.venues.map((v) => ({ ...v, plotIds: ["p-0"] })) }));
+      await h.publisher.settle();
+    });
+    assert.deepEqual(h.page.hub.stagePlotKeys(secret).sort(), ["index", "plot/p-0"], "a plot taken off the venue is still reachable under its link");
+  });
+
+  test("a new background whose answer was lost, then taken off its plot, leaves the public page", async () => {
+    const base = venueDoc(1, 1);
+    const h = await harness({ ...base, plots: base.plots.map((p) => ({ ...p, backgroundId: null })) });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    applyThenLose(h.page, "drop", putOf(secret, (k) => k !== "index" && !k.startsWith("plot/")));
+    const withBackground = (id: string | null) => (d: StagePlotsDoc) => ({ ...d, plots: d.plots.map((p) => ({ ...p, backgroundId: id, version: p.version + 1 })) });
+    await quietly(async () => {
+      await h.edit(withBackground("b-0"));
+      await h.publisher.settle();
+    });
+    assertTook(h.page.hub.stagePlotKeys(secret).length === 3, "the background");
+    h.page.respond = (req) => h.page.worker(req);
+    await quietly(async () => {
+      await h.edit(withBackground(null));
+      await h.publisher.settle();
+    });
+    assert.deepEqual(h.page.hub.stagePlotKeys(secret).sort(), ["index", "plot/p-0"], "a background taken off its plot is still on the public page");
+  });
+
+  for (const [name, doc] of [
+    ["", venueDoc(1, 0)],
+    [", backgrounds and all", venueDoc(1, 1)],
+  ] as const) {
+    test(`an unpublish whose answer was lost says the link may be gone, and the next change puts the whole venue back${name}`, async () => {
+      const h = await harness(doc);
+      assert.ok((await h.publisher.publish("v-1")).ok);
+      const secret = (await h.venue()).publish!.secret;
+      const before = h.page.hub.stagePlotKeys(secret).sort();
+      applyThenLose(h.page, "drop", (req) => req.method === "DELETE" && SP.exec(req.path)?.[1] === secret);
+      const warned: string[] = [];
+      const off = await quietly(async () => {
+        const w = mock.method(console, "warn", (line: string) => void warned.push(line));
+        try {
+          return await h.publisher.unpublish("v-1");
+        } finally {
+          w.mock.restore();
+        }
+      });
+      assert.equal(off.ok, false);
+      assertTook(h.page.hub.stagePlotKeys(secret).length === 0, "the drop");
+      assert.match((off as { error: string }).error, /may have removed it all the same/);
+      // The operator's log says the outcome is not known, on the line that says it failed.
+      assert.ok(warned.some((l) => /^\[stageplots\] "Main room" could not be unpublished: .*The page may have removed it all the same/.test(l)), JSON.stringify(warned));
+      h.page.respond = (req) => h.page.worker(req);
+      await quietly(async () => {
+        await h.edit(labelled("Monitor"));
+        await h.publisher.settle();
+      });
+      assert.deepEqual(h.page.hub.stagePlotKeys(secret).sort(), before, "the venue's link is missing part of the venue after an unpublish whose answer was lost");
+    });
+  }
 });
 
 describe("publishing a venue", () => {
@@ -606,11 +673,12 @@ describe("unpublishing", () => {
     assert.equal((await visit(h.page, secret, "index")).status, 404);
   });
 
-  test("a delete that fails keeps the venue published and says the link still works", async () => {
+  test("a delete the page refuses keeps the venue published and says the link still works", async () => {
+    // A 429 is an answer that it did not; a 5xx or no answer may have dropped it.
     const h = await harness();
     assert.ok((await h.publisher.publish("v-1")).ok);
     const secret = (await h.venue()).publish!.secret;
-    h.page.respond = (req) => (req.method === "DELETE" ? { status: 500, body: "" } : h.page.worker(req));
+    h.page.respond = (req) => (req.method === "DELETE" ? { status: 429, body: "" } : h.page.worker(req));
     const r = await h.publisher.unpublish("v-1");
     assert.equal(r.ok, false);
     const pub = (await h.venue()).publish!;
