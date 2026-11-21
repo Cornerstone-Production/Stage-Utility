@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 
-import type { ServiceCueLayout } from "../../main/types/pco.js";
+import type { ServiceCueLayout } from "@main/types/pco";
 import { invoke } from "./api";
 import { useFailedReads } from "./use-failed-reads";
 
