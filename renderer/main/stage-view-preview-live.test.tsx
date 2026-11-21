@@ -162,7 +162,7 @@ test("an ask from any window but the page's own parent goes unanswered", async (
 
 test("a preview says whether its stream is the shared one", async () => {
   await renderAt("/preview-v1?output=display-1");
-  __sseFallback.setShared(true);
+  act(() => __sseFallback.setShared(true));
   await act(async () => __sseFallback.noteStream(true));
   assert.equal(reportsShared.at(-1), true);
   await act(async () => __sseFallback.setShared(false, "worker abandoned: test"));

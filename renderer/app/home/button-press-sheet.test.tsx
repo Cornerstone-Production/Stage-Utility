@@ -94,7 +94,7 @@ describe("the Presses sheet", () => {
     assert.equal(saved.length, 0, "nothing is stored until Save");
 
     await eventually(() => assert.ok(screen.queryByText(/Saved as this Button/)));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await eventually(() => assert.equal(saved.length, 1));
     assert.deepEqual(saved[0]!.config, { type: "cue-button", cue: "btn_refresh", showDevice: true, label: "Refresh" });
     assert.equal(saved[0]!.id, "home-cue-button-5-4");
@@ -122,7 +122,7 @@ describe("the Presses sheet", () => {
     await eventually(() => assert.ok(document.querySelector('[role="option"]')));
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
     await eventually(() => assert.equal(server.posts.length, 1));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(saved.length, 0, "the tile must not be stored before its command is bound");
     release();
@@ -138,7 +138,7 @@ describe("the Presses sheet", () => {
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Write a log message")!);
     await eventually(() => assert.ok(document.querySelector('[aria-label="Message"]')));
     fireEvent.change(document.querySelector('[aria-label="Message"]')!, { target: { value: "Hello" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await eventually(() => assert.equal(saved.length, 1));
     assert.equal(server.posts.length, 1);
     assert.match((saved[0]!.config as { cue: string }).cue, /^btn_/);
@@ -153,7 +153,7 @@ describe("the Presses sheet", () => {
     fireEvent.click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent === "Refresh displays")!);
     await eventually(() => assert.equal(server.posts.length, 1));
     await eventually(() => assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes("already used")));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await new Promise((r) => setTimeout(r, 30));
     assert.deepEqual(saved, [], "the tile was stored although its command was never made");
     assert.equal(closes(), 0);

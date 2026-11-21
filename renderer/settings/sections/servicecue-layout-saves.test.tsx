@@ -228,10 +228,14 @@ test("an edit that throws is refused, and the edit queued behind it still saves"
       broken = result.current.edit(() => { throw new Error("a bug in an edit"); });
       renamed = result.current.edit((list) => list.map((l) => (l.id === "svl2" ? { ...l, name: "Lights" } : l)));
     });
-    const outcomes = await Promise.race([
-      Promise.all([broken, renamed]),
-      sleep(2000).then(() => "stuck"),
-    ]);
+    // Inside a scope: the queue's saves set state as they land.
+    let outcomes: unknown;
+    await act(async () => {
+      outcomes = await Promise.race([
+        Promise.all([broken, renamed]),
+        sleep(2000).then(() => "stuck"),
+      ]);
+    });
     assert.deepEqual(outcomes, [{ ok: false, error: "a bug in an edit" }, { ok: true }], "the queue stopped at the edit that threw");
     assert.deepEqual(serverNames(server.stored()), ["Audio", "Lights"]);
     assert.deepEqual(result.current.list.map((l) => l.name), ["Audio", "Lights"]);

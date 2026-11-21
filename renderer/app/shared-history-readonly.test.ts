@@ -218,7 +218,7 @@ describe("the shared /history link", () => {
     // Workflow toggle — which the shared page must never offer a way to.
     const { installDom } = await import("../test-dom.js");
     const teardown = installDom();
-    const { render, cleanup } = await import("@testing-library/react");
+    const { render, cleanup, act } = await import("@testing-library/react");
     try {
       (globalThis as unknown as { EventSource: unknown }).EventSource = class {
         readyState = 1;
@@ -288,7 +288,9 @@ describe("the shared /history link", () => {
       for (let i = 0; i < 4; i++) await settle();
       const row = [...view.container.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Evening"));
       assert.ok(row, "the service row never rendered");
-      row!.click();
+      await act(async () => {
+        row!.click();
+      });
       for (let i = 0; i < 4; i++) await settle();
 
       const card = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms");
