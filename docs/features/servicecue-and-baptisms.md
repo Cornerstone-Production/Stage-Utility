@@ -267,7 +267,7 @@ Each layout picks one source for its row color, under **Row color**:
 | | Rows tinted by |
 |---|---|
 | **From PCO** (default) | Planning Center's own item colors — song, header, media, custom types |
-| **By category** | a note category you choose, wherever it has a note on the item |
+| **By column** | a category role you choose, wherever it has a note on the item |
 | **None** | nothing |
 
 A running item always outranks the tint.
@@ -277,10 +277,11 @@ white table and would read as near-white on a dark panel, so each hue maps to a
 color chosen for a dark surface. Add a color in PCO and rows follow within
 fifteen minutes, including new custom item types.
 
-**By category** can use any category the service type defines, not just the columns
-this layout shows — "Lighting has a cue here" is useful to a stage manager without
-showing the cue text. Colors are assigned from the category name and are not
-configurable, since Planning Center has no color for a note category.
+**By column** picks from the category roles, not only the columns this layout
+shows — "Lighting has a cue here" is useful to a stage manager without showing the
+cue text. A role with no categories yet is listed but cannot be picked. Colors are
+assigned from the role's name and are not configurable, since Planning Center has
+no color for a note category.
 
 ## Plan switcher
 

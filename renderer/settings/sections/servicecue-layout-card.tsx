@@ -298,18 +298,23 @@ function RowColor({ layout: l, roles, onUpdate }: { layout: ServiceCueLayout; ro
         <SelectTrigger className="w-36" aria-label="Row color"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="pco">From PCO</SelectItem>
-          <SelectItem value="category">By category</SelectItem>
+          <SelectItem value="category">By column</SelectItem>
           <SelectItem value="none">None</SelectItem>
         </SelectContent>
       </Select>
       {(l.rowColor ?? "pco") === "category" && (
         <Select value={l.accentRole ?? "__none__"} onValueChange={(v) => onUpdate({ accentRole: v === "__none__" ? null : v })}>
-          <SelectTrigger className="w-44" aria-label="Row color category"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-44" aria-label="Row color column"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">Pick a category…</SelectItem>
+            <SelectItem value="__none__">Pick a column…</SelectItem>
             {/* Every role, not only this layout's columns: "Lighting has a cue here" is
                 worth a tint without showing the cue's text. */}
-            {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            {roles.map((r) => (
+              // A role with no categories draws no column, so tinting by it tints nothing.
+              <SelectItem key={r.id} value={r.id} disabled={r.members.length === 0}>
+                {r.members.length === 0 ? `${r.name} (no categories yet)` : r.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
