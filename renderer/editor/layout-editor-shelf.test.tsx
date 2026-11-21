@@ -99,7 +99,9 @@ const settleAct = async () => act(async () => settle());
 
 const keydown = (target: Element, init: KeyboardEventInit) => {
   const e = new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
-  target.dispatchEvent(e);
+  act(() => {
+    target.dispatchEvent(e);
+  });
   return e;
 };
 const layerNames = () => screen.getAllByRole("button").filter((b) => b.getAttribute("draggable") === "true" && !b.getAttribute("aria-label")).map((b) => b.textContent);
