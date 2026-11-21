@@ -186,7 +186,7 @@ describe("a live push updates a row already on screen", () => {
     // Before the push: the month fetch answered null, so the row has nothing.
     assert.equal(figuresOf(row).level.caption, "no sound recorded", "expected the row to start with no sound recorded");
 
-    FakeEventSource.last!.push("spl:history", splRecording());
+    act(() => { FakeEventSource.last!.push("spl:history", splRecording()); });
     await settle();
 
     const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording(), { trends: null, chosen: null }).map((k) => [k.key, k]));
@@ -213,7 +213,7 @@ describe("a live push updates a row already on screen", () => {
 
     const closed: ServiceTimeline = { ...timeline(), endedAt: iso("21:45:00") };
     closed.items = closed.items.map((it) => ({ ...it, endedAt: it.endedAt ?? iso("21:45:00") }));
-    FakeEventSource.last!.push("service-timeline:history", closed);
+    act(() => { FakeEventSource.last!.push("service-timeline:history", closed); });
     await settle();
 
     await eventually(() => {

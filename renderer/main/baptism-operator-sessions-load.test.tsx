@@ -130,7 +130,7 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     // A rebuild the server broadcasts as having actually restored something
     // — the shape a rebuild started from History (never touching this
     // page's own onRebuilt props) produces.
-    FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: "st1:plan-1:9am", ids: ["bap-1"] });
+    act(() => { FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: "st1:plan-1:9am", ids: ["bap-1"] }); });
     await act(async () => {
       await settle();
     });
@@ -259,7 +259,7 @@ test("a Finish pushed from elsewhere (Companion, a second tab, the display) relo
     // The server finalizes (a Companion key bound to baptism.advance on the
     // last person, say) and broadcasts the finished state. Nothing on THIS
     // page pressed Finish.
-    FakeEventSource.last!.push("baptism:state", FINISHED);
+    act(() => { FakeEventSource.last!.push("baptism:state", FINISHED); });
     await act(async () => {
       await settle();
     });
