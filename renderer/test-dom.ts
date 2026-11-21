@@ -294,22 +294,29 @@ const realNow = Date.now.bind(Date);
 export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<Awaited<T>> {
   const deadline = realNow() + timeout;
   for (;;) {
-    try {
-      // `check` may be async (it may open a tooltip, say, to read it): a rejection
-      // is a failed look like a throw is. The look is inside act too: the fetch a
-      // click or a mount started resolves on the microtasks that run while the
-      // test awaits, and outside a scope React reports that update as unwrapped.
-      let found!: Awaited<T>;
-      await act(async () => {
-        found = await check();
-      });
-      return found;
-    } catch (err) {
-      if (realNow() >= deadline) throw err;
-    }
+    let found!: Awaited<T>;
+    let failure: unknown;
+    let looked = false;
+    // The look runs inside act, so a fetch a click or a mount started cannot land
+    // on the microtasks between two scopes, where React reports it as unwrapped.
+    // A failed look is caught INSIDE the scope: act that rejects throws away the
+    // renders its scope had queued, and the page the next look reads never draws.
+    // The gap after a failed look shares the scope for the same seam's sake.
     await act(async () => {
+      try {
+        // `check` may be async (it may open a tooltip, say, to read it): a
+        // rejection is a failed look like a throw is.
+        found = await check();
+        looked = true;
+        return;
+      } catch (err) {
+        failure = err;
+      }
+      if (realNow() >= deadline) return;
       await new Promise((resolve) => realSetTimeout(resolve, 10));
     });
+    if (looked) return found;
+    if (realNow() >= deadline) throw failure;
   }
 }
 
