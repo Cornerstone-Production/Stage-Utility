@@ -247,6 +247,29 @@ describe("a bundle carrying two ServiceCue presets with one id", () => {
     assert.equal(dupes.length, 1, `"dup" landed ${dupes.length} times: ${JSON.stringify(saved)}`);
     assert.equal(dupes[0].name, "First", "the first one wins, like a target does");
   });
+
+  test("tells the operator in the word they read, layout, never preset", async () => {
+    // The import report reaches the operator as written (import-layout.tsx). "Preset" is
+    // the code's old name for a ServiceCue layout.
+    const { serviceCueLayoutsStore } = await import("./servicecue-layouts-store.js");
+    await serviceCueLayoutsStore.save([{ id: "here", name: "Here", order: 0 }] as never);
+    const report = await applyViewBundle(bundle({
+      sideData: {
+        slots: {}, notes: {},
+        serviceCueLayouts: [
+          { name: "no id" },
+          { id: "here", name: "Here" },
+          { id: "other", name: "here" },
+        ],
+      },
+    }));
+    const said = report.skipped.filter((k) => /ServiceCue/.test(k));
+    assert.equal(said.length >= 3, true, JSON.stringify(report.skipped));
+    for (const k of said) assert.equal(/preset/i.test(k), false, k);
+    assert.equal(said.some((k) => k.startsWith("a ServiceCue layout with no id or name")), true);
+    assert.equal(said.some((k) => k.includes('ServiceCue layout "Here" — kept the one already here')), true);
+    assert.equal(said.some((k) => /imported as .*that name was taken here/.test(k)), true, JSON.stringify(said));
+  });
 });
 
 // ── Plan exports ────────────────────────────────────────────────────────────
