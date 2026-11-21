@@ -162,14 +162,18 @@ export type Rich = (string | { b: string })[];
 
 export const plainText = (r: Rich): string => r.map((p) => (typeof p === "string" ? p : p.b)).join("");
 
-/** The views that draw this layout, in the order given. Only a ServiceCue view draws a
+/** The views that draw this layout, by name: the order Screens lists a view in (see
+ *  screenPickerViews, which sorts the same way). Only a ServiceCue view draws a
  *  layout: a view changed to another kind keeps the id it had, and shows nothing of it.
  *  The Delete confirm and the open card's Used by both read it, so they cannot disagree. */
 export function layoutUsers(
   layout: Pick<ServiceCueLayout, "id">,
   views: readonly { name: string; kind?: string; serviceCueLayoutId?: string | null }[],
 ): string[] {
-  return views.filter((v) => v.kind === "script" && v.serviceCueLayoutId === layout.id).map((v) => v.name);
+  return views
+    .filter((v) => v.kind === "script" && v.serviceCueLayoutId === layout.id)
+    .map((v) => v.name)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 /** What deleting a layout does to the screens set to it. `views` is null until known. */

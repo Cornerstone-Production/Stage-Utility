@@ -212,8 +212,8 @@ test("a failed note-category read says so, by service type, above the previews a
     await eventually(() => assert.match(alerts(), /Couldn't load the note categories for Weekend, so its preview is missing them\./));
     assert.equal(
       screen.queryAllByRole("alert").filter((n) => /note categories for Weekend/.test(n.textContent ?? "")).length,
-      2,
-      "the roles section says it too: without it, no + Add category and no Categories in no role read as a type with none",
+      3,
+      "the preview, the notice's place at the top and the roles section each say it: without the last, no + Add category and no Categories in no role read as a type with none",
     );
     await eventually(() => assert.ok(logged(f.logs, /note categories/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {

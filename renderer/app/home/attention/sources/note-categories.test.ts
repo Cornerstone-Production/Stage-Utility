@@ -38,7 +38,7 @@ describe("note-categories source", () => {
     assert.equal(item.detail, "Prayer shows only under All columns.");
   });
 
-  it("counts the layouts page notice's own set: the same functions, over the landing page's types, one name once", () => {
+  it("counts the roles section's own set: the same functions, over the landing page's types, one name once", () => {
     // Two types that both name Prayer: it is one category the operator makes one role for.
     const input = cover({ landingTypeIds: ["wk", "mid"], catsByType: new Map([["wk", ["Audio", "Prayer"]], ["mid", ["Prayer", "Stage notes"]], ["off", ["Hidden"]]]) });
     const expected = unassignedDistinct(unassignedByType(input.roles, input.landingTypeIds, input.catsByType)).map((e) => e.name);

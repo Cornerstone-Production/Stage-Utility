@@ -253,7 +253,7 @@ test("the open card ends in its address and the views that use it", async () => 
     await mount();
     await openCard("Audio");
     await eventually(() => assert.match(footText(), /Address\s*\/servicecue\/sunday-morning\/audio/));
-    assert.match(footText(), /Used by:\s*Stage left, Audio tablet/);
+    assert.match(footText(), /Used by:\s*Audio tablet, Stage left/);
     // The address follows Preview with: it needs a service type.
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "wed" } });
     await eventually(() => assert.match(footText(), /\/servicecue\/wednesday-night\/audio/));
@@ -267,10 +267,29 @@ test("Used by is what the Delete confirm names, from the same list", async () =>
   try {
     await mount();
     await openCard("Audio");
-    await eventually(() => assert.match(footText(), /Used by:\s*Stage left, Audio tablet/));
+    await eventually(() => assert.match(footText(), /Used by:\s*Audio tablet, Stage left/));
     fireEvent.click(screen.getByRole("button", { name: "Delete Audio" }));
-    await eventually(() => assert.match(document.body.textContent ?? "", /Stage left and Audio tablet use this layout\./));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Audio tablet and Stage left use this layout\./));
     assert.doesNotMatch(document.body.textContent ?? "", /Mic wall/, "a view of another kind is not a user");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Used by is in the order Screens lists a view in: by name, whatever order the state holds them", async () => {
+  const views = [
+    { id: "v1", name: "Zeta wall", kind: "script", serviceCueLayoutId: "l-audio" },
+    { id: "v2", name: "alpha tablet", kind: "script", serviceCueLayoutId: "l-audio" },
+    { id: "v3", name: "Mid", kind: "script", serviceCueLayoutId: "l-audio" },
+  ];
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.match(footText(), /Used by:\s*alpha tablet, Mid, Zeta wall/));
+    const { screenPickerViews } = await import("./outputs-section.js");
+    const asScreens = screenPickerViews(views as never).map((v) => v.name).join(", ");
+    assert.equal(asScreens, "alpha tablet, Mid, Zeta wall", "Screens' own order is no longer by name");
   } finally {
     s.restore();
   }

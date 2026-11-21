@@ -2,9 +2,11 @@
 //
 // The layouts page's notice says it at the top of /servicecue/presets; nothing on Home
 // did, though the category shows under All columns and is missing from every
-// department's layout. Counted by the notice's own functions (servicecue-layouts-model)
-// over the landing page's service types, so the page and Home cannot disagree, and
-// not on a first run with no roles, where the page says nothing either.
+// department's layout. Counted with the functions the Category roles section's
+// "Categories in no role" list uses (servicecue-layouts-model): over the landing page's
+// service types, each name once. The page's notice lists a name once per type instead,
+// so a name in two types is counted once here and listed twice there. Not shown on a first run
+// with no roles, where the page says nothing either.
 
 import { ROLES_FLASH_ID } from "../../../flash";
 import { listOf, unassignedByType, unassignedDistinct } from "../../../../settings/sections/servicecue-layouts-model";
