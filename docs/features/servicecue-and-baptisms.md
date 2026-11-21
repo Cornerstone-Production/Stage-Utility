@@ -47,10 +47,10 @@ define once looks identical wherever it shows up:
 
 ![A ServiceCue rundown on a screen with the live item highlighted and Audio and Band note columns](../images/wall-servicecue.png)
 
-| | Follows | Columns from |
+| | Follows | Layout from |
 |---|---|---|
 | **The `/servicecue` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
-| **A ServiceCue view** on a display | the app's active plan | its **Columns** setting |
+| **A ServiceCue view** on a display | the app's active plan | its **Layout** setting |
 | **An Embedded view object** inside a custom layout | the app's active plan | the ServiceCue view it points at |
 
 The third is how you put the rundown under your own objects on one screen instead
@@ -71,7 +71,7 @@ plan — a pre-service checklist, or one only tall enough for a row or two.
 renders at so the two match. Reach for it when a dense layout needs more rows
 on screen: row height is driven mostly by how many columns are shown, because
 notes wrap inside narrow ones. Choosing a smaller layout in the ServiceCue view's
-**Columns** gains far more rows than shrinking the type does.
+**Layout** gains far more rows than shrinking the type does.
 
 An **Embedded view** object can point at any view, including one holding a custom
 layout of its own — nested up to three deep, and a view cannot embed itself; a
@@ -174,7 +174,7 @@ A name is saved when you leave the field or press Enter, not on each keystroke; 
 puts the saved name back. Every other change saves when it is made. Saves go one at a
 time, each applied to the list as the last one left it, so a change made while another
 is still saving is not lost, and a refused change is dropped without undoing the ones
-after it. Deleting a layout asks first and names the views whose **Columns** setting uses
+after it. Deleting a layout asks first and names the views whose **Layout** setting uses
 it, which go back to All columns, or says no screen uses it. A tablet that opened the
 layout's address directly is not a view, so the confirm cannot name it; it says such a
 tablet shows All columns too.

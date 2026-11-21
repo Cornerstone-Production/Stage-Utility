@@ -97,3 +97,13 @@ describe("retired layout objects convert to their own replacement", () => {
     assert.equal((converted as { platform?: string }).platform, "youtube");
   });
 });
+
+describe("the legacy Service order caveat speaks the operator's word", () => {
+  test("it says layout, not preset, for what sets the replacement's columns", () => {
+    // "Preset" is the code's old name for a ServiceCue layout; nothing an operator reads
+    // calls it that. Read from the spec itself, so a comment cannot satisfy it.
+    const caveat = LAYOUT_OBJECTS["service-order"].retired?.caveat ?? "";
+    assert.match(caveat, /Its columns come from the ServiceCue view's layout instead\./);
+    assert.doesNotMatch(caveat, /preset/i);
+  });
+});

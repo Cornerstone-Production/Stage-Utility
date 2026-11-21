@@ -70,7 +70,7 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ServiceCue layouts, for a "script" View's Columns picker. Fetched here
+  // The ServiceCue layouts, for a "script" View's Layout picker. Fetched here
   // rather than threaded through SectionProps: only this branch needs them, and
   // they change when someone edits a layout on the ServiceCue layouts page.
   const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
@@ -210,6 +210,44 @@ export function ViewDetail({
         </Button>
       </div>
 
+      {/* A ServiceCue view's Layout is the one thing an operator changes here, so it
+          sits above the preview, on screen at 900px, and the preview follows it. */}
+      {view.kind === "script" && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col">
+            <span className="text-caption1 text-fg">Layout</span>
+            <span className="text-caption2 text-fg-muted">
+              The same layouts the ServiceCue pages use, so a department's columns are
+              defined once and a display and a browser tab cannot disagree about them.
+            </span>
+          </div>
+          {failed.has("layouts") ? (
+            // In the picker's place, not beside it: with no list to choose from
+            // it could only offer All columns, and switching to that by
+            // accident would overwrite the view's real choice.
+            <ErrorNote>Couldn't load the ServiceCue layouts, so this view's layout can't be changed right now.</ErrorNote>
+          ) : (
+            <Select
+              value={view.serviceCueLayoutId ?? ALL_COLUMNS}
+              onValueChange={(v: string) =>
+                void invoke("views:setServiceCueLayout", {
+                  id: view.id,
+                  serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
+                }).catch((e: unknown) => toast.error(`Could not change this view's layout: ${errorMessage(e)}`))
+              }
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Layout"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
+                {serviceCueLayouts.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
+
       {/* Custom views get the visual editor (its canvas doubles as the preview);
           all other kinds get the read-only live preview. */}
       {view.kind === "custom" ? (
@@ -274,40 +312,6 @@ export function ViewDetail({
         </>
 ) : view.kind === "custom" ? null : view.kind === "script" ? (
         <>
-          <Separator />
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-col">
-              <span className="text-caption1 text-fg">Columns</span>
-              <span className="text-caption2 text-fg-muted">
-                The same layouts the ServiceCue pages use, so a department's columns are
-                defined once and a display and a browser tab cannot disagree about them.
-              </span>
-            </div>
-            {failed.has("layouts") ? (
-              // In the picker's place, not beside it: with no list to choose from
-              // it could only offer All columns, and switching to that by
-              // accident would overwrite the view's real choice.
-              <ErrorNote>Couldn't load the ServiceCue layouts, so this view's columns can't be changed right now.</ErrorNote>
-            ) : (
-              <Select
-                value={view.serviceCueLayoutId ?? ALL_COLUMNS}
-                onValueChange={(v: string) =>
-                  void invoke("views:setServiceCueLayout", {
-                    id: view.id,
-                    serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
-                  }).catch((e: unknown) => toast.error(`Could not change this view's columns: ${errorMessage(e)}`))
-                }
-              >
-                <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
-                  {serviceCueLayouts.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
           <p className="text-caption2 text-fg-muted">
             The ServiceCue view renders the active plan's rundown — the same table as the ServiceCue
             pages, following whichever plan the app is set to. A layout with Max SPL in its columns
