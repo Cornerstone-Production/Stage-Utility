@@ -368,7 +368,8 @@ Two modes, set on the Plan page:
 | **Within a type** | a dropdown of the active service types | that type's plans, Default first and then each upcoming date |
 | **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Youth Night" | every active type's plans in date order |
 
-In **Upcoming plans** the middle's dropdown lists the next ten plans and a
+In **Upcoming plans** the middle's dropdown lists ten plans with the one you are
+on in the middle, so the dates before it stay in reach after you jump ahead, and a
 **Defaults…** group with each active type's default. The arrows do not wrap: at
 either end of the list the arrow is simply disabled.
 

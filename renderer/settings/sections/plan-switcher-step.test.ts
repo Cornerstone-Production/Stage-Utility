@@ -161,18 +161,36 @@ describe("the dropdown's options", () => {
     assert.deepEqual(o.defaults, []);
   });
 
-  test("upcoming, they start at the current target and list every type's default", () => {
+  test("upcoming, they keep the plans before the current target and list every type's default", () => {
+    // The bug: the list started AT the target, so jumping ahead to a later plan took
+    // every earlier date out of the dropdown, and only the arrow could reach them.
     const o = switcherOptions(PLANS, "upcoming", at(SUN, "s1"));
-    assert.deepEqual(o.plans.map((e) => e.planId), ["s1", "y2", "s2"]);
+    assert.deepEqual(o.plans.map((e) => e.planId), ["y1", "s1", "y2", "s2"]);
     assert.deepEqual(o.defaults.map((e) => e.serviceTypeId), [YOUTH, SUN]);
   });
 
+  const MANY = Array.from({ length: 40 }, (_, i) =>
+    plan(`p${i}`, SUN, new Date(Date.UTC(2026, 8, 1) + i * 86400000).toISOString()),
+  );
+  const ids = (target: string) => switcherOptions(MANY, "upcoming", at(SUN, target)).plans.map((e) => e.planId);
+
   test("upcoming, they are capped", () => {
-    const many = Array.from({ length: 40 }, (_, i) =>
-      plan(`p${i}`, SUN, new Date(Date.UTC(2026, 8, 1) + i * 86400000).toISOString()),
-    );
-    const o = switcherOptions(many, "upcoming", at(SUN, "p0"));
-    assert.equal(o.plans.length, UPCOMING_DROPDOWN_LIMIT);
+    assert.equal(ids("p0").length, UPCOMING_DROPDOWN_LIMIT);
+  });
+
+  test("upcoming, a target far ahead sits mid-window, with earlier dates before it", () => {
+    const got = ids("p25");
+    assert.equal(got.length, UPCOMING_DROPDOWN_LIMIT);
+    assert.ok(got.includes("p25"), "the target must be selectable");
+    assert.equal(got[0], "p20", "the five plans before the target are listed");
+    assert.equal(got.at(-1), "p29");
+  });
+
+  test("upcoming, the window stays full at either end of the list", () => {
+    assert.equal(ids("p1")[0], "p0");
+    const last = ids("p39");
+    assert.equal(last.length, UPCOMING_DROPDOWN_LIMIT);
+    assert.equal(last.at(-1), "p39");
   });
 
   test("a default whose type has no plans is still selectable in its own dropdown", () => {
