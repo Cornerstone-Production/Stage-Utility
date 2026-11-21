@@ -6,7 +6,7 @@
 // EDITOR is the feature, not the list around it, so it moved here rather than
 // being deleted with its old shell.
 
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
@@ -23,7 +23,7 @@ import {
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { useFailedReads } from "../../lib/use-failed-reads";
+import { useServiceCueLayouts } from "../../lib/use-servicecue-layouts";
 import type { SectionProps } from "../types";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
@@ -71,31 +71,12 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ServiceCue layouts, for a "script" View's Layout picker. Fetched here
-  // rather than threaded through SectionProps: only this branch needs them, and
-  // they change when someone edits a layout on the ServiceCue layouts page.
-  const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
-  // A failed read is not "no layouts". Drawn as one, the picker offered only
-  // All columns and labelled this view's own set "not found".
-  const { failed, fail, clear } = useFailedReads<"layouts">("servicecue");
-  useEffect(() => {
-    if (view.kind !== "script") return;
-    // Cancelled when the kind changes, so a slow failure from a read that no
-    // longer applies cannot replace a picker a later read has filled.
-    let cancelled = false;
-    invoke<ServiceCueLayout[]>("servicecue:listLayouts")
-      .then((l) => {
-        if (cancelled) return;
-        setServiceCueLayouts([...l].sort((a, b) => a.order - b.order));
-        clear("layouts");
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) fail("layouts", "the ServiceCue layouts for a view", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view.kind, fail, clear]);
+  // The ServiceCue layouts, for a "script" View's Layout picker. Fetched here rather than
+  // threaded through SectionProps: only this branch needs them, and they change when someone
+  // edits a layout on the ServiceCue layouts page. A failed read is not "no layouts": drawn
+  // as one, the picker offered only All columns and labelled this view's own set "not found".
+  const layoutsRead = useServiceCueLayouts(view.kind === "script", { tag: "servicecue", what: "the ServiceCue layouts for a view" });
+  const serviceCueLayouts = layoutsRead.layouts ?? [];
 
   function handleNameBlur() {
     const trimmed = editName.trim();
@@ -222,7 +203,7 @@ export function ViewDetail({
               defined once and a display and a browser tab cannot disagree about them.
             </span>
           </div>
-          {failed.has("layouts") ? (
+          {layoutsRead.failed ? (
             // In the picker's place, not beside it: with no list to choose from
             // it could only offer All columns, and switching to that by
             // accident would overwrite the view's real choice.

@@ -107,6 +107,40 @@ test("saved header and follow values survive a pick of another kind and back", a
   }
 });
 
+test("an embed saved pointing at its own view says so in the select, and the saved id is kept", async () => {
+  const f = stubLayouts();
+  try {
+    const seen: Config[] = [];
+    mount({ type: "view-embed", viewId: "overview" }, (c) => seen.push(c));
+    await settle();
+    const chosen = (picker() as HTMLSelectElement).selectedOptions[0]?.textContent;
+    assert.equal(chosen, "Stage overview · can't contain itself");
+    assert.deepEqual(seen, [], "showing it changed the stored config");
+    // It is still not offered as a choice among the others.
+    assert.equal(optionTexts().filter((t) => /^Stage overview \(/.test(t ?? "")).length, 0);
+  } finally {
+    f.restore();
+  }
+});
+
+test("a read that never answers shows no failure text, only the answer once it lands", async () => {
+  // A loading state is not a failure: the line used to flash "Couldn't read this view's layout" on every pick.
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input).includes("/api/servicecue/layouts")) return new Promise(() => {});
+    return ok({});
+  }) as unknown as typeof fetch;
+  try {
+    mount({ type: "view-embed", viewId: "stage-left" });
+    for (let i = 0; i < 5; i++) await settle();
+    assert.doesNotMatch(document.body.textContent ?? "", /Couldn't read/);
+    assert.doesNotMatch(document.body.textContent ?? "", /Shows /);
+    assert.equal(!!screen.queryByRole("link", { name: "Change" }), true, "Change is there while it loads");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test("a ServiceCue view's layout is named under the picker, with Change to its edit page", async () => {
   const f = stubLayouts();
   try {
