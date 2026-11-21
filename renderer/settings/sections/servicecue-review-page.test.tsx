@@ -108,7 +108,8 @@ test("an empty role waits in the tray greyed and unaddable, with its reason, and
     fireEvent.keyDown(chip!, { key: "Enter" });
     fireEvent.keyDown(chip!, { key: " " });
     await settle();
-    assert.equal(s.requests.slice(before).filter((r) => r.method === "POST").length, 0, "clicking an empty role saved something");
+    // Only the page's own saves: the event stream's subscribe is a POST too, and lands whenever it likes.
+    assert.equal(s.requests.slice(before).filter((r) => r.method === "POST" && r.path.startsWith("/api/servicecue")).length, 0, "clicking an empty role saved something");
     assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]);
     // Its reason is said on focus, where a keyboard operator finds it.
     chip!.focus();
