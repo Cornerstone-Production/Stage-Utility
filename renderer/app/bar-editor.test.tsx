@@ -50,7 +50,10 @@ const saves: Record<string, unknown>[] = [];
 
 function emitState(): void {
   const frame = { data: JSON.stringify(state) };
-  for (const h of [...(listeners.get("stage:state-changed") ?? [])]) h(frame);
+  // The server pushing is state arriving outside any render: React's act scope.
+  act(() => {
+    for (const h of [...(listeners.get("stage:state-changed") ?? [])]) h(frame);
+  });
 }
 const json = (status: number, value: unknown) => ({ ok: status < 400, status, json: async () => value, text: async () => JSON.stringify(value) });
 
@@ -115,7 +118,9 @@ function TrayGate({ barOnPage }: { barOnPage: boolean }) {
 }
 
 async function mountInMode({ barOnPage = true }: { barOnPage?: boolean } = {}): Promise<void> {
-  render(
+  // Async act: the hydrate read resolves on the microtasks right after the mount,
+  // and it must land inside the scope or React reports it as an update outside act.
+  await act(async () => render(
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
@@ -138,7 +143,7 @@ async function mountInMode({ barOnPage = true }: { barOnPage?: boolean } = {}): 
         React.createElement(Toaster),
       ),
     ),
-  );
+  ));
   await eventually(() => assert.ok(api, "the provider never rendered"));
   await act(async () => api!.open("bar"));
   // The strip shows what is saved: the hydrate has landed.
