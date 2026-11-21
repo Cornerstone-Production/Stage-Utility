@@ -10,7 +10,7 @@
 import { PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { Ref } from "react";
 
-import { Button, ErrorNote, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../../components/ui";
+import { Button, ErrorNote, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
@@ -220,6 +220,13 @@ function RoleRow({
           inputRef={nameRef}
           className="h-[30px] min-w-0 max-w-[240px] flex-1 font-medium"
         />
+        {r.members.length === 0 && (
+          <Tooltip label="No categories yet, so no layout can use this role as a column. Give it a category.">
+            <span tabIndex={0} data-role-empty className="whitespace-nowrap rounded-full bg-warn-9/15 px-2 text-caption2 font-medium leading-[17px] text-warn-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              Can't be added to a layout
+            </span>
+          </Tooltip>
+        )}
         <span className="ml-auto whitespace-nowrap text-caption1 text-fg-subtle">
           {used ? (
             <>

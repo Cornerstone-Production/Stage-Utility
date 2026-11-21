@@ -4,10 +4,10 @@
 // it is the name field, Duplicate and Delete, the rows that set what the layout shows,
 // and a preview of it against the plan the page previews with.
 
-import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, MinusCircleIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useRef, type ReactNode, type Ref } from "react";
 
-import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
@@ -177,6 +177,13 @@ export function LayoutCard({
           >
             {tray.map((it) => {
               const id = it.kind === "fixed" ? `fixed:${it.key}` : it.id;
+              if (it.kind === "role" && it.empty) {
+                return (
+                  <span key={id} role="listitem" className="inline-flex">
+                    <EmptyRoleChip name={it.name} />
+                  </span>
+                );
+              }
               return (
                 <span key={id} role="listitem" className="inline-flex">
                   <TrayChip
@@ -223,6 +230,28 @@ const CHIP =
 
 const ICON_BUTTON =
   "inline-grid size-6 shrink-0 place-items-center rounded-[5px] p-0 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-30";
+
+/** A role with no categories, in "Not in this layout": shown, so it is not missing, but it
+ *  is no button and no drag handle, since a column for it would draw nothing. Focusable
+ *  so the reason is reachable from the keyboard. */
+function EmptyRoleChip({ name }: { name: string }) {
+  return (
+    <Tooltip label={`${name} has no categories yet, so it would draw no column. Give it one under Category roles.`}>
+      <span
+        role="button"
+        tabIndex={0}
+        aria-disabled="true"
+        aria-label={`${name}, no categories yet. Give it a category under Category roles to add it.`}
+        data-empty-role
+        className="inline-flex h-[30px] cursor-not-allowed select-none items-center gap-1 whitespace-nowrap rounded-md border border-dotted border-line-strong bg-fill pl-[7px] pr-2.5 text-footnote text-fg-subtle opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <MinusCircleIcon className="size-[13px]" aria-hidden="true" />
+        {name}
+        <small className="text-caption2 text-fg-subtle">No categories yet</small>
+      </span>
+    </Tooltip>
+  );
+}
 
 /** A role column: moved by its grip, taken out by its X. */
 function RoleChip({ item, order, children }: { item: DragItem; order: readonly string[]; children: ReactNode }) {

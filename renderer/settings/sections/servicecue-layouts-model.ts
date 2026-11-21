@@ -72,7 +72,8 @@ export function columnSummary(l: ServiceCueLayout, roles: readonly CategoryRole[
   ];
 }
 
-export type TrayItem = { kind: "fixed"; key: FixedKey; name: string } | { kind: "role"; id: string; name: string };
+/** `empty`: the role has no categories, so adding it would draw no column. */
+export type TrayItem = { kind: "fixed"; key: FixedKey; name: string } | { kind: "role"; id: string; name: string; empty: boolean };
 
 /** What could be added to a layout: Clock and Time if off, every role it lacks, Max SPL if off. */
 export function trayItems(l: ServiceCueLayout, roles: readonly CategoryRole[]): TrayItem[] {
@@ -81,7 +82,7 @@ export function trayItems(l: ServiceCueLayout, roles: readonly CategoryRole[]): 
   return [
     ...fixed("showClock"),
     ...fixed("showLength"),
-    ...roles.filter((r) => !shown.has(r.id)).map((r): TrayItem => ({ kind: "role", id: r.id, name: r.name })),
+    ...roles.filter((r) => !shown.has(r.id)).map((r): TrayItem => ({ kind: "role", id: r.id, name: r.name, empty: r.members.length === 0 })),
     ...fixed("showMaxSpl"),
   ];
 }

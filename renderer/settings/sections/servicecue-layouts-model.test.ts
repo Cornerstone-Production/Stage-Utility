@@ -74,6 +74,12 @@ describe("what a change saves", () => {
     const l = layout("l", 0, { columnRoles: ["r2"], showLength: false });
     assert.deepEqual(trayItems(l, roles).map((t) => t.name), ["Time", "Audio", "Max SPL"]);
   });
+
+  test("a role with no categories is marked empty in the tray; one with a category is not", () => {
+    const roles = [{ id: "r1", name: "Audio", members: ["Audio"] }, { id: "r2", name: "Video", members: [] }];
+    const out = trayItems(layout("l", 0, { columnRoles: [] }), roles).flatMap((t) => (t.kind === "role" ? [`${t.name}:${t.empty}`] : []));
+    assert.deepEqual(out, ["Audio:false", "Video:true"]);
+  });
 });
 
 describe("the notice's words", () => {

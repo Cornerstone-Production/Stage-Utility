@@ -6,6 +6,9 @@
 // lays nothing out): the greyed, dotted look of an empty role's chip, where the footer
 // wraps at 390px, and the popover that carries the reason on hover.
 
+// NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND: a failing assert inspects the node,
+// and a jsdom node takes a minute to print. Assert on `!!node` or on text.
+
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
@@ -80,3 +83,74 @@ test("Row color says By column and Pick a column, and an empty role cannot be pi
     s.restore();
   }
 });
+
+// ── F6: an empty role is shown, marked, and cannot be added ─────────────────
+
+const trayOf = (id: string) => document.querySelector(`[data-tray="${id}"]`) as HTMLElement;
+
+test("an empty role waits in the tray greyed and unaddable, with its reason, and is not a button", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    const tray = trayOf("l-audio");
+    // A role with categories is still a button to click; the empty one is not.
+    assert.equal(!!tray.querySelector('button[aria-label="Add Lighting"]'), true);
+    assert.equal(!!tray.querySelector('button[aria-label="Add Video"]'), false, "an empty role is offered as a button");
+    const chip = tray.querySelector("[data-empty-role]") as HTMLElement | null;
+    assert.equal(chip === null, false, "the empty role has no chip of its own in the tray");
+    assert.equal(chip!.tagName, "SPAN");
+    assert.equal(chip!.getAttribute("aria-disabled"), "true");
+    assert.equal(chip!.getAttribute("aria-label"), "Video, no categories yet. Give it a category under Category roles to add it.");
+    assert.match(chip!.textContent ?? "", /Video\s*No categories yet/);
+    const before = s.requests.length;
+    fireEvent.click(chip!);
+    fireEvent.keyDown(chip!, { key: "Enter" });
+    fireEvent.keyDown(chip!, { key: " " });
+    await settle();
+    assert.equal(s.requests.slice(before).filter((r) => r.method === "POST").length, 0, "clicking an empty role saved something");
+    assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]);
+    // Its reason is said on focus, where a keyboard operator finds it.
+    chip!.focus();
+    await eventually(() => assert.match(document.body.textContent ?? "", /Video has no categories yet, so it would draw no column\. Give it one under Category roles\./));
+  } finally {
+    s.restore();
+  }
+});
+
+test("the roles list tags an empty role, and giving it a category clears the tag and the greying", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, cats: { sun: ["Audio", "Lighting", "Video"] } });
+  try {
+    await mount();
+    await openCard("Audio");
+    const tags = () => [...document.querySelectorAll("[data-role-empty]")].map((t) => t.textContent);
+    assert.deepEqual(tags(), ["Can't be added to a layout"]);
+    assert.match((document.querySelector('[data-role="r-video"]') as HTMLElement).textContent ?? "", /No categories yet, so this column is empty\./);
+    const add = (await eventually(() => screen.getByRole("combobox", { name: "Add a category to Video" }))) as HTMLSelectElement;
+    const opt = [...add.querySelectorAll("option")].find((o) => o.textContent === "Video") as HTMLOptionElement;
+    fireEvent.change(add, { target: { value: opt.value } });
+    await eventually(() => assert.deepEqual(s.roles().find((r) => r.id === "r-video")?.members, ["Video"]));
+    await eventually(() => assert.deepEqual(tags(), []));
+    assert.equal(!!trayOf("l-audio").querySelector("[data-empty-role]"), false);
+    assert.equal(!!trayOf("l-audio").querySelector('button[aria-label="Add Video"]'), true);
+  } finally {
+    s.restore();
+  }
+});
+
+test("a role already a column keeps its place after losing its categories, and nothing is removed", async () => {
+  const roles = [{ id: "r-audio", name: "Audio", members: [] as string[] }];
+  const s = serviceCueServer({ layouts: LAYOUTS, roles, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await eventually(() => screen.getByRole("button", { name: "Audio, Clock · Time · Item · Audio" }));
+    await openCard("Audio");
+    assert.deepEqual(roleRow("l-audio"), ["Audio"]);
+    assert.equal(s.requests.filter((r) => r.method === "POST" && r.path === "/api/servicecue/layouts").length, 0, "opening the card rewrote the layout");
+    assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]);
+  } finally {
+    s.restore();
+  }
+});
+const roleRow = (layoutId: string) =>
+  [...(document.querySelector(`[data-cols="${layoutId}"]`)?.querySelectorAll("[data-sort-id]") ?? [])].map((c) => c.textContent ?? "");

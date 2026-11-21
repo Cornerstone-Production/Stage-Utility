@@ -103,7 +103,7 @@ button to shut it, and under that:
 | Row | What it sets |
 |---|---|
 | **Columns** | Every column the layout draws, in rundown order: **Clock** and **Time**, pinned before Item; **Item**, always drawn and locked; the layout's roles; **Max SPL**, pinned last. Clock, Time, Max SPL and each role have an X, which moves the column to the row below |
-| **Not in this layout** | Every role the layout does not show, and Clock, Time and Max SPL when they are off. Click a chip to add it: a role goes on the end, a fixed column goes to its place. Or drag it to a spot in the row |
+| **Not in this layout** | Every role the layout does not show, and Clock, Time and Max SPL when they are off. Click a chip to add it: a role goes on the end, a fixed column goes to its place. Or drag it to a spot in the row. A role with no categories yet is listed greyed, marked **No categories yet**, and cannot be clicked or dragged: a column for it would draw nothing |
 | **Under the title** | **Song key**, **BPM**, **Time signature**, **Arrangement** and **Item notes**, each a toggle saying whether it is on |
 | **Footer** | **Total time** |
 | **Row color** | See [Row colors](#row-colors) |
@@ -228,6 +228,9 @@ public page all draw columns the same way.
 there whether or not a layout exists. Each role shows its name (saved when you leave the
 field or press Enter), how many layouts use it, and its categories in priority order. Drag
 a category's grip to reorder them, as with layouts; its X takes it out of the role.
+A role with no categories carries a **Can't be added to a layout** tag until it has one. A
+role already in a layout stays there if it later loses its categories; it draws nothing
+until a category returns.
 **+ Add category** lists every service type's categories, grouped by type, and says when
 one is already in another role; the types off the landing page are read from Planning
 Center the first time such a list is opened, one at a time, and one that cannot be read
