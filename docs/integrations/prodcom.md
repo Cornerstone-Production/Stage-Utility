@@ -390,7 +390,8 @@ sensitive keywords** is on by default; see
 [Sensitive keywords](#sensitive-keywords).
 
 **On a layout:** add object → **Transcription** (the transcription strip). Options: latest-line vs.
-multi-speaker scrolling feed, max lines, and hide specific channels by name.
+multi-speaker rolling feed (newest line at the bottom), max lines, and hide specific channels by name.
+See [Transcription](../reference/widgets.md#transcription).
 
 ## Caption colors
 

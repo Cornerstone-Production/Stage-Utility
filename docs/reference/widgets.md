@@ -565,7 +565,9 @@ and average are building-only — the zone endpoint does not report them. See
 | **Transcription** | Live captions of what is being said | The transcription service |
 
 **Mode** picks **Latest**, one line that replaces itself as new words arrive, or
-**Rolling**, a scrolling multi-line feed like the Captions display. In Rolling,
+**Rolling**, a multi-line feed like the Captions display: the newest line sits at
+the bottom, and older lines are cut off at the top once the widget is full. It has
+no scrollbar; the Captions display is the place to scroll back. In Rolling,
 **Lines** caps how many show, 1 to 10; left blank it reads **Fit** and shows as
 many as the widget holds. **Channels shown** hides any channel from this widget, and lists
 the channels once captions have arrived.
