@@ -28,6 +28,9 @@ import { useEffect, useRef } from "react";
 /** The class carrying the highlight animation (defined in styles.css). */
 export const FLASH_CLASS = "su-flash";
 
+/** A ServiceCue view's Layout select on its edit page: where the Embedded view inspector's Change link lands. */
+export const VIEW_LAYOUT_FLASH_ID = "view-layout";
+
 /** How long the highlight stays before it is cleared. */
 const FLASH_MS = 2000;
 

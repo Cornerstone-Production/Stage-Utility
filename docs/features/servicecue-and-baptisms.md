@@ -57,9 +57,17 @@ The third is how you put the rundown under your own objects on one screen instea
 of stacking two browser tabs. Add an **Embedded view** object to a custom layout
 and point it at a ServiceCue view.
 
+The picker names each view with its kind as New view does (`Stage left (ServiceCue)`) and
+never offers the view being edited. Under it, **Shows the Band layout · Change** names the
+layout the picked ServiceCue view uses, and **Change** opens that view's page at its
+**Layout** setting.
+
 The embed shows the rundown only — no back arrow and no layout switcher. Its
 header (plan title, countdown, clock) is off by default, since a layout usually
-has its own; turn it on per object.
+has its own; turn it on per object. **Show the view's header** and **Follow the live
+item** appear only when the picked view is a ServiceCue view, since they act on nothing
+else; their saved values wait if it is switched to another kind and apply again if it
+is switched back.
 
 **Follow the live item** (on by default) scrolls the rundown to keep Planning
 Center's live item on screen, so a plan longer than the box does not need anyone

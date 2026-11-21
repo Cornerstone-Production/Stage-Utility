@@ -32,6 +32,7 @@ import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 import { deleteView } from "./screen-confirms";
 import { AppLink } from "../../app/app-link";
+import { VIEW_LAYOUT_FLASH_ID } from "../../app/flash";
 import { viewBoardId } from "@main/services/slot-boards";
 
 const PREVIEW_ASPECTS = [
@@ -236,7 +237,7 @@ export function ViewDetail({
                 }).catch((e: unknown) => toast.error(`Could not change this view's layout: ${errorMessage(e)}`))
               }
             >
-              <SelectTrigger className="w-full sm:w-64" aria-label="Layout"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-64" aria-label="Layout" data-flash-id={VIEW_LAYOUT_FLASH_ID}><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
                 {serviceCueLayouts.map((l) => (

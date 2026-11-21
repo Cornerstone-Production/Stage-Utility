@@ -23,6 +23,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ViewDetail } = await import("./view-detail.js");
+const { VIEW_LAYOUT_FLASH_ID } = await import("../../app/flash.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -180,6 +181,8 @@ test("the view's layout is called Layout, and its picker sits above the preview"
     assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), false, "still called Columns");
     assert.equal(!!screen.queryByText("Columns"), false);
     assert.equal(!!screen.queryByText("Layout", { selector: "span" }), true);
+    // The Embedded view inspector's Change link flashes this select (see embedded-view-rows).
+    assert.equal(picker.getAttribute("data-flash-id"), VIEW_LAYOUT_FLASH_ID);
   } finally {
     f.restore();
   }
