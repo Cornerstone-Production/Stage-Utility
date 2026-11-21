@@ -343,7 +343,7 @@ describe("the grid, read-only", () => {
   test("draws the extent the server sent, each key in its own row and column", () => {
     mount();
     const grid = document.querySelector('[role="img"]') as HTMLElement;
-    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))", "a key has a minimum width, so a wide page would scroll sideways");
+    assert.equal(grid.style.gridTemplateColumns, "repeat(12, minmax(0px, 1fr))", "a key has a minimum width, so a wide page would scroll sideways");
     assert.equal(grid.children.length, 12 * 5, "the grid is not cols x rows cells");
     assert.equal(grid.children[4 * 12 + 11] === keyAt("p17 r4 c11"), true, "the last key is not in the last cell");
     assert.equal(grid.children[1 * 12 + 3] === keyAt("p17 r1 c3"), true, "a key is not in its own row and column");
