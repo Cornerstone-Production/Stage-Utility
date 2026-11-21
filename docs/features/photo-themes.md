@@ -12,6 +12,13 @@ an edit can change a face.
 ## Connecting OpenAI
 
 Theme photos needs an **OpenAI API key**, saved on the server (`PUT /api/openai/key`).
+Add it from the **OpenAI** tile on **Settings > Integrations**: the tile sits under
+*Not set up* until a key is saved, then moves up with the integrations in use, showing
+the key's hint and its state. Click it (`?integration=openai`) for the dialog that holds
+the key field, **Save**, **Test** and **Remove key**. OpenAI is not a server
+integration: it has no enable switch, and no Companion, Home Assistant or backup
+surface. It counts in the page's *N of M connected* only while its state is
+`connected`.
 The key is a credential like a Planning Center secret: it is kept encrypted in
 `secrets.bin`, sent only to OpenAI in the request's `Authorization` header, never
 logged, never sent to a browser (the app shows `sk-…3f2a`, its last four

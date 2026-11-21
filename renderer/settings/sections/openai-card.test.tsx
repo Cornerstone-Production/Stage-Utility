@@ -1,4 +1,4 @@
-// The OpenAI card over a stubbed server: each state the server can report, and the
+// The OpenAI key form over a stubbed server: each state the server can report, and the
 // Save, Test and Remove key buttons PRESSED, with the request each sends.
 //
 // The thing most worth guarding is the key. It goes to the server in one PUT and
@@ -19,7 +19,7 @@ const teardown = installRenderDom();
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
-const { OpenAiCard } = await import("./openai-card.js");
+const { OpenAiKeyForm } = await import("./openai-card.js");
 
 const KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
 type Conn = { method: "api-key" | null; hint: string | null; state: string; reason: string | null; checkedAt: string | null };
@@ -65,7 +65,7 @@ const settle = async () => {
   for (let i = 0; i < 6; i++) await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
 };
 async function mount() {
-  const r = render(React.createElement(QueryClientProvider, { client: client! }, React.createElement(OpenAiCard)));
+  const r = render(React.createElement(QueryClientProvider, { client: client! }, React.createElement(OpenAiKeyForm)));
   await settle();
   return r;
 }
@@ -101,7 +101,18 @@ describe("the connection, as the server reports it", () => {
   test("the masked hint is the placeholder, and the helper line about Business credits is there", async () => {
     const { container } = await mount();
     assert.equal(field(container).placeholder, "sk-…3f2a (saved)");
-    assert.match(container.textContent ?? "", /ChatGPT Business plan, the plan's included API credits pay for edits/);
+    assert.match(container.textContent ?? "", /Uses your ChatGPT Business plan's included API credits/);
+    // One line, two links, both opened in a new tab without handing over the opener.
+    const links = [...container.querySelectorAll("a")];
+    assert.deepEqual(
+      links.map((a) => a.getAttribute("href")),
+      ["https://developers.openai.com/api/docs/guides/chatgpt-api-credits", "https://platform.openai.com/api-keys"],
+    );
+    for (const a of links) {
+      assert.equal(a.getAttribute("target"), "_blank");
+      assert.match(a.getAttribute("rel") ?? "", /noopener/);
+    }
+    assert.doesNotMatch(container.textContent ?? "", /after that, normal API billing applies/);
   });
 
   test("there is no ChatGPT sign-in row: it cannot pay for image edits", async () => {

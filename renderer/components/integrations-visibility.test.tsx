@@ -26,7 +26,8 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
 
-const TOTAL = INTEGRATION_DESCRIPTOR_FIXTURE.length;
+// The server's integrations plus OpenAI, whose tile the panel draws itself.
+const TOTAL = INTEGRATION_DESCRIPTOR_FIXTURE.length + 1;
 
 let server = installFakeServer();
 
@@ -75,7 +76,7 @@ describe("every integration is visible, with nothing collapsed", () => {
     assert.equal(tiles(c).length, TOTAL);
     assert.deepEqual(
       tiles(c).map((el) => el.getAttribute("data-integration-card")).sort(),
-      INTEGRATION_DESCRIPTOR_FIXTURE.map((d) => d.id).sort(),
+      [...INTEGRATION_DESCRIPTOR_FIXTURE.map((d) => d.id), "openai"].sort(),
     );
   });
 

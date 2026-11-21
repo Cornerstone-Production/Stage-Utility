@@ -36,6 +36,12 @@ export const photoStateKey = [...PHOTO_THEMES_KEY, "state"] as const;
 export const planPeopleKey = (planId: string, serviceTypeId: string) => [...PHOTO_THEMES_KEY, "plan", planId, serviceTypeId] as const;
 export const OPENAI_KEY = ["openai", "status"] as const;
 
+/** OpenAI's connection, read once and shared: the Integrations tile, its dialog and the
+ *  key form all draw from this one query, so a saved key moves all three at once. */
+export function useOpenAiConnection() {
+  return useQuery({ queryKey: OPENAI_KEY, queryFn: () => ipc<OpenAiConnectionDTO>("openai:getStatus") });
+}
+
 /** The plan Theme photos is for: the one the Mic slots page is editing. */
 export interface PhotoPlan {
   planId: string;

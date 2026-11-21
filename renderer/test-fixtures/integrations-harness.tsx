@@ -34,6 +34,8 @@ const GET_ROUTES: Record<string, unknown> = {
   "/api/scores/favourites": { favourites: [] },
   "/api/sensource/locations": [],
   "/api/sensource/zones": [],
+  // OpenAI's tile reads its own connection; a fresh install has no key.
+  "/api/openai": { method: null, hint: null, state: "not-connected", reason: null, checkedAt: null },
 };
 
 export interface FakeServer {
