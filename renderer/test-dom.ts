@@ -305,10 +305,16 @@ export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEO
   }
 }
 
+/** `logToServer`'s POST. Nothing reads its answer, so a ledger that counted it would wait for
+ *  a body nobody takes, and every wait after it would time out. The serverClock sends one the
+ *  first time it is fed a stamp, once two arrive a second apart, which only a slow run reaches. */
+const isLogPost = (url: string): boolean => new URL(url, "http://stub.invalid").pathname === "/api/log/client";
+
 /** A fetch stub's own tally of the reads it was asked for and the answers a caller took. */
 export interface ReadLedger {
-  /** A read has started. */
-  begin: () => void;
+  /** A read has started. Pass its URL: the page's own log line (`/api/log/client`) is
+   *  fire and forget, its reply is never read, so it is never counted as a read. */
+  begin: (url: string) => void;
   /** The answer to a read. It counts as taken the first time its body is read. */
   answer: <R extends { json: () => Promise<unknown>; text: () => Promise<string> }>(res: R) => R;
   /** A read that failed before it could be answered; nobody is going to take it. */
@@ -333,7 +339,7 @@ export interface ReadLedger {
  *
  *   const reads = readLedger();
  *   globalThis.fetch = async (url) => {
- *     reads.begin();
+ *     reads.begin(url);
  *     return reads.answer(ok(body));
  *   };
  *   ...
@@ -347,7 +353,7 @@ export function readLedger(): ReadLedger {
   let begun = 0;
   let taken = 0;
   return {
-    begin: () => void (begun += 1),
+    begin: (url) => void (isLogPost(url) || (begun += 1)),
     answer(res) {
       let counted = false;
       const take = () => {
@@ -360,7 +366,10 @@ export function readLedger(): ReadLedger {
     failed: () => void (taken += 1),
     pending: () => begun - taken,
     landed() {
-      if (begun !== taken) throw new Error(`${begun - taken} read(s) still on their way`);
+      // Equal, not merely "no more begun than taken": a take with no begin is a stub
+      // that answers a read it never counted, and would hide a real one still in flight.
+      if (begun > taken) throw new Error(`${begun - taken} read(s) still on their way`);
+      if (taken > begun) throw new Error(`${taken - begun} answer(s) taken for reads that were never begun`);
     },
     reset() {
       begun = 0;

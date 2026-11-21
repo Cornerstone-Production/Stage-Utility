@@ -64,7 +64,7 @@ const reads = readLedger();
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string) => {
   // The live-update subscription is nobody's read; see isPlumbing.
   if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  reads.begin();
+  reads.begin(url);
   const payload = url.includes("/api/update/lock") ? lockReply : {};
   return reads.answer({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) });
 };

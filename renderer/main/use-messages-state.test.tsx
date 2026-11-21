@@ -26,7 +26,7 @@ const reads = readLedger();
   if (url.startsWith("/api/log/client")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch: ${url}`);
   inits.push(init);
-  reads.begin();
+  reads.begin(url);
   const body = await answer().catch((err: unknown) => {
     reads.failed();
     throw err;

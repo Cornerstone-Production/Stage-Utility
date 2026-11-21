@@ -302,8 +302,8 @@ const reads = readLedger();
   // The live-update subscription posts on its own schedule and lands whenever it
   // likes; it is neither a read the page waits on nor one of these counts.
   if (isPlumbing(String(input))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  reads.begin();
   const url = String(input);
+  reads.begin(url);
   const pick = <T,>(live: T, idle: T): T => (happening ? live : idle);
   const body =
     url.includes("/api/obs/status") ? pick(OBS_LIVE, OBS_IDLE)
