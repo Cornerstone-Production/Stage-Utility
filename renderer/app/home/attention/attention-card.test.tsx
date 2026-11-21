@@ -449,10 +449,11 @@ test("a failed fix's note clears itself", async () => {
       reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
     });
     mock.timers.enable({ apis: ["setTimeout"] });
-    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    // The click inside the scope, so the press's whole promise chain lands in it.
+    const { act } = await import("@testing-library/react");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start recording" })); });
     // Mocked setTimeout would stall settle(); eventually() polls on the real timer it
     // captured at load, so it waits out the response without it.
-    const { act } = await import("@testing-library/react");
     await eventually(() => assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed/));
     act(() => mock.timers.tick(ACTION_NOTE_MS));
     assert.ok(screen.queryByRole("alert") === null, "the note must not outlive its moment");
