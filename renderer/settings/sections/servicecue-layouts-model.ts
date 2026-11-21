@@ -162,6 +162,16 @@ export type Rich = (string | { b: string })[];
 
 export const plainText = (r: Rich): string => r.map((p) => (typeof p === "string" ? p : p.b)).join("");
 
+/** The views that draw this layout, in the order given. Only a ServiceCue view draws a
+ *  layout: a view changed to another kind keeps the id it had, and shows nothing of it.
+ *  The Delete confirm and the open card's Used by both read it, so they cannot disagree. */
+export function layoutUsers(
+  layout: Pick<ServiceCueLayout, "id">,
+  views: readonly { name: string; kind?: string; serviceCueLayoutId?: string | null }[],
+): string[] {
+  return views.filter((v) => v.kind === "script" && v.serviceCueLayoutId === layout.id).map((v) => v.name);
+}
+
 /** What deleting a layout does to the screens set to it. `views` is null until known. */
 export function deleteLayoutBody(
   layout: Pick<ServiceCueLayout, "id">,
@@ -171,9 +181,7 @@ export function deleteLayoutBody(
   // so it is said apart from the screens: it shows All columns too.
   const tablet = " A tablet opened at its address will show All columns too.";
   if (!views) return [`Screens using it will show All columns.${tablet}`];
-  // Only a ServiceCue view draws a layout. A view changed to another kind keeps the id
-  // it had, and shows nothing of it.
-  const users = views.filter((v) => v.kind === "script" && v.serviceCueLayoutId === layout.id).map((v) => v.name);
+  const users = layoutUsers(layout, views);
   if (users.length === 0) return [`No screens use this layout.${tablet}`];
   return [
     { b: listOf(users) },

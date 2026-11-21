@@ -5,10 +5,12 @@
 // and a preview of it against the plan the page previews with.
 
 import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, MinusCircleIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useRef, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { copyText } from "../../lib/clipboard";
+import { serviceCueUrl } from "../../main/servicecue-index-view";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { RundownTable } from "../../main/rundown-table";
@@ -21,6 +23,7 @@ import {
   fixedOn,
   FOOTER,
   layoutRoles,
+  layoutUsers,
   listOf,
   roleApplies,
   toggleOn,
@@ -59,6 +62,7 @@ export function LayoutCard({
   onUpdate,
   onColumns,
   preview,
+  views,
   layoutIds,
   nameRef,
 }: {
@@ -75,6 +79,8 @@ export function LayoutCard({
   /** A change to the Columns row. `focus` names the control to focus once it has drawn. */
   onColumns: (change: ColumnChange, focus?: string) => void;
   preview: PreviewSource;
+  /** The app's views, for Used by; null until the stage state is read. */
+  views: readonly { name: string; kind?: string; serviceCueLayoutId?: string | null }[] | null;
   /** Every layout's id in page order: what the card's grip moves it among. */
   layoutIds: readonly string[];
   /** The open card's name field, for the page to focus on a new or copied layout. */
@@ -219,6 +225,7 @@ export function LayoutCard({
           <RowColor layout={l} roles={roles} onUpdate={onUpdate} />
         </Row>
         <Preview layout={shown} roles={roles} source={preview} />
+        <CardFooter layout={l} source={preview} views={views} />
       </div>
     </div>
   );
@@ -350,6 +357,52 @@ function RowColor({ layout: l, roles, onUpdate }: { layout: ServiceCueLayout; ro
     </div>
   );
 }
+
+/** The address a rundown for this layout opens at, and the screens set to it. The address
+ *  needs a service type, so it uses the one the preview does; without one it shows the
+ *  template and Copy is off. Copy takes the full address, this app's origin included. */
+function CardFooter({ layout: l, source: p, views }: { layout: ServiceCueLayout; source: PreviewSource; views: LayoutCardProps["views"] }) {
+  const typeName = p.types.find((t) => t.id === p.typeId)?.name;
+  const path = typeName ? serviceCueUrl(typeName, l.id, l.slug) : `/servicecue/<service type>/${l.slug ?? l.id}`;
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const users = views ? layoutUsers(l, views) : null;
+  const onCopy = async () => {
+    setCopy((await copyText(`${window.location.origin}${path}`)) ? "copied" : "failed");
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopy("idle"), 1600);
+  };
+  return (
+    <div
+      data-layout-foot={l.id}
+      className="-mx-3.5 -mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-b-xl border-t border-line bg-fill px-3.5 py-2.5 text-caption1 text-fg-muted max-sm:-mx-3 max-sm:-mb-3 max-sm:px-3"
+    >
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="text-fg-subtle">Address</span>{" "}
+        <code className="font-mono text-caption1 text-fg [overflow-wrap:anywhere]">{path}</code>
+        <Button
+          variant="filled"
+          size="small"
+          onClick={() => void onCopy()}
+          disabled={!typeName}
+          tooltip={typeName ? "" : "An address needs a service type. Connect Planning Center to copy one."}
+        >
+          <CopyIcon className="size-3" aria-hidden="true" />
+          {copy === "copied" ? "Copied" : copy === "failed" ? "Couldn't copy" : "Copy"}
+        </Button>
+      </span>
+      {users && (
+        <span>
+          <span className="mr-1.5 text-fg-subtle">Used by:</span>{" "}
+          {users.length > 0 ? <b className="font-medium text-fg">{users.join(", ")}</b> : "no views yet"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+type LayoutCardProps = Parameters<typeof LayoutCard>[0];
 
 /** The layout drawn against the previewed plan: capped in height, scrolling inside. */
 function Preview({ layout: l, roles, source: p }: { layout: ServiceCueLayout; roles: CategoryRole[]; source: PreviewSource }) {

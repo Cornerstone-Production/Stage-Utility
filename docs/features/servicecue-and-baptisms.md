@@ -120,6 +120,13 @@ Below them is a preview of the layout against the plan of the service type picke
 It redraws as the rows change. A role with no category in the previewed type draws no
 column there, and a line under the preview says which.
 
+The card ends in its **Address**, `/servicecue/<service type>/<layout>`, with a **Copy**
+button, and **Used by:** the ServiceCue views set to it, in the order Screens lists them
+(the Delete confirm names the same ones), or "no views yet". The address uses the
+service type in **Preview with**, and **Copy** puts this app's full address on the
+clipboard, falling back to a hidden text field on plain HTTP. Without Planning Center
+the address shows `<service type>` and **Copy** is off.
+
 Clock, Time, Max SPL and Item keep their places; only roles move. Role columns move by
 dragging their grip along the row; a role column dragged onto **Not in this layout**
 leaves the layout. Layout cards move the same way, by the grip on their header, and so

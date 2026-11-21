@@ -635,6 +635,7 @@ export function ServiceCueSection() {
                     announce(columnsSaid(change));
                   }}
                   preview={preview}
+                  views={stage.state?.views ?? null}
                   layoutIds={layoutIds}
                   nameRef={openId === l.id ? nameField : undefined}
                 />

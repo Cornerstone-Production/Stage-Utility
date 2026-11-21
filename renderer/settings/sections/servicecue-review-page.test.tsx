@@ -20,7 +20,7 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -208,6 +208,137 @@ test("without Planning Center the open Landing page links to Integrations; the o
     assert.equal(screen.getByRole("link", { name: "Connect Planning Center" }).getAttribute("href"), "/settings/integrations");
     assert.equal(screen.getAllByRole("link", { name: /Connect Planning Center/ }).length, 1);
   } finally {
+    s.restore();
+  }
+});
+
+// ── F8: the open card's address and who uses it ─────────────────────────────
+
+const VIEWS = [
+  { id: "v1", name: "Stage left", kind: "script", serviceCueLayoutId: "l-audio" },
+  { id: "v2", name: "Mic wall", kind: "slots", serviceCueLayoutId: "l-audio" }, // kept its id after a kind change: draws nothing of it
+  { id: "v3", name: "Lighting tablet", kind: "script", serviceCueLayoutId: "l-light" },
+  { id: "v4", name: "Audio tablet", kind: "script", serviceCueLayoutId: "l-audio" },
+];
+const footer = () => document.querySelector("[data-layout-foot]") as HTMLElement;
+const footText = () => footer()?.textContent ?? "";
+
+test("the open card ends in its address and the views that use it", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun", "wed"], types: TYPES, views: VIEWS });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.match(footText(), /Address\s*\/servicecue\/sunday-morning\/audio/));
+    assert.match(footText(), /Used by:\s*Stage left, Audio tablet/);
+    // The address follows Preview with: it needs a service type.
+    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "wed" } });
+    await eventually(() => assert.match(footText(), /\/servicecue\/wednesday-night\/audio/));
+  } finally {
+    s.restore();
+  }
+});
+
+test("Used by is what the Delete confirm names, from the same list", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views: VIEWS });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.match(footText(), /Used by:\s*Stage left, Audio tablet/));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Audio" }));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Stage left and Audio tablet use this layout\./));
+    assert.doesNotMatch(document.body.textContent ?? "", /Mic wall/, "a view of another kind is not a user");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a layout no view uses says so", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views: [] });
+  try {
+    await mount();
+    await openCard("Lighting");
+    await eventually(() => assert.match(footText(), /Used by:\s*no views yet/));
+  } finally {
+    s.restore();
+  }
+});
+
+test("without Planning Center the address is the template and Copy is disabled", async () => {
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: [], types: [], pcoConfigured: false, views: VIEWS });
+  try {
+    await mount();
+    await openCard("Audio");
+    await eventually(() => assert.match(footText(), /\/servicecue\/<service type>\/audio/));
+    assert.equal((within(footer()).getByRole("button", { name: /Copy/ }) as HTMLButtonElement).disabled, true);
+  } finally {
+    s.restore();
+  }
+});
+
+/** Run `body` with the page's clipboard as given: a secure-context API, or none (plain HTTP). */
+async function withClipboard(kind: "api" | "http", body: (copied: string[]) => Promise<void>): Promise<void> {
+  const copied: string[] = [];
+  const nav = navigator as unknown as { clipboard?: unknown };
+  const win = window as unknown as { isSecureContext: boolean };
+  const doc = document as unknown as { execCommand?: unknown };
+  const had = { clipboard: Object.getOwnPropertyDescriptor(nav, "clipboard"), secure: win.isSecureContext, exec: doc.execCommand };
+  if (kind === "api") {
+    Object.defineProperty(nav, "clipboard", { configurable: true, value: { writeText: async (t: string) => void copied.push(t) } });
+    win.isSecureContext = true;
+  } else {
+    // Plain HTTP on a LAN address: no navigator.clipboard at all. The legacy path copies
+    // the selected textarea, so what it was holding when told to copy is what is recorded.
+    delete nav.clipboard;
+    win.isSecureContext = false;
+    doc.execCommand = () => {
+      const ta = document.activeElement as HTMLTextAreaElement | null;
+      if (ta?.tagName === "TEXTAREA") copied.push(ta.value);
+      return true;
+    };
+  }
+  try {
+    await body(copied);
+  } finally {
+    if (had.clipboard) Object.defineProperty(nav, "clipboard", had.clipboard);
+    else delete nav.clipboard;
+    win.isSecureContext = had.secure;
+    doc.execCommand = had.exec;
+  }
+}
+
+for (const kind of ["api", "http"] as const) {
+  test(`Copy writes this app's full address (${kind === "api" ? "clipboard API" : "plain HTTP fallback"}) and says Copied`, async () => {
+    await withClipboard(kind, async (copied) => {
+      const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views: VIEWS });
+      try {
+        await mount();
+        await openCard("Audio");
+        fireEvent.click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
+        await eventually(() => assert.deepEqual(copied, [`${window.location.origin}/servicecue/sunday-morning/audio`]));
+        await eventually(() => assert.match(footText(), /Copied/));
+      } finally {
+        s.restore();
+      }
+    });
+  });
+}
+
+test("a copy the browser refuses says so instead of reading Copied", async () => {
+  const win = window as unknown as { isSecureContext: boolean };
+  const doc = document as unknown as { execCommand?: unknown };
+  const was = { secure: win.isSecureContext, exec: doc.execCommand };
+  win.isSecureContext = false;
+  doc.execCommand = () => false;
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views: VIEWS });
+  try {
+    await mount();
+    await openCard("Audio");
+    fireEvent.click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
+    await eventually(() => assert.match(footText(), /Couldn't copy/));
+    assert.doesNotMatch(footText(), /Copied/);
+  } finally {
+    win.isSecureContext = was.secure;
+    doc.execCommand = was.exec;
     s.restore();
   }
 });
