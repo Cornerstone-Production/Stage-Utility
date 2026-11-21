@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle } from "../test-dom.js";
+import { installRenderDom, settle, mountInAct } from "../test-dom.js";
 
 installRenderDom();
 (window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} });
@@ -35,13 +35,10 @@ let asked: string[] = [];
 
 const { render, cleanup, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { act } = await import("react");
 const { LandingPublicPage } = await import("./landing-public-page.js");
 
 async function mount() {
-  await act(async () => {
-    render(React.createElement(LandingPublicPage));
-  });
+  await mountInAct(render, React.createElement(LandingPublicPage));
   for (let i = 0; i < 4; i++) await settle();
 }
 

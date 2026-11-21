@@ -10,13 +10,13 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -64,15 +64,13 @@ function stubFetch(opts: { refuse?: string; views?: unknown[] } = {}) {
 }
 
 async function mount(): Promise<void> {
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
       React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
     ),
   );
-  });
   for (let i = 0; i < 4; i++) await settle();
 }
 

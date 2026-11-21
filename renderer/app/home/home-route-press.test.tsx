@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { NoStream } from "../../test-fixtures/no-stream.js";
 import { serve } from "../../test-fixtures/button-server.js";
 
@@ -55,15 +55,13 @@ async function mountHome() {
     extra: (url) => (url.endsWith("/api/state") ? jsonOk({ ...DEFAULT_STAGE_STATE, views: [HOME], onboardingDismissed: true }) : undefined),
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       RouterContextProvider as never,
       { router },
       React.createElement(QueryClientProvider, { client: qc }, React.createElement(TooltipProvider, null, React.createElement(HomeRoute))),
     ),
   );
-  });
   await act(async () => settle());
   return () => server.restore();
 }

@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -32,7 +32,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
   },
 });
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
@@ -102,14 +102,12 @@ test("hovering a sound lane segment reads the item's PLANNED length off the time
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch;
   try {
-    await act(async () => {
-      render(
+    await mountInAct(render, 
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
     );
-    });
     // By its label, NOT `querySelector("svg")` — the strip's Customize trigger
     // is a lucide icon, so the first svg on the page is a glyph. The chart draws
     // once the series read has answered (here, with a 404).

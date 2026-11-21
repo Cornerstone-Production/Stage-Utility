@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, mountInAct, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -120,7 +120,7 @@ function TrayGate({ barOnPage }: { barOnPage: boolean }) {
 async function mountInMode({ barOnPage = true }: { barOnPage?: boolean } = {}): Promise<void> {
   // Async act: the hydrate read resolves on the microtasks right after the mount,
   // and it must land inside the scope or React reports it as an update outside act.
-  await act(async () => render(
+  await mountInAct(render,
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
@@ -143,7 +143,7 @@ async function mountInMode({ barOnPage = true }: { barOnPage?: boolean } = {}): 
         React.createElement(Toaster),
       ),
     ),
-  ));
+  );
   await eventually(() => assert.ok(api, "the provider never rendered"));
   await act(async () => api!.open("bar"));
   // The strip shows what is saved: the hydrate has landed.

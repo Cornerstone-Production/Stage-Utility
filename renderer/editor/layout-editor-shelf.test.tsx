@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -62,8 +62,7 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
     url.includes("/api/cues/manifest") ? ok(CUE_MANIFEST) : url.includes("/api/layout-groups") ? ok([]) : ok({}),
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       RouterContextProvider as unknown as React.FunctionComponent<Record<string, unknown>>,
       { router: testRouter },
@@ -86,7 +85,6 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
       ),
     ),
   );
-  });
   await settle();
   await settle();
   return f;

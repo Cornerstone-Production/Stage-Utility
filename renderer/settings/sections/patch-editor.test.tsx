@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -97,9 +97,7 @@ function stubServer() {
 }
 
 async function mount(): Promise<void> {
-  await act(async () => {
-    render(React.createElement(TooltipProvider, null, React.createElement(PatchSection), React.createElement(ConfirmHost)));
-  });
+  await mountInAct(render, React.createElement(TooltipProvider, null, React.createElement(PatchSection), React.createElement(ConfirmHost)));
   await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Analog" }), true, "the patch loaded"));
   await settle();
 }

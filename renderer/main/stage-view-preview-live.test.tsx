@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, mountInAct } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -106,11 +106,9 @@ after(async () => {
 async function renderAt(path: string) {
   window.history.replaceState({}, "", path);
   await act(async () => {
-    await act(async () => {
-      render(
+    await mountInAct(render, 
       React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(TooltipProvider, null, React.createElement(StageView))),
     );
-    });
     await flush();
   });
 }

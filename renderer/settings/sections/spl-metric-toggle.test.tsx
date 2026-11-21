@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -102,11 +102,9 @@ function stubFetch(serverMetrics: string[] = []): typeof fetch {
 }
 
 async function mount(detail: unknown = DETAIL): Promise<void> {
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric: null }),
   );
-  });
   // The chart's table is there once the series read has answered (here, 404),
   // and the seed read lands with it or just behind.
   await eventually(() =>

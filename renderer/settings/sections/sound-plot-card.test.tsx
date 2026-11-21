@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -92,11 +92,9 @@ after(async () => {
 });
 
 async function mount(detail: ServiceSplHistory, trendsMetric: string | null = "SPL A Slow") {
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, { detail, trendsMetric }),
   );
-  });
   await eventually(() => assert.ok(document.querySelector("[data-series-line]"), "the raw line never drew"));
 }
 

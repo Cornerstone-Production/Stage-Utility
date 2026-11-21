@@ -9,12 +9,12 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { HostNamesCard } = await import("./host-names-card.js");
@@ -36,15 +36,13 @@ async function mount(addAnswer: () => unknown, view: Record<string, unknown> = V
   });
   const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } });
   mountedClient = queryClient;
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: queryClient },
       React.createElement(TooltipProvider, null, React.createElement(HostNamesCard), React.createElement(Toaster)),
     ),
   );
-  });
   return stub;
 }
 

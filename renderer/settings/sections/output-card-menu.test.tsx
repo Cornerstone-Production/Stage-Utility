@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installDom();
 
@@ -72,15 +72,13 @@ async function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onRequestNewView: noop,
     ...over,
   };
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: queryClient },
       React.createElement(TooltipProvider, null, React.createElement(OutputRow, props)),
     ),
   );
-  });
 }
 
 async function openMenu(): Promise<void> {

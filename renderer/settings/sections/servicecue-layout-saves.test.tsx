@@ -13,7 +13,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 import { LayoutNameRefused, prepareLayoutsSave } from "../../../main/services/servicecue-slug.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
@@ -82,15 +82,13 @@ function fakeServer(initial: ServiceCueLayout[], opts: { delayMs?: number } = {}
 }
 
 async function mount(): Promise<void> {
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
       React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
     ),
   );
-  });
   for (let i = 0; i < 4; i++) await settle();
 }
 

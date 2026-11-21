@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 
 import type { PublishedPlot, PublishedVenue } from "@main/types/stageplots";
 
-import { installRenderDom, settle } from "../test-dom.js";
+import { installRenderDom, settle, mountInAct } from "../test-dom.js";
 
 installRenderDom();
 (window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} });
@@ -66,9 +66,7 @@ const { act } = await import("react");
 const { StagePlotsPublicPage, secretFromPath } = await import("./stageplots-public-page.js");
 
 async function mount(path = `/stageplots/${SECRET}`) {
-  await act(async () => {
-    render(React.createElement(StagePlotsPublicPage, { path }));
-  });
+  await mountInAct(render, React.createElement(StagePlotsPublicPage, { path }));
   for (let i = 0; i < 5; i++) await settle();
 }
 

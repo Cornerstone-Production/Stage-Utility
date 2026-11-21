@@ -14,7 +14,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import type { LayoutObject, View } from "@main/types/views.js";
-import { eventually, installRenderDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { serve } from "../test-fixtures/button-server.js";
 import { reply } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
@@ -22,7 +22,7 @@ import { NoStream } from "../test-fixtures/no-stream.js";
 const teardown = installRenderDom();
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../components/ui/index.js");
@@ -67,8 +67,7 @@ async function mount(serveOpts: Parameters<typeof serve>[0] = {}) {
   });
   const saved: LayoutObject[][] = [];
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       RouterContextProvider as unknown as React.FunctionComponent<Record<string, unknown>>,
       { router: testRouter },
@@ -93,7 +92,6 @@ async function mount(serveOpts: Parameters<typeof serve>[0] = {}) {
       ),
     ),
   );
-  });
   return { server, saved };
 }
 

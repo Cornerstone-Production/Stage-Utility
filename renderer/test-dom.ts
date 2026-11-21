@@ -268,6 +268,27 @@ export async function settle(): Promise<void> {
   });
 }
 
+/**
+ * Mount inside an async act, and return what `render` returned.
+ *
+ * Testing Library's own `render` is wrapped in a SYNCHRONOUS act, which closes
+ * before the fetch a component starts on mount has resolved; the update that
+ * fetch makes lands on the microtasks right after and React reports it as outside
+ * act. An async scope stays open across them.
+ *
+ * `render` is a parameter because this module is imported before installDom has
+ * run, and Testing Library binds to `document` when it loads.
+ *
+ *   const view = await mountInAct(render, <Card />);
+ */
+export async function mountInAct<A extends unknown[], R>(render: (...args: A) => R, ...args: A): Promise<R> {
+  let result!: R;
+  await act(async () => {
+    result = render(...args);
+  });
+  return result;
+}
+
 /** How long a test waits for something asynchronous to appear, in ms. */
 export const WAIT_TIMEOUT_MS = 5000;
 

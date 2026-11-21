@@ -16,7 +16,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import type { LayoutObject } from "@main/types/views.js";
-import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { owned, serve as serveButtons } from "../../test-fixtures/button-server.js";
 import { NoStream } from "../../test-fixtures/no-stream.js";
 
@@ -49,8 +49,7 @@ async function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>
   const saved: LayoutObject[] = [];
   let closed = 0;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => {
-    render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider as never,
       { client: qc },
@@ -62,7 +61,6 @@ async function mount(c: LayoutObject, serveOpts: Parameters<typeof serveButtons>
       }),
     ),
   );
-  });
   return { server, saved, closes: () => closed };
 }
 

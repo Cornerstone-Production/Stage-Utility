@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 import { ok } from "../test-fixtures/fetch-log.js";
@@ -119,9 +119,7 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    await act(async () => {
-      render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
-    });
+    await mountInAct(render, React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
     await eventually(() => assert.ok(sessionCalls >= 1, "sanity: mounting fetches sessions at least once"));
     await settle();
