@@ -204,6 +204,10 @@ function text(): string {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) words.push(n.textContent ?? "");
   return words.join(" ").replace(/\s+/g, " ").replace(/ ([:.,;])/g, "$1").trim();
 }
+/** What the card says before the setup fields, in reading order: its title, the one line
+ *  that warns what a public page shows (finding 4), then the pill naming its state. */
+const WARNING = "Every note on these plans is public to anyone with the link.";
+const head = (pill: string) => `Public link ${WARNING} ${pill}`;
 /** A field by its label, which also holds its hint: "Page address" + "Your Cloudflare Worker". */
 const input = (label: string) => screen.getByLabelText(new RegExp(`^${label}`)) as HTMLInputElement;
 
@@ -220,7 +224,7 @@ const LEAD =
 describe("Not set up", () => {
   test("is the mockup: Off, the setup fields, and a switch that waits for both", async () => {
     await mount();
-    assert.ok(text().startsWith("Public link Off"), text());
+    assert.ok(text().startsWith(head("Off")), text());
     assert.equal(stateOf(), "off");
     assert.ok(text().includes(LEAD));
     assert.equal(sw().getAttribute("aria-checked"), "false");
@@ -281,7 +285,7 @@ describe("Not set up", () => {
     fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
     fireEvent.change(input("Publishing token"), { target: { value: "tok-typed" } });
     fireEvent.click(sw());
-    await eventually(() => assert.ok(text().startsWith("Public link Publishing"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
     assert.deepEqual(server.posts, [
       ["test", { url: ORIGIN, token: "tok-typed" }],
       ["save", { url: ORIGIN, token: "tok-typed", enabled: true }],
@@ -309,7 +313,7 @@ describe("Not set up", () => {
       fireEvent.click(sw());
       await eventually(() => assert.match(alerts(), says));
       assert.deepEqual(server.posts.map(([p]) => p), ["test"], "an address that failed its test was saved and switched on");
-      assert.ok(text().startsWith("Public link Off"), text());
+      assert.ok(text().startsWith(head("Off")), text());
       assert.equal(input("Page address").value, ORIGIN, "what was typed is kept for another try");
     });
   }
@@ -326,7 +330,7 @@ describe("Not set up", () => {
       fireEvent.change(screen.getByLabelText(/^Publishing token/), { target: { value: "tok" } });
       fireEvent.click(sw());
       await eventually(() => assert.ok(alerts().length > 0, "nothing says the switch did not take"));
-      assert.ok(text().startsWith("Public link Off"));
+      assert.ok(text().startsWith(head("Off")));
     } finally {
       globalThis.fetch = real;
     }
@@ -340,7 +344,7 @@ describe("Publishing", () => {
 
   test("is the mockup: the link, what was sent, and what the public sees", async () => {
     await mount();
-    assert.ok(text().startsWith("Public link Publishing"), text());
+    assert.ok(text().startsWith(head("Publishing")), text());
     assert.equal(stateOf(), "publishing");
     assert.equal(sw().getAttribute("aria-checked"), "true");
     assert.equal(sw().disabled, false);
@@ -535,7 +539,7 @@ describe("Publishing", () => {
   test("switches off with the switch, and goes back to the setup fields with what is stored in them", async () => {
     await mount();
     fireEvent.click(sw());
-    await eventually(() => assert.ok(text().startsWith("Public link Off"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
     assert.deepEqual(server.posts, [["save", { enabled: false }]]);
     assert.equal(input("Page address").value, ORIGIN);
     assert.equal(input("Publishing token").value, FORM_MASK);
@@ -569,7 +573,7 @@ describe("Publishing", () => {
     // A poll is on its way, carrying what the server holds now: Publishing.
     await eventually(() => assert.ok(server.reads >= 2, `reads: ${server.reads}`));
     fireEvent.click(sw());
-    await eventually(() => assert.ok(text().startsWith("Public link Off"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
     // Watch for the stale answer landing: it would put Publishing back until the next poll corrects it.
     const seen: string[] = [];
     const deadline = Date.now() + 500;
@@ -584,11 +588,11 @@ describe("Publishing", () => {
 
   test("follows the server while the page is open", async () => {
     await mount({ pollMs: 40 });
-    assert.ok(text().startsWith("Public link Publishing"));
+    assert.ok(text().startsWith(head("Publishing")));
     server.dto = problem();
-    await eventually(() => assert.ok(text().startsWith("Public link Not reaching the page"), text()), 3000);
+    await eventually(() => assert.ok(text().startsWith(head("Not reaching the page")), text()), 3000);
     server.dto = publishing();
-    await eventually(() => assert.ok(text().startsWith("Public link Publishing"), text()), 3000);
+    await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()), 3000);
   });
 });
 
@@ -599,7 +603,7 @@ describe("Problem", () => {
 
   test("is the mockup: Not reaching the page, how old the last send is, and why", async () => {
     await mount();
-    assert.ok(text().startsWith("Public link Not reaching the page"), text());
+    assert.ok(text().startsWith(head("Not reaching the page")), text());
     assert.equal(stateOf(), "problem");
     assert.ok(text().includes("Last sent 6 min ago"), text());
     assert.equal(alerts(), AUTH_TEXT);
@@ -646,14 +650,14 @@ describe("Problem", () => {
     fireEvent.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     await settle();
-    await eventually(() => assert.ok(text().startsWith("Public link Publishing"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
     assert.equal(alerts(), "");
   });
 
   test("can still be switched off", async () => {
     await mount();
     fireEvent.click(sw());
-    await eventually(() => assert.ok(text().startsWith("Public link Off"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
   });
 });
 
@@ -664,7 +668,7 @@ describe("Planning Center can't be read", () => {
   test("is the mockup: Can't read Planning Center, why, and the way to Integrations", async () => {
     server.dto = publishing({ sourceProblem: { message: PCO }, counts: { types: 0, plans: 0, layouts: 6 } });
     await mount();
-    assert.ok(text().startsWith("Public link Can't read Planning Center"), text());
+    assert.ok(text().startsWith(head("Can't read Planning Center")), text());
     assert.equal(stateOf(), "source");
     assert.equal(alerts(), PCO_TEXT);
     // The page is reached: still switched on, still the link and what was sent.
@@ -681,7 +685,7 @@ describe("Planning Center can't be read", () => {
   test("with the page not reached too: that keeps the pill, and both notes show, the page's first", async () => {
     server.dto = publishing({ state: "problem", lastSentAt: NOW - 6 * 60_000, lastError: AUTH_PROBLEM, sourceProblem: { message: PCO } });
     await mount();
-    assert.ok(text().startsWith("Public link Not reaching the page"), text());
+    assert.ok(text().startsWith(head("Not reaching the page")), text());
     assert.equal(alerts(), `${AUTH_TEXT} | ${PCO_TEXT}`);
   });
 
@@ -689,7 +693,7 @@ describe("Planning Center can't be read", () => {
     server.dto = publishing({ sourceProblem: { message: PCO } });
     await mount({ pollMs: 50 });
     server.dto = publishing();
-    await eventually(() => assert.ok(text().startsWith("Public link Publishing"), text()));
+    await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
     assert.equal(alerts(), "");
   });
 });
@@ -781,5 +785,28 @@ describe("how long ago", () => {
     assert.equal(sentAgo(59 * 60_000), "59 min");
     assert.equal(sentAgo(2 * 3_600_000), "2 h");
     assert.equal(sentAgo(-5_000), "0 s", "a server stamp ahead of the clock is never negative");
+  });
+});
+
+// ── Finding 4: the one fact the card never said ─────────────────────────────
+
+describe("The public warning", () => {
+  const warning = () => screen.queryByText(WARNING);
+
+  test("is on the card in every state, and comes before the switch in reading order", async () => {
+    const states: [string, Dto][] = [
+      ["off", off()],
+      ["publishing", publishing()],
+      ["a page that cannot be reached", problem()],
+      ["a source that cannot be read", publishing({ sourceProblem: { message: "Planning Center did not answer." } })],
+    ];
+    for (const [name, dto] of states) {
+      server.dto = dto;
+      await mount();
+      assert.equal(!!warning(), true, `no warning when ${name}`);
+      // Document order, as a boolean: the switch FOLLOWS the warning.
+      assert.equal((warning()!.compareDocumentPosition(sw()) & 4) !== 0, true, `the warning is below the switch when ${name}`);
+      cleanup();
+    }
   });
 });

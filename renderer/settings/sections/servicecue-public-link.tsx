@@ -19,6 +19,7 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircleIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
@@ -496,16 +497,26 @@ export function PublicLinkCard({
       data-state={dto ? view : "loading"}
       className={look.card}
     >
-      <div className="flex items-center gap-2.5">
-        <h2 id="pub-title" className={look.title}>Public link</h2>
-        {dto && (
+      <h2 id="pub-title" className={look.title}>Public link</h2>
+
+      {/* Said before the switch, in every state: the risk does not end when it is on. The
+          docs carried it alone until now, and it is the one fact a church needs before a
+          pastoral note is in a plan. */}
+      <div className="flex items-start gap-2 rounded-lg border border-warn-11/35 bg-warn-11/10 px-3 py-[9px] text-[12.5px] leading-[17px] text-fg">
+        <AlertCircleIcon className="mt-px size-4 shrink-0 text-warn-11" aria-hidden="true" />
+        <span>Every note on these plans is public to anyone with the link.</span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2.5">
+        {dto ? (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-0.5 text-caption1 font-medium", pill[view].tone)}>
             <span aria-hidden="true" className="size-[7px] rounded-full bg-current" />
             {pill[view].word}
           </span>
+        ) : (
+          <span />
         )}
         <Switch
-          className="ml-auto"
           aria-label="Publish ServiceCue to the web"
           checked={view !== "off"}
           disabled={!dto || working || (view === "off" && !canEnable)}

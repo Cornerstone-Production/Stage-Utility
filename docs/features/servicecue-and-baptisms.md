@@ -416,7 +416,8 @@ access, no settings, no network addresses. The card's **Setup guide** link opens
 [deploy guide](../ops/servicecue-on-the-web.md); what the server and the page say to each
 other is in the [publishing protocol](../reference/servicecue-publishing.md).
 
-The card has four states:
+The card opens with one line, above the switch and in every state: **Every note on these
+plans is public to anyone with the link.** It has four states:
 
 | | |
 |---|---|
