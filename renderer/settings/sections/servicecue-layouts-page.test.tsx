@@ -24,7 +24,7 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within, act } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
@@ -50,14 +50,26 @@ const LAYOUTS: ServiceCueLayout[] = [
   { id: "l-light", name: "Lighting", order: 1, columnRoles: ["r-light"], rowColor: "category", accentRole: "r-light" },
 ];
 
+/** Every event is fired inside an awaited act, so the saves and redraws it sets going land inside it: a bare
+ *  fireEvent leaves them outside, as an act() warning. */
+const fire = Object.fromEntries(
+  ["blur", "change", "click", "focus", "keyDown", "mouseDown", "mouseMove", "mouseUp", "pointerUp", "scroll"].map((k) => [
+    k,
+    (el: Element | Window | Document, init?: object) =>
+      act(async () => void (fireEvent as unknown as Record<string, (e: unknown, i?: object) => unknown>)[k](el, init)),
+  ]),
+) as Record<"blur" | "change" | "click" | "focus" | "keyDown" | "mouseDown" | "mouseMove" | "mouseUp" | "pointerUp" | "scroll", (el: Element | Window | Document, init?: object) => Promise<void>>;
+
 async function mount(): Promise<void> {
-  render(
-    React.createElement(
-      QueryClientProvider,
-      { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
-      React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
-    ),
-  );
+  await act(async () => {
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+        React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
+      ),
+    );
+  });
   for (let i = 0; i < 5; i++) await settle();
 }
 
@@ -143,9 +155,9 @@ test("Landing page opens to the service types, and a tick saves them in Planning
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["wed"], types: TYPES });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /^Landing page/ })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: /^Landing page/ })));
     await settle();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
+    await fire.click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
     await eventually(() => assert.deepEqual(s.shown(), ["sun", "wed"]));
     await eventually(() => assert.deepEqual(rowHeads(), ["Landing page· Sunday Morning, Wednesday Night true"]));
   } finally {
@@ -157,7 +169,7 @@ test("Landing page opens to the service types, and a tick saves them in Planning
 
 /** Open a layout's card by its shut header, which is named for the layout and its columns. */
 async function openCard(name: string): Promise<void> {
-  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await fire.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
   await settle();
 }
 const openCards = () => [...document.querySelectorAll('input[aria-label="Layout name"]')].map((n) => (n as HTMLInputElement).value);
@@ -181,7 +193,7 @@ test("one card is open at a time", async () => {
     assert.deepEqual(openCards(), ["Audio"]);
     await openCard("Lighting");
     assert.deepEqual(openCards(), ["Lighting"]);
-    fireEvent.click(screen.getByRole("button", { name: "Collapse Lighting" }));
+    await fire.click(screen.getByRole("button", { name: "Collapse Lighting" }));
     await settle();
     assert.deepEqual(openCards(), []);
   } finally {
@@ -193,7 +205,7 @@ test("New layout starts with no roles, Clock and Time on and Max SPL off, open a
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /New layout/ })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: /New layout/ })));
     await eventually(() => assert.equal(s.layouts().length, 3));
     const made = s.layouts()[2];
     assert.deepEqual(
@@ -219,7 +231,7 @@ test("Duplicate puts '<name> copy' right after it, under its own address, open t
   try {
     await mount();
     await openCard("Audio");
-    fireEvent.click(screen.getByRole("button", { name: "Duplicate Audio" }));
+    await fire.click(screen.getByRole("button", { name: "Duplicate Audio" }));
     await eventually(() => assert.equal(s.layouts().length, 4));
     const stored = s.layouts();
     assert.deepEqual(stored.map((l) => l.name), ["Audio", "Audio copy 2", "Lighting", "Audio copy"]);
@@ -232,8 +244,8 @@ test("Duplicate puts '<name> copy' right after it, under its own address, open t
     await eventually(() => assert.match(said(), /Duplicated as Audio copy 2\./));
     // Named by the page, not the operator: its first rename moves its address, as a new layout's does.
     const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
-    fireEvent.change(box, { target: { value: "Monitors" } });
-    fireEvent.blur(box);
+    await fire.change(box, { target: { value: "Monitors" } });
+    await fire.blur(box);
     await eventually(() => assert.equal(s.layouts()[1].slug, "monitors", "renaming the copy kept its Audio copy 2 address"));
   } finally {
     s.restore();
@@ -249,8 +261,8 @@ test("deleting a layout moves focus to the card that takes its place, else the o
   });
   const remove = async (name: string) => {
     await openCard(name);
-    fireEvent.click(screen.getByRole("button", { name: `Delete ${name}` }));
-    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
+    await fire.click(screen.getByRole("button", { name: `Delete ${name}` }));
+    await fire.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
     for (let i = 0; i < 4; i++) await settle();
   };
   const focused = () => (document.activeElement as HTMLElement | null)?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? "";
@@ -274,8 +286,8 @@ test("Escape puts the name back and leaves the field, saving nothing", async () 
     await openCard("Audio");
     const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
     box.focus();
-    fireEvent.change(box, { target: { value: "Monitors" } });
-    fireEvent.keyDown(box, { key: "Escape" });
+    await fire.change(box, { target: { value: "Monitors" } });
+    await fire.keyDown(box, { key: "Escape" });
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(box.value, "Audio");
     assert.equal(document.activeElement === box, false, "Escape did not leave the field");
@@ -292,10 +304,10 @@ test("a name typed, then Duplicate clicked: the rename saves and the copy carrie
     await openCard("Audio");
     const box = screen.getByRole("textbox", { name: "Layout name" }) as HTMLInputElement;
     box.focus();
-    fireEvent.change(box, { target: { value: "Front desk" } });
+    await fire.change(box, { target: { value: "Front desk" } });
     // A click on Duplicate blurs the field first.
-    fireEvent.blur(box);
-    fireEvent.click(screen.getByRole("button", { name: /^Duplicate/ }));
+    await fire.blur(box);
+    await fire.click(screen.getByRole("button", { name: /^Duplicate/ }));
     await eventually(() => assert.deepEqual(s.layouts().map((l) => l.name), ["Front desk", "Front desk copy", "Lighting"]));
   } finally {
     s.restore();
@@ -340,16 +352,16 @@ test("removing a column sends it to Not in this layout, and clicking it there pu
   try {
     await mount();
     await openCard("Audio");
-    fireEvent.click(screen.getByRole("button", { name: "Remove Clock" }));
+    await fire.click(screen.getByRole("button", { name: "Remove Clock" }));
     await eventually(() => assert.equal(s.layouts()[0].showClock, false));
     assert.deepEqual(trayRow("l-audio"), ["Clock", "Lighting"], "Clock leads the tray, as it leads the row");
     assert.equal((document.activeElement as HTMLElement | null)?.getAttribute("aria-label"), "Add Clock", "focus fell off the removed chip");
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Lighting" }));
+    await fire.click(screen.getByRole("button", { name: "Add Lighting" }));
     await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio", "r-band", "r-light"]), undefined);
     assert.equal((document.activeElement as HTMLElement | null)?.getAttribute("aria-label"), "Remove Lighting");
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Clock" }));
+    await fire.click(screen.getByRole("button", { name: "Add Clock" }));
     await eventually(() => assert.equal(s.layouts()[0].showClock, true));
     assert.equal(columnsRow("l-audio")[0], "Clock x", "Clock goes back to its fixed place, first");
     assert.deepEqual(trayRow("l-audio"), []);
@@ -365,7 +377,7 @@ test("Max SPL, off on a layout saved without it, waits in the tray and goes in l
     await mount();
     await openCard("Lighting");
     assert.deepEqual(trayRow("l-light"), ["Audio", "Band", "Max SPL"]);
-    fireEvent.click(screen.getByRole("button", { name: "Add Max SPL" }));
+    await fire.click(screen.getByRole("button", { name: "Add Max SPL" }));
     await eventually(() => assert.equal(s.layouts()[1].showMaxSpl, true));
     assert.equal(columnsRow("l-light").at(-1), "Max SPL x");
   } finally {
@@ -378,7 +390,7 @@ test("removing the column a layout tints rows by stops the tint", async () => {
   try {
     await mount();
     await openCard("Lighting");
-    fireEvent.click(within(document.querySelector('[data-cols="l-light"]') as HTMLElement).getByRole("button", { name: "Remove Lighting" }));
+    await fire.click(within(document.querySelector('[data-cols="l-light"]') as HTMLElement).getByRole("button", { name: "Remove Lighting" }));
     await eventually(() => assert.deepEqual(s.layouts()[1].columnRoles, []));
     assert.equal(s.layouts()[1].accentRole, null, "the layout still tints by a role it no longer shows");
   } finally {
@@ -393,11 +405,11 @@ test("Under the title and Footer: each toggle says whether it is on, saves, and 
     await openCard("Audio");
     await eventually(() => assert.equal(!!document.querySelector("[data-preview] table"), true));
     const songKey = screen.getByRole("button", { name: "Song key", pressed: true });
-    fireEvent.click(songKey);
+    await fire.click(songKey);
     await eventually(() => assert.equal(s.layouts()[0].showKey, false));
     assert.equal(screen.getByRole("button", { name: "Song key" }).getAttribute("aria-pressed"), "false");
     assert.match(document.querySelector("[data-preview]")?.textContent ?? "", /total time/);
-    fireEvent.click(screen.getByRole("button", { name: "Total time", pressed: true }));
+    await fire.click(screen.getByRole("button", { name: "Total time", pressed: true }));
     await eventually(() => assert.equal(s.layouts()[0].showTotalTime, false));
     assert.doesNotMatch(document.querySelector("[data-preview]")?.textContent ?? "", /total time/, "the footer is still drawn");
   } finally {
@@ -411,10 +423,10 @@ test("the preview follows the Columns row, and says which role the previewed typ
     await mount();
     await openCard("Lighting");
     await eventually(() => assert.equal(previewHeads().includes("Lighting"), true, JSON.stringify(previewHeads())));
-    fireEvent.click(screen.getByRole("button", { name: "Add Audio" }));
+    await fire.click(screen.getByRole("button", { name: "Add Audio" }));
     await eventually(() => assert.equal(previewHeads().includes("Audio"), true, JSON.stringify(previewHeads())));
     // Youth names no lighting category: the column is left out, and the page says why.
-    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    await fire.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
     await eventually(() => assert.match(document.body.textContent ?? "", /Lighting has no category in Youth, so the preview leaves it out\./));
   } finally {
     s.restore();
@@ -427,7 +439,7 @@ test("the preview follows the Columns row, and says which role the previewed typ
 const grip = (what: string) => screen.getByRole("button", { name: `Move ${what}. Press Space to pick up` });
 const press = async (el: Element, ...keys: string[]) => {
   for (const key of keys) {
-    fireEvent.keyDown(el, { key });
+    await fire.keyDown(el, { key });
     await settle();
   }
 };
@@ -561,6 +573,8 @@ const centre = (el: Element) => {
 };
 
 /** Press on `source`, carry it to (x, y), then let go there, or press Escape first. */
+// The drag is fired with bare fireEvent on purpose: dnd-kit counts real time between the events (its own 50ms click
+// guard, the delay between press and move), and an awaited act between them moves the Escape case off it.
 async function carry(source: Element, to: { x: number; y: number }, opts: { escape?: boolean; back?: boolean } = {}) {
   const s = centre(source);
   fireEvent.mouseDown(source, { button: 0, clientX: s.x, clientY: s.y });
@@ -640,18 +654,18 @@ test("pointer: a page that scrolls mid-drag does not move the drop off the point
       const from = centre(band);
       const tray = document.querySelector('[data-tray="l-audio"]')!;
       const at = centre(tray);
-      fireEvent.mouseDown(band, { button: 0, clientX: from.x, clientY: from.y });
-      fireEvent.mouseMove(document, { clientX: from.x + 8, clientY: from.y + 8 });
+      await fire.mouseDown(band, { button: 0, clientX: from.x, clientY: from.y });
+      await fire.mouseMove(document, { clientX: from.x + 8, clientY: from.y + 8 });
       await settle();
-      fireEvent.mouseMove(document, { clientX: at.x, clientY: at.y });
+      await fire.mouseMove(document, { clientX: at.x, clientY: at.y });
       await settle();
       Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => 300 });
       placeRects("l-audio", -300);
-      fireEvent.scroll(scroller);
+      await fire.scroll(scroller);
       await settle();
-      fireEvent.mouseMove(document, { clientX: at.x, clientY: at.y - 300 });
+      await fire.mouseMove(document, { clientX: at.x, clientY: at.y - 300 });
       await settle();
-      fireEvent.mouseUp(document, { clientX: at.x, clientY: at.y - 300 });
+      await fire.mouseUp(document, { clientX: at.x, clientY: at.y - 300 });
       for (let i = 0; i < 3; i++) await settle();
       await new Promise((r) => setTimeout(r, 60));
       await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"], `the drop missed the tray: "${said()}"`));
@@ -723,8 +737,8 @@ test("a refused layout delete keeps the card, says what failed, and announces no
   try {
     await mount();
     await openCard("Lighting");
-    fireEvent.click(screen.getByRole("button", { name: "Delete Lighting" }));
-    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
+    await fire.click(screen.getByRole("button", { name: "Delete Lighting" }));
+    await fire.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete layout" }));
     await eventually(() => assert.match(alerts(), /Couldn.t save the layouts: disk full/));
     // The announcer speaks 30ms after it is told: wait past that.
     await new Promise((r) => setTimeout(r, 80));
@@ -786,10 +800,10 @@ test("a role's name saves when it is left, not at each key", async () => {
     await mount();
     const box = await eventually(() => roleBox("Band"));
     box.focus();
-    for (const v of ["M", "Mu", "Musicians"]) fireEvent.change(box, { target: { value: v } });
+    for (const v of ["M", "Mu", "Musicians"]) await fire.change(box, { target: { value: v } });
     await settle();
     assert.equal(saves(s, "/api/servicecue/roles"), 0, "a half-typed role name was saved");
-    fireEvent.keyDown(box, { key: "Enter" });
+    await fire.keyDown(box, { key: "Enter" });
     await eventually(() => assert.deepEqual(s.roles().map((r) => r.name), ["Audio", "Lighting", "Musicians"]));
   } finally {
     s.restore();
@@ -802,9 +816,9 @@ test("+ New role adds a role with an id of its own, named and ready to rename", 
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "New role" })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "New role" })));
     await eventually(() => assert.equal(s.roles().length, 4));
-    fireEvent.click(screen.getByRole("button", { name: "New role" }));
+    await fire.click(screen.getByRole("button", { name: "New role" }));
     await eventually(() => assert.equal(s.roles().length, 5));
     const made = s.roles().slice(3);
     assert.deepEqual(made.map((r) => r.name), ["New role", "New role"]);
@@ -827,17 +841,17 @@ test("deleting a role asks first, naming the layouts it leaves and tints, then t
   });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Lighting" })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "Delete role Lighting" })));
     const dialog = await eventually(() => screen.getByRole("alertdialog"));
     assert.equal(
       dialog.textContent,
       "Delete the Lighting role?Lighting is a column in Lighting and Stage manager. Deleting it removes it from both. Rows in Lighting stop being tinted by it. Lighting and Lights go back to Categories in no role, and still appear under All columns.CancelDelete role",
     );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await fire.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await settle();
     assert.equal(s.roles().length, 3, "Cancel deleted it");
-    fireEvent.click(screen.getByRole("button", { name: "Delete role Lighting" }));
-    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await fire.click(screen.getByRole("button", { name: "Delete role Lighting" }));
+    await fire.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
     await eventually(() => assert.deepEqual(s.roles().map((r) => r.id), ["r-audio", "r-band"]));
     const stored = s.layouts();
     assert.deepEqual(stored.map((l) => l.columnRoles), [["r-audio", "r-band"], [], ["r-audio"]]);
@@ -853,7 +867,7 @@ test("Categories in no role: every landing-page type's, each with where it comes
     await mount();
     // Sunday's Graphics, and Wednesday has none left: Sound and Lights are in roles.
     await eventually(() => assert.deepEqual(noRoleChips(), ["Graphics Sunday Morning"]));
-    fireEvent.click(screen.getByRole("button", { name: "Make a role for Graphics" }));
+    await fire.click(screen.getByRole("button", { name: "Make a role for Graphics" }));
     await eventually(() => assert.deepEqual(s.roles().at(-1)?.members, ["Graphics"]));
     assert.equal(s.roles().at(-1)?.name, "Graphics");
     await eventually(() => assert.deepEqual(noRoleChips(), []));
@@ -885,7 +899,7 @@ test("Make a role for each seeds one landing-page type at a time, never two at o
   });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
     for (let n = 0; n < 2; n++) {
       await eventually(() => assert.equal(held.length, 1));
       held.shift()!();
@@ -910,7 +924,7 @@ test("first run: the categories, with Make a role for each as the main action", 
     await eventually(() => assert.match(document.body.textContent ?? "", /Planning Center has 3 note categories on the landing page's service types\./));
     const chips = [...document.querySelectorAll("[data-first-run] [data-category]")].map((c) => c.textContent?.replace(/\s+/g, " ").trim());
     assert.deepEqual(chips, ["Audio Sunday Morning, Wednesday Night", "Video Sunday Morning", "Cameras Wednesday Night"]);
-    fireEvent.click(screen.getByRole("button", { name: "Make a role for each" }));
+    await fire.click(screen.getByRole("button", { name: "Make a role for each" }));
     await eventually(() => assert.deepEqual(s.roles().map((r) => r.name), ["Audio", "Video", "Cameras"]));
     await eventually(() => assert.deepEqual(roleNames(), ["Audio", "Video", "Cameras"]));
   } finally {
@@ -931,7 +945,7 @@ test("a seed that fails for one type says which, and the other still seeds", asy
   });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "Make a role for each" })));
     await eventually(() => assert.match(alerts(), /Couldn't make roles for Wednesday Night/));
     assert.deepEqual(s.roles().map((r) => r.name), ["Audio"]);
   } finally {
@@ -958,15 +972,15 @@ test("opening + Add category reads every service type's categories, one type at 
     await mount();
     const add = await eventually(() => screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement);
     await eventually(() => assert.equal(asked(), 1, "only the landing page's type is read up front"));
-    fireEvent.focus(add);
+    await fire.focus(add);
     await eventually(() => assert.equal(asked(), 2));
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(asked(), 2, "Youth was asked for while Wednesday was still being read");
-    releaseWed();
+    await act(async () => releaseWed());
     await eventually(() => assert.match(alerts(), /Couldn't load the note categories for Youth/));
     const groups = [...(screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement).querySelectorAll("optgroup")].map((g) => g.label);
     assert.deepEqual(groups, ["Sunday Morning", "Wednesday Night"]);
-    fireEvent.focus(screen.getByRole("combobox", { name: "Add a category to Audio" }));
+    await fire.focus(screen.getByRole("combobox", { name: "Add a category to Audio" }));
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(asked(), 3, "the lists were read again on the next open");
   } finally {
@@ -985,11 +999,11 @@ test("a refused role save says the roles failed, and a layout save does not clea
   try {
     await mount();
     const box = await eventually(() => roleBox("Band"));
-    fireEvent.change(box, { target: { value: "Musicians" } });
-    fireEvent.blur(box);
+    await fire.change(box, { target: { value: "Musicians" } });
+    await fire.blur(box);
     await eventually(() => assert.match(alerts(), /Couldn't save the category roles: disk full/));
     await openCard("Audio");
-    fireEvent.click(screen.getByRole("button", { name: "BPM", pressed: true }));
+    await fire.click(screen.getByRole("button", { name: "BPM", pressed: true }));
     await eventually(() => assert.equal(s.layouts()[0].showBpm, false));
     for (let i = 0; i < 3; i++) await settle();
     assert.match(alerts(), /Couldn't save the category roles: disk full/, "a layout save cleared the roles' failure");
@@ -1008,8 +1022,8 @@ test("a role delete that takes the role out of the layouts and then fails says i
   });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Band" })));
-    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "Delete role Band" })));
+    await fire.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
     await eventually(() =>
       assert.match(alerts(), /Band was taken out of every layout, but the role itself could not be deleted: disk full\. It is still listed; delete it again to finish\./),
     );
@@ -1026,8 +1040,8 @@ test("deleting the last role puts focus on New role", async () => {
   const s = serviceCueServer({ roles: [{ id: "r-only", name: "Only", members: [] }], shown: ["sun"], types: TYPES });
   try {
     await mount();
-    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete role Only" })));
-    fireEvent.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
+    await fire.click(await eventually(() => screen.getByRole("button", { name: "Delete role Only" })));
+    await fire.click(within(await eventually(() => screen.getByRole("alertdialog"))).getByRole("button", { name: "Delete role" }));
     await eventually(() => assert.equal(s.roles().length, 0));
     await eventually(() => assert.equal(document.activeElement?.textContent?.trim(), "New role", `focus is on "${document.activeElement?.tagName}"`));
   } finally {
@@ -1041,7 +1055,7 @@ test("Categories in no role counts the landing page's types, not one only previe
     await mount();
     await eventually(() => assert.deepEqual(noRoleChips(), ["Graphics Sunday Morning"]));
     await openCard("Audio");
-    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    await fire.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
     // Youth's categories are read for the preview, and its Games is in no role.
     await eventually(() => assert.equal(s.requests.filter((r) => r.path === "/api/servicecue/note-categories").length, 2));
     for (let i = 0; i < 5; i++) await settle();
@@ -1066,7 +1080,7 @@ test("no role can be added before the saved roles are read: none would survive t
   try {
     await mount();
     assert.equal(!!screen.queryByRole("button", { name: /New role|Make a role/ }), false, "a role action before the roles are read");
-    answer();
+    await act(async () => answer());
     await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "New role" }), true));
     assert.equal(saves(s, "/api/servicecue/roles"), 0);
   } finally {
@@ -1086,12 +1100,12 @@ test("+ Add category offers every read type's categories, grouped, saying which 
       "Wednesday Night: Sound (in Audio), Lights (in Lighting)",
     ]);
     const graphics = [...add.querySelectorAll("option")].find((o) => o.textContent === "Graphics") as HTMLOptionElement;
-    fireEvent.change(add, { target: { value: graphics.value } });
+    await fire.change(add, { target: { value: graphics.value } });
     await eventually(() => assert.deepEqual(s.roles()[2].members, ["Band", "Graphics"]));
     // A category in two roles makes the column ambiguous, and the page says so.
     const again = screen.getByRole("combobox", { name: "Add a category to Band" }) as HTMLSelectElement;
     const sound = [...again.querySelectorAll("option")].find((o) => o.textContent === "Sound (in Audio)") as HTMLOptionElement;
-    fireEvent.change(again, { target: { value: sound.value } });
+    await fire.change(again, { target: { value: sound.value } });
     await eventually(() => assert.match(alerts(), /In more than one role, so which column shows its note is ambiguous: Sound \(Audio and Band\)\./));
   } finally {
     s.restore();
@@ -1127,12 +1141,12 @@ test("the notice names each category in no role and its service type, and Make a
     // Youth is not on the landing page, so its own category is not counted, even
     // once it is previewed and its categories have been read.
     await openCard("Audio");
-    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
+    await fire.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "yth" } });
     await eventually(() => assert.equal(s.requests.some((r) => r.path === "/api/servicecue/note-categories" && r.method === "GET"), true));
     for (let i = 0; i < 4; i++) await settle();
     assert.doesNotMatch(notice() ?? "", /Youth/, "a type off the landing page was counted");
     const bar = document.querySelector("[data-notice]")!.parentElement!;
-    fireEvent.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
+    await fire.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
     await eventually(() => assert.equal(notice(), null));
     assert.deepEqual(s.roles().slice(5).map((r) => r.name), ["Graphics", "Livestream notes"]);
   } finally {
@@ -1182,7 +1196,7 @@ test("seeding a category a role was made for once, and then lost, makes a role w
   try {
     await mount();
     const bar = await eventually(() => document.querySelector("[data-notice]")!.parentElement!);
-    fireEvent.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
+    await fire.click(within(bar as HTMLElement).getByRole("button", { name: "Make a role for each" }));
     await eventually(() => assert.equal(s.roles().length, 7));
     const ids = s.roles().map((r) => r.id);
     assert.equal(new Set(ids).size, ids.length, `two roles share an id: ${ids.join(", ")}`);

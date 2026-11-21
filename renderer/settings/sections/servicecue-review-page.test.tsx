@@ -46,18 +46,27 @@ const LAYOUTS: ServiceCueLayout[] = [
   { id: "l-light", name: "Lighting", order: 1, columnRoles: ["r-light"], slug: "lighting" },
 ];
 
+/** Every press, change and focus is made inside act, awaited, so what it sets going (a save, a tooltip, a copy)
+ *  lands inside it. A bare fireEvent starts the work and leaves its updates outside, as an act() warning. */
+const click = (el: Element) => act(async () => void fireEvent.click(el));
+const change = (el: Element, value: string) => act(async () => void fireEvent.change(el, { target: { value } }));
+const press = (el: Element, key: string) => act(async () => void fireEvent.keyDown(el, { key }));
+const focus = (el: HTMLElement) => act(async () => el.focus());
+
 async function mount(): Promise<void> {
-  render(
-    React.createElement(
-      QueryClientProvider,
-      { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
-      React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
-    ),
-  );
+  await act(async () => {
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+        React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
+      ),
+    );
+  });
   for (let i = 0; i < 5; i++) await settle();
 }
 async function openCard(name: string): Promise<void> {
-  fireEvent.click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
+  await click(await eventually(() => screen.getByRole("button", { name: new RegExp(`^${name},`) })));
   await settle();
 }
 const optionTexts = (select: HTMLElement) => [...select.querySelectorAll("option")].map((o) => `${o.textContent}${(o as HTMLOptionElement).disabled ? " [disabled]" : ""}`);
@@ -76,7 +85,7 @@ test("Row color says By column and Pick a column, and an empty role cannot be pi
     // The stored value is unchanged: a saved layout still reads "category" and its role.
     assert.equal((mode as HTMLSelectElement).value, "category");
     assert.equal((pick as HTMLSelectElement).value, "r-audio");
-    fireEvent.change(pick, { target: { value: "r-light" } });
+    await change(pick, "r-light");
     await eventually(() => assert.equal(s.layouts()[0].accentRole, "r-light"));
     assert.equal(s.layouts()[0].rowColor, "category");
   } finally {
@@ -104,15 +113,15 @@ test("an empty role waits in the tray greyed and unaddable, with its reason, and
     assert.equal(chip!.getAttribute("aria-label"), "Video, no categories yet. Give it a category under Category roles to add it.");
     assert.match(chip!.textContent ?? "", /Video\s*No categories yet/);
     const before = s.requests.length;
-    fireEvent.click(chip!);
-    fireEvent.keyDown(chip!, { key: "Enter" });
-    fireEvent.keyDown(chip!, { key: " " });
+    await click(chip!);
+    await press(chip!, "Enter");
+    await press(chip!, " ");
     await settle();
     // Only the page's own saves: the event stream's subscribe is a POST too, and lands whenever it likes.
     assert.equal(s.requests.slice(before).filter((r) => r.method === "POST" && r.path.startsWith("/api/servicecue")).length, 0, "clicking an empty role saved something");
     assert.deepEqual(s.layouts()[0].columnRoles, ["r-audio"]);
     // Its reason is said on focus, where a keyboard operator finds it.
-    chip!.focus();
+    await focus(chip!);
     await eventually(() => assert.match(document.body.textContent ?? "", /Video has no categories yet, so it would draw no column\. Give it one under Category roles\./));
   } finally {
     s.restore();
@@ -129,7 +138,7 @@ test("the roles list tags an empty role, and giving it a category clears the tag
     assert.match((document.querySelector('[data-role="r-video"]') as HTMLElement).textContent ?? "", /No categories yet, so this column is empty\./);
     const add = (await eventually(() => screen.getByRole("combobox", { name: "Add a category to Video" }))) as HTMLSelectElement;
     const opt = [...add.querySelectorAll("option")].find((o) => o.textContent === "Video") as HTMLOptionElement;
-    fireEvent.change(add, { target: { value: opt.value } });
+    await change(add, opt.value);
     await eventually(() => assert.deepEqual(s.roles().find((r) => r.id === "r-video")?.members, ["Video"]));
     await eventually(() => assert.deepEqual(tags(), []));
     assert.equal(!!trayOf("l-audio").querySelector("[data-empty-role]"), false);
@@ -174,7 +183,7 @@ test("Landing page is the first section, above Layouts, and open while no type i
     // Landing page leads now, so its layouts are below it, not above.
     assert.match(document.body.textContent ?? "", /each with the layouts below, in that order, then All columns\./);
     // Ticking the first type does not shut it under the pointer.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
+    await click(screen.getByRole("checkbox", { name: "Sunday Morning" }));
     await eventually(() => assert.deepEqual(s.shown(), ["sun"]));
     assert.equal(landingRow().getAttribute("aria-expanded"), "true");
   } finally {
@@ -260,7 +269,7 @@ test("the open card ends in its address and the views that use it", async () => 
     await eventually(() => assert.match(footText(), /Address\s*\/servicecue\/sunday-morning\/audio/));
     assert.match(footText(), /Used by:\s*Audio tablet, Stage left/);
     // The address follows Preview with: it needs a service type.
-    fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "wed" } });
+    await change(screen.getByRole("combobox", { name: "Preview with" }), "wed");
     await eventually(() => assert.match(footText(), /\/servicecue\/wednesday-night\/audio/));
   } finally {
     s.restore();
@@ -273,7 +282,7 @@ test("Used by is what the Delete confirm names, from the same list", async () =>
     await mount();
     await openCard("Audio");
     await eventually(() => assert.match(footText(), /Used by:\s*Audio tablet, Stage left/));
-    fireEvent.click(screen.getByRole("button", { name: "Delete Audio" }));
+    await click(screen.getByRole("button", { name: "Delete Audio" }));
     await eventually(() => assert.match(document.body.textContent ?? "", /Audio tablet and Stage left use this layout\./));
     assert.doesNotMatch(document.body.textContent ?? "", /Mic wall/, "a view of another kind is not a user");
   } finally {
@@ -361,7 +370,7 @@ for (const kind of ["api", "http"] as const) {
       try {
         await mount();
         await openCard("Audio");
-        fireEvent.click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
+        await click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
         await eventually(() => assert.deepEqual(copied, [`${window.location.origin}/servicecue/sunday-morning/audio`]));
         await eventually(() => assert.match(footText(), /Copied/));
       } finally {
@@ -381,7 +390,7 @@ test("a copy the browser refuses says so instead of reading Copied", async () =>
   try {
     await mount();
     await openCard("Audio");
-    fireEvent.click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
+    await click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
     await eventually(() => assert.match(footText(), /Couldn't copy/));
     assert.doesNotMatch(footText(), /Copied/);
   } finally {

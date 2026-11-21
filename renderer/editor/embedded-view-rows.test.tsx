@@ -21,7 +21,7 @@ import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { EmbeddedViewRows } = await import("./embedded-view-rows.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
@@ -49,14 +49,17 @@ function stubLayouts(fail = false) {
   });
 }
 
-function mount(c: Config, onConfig: (c: Config) => void = () => {}) {
-  render(
-    React.createElement(
-      TooltipProvider,
-      null,
-      React.createElement(EmbeddedViewRows, { c, onConfig: onConfig as never, hostViewId: "overview", views: VIEWS }),
-    ),
-  );
+/** Mounted inside act, so the layouts read it starts has its answer land inside act too. */
+async function mount(c: Config, onConfig: (c: Config) => void = () => {}): Promise<void> {
+  await act(async () => {
+    render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(EmbeddedViewRows, { c, onConfig: onConfig as never, hostViewId: "overview", views: VIEWS }),
+      ),
+    );
+  });
 }
 const picker = () => screen.getByRole("combobox", { name: "View" });
 const optionTexts = () => [...picker().querySelectorAll("option")].map((o) => o.textContent);
@@ -65,7 +68,7 @@ const has = (name: string) => !!screen.queryByRole("switch", { name });
 test("the picker names each kind as New view does, and leaves the view being edited out", async () => {
   const f = stubLayouts();
   try {
-    mount({ type: "view-embed", viewId: null });
+    await mount({ type: "view-embed", viewId: null });
     await settle();
     assert.deepEqual(optionTexts(), ["None", "Stage left (ServiceCue)", "Everything (ServiceCue)", "Mic wall (Mic Slots)", "Home (Custom Layout)"]);
   } finally {
@@ -76,16 +79,16 @@ test("the picker names each kind as New view does, and leaves the view being edi
 test("the header and follow switches appear only for a ServiceCue view", async () => {
   const f = stubLayouts();
   try {
-    mount({ type: "view-embed", viewId: "mic-wall", showHeader: true, autoScroll: false });
+    await mount({ type: "view-embed", viewId: "mic-wall", showHeader: true, autoScroll: false });
     await settle();
     assert.equal(has("Show the view's header"), false);
     assert.equal(has("Follow the live item"), false);
     cleanup();
-    mount({ type: "view-embed", viewId: null });
+    await mount({ type: "view-embed", viewId: null });
     await settle();
     assert.equal(has("Follow the live item"), false, "nothing picked, nothing to follow");
     cleanup();
-    mount({ type: "view-embed", viewId: "stage-left" });
+    await mount({ type: "view-embed", viewId: "stage-left" });
     await settle();
     assert.equal(has("Show the view's header"), true);
     assert.equal(has("Follow the live item"), true);
@@ -98,9 +101,9 @@ test("saved header and follow values survive a pick of another kind and back", a
   const f = stubLayouts();
   try {
     const seen: Config[] = [];
-    mount({ type: "view-embed", viewId: "stage-left", showHeader: true, autoScroll: false }, (c) => seen.push(c));
+    await mount({ type: "view-embed", viewId: "stage-left", showHeader: true, autoScroll: false }, (c) => seen.push(c));
     await settle();
-    fireEvent.change(picker(), { target: { value: "mic-wall" } });
+    await act(async () => void fireEvent.change(picker(), { target: { value: "mic-wall" } }));
     assert.deepEqual(seen, [{ type: "view-embed", viewId: "mic-wall", showHeader: true, autoScroll: false }]);
   } finally {
     f.restore();
@@ -111,7 +114,7 @@ test("an embed saved pointing at its own view says so in the select, and the sav
   const f = stubLayouts();
   try {
     const seen: Config[] = [];
-    mount({ type: "view-embed", viewId: "overview" }, (c) => seen.push(c));
+    await mount({ type: "view-embed", viewId: "overview" }, (c) => seen.push(c));
     await settle();
     const chosen = (picker() as HTMLSelectElement).selectedOptions[0]?.textContent;
     assert.equal(chosen, "Stage overview · can't contain itself");
@@ -131,7 +134,7 @@ test("a read that never answers shows no failure text, only the answer once it l
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    mount({ type: "view-embed", viewId: "stage-left" });
+    await mount({ type: "view-embed", viewId: "stage-left" });
     for (let i = 0; i < 5; i++) await settle();
     assert.doesNotMatch(document.body.textContent ?? "", /Couldn't read/);
     assert.doesNotMatch(document.body.textContent ?? "", /Shows /);
@@ -144,17 +147,17 @@ test("a read that never answers shows no failure text, only the answer once it l
 test("a ServiceCue view's layout is named under the picker, with Change to its edit page", async () => {
   const f = stubLayouts();
   try {
-    mount({ type: "view-embed", viewId: "stage-left" });
+    await mount({ type: "view-embed", viewId: "stage-left" });
     await eventually(() => assert.match(document.body.textContent ?? "", /Shows the Band layout/));
     assert.equal(screen.getByRole("link", { name: "Change" }).getAttribute("href"), "/screens/stage-left/edit");
     const { INLINE_LINK } = await import("../lib/link-classes.js");
     for (const cls of INLINE_LINK.split(" ")) assert.equal(screen.getByRole("link", { name: "Change" }).classList.contains(cls), true, cls);
     cleanup();
-    mount({ type: "view-embed", viewId: "everything" });
+    await mount({ type: "view-embed", viewId: "everything" });
     await eventually(() => assert.match(document.body.textContent ?? "", /Shows All columns/));
     assert.equal(screen.getByRole("link", { name: "Change" }).getAttribute("href"), "/screens/everything/edit");
     cleanup();
-    mount({ type: "view-embed", viewId: "mic-wall" });
+    await mount({ type: "view-embed", viewId: "mic-wall" });
     await settle();
     assert.equal(!!screen.queryByRole("link", { name: "Change" }), false, "only a ServiceCue view has a layout to change");
   } finally {
@@ -165,7 +168,7 @@ test("a ServiceCue view's layout is named under the picker, with Change to its e
 test("layouts that cannot be read say so and reach the log, and Change is still there", async () => {
   const f = stubLayouts(true);
   try {
-    mount({ type: "view-embed", viewId: "stage-left" });
+    await mount({ type: "view-embed", viewId: "stage-left" });
     await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't read this view's layout/));
     assert.equal(!!screen.queryByRole("link", { name: "Change" }), true);
     await eventually(() => assert.ok(f.logs.some((l) => l.tag === "layout-editor" && /ServiceCue layouts/.test(l.message)), JSON.stringify(f.logs)));

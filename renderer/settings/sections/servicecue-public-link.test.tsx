@@ -193,6 +193,15 @@ async function mount(over: Partial<React.ComponentProps<typeof PublicLinkCard>> 
   await settle();
 }
 
+/** Every event is fired inside an awaited act, so what it sets going (a test of the page, a save, a refetch) lands
+ *  inside it. A bare fireEvent leaves those updates outside, as an act() warning. */
+const fire = {
+  click: (el: Element) => act(async () => void fireEvent.click(el)),
+  change: (el: Element, init: Parameters<typeof fireEvent.change>[1]) => act(async () => void fireEvent.change(el, init)),
+  blur: (el: Element, init?: Parameters<typeof fireEvent.blur>[1]) => act(async () => void fireEvent.blur(el, init)),
+  focus: (el: Element) => act(async () => void fireEvent.focus(el)),
+};
+
 const card = () => screen.getByRole("region", { name: "Public link" });
 const sw = () => screen.getByRole("switch", { name: "Publish ServiceCue to the web" }) as HTMLButtonElement;
 /** Which of the three states the card is drawn in. */
@@ -262,9 +271,9 @@ describe("Not set up", () => {
     server.dto = { ...off(), url: ORIGIN, token: MASK };
     await mount();
     assert.equal(sw().disabled, false);
-    fireEvent.change(input("Publishing token"), { target: { value: "" } });
+    await fire.change(input("Publishing token"), { target: { value: "" } });
     assert.equal(sw().disabled, true, "an emptied field is not the stored token while it is being edited");
-    fireEvent.blur(input("Publishing token"));
+    await fire.blur(input("Publishing token"));
     await settle();
     assert.equal(input("Publishing token").value, FORM_MASK, "the field stayed blank with the token still stored");
     assert.equal(sw().disabled, false, "the switch stayed off with a token stored");
@@ -273,21 +282,21 @@ describe("Not set up", () => {
 
   test("turns on once both fields are filled, and not before", async () => {
     await mount();
-    fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
+    await fire.change(input("Page address"), { target: { value: ORIGIN } });
     assert.equal(sw().disabled, true, "the switch turned on with an address and no token");
-    fireEvent.change(input("Publishing token"), { target: { value: "  " } });
+    await fire.change(input("Publishing token"), { target: { value: "  " } });
     assert.equal(sw().disabled, true, "a token of spaces counts as a token");
-    fireEvent.change(input("Publishing token"), { target: { value: long("tok-typed") } });
+    await fire.change(input("Publishing token"), { target: { value: long("tok-typed") } });
     assert.equal(sw().disabled, false);
-    fireEvent.change(input("Page address"), { target: { value: "" } });
+    await fire.change(input("Page address"), { target: { value: "" } });
     assert.equal(sw().disabled, true, "the switch stayed on with the address cleared");
   });
 
   test("tests the page first, then saves and publishes: the switch is the connection test", async () => {
     await mount();
-    fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
-    fireEvent.change(input("Publishing token"), { target: { value: long("tok-typed") } });
-    fireEvent.click(sw());
+    await fire.change(input("Page address"), { target: { value: ORIGIN } });
+    await fire.change(input("Publishing token"), { target: { value: long("tok-typed") } });
+    await fire.click(sw());
     await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
     assert.deepEqual(server.posts, [
       ["test", { url: ORIGIN, token: long("tok-typed") }],
@@ -311,9 +320,9 @@ describe("Not set up", () => {
     test(`stays off, saves nothing and says why, when ${when}`, async () => {
       server.test = answer;
       await mount();
-      fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
-      fireEvent.change(input("Publishing token"), { target: { value: long(token) } });
-      fireEvent.click(sw());
+      await fire.change(input("Page address"), { target: { value: ORIGIN } });
+      await fire.change(input("Publishing token"), { target: { value: long(token) } });
+      await fire.click(sw());
       await eventually(() => assert.match(alerts(), says));
       assert.deepEqual(server.posts.map(([p]) => p), ["test"], "an address that failed its test was saved and switched on");
       assert.ok(text().startsWith(head("Off")), text());
@@ -329,9 +338,9 @@ describe("Not set up", () => {
       return real(input as string, init);
     }) as typeof fetch;
     try {
-      fireEvent.change(screen.getByLabelText(/^Page address/), { target: { value: ORIGIN } });
-      fireEvent.change(screen.getByLabelText(/^Publishing token/), { target: { value: long("tok") } });
-      fireEvent.click(sw());
+      await fire.change(screen.getByLabelText(/^Page address/), { target: { value: ORIGIN } });
+      await fire.change(screen.getByLabelText(/^Publishing token/), { target: { value: long("tok") } });
+      await fire.click(sw());
       await eventually(() => assert.ok(alerts().length > 0, "nothing says the switch did not take"));
       assert.ok(text().startsWith(head("Off")));
     } finally {
@@ -411,7 +420,7 @@ describe("Publishing", () => {
     try {
       await mount();
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+        await fire.click(screen.getByRole("button", { name: "Copy" }));
       });
       await eventually(() => assert.ok(screen.getByRole("button", { name: "Copied" })));
       assert.deepEqual(copied, [`${ORIGIN}/servicecue`]);
@@ -443,7 +452,7 @@ describe("Publishing", () => {
       const button = screen.getByRole("button", { name: "QR code" });
       assert.equal(button.getAttribute("aria-expanded"), "false");
       assert.equal(text().includes("Print it for the green room"), false);
-      fireEvent.click(button);
+      await fire.click(button);
       assert.equal(button.getAttribute("aria-expanded"), "true");
       assert.ok(
         text().includes(
@@ -451,7 +460,7 @@ describe("Publishing", () => {
         ),
         text(),
       );
-      fireEvent.click(button);
+      await fire.click(button);
       assert.equal(text().includes("Print it for the green room"), false);
     });
   });
@@ -461,7 +470,7 @@ describe("Publishing", () => {
     const toggle = screen.getByRole("button", { name: "Cloudflare connection" });
     assert.equal(toggle.getAttribute("aria-expanded"), "false");
     assert.ok(screen.queryByLabelText(/^Page address/) === null, "the connection fields are open before they were asked for");
-    fireEvent.click(toggle);
+    await fire.click(toggle);
     assert.equal(toggle.getAttribute("aria-expanded"), "true");
     assert.equal(input("Page address").value, ORIGIN);
     assert.equal(input("Publishing token").type, "password");
@@ -470,9 +479,9 @@ describe("Publishing", () => {
 
   test("saves a token typed over the mask, to the same address, when the field is left", async () => {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-new" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Publishing token"), { target: { value: "tok-new" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     await settle();
     assert.deepEqual(server.posts[0], ["save", { token: "tok-new" }], "the address was sent with a token for the same address");
@@ -482,9 +491,9 @@ describe("Publishing", () => {
   test("says so when the server refuses a token typed in the connection fields, and stays publishing", async () => {
     server.refuseSave = SHORT_TOKEN;
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Publishing token"), { target: { value: "too-short" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Publishing token"), { target: { value: "too-short" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.equal(alerts(), SHORT_TOKEN));
     assert.equal(stateOf(), "publishing", "a refused token took the card out of Publishing");
     assert.equal(server.dto.token, MASK, "the stored token was touched by a write the server refused");
@@ -492,9 +501,9 @@ describe("Publishing", () => {
 
   test("puts the stored token back when its field is emptied and left, and sends nothing", async () => {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Publishing token"), { target: { value: "" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Publishing token"), { target: { value: "" } });
+    await fire.blur(input("Publishing token"));
     await settle();
     assert.equal(input("Publishing token").value, FORM_MASK, "the field stayed blank while the server still holds the token");
     assert.deepEqual(server.posts, []);
@@ -502,24 +511,24 @@ describe("Publishing", () => {
 
   test("does not save the mask back as a token", async () => {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.focus(input("Publishing token"));
-    fireEvent.blur(input("Publishing token"));
-    fireEvent.blur(input("Page address"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.focus(input("Publishing token"));
+    await fire.blur(input("Publishing token"));
+    await fire.blur(input("Page address"));
     await settle();
     assert.deepEqual(server.posts, [], "nothing was changed and something was saved");
   });
 
   test("asks for the token again before it moves to a new address, instead of sending half of it", async () => {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
-    fireEvent.blur(input("Page address"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
+    await fire.blur(input("Page address"));
     await settle();
     assert.deepEqual(server.posts, [], "a new address was sent with the token it was not saved for");
     assert.ok(text().includes("A different address needs its token: paste it again."));
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-for-it" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.change(input("Publishing token"), { target: { value: "tok-for-it" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     await settle();
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
@@ -527,21 +536,21 @@ describe("Publishing", () => {
 
   test("Tab from a new address to the token field saves nothing and says nothing until the pair is left", async () => {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
-    fireEvent.blur(input("Page address"), { relatedTarget: input("Publishing token") });
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
+    await fire.blur(input("Page address"), { relatedTarget: input("Publishing token") });
     await settle();
     assert.ok(!text().includes("A different address needs its token"), "told it needs a token on the way to typing one");
     assert.equal(input("Publishing token").disabled, false);
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-for-it" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.change(input("Publishing token"), { target: { value: "tok-for-it" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
   });
 
   test("switches off with the switch, and goes back to the setup fields with what is stored in them", async () => {
     await mount();
-    fireEvent.click(sw());
+    await fire.click(sw());
     await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
     assert.deepEqual(server.posts, [["save", { enabled: false }]]);
     assert.equal(input("Page address").value, ORIGIN);
@@ -553,7 +562,7 @@ describe("Publishing", () => {
   test("tells the operator when the page could not be asked to forget its copy", async () => {
     server.save = (body) => ({ ...off(), url: ORIGIN, token: MASK, dropped: { ok: false, message: "No answer from the page within 10 seconds." }, ...(body ? {} : {}) });
     await mount();
-    fireEvent.click(sw());
+    await fire.click(sw());
     await eventually(() => assert.match(alerts(), /Publishing is off, but the page didn't answer/));
     assert.match(alerts(), /may still show the last rundown it was sent\. No answer from the page within 10 seconds\./);
   });
@@ -562,10 +571,10 @@ describe("Publishing", () => {
     const MOVED = "https://another.example-account.example";
     server.save = (body) => ({ ...publishing(), url: String(body.url ?? ORIGIN), token: MASK, dropped: { ok: false, message: "No answer from the page within 10 seconds." } });
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    fireEvent.change(input("Page address"), { target: { value: MOVED } });
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-for-it" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Page address"), { target: { value: MOVED } });
+    await fire.change(input("Publishing token"), { target: { value: "tok-for-it" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.match(alerts(), /The address changed, but the page didn't answer/));
     assert.equal(stateOf(), "publishing", "the card left Publishing for an address that was saved");
   });
@@ -575,7 +584,7 @@ describe("Publishing", () => {
     await mount({ pollMs: 30 });
     // A poll is on its way, carrying what the server holds now: Publishing.
     await eventually(() => assert.ok(server.reads >= 2, `reads: ${server.reads}`));
-    fireEvent.click(sw());
+    await fire.click(sw());
     await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
     // Watch for the stale answer landing: it would put Publishing back until the next poll corrects it.
     const seen: string[] = [];
@@ -621,7 +630,7 @@ describe("Problem", () => {
     assert.equal(screen.getByRole("button", { name: "Cloudflare connection" }).getAttribute("aria-expanded"), "true");
     assert.ok(input("Publishing token"));
     // And the operator can still shut them.
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
     assert.ok(screen.queryByLabelText(/^Page address/) === null);
   });
 
@@ -649,8 +658,8 @@ describe("Problem", () => {
 
   test("takes the token again where it says to, and recovers", async () => {
     await mount();
-    fireEvent.change(input("Publishing token"), { target: { value: "tok-fixed" } });
-    fireEvent.blur(input("Publishing token"));
+    await fire.change(input("Publishing token"), { target: { value: "tok-fixed" } });
+    await fire.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     await settle();
     await eventually(() => assert.ok(text().startsWith(head("Publishing")), text()));
@@ -659,7 +668,7 @@ describe("Problem", () => {
 
   test("can still be switched off", async () => {
     await mount();
-    fireEvent.click(sw());
+    await fire.click(sw());
     await eventually(() => assert.ok(text().startsWith(head("Off")), text()));
   });
 });
@@ -681,7 +690,7 @@ describe("Planning Center can't be read", () => {
 
     const link = screen.getByRole("link", { name: "Open Integrations" });
     assert.equal(link.getAttribute("href"), INTEGRATIONS);
-    fireEvent.click(link);
+    await fire.click(link);
     await eventually(() => assert.equal(router.state.location.pathname, INTEGRATIONS));
   });
 
@@ -818,30 +827,30 @@ describe("The public warning", () => {
 
 describe("The token's length", () => {
   const line = () => document.getElementById("pl-tokline")?.textContent ?? "";
-  const fill = (address: string, token: string) => {
-    fireEvent.change(input("Page address"), { target: { value: address } });
-    fireEvent.change(input("Publishing token"), { target: { value: token } });
+  const fill = async (address: string, token: string) => {
+    await fire.change(input("Page address"), { target: { value: address } });
+    await fire.change(input("Publishing token"), { target: { value: token } });
   };
 
   test("a short token keeps the switch off and counts what is typed, under the field", async () => {
     await mount();
-    fill(ORIGIN, "k3j9x0q2m8vb");
+    await fill(ORIGIN, "k3j9x0q2m8vb");
     assert.equal(sw().disabled, true);
     assert.equal(line(), "The token needs at least 32 characters (12 so far).");
     // The switch points at the reason, for a screen reader.
     assert.equal(sw().getAttribute("aria-describedby"), "pl-tokline");
     assert.equal(document.getElementById(sw().getAttribute("aria-describedby")!) !== null, true);
-    fireEvent.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q" } });
+    await fire.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q" } });
     assert.equal(line(), "The token needs at least 32 characters (31 so far).");
     assert.equal(sw().disabled, true);
-    fireEvent.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q2" } });
+    await fire.change(input("Publishing token"), { target: { value: "k3j9x0q2m8vbk3j9x0q2m8vbk3j9x0q2" } });
     assert.equal(line(), "The token is long enough.");
     assert.equal(sw().disabled, false);
   });
 
   test("the length is counted after trimming, as the field is sent", async () => {
     await mount();
-    fill(ORIGIN, `  ${"a".repeat(31)}  `);
+    await fill(ORIGIN, `  ${"a".repeat(31)}  `);
     assert.equal(line(), "The token needs at least 32 characters (31 so far).");
     assert.equal(sw().disabled, true);
   });
@@ -850,20 +859,20 @@ describe("The token's length", () => {
     await mount();
     const HINT = "The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.";
     assert.equal(line(), HINT);
-    fireEvent.change(input("Publishing token"), { target: { value: "short" } });
+    await fire.change(input("Publishing token"), { target: { value: "short" } });
     assert.equal(line(), HINT, "a reason was given for a token with no address beside it");
-    fireEvent.change(input("Page address"), { target: { value: ORIGIN } });
+    await fire.change(input("Page address"), { target: { value: ORIGIN } });
     assert.match(line(), /^The token needs at least 32 characters \(5 so far\)\.$/);
-    fireEvent.change(input("Page address"), { target: { value: "" } });
+    await fire.change(input("Page address"), { target: { value: "" } });
     assert.equal(line(), HINT);
   });
 
   test("a space or a character outside printable ASCII gets the server's own sentence", async () => {
     await mount();
-    fill(ORIGIN, `${"a".repeat(20)} ${"b".repeat(20)}`);
+    await fill(ORIGIN, `${"a".repeat(20)} ${"b".repeat(20)}`);
     assert.equal(line(), "The publishing token can only use letters, digits and punctuation, with no spaces.");
     assert.equal(sw().disabled, true);
-    fireEvent.change(input("Publishing token"), { target: { value: "é".repeat(40) } });
+    await fire.change(input("Publishing token"), { target: { value: "é".repeat(40) } });
     assert.equal(line(), "The publishing token can only use letters, digits and punctuation, with no spaces.");
     assert.equal(sw().disabled, true);
   });
@@ -875,7 +884,7 @@ describe("The token's length", () => {
     await mount();
     const seen: string[] = [];
     for (const t of tokens) {
-      fill(ORIGIN, t);
+      await fill(ORIGIN, t);
       const accepted = checkPublishToken(t.trim()) === null;
       assert.equal(sw().disabled, !accepted, `${JSON.stringify(t)}: the server ${accepted ? "takes" : "refuses"} it`);
       seen.push(`${accepted ? "on " : "off"} ${JSON.stringify(t)}`);
