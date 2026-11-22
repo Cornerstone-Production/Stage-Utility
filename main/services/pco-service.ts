@@ -1300,8 +1300,11 @@ class PcoService {
     if (cached) return cached;
 
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/${pcoSegment("collection", collection)}?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
+    // A failed read throws to the caller, which names it ([pco] on the route) and answers 502. It
+    // used to parse to an empty list with a 200, so Planning Center being down read as "this service
+    // type has no note categories": Home said All clear and the layouts page said nothing at all.
+    const json = await this.request(url, appId, secret);
+    const items = Array.isArray(json.data) ? json.data : [];
     const result = items
       .map((n) => ({
         name: typeof n.attributes.name === "string" ? n.attributes.name : "",
@@ -1311,9 +1314,8 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    // Only cache a real answer. A failed request parses to an empty list, and
-    // caching that would store a FAILURE as data, with a success's TTL.
-    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
+    // Only a real answer reaches here, so only a real answer is cached.
+    this.cacheSet(cacheKey, result, TTL_LONG_MS);
     return result;
   }
 

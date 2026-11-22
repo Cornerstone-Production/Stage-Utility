@@ -22,7 +22,7 @@ export interface ServiceCueServerSetup {
   /** Each service type's note categories. */
   cats?: Record<string, string[]>;
   rundown?: (typeId: string) => unknown;
-  views?: { id: string; name: string; serviceCueLayoutId?: string | null }[];
+  views?: { id: string; name: string; kind?: string; serviceCueLayoutId?: string | null }[];
   pcoConfigured?: boolean;
   /** Answer a route yourself: return (or resolve to) undefined to fall through to the
    *  default, which is how a test holds a request back and then lets it answer as usual. */

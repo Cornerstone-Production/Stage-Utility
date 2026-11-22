@@ -90,6 +90,9 @@ const ROLES = [
 ];
 
 const requests: { method: string; path: string; search: string }[] = [];
+/** What the Worker holds as the church's state and landing-page config; a case changes them. */
+let stateDoc: unknown = STATE;
+let configDoc: unknown = { serviceTypeIds: ["1001"] };
 /** How the read of the edge is answered: when the church last sent a heartbeat, and the edge's clock. */
 let heartbeatAnswer: () => unknown = () => ok({ at: EDGE - 5_000, now: EDGE });
 /** The rundown the Worker holds; a case changes it. */
@@ -124,7 +127,7 @@ g.fetch = async (input: unknown, init?: RequestInit) => {
   }
   switch (u.pathname) {
     case "/api/state":
-      return ok(STATE);
+      return ok(stateDoc);
     case "/api/service-types":
       return ok([{ id: "1001", name: "Weekend" }]);
     case "/api/servicecue/layouts":
@@ -132,7 +135,7 @@ g.fetch = async (input: unknown, init?: RequestInit) => {
     case "/api/servicecue/roles":
       return ok(ROLES);
     case "/api/servicecue/config":
-      return ok({ serviceTypeIds: ["1001"] });
+      return ok(configDoc);
     case "/api/servicecue/rundown":
       return ok(rundown);
     case "/api/plans/upcoming":
@@ -223,6 +226,8 @@ beforeEach(() => {
   perfNow = 50_000;
   heartbeatAnswer = () => ok({ at: EDGE - 5_000, now: EDGE });
   rundown = RUNDOWN;
+  stateDoc = STATE;
+  configDoc = { serviceTypeIds: ["1001"] };
   unpublished = new Set();
   broken = new Set();
 });
@@ -260,6 +265,26 @@ describe("the landing page", () => {
       await eventually(() => assert.ok(screen.getByText("Weekend")));
       assert.equal(linkNamed("Edit layouts")?.getAttribute("href"), "/servicecue/presets");
     });
+  });
+});
+
+describe("the landing page's empty messages", () => {
+  // In the building these are links (to Integrations, and to Landing page); the public page has
+  // neither to offer, so they are plain text there, and the flag is what makes them so.
+  const links = () => screen.queryAllByRole("link").map((a) => a.getAttribute("href"));
+
+  test("Planning Center not connected: plain text, no link to settings", async () => {
+    stateDoc = { ...STATE, pcoConfigured: false };
+    await load("/servicecue");
+    await eventually(() => assert.match(document.body.textContent ?? "", /Connect Planning Center to use ServiceCue\./));
+    assert.deepEqual(links(), [], "the public page links to settings it does not have");
+  });
+
+  test("no service types enabled: plain text, no link to the layouts page", async () => {
+    configDoc = { serviceTypeIds: [] };
+    await load("/servicecue");
+    await eventually(() => assert.match(document.body.textContent ?? "", /No service types enabled\. Choose them on the ServiceCue layouts page, under Landing page\./));
+    assert.deepEqual(links(), [], "the public page links to an editor it does not have");
   });
 });
 

@@ -154,7 +154,10 @@ of that type without changing the one the app follows; see
 [Plan switcher](features/servicecue-and-baptisms.md#plan-switcher). `?from=<path>`
 names the launcher a rundown was opened from, `/servicecue` or
 `/servicecue/manage`, which its back arrow returns to; without it, or with any
-other path, the arrow goes to `/servicecue`.
+other path, the arrow goes to `/servicecue`. The launcher's link to a rundown and the
+arrow back also carry `?transport=poll` and `?text=`, and nothing else of the query,
+so a panel opened as `/servicecue?transport=poll` keeps [polling](#polling-transport)
+from the launcher to the rundown and back.
 
 ## Polling transport
 

@@ -146,3 +146,22 @@ describe("useRevealNonce is gone", () => {
     assert.equal(typeof flashModule.useRevealTarget, "function");
   });
 });
+
+describe("Getting Started names ServiceCue", () => {
+  test("the Create a view step lists ServiceCue among what a view can be", () => {
+    // Read from the rendered card: a hint that dropped the name reads as a view kind
+    // that does not exist, and a first-run operator never finds ServiceCue.
+    const c = render(
+      withQueryClient(
+        <GettingStarted
+          stageState={{ pcoConfigured: false, views: [], outputs: [] } as unknown as StageState}
+          onNavigate={() => {}}
+          onDismiss={() => {}}
+        />,
+      ),
+    );
+    const step = [...c.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Create a view"));
+    assert.ok(step, "the Create a view step is gone");
+    assert.match(step.textContent ?? "", /mic slots, a dashboard, ServiceCue, transcription, or a custom layout/);
+  });
+});

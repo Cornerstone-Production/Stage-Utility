@@ -323,6 +323,18 @@ stage and SPL rundown views are configured per display rather than per view, so
 an Embedded view pointed at one says so instead of rendering it — Embedded
 screen is the only way to bring one into a tile.
 
+The **View** picker names each view with its kind as New view does (`Stage left
+(ServiceCue)`, `Mic wall (Mic Slots)`) and never offers the view being edited, which
+could only contain itself. Two switches appear only when the picked view is a ServiceCue
+view, since they act on nothing else: **Show the view's header** (off by default, since a
+layout usually has its own) and **Follow the live item** (on by default, scrolling the
+rundown to keep Planning Center's live item on screen, and only the tile, never the
+layout around it). Their saved values are kept if the picked view is later switched to
+another kind and apply again if it is switched back. For a ServiceCue view, a line under
+the picker names its layout (`Shows the Band layout`, or `Shows All columns`) with a
+**Change** link to that view's page, at its **Layout** setting. See
+[ServiceCue](../features/servicecue-and-baptisms.md#where-the-rundown-can-appear).
+
 A screen tile's status dot means a **browser is actually open on that display**.
 Each display page heartbeats, and a screen that stops reporting goes dark within
 ninety seconds — whether it was unplugged, switched off or simply closed. On a

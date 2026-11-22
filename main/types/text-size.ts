@@ -9,6 +9,9 @@
 export const MIN_TEXT_SIZE = 50;
 export const MAX_TEXT_SIZE = 300;
 export const DEFAULT_TEXT_SIZE = 100;
+/** One press of the page's A+ / A-, and one step of a screen's Text size field: the two
+ *  controls move a size by the same amount. */
+export const TEXT_SIZE_STEP = 5;
 
 /** Round to a whole percent and hold it inside [MIN, MAX]. */
 export function clampTextSize(n: number): number {

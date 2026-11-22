@@ -358,6 +358,14 @@ describe("text size", () => {
     assert.deepEqual(calls, [["textSize", "display-1", 150]]);
   });
 
+  test("a stepper press moves it by five, the same as the ServiceCue page's A+ and A-", async () => {
+    const { calls } = mount({ outputs: [{ ...MINE, textSize: 100 }] });
+    const plus = screen.getAllByLabelText("Increase").find((b) => field().parentElement?.contains(b))!;
+    await act(async () => { fireEvent.pointerDown(plus, { pointerId: 1, isPrimary: true }); await settle(); });
+    await act(async () => { fireEvent.pointerUp(plus, { pointerId: 1, isPrimary: true }); await settle(); });
+    assert.deepEqual(calls, [["textSize", "display-1", 105]]);
+  });
+
   test("is held between 50 and 300", async () => {
     const { calls } = mount({});
     await act(async () => { fireEvent.focus(field()); await settle(); });

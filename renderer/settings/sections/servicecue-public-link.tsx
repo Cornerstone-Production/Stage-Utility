@@ -19,6 +19,7 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircleIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
@@ -35,7 +36,7 @@ import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { ConnectionField } from "./connection-field";
-import { selectMask, typedTokenOf } from "./servicecue-token";
+import { selectMask, tokenReason, typedTokenOf } from "./servicecue-token";
 import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
 import { advancedTabPath } from "./advanced-settings";
 import { byOrder } from "./servicecue-layouts-model";
@@ -55,6 +56,9 @@ const QUERY_KEY = ["servicecue:getPublish"] as const;
 
 /** Where Planning Center's credentials are set. */
 const INTEGRATIONS_ROUTE = "/settings/integrations";
+
+/** The line under the setup fields that says why the switch is off; the switch is described by it. */
+const TOKEN_LINE_ID = "pl-tokline";
 
 const ADDRESS_PLACEHOLDER = "https://servicecue.your-account.workers.dev";
 
@@ -383,7 +387,10 @@ export function PublicLinkCard({
   const addr = addrDraft ?? dto?.url ?? "";
   const tok = tokDraft ?? (tokenStored ? FORM_MASK : "");
   const typedToken = typedTokenOf(tokDraft);
-  const canEnable = addr.trim() !== "" && (typedToken !== null || (tokDraft === null && tokenStored));
+  // A token typed here is checked as it is typed, by the rule the server holds it to, so the switch
+  // never turns on for one the server refuses; a stored token (the mask) was checked when it was saved.
+  const reason = typedToken !== null ? tokenReason(typedToken) : null;
+  const canEnable = addr.trim() !== "" && ((typedToken !== null && reason === null) || (tokDraft === null && tokenStored));
   const link = dto?.url ? `${dto.url}/servicecue` : "";
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
   const ageMs = status?.lastSentAt != null ? status.now - status.lastSentAt + Math.max(0, clock - dataUpdatedAt) : null;
@@ -475,9 +482,33 @@ export function PublicLinkCard({
     );
   }
 
+  // Under the token field, where the eye is while typing; the switch points at it. Until both
+  // fields are filled it is the hint; then the token's own state, said before the flip. The
+  // setup guide stays beside it whichever is showing.
+  const tokenLine =
+    view === "off" ? (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {addr.trim() !== "" && typedToken !== null ? (
+          <span id={TOKEN_LINE_ID} className={cn("text-caption1", reason ? "text-warn-11" : "text-ok-11")}>
+            {reason ?? "The token is long enough."}
+          </span>
+        ) : (
+          <span id={TOKEN_LINE_ID} className="text-caption1 text-fg-muted">
+            The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.
+          </span>
+        )}
+        <Button asChild variant="transparent" size="small" className="px-1 text-accent">
+          <a href={docsPageUrl("ops/servicecue-on-the-web", branch)} target="_blank" rel="noreferrer">
+            Setup guide
+          </a>
+        </Button>
+      </div>
+    ) : null;
+
   const fields = (
     <ConnectionFields
       setup={view === "off"}
+      below={tokenLine}
       addr={addr}
       tok={tok}
       disabled={working}
@@ -496,17 +527,28 @@ export function PublicLinkCard({
       data-state={dto ? view : "loading"}
       className={look.card}
     >
-      <div className="flex items-center gap-2.5">
-        <h2 id="pub-title" className={look.title}>Public link</h2>
-        {dto && (
+      <h2 id="pub-title" className={look.title}>Public link</h2>
+
+      {/* Said before the switch, in every state: the risk does not end when it is on. The
+          docs carried it alone until now, and it is the one fact a church needs before a
+          pastoral note is in a plan. */}
+      <div className="flex items-start gap-2 rounded-lg border border-warn-11/35 bg-warn-11/10 px-3 py-[9px] text-[12.5px] leading-[17px] text-fg">
+        <AlertCircleIcon className="mt-px size-4 shrink-0 text-warn-11" aria-hidden="true" />
+        <span>Every note on these plans is public to anyone with the link.</span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2.5">
+        {dto ? (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-0.5 text-caption1 font-medium", pill[view].tone)}>
             <span aria-hidden="true" className="size-[7px] rounded-full bg-current" />
             {pill[view].word}
           </span>
+        ) : (
+          <span />
         )}
         <Switch
-          className="ml-auto"
           aria-label="Publish ServiceCue to the web"
+          aria-describedby={view === "off" ? TOKEN_LINE_ID : undefined}
           checked={view !== "off"}
           disabled={!dto || working || (view === "off" && !canEnable)}
           onCheckedChange={(on) => void (on ? turnOn() : turnOff())}
@@ -602,16 +644,6 @@ export function PublicLinkCard({
         <div className="flex flex-col gap-2.5">
           {notice && <Note>{notice}</Note>}
           {fields}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <span className="text-caption2 text-fg-subtle">
-              The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.
-            </span>
-            <Button asChild variant="transparent" size="small" className="px-1 text-accent">
-              <a href={docsPageUrl("ops/servicecue-on-the-web", branch)} target="_blank" rel="noreferrer">
-                Setup guide
-              </a>
-            </Button>
-          </div>
         </div>
       )}
 
@@ -696,12 +728,15 @@ function ConnectionFields({
   tok,
   disabled,
   hint,
+  below,
   onAddr,
   onTok,
   onTokBlank,
   onLeave,
 }: {
   setup: boolean;
+  /** Under the token field, in its own column. */
+  below?: ReactNode;
   addr: string;
   tok: string;
   disabled: boolean;
@@ -737,21 +772,24 @@ function ConnectionFields({
         />
       </ConnectionField>
       <ConnectionField label="Publishing token" hint={setup ? "The same one set on the page" : undefined} id={setup ? "pl-tok" : "pl-tok2"}>
-        <Input
-          id={setup ? "pl-tok" : "pl-tok2"}
-          className="font-mono"
-          type="password"
-          placeholder="Paste the token"
-          value={tok}
-          disabled={disabled}
-          autoComplete="off"
-          onFocus={(e) => selectMask(e, tok)}
-          onChange={(e) => onTok(e.target.value)}
-          onBlur={(e) => {
-            if (tok.trim() === "") onTokBlank();
-            leave?.(e);
-          }}
-        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <Input
+            id={setup ? "pl-tok" : "pl-tok2"}
+            className="font-mono"
+            type="password"
+            placeholder="Paste the token"
+            value={tok}
+            disabled={disabled}
+            autoComplete="off"
+            onFocus={(e) => selectMask(e, tok)}
+            onChange={(e) => onTok(e.target.value)}
+            onBlur={(e) => {
+              if (tok.trim() === "") onTokBlank();
+              leave?.(e);
+            }}
+          />
+          {below}
+        </div>
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
     </div>

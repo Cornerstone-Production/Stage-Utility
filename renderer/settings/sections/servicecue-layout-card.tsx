@@ -4,11 +4,13 @@
 // it is the name field, Duplicate and Delete, the rows that set what the layout shows,
 // and a preview of it against the plan the page previews with.
 
-import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useRef, type ReactNode, type Ref } from "react";
+import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, MinusCircleIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
-import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { copyText } from "../../lib/clipboard";
+import { serviceCueUrl } from "../../main/servicecue-index-view";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
 import { RundownTable } from "../../main/rundown-table";
@@ -21,6 +23,7 @@ import {
   fixedOn,
   FOOTER,
   layoutRoles,
+  layoutUsers,
   listOf,
   roleApplies,
   toggleOn,
@@ -59,6 +62,7 @@ export function LayoutCard({
   onUpdate,
   onColumns,
   preview,
+  views,
   layoutIds,
   nameRef,
 }: {
@@ -75,6 +79,8 @@ export function LayoutCard({
   /** A change to the Columns row. `focus` names the control to focus once it has drawn. */
   onColumns: (change: ColumnChange, focus?: string) => void;
   preview: PreviewSource;
+  /** The app's views, for Used by; null until the stage state is read. */
+  views: readonly { name: string; kind?: string; serviceCueLayoutId?: string | null }[] | null;
   /** Every layout's id in page order: what the card's grip moves it among. */
   layoutIds: readonly string[];
   /** The open card's name field, for the page to focus on a new or copied layout. */
@@ -177,6 +183,13 @@ export function LayoutCard({
           >
             {tray.map((it) => {
               const id = it.kind === "fixed" ? `fixed:${it.key}` : it.id;
+              if (it.kind === "role" && it.empty) {
+                return (
+                  <span key={id} role="listitem" className="inline-flex">
+                    <EmptyRoleChip name={it.name} />
+                  </span>
+                );
+              }
               return (
                 <span key={id} role="listitem" className="inline-flex">
                   <TrayChip
@@ -212,6 +225,7 @@ export function LayoutCard({
           <RowColor layout={l} roles={roles} onUpdate={onUpdate} />
         </Row>
         <Preview layout={shown} roles={roles} source={preview} />
+        <CardFooter layout={l} source={preview} views={views} />
       </div>
     </div>
   );
@@ -223,6 +237,28 @@ const CHIP =
 
 const ICON_BUTTON =
   "inline-grid size-6 shrink-0 place-items-center rounded-[5px] p-0 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-30";
+
+/** A role with no categories, in "Not in this layout": shown, so it is not missing, but it
+ *  is no button and no drag handle, since a column for it would draw nothing. Focusable
+ *  so the reason is reachable from the keyboard. */
+function EmptyRoleChip({ name }: { name: string }) {
+  return (
+    <Tooltip label={`${name} has no categories yet, so it would draw no column. Give it one under Category roles.`}>
+      <span
+        role="button"
+        tabIndex={0}
+        aria-disabled="true"
+        aria-label={`${name}, no categories yet. Give it a category under Category roles to add it.`}
+        data-empty-role
+        className="inline-flex h-[30px] cursor-not-allowed select-none items-center gap-1 whitespace-nowrap rounded-md border border-dotted border-line-strong bg-fill pl-[7px] pr-2.5 text-footnote text-fg-subtle opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <MinusCircleIcon className="size-[13px]" aria-hidden="true" />
+        {name}
+        <small className="text-caption2 text-fg-subtle">No categories yet</small>
+      </span>
+    </Tooltip>
+  );
+}
 
 /** A role column: moved by its grip, taken out by its X. */
 function RoleChip({ item, order, children }: { item: DragItem; order: readonly string[]; children: ReactNode }) {
@@ -298,24 +334,75 @@ function RowColor({ layout: l, roles, onUpdate }: { layout: ServiceCueLayout; ro
         <SelectTrigger className="w-36" aria-label="Row color"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="pco">From PCO</SelectItem>
-          <SelectItem value="category">By category</SelectItem>
+          <SelectItem value="category">By column</SelectItem>
           <SelectItem value="none">None</SelectItem>
         </SelectContent>
       </Select>
       {(l.rowColor ?? "pco") === "category" && (
         <Select value={l.accentRole ?? "__none__"} onValueChange={(v) => onUpdate({ accentRole: v === "__none__" ? null : v })}>
-          <SelectTrigger className="w-44" aria-label="Row color category"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-44" aria-label="Row color column"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">Pick a category…</SelectItem>
+            <SelectItem value="__none__">Pick a column…</SelectItem>
             {/* Every role, not only this layout's columns: "Lighting has a cue here" is
                 worth a tint without showing the cue's text. */}
-            {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            {roles.map((r) => (
+              // A role with no categories draws no column, so tinting by it tints nothing.
+              <SelectItem key={r.id} value={r.id} disabled={r.members.length === 0}>
+                {r.members.length === 0 ? `${r.name} (no categories yet)` : r.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
     </div>
   );
 }
+
+/** The address a rundown for this layout opens at, and the screens set to it. The address
+ *  needs a service type, so it uses the one the preview does; without one it shows the
+ *  template and Copy is off. Copy takes the full address, this app's origin included. */
+function CardFooter({ layout: l, source: p, views }: { layout: ServiceCueLayout; source: PreviewSource; views: LayoutCardProps["views"] }) {
+  const typeName = p.types.find((t) => t.id === p.typeId)?.name;
+  const path = typeName ? serviceCueUrl(typeName, l.id, l.slug) : `/servicecue/<service type>/${l.slug ?? l.id}`;
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const users = views ? layoutUsers(l, views) : null;
+  const onCopy = async () => {
+    setCopy((await copyText(`${window.location.origin}${path}`)) ? "copied" : "failed");
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopy("idle"), 1600);
+  };
+  return (
+    <div
+      data-layout-foot={l.id}
+      className="-mx-3.5 -mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-b-xl border-t border-line bg-fill px-3.5 py-2.5 text-caption1 text-fg-muted max-sm:-mx-3 max-sm:-mb-3 max-sm:px-3"
+    >
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="text-fg-subtle">Address</span>{" "}
+        <code className="font-mono text-caption1 text-fg [overflow-wrap:anywhere]">{path}</code>
+        <Button
+          variant="filled"
+          size="small"
+          onClick={() => void onCopy()}
+          disabled={!typeName}
+          tooltip={typeName ? "" : "An address needs a service type. Connect Planning Center to copy one."}
+        >
+          <CopyIcon className="size-3" aria-hidden="true" />
+          {copy === "copied" ? "Copied" : copy === "failed" ? "Couldn't copy" : "Copy"}
+        </Button>
+      </span>
+      {users && (
+        <span>
+          <span className="mr-1.5 text-fg-subtle">Used by:</span>{" "}
+          {users.length > 0 ? <b className="font-medium text-fg">{users.join(", ")}</b> : "no views yet"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+type LayoutCardProps = Parameters<typeof LayoutCard>[0];
 
 /** The layout drawn against the previewed plan: capped in height, scrolling inside. */
 function Preview({ layout: l, roles, source: p }: { layout: ServiceCueLayout; roles: CategoryRole[]; source: PreviewSource }) {

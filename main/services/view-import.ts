@@ -434,12 +434,12 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     const add: typeof svIncoming = [];
     for (const l of svIncoming) {
       if (!isRecord(l) || typeof l.id !== "string" || typeof l.name !== "string") {
-        skipped.push("a ServiceCue preset with no id or name");
+        skipped.push("a ServiceCue layout with no id or name");
         continue;
       }
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
-      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name}" — kept the one already here`);
+      if (svHave.has(l.id)) skipped.push(`ServiceCue layout "${l.name}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
     // Through the store's own rules for a name and an address, which rename rather than
@@ -447,7 +447,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     const renamed = add.length ? await serviceCueLayoutsStore.importLayouts(add) : [];
     for (const r of renamed) {
       const why = r.from.trim() ? "that name was taken here" : "it had no name";
-      skipped.push(`ServiceCue preset "${r.from}" — imported as "${r.to}", ${why}`);
+      skipped.push(`ServiceCue layout "${r.from}" — imported as "${r.to}", ${why}`);
       console.log(`[view-import] ServiceCue preset "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
     }
   }
@@ -458,7 +458,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // setViewServiceCueLayout refuses one.
   for (const v of named) {
     if (v.serviceCueLayoutId && !svHave.has(v.serviceCueLayoutId)) {
-      skipped.push(`"${v.name}" points at a ServiceCue preset that is not in the file or here`);
+      skipped.push(`"${v.name}" points at a ServiceCue layout that is not in the file or here`);
     }
   }
 

@@ -158,7 +158,8 @@ export interface ServiceCueLayout {
 }
 
 /** ServiceCue-wide config: which PCO service types appear on the landing page
- *  (ordered). Empty = fall back to types that have layouts. */
+ *  (ordered). Empty = an empty launcher: nothing is offered until a type is ticked
+ *  (the launcher says so and links to Landing page). */
 export interface ServiceCueConfig {
   serviceTypeIds: string[];
 }

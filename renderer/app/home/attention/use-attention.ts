@@ -16,6 +16,7 @@ import { useResiStatus, useYouTubeStatus } from "../../../main/use-stream-state"
 import { useWirelessTelemetryStatus } from "../../../main/use-wireless-telemetry";
 import { integrationHealth } from "../../context-bar";
 import { trackDownSince } from "./down-since";
+import { useNoteCategories } from "./use-note-categories";
 import type { AttentionInput } from "./types";
 
 /** Wireless channel id -> the name of the slot it is assigned to, across every board. */
@@ -64,6 +65,8 @@ export function useAttentionInput(args: {
 
   const assigned = useMemo(() => assignedChannels(state), [state]);
 
+  const noteCategories = useNoteCategories({ pcoConfigured: state.pcoConfigured === true, planId: state.planId });
+
   const endMs = mood === "live" ? projectedServiceEndMs(pcoLive, planItems.value, now) : null;
   const minutesLeft = endMs === null ? null : Math.max(0, (endMs - now) / 60_000);
 
@@ -90,5 +93,6 @@ export function useAttentionInput(args: {
     resiKnown: resi.known && !resi.failed,
     youtube: youtube.value,
     youtubeKnown: youtube.known && !youtube.failed,
+    noteCategories,
   };
 }

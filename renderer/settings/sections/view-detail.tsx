@@ -6,7 +6,7 @@
 // EDITOR is the feature, not the list around it, so it moved here rather than
 // being deleted with its old shell.
 
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
@@ -23,7 +23,7 @@ import {
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { useFailedReads } from "../../lib/use-failed-reads";
+import { useServiceCueLayouts } from "../../lib/use-servicecue-layouts";
 import type { SectionProps } from "../types";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
@@ -32,6 +32,7 @@ import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 import { deleteView } from "./screen-confirms";
 import { AppLink } from "../../app/app-link";
+import { VIEW_LAYOUT_FLASH_ID } from "../../app/flash";
 import { viewBoardId } from "@main/services/slot-boards";
 
 const PREVIEW_ASPECTS = [
@@ -70,31 +71,12 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ServiceCue layouts, for a "script" View's Columns picker. Fetched here
-  // rather than threaded through SectionProps: only this branch needs them, and
-  // they change when someone edits a layout on the ServiceCue layouts page.
-  const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
-  // A failed read is not "no layouts". Drawn as one, the picker offered only
-  // All columns and labelled this view's own set "not found".
-  const { failed, fail, clear } = useFailedReads<"layouts">("servicecue");
-  useEffect(() => {
-    if (view.kind !== "script") return;
-    // Cancelled when the kind changes, so a slow failure from a read that no
-    // longer applies cannot replace a picker a later read has filled.
-    let cancelled = false;
-    invoke<ServiceCueLayout[]>("servicecue:listLayouts")
-      .then((l) => {
-        if (cancelled) return;
-        setServiceCueLayouts([...l].sort((a, b) => a.order - b.order));
-        clear("layouts");
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) fail("layouts", "the ServiceCue layouts for a view", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view.kind, fail, clear]);
+  // The ServiceCue layouts, for a "script" View's Layout picker. Fetched here rather than
+  // threaded through SectionProps: only this branch needs them, and they change when someone
+  // edits a layout on the ServiceCue layouts page. A failed read is not "no layouts": drawn
+  // as one, the picker offered only All columns and labelled this view's own set "not found".
+  const layoutsRead = useServiceCueLayouts(view.kind === "script", { tag: "servicecue", what: "the ServiceCue layouts for a view" });
+  const serviceCueLayouts = layoutsRead.layouts ?? [];
 
   function handleNameBlur() {
     const trimmed = editName.trim();
@@ -210,6 +192,44 @@ export function ViewDetail({
         </Button>
       </div>
 
+      {/* A ServiceCue view's Layout is the one thing an operator changes here, so it
+          sits above the preview, on screen at 900px, and the preview follows it. */}
+      {view.kind === "script" && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col">
+            <span className="text-caption1 text-fg">Layout</span>
+            <span className="text-caption2 text-fg-muted">
+              The same layouts the ServiceCue pages use, so a department's columns are
+              defined once and a display and a browser tab cannot disagree about them.
+            </span>
+          </div>
+          {layoutsRead.failed ? (
+            // In the picker's place, not beside it: with no list to choose from
+            // it could only offer All columns, and switching to that by
+            // accident would overwrite the view's real choice.
+            <ErrorNote>Couldn't load the ServiceCue layouts, so this view's layout can't be changed right now.</ErrorNote>
+          ) : (
+            <Select
+              value={view.serviceCueLayoutId ?? ALL_COLUMNS}
+              onValueChange={(v: string) =>
+                void invoke("views:setServiceCueLayout", {
+                  id: view.id,
+                  serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
+                }).catch((e: unknown) => toast.error(`Could not change this view's layout: ${errorMessage(e)}`))
+              }
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Layout" data-flash-id={VIEW_LAYOUT_FLASH_ID}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
+                {serviceCueLayouts.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
+
       {/* Custom views get the visual editor (its canvas doubles as the preview);
           all other kinds get the read-only live preview. */}
       {view.kind === "custom" ? (
@@ -274,40 +294,6 @@ export function ViewDetail({
         </>
 ) : view.kind === "custom" ? null : view.kind === "script" ? (
         <>
-          <Separator />
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-col">
-              <span className="text-caption1 text-fg">Columns</span>
-              <span className="text-caption2 text-fg-muted">
-                The same layouts the ServiceCue pages use, so a department's columns are
-                defined once and a display and a browser tab cannot disagree about them.
-              </span>
-            </div>
-            {failed.has("layouts") ? (
-              // In the picker's place, not beside it: with no list to choose from
-              // it could only offer All columns, and switching to that by
-              // accident would overwrite the view's real choice.
-              <ErrorNote>Couldn't load the ServiceCue layouts, so this view's columns can't be changed right now.</ErrorNote>
-            ) : (
-              <Select
-                value={view.serviceCueLayoutId ?? ALL_COLUMNS}
-                onValueChange={(v: string) =>
-                  void invoke("views:setServiceCueLayout", {
-                    id: view.id,
-                    serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
-                  }).catch((e: unknown) => toast.error(`Could not change this view's columns: ${errorMessage(e)}`))
-                }
-              >
-                <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
-                  {serviceCueLayouts.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
           <p className="text-caption2 text-fg-muted">
             The ServiceCue view renders the active plan's rundown — the same table as the ServiceCue
             pages, following whichever plan the app is set to. A layout with Max SPL in its columns

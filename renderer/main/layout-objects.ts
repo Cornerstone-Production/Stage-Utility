@@ -426,7 +426,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
       replacedBy: "view-embed",
       why: "Embedded view renders the full ServiceCue rundown — the same table as the ServiceCue pages, with your saved layouts.",
       caveat:
-        "It is not a like-for-like swap, so read this first: the replacement scrolls rather than shrinking to fit, and Fit to height, Scroll and the note-category picker do not carry over. Its columns come from the ServiceCue view's preset instead. Set the object's font size afterwards — nothing auto-fits it now.",
+        "It is not a like-for-like swap, so read this first: the replacement scrolls rather than shrinking to fit, and Fit to height, Scroll and the note-category picker do not carry over. Its columns come from the ServiceCue view's layout instead. Set the object's font size afterwards — nothing auto-fits it now.",
       convert: (_old, ctx) => ({
         type: "view-embed",
         // Only auto-pick when there is no ambiguity; otherwise leave it for the

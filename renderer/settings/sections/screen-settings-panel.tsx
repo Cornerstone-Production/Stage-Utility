@@ -38,6 +38,7 @@ import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice, setOutputEnabled } from "../../app/screens/screen-device";
 import { readUpdate, TONE_CLASS, UpdateButton, type UpdateReading } from "../../app/screens/machine-update";
 import { cardOf, outputModeLine, outputSwitchState } from "../../app/screens/output-helpers";
+import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, TEXT_SIZE_STEP } from "@main/types/text-size";
 import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
 import type { DeviceOutput } from "@main/types/kiosk";
 import type { OutputHealth } from "@main/types/output-health";
@@ -577,9 +578,9 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
             <NumberInput
               aria-label="Text size"
               value={draftSize ?? output.textSize ?? 100}
-              min={50}
-              max={300}
-              step={5}
+              min={MIN_TEXT_SIZE}
+              max={MAX_TEXT_SIZE}
+              step={TEXT_SIZE_STEP}
               suffix="%"
               className="w-32"
               onChange={setDraftSize}
