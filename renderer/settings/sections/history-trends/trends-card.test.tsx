@@ -14,7 +14,6 @@ import { after, afterEach, describe, test } from "node:test";
 import { eventually, installRenderDom } from "../../../test-dom.js";
 
 const teardown = installRenderDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
 // pointer against a zero-width box — it would map every x to NaN. Give every

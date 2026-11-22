@@ -12,10 +12,6 @@ import { after, beforeEach, describe, test } from "node:test";
 import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 419 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup } = await import("@testing-library/react");
 const { installFakeServer, withQueryClient, assertAbsent, actIdle } = await import(
@@ -26,7 +22,8 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
 
-const TOTAL = INTEGRATION_DESCRIPTOR_FIXTURE.length;
+// The server's integrations plus OpenAI, whose tile the panel draws itself.
+const TOTAL = INTEGRATION_DESCRIPTOR_FIXTURE.length + 1;
 
 let server = installFakeServer();
 
@@ -75,7 +72,7 @@ describe("every integration is visible, with nothing collapsed", () => {
     assert.equal(tiles(c).length, TOTAL);
     assert.deepEqual(
       tiles(c).map((el) => el.getAttribute("data-integration-card")).sort(),
-      INTEGRATION_DESCRIPTOR_FIXTURE.map((d) => d.id).sort(),
+      [...INTEGRATION_DESCRIPTOR_FIXTURE.map((d) => d.id), "openai"].sort(),
     );
   });
 

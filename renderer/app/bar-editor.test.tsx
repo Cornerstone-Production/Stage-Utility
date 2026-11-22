@@ -10,10 +10,9 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, mountInAct, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const listeners = new Map<string, Set<(e: { data: string }) => void>>();
 class StubEventSource {
@@ -51,7 +50,10 @@ const saves: Record<string, unknown>[] = [];
 
 function emitState(): void {
   const frame = { data: JSON.stringify(state) };
-  for (const h of [...(listeners.get("stage:state-changed") ?? [])]) h(frame);
+  // The server pushing is state arriving outside any render: React's act scope.
+  act(() => {
+    for (const h of [...(listeners.get("stage:state-changed") ?? [])]) h(frame);
+  });
 }
 const json = (status: number, value: unknown) => ({ ok: status < 400, status, json: async () => value, text: async () => JSON.stringify(value) });
 
@@ -116,7 +118,9 @@ function TrayGate({ barOnPage }: { barOnPage: boolean }) {
 }
 
 async function mountInMode({ barOnPage = true }: { barOnPage?: boolean } = {}): Promise<void> {
-  render(
+  // Async act: the hydrate read resolves on the microtasks right after the mount,
+  // and it must land inside the scope or React reports it as an update outside act.
+  await mountInAct(render,
     React.createElement(
       QueryClientProvider,
       { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },

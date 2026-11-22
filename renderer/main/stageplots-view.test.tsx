@@ -18,7 +18,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import type { StagePlotsView } from "@main/types/stageplots";
 import type { PatchFile } from "@main/types/patch";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -557,9 +557,7 @@ describe("/stageplots: an item's details, the legend and print", () => {
     assert.equal(printedDate(noonUtc, "Pacific/Kiritimati"), "Fri 13 Nov 2026");
     assert.equal(printedDate(noonUtc, "UTC"), "Thu 12 Nov 2026");
     TIMEZONE = "Pacific/Kiritimati";
-    await act(async () => {
-      render(React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
-    });
+    await mountInAct(render, React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
     await settle();
     assert.equal(screen.getByTestId("print-page").querySelector("header p")!.textContent, "Printed Fri 13 Nov 2026");
   });
@@ -569,9 +567,7 @@ describe("/stageplots: an item's details, the legend and print", () => {
     // so a server in UTC+14 has already reached Friday whatever the browser says.
     const noonUtc = Date.UTC(2026, 10, 12, 12);
     HOST_TIMEZONE = "Pacific/Kiritimati";
-    await act(async () => {
-      render(React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
-    });
+    await mountInAct(render, React.createElement(PrintSheet, { venueName: "Room One", plotName: "Standard", planLine: null, items: [], background: null, fade: 0.4, now: noonUtc }));
     await settle();
     assert.equal(screen.getByTestId("print-page").querySelector("header p")!.textContent, "Printed Fri 13 Nov 2026");
   });

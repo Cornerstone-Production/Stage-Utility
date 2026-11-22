@@ -16,7 +16,6 @@ import { after, afterEach, test } from "node:test";
 import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent, act, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;

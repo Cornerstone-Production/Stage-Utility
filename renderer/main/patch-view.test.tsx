@@ -31,7 +31,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -161,9 +161,7 @@ function file(...sheets: PatchSheet[]): PatchFile {
 }
 
 async function mount() {
-  await act(async () => {
-    render(React.createElement(PatchView));
-  });
+  await mountInAct(render, React.createElement(PatchView));
   await settle();
   await settle();
 }

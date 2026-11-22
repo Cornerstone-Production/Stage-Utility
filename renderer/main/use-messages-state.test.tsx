@@ -12,7 +12,6 @@ import { eventually, installDom, readLedger, settle, unmountAndTeardown } from "
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let answer: () => Promise<unknown> = async () => ({});

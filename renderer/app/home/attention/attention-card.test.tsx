@@ -6,7 +6,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
 import { attentionInput, integration, mic } from "./test-input.js";
 
 const teardown = installRenderDom();
@@ -428,9 +428,8 @@ test("a Start recording that Simulate stops says so on the card", async () => {
       integrations: [integration("reaper")], integrationLabels: { reaper: "REAPER" },
       reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
     });
-    // Inside act, awaited: the press posts, and the answer redraws the card after it.
-    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start recording" })));
-    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await eventually(() => assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed/));
     assert.deepEqual(posted, ["reaper_record_on"]);
     assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed: Simulated: nothing was sent/);
   } finally {
@@ -451,13 +450,12 @@ test("a failed fix's note clears itself", async () => {
       reaper: { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: null, positionString: null },
     });
     mock.timers.enable({ apis: ["setTimeout"] });
-    // Mocked setTimeout would stall settle(); the press and the promise chain it starts are flushed by
-    // hand, inside one act, so the note it sets lands inside it.
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
-      for (let n = 0; n < 8; n++) await Promise.resolve();
-    });
-    assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed/);
+    // The click inside the scope, so the press's whole promise chain lands in it.
+    const { act } = await import("@testing-library/react");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start recording" })); });
+    // Mocked setTimeout would stall settle(); eventually() polls on the real timer it
+    // captured at load, so it waits out the response without it.
+    await eventually(() => assert.match(screen.getByRole("alert").textContent ?? "", /Start recording failed/));
     act(() => mock.timers.tick(ACTION_NOTE_MS));
     assert.ok(screen.queryByRole("alert") === null, "the note must not outlive its moment");
   } finally {

@@ -6,7 +6,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 const { render, cleanup, screen, fireEvent } = await import("@testing-library/react");
@@ -25,9 +25,7 @@ async function openPicker(file: unknown) {
   const quiet = console.error;
   console.error = (...a: unknown[]) => void errors.push(a.map(String).join(" "));
   try {
-    await act(async () => {
-      render(React.createElement(PatchDeviceField, { item, link: undefined, patch: { ok: true, file } as FieldProps["patch"], dispatch: () => undefined }));
-    });
+    await mountInAct(render, React.createElement(PatchDeviceField, { item, link: undefined, patch: { ok: true, file } as FieldProps["patch"], dispatch: () => undefined }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Link to patch device" }));
     });

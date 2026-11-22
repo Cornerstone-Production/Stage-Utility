@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { alerts, ok, reply } from "../test-fixtures/fetch-log.js";
 import { FakeSocket } from "../test-fixtures/fake-socket.js";
 
@@ -602,9 +602,7 @@ describe('the "Not updating" notice', () => {
     mock.timers.enable({ apis: ["setInterval"] });
     await load("/servicecue/weekend/audio");
     await beat();
-    await act(async () => {
-      render(React.createElement(StaleNotice, { staleAfterMs: 10_000 }));
-    });
+    await mountInAct(render, React.createElement(StaleNotice, { staleAfterMs: 10_000 }));
     await pass(20_000);
     // Two notices are on the page, in document order: the viewer's own, at the default
     // two minutes, and this one, at ten seconds.

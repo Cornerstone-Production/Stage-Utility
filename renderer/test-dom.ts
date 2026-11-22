@@ -12,6 +12,7 @@
 //   teardown();
 
 import { registerHooks } from "node:module";
+import { format } from "node:util";
 
 import { act } from "react";
 import { JSDOM } from "jsdom";
@@ -89,6 +90,9 @@ const EXPOSED = [
   "sessionStorage",
 ] as const;
 
+/** What React says when an update lands outside act(), or act() runs without the flag. */
+const ACT_WARNING = /not wrapped in act|not configured to support act/;
+
 /**
  * Install a DOM onto globalThis and return the function that removes it again.
  *
@@ -141,20 +145,45 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
     });
   }
 
+  // React runs act() quietly, and warns when an update escapes one, only when
+  // told it is in a test environment. Every file that installs a DOM renders
+  // React into it; a file that forgot the flag read as clean while its updates
+  // landed outside act, and the undrained work then ran after the DOM had gone
+  // ("window is not defined"). It is set here so no file can forget it.
+  const previousActFlag = Object.getOwnPropertyDescriptor(g, "IS_REACT_ACT_ENVIRONMENT");
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+
+  // With the flag on, React reports an update that escaped act() with console.error
+  // and nothing else, which scrolls past in a 16,000-test log. Record them, and fail
+  // the file when its DOM comes down, so a new one is red instead of quiet.
+  const realConsoleError = console.error;
+  const actWarnings: string[] = [];
+  console.error = (...args: unknown[]) => {
+    const message = format(...args);
+    if (ACT_WARNING.test(message)) actWarnings.push(message);
+    realConsoleError.apply(console, args);
+  };
+
   return () => {
+    console.error = realConsoleError;
+    if (previousActFlag) Object.defineProperty(g, "IS_REACT_ACT_ENVIRONMENT", previousActFlag);
+    else delete g.IS_REACT_ACT_ENVIRONMENT;
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(g, key, descriptor);
       else delete g[key];
     }
     dom.window.close();
+    if (actWarnings.length > 0) {
+      throw new Error(`${actWarnings.length} React act warning(s) while this DOM was installed; the first: ${actWarnings[0].split("\n")[0]}`);
+    }
   };
 }
 
 /**
- * installDom, plus the three things a REACT render needs on top of it.
+ * installDom, plus the two things a REACT render needs on top of it.
  *
  * Three files in renderer/main opened with byte-identical copies of exactly
- * this: the act-environment flag, one clientHeight for every element, and a
+ * this: the act-environment flag (now installDom's), one clientHeight for every element, and a
  * do-nothing EventSource. StubEventSource alone is at eleven copies across the
  * repo. Each was correct; three copies of a correct thing is still three places
  * a platform gap has to be patched, and installDom already stubs ResizeObserver
@@ -174,10 +203,6 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
 export function installRenderDom({ clientHeight }: { clientHeight?: number } = {}): () => void {
   const teardown = installDom();
   const g = globalThis as unknown as Record<string, unknown>;
-
-  // React runs act() quietly only when told it is in a test environment; without
-  // this every awaited render logs "not configured to support act(...)".
-  g.IS_REACT_ACT_ENVIRONMENT = true;
 
   if (clientHeight !== undefined) {
     Object.defineProperty((g.HTMLElement as { prototype: object }).prototype, "clientHeight", {
@@ -202,7 +227,6 @@ export function installRenderDom({ clientHeight }: { clientHeight?: number } = {
 
   return () => {
     delete g.EventSource;
-    delete g.IS_REACT_ACT_ENVIRONMENT;
     teardown();
   };
 }
@@ -244,6 +268,27 @@ export async function settle(): Promise<void> {
   });
 }
 
+/**
+ * Mount inside an async act, and return what `render` returned.
+ *
+ * Testing Library's own `render` is wrapped in a SYNCHRONOUS act, which closes
+ * before the fetch a component starts on mount has resolved; the update that
+ * fetch makes lands on the microtasks right after and React reports it as outside
+ * act. An async scope stays open across them.
+ *
+ * `render` is a parameter because this module is imported before installDom has
+ * run, and Testing Library binds to `document` when it loads.
+ *
+ *   const view = await mountInAct(render, <Card />);
+ */
+export async function mountInAct<A extends unknown[], R>(render: (...args: A) => R, ...args: A): Promise<R> {
+  let result!: R;
+  await act(async () => {
+    result = render(...args);
+  });
+  return result;
+}
+
 /** How long a test waits for something asynchronous to appear, in ms. */
 export const WAIT_TIMEOUT_MS = 5000;
 
@@ -266,8 +311,8 @@ const realNow = Date.now.bind(Date);
  *   await eventually(() => assert.ok(screen.getByText("Saved")));
  *   const button = await eventually(() => screen.getByRole("button", { name: "Add" }));
  *
- * It looks at once, then every 10 ms, each gap spent inside act() so React's work
- * is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
+ * It looks at once, then every 10 ms, each look and each gap spent inside act() so
+ * React's work is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
  * how long a real failure takes to report, and the failure is `check`'s own last
  * error, not a bare timeout.
  *
@@ -284,24 +329,42 @@ const realNow = Date.now.bind(Date);
  * write behind the first would go unseen; wait for the first, then assert the
  * count plainly.
  *
- * The import is inside the function because Testing Library binds to `document`
- * when it loads, so a file must import it after installDom, and this module is
- * imported before.
+ * `act` is React's own, imported at the top, not Testing Library's: awaiting an
+ * import first would hand the microtask queue back to the test's pending fetches
+ * before any act scope was open, and their updates would land outside one.
  */
 export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<Awaited<T>> {
-  const { act } = await import("@testing-library/react");
   const deadline = realNow() + timeout;
   for (;;) {
-    try {
-      // `check` may be async (it may open a tooltip, say, to read it): a rejection
-      // is a failed look like a throw is.
-      return await check();
-    } catch (err) {
-      if (realNow() >= deadline) throw err;
-    }
+    let found!: Awaited<T>;
+    let failure: unknown;
+    let looked = false;
+    let expired = false;
+    // The look runs inside act, so a fetch a click or a mount started cannot land
+    // on the microtasks between two scopes, where React reports it as unwrapped.
+    // A failed look is caught inside the scope rather than left to reject it, so
+    // the scope always ends normally and flushes what it queued; the gap after a
+    // failed look shares the scope, so there is no seam between the two. When the
+    // gap runs past the deadline the loop looks once more before it gives up: the
+    // last look follows the last flush.
     await act(async () => {
+      try {
+        // `check` may be async (it may open a tooltip, say, to read it): a
+        // rejection is a failed look like a throw is.
+        found = await check();
+        looked = true;
+        return;
+      } catch (err) {
+        failure = err;
+      }
+      if (realNow() >= deadline) {
+        expired = true;
+        return;
+      }
       await new Promise((resolve) => realSetTimeout(resolve, 10));
     });
+    if (looked) return found;
+    if (expired) throw failure;
   }
 }
 

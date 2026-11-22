@@ -19,7 +19,7 @@ import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@
 import type { UpcomingPlansDTO } from "@main/types/pco";
 import type { PatchFile } from "@main/types/patch";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -302,7 +302,7 @@ const fakePdf = async () => {
 async function mount({ viewer = false }: { viewer?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
-    render(
+    await mountInAct(render, 
       React.createElement(
         QueryClientProvider,
         { client },
@@ -324,7 +324,7 @@ async function mountRouted(url: string) {
   const venue = createRoute({ getParentRoute: () => root, path: "/stageplots/manage/$venueId", component: StagePlotsManageVenueRoute });
   const router = createRouter({ routeTree: root.addChildren([edit, list, venue]), history: createMemoryHistory({ initialEntries: [url] }) });
   await act(async () => {
-    render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
+    await mountInAct(render, React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never), React.createElement(ConfirmHost)));
   });
   for (let i = 0; i < 6; i++) await settle();
   return router;
@@ -711,7 +711,7 @@ describe("/stageplots/edit", () => {
     assert.deepEqual(sent.at(-1)?.body, { plotIds: ["p-4", "p-1", "p-2", "p-3"] });
     sent = [];
     DOC.venues[0].plotIds = ["p-1", "p-2", "p-3", "p-4"];
-    broadcast();
+    await act(async () => broadcast());
     await settle();
     // Standard dragged to the second row's left end (x 10, y 55): after the whole first row's
     // other tab (Special) and before Third.
@@ -1645,7 +1645,7 @@ describe("the kept draft", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     try {
       await act(async () => {
-        render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+        await mountInAct(render, React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
       });
       for (let i = 0; i < 4; i++) await settle();
       const closing = () => {
@@ -1766,7 +1766,7 @@ describe("the kept draft", () => {
     const router = createRouter({ routeTree: root.addChildren([edit, list]), history: createMemoryHistory({ initialEntries: ["/stageplots/edit"] }) });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     await act(async () => {
-      render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+      await mountInAct(render, React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
     });
     for (let i = 0; i < 4; i++) await settle();
     const leave = async () => {

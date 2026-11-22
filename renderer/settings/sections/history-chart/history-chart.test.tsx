@@ -20,10 +20,9 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../../test-dom.js";
+import { installDom, mountInAct } from "../../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
 // pointer against a zero-width box (that maps every x to NaN and the crosshair
@@ -37,7 +36,18 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
   },
 });
 
-const { fireEvent, render, screen, cleanup } = await import("@testing-library/react");
+const { fireEvent, render, screen, cleanup, act } = await import("@testing-library/react");
+
+// jsdom drives requestAnimationFrame (pretendToBeVisual), and the provisional
+// tail's pulse sets state from every frame. A frame is the browser calling the
+// component back, so it runs inside act like any other event.
+const frame = window.requestAnimationFrame.bind(window);
+const inAct = (cb: FrameRequestCallback) => (t: number) => {
+  act(() => cb(t));
+};
+window.requestAnimationFrame = (cb) => frame(inAct(cb));
+globalThis.requestAnimationFrame = window.requestAnimationFrame;
+
 const { HistoryChart } = await import("./history-chart.js");
 const { CustomizePopover } = await import("./customize.js");
 const { formatClock } = await import("../../../lib/clock-format.js");
@@ -166,23 +176,23 @@ function formatTime(t: number): string {
 }
 
 describe("the stat strip", () => {
-  test("at rest it shows the chosen figures, and only those", () => {
-    render(chart());
+  test("at rest it shows the chosen figures, and only those", async () => {
+    await mountInAct(render, chart());
     const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "rest");
     for (const f of FIGURES) assert.ok(strip.textContent?.includes(f.label), `${f.label} missing`);
     assert.ok(!strip.textContent?.includes("Live"));
   });
 
-  test("a figure the operator unticked is not in the strip", () => {
-    render(chart({ figures: FIGURES.filter((f) => f.key !== "samples") }));
+  test("a figure the operator unticked is not in the strip", async () => {
+    await mountInAct(render, chart({ figures: FIGURES.filter((f) => f.key !== "samples") }));
     const strip = stripEl();
     assert.ok(!strip.textContent?.includes("Samples"));
     assert.ok(strip.textContent?.includes("Peak"));
   });
 
-  test("hovering the plot swaps it for the time and the series' value there", () => {
-    render(chart());
+  test("hovering the plot swaps it for the time and the series' value there", async () => {
+    await mountInAct(render, chart());
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
     const strip = stripEl();
@@ -193,16 +203,16 @@ describe("the stat strip", () => {
     assert.ok(strip.textContent?.includes("128"), strip.textContent ?? "");
   });
 
-  test("leaving the plot puts the chosen figures back", () => {
-    render(chart());
+  test("leaving the plot puts the chosen figures back", async () => {
+    await mountInAct(render, chart());
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
     fireEvent.pointerLeave(svg);
     assert.equal(stripEl().dataset.historyStrip, "rest");
   });
 
-  test("hovering a lane segment names the item, its number, and what it ran against plan", () => {
-    render(chart());
+  test("hovering a lane segment names the item, its number, and what it ran against plan", async () => {
+    await mountInAct(render, chart());
     const svg = document.querySelector("svg") as SVGSVGElement;
     // Three quarters across = 20:45, inside Message; y in the lower lane row.
     fireEvent.pointerMove(svg, { clientX: 480, clientY: 205 });
@@ -213,16 +223,16 @@ describe("the stat strip", () => {
     assert.ok(strip.textContent?.includes("30:00"), strip.textContent ?? "");
   });
 
-  test("while recording it reads LIVE with the current values", () => {
-    render(chart({ live: true }));
+  test("while recording it reads LIVE with the current values", async () => {
+    await mountInAct(render, chart({ live: true }));
     const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "live");
     assert.ok(strip.textContent?.includes("Live"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("160"), strip.textContent ?? "");
   });
 
-  test("a hover wins over LIVE — the operator asked about that instant", () => {
-    render(chart({ live: true }));
+  test("a hover wins over LIVE — the operator asked about that instant", async () => {
+    await mountInAct(render, chart({ live: true }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 200, clientY: 80 });
     assert.equal(stripEl().dataset.historyStrip, "hover");
   });
@@ -234,12 +244,12 @@ describe("a day that has not finished", () => {
     xAxis: "date",
   });
 
-  test("its last segment is dashed and its node marked; the rest of the line is not", () => {
+  test("its last segment is dashed and its node marked; the rest of the line is not", async () => {
     // WHAT THIS CANNOT SEE: the dashes. jsdom paints nothing and loads no
     // stylesheet. What it CAN read is what was handed to the SVG — which path
     // carries the dash array, which node is marked, and that the solid path
     // stops one point short. Driven in Chrome at 1440.
-    render(provisional());
+    await mountInAct(render, provisional());
     const solid = document.querySelector("[data-series-line]");
     const prov = document.querySelector("[data-series-provisional]");
     assert.ok(prov, "no provisional segment at all");
@@ -347,13 +357,13 @@ describe("a day that has not finished", () => {
     }
   });
 
-  test("a series that is NOT provisional carries neither", () => {
-    render(chart({ xAxis: "date" }));
+  test("a series that is NOT provisional carries neither", async () => {
+    await mountInAct(render, chart({ xAxis: "date" }));
     assert.equal(document.querySelectorAll("[data-series-provisional]").length, 0);
     assert.equal([...(document.querySelector("[data-series-line]")?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 61);
   });
 
-  test("REDUCED MOTION drops the pulse, and keeps the dash", () => {
+  test("REDUCED MOTION drops the pulse, and keeps the dash", async () => {
     // The dash is the information; the beat is decoration. Under
     // prefers-reduced-motion the mark must still say "not done yet".
     const real = window.matchMedia;
@@ -362,7 +372,7 @@ describe("a day that has not finished", () => {
       value: (q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} }),
     });
     try {
-      render(provisional());
+      await mountInAct(render, provisional());
       const node = document.querySelector("[data-provisional-node]");
       assert.ok(node, "no provisional node under reduced motion");
       assert.equal(node.getAttribute("class"), null, "the pulse animation survived reduced motion");
@@ -376,10 +386,10 @@ describe("a day that has not finished", () => {
     }
   });
 
-  test("and the pulse is there when motion is allowed", () => {
+  test("and the pulse is there when motion is allowed", async () => {
     // The other half: a guard that only ever sees "no class" would pass on a
     // node that never pulsed at all.
-    render(provisional());
+    await mountInAct(render, provisional());
     assert.match(
       document.querySelector("[data-provisional-node]")?.getAttribute("class") ?? "",
       /su-history-pulse/,
@@ -412,12 +422,12 @@ describe("handing the hover to the caller instead of drawing a strip", () => {
     );
   });
 
-  test("and it stops drawing a strip, because the caller is drawing one", () => {
+  test("and it stops drawing a strip, because the caller is drawing one", async () => {
     // The other half of the same contract: a chart cannot both hand the hover
     // over and print it, or the Trends card gets two readouts and one of them
     // is over the plot.
     const { onHover } = reporter();
-    render(chart({ onHover }));
+    await mountInAct(render, chart({ onHover }));
     assert.equal(
       document.querySelectorAll("[data-history-strip]").length,
       0,
@@ -427,8 +437,8 @@ describe("handing the hover to the caller instead of drawing a strip", () => {
 });
 
 describe("the plot", () => {
-  test("hatches the time before and after the service window", () => {
-    render(chart());
+  test("hatches the time before and after the service window", async () => {
+    await mountInAct(render, chart());
     const pre = document.querySelector("[data-hatch='pre']") as SVGRectElement;
     const post = document.querySelector("[data-hatch='post']") as SVGRectElement;
     assert.ok(pre, "no pre-service hatch");
@@ -439,22 +449,22 @@ describe("the plot", () => {
     assert.ok(document.querySelector("pattern"), "no hatch pattern defined");
   });
 
-  test("no hatch when the record has no service window to sit inside", () => {
-    render(chart({ window: { startedAt: null, endedAt: null } }));
+  test("no hatch when the record has no service window to sit inside", async () => {
+    await mountInAct(render, chart({ window: { startedAt: null, endedAt: null } }));
     assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 0);
     assert.equal(document.querySelectorAll("[data-hatch='post']").length, 0);
   });
 
-  test("there is no plot-area fill behind the series", () => {
+  test("there is no plot-area fill behind the series", async () => {
     // The plot's background is the card's. A rect spanning the plot would be one.
-    render(chart());
+    await mountInAct(render, chart());
     const rects = [...document.querySelectorAll("rect")];
     const areaFills = rects.filter((r) => !r.hasAttribute("data-hatch") && !r.hasAttribute("data-lane-segment"));
     assert.equal(areaFills.length, 0, `${areaFills.length} rect(s) behind the series`);
   });
 
-  test("a secondary series draws thinner than the primary", () => {
-    render(chart({
+  test("a secondary series draws thinner than the primary", async () => {
+    await mountInAct(render, chart({
       series: [series(), series({ id: "entries", label: "Total entries", role: "secondary", fill: false, dashed: true })],
     }));
     const primary = document.querySelector("[data-series-line='occupancy']") as SVGPathElement;
@@ -464,16 +474,16 @@ describe("the plot", () => {
     assert.equal(secondary.getAttribute("stroke-dasharray"), "4 3");
   });
 
-  test("a series that says it has no sampling gap is never broken", () => {
+  test("a series that says it has no sampling gap is never broken", async () => {
     // A reference line is two points two hours apart, and a step line holds one
     // level across a 25-minute item. Under the default sampling-gap rule both
     // were cut into single-point runs: the reference line drew as two dots at
     // the edges of the plot, and the step line broke inside every long item.
     const far = [{ t: T0, v: 120 }, { t: T0 + 60 * MIN, v: 120 }];
-    render(chart({ series: [series({ id: "ref", points: far, fill: false, gapMs: Infinity })] }));
+    await mountInAct(render, chart({ series: [series({ id: "ref", points: far, fill: false, gapMs: Infinity })] }));
     assert.equal(document.querySelectorAll("[data-series-line='ref']").length, 1);
     cleanup();
-    render(chart({ series: [series({ id: "ref", points: far, fill: false })] }));
+    await mountInAct(render, chart({ series: [series({ id: "ref", points: far, fill: false })] }));
     assert.equal(
       document.querySelectorAll("[data-series-line='ref']").length,
       2,
@@ -481,19 +491,19 @@ describe("the plot", () => {
     );
   });
 
-  test("the time axis is ticked through the service, not only at its ends", () => {
+  test("the time axis is ticked through the service, not only at its ends", async () => {
     // The fixture is 20:00 -> 21:00 of samples, so the domain is an hour: the
     // fine step, every ten minutes. Two labels an hour apart say nothing about
     // where in the service a bump happened.
-    render(chart());
+    await mountInAct(render, chart());
     const ticks = [...document.querySelectorAll("[data-axis-tick]")];
     assert.equal(ticks.length, 7, `${ticks.length} ticks`); // 20:00…21:00 inclusive
     const labels = [...document.querySelectorAll("[data-axis-label]")].map((e) => e.textContent);
     assert.ok(labels.length >= 4, `only ${labels.length} labels: ${labels.join(",")}`);
   });
 
-  test("an empty record says so instead of drawing an axis around nothing", () => {
-    render(chart({ series: [series({ points: [] })] }));
+  test("an empty record says so instead of drawing an axis around nothing", async () => {
+    await mountInAct(render, chart({ series: [series({ points: [] })] }));
     assert.equal(document.querySelectorAll("svg").length, 0);
     assert.ok(screen.getByText(/Nothing recorded yet/));
   });
@@ -603,48 +613,48 @@ describe("an empty plot says WHY it is empty", () => {
   const off = (over: Partial<ChartSeries> = {}) => series({ on: false, ...over });
   const emptyText = () => document.querySelector("[data-history-strip]")?.parentElement?.textContent ?? "";
 
-  test("every line hidden says so and points at the legend, not 'nothing recorded'", () => {
-    render(chart({ series: [off(), off({ id: "entries", label: "Total entries", role: "secondary" })], onToggleSeries: () => {} }));
+  test("every line hidden says so and points at the legend, not 'nothing recorded'", async () => {
+    await mountInAct(render, chart({ series: [off(), off({ id: "entries", label: "Total entries", role: "secondary" })], onToggleSeries: () => {} }));
     assert.match(emptyText(), /Every line is hidden\. Turn one on in the legend\./);
     assert.ok(!/Nothing recorded yet/.test(emptyText()), emptyText());
   });
 
-  test("names Customize when the section has one", () => {
-    render(chart({ series: [off()], customize: <span>customize</span>, onToggleSeries: () => {} }));
+  test("names Customize when the section has one", async () => {
+    await mountInAct(render, chart({ series: [off()], customize: <span>customize</span>, onToggleSeries: () => {} }));
     assert.match(emptyText(), /The line is hidden\. Turn it on in the legend or in Customize\./);
   });
 
-  test("outranks the caller's own empty note, which is about a different emptiness", () => {
-    render(chart({ series: [off()], emptyNote: "No recordings in this range — try a longer one.", onToggleSeries: () => {} }));
+  test("outranks the caller's own empty note, which is about a different emptiness", async () => {
+    await mountInAct(render, chart({ series: [off()], emptyNote: "No recordings in this range — try a longer one.", onToggleSeries: () => {} }));
     assert.ok(!/No recordings in this range/.test(emptyText()), emptyText());
     assert.match(emptyText(), /hidden/);
   });
 
-  test("a chart with nothing recorded still says nothing is recorded", () => {
-    render(chart({ series: [series({ points: [] })] }));
+  test("a chart with nothing recorded still says nothing is recorded", async () => {
+    await mountInAct(render, chart({ series: [series({ points: [] })] }));
     assert.match(emptyText(), /Nothing recorded yet/);
     cleanup();
-    render(chart({ series: [] , emptyNote: "Reading the recorded samples…" }));
+    await mountInAct(render, chart({ series: [] , emptyNote: "Reading the recorded samples…" }));
     assert.match(emptyText(), /Reading the recorded samples/);
   });
 
-  test("a hidden series with no readings is not 'hidden', it is empty", () => {
-    render(chart({ series: [off({ points: [] })], onToggleSeries: () => {} }));
+  test("a hidden series with no readings is not 'hidden', it is empty", async () => {
+    await mountInAct(render, chart({ series: [off({ points: [] })], onToggleSeries: () => {} }));
     assert.match(emptyText(), /Nothing recorded yet/);
   });
 
-  test("with an empty line still on, it names what is hidden rather than claiming every line is", () => {
+  test("with an empty line still on, it names what is hidden rather than claiming every line is", async () => {
     // The Trends shape: a type with no reading is a line that is on and empty.
     const emptyOn = series({ id: "evening", label: "Evening", points: [] });
-    render(chart({ series: [off({ id: "a", label: "Weekend" }), off({ id: "b", label: "Night" }), emptyOn], onToggleSeries: () => {} }));
+    await mountInAct(render, chart({ series: [off({ id: "a", label: "Weekend" }), off({ id: "b", label: "Night" }), emptyOn], onToggleSeries: () => {} }));
     assert.match(emptyText(), /Every line with readings is hidden\. Turn one on in the legend\./);
   });
 });
 
 describe("the legend", () => {
-  test("with a handler it is a row of toggles, each saying whether it is on", () => {
+  test("with a handler it is a row of toggles, each saying whether it is on", async () => {
     const toggled: string[] = [];
-    render(chart({
+    await mountInAct(render, chart({
       series: [series(), series({ id: "entries", label: "Total entries", role: "secondary", fill: false, on: false })],
       onToggleSeries: (id) => toggled.push(id),
     }));
@@ -658,10 +668,10 @@ describe("the legend", () => {
     assert.deepEqual(toggled, ["entries"]);
   });
 
-  test("a series that is off is LISTED but not drawn", () => {
+  test("a series that is off is LISTED but not drawn", async () => {
     // Listed, because a legend that drops what is off can never turn it back on
     // — which is the whole point of it being a toggle.
-    render(chart({
+    await mountInAct(render, chart({
       series: [series(), series({ id: "entries", label: "Total entries", role: "secondary", fill: false, on: false })],
       onToggleSeries: () => {},
     }));
@@ -670,18 +680,18 @@ describe("the legend", () => {
     assert.equal(document.querySelectorAll("[data-series-line='occupancy']").length, 1);
   });
 
-  test("without a handler it is a plain legend, not a dead button", () => {
-    render(chart());
+  test("without a handler it is a plain legend, not a dead button", async () => {
+    await mountInAct(render, chart());
     assert.equal(document.querySelectorAll("[data-series-toggle]").length, 0);
   });
 
-  test("every swatch is the LINE it stands for, dashed when the line is", () => {
+  test("every swatch is the LINE it stands for, dashed when the line is", async () => {
     // A filled dot for the solid series and a rule for the dashed one were two
     // different kinds of mark for two lines, and on the trend chart — where
     // every series is a solid line of the same weight — a row of dots said
     // nothing about which line was which. Both are now rules; only the dashing
     // differs, which is the only thing that differs on the plot.
-    render(chart({
+    await mountInAct(render, chart({
       series: [series(), series({ id: "avg", label: "Avg", role: "secondary", fill: false, dashed: true })],
       onToggleSeries: () => {},
     }));
@@ -695,20 +705,20 @@ describe("the legend", () => {
 });
 
 describe("the item lane", () => {
-  test("one block per item, pre-service items in their own row", () => {
-    render(chart());
+  test("one block per item, pre-service items in their own row", async () => {
+    await mountInAct(render, chart());
     const rows = [...document.querySelectorAll("[data-lane-row]")].map((g) => g.getAttribute("data-lane-row"));
     assert.deepEqual(rows, ["pre", "service", "service"]);
   });
 
-  test("a pre-service item's extra lane pushes the service row DOWN, not onto it", () => {
+  test("a pre-service item's extra lane pushes the service row DOWN, not onto it", async () => {
     // Seen on the 17 Sep record: "10 min Warning" (pre-service, stacked into
     // lane 1 because it overlaps "Doors") landed on the same line as
     // "VIDEO: Pre-roll" (in-service, lane 0), and the two drew on top of each
     // other — the exact invisibility the stacking was added to fix, moved one
     // row over. Every block must be on a line of its own or beside another
     // block, never underneath one.
-    render(chart({
+    await mountInAct(render, chart({
       items: [
         { ...ITEMS[0], itemId: "doors", title: "Doors", sequence: 0, preService: true, startedAt: new Date(T0).toISOString(), endedAt: new Date(T0 + 26 * MIN).toISOString() },
         { ...ITEMS[0], itemId: "warn", title: "10 min Warning", sequence: 1, preService: true, startedAt: new Date(T0 + 16 * MIN).toISOString(), endedAt: new Date(T0 + 26 * MIN).toISOString() },
@@ -743,8 +753,8 @@ describe("the item lane", () => {
     assert.ok(Number(svg.getAttribute("height")) >= bottom, `svg is ${svg.getAttribute("height")} tall, needs ${bottom}`);
   });
 
-  test("a live item's block reaches the live edge instead of collapsing", () => {
-    render(chart({
+  test("a live item's block reaches the live edge instead of collapsing", async () => {
+    await mountInAct(render, chart({
       live: true,
       items: [{ ...ITEMS[2], endedAt: null }],
       nowMs: T0 + 55 * MIN,
@@ -753,9 +763,9 @@ describe("the item lane", () => {
     assert.ok(Number(seg.getAttribute("width")) > 50, `collapsed to ${seg.getAttribute("width")}`);
   });
 
-  test("hovering an item block with a peak puts the NUMBER and the time in the strip", () => {
+  test("hovering an item block with a peak puts the NUMBER and the time in the strip", async () => {
     // A peak with the number nowhere is a mark nobody can read.
-    render(chart({ items: peakItems() }));
+    await mountInAct(render, chart({ items: peakItems() }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, svgPoint(250));
     const strip = stripEl();
     assert.ok(strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
@@ -763,8 +773,8 @@ describe("the item lane", () => {
     assert.ok(strip.textContent?.includes("When"), strip.textContent ?? "");
   });
 
-  test("an item with no peak gets no empty Peaked column", () => {
-    render(chart());
+  test("an item with no peak gets no empty Peaked column", async () => {
+    await mountInAct(render, chart());
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, svgPoint(480));
     const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), "the lane hover did not register");
@@ -805,8 +815,8 @@ describe("item peak markers", () => {
     fireEvent.pointerMove(svgEl(), { clientX: x, clientY: (y / svgH()) * SVG_H });
   }
 
-  test("the triangle sits at the series maximum, not the middle of the block", () => {
-    render(peakChart());
+  test("the triangle sits at the series maximum, not the middle of the block", async () => {
+    await mountInAct(render, peakChart());
     const tip = tipOf();
     const loud = xOfT(PEAK_AT);
     const mid = xOfT(T0 + 22.5 * MIN);
@@ -814,8 +824,8 @@ describe("item peak markers", () => {
     assert.ok(Math.abs(tip.x - mid) > 30, "the triangle is at the midpoint");
   });
 
-  test("the triangle is 12 wide, 10 tall, in the primary series colour", () => {
-    render(peakChart());
+  test("the triangle is 12 wide, 10 tall, in the primary series colour", async () => {
+    await mountInAct(render, peakChart());
     const tri = document.querySelector("[data-peak-triangle]") as SVGPathElement;
     assert.equal(tri.getAttribute("fill"), "var(--green-9)");
     const [, x0, y0, x1, x, y] = /M([\d.]+),([\d.]+)H([\d.]+)L([\d.]+),([\d.]+)Z/.exec(tri.getAttribute("d") ?? "")?.map(Number) ?? [];
@@ -824,54 +834,54 @@ describe("item peak markers", () => {
     assert.equal(x, (x0 + x1) / 2);
   });
 
-  test("the marker row exists only when there is a peak to mark", () => {
-    render(chart({ series: [peakSeries()] }));
+  test("the marker row exists only when there is a peak to mark", async () => {
+    await mountInAct(render, chart({ series: [peakSeries()] }));
     const plain = svgH();
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
     assert.equal(document.querySelectorAll("[data-peak-row]").length, 0);
     cleanup();
 
-    render(peakChart());
+    await mountInAct(render, peakChart());
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 1);
     assert.equal(svgH() - plain, 14, "the marker row did not make room above the plot");
     cleanup();
 
     // A caller that gives no peak (every other chart) gets no extra top space.
-    render(chart({ series: [peakSeries()], items: ITEMS }));
+    await mountInAct(render, chart({ series: [peakSeries()], items: ITEMS }));
     assert.equal(svgH(), plain);
   });
 
-  test("an item with no point inside it gets no triangle and no row", () => {
-    render(peakChart());
+  test("an item with no point inside it gets no triangle and no row", async () => {
+    await mountInAct(render, peakChart());
     const withRow = svgH();
     cleanup();
     // The peak instant is one the drawn line has no point at.
-    render(peakChart({ items: peakItems({ peakAt: PEAK_AT + 7_000 }) }));
+    await mountInAct(render, peakChart({ items: peakItems({ peakAt: PEAK_AT + 7_000 }) }));
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
     assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0);
     assert.equal(svgH(), withRow - 14);
     cleanup();
     // And an item with a peak figure but no instant at all: no midpoint guess.
-    render(peakChart({ items: peakItems({ peakAt: null }) }));
+    await mountInAct(render, peakChart({ items: peakItems({ peakAt: null }) }));
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
   });
 
-  test("the lane block carries no tick any more", () => {
-    render(peakChart());
+  test("the lane block carries no tick any more", async () => {
+    await mountInAct(render, peakChart());
     for (const row of document.querySelectorAll("[data-lane-row]")) {
       assert.equal(row.querySelectorAll("line, [data-peak-mark]").length, 0, "a tick is drawn in the lane");
     }
   });
 
-  test("at rest the line and the dot are not drawn; only the triangle is", () => {
-    render(peakChart());
+  test("at rest the line and the dot are not drawn; only the triangle is", async () => {
+    await mountInAct(render, peakChart());
     assert.equal(document.querySelectorAll("[data-peak-triangle]").length, 1);
     assert.equal(document.querySelectorAll("[data-peak-line]").length, 0, "the line is drawn at rest");
     assert.equal(document.querySelectorAll("[data-peak-dot]").length, 0, "the dot is drawn at rest");
   });
 
-  test("hovering the triangle draws the line from its tip down to the peak point, and the dot", () => {
-    render(peakChart());
+  test("hovering the triangle draws the line from its tip down to the peak point, and the dot", async () => {
+    await mountInAct(render, peakChart());
     const tip = tipOf();
     at(tip.x, tip.y - 4);
     const line = document.querySelector("[data-peak-line]") as SVGLineElement;
@@ -891,8 +901,8 @@ describe("item peak markers", () => {
     );
   });
 
-  test("hovering mid-plot on the line shows the item readout, with When", () => {
-    render(peakChart());
+  test("hovering mid-plot on the line shows the item readout, with When", async () => {
+    await mountInAct(render, peakChart());
     const tip = tipOf();
     const dotY = () => Number((document.querySelector("[data-peak-dot]") as SVGCircleElement).getAttribute("cy"));
     at(tip.x, tip.y + 2);
@@ -910,8 +920,8 @@ describe("item peak markers", () => {
     assert.ok(text.includes(formatTime(PEAK_AT)), `${text} does not carry ${formatTime(PEAK_AT)}`);
   });
 
-  test("just outside the 10px column the plot's own readout comes back", () => {
-    render(peakChart());
+  test("just outside the 10px column the plot's own readout comes back", async () => {
+    await mountInAct(render, peakChart());
     const tip = tipOf();
     at(tip.x, tip.y + 2);
     const peakY = Number((document.querySelector("[data-peak-dot]") as SVGCircleElement).getAttribute("cy"));
@@ -927,16 +937,16 @@ describe("item peak markers", () => {
     assert.ok(!(stripEl().textContent ?? "").includes("When"));
   });
 
-  test("hovering the item's lane block lights its line too", () => {
-    render(peakChart());
+  test("hovering the item's lane block lights its line too", async () => {
+    await mountInAct(render, peakChart());
     fireEvent.pointerMove(svgEl(), svgPoint(250));
     assert.ok(document.querySelector("[data-peak-line]"), "the line stays dark while its block is hovered");
     assert.ok(document.querySelector("[data-peak-dot]"));
     assert.ok((stripEl().textContent ?? "").includes("When"));
   });
 
-  test("focusing the triangle shows the same readout, and blurring clears it", () => {
-    render(peakChart());
+  test("focusing the triangle shows the same readout, and blurring clears it", async () => {
+    await mountInAct(render, peakChart());
     const g = document.querySelector("[data-peak-mark]") as SVGGElement;
     assert.equal(g.getAttribute("role"), "button");
     assert.equal(g.getAttribute("tabindex"), "0");
@@ -950,10 +960,10 @@ describe("item peak markers", () => {
     assert.ok(!(stripEl().textContent ?? "").includes("When"));
   });
 
-  test("a pointer on the plot answers for itself while a triangle still holds focus", () => {
+  test("a pointer on the plot answers for itself while a triangle still holds focus", async () => {
     // A click on the triangle focuses it and leaves it focused; the readout
     // must follow the pointer again once it is on the plot, not stay on the peak.
-    render(peakChart());
+    await mountInAct(render, peakChart());
     fireEvent.focus(document.querySelector("[data-peak-mark]") as SVGGElement);
     assert.ok((stripEl().textContent ?? "").includes("When"), "focus shows the peak's readout");
     fireEvent.pointerMove(svgEl(), svgPoint(560));
@@ -962,19 +972,19 @@ describe("item peak markers", () => {
     assert.equal(document.querySelectorAll("[data-peak-line]").length, 0);
   });
 
-  test("Item peaks off hides the triangle, the row and the legend entry", () => {
-    render(peakChart());
+  test("Item peaks off hides the triangle, the row and the legend entry", async () => {
+    await mountInAct(render, peakChart());
     const on = svgH();
     cleanup();
-    render(peakChart({ peakMarks: false }));
+    await mountInAct(render, peakChart({ peakMarks: false }));
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
     assert.equal(document.querySelectorAll("[data-peak-row]").length, 0);
     assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0);
     assert.equal(svgH(), on - 14);
   });
 
-  test("the legend swatch is a downward triangle", () => {
-    render(peakChart());
+  test("the legend swatch is a downward triangle", async () => {
+    await mountInAct(render, peakChart());
     const legend = document.querySelector("[data-legend-peak-mark]") as HTMLElement;
     assert.ok(legend.querySelector("svg path"), "the swatch is not a triangle");
     assert.equal(legend.textContent, "Item peak");
@@ -984,7 +994,7 @@ describe("item peak markers", () => {
 describe("Customize", () => {
   test("the sliders button opens a popover of the groups and reports the ticked key", async () => {
     const toggled: string[] = [];
-    render(
+    await mountInAct(render, 
       <CustomizePopover
         label="Customize attendance"
         groups={[
@@ -1003,7 +1013,7 @@ describe("Customize", () => {
   });
 
   test("a group with nothing in it is not drawn — an empty heading names nothing", async () => {
-    render(
+    await mountInAct(render, 
       <CustomizePopover
         label="Customize sound"
         groups={[

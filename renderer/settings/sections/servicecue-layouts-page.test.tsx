@@ -16,7 +16,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { serviceCueServer } from "../../test-fixtures/servicecue-server.js";
 import { alerts, reply } from "../../test-fixtures/fetch-log.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
@@ -61,15 +61,13 @@ const fire = Object.fromEntries(
 ) as Record<"blur" | "change" | "click" | "focus" | "keyDown" | "mouseDown" | "mouseMove" | "mouseUp" | "pointerUp" | "scroll", (el: Element | Window | Document, init?: object) => Promise<void>>;
 
 async function mount(): Promise<void> {
-  await act(async () => {
-    render(
-      React.createElement(
-        QueryClientProvider,
-        { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
-        React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
-      ),
-    );
-  });
+  await mountInAct(render, 
+    React.createElement(
+      QueryClientProvider,
+      { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+      React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection), React.createElement(ConfirmHost)),
+    ),
+  );
   for (let i = 0; i < 5; i++) await settle();
 }
 
@@ -142,7 +140,7 @@ test("the shut Public link row keeps its summary current", async () => {
     return React.createElement("span", { "data-summary": true }, usePublishSummary(40));
   }
   try {
-    render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(Summary)));
+    await mountInAct(render, React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(Summary)));
     await eventually(() => assert.equal(document.querySelector("[data-summary]")?.textContent, "Off"));
     enabled = true;
     await eventually(() => assert.equal(document.querySelector("[data-summary]")?.textContent, "Publishing", "the summary never read again"), 2000);
@@ -631,7 +629,7 @@ test("pointer: a page that scrolls mid-drag does not move the drop off the point
   // drag, the rects move up with it, and the pointer follows the tray to where it now is.
   const s = serviceCueServer({ layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES });
   try {
-    render(
+    await mountInAct(render, 
       React.createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },

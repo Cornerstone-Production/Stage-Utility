@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -102,7 +102,7 @@ test("hovering a sound lane segment reads the item's PLANNED length off the time
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch;
   try {
-    render(
+    await mountInAct(render, 
       React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,

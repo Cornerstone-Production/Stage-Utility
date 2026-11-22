@@ -14,7 +14,6 @@ import { eventually, installDom } from "../test-dom.js";
 import { ALERT_MS, EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const requests: { url: string; method: string; body: Record<string, unknown> | null }[] = [];
 let failWith: { status: number; error: string } | null = null;
