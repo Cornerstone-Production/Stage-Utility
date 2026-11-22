@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, mountInAct } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -39,7 +39,6 @@ class StubEventSource {
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
@@ -107,7 +106,7 @@ after(async () => {
 async function renderAt(path: string) {
   window.history.replaceState({}, "", path);
   await act(async () => {
-    render(
+    await mountInAct(render, 
       React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(TooltipProvider, null, React.createElement(StageView))),
     );
     await flush();
@@ -161,7 +160,7 @@ test("an ask from any window but the page's own parent goes unanswered", async (
 
 test("a preview says whether its stream is the shared one", async () => {
   await renderAt("/preview-v1?output=display-1");
-  __sseFallback.setShared(true);
+  act(() => __sseFallback.setShared(true));
   await act(async () => __sseFallback.noteStream(true));
   assert.equal(reportsShared.at(-1), true);
   await act(async () => __sseFallback.setShared(false, "worker abandoned: test"));

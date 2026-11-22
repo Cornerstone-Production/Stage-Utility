@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installDom();
 
@@ -51,7 +51,7 @@ const noop = () => {};
 
 const VIEW: View = { id: "v1", name: "The view", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z" };
 
-function card(over: Partial<OutputRowProps> = {}, routed = true) {
+async function card(over: Partial<OutputRowProps> = {}, routed = true) {
   const props: OutputRowProps = {
     output: { id: "display-1", name: "Stage left", viewId: routed ? "v1" : null },
     views: routed ? [VIEW] : [],
@@ -72,7 +72,7 @@ function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onRequestNewView: noop,
     ...over,
   };
-  render(
+  await mountInAct(render, 
     React.createElement(
       QueryClientProvider,
       { client: queryClient },
@@ -108,7 +108,7 @@ const select = async (el: Element) => {
 
 describe("the card's menu", () => {
   test("is the actions and nothing else, in order, with Screen settings between two separators", async () => {
-    card();
+    await card();
     await openMenu();
     assert.deepEqual(rows(), [
       "Open display",
@@ -123,13 +123,13 @@ describe("the card's menu", () => {
   });
 
   test("offers Rename view only when a view is assigned", async () => {
-    card({}, false);
+    await card({}, false);
     await openMenu();
     assert.deepEqual(rows(), ["Open display", "Copy URL", "Refresh display", "—", "Screen settings…", "—", "Remove display…"]);
   });
 
   test("no longer holds any setting", async () => {
-    card();
+    await card();
     await openMenu();
     const text = document.body.textContent ?? "";
     for (const gone of [
@@ -149,14 +149,14 @@ describe("the card's menu", () => {
 
   test("Screen settings… opens THIS screen's panel", async () => {
     let opened = 0;
-    card({ onSelect: () => { opened++; } });
+    await card({ onSelect: () => { opened++; } });
     await openMenu();
     await select(screen.getByRole("menuitem", { name: "Screen settings…" }));
     assert.equal(opened, 1);
   });
 
   test("Remove display is still refused for the last screen", async () => {
-    card({ canRemove: false });
+    await card({ canRemove: false });
     await openMenu();
     assert.equal(screen.getByRole("menuitem", { name: "Remove display…" }).getAttribute("aria-disabled"), "true");
   });
@@ -174,7 +174,7 @@ describe("the card's menu", () => {
       return true;
     };
     try {
-      card();
+      await card();
       await openMenu();
       const copy = screen.getByRole("menuitem", { name: "Copy URL" });
       // Synchronous on purpose: the menu closes itself once the copy is done, so
@@ -194,8 +194,8 @@ describe("the card's menu", () => {
 // The selected card's accent border is a stylesheet fact jsdom cannot see; it is
 // checked in a browser, not here.
 describe("the card keeps what an operator reaches for while working", () => {
-  test("the name, its view picker and the Open link are on the card, not in the menu", () => {
-    card();
+  test("the name, its view picker and the Open link are on the card, not in the menu", async () => {
+    await card();
     assert.ok(screen.getByLabelText("Display name"));
     assert.ok(screen.getByText("The view"));
     assert.ok(screen.getByRole("link", { name: /^Open/ }));

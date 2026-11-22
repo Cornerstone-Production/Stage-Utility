@@ -20,7 +20,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
@@ -261,7 +261,7 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
       { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
-  render(
+  await mountInAct(render, 
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {} })),
   );
 
@@ -284,7 +284,7 @@ test("OutputsSection builds the box from the pair's episode, not its live window
       { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 }, laggingEpisode: null },
     ]),
   );
-  render(
+  await mountInAct(render, 
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {} })),
   );
 
@@ -306,7 +306,7 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
       { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
-  render(
+  await mountInAct(render, 
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {} })),
   );
 
@@ -328,7 +328,7 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
 
 test("OutputsSection shows no struggle box for any screen before video:state has hydrated struggling data", async () => {
   stubVideoState(videoState([]));
-  render(
+  await mountInAct(render, 
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {} })),
   );
   await eventually(() => assert.ok(screen.getByText("Nothing assigned"))); // the unrouted-screen placeholder — proof the card mounted
@@ -346,7 +346,7 @@ test("OutputsSection builds the lagging box from the pair's EPISODE — the wors
       { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: 20, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
-  render(
+  await mountInAct(render, 
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {} })),
   );
 

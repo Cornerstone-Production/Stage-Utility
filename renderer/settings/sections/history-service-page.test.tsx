@@ -19,7 +19,6 @@ import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // api.ts opens an SSE stream on first use — most tests here never push on
 // it, but a few drive a live channel through `FakeEventSource.last`.

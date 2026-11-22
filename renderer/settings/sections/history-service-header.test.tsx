@@ -18,7 +18,6 @@ import { after, beforeEach, describe, test } from "node:test";
 import { installDom } from "../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** The one stubbed IntersectionObserver, handing the test its callback. */
 class StubObserver {

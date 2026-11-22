@@ -34,7 +34,6 @@ const posted: { url: string; body: unknown }[] = [];
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;

@@ -89,7 +89,6 @@ const CALENDAR_GRID = {
   }),
 };
 
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;

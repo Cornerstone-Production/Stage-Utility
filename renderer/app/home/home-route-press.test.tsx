@@ -10,12 +10,11 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
 import { NoStream } from "../../test-fixtures/no-stream.js";
 import { serve } from "../../test-fixtures/button-server.js";
 
 const teardown = installRenderDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -56,7 +55,7 @@ async function mountHome() {
     extra: (url) => (url.endsWith("/api/state") ? jsonOk({ ...DEFAULT_STAGE_STATE, views: [HOME], onboardingDismissed: true }) : undefined),
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await mountInAct(render, 
     React.createElement(
       RouterContextProvider as never,
       { router },

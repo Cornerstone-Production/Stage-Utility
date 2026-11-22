@@ -32,7 +32,6 @@ import { eventually, installDom, isPlumbing, settle, unmountAndTeardown } from "
 import type { UpdateStatus } from "@main/types/state";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class StubEventSource {
   readyState = 0;
