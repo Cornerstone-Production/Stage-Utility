@@ -145,6 +145,17 @@ describe("the helper job is gated on the build script being in the tree", () => 
     const key = String(cache.with?.["key"]);
     for (const part of ["${{ matrix.arch }}", "helper/macos/cef.json", "helper/macos/build-tools.txt", "helper/macos/CEFHost/**"]) assert.ok(key.includes(part), `the key does not depend on ${part}`);
     const steps = helper.steps ?? [];
+    // ninja does not notice a new compiler, so objects built by another Xcode must not be restored.
+    const toolchain = steps.find((s) => s.id === "toolchain");
+    assert.match(toolchain?.run ?? "", /xcodebuild -version/, "the toolchain step does not read the Xcode version");
+    const selectXcode = steps.findIndex((s) => s.uses?.endsWith("/.github/actions/select-xcode"));
+    assert.ok(selectXcode >= 0, "the helper job does not select Xcode");
+    assert.ok(selectXcode < steps.indexOf(toolchain!), "the version is read before Xcode is selected");
+    assert.ok(steps.indexOf(toolchain!) < steps.indexOf(cache), "the version is read before the cache is restored");
+    const xcode = "${{ steps.toolchain.outputs.xcode }}";
+    assert.ok(key.includes(xcode), "the key does not depend on the Xcode version");
+    assert.ok(String(cache.with?.["restore-keys"]).includes(xcode), "restore-keys can restore objects built by another Xcode");
+    assert.ok(steps.indexOf(cache) < steps.findIndex((s) => s.run?.includes("build-app.sh")), "restored before the build");
     assert.ok(steps.indexOf(cache) < steps.findIndex((s) => s.run?.includes("build-app.sh")), "restored before the build");
   });
 });

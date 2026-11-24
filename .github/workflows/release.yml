@@ -569,6 +569,14 @@ jobs:
       # with, not the runner image's default.
       - uses: $/.github/actions/select-xcode
 
+      # The Xcode that was just selected, for the cache key below: ninja reruns a
+      # command when its text changes, not when the compiler behind it does.
+      - name: Read the Xcode version
+        id: toolchain
+        run: |
+          set -euo pipefail
+          echo "xcode=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -587,11 +595,11 @@ jobs:
           path: |
             helper/macos/.cef-build/${{ matrix.arch }}
             helper/macos/.tools
-          key: helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-${{ hashFiles('helper/macos/CEFHost/**') }}
+          key: helper-cef-${{ matrix.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-${{ hashFiles('helper/macos/CEFHost/**') }}
           # A change to our CEF host alone still reuses the wrapper: ninja rebuilds
           # only what changed.
           restore-keys: |
-            helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-
+            helper-cef-${{ matrix.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-
 
       - name: Build and package the architecture
         env:
