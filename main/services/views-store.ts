@@ -9,6 +9,7 @@
 import type { View } from "../types/stage.js";
 import { isSelectionList } from "../types/calendar.js";
 import { isDisplayKind, isLayoutShape, isSlotsLayoutValue } from "../types/views.js";
+import { parseQsysPanelBlock } from "../types/qsys.js";
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse, textOrNull, uniqueIds } from "./restore-check.js";
 import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
@@ -19,7 +20,7 @@ import { isSafeKey } from "./safe-key.js";
  * and held to what PATCH /api/views/:id checks of each field, through the same
  * predicates: a kind the app has (isDisplayKind), a layout of the layout shape,
  * `slotsLayout` an object or null, the slot board, the ServiceCue layout and
- * NDI source text or null, the two flags booleans, the calendar lists `{ id, name }` lists, the
+ * NDI source text or null, the two flags booleans, a Q-SYS panel block of its shape, the calendar lists `{ id, name }` lists, the
  * surface display or console. No id twice.
  */
 const restoreCheck = checked((raw) => {
@@ -38,6 +39,10 @@ const restoreCheck = checked((raw) => {
     textOrNull(v.ndiSource, `${what}'s NDI source`);
     optional(v.hideChrome, "boolean", `${what}'s hideChrome`);
     optional(v.showInSidebar, "boolean", `${what}'s showInSidebar`);
+    if (v.qsys !== undefined) {
+      const parsed = parseQsysPanelBlock(v.qsys);
+      if ("error" in parsed) refuse(`${what}'s Q-SYS panel settings: ${parsed.error}`);
+    }
     for (const k of ["calendarSources", "calendarTags"] as const) {
       if (v[k] !== undefined && !isSelectionList(v[k])) refuse(`${what}'s ${k} must be a list of { id, name }`);
     }
@@ -46,6 +51,14 @@ const restoreCheck = checked((raw) => {
     }
   });
   uniqueIds(list, "the views");
+  // /qsys/<slug> opens one panel; a slug on two views would open whichever came first.
+  const slugs = new Set<string>();
+  for (const v of list) {
+    const slug = (v.qsys as { slug?: unknown } | undefined)?.slug;
+    if (typeof slug !== "string") continue;
+    if (slugs.has(slug)) refuse(`two views use the Q-SYS panel address /qsys/${slug}`);
+    slugs.add(slug);
+  }
   return views;
 });
 

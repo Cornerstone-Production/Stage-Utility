@@ -39,6 +39,9 @@ import { StagePlotsEdit } from "../settings/sections/stageplots-edit";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRouteSlot } from "./screens/kept-screens";
 import { ConsoleRoute } from "./console-route";
+import { QsysManagePanelRoute, QsysManageRoute } from "./qsys/qsys-manage-route";
+import { QsysPanelRoute } from "./qsys/qsys-panel-route";
+import { QSYS_MANAGE_PATH } from "./qsys/qsys-paths";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
 import { MicSlotsPage } from "./mic-slots/mic-slots-page";
@@ -372,4 +375,11 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // nowhere to be: it rendered only on a panel Output, which meant the one
   // surface built for the operator was the one the operator could not open.
   { path: "/consoles/$viewId", Component: ConsoleRoute },
+  // Q-SYS: the operator's page, titled here because nothing in the rail prefixes it;
+  // a panel inside the shell, titled with the panel's own name (active-page.ts,
+  // qsysPanelPages); and the panel full screen, chromeless, what an iPad opens. The
+  // static /qsys/manage wins over the /qsys/$slug parameter.
+  { path: QSYS_MANAGE_PATH, Component: QsysManageRoute, label: "Q-SYS", description: "Panels, the connection to the Core, and what panels may change." },
+  { path: "/qsys/manage/$slug", Component: QsysManagePanelRoute },
+  { path: "/qsys/$slug", Component: QsysPanelRoute },
 ];

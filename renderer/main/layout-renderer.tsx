@@ -46,6 +46,7 @@ import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { CueButton } from "./cue-button";
 import { QsysObject } from "./qsys/qsys-objects";
+import { panelKindOf, type PanelKind } from "@main/types/qsys";
 import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -788,8 +789,11 @@ function proFor(
 
 /** A Q-SYS object's panel: the View that holds it, the innermost of the embed chain,
  *  which is what the server builds its panels from. Null on Home. */
-function qsysPanelOf(ctx: LayoutRenderCtx): string | null {
-  return ctx.embedChain.at(-1) ?? null;
+/** The panel a Q-SYS object is on: the innermost view drawing it, and that view's
+ *  kind, which picks the meter channel. The same lookup the server's watch makes. */
+function qsysPanelOf(ctx: LayoutRenderCtx): { id: string | null; kind: PanelKind } {
+  const id = ctx.embedChain.at(-1) ?? null;
+  return { id, kind: panelKindOf(id ? ctx.state.views?.find((v) => v.id === id) : null) };
 }
 
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
@@ -1739,7 +1743,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "qsys-label":
     case "qsys-strip":
     case "qsys-status":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
+      return <QsysObject config={c} panel={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "messages":
       return (
         <MessagesObject

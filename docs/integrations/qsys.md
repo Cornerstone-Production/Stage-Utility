@@ -48,8 +48,8 @@ the reason it could not connect. `/log` shows the decisions, tagged `[qsys]`; se
 | Volunteer meter rate | Meter updates per second for volunteer panels. Whole number, 1 to 30, default 10. |
 | Staff meter rate | Meter updates per second for staff panels. Whole number, 1 to 30, default 20. |
 
-Every Q-SYS panel polls its meters at the staff rate for now; the volunteer rate is
-stored and not yet read.
+A [volunteer panel](#panels) moves its meters at the volunteer rate, and a staff panel,
+or a console with Q-SYS objects that is not a panel, at the staff rate.
 
 Enable the integration and use **Test connection**. It connects, logs on, and
 reports `Connected to <design name>` with the number of components it read, or
@@ -66,9 +66,9 @@ status reports `emulator` so it is not mistaken for a live Core.
 ## Allowlist and limits
 
 Writes go through [`POST /api/qsys/write`](../reference/api.md#q-sys) and reach only
-the controls on the allowlist. Nothing is on it by default. In this release the
-allowlist is set over the API, with `PUT /api/qsys/allowlist` or an allowlist file
-import; there is no page for it yet. Every write is checked by the server.
+the controls on the allowlist. Nothing is on it by default. The list is edited on
+[`/qsys/manage`](#the-q-sys-page), set over the API with `PUT /api/qsys/allowlist`, or
+imported as an allowlist file. Every write is checked by the server.
 
 | Field | Meaning |
 |---|---|
@@ -183,10 +183,9 @@ not copied, since no part has the strip's proportions. One undo restores the str
 
 ## Binding check
 
-A Q-SYS object stores the address of the control it reads or writes. Any View with
-Q-SYS objects (containers' children included) is a panel, and every time the Views
-are saved, the catalog is read, or the allowlist is saved, the server checks each
-binding against the Core:
+A Q-SYS object stores the address of the control it reads or writes. Every View
+with Q-SYS objects (containers' children included) is checked, a [panel](#panels) or
+not, every time the Views are saved, the catalog is read, or the allowlist is saved:
 
 | Problem | Meaning |
 |---|---|
@@ -203,16 +202,83 @@ indicator) need the control to exist.
 Each problem is one `[qsys] binding: <view>/<object> <problem> (<component>/<control>)`
 line on `/log`, written when the problem first appears and not again while it
 stands; a line says when every problem has been fixed. The report is at
-`GET /api/qsys/bindings`, which answers `503` while the Core is not connected (there
-is nothing to compare with) or while the check cannot read the views or the
-allowlist, and `[]` only when every binding resolves. A reconnect, or a new design,
-says every standing problem again. A config restore restarts the server, which reads
-the restored views and allowlist and checks them afresh. An unreadable views file
-stops the check, and says so.
+`GET /api/qsys/bindings` and on [`/qsys/manage`](#the-q-sys-page). The route answers
+`503` while the Core is not connected (there is nothing to compare with) or while the
+check cannot read the views or the allowlist (the body's `code` says which), and `[]`
+only when every binding resolves. A reconnect, or a new design, says every standing
+problem again. A config restore restarts the server, which reads the restored views
+and allowlist and checks them afresh. An unreadable views file stops the check, and
+says so.
 
-The same step gives the watch its panels: every View with Q-SYS objects, and the
-controls its objects read. When two people move one fader, the last write wins, and
-each panel shows the Core's value after the next poll, never its own.
+The same step gives the watch its panels: every View with Q-SYS objects or a panel
+block, the controls its objects read, and its kind. When two people move one fader,
+the last write wins, and each panel shows the Core's value after the next poll,
+never its own.
+
+## Panels
+
+A Q-SYS panel is a custom console with panel settings. It is built, edited, exported
+and imported like any console, and it is listed on `/qsys/manage` rather than among
+the consoles in the sidebar.
+
+| Setting | Meaning |
+|---|---|
+| Who uses it | **Volunteer** (big targets; meters at the volunteer rate) or **Staff** (dense; meters at the staff rate). |
+| Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's is refused, naming that panel. `manage` is not allowed. |
+| Panels in its cog menu | Other panels, by slug. One that no longer exists is kept, not refused. |
+| Go back to the home panel after | Minutes without a touch; 0 never goes back. Default 5. |
+
+A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A console
+with Q-SYS objects and no panel settings still works where it is shown, as a staff
+panel, and `/qsys/manage` offers to make it a panel.
+
+### Addresses
+
+| URL | What it is |
+|---|---|
+| `/qsys/<slug>` | The panel full screen, with no sidebar or header from the app: what an iPad opens, saved to its home screen. Its own header shows the panel's name and the connection. |
+| `/qsys/manage` | The Q-SYS page, in the app (see below). |
+| `/qsys/manage/<slug>` | The panel inside the app, with **Edit** in its top-right corner, as on a console. |
+
+An address no panel has shows "There is no panel here", never a blank page.
+
+### What a panel shows
+
+| The connection line says | When | Controls |
+|---|---|---|
+| Connected to sound system | The panel has read the Core's current values. | Live. |
+| Reconnecting to sound system | The page is reading the Core's values again: just opened, back from sleep, or its own connection to Stage Utility came back. | Hold their last values and take no input until the read lands. |
+| Sound system offline | Stage Utility cannot reach the Core. After 2 seconds, a card covers the controls: "Audio controls are offline. This page can't reach the sound system, so nothing here will change anything. Use the Q-SYS panel on the wall, or find a tech." The service keeps retrying, and the card goes when the Core is back. | Greyed, no input. |
+| No Q-SYS Core is set up | The integration is off or has no Core host. A bar under the header says so; on a staff panel and inside the app it links to the Q-SYS settings. | Greyed, no input. The panel stays editable. |
+
+A page that wakes from sleep, or whose connection to Stage Utility drops and comes
+back, reads the Core's current values before it takes a touch, and never sends its
+own values back: only a fresh touch writes.
+
+If Stage Utility itself is down, an iPad shows the browser's own error. The Core and
+its wall panels are not affected.
+
+## The Q-SYS page
+
+`/qsys/manage`, reached from the Q-SYS integration's dialog (**Open Q-SYS panels**):
+
+- **Panels**: a card per panel with its address, its kind and how many binding
+  problems it has; its name opens it inside the app, **Settings** edits its panel
+  settings, and **New panel** makes a blank one.
+- **Connection**: whether the Core is connected, and a link to its settings.
+- **Allowlist**: every allowlisted control, with its limits (blank for none) and
+  whether it asks for a hold. Edits are saved together with **Save the allowlist**.
+  **Add all controls <panel> uses** adds every control that panel's objects change
+  (a fader's level, a mute, a button, a switch, presets, a selector, a strip's gain
+  and mute; never a meter, a label or an indicator) that the list lacks, at the
+  Core's own range, and leaves every entry already there as it is. It needs the
+  Core connected, since the ranges come from it, and says which controls it left
+  off (not in the design, or read-only). An invalid stored list is shown with
+  **Start a new, empty list**, which keeps the old file beside the new one.
+- **Binding check**: each problem with its panel and control, "Every binding
+  resolves", "Connect a Core to check the bindings", or why the check could not run.
+- **Staff PIN** and **Meter rates**: the PIN a volunteer panel's cog asks for, and a
+  link to the rates on the integration.
 
 ## Write log
 
@@ -350,7 +416,12 @@ Look at `/log` and filter for `[qsys]`.
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
-| `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` until a check runs again, never an empty (all clear) list. |
+| `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
+| `allowlist: added <n> control(s) a panel uses, at the Core's own ranges` | **Add all controls … uses** on `/qsys/manage` added entries. |
+| `allowlist add refused: <why>` | **Add all controls … uses** saved nothing: the stored list is invalid, or the result broke a rule. |
+| `panel settings for <view> were refused: <why>`, `a new panel was refused: <why>` | From the page: a panel's settings or a new panel were refused, as for an address another panel has. The server's own line is `[stage-controller] setViewQsys … refused` or `createView refused`. |
+| `the allowlist save was refused: <why>`, `adding a panel's controls to the allowlist was refused: <why>`, `replacing the invalid allowlist was refused: <why>` | From `/qsys/manage`: the server refused the change; the page shows the same reason. |
+| `could not read the allowlist for /qsys/manage`, `… the binding check for /qsys/manage`, `… the Q-SYS connection for /qsys/manage` | A read on the Q-SYS page failed; that section says so. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 | `ready listener failed: <reason>` | A bug in this app's handling of writes becoming possible again (where an owed release is sent). Writes carry on; report the line. |
 

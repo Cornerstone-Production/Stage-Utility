@@ -11,7 +11,7 @@
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
 import type { Rotation } from "./output-format.js";
-import type { QsysBinding, QsysDensity } from "./qsys.js";
+import type { QsysBinding, QsysDensity, QsysPanelBlock } from "./qsys.js";
 
 export type ViewKind =
   | "slots"
@@ -288,6 +288,14 @@ export interface View {
    * to a display and back does not lose the choice.
    */
   showInSidebar?: boolean;
+  /**
+   * Makes a console a Q-SYS panel: its kind (volunteer or staff, which picks the
+   * meter rate), its URL slug (`/qsys/<slug>`), the sibling panels its cog menu
+   * lists, and its auto-return time. Absent: an ordinary console. A Q-SYS panel is
+   * listed under Q-SYS rather than among the sidebar's consoles. Checked by
+   * parseQsysPanelBlock; the slug is unique across the views.
+   */
+  qsys?: QsysPanelBlock;
   /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still

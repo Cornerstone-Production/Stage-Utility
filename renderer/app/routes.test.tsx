@@ -48,7 +48,10 @@ describe("operator destinations", () => {
     // the operator built, derived from state in rail.tsx. The server must still
     // claim the path or a direct load serves the kiosk bundle — which is exactly
     // the bug that put it here.
-    const dynamic = new Set(["/consoles"]);
+    //
+    // /qsys has none either: its pages are nested routes, /qsys/manage and one per
+    // panel, reached from the Q-SYS integration's dialog.
+    const dynamic = new Set(["/consoles", "/qsys"]);
     const expected = OPERATOR_PATHS.filter((p) => !retired.has(p) && !dynamic.has(p));
     assert.deepEqual(
       [...railTops].sort(),

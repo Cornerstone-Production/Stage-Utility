@@ -33,7 +33,7 @@ import { installDom, unmountAndTeardown } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, integrationCard, until, actUntil, settleFor, actIdle } = await import(
+const { installFakeServer, withQueryClientAndRouter, integrationCard, until, actUntil, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
@@ -290,7 +290,8 @@ function dialogNow(): HTMLElement {
 
 async function openCard(id: string, config: Record<string, unknown> = {}): Promise<void> {
   server = installFakeServer(Object.keys(config).length ? { [id]: { config } } : {});
-  const c = render(withQueryClient(<IntegrationsPanel />));
+  // Under a router: a dialog can link to another page (Q-SYS links to its panels).
+  const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
   await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
   await settleFor(60);

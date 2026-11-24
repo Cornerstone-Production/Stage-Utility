@@ -380,10 +380,50 @@ describe("/api/qsys", () => {
       const r = await callRoute(qsysRoutes, "/api/qsys/bindings");
       assert.equal(r.status, 503, `a check that could not run answered ${r.status} ${JSON.stringify(r.json)}`);
       assert.match((r.json as { error: string }).error, /could not run/);
+      assert.equal((r.json as { code?: string }).code, "check-failed", "a page could not tell this 503 from no Core");
     } finally {
       failing.mock.restore();
     }
     await quietly(() => qsysBindings.refresh());
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/bindings")).status, 200, "a good run did not bring the report back");
+  });
+
+  test("POST /api/qsys/allowlist/add-panel adds every control the panel writes at the Core's range, and touches no existing entry", async () => {
+    await quietly(connect);
+    const { viewsStore } = await import("../views-store.js");
+    const o = (id: string, config: unknown) => ({ id, x: 0, y: 0, w: 0.1, h: 0.1, z: 0, config });
+    await viewsStore.save([
+      {
+        id: "p1",
+        name: "Lobby",
+        kind: "custom",
+        surface: "console",
+        createdAt: "2026-01-01",
+        layout: {
+          version: 1,
+          canvas: {},
+          objects: [
+            o("f", { type: "qsys-fader", binding: { component: "Lobby_Mixer", control: "gain" }, orientation: "vertical", showDb: true, steps: false, stepDb: 1 }),
+            o("m", { type: "qsys-mute", binding: { component: "Lobby_Mixer", control: "mute" } }),
+            o("x", { type: "qsys-mute", binding: { component: "Lobby_Mixer", control: "nope" } }),
+            // Read only: a meter is never added.
+            o("r", { type: "qsys-meter", binding: { component: "Lobby_Mixer", control: "gain" }, form: "bar" }),
+          ],
+        },
+      },
+    ] as never);
+    const tight = { ...MUTE, label: "set by hand" };
+    assert.equal((await quietly(() => put([tight]))).status, 200);
+    const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "p1" } }));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const body = r.json as { entries: AllowEntry[]; added: AllowEntry[]; skipped: unknown[] };
+    assert.deepEqual(body.added, [{ component: "Lobby_Mixer", control: "gain", label: "Lobby_Mixer gain", min: -100, max: 20, confirm: "none" }]);
+    assert.deepEqual(body.skipped, [{ component: "Lobby_Mixer", control: "nope", reason: "not-in-design" }]);
+    assert.deepEqual(await listed(), [tight, body.added[0]], "the hand-set entry changed, or the list was not saved");
+    // Again: nothing more to add.
+    const again = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "p1" } }));
+    assert.deepEqual((again.json as { added: unknown[] }).added, []);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "gone" } })).status, 404);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: 7 } })).status, 400);
   });
 });

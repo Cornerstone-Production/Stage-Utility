@@ -236,6 +236,37 @@ export const qsysAllowlist = {
     return accept("save", () => parseAllowEntries(raw), replaceInvalid);
   },
 
+  /**
+   * Add each of `candidates` whose address is not on the list yet, as one atomic
+   * read-modify-write. An entry already listed is never touched, so limits set by
+   * hand stay as they are. Over an invalid stored file it is refused
+   * (AllowlistStoredInvalid), and a list that would break a rule is refused whole
+   * (AllowlistRefused); either saves nothing. Returns the list and what was added.
+   */
+  async addMissing(candidates: AllowEntry[]): Promise<{ entries: AllowEntry[]; added: AllowEntry[] }> {
+    let added: AllowEntry[] = [];
+    try {
+      const next = await store.update((current) => {
+        const reason = invalidReason.get(current);
+        if (reason !== undefined) throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Replace it with a save or an import first`);
+        const have = new Set(current.entries.map(addressKey));
+        added = candidates.filter((c) => {
+          const k = addressKey(c);
+          if (have.has(k)) return false;
+          have.add(k);
+          return true;
+        });
+        // The same object back: nothing to add, and nothing written.
+        return added.length === 0 ? current : { entries: parseAllowEntries([...current.entries, ...added]) };
+      });
+      if (added.length > 0) console.log(`[qsys] allowlist: added ${scrub(added.length)} control(s) a panel uses, at the Core's own ranges`);
+      return { entries: next.entries, added };
+    } catch (err) {
+      console.warn(`[qsys] allowlist add refused: ${scrub(errorMessage(err))}`);
+      throw err;
+    }
+  },
+
   /** Told after every save that landed (a save, an import, a restore). */
   onSaved(listener: () => void): void {
     store.onSaved(() => listener());

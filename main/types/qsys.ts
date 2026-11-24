@@ -187,3 +187,118 @@ export function qsysAddressesOf(config: LayoutObjectConfig): QsysAddress[] {
   }
   return out;
 }
+
+// ── Panels ─────────────────────────────────────────────────────────────────
+
+/**
+ * What makes a console View a Q-SYS panel: who it is for, the URL it opens at
+ * (`/qsys/<slug>`), the panels its cog menu lists, and how long it waits without
+ * a touch before going back to the device's home panel.
+ */
+export interface QsysPanelBlock {
+  kind: PanelKind;
+  /** Lowercase a-z, 0-9 and single hyphens; unique across the views; never "manage". */
+  slug: string;
+  /** Other panels' slugs, for the cog menu. One that does not exist is kept and
+   *  dropped from the menu where it is drawn, never refused here. */
+  siblings: string[];
+  /** Minutes without a touch before returning home; 0 never returns. */
+  returnAfterMin: number;
+}
+
+export const QSYS_SLUG_MAX = 64;
+export const QSYS_RETURN_DEFAULT_MIN = 5;
+export const QSYS_RETURN_MAX_MIN = 1440;
+const QSYS_SIBLINGS_MAX = 50;
+/** `/qsys/manage` is the operator's page, so no panel may take its name. */
+const RESERVED_QSYS_SLUGS: ReadonlySet<string> = new Set(["manage"]);
+const SLUG_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Is this a slug a panel may have? Shape only; uniqueness is {@link qsysSlugOwner}'s. */
+export function isQsysSlug(v: unknown): v is string {
+  return typeof v === "string" && v.length <= QSYS_SLUG_MAX && SLUG_SHAPE.test(v) && !RESERVED_QSYS_SLUGS.has(v);
+}
+
+/** A panel's name as a slug: lowercase, every run of anything else one hyphen.
+ *  "panel" for a name with nothing left, and a reserved word gets "-panel". */
+export function slugify(name: string): string {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, QSYS_SLUG_MAX)
+    .replace(/-+$/, "");
+  if (!base) return "panel";
+  return RESERVED_QSYS_SLUGS.has(base) ? `${base}-panel` : base;
+}
+
+/** `base`, or `base-2`, `base-3`... : the first that is not in `taken`. */
+export function uniqueQsysSlug(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `-${n}`;
+    const slug = `${base.slice(0, QSYS_SLUG_MAX - suffix.length).replace(/-+$/, "")}${suffix}`;
+    if (!taken.has(slug)) return slug;
+  }
+}
+
+/** Every slug the views' panels use. */
+export function qsysSlugsOf(views: readonly { qsys?: QsysPanelBlock | null }[]): Set<string> {
+  return new Set(views.flatMap((v) => (v.qsys ? [v.qsys.slug] : [])));
+}
+
+/** The kind a view's Q-SYS objects poll their meters as: its panel block's, else
+ *  staff (a console with Q-SYS objects and no block, or no view at all). The
+ *  server's watch and every page ask here, so they name the same meter channel. */
+export function panelKindOf(view: { qsys?: QsysPanelBlock | null } | null | undefined): PanelKind {
+  return view?.qsys?.kind ?? "staff";
+}
+
+/** Is this View a Q-SYS panel: one with a `qsys` block. */
+export function isQsysPanel(v: { qsys?: QsysPanelBlock | null }): boolean {
+  return !!v.qsys;
+}
+
+/** The panel at `/qsys/<slug>`, or null. The first in view order if two ever share one. */
+export function findPanelBySlug<V extends { qsys?: QsysPanelBlock | null }>(views: readonly V[], slug: string): V | null {
+  return views.find((v) => v.qsys?.slug === slug) ?? null;
+}
+
+/** The view, other than `exceptId`, already using `slug`; null when it is free. */
+export function qsysSlugOwner<V extends { id: string; qsys?: QsysPanelBlock | null }>(views: readonly V[], slug: string, exceptId: string | null): V | null {
+  return views.find((v) => v.id !== exceptId && v.qsys?.slug === slug) ?? null;
+}
+
+/**
+ * A `qsys` block as a request or a file gives it, checked: the block, or why it is
+ * refused. `siblings` defaults to none and `returnAfterMin` to 5. Shape only:
+ * whether the slug is free is decided against the views at the write.
+ */
+export function parseQsysPanelBlock(raw: unknown): { block: QsysPanelBlock } | { error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { error: "qsys must be an object or null" };
+  const r = raw as Record<string, unknown>;
+  for (const k of Object.keys(r)) {
+    if (k !== "kind" && k !== "slug" && k !== "siblings" && k !== "returnAfterMin") return { error: `qsys has a field this app does not have: ${k.slice(0, 40)}` };
+  }
+  if (r.kind !== "volunteer" && r.kind !== "staff") return { error: "qsys.kind must be volunteer or staff" };
+  if (!isQsysSlug(r.slug)) {
+    return { error: `qsys.slug must be lowercase letters, digits and single hyphens, up to ${QSYS_SLUG_MAX} characters, and not "manage"` };
+  }
+  const siblings = r.siblings ?? [];
+  if (!Array.isArray(siblings) || siblings.length > QSYS_SIBLINGS_MAX || !siblings.every(isQsysSlug)) {
+    return { error: `qsys.siblings must be a list of up to ${QSYS_SIBLINGS_MAX} panel slugs` };
+  }
+  const unique = [...new Set(siblings as string[])].filter((s) => s !== r.slug);
+  const returnAfterMin = r.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN;
+  if (typeof returnAfterMin !== "number" || !Number.isInteger(returnAfterMin) || returnAfterMin < 0 || returnAfterMin > QSYS_RETURN_MAX_MIN) {
+    return { error: `qsys.returnAfterMin must be a whole number of minutes from 0 to ${QSYS_RETURN_MAX_MIN}` };
+  }
+  return { block: { kind: r.kind, slug: r.slug, siblings: unique, returnAfterMin } };
+}
+
+/** What a duplicate slug is refused with. */
+export function slugTakenMessage(slug: string, owner: { name: string }): string {
+  return `the panel address /qsys/${slug} is already used by "${owner.name}"; pick another`;
+}

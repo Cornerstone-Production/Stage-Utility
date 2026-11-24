@@ -21,7 +21,7 @@
 import { scrub } from "../scrub.js";
 import { viewsStore } from "../views-store.js";
 import { walkLayoutObjects, type LayoutObject, type View } from "../../types/views.js";
-import { addressKey, addressOf, qsysAddressesOf, slotsOf, type QsysAddress, type QsysSlotRole } from "../../types/qsys.js";
+import { addressKey, addressOf, panelKindOf, qsysAddressesOf, slotsOf, type QsysAddress, type QsysSlotRole } from "../../types/qsys.js";
 import { qsysAllowlist, type AllowEntry } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch, type WatchPanel } from "./qsys-watch.js";
@@ -40,7 +40,29 @@ export function qsysObjectsOf(view: View): LayoutObject[] {
   return out;
 }
 
-/** The watch's panel list: every view with Q-SYS objects, its addresses once each. */
+/** The controls a view's objects WRITE (a fader's level, a mute, a button's
+ *  trigger, a strip's gain and mute), each once. Indicators, meters and labels are
+ *  only read, so "Add all controls this panel uses" leaves them off the allowlist. */
+export function writeAddressesOf(view: View): QsysAddress[] {
+  const seen = new Set<string>();
+  const out: QsysAddress[] = [];
+  for (const o of qsysObjectsOf(view)) {
+    for (const { binding, role } of slotsOf(o.config)) {
+      if (!binding || role !== "write") continue;
+      const a = addressOf(binding);
+      const k = addressKey(a);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+/** The watch's panel list: every view with Q-SYS objects or a Q-SYS panel block,
+ *  its addresses once each. A panel's kind picks its meter rate; a view with Q-SYS
+ *  objects and no block is a staff panel. A panel with nothing on it yet is listed
+ *  too, so its page reads as a panel (an empty one) rather than as no panel. */
 export function panelsFromViews(views: View[]): WatchPanel[] {
   const panels: WatchPanel[] = [];
   for (const v of views) {
@@ -54,8 +76,7 @@ export function panelsFromViews(views: View[]): WatchPanel[] {
         addresses.push(a);
       }
     }
-    // A kind of "staff" for now: the View's own Q-SYS settings arrive with the panel shell.
-    if (addresses.length > 0) panels.push({ id: v.id, kind: "staff", addresses });
+    if (addresses.length > 0 || v.qsys) panels.push({ id: v.id, kind: panelKindOf(v), addresses });
   }
   return panels;
 }

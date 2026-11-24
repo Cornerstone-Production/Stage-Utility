@@ -841,6 +841,14 @@ export function IntegrationDialog({
         <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
       )}
       {descriptor.id === "prodcom" && <CaptionColorsPanel />}
+      {descriptor.id === "qsys" && (
+        <p className="px-1 py-2 text-callout text-fg-muted">
+          Panels, the allowlist of what they may change, and the binding check live on their own page.{" "}
+          <AppLink to="/qsys/manage" className="text-accent hover:underline">
+            Open Q-SYS panels
+          </AppLink>
+        </p>
+      )}
     </div>
     ));
 

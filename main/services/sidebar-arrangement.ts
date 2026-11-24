@@ -28,6 +28,7 @@
 import { screensListViews } from "./home-view.js";
 import { refuse } from "./restore-check.js";
 import { viewShownInSidebar, viewSurface, type View } from "../types/views.js";
+import { isQsysPanel } from "../types/qsys.js";
 import { isRecord } from "./is-record.js";
 
 export type SidebarSectionKind = "top" | "consoles" | "pages";
@@ -137,8 +138,17 @@ export interface SidebarConsoles {
   hidden: ReadonlySet<string>;
 }
 
+/**
+ * The consoles the sidebar may list: every console but a Q-SYS panel, which is
+ * listed under Q-SYS instead. Only the sidebar narrows the list; a panel is still
+ * a console everywhere else.
+ */
+export function sidebarConsoleViews<V extends Pick<View, "id" | "surface" | "qsys">>(views: readonly V[] | undefined): V[] {
+  return consoleViews(views).filter((v) => !isQsysPanel(v));
+}
+
 export function sidebarConsolesOf(views: readonly View[] | undefined): SidebarConsoles {
-  const list = consoleViews(views);
+  const list = sidebarConsoleViews(views);
   return {
     all: list.map((v) => consoleMemberId(v.id)),
     hidden: new Set(list.filter((v) => !viewShownInSidebar(v)).map((v) => consoleMemberId(v.id))),

@@ -22,6 +22,8 @@ export interface QsysStatusDto {
   designName: string | null;
   isEmulator: boolean | null;
   catalogAt: number | null;
+  /** A Core is set up and the integration is on. False: a panel says "No Q-SYS Core is set up". */
+  configured: boolean;
   rev?: number;
 }
 
@@ -30,7 +32,7 @@ export interface QsysCatalog {
   components: { name: string; type: string; controls: QrcControl[] }[];
 }
 
-const OFFLINE: QsysStatusDto = { connected: false, state: "offline", designName: null, isEmulator: null, catalogAt: null };
+const OFFLINE: QsysStatusDto = { connected: false, state: "offline", designName: null, isEmulator: null, catalogAt: null, configured: false };
 
 export type QsysTestResult =
   | { ok: true; status: QrcStatus; components: number }
@@ -89,6 +91,10 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
   private pushes = 0;
   private readonly catalogListeners: ((c: QsysCatalog) => void)[] = [];
 
+  /** Stopped from outside, or never started: see stop(). */
+  private off = true;
+  private restarting = false;
+
   constructor() {
     super("qsys", "qsys:status", OFFLINE);
   }
@@ -102,13 +108,41 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     this.settings = s;
     this.password = password;
     this.resetReport();
+    // restart() stops first, and stop() lands on offline stamped with whether a Core is
+    // set up now: so a panel hears "set up" or "not set up" even with nothing to drop.
     this.restart();
   }
 
   override start(): void {
     if (this.running || !this.configured) return;
+    this.off = false;
+    // Set up from here on, before the first dial answers: a slow dial is not "no Core".
+    this.emitIfChanged({ ...this.last, configured: true });
     console.log(`[qsys] connecting to ${scrub(this.settings!.host)}:${this.settings!.port}`);
     super.start();
+  }
+
+  /**
+   * Stopped from outside (the integration switched off, or its host cleared) is
+   * "no Core set up", whatever the last settings said. A restart's own stop is not.
+   */
+  override stop(): void {
+    if (!this.restarting) this.off = true;
+    super.stop();
+  }
+
+  protected override restart(): void {
+    this.restarting = true;
+    try {
+      super.restart();
+    } finally {
+      this.restarting = false;
+    }
+  }
+
+  /** What the status calls `configured`: a Core is set up and the integration has not been switched off. */
+  private get setUp(): boolean {
+    return this.configured && !this.off;
   }
 
   /** Drop the connection and everything read on it. Also how a failed connection ends. */
@@ -348,6 +382,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
       designName: status.DesignName,
       isEmulator: status.IsEmulator,
       catalogAt: this.catalogAt,
+      configured: true,
     });
   }
 
@@ -375,13 +410,13 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
       this.report("error", err instanceof QrcError ? `The Core answered with an error: ${err.message}` : `Can't reach the Core: ${errorMessage(err)}`);
     }
     this.teardown();
-    this.emitIfChanged({ ...OFFLINE, state: "reconnecting" });
+    this.emitIfChanged({ ...OFFLINE, state: "reconnecting", configured: true });
     this.scheduleReconnect();
   }
 
   /** stop() lands on offline, not reconnecting. */
   protected override goOffline(): void {
-    this.emitIfChanged(OFFLINE);
+    this.emitIfChanged({ ...OFFLINE, configured: this.setUp });
   }
 }
 

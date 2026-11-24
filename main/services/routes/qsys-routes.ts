@@ -10,12 +10,16 @@
 //                                      entry; 409 over an invalid stored file unless replaceInvalid is true
 //   POST /api/qsys/allowlist/export    the allowlist file
 //   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
+//   POST /api/qsys/allowlist/add-panel { panelId } -> { entries, added, skipped }: every control the panel writes
+//                                      and the list lacks, at the Core's range; 503 while not connected,
+//                                      404 unknown view, 409 over an invalid stored file
 //   POST /api/qsys/write               { component, control, value, panelId?, final?, lease?, cid? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   POST /api/qsys/lease               { component, control, cid? } -> { held }: renew a held momentary
 //   GET  /api/qsys/values?panel=<id>   { ready, values, catalogAt }: the panel's values as last read; 404 unknown panel
 //   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not
-//                                      connected, or while the check cannot read the views or the allowlist
+//                                      connected (code not-connected), or while the check cannot read the views
+//                                      or the allowlist (code check-failed)
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -25,8 +29,10 @@
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
-import { AllowlistRefused, AllowlistStoredInvalid, isLine, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
-import { qsysBindings } from "../qsys/qsys-bindings.js";
+import { AllowlistRefused, AllowlistStoredInvalid, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
+import { viewsStore } from "../views-store.js";
+import { isReadOnlyDirection } from "../../types/qsys.js";
+import { qsysBindings, writeAddressesOf } from "../qsys/qsys-bindings.js";
 import { qsysService } from "../qsys/qsys-service.js";
 import { qsysWatch } from "../qsys/qsys-watch.js";
 import { qsysWriter, writeControl } from "../qsys/qsys-write.js";
@@ -109,6 +115,34 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     return allowlistChange(c, (body, opts) => qsysAllowlist.importFile(body, opts));
   }
 
+  if (method === "POST" && pathname === "/api/qsys/allowlist/add-panel") {
+    // "Add all controls this panel uses": every control the panel WRITES, at the Core's own range.
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (!isLine(body.panelId, MAX_PANEL_ID)) return error(res, `panelId must be text of up to ${MAX_PANEL_ID} characters on one line`);
+    const catalog = qsysService.getCatalog();
+    if (!catalog) return error(res, "the Q-SYS Core is not connected, so its ranges are not known", 503);
+    const view = (await viewsStore.loadStrict()).find((v) => v.id === body.panelId);
+    if (!view) return error(res, "no view has that id", 404);
+    const components = new Map(catalog.components.map((c) => [c.name, new Map(c.controls.map((x) => [x.Name, x]))]));
+    const candidates: AllowEntry[] = [];
+    const skipped: { component: string; control: string; reason: "not-in-design" | "read-only" }[] = [];
+    for (const a of writeAddressesOf(view)) {
+      const control = components.get(a.component)?.get(a.control);
+      if (!control) skipped.push({ ...a, reason: "not-in-design" });
+      else if (isReadOnlyDirection(control.Direction)) skipped.push({ ...a, reason: "read-only" });
+      else candidates.push(allowEntryFromCatalog(control, a.component));
+    }
+    try {
+      json(res, { ...(await qsysAllowlist.addMissing(candidates)), skipped });
+    } catch (err) {
+      if (err instanceof AllowlistStoredInvalid) return error(res, err.message, 409);
+      if (!(err instanceof AllowlistRefused)) throw err;
+      error(res, err.message);
+    }
+    return;
+  }
+
   if (method === "POST" && pathname === "/api/qsys/write") {
     const body = await readObjectBody(req, res, MAX_WRITE_BODY_BYTES);
     if (!body) return;
@@ -165,7 +199,8 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     const answer = qsysBindings.current();
     if ("report" in answer) return json(res, answer.report);
     // Never an empty report in place of a check that could not run: empty means every binding resolves.
-    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503);
+    // The code says which of the two a 503 is.
+    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503, answer.error);
     return;
   }
 

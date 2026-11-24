@@ -22,7 +22,8 @@
 
 import { viewShownInSidebar, type View } from "@main/types/views";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
-import { consoleViews } from "@main/services/sidebar-arrangement";
+import { consoleViews, sidebarConsoleViews } from "@main/services/sidebar-arrangement";
+import { qsysManagedSlugOf, qsysManagePanelPath, qsysPanelPath, qsysPanelSlugOf } from "./qsys/qsys-paths";
 
 /** What the chrome needs to know about a page. A Destination minus its icon and
  *  its component, so a page that has no rail entry can still have a name. */
@@ -59,11 +60,13 @@ export function consoleViewList(views: readonly View[] | undefined): View[] {
 }
 
 /**
- * The consoles the sidebar lists: {@link consoleViewList} minus those the
- * operator turned "Show in the sidebar" off for. Only the rail reads this.
+ * The consoles the sidebar lists: {@link consoleViewList} minus Q-SYS panels and
+ * those the operator turned "Show in the sidebar" off for. Only the rail reads this.
  */
 export function sidebarConsoleList(views: readonly View[] | undefined): View[] {
-  return consoleViewList(views).filter(viewShownInSidebar);
+  // A Q-SYS panel is listed under Q-SYS, not among the consoles: the same narrowing
+  // the server validates a saved sidebar with.
+  return sidebarConsoleViews(views).filter(viewShownInSidebar);
 }
 
 /** Where a console View lives. ONE spelling of the path shape, because it was
@@ -94,6 +97,22 @@ export function consolePageFor(view: View): PageIdentity {
 /** Every console View as a page. */
 export function consolePages(views: readonly View[] | undefined): PageIdentity[] {
   return consoleViewList(views).map(consolePageFor);
+}
+
+/**
+ * Every Q-SYS panel as its two pages, both named as the panel is: inside the
+ * shell at `/qsys/manage/<slug>`, and full screen at `/qsys/<slug>`, which draws
+ * no shell but still has a name.
+ */
+export function qsysPanelPages(views: readonly View[] | undefined): PageIdentity[] {
+  return (views ?? []).flatMap((v) =>
+    v.qsys
+      ? [
+          { path: qsysManagePanelPath(v.qsys.slug), label: v.name, description: "" },
+          { path: qsysPanelPath(v.qsys.slug), label: v.name, description: "" },
+        ]
+      : [],
+  );
 }
 
 /**
@@ -130,6 +149,8 @@ export function isFullBleedPath(pathname: string, views: readonly View[] | undef
   // kiosk surface. NOT `/servicecue` or `/servicecue/presets`, which are ordinary
   // pages and want the gutter.
   if (/^\/servicecue\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  // A Q-SYS panel paints its own surface too, in the shell or out of it.
+  if (qsysPanelSlugOf(pathname) !== null || qsysManagedSlugOf(pathname) !== null) return true;
   return isConsolePath(pathname, views);
 }
 
@@ -176,6 +197,9 @@ export function isSharedChromelessPath(pathname: string): boolean {
   // layouts and stays an ordinary settings page, so only the exact launcher
   // path and the three-deep rundown path qualify.
   if (bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare)) return true;
+  // A Q-SYS panel at /qsys/<slug>: what a volunteer's iPad opens, with no way into the
+  // app from it. /qsys/manage and a panel under it keep the shell.
+  if (qsysPanelSlugOf(bare) !== null) return true;
   // One venue on the crew's stage plots (the list is in the set above): the link and QR code
   // handed out at load-in. /stageplots/manage (the app's own, with Edit) and the editor keep
   // the shell.

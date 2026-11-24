@@ -38,6 +38,7 @@ import { keepKnownConsoles, resolveSidebar, sidebarConsolesOf, type SidebarArran
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { qsysSlugOwner, qsysSlugsOf, slugTakenMessage, uniqueQsysSlug, type QsysPanelBlock } from "../types/qsys.js";
 import { isSafeKey } from "./safe-key.js";
 import {
   CAPTION_COLOR,
@@ -370,6 +371,11 @@ export class NoDuplicateServerError extends Error {
     super("New server id is offered only while another server answers with this server's id.");
     this.name = "NoDuplicateServerError";
   }
+}
+
+/** A Q-SYS panel block refused: a slug another view has, or a view that cannot be a panel. 400, with the reason. */
+export class QsysPanelRefused extends Error {
+  readonly status = 400;
 }
 
 export class LayoutConflictError extends Error {
@@ -4068,8 +4074,9 @@ export class StageController {
     name: string,
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
+    qsys: QsysPanelBlock | null = null,
   ): Promise<StageState> {
-    await this.createViewRecord(name, kind, surface);
+    await this.createViewRecord(name, kind, surface, undefined, qsys);
     return this.state;
   }
 
@@ -4086,7 +4093,11 @@ export class StageController {
     /** Told the view in the same synchronous turn it enters the state, BEFORE the
      *  write that can fail. See addOutput's `onAssigned`. */
     onAssigned?: (view: View) => void,
+    /** A new Q-SYS panel: a custom console with this block, its slug checked in the
+     *  same turn the view enters the state. */
+    qsys: QsysPanelBlock | null = null,
   ): Promise<View> {
+    if (qsys && (kind !== "custom" || surface !== "console")) throw new QsysPanelRefused("a Q-SYS panel is a custom console");
     const id = await this.allocateViewId();
     // A kind with nothing to operate asked for as a console would be a console
     // that cannot carry a control: a promise the screen could not keep.
@@ -4106,8 +4117,16 @@ export class StageController {
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,
       ...(boardId ? { boardId } : {}),
+      ...(qsys ? { qsys } : {}),
     };
-    console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
+    // After the await above, so a panel saved meanwhile is seen.
+    const slugOwner = qsys ? qsysSlugOwner(this.state.views, qsys.slug, null) : null;
+    if (qsys && slugOwner) {
+      const refused = slugTakenMessage(qsys.slug, slugOwner);
+      console.warn(`[stage-controller] createView refused: ${scrub(refused)}`);
+      throw new QsysPanelRefused(refused);
+    }
+    console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}${qsys ? ` Q-SYS ${scrub(qsys.kind)} panel /qsys/${scrub(qsys.slug)}` : ""}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
     onAssigned?.(view);
@@ -4332,6 +4351,37 @@ export class StageController {
       id,
       { showInSidebar },
       `[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`,
+    );
+  }
+
+  /**
+   * Why `block` cannot be this view's Q-SYS panel block, or null. A panel is a
+   * custom console, and its slug is not another view's. Asked before a PATCH writes
+   * anything, and again at the write, in the same turn the state changes.
+   */
+  qsysPanelRefusal(id: string, block: QsysPanelBlock | null, change: { kind?: ViewKind; surface?: ViewSurface } = {}): string | null {
+    if (!block) return null;
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) return null;
+    if ((change.surface ?? viewSurface(view)) !== "console" || (change.kind ?? view.kind) !== "custom") {
+      return `"${view.name}" is not a custom console, so it cannot be a Q-SYS panel`;
+    }
+    const owner = qsysSlugOwner(this.state.views, block.slug, id);
+    return owner ? slugTakenMessage(block.slug, owner) : null;
+  }
+
+  /** Make a view a Q-SYS panel, change its panel settings, or (null) make it an ordinary console. */
+  async setViewQsys(id: string, block: QsysPanelBlock | null): Promise<StageState> {
+    this.requireView(id, "views:setQsys");
+    const refused = this.qsysPanelRefusal(id, block);
+    if (refused) {
+      console.warn(`[stage-controller] setViewQsys id=${scrub(id)} refused: ${scrub(refused)}`);
+      throw new QsysPanelRefused(refused);
+    }
+    return this.commitViewPatch(
+      id,
+      { qsys: block ?? undefined },
+      `[stage-controller] setViewQsys id=${scrub(id)} → ${block ? `${scrub(block.kind)} /qsys/${scrub(block.slug)}` : "not a panel"}`,
     );
   }
 
@@ -4566,7 +4616,12 @@ export class StageController {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
-    const copy = copyBoards ? await this.giveCopyItsOwnBoards(cloned.copy) : cloned.copy;
+    const boarded = copyBoards ? await this.giveCopyItsOwnBoards(cloned.copy) : cloned.copy;
+    // A copy of a Q-SYS panel is a panel at an address of its own: two views at one
+    // /qsys/<slug> would open whichever came first. Taken after the await, so a panel
+    // saved meanwhile keeps its address. (The screen-role migration's copies need
+    // none of this: it runs only on screens saved before panels existed.)
+    const copy = boarded.qsys ? { ...boarded, qsys: { ...boarded.qsys, slug: uniqueQsysSlug(src.qsys!.slug, qsysSlugsOf(this.state.views)) } } : boarded;
     console.log(
       `[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"${scrub(copyBoards ? " with its own boards" : "")}`,
     );
@@ -5238,11 +5293,18 @@ export class StageController {
    * same body that makes it a wall view), so a refusal here is the only one the
    * two writes can raise, and neither runs when it is returned.
    */
-  viewPatchRefusal(id: string, change: { kind?: ViewKind; surface?: ViewSurface }): string | null {
+  viewPatchRefusal(id: string, change: { kind?: ViewKind; surface?: ViewSurface; qsys?: QsysPanelBlock | null }): string | null {
+    const panelRefused = change.qsys === undefined ? null : this.qsysPanelRefusal(id, change.qsys, change);
+    if (panelRefused) return panelRefused;
     const view = this.state.views.find((v) => v.id === id);
     if (!view || (change.kind === undefined && change.surface === undefined)) return null;
     const final: View = { ...view, kind: change.kind ?? view.kind };
     const surface = change.surface ?? viewSurface(view);
+    // A Q-SYS panel stays a custom console while it is one; /qsys/<slug> draws its layout.
+    const panel = change.qsys === undefined ? view.qsys : change.qsys;
+    if (panel && (surface !== "console" || final.kind !== "custom")) {
+      return `"${view.name}" is a Q-SYS panel; make it an ordinary console on the Q-SYS page first`;
+    }
     try {
       if (surface === "console") this.assertCanBeControlSurface(final);
     } catch (err) {

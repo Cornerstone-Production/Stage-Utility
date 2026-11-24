@@ -572,10 +572,13 @@ export type IpcChannel =
   | "propresenter:getInstances"
   | "propresenter:getStatus"
   | "pvp:getStatus"
+  | "qsys:addPanelControls"
   | "qsys:allowlist"
+  | "qsys:bindings"
   | "qsys:catalog"
   | "qsys:lease"
   | "qsys:panelValues"
+  | "qsys:setAllowlist"
   | "qsys:status"
   | "qsys:write"
   | "reaper:getStatus"
@@ -713,6 +716,7 @@ export type IpcChannel =
   | "views:setBoard"
   | "views:setCalendarFilters"
   | "views:setHideChrome"
+  | "views:setQsys"
   | "views:setKind"
   | "views:setLayout"
   | "views:setServiceCueLayout"
@@ -1005,8 +1009,14 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     // Q-SYS panels. The values read is a panel's hydration (its pushes carry only
     // changes); a write is one control, checked again on the server.
+    case "qsys:addPanelControls":
+      return post<T>("/api/qsys/allowlist/add-panel", { panelId: p.panelId });
     case "qsys:allowlist":
       return apiFetch<T>("/api/qsys/allowlist");
+    case "qsys:bindings":
+      return apiFetch<T>("/api/qsys/bindings");
+    case "qsys:setAllowlist":
+      return put<T>("/api/qsys/allowlist", { entries: p.entries, ...(p.replaceInvalid === true ? { replaceInvalid: true } : {}) });
     case "qsys:catalog":
       return apiFetch<T>("/api/qsys/catalog");
     case "qsys:lease":
@@ -1464,6 +1474,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "views:setShowInSidebar": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showInSidebar: p.showInSidebar });
+    }
+
+    case "views:setQsys": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { qsys: p.qsys });
     }
 
     case "views:setHideChrome": {

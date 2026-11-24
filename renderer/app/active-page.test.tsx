@@ -23,7 +23,7 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const { router } = await import("./router.js");
 const { MOVED_PAGE_ROUTE_PATTERNS, MOVED_ROUTES } = await import("./redirects.js");
-const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, resolvePage } =
+const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, isFullBleedPath, qsysPanelPages, resolvePage, sidebarConsoleList } =
   await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
 const { ALL_DESTINATIONS } = await import("./destinations.js");
@@ -37,6 +37,9 @@ after(() => {
 /** Invented, as everything in this repo's fixtures is. */
 const CONSOLE_ID = "view-monitor-world";
 const CONSOLE_NAME = "Monitor World";
+const QSYS_ID = "view-zone-panel";
+const QSYS_NAME = "Zone 1";
+const QSYS_SLUG = "zone-1";
 
 const VIEWS = [
   // Home is a console View and must NOT become a console page — the rail once
@@ -44,9 +47,12 @@ const VIEWS = [
   { id: "home", name: "Home", kind: "custom", surface: "console", createdAt: "2026-01-01T00:00:00.000Z" },
   { id: CONSOLE_ID, name: CONSOLE_NAME, kind: "custom", surface: "console", createdAt: "2026-01-01T00:00:00.000Z" },
   { id: "view-lobby", name: "Lobby", kind: "slots", createdAt: "2026-01-01T00:00:00.000Z" },
+  // A Q-SYS panel: a console with a panel block, listed under Q-SYS rather than the consoles.
+  { id: QSYS_ID, name: QSYS_NAME, kind: "custom", surface: "console", createdAt: "2026-01-01T00:00:00.000Z", qsys: { kind: "volunteer", slug: QSYS_SLUG, siblings: [], returnAfterMin: 5 } },
 ] as unknown as NonNullable<Parameters<typeof consolePages>[0]>;
 
-const CONSOLES = consolePages(VIEWS);
+/** Every page built from the operator's views, as the shell builds them. */
+const CONSOLES = [...consolePages(VIEWS), ...qsysPanelPages(VIEWS)];
 
 /** Sample values for a route pattern's params, so a dynamic route can be walked
  *  as a real URL. Invented ids, never a real service type. */
@@ -56,6 +62,7 @@ const PARAMS: Record<string, string> = {
   $layout: "audio",
   $tab: "network",
   $venueId: "v-abc",
+  $slug: QSYS_SLUG,
 };
 
 function fill(pattern: string): string {
@@ -94,7 +101,7 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly seven dynamic routes", () => {
+  test("there are exactly nine dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
@@ -102,6 +109,8 @@ describe("the route table", () => {
     assert.deepEqual(dynamic, [
       "/automation/$tab",
       "/consoles/$viewId",
+      "/qsys/$slug",
+      "/qsys/manage/$slug",
       "/screens/$viewId/edit",
       "/servicecue/$serviceType/$layout",
       "/settings/advanced/$tab",
@@ -150,6 +159,9 @@ describe("every registered route resolves a title", () => {
         "/patch",
         "/patch/edit",
         "/plan",
+        "/qsys/$slug",
+        "/qsys/manage",
+        "/qsys/manage/$slug",
         "/screens",
         "/screens/$viewId/edit",
         "/scriptview",
@@ -194,6 +206,9 @@ describe("every registered route resolves a title", () => {
         "/patch",
         "/patch/edit",
         "/plan",
+        "/qsys/$slug",
+        "/qsys/manage",
+        "/qsys/manage/$slug",
         "/screens",
         "/screens/$viewId/edit",
         "/servicecue",
@@ -227,7 +242,7 @@ describe("a console is named after its View", () => {
   });
 
   test("Home is not one of them", () => {
-    assert.deepEqual(CONSOLES.map((c) => c.path), [`/consoles/${CONSOLE_ID}`]);
+    assert.deepEqual(CONSOLES.map((c) => c.path), [`/consoles/${CONSOLE_ID}`, `/consoles/${QSYS_ID}`, `/qsys/manage/${QSYS_SLUG}`, `/qsys/${QSYS_SLUG}`]);
   });
 
   test("a console that no longer exists names nothing rather than something wrong", () => {
@@ -314,7 +329,8 @@ describe("exact versus prefix", () => {
     // /servicecue/manage, so a prefix match landed on the tablet's /servicecue,
     // which has no row, and nothing in the rail was lit while editing layouts.
     // Every registered route that shows the chrome, paired with the row it lights.
-    const rail = new Set([...ALL_DESTINATIONS.map((d) => d.path), ...CONSOLES.map((c) => c.path)]);
+    // The rail's rows are the destinations and the consoles the sidebar lists, not every page.
+    const rail = new Set([...ALL_DESTINATIONS.map((d) => d.path), ...sidebarConsoleList(VIEWS).map((v) => consolePageFor(v).path)]);
     const lit = REGISTERED.filter((p) => !REDIRECTS.has(p) && !hidesChrome(fill(p), VIEWS))
       .map((p) => {
         const path = resolvePage(fill(p), CONSOLES)?.page.path ?? "nothing";
@@ -332,6 +348,8 @@ describe("exact versus prefix", () => {
       "/patch -> /patch",
       "/patch/edit -> /patch",
       "/plan -> /plan",
+      "/qsys/manage -> /qsys/manage (no rail row)",
+      `/qsys/manage/$slug -> /qsys/manage/${QSYS_SLUG} (no rail row)`,
       "/screens -> /screens",
       "/screens/$viewId/edit -> /screens",
       "/servicecue/manage -> /servicecue/manage",
@@ -509,5 +527,41 @@ describe("hidesChrome adds the shared read-only pages beside a console's own fla
     for (const path of ["/", "/screens"]) {
       assert.equal(hidesChrome(path, withFlag), false, `${path} lost its chrome`);
     }
+  });
+});
+
+describe("Q-SYS panels", () => {
+  const matched = (path: string) => (router.matchRoutes(path) as unknown as { routeId: string }[]).map((m) => m.routeId).pop();
+
+  test("/qsys/<slug> hides chrome; /qsys/manage and /qsys/manage/<slug> keep it", () => {
+    for (const p of [`/qsys/${QSYS_SLUG}`, `/qsys/${QSYS_SLUG}/`, "/qsys/no-such-panel"]) {
+      assert.equal(hidesChrome(p, VIEWS), true, `${p} should be chromeless`);
+      // From first paint too: an iPad must never see the rail flash while views load.
+      assert.equal(hidesChrome(p, undefined), true, `${p} should be chromeless before views load`);
+    }
+    for (const p of ["/qsys/manage", `/qsys/manage/${QSYS_SLUG}`, "/qsys/manage/no-such-panel"]) {
+      assert.equal(hidesChrome(p, VIEWS), false, `${p} should keep the shell`);
+    }
+  });
+
+  test("/qsys/manage is the operator's page, never a panel called manage", () => {
+    assert.equal(matched("/qsys/manage"), "/qsys/manage");
+    assert.equal(matched(`/qsys/manage/${QSYS_SLUG}`), "/qsys/manage/$slug");
+    assert.equal(matched(`/qsys/${QSYS_SLUG}`), "/qsys/$slug");
+  });
+
+  test("a panel's pages are named after the panel, and both paint edge to edge", () => {
+    assert.equal(resolvePage(`/qsys/manage/${QSYS_SLUG}`, CONSOLES)?.page.label, QSYS_NAME);
+    assert.equal(resolvePage(`/qsys/manage/${QSYS_SLUG}`, CONSOLES)?.exact, true);
+    assert.equal(resolvePage(`/qsys/${QSYS_SLUG}`, CONSOLES)?.page.label, QSYS_NAME);
+    assert.equal(resolvePage("/qsys/manage", CONSOLES)?.page.label, "Q-SYS");
+    assert.equal(isFullBleedPath(`/qsys/${QSYS_SLUG}`, VIEWS), true);
+    assert.equal(isFullBleedPath(`/qsys/manage/${QSYS_SLUG}`, VIEWS), true);
+    assert.equal(isFullBleedPath("/qsys/manage", VIEWS), false, "the manage page wants the gutter");
+  });
+
+  test("a Q-SYS panel is not in the sidebar's console list; it is still a console page", () => {
+    assert.deepEqual(sidebarConsoleList(VIEWS).map((v) => v.id), [CONSOLE_ID]);
+    assert.ok(consolePages(VIEWS).some((p) => p.path === `/consoles/${QSYS_ID}`), "a panel is still a console everywhere but the sidebar list");
   });
 });

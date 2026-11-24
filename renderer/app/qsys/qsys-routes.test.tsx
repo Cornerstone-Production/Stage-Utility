@@ -1,0 +1,395 @@
+// The Q-SYS panel pages, through the real route components against a stubbed
+// server: /qsys/<slug> (the panel full screen), /qsys/manage (the operator's page)
+// and the not-found panel. Which paths hide the chrome is pinned in
+// active-page.test.tsx, against the real router.
+//
+// What is asserted is what the page says and what it sends: the header's
+// connection line, the offline card's words, the manage page's sections, and
+// that a woken page sends nothing until it has read the Core's state again.
+//
+// NOT unit-tested here, and checked in a browser instead: how the pages LOOK.
+// jsdom loads no stylesheet and lays nothing out, so the kiosk surface's colours,
+// the header's height, the card's place over the layout and the panel grid's
+// columns all read as nothing here. Those were driven in a real page against a
+// fake Core.
+//
+// The new pages and the Q-SYS store run through the React Compiler, as the built
+// app runs them (react-compiler-hook.ts): a read outside a hook's snapshot works
+// uncompiled and freezes compiled.
+//
+// Every name and id is invented.
+//
+// A DOM node is never handed to assert as a value: on a failure the reporter
+// inspects it, walks the whole jsdom graph and the run dies with no message.
+
+import { strict as assert } from "node:assert";
+import { after, afterEach, beforeEach, describe, test } from "node:test";
+
+import { compileWithReactCompiler } from "../../test-fixtures/react-compiler-hook.js";
+import { installDom, unmountAndTeardown } from "../../test-dom.js";
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
+import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+
+const compiled = compileWithReactCompiler((url) => /\/renderer\/(app|main)\/qsys\/[^/]+\.tsx?$/.test(url) && !/\.test\.tsx?$/.test(url));
+const teardown = installDom();
+(globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
+  observe(): void {}
+  disconnect(): void {}
+  unobserve(): void {}
+};
+(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
+  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+});
+(window.HTMLElement.prototype as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => ({
+  x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 200, width: 200, height: 200,
+});
+
+const { render, cleanup, fireEvent, act, screen } = await import("@testing-library/react");
+const React = (await import("react")).default;
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { QsysPanelRoute, OFFLINE_BODY, OFFLINE_TITLE, NO_CORE_TITLE, __setOfflineOverlayDelayForTests } = await import("./qsys-panel-route.js");
+const { QsysManageRoute, QsysManagePanelRoute } = await import("./qsys-manage-route.js");
+const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
+const { __resetReplayCacheForTests, __sseFallback } = await import("../../lib/api.js");
+const { __resetQsysPanelsForTests } = await import("../../main/qsys/use-qsys-values.js");
+const { slugTakenMessage } = await import("@main/types/qsys");
+
+after(() => unmountAndTeardown(cleanup, teardown));
+
+const MIX = "Lobby_Mixer";
+const NOW = "2026-01-01T00:00:00.000Z";
+const block = (kind: "volunteer" | "staff", slug: string) => ({ kind, slug, siblings: [], returnAfterMin: 5 });
+const layoutWith = (...configs: unknown[]) => ({
+  version: 1,
+  canvas: { width: 1920, height: 1080, background: null },
+  objects: configs.map((config, i) => ({ id: `o${i}`, x: 0, y: 0, w: 0.2, h: 0.5, z: 1, config, style: {} })),
+});
+const MUTE = { type: "qsys-mute", binding: { component: MIX, control: "mute" } };
+const METER = { type: "qsys-meter", binding: { component: MIX, control: "meter" }, form: "bar" };
+
+const ZONE = { id: "v-zone", name: "Zone 1", kind: "custom", surface: "console", createdAt: NOW, layout: layoutWith(MUTE, METER), qsys: block("volunteer", "zone-1") };
+const BOOTH = { id: "v-booth", name: "Booth", kind: "custom", surface: "console", createdAt: NOW, layout: layoutWith(MUTE), qsys: block("staff", "booth") };
+
+interface Server {
+  views: unknown[];
+  status: { connected: boolean; state: "connected" | "reconnecting" | "offline"; configured: boolean; designName: string | null; isEmulator: boolean | null };
+  ready: boolean;
+  values: Record<string, unknown>;
+  holdReads: ((release: () => void) => void) | null;
+  reads: number;
+  writes: Record<string, unknown>[];
+  subscribes: string[][];
+  bindings: { status: number; body: unknown };
+  patches: { url: string; body: Record<string, unknown> }[];
+  patchAnswer: { status: number; body: unknown };
+}
+
+let server: Server;
+function freshServer(): Server {
+  return {
+    views: [ZONE, BOOTH],
+    status: { connected: true, state: "connected", configured: true, designName: "Main design", isEmulator: true },
+    ready: true,
+    values: { mute: false, meter: -30 },
+    holdReads: null,
+    reads: 0,
+    writes: [],
+    subscribes: [],
+    bindings: { status: 200, body: [] },
+    patches: [],
+    patchAnswer: { status: 200, body: {} },
+  };
+}
+
+const ALLOW = { entries: [{ component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" }], invalid: null };
+const CATALOG = { designCode: "d1", components: [{ name: MIX, type: "mixer", controls: [{ Name: "mute", Type: "Boolean" }, { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 }] }] };
+
+const f = stubFetchWithLog((url, init) => {
+  if (url.includes("/api/state")) return ok({ views: server.views, outputs: [], appName: "Stage Utility" });
+  if (url.includes("/api/events/subscribe")) {
+    server.subscribes.push((JSON.parse(String(init?.body ?? "{}")) as { channels: string[] }).channels);
+    return ok({});
+  }
+  if (url.startsWith("/api/qsys/values")) {
+    server.reads++;
+    const answer = () => ok({ ready: server.ready, values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })) });
+    const hold = server.holdReads;
+    if (hold) return new Promise((resolve) => hold(() => resolve(answer())));
+    return answer();
+  }
+  if (url === "/api/qsys/status") return ok(server.status);
+  if (url === "/api/qsys/allowlist") return ok(ALLOW);
+  if (url === "/api/qsys/catalog") return ok(CATALOG);
+  if (url === "/api/qsys/bindings") return reply(server.bindings.status, server.bindings.body);
+  if (url === "/api/qsys/write") {
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    server.writes.push(body);
+    return ok({ ok: true, value: body.value, string: String(body.value), clamped: false });
+  }
+  if (url.startsWith("/api/views/") && init?.method === "PATCH") {
+    server.patches.push({ url, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
+    return reply(server.patchAnswer.status, server.patchAnswer.body);
+  }
+  return ok({});
+});
+after(async () => {
+  await new Promise((r) => setTimeout(r, 300));
+  f.restore();
+});
+
+beforeEach(() => {
+  server = freshServer();
+  __resetReplayCacheForTests();
+  __resetQsysPanelsForTests();
+  __sseFallback.noteStream(true);
+  __setOfflineOverlayDelayForTests(50);
+});
+afterEach(() => {
+  cleanup();
+  resetStageState();
+});
+
+const wait = (ms: number) =>
+  act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+
+async function open(path: string) {
+  const root = createRootRoute();
+  const routes = [
+    createRoute({ getParentRoute: () => root, path: "/qsys/manage", component: QsysManageRoute }),
+    createRoute({ getParentRoute: () => root, path: "/qsys/manage/$slug", component: QsysManagePanelRoute }),
+    createRoute({ getParentRoute: () => root, path: "/qsys/$slug", component: QsysPanelRoute }),
+  ];
+  const router = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: [path] }) });
+  render(
+    React.createElement(
+      QueryClientProvider,
+      { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+      React.createElement(RouterProvider, { router }),
+    ),
+  );
+  await wait(60);
+}
+
+const line = () => document.querySelector("[data-connection-line]")?.textContent ?? "";
+const muteButton = () => document.querySelector('[data-qsys-object="qsys-mute"] button') as HTMLElement;
+const muteState = () => (document.querySelector('[data-qsys-object="qsys-mute"]') as HTMLElement).dataset.state;
+const pushStatus = (p: Server["status"]) => act(() => FakeEventSource.last!.push("qsys:status", p));
+
+describe("Q-SYS panel pages", () => {
+  test("the pages and the panel store run through the React Compiler here", () => {
+    assert.deepEqual(compiled(), [
+      "fader-scale.ts",
+      "meter-tween.ts",
+      "qsys-manage-route.tsx",
+      "qsys-objects.tsx",
+      "qsys-panel-route.tsx",
+      "qsys-paths.ts",
+      "use-qsys-values.ts",
+    ]);
+  });
+
+  test("/qsys/<slug> draws the panel: its name, the connection line, and live objects", async () => {
+    await open("/qsys/zone-1");
+    assert.equal(document.querySelector("h1")?.textContent, "Zone 1");
+    assert.equal(line(), "Connected to sound system");
+    assert.equal(muteState(), "live");
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false);
+    assert.equal(screen.queryByText(/Edit/) !== null, false, "a panel opened full screen offers no way into the editor");
+  });
+
+  test("a volunteer panel's meters come on the volunteer channel, a staff panel's on the staff one", async () => {
+    await open("/qsys/zone-1");
+    await wait(250);
+    const volunteer = server.subscribes.at(-1) ?? [];
+    assert.ok(volunteer.includes("qsys:meters:volunteer"), `subscribed: ${JSON.stringify(volunteer)}`);
+    assert.ok(!volunteer.includes("qsys:meters:staff"), "the volunteer panel also took the staff rate");
+    cleanup();
+    await open("/qsys/booth");
+    await wait(250);
+    assert.ok((server.subscribes.at(-1) ?? []).includes("qsys:meters:staff"));
+  });
+
+  test("an unknown slug shows a not-found panel, not a blank page", async () => {
+    let releaseState: () => void = () => {};
+    const real = globalThis.fetch;
+    // Hold the views: until they are known, nothing says "not found".
+    globalThis.fetch = ((input: unknown, init?: RequestInit) =>
+      String(input).includes("/api/state") ? new Promise((resolve) => (releaseState = () => resolve(real(input as string, init)))) : real(input as string, init)) as typeof fetch;
+    try {
+      await open("/qsys/no-such-panel");
+      assert.equal(document.querySelector("[data-qsys-not-found]") !== null, false, "said not found before the views were read");
+      releaseState();
+      await wait(60);
+      const nf = document.querySelector("[data-qsys-not-found]");
+      assert.ok(nf, "a blank page");
+      assert.match(nf!.textContent ?? "", /There is no panel here/);
+      assert.match(nf!.textContent ?? "", /\/qsys\/no-such-panel/);
+      assert.equal(nf!.querySelector("a") !== null, false, "a volunteer's not-found page links into the app");
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  test("when the Core cannot be reached, the offline card says so in the approved words, and the panel takes no input", async () => {
+    await open("/qsys/zone-1");
+    server.status = { ...server.status, connected: false, state: "reconnecting", designName: null };
+    server.ready = false;
+    pushStatus(server.status);
+    await wait(10);
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false, "a blip shorter than the delay covered the panel");
+    await wait(80);
+    const card = document.querySelector("[data-qsys-offline]");
+    assert.ok(card, "no offline card");
+    assert.match(card!.textContent ?? "", new RegExp(OFFLINE_TITLE));
+    assert.ok((card!.textContent ?? "").includes(OFFLINE_BODY));
+    assert.equal(OFFLINE_TITLE, "Audio controls are offline");
+    assert.equal(OFFLINE_BODY, "This page can't reach the sound system, so nothing here will change anything. Use the Q-SYS panel on the wall, or find a tech.");
+    assert.equal(line(), "Sound system offline");
+    act(() => {
+      fireEvent.click(muteButton());
+    });
+    await wait(20);
+    assert.equal(server.writes.length, 0, "an offline panel wrote");
+    // Back: the card goes, and input opens once the panel is read again.
+    server.status = { ...server.status, connected: true, state: "connected", designName: "Main design" };
+    server.ready = true;
+    pushStatus(server.status);
+    await wait(60);
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false);
+    assert.equal(line(), "Connected to sound system");
+  });
+
+  test("with no Core set up, the panel says so, its objects are disabled, and a volunteer panel has no way to settings", async () => {
+    server.status = { connected: false, state: "offline", configured: false, designName: null, isEmulator: null };
+    server.ready = false;
+    await open("/qsys/zone-1");
+    const strip = document.querySelector("[data-qsys-no-core]");
+    assert.ok(strip, "no warning");
+    assert.match(strip!.textContent ?? "", new RegExp(NO_CORE_TITLE));
+    assert.equal(strip!.querySelector("a") !== null, false, "a volunteer panel links to settings");
+    assert.equal(muteState(), "offline");
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false, "no Core is not an outage");
+    cleanup();
+    __resetQsysPanelsForTests();
+    await open("/qsys/booth");
+    assert.equal(document.querySelector("[data-qsys-no-core] a")?.getAttribute("href"), "/settings/integrations", "a staff panel has the link");
+    cleanup();
+    __resetQsysPanelsForTests();
+    await open("/qsys/manage/zone-1");
+    assert.equal(document.querySelector("[data-qsys-no-core] a")?.getAttribute("href"), "/settings/integrations", "the shell has the link");
+    assert.ok(screen.getByText("Edit"), "the panel stays editable in the shell");
+    // The shell's context bar names the page; the panel's header does not say it twice.
+    assert.equal(document.querySelectorAll("[data-qsys-panel] h1").length, 0);
+    assert.match(line(), /No Q-SYS Core is set up/);
+  });
+
+  test("after the page was hidden, values re-hydrate before input is accepted", async () => {
+    await open("/qsys/zone-1");
+    assert.equal(muteState(), "live");
+    const reads = server.reads;
+    // An iPad sleeps; meanwhile a UCI mutes it.
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    act(() => {
+      document.dispatchEvent(new window.Event("visibilitychange"));
+    });
+    server.values.mute = true;
+    // It wakes, and its read of the Core's state is slow to come back.
+    let release: () => void = () => {};
+    server.holdReads = (r) => (release = r);
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    act(() => {
+      document.dispatchEvent(new window.Event("visibilitychange"));
+    });
+    await wait(60);
+    assert.ok(server.reads > reads, "the woken page did not read the Core's state");
+    assert.equal(muteState(), "offline", "the panel took input before the read landed");
+    assert.equal(line(), "Reconnecting to sound system");
+    act(() => {
+      fireEvent.click(muteButton());
+    });
+    await wait(20);
+    assert.equal(server.writes.length, 0, "a tap before the read landed was sent");
+    server.holdReads = null;
+    release();
+    await wait(60);
+    assert.equal(muteState(), "live");
+    assert.equal(line(), "Connected to sound system");
+    assert.equal(muteButton().getAttribute("aria-pressed"), "true", "it shows the Core's value from the read, the UCI's mute");
+    act(() => {
+      fireEvent.click(muteButton());
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.value), [false], "a tap after the read writes once (positive control)");
+  });
+});
+
+describe("/qsys/manage", () => {
+  test("/qsys/manage lists panels with kind, binding problems, connection, allowlist, PIN and rates", async () => {
+    server.bindings = {
+      status: 200,
+      body: [
+        { panelId: "v-booth", objectId: "o0", address: { component: MIX, control: "gone" }, problem: "missing-control" },
+        { panelId: "v-booth", objectId: "o1", address: { component: MIX, control: "free" }, problem: "not-allowed" },
+      ],
+    };
+    await open("/qsys/manage");
+    await wait(60);
+    const zone = document.querySelector('[data-qsys-panel-card="zone-1"]')!;
+    const booth = document.querySelector('[data-qsys-panel-card="booth"]')!;
+    assert.match(zone.textContent ?? "", /Zone 1/);
+    assert.match(zone.textContent ?? "", /\/qsys\/zone-1/);
+    assert.equal(zone.querySelector("[data-kind]")?.textContent, "Volunteer panel");
+    assert.equal(zone.querySelector("[data-problems]") !== null, false);
+    assert.equal(booth.querySelector("[data-kind]")?.textContent, "Staff panel");
+    assert.equal(booth.querySelector("[data-problems]")?.textContent, "2 binding problems");
+    assert.equal(zone.querySelector("a")?.getAttribute("href"), "/qsys/manage/zone-1");
+    assert.match(document.querySelector("[data-qsys-connection]")?.textContent ?? "", /Connected to Main design \(Emulate\)/);
+    assert.match(document.querySelector("[data-qsys-allowlist]")?.textContent ?? "", /Lobby_Mixer mute/);
+    assert.ok(screen.getByText("Add all controls Zone 1 uses"), "no add-all for a panel");
+    const report = document.querySelector('[data-qsys-bindings="ok"]')!;
+    assert.match(report.textContent ?? "", /Booth.*Lobby_Mixer gone.*no such control/);
+    assert.ok(document.querySelector("[data-qsys-pin]"), "no staff PIN section");
+    assert.equal(document.querySelector("[data-qsys-rates]")?.getAttribute("href"), "/settings/integrations");
+  });
+
+  test("the binding report says when the check could not run, and when there is no Core to check against", async () => {
+    // Both are 503 from the server (main/services/routes/qsys-routes.test.ts); the code tells them apart.
+    server.bindings = { status: 503, body: { error: "the binding check could not run: the saved views or the allowlist could not be read; see /log", code: "check-failed" } };
+    await open("/qsys/manage");
+    await wait(60);
+    const failed = document.querySelector('[data-qsys-bindings="failed"]')?.textContent ?? "";
+    assert.match(failed, /^The binding check could not run: the saved views or the allowlist could not be read/, "a check that could not run read as no Core, or said so twice");
+    cleanup();
+    server.bindings = { status: 503, body: { error: "the Q-SYS Core is not connected", code: "not-connected" } };
+    await open("/qsys/manage");
+    await wait(60);
+    assert.match(document.querySelector('[data-qsys-bindings="offline"]')?.textContent ?? "", /Connect a Core/);
+  });
+
+  test("slugs are unique: saving a duplicate is refused with a message", async () => {
+    // The server's refusal, word for word (main/services/routes/qsys-panel-block-route.test.ts proves it refuses).
+    const message = slugTakenMessage("zone-1", { name: "Zone 1" });
+    server.patchAnswer = { status: 400, body: { error: message } };
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Settings for Booth"));
+    });
+    await wait(20);
+    const address = screen.getByLabelText("Address") as HTMLInputElement;
+    act(() => {
+      fireEvent.change(address, { target: { value: "zone-1" } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Save"));
+    });
+    await wait(40);
+    assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "zone-1", siblings: [], returnAfterMin: 5 } });
+    assert.equal(document.querySelector("[data-qsys-refused]")?.textContent, message, "the refusal was not shown");
+    assert.ok(screen.getByLabelText("Address"), "the dialog closed on a refused save");
+  });
+});

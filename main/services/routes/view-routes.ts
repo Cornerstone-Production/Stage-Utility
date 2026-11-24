@@ -26,7 +26,8 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, ViewSlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
+import { LayoutConflictError, QsysPanelRefused, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
+import { parseQsysPanelBlock, type QsysPanelBlock } from "../../types/qsys.js";
 import { isSelectionList } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
@@ -93,8 +94,19 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
       const surface = body.surface === "console" ? "console" : "display";
-      const state = await stageController.createView(name ?? "", kind, surface);
-      json(res, state, 201);
+      // A new Q-SYS panel: refused whole, making nothing, when the block is bad or its slug is taken.
+      const qsys = body.qsys === undefined ? null : parseQsysPanelBlock(body.qsys);
+      if (qsys && "error" in qsys) {
+        error(res, qsys.error);
+        return;
+      }
+      try {
+        const state = await stageController.createView(name ?? "", kind, surface, qsys?.block ?? null);
+        json(res, state, 201);
+      } catch (err) {
+        if (!(err instanceof QsysPanelRefused)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 
@@ -499,16 +511,28 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !hasShowInSidebar && !calendarFilters) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
+      // The Q-SYS panel block, or null to make the view an ordinary console again.
+      let qsys: QsysPanelBlock | null | undefined;
+      if ("qsys" in body) {
+        const parsed = body.qsys === null ? { block: null } : parseQsysPanelBlock(body.qsys);
+        if ("error" in parsed) {
+          error(res, parsed.error);
+          return;
+        }
+        qsys = parsed.block;
+      }
+      const hasQsys = qsys !== undefined;
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !hasShowInSidebar && !calendarFilters && !hasQsys) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), body.qsys (object|null), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
-      // Every refusal the kind and the surface can raise is decided here, before
-      // the first write, so a rename beside a refused body does not land alone. The
-      // view is judged as it will be once the whole body is applied.
+      // Every refusal the kind, the surface and the Q-SYS block can raise is decided
+      // here, before the first write, so a rename beside a refused body does not land
+      // alone. The view is judged as it will be once the whole body is applied.
       const refused = stageController.viewPatchRefusal(id, {
         ...(hasKind ? { kind: body.kind as ViewKind } : {}),
         ...(hasSurface ? { surface } : {}),
+        ...(hasQsys ? { qsys } : {}),
       });
       if (refused) {
         error(res, refused);
@@ -545,6 +569,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         }
       }
       if (hasName) state = await stageController.renameView(id, body.name as string);
+      // Off first, so a body that also makes it a display finds it an ordinary console.
+      if (qsys === null) state = await stageController.setViewQsys(id, null);
       // In the order that keeps the view valid at each step: a body making it a
       // console takes the kind first (a console may only be a kind that can be
       // one), and a body making it a wall view takes the surface first.
@@ -556,6 +582,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (hasShowInSidebar) state = await stageController.setViewShowInSidebar(id, body.showInSidebar as boolean);
+      if (qsys) {
+        try {
+          state = await stageController.setViewQsys(id, qsys);
+        } catch (err) {
+          // Taken between the check above and here (another save in between).
+          if (!(err instanceof QsysPanelRefused)) throw err;
+          error(res, err.message, err.status);
+          return;
+        }
+      }
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
         // Forced past the subscriber gate and NOT awaited. The operator who just

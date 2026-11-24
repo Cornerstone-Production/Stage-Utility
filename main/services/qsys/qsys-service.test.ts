@@ -370,3 +370,37 @@ test("the emulator flag reaches /log as a boolean, whatever the Core sent", { ti
   const connected = lines.find((l) => l.startsWith("[qsys] connected to"));
   assert.match(connected ?? "", /emulator=false\)$/);
 });
+
+test("the status says whether a Core is set up, so a panel can tell 'not set up' from 'can't reach it'", { timeout: 20_000 }, async () => {
+  assert.equal(svc.getStatus().configured, false, "a fresh service has no Core");
+  svc.configure(settings(), null);
+  // Set up before it has connected: a slow first dial is not "no Core".
+  assert.equal(svc.getStatus().configured, true, "set up, still dialling");
+  await until(() => svc.getStatus().connected, "connected");
+  assert.equal(svc.getStatus().configured, true);
+  await fake.stop();
+  await until(() => svc.getStatus().state === "reconnecting", "reconnecting");
+  assert.equal(svc.getStatus().configured, true, "unreachable is still set up");
+  svc.configure(settings({ enabled: false }), null);
+  assert.equal(svc.getStatus().state, "offline");
+  assert.equal(svc.getStatus().configured, false, "switched off reads as no Core");
+});
+
+test("switched off by the integration manager (a bare stop) reads as no Core; a save that reconnects never does", { timeout: 20_000 }, async () => {
+  svc.configure(settings(), null);
+  await until(() => svc.getStatus().connected, "connected");
+  const seen: boolean[] = [];
+  const listen = mock.method(svc as unknown as { emit: (s: { configured: boolean }) => void }, "emit");
+  // A save of the meter rates restarts the connection: never "no Core" on the way.
+  svc.configure(settings({ staffMeterHz: 15 }), null);
+  for (const c of listen.mock.calls) seen.push((c.arguments[0] as { configured: boolean }).configured);
+  listen.mock.restore();
+  assert.ok(seen.length > 0, "the restart published nothing (positive control)");
+  assert.ok(seen.every((c) => c === true), `a restart said no Core on the way: ${JSON.stringify(seen)}`);
+  await until(() => svc.getStatus().connected, "reconnected");
+  // The manager switches an integration off with stop(), its settings untouched.
+  svc.stop();
+  assert.equal(svc.getStatus().configured, false);
+  svc.configure(settings(), null);
+  assert.equal(svc.getStatus().configured, true, "switched on again");
+});
