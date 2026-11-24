@@ -401,6 +401,8 @@ export class StagePlotsPublisher {
   private readonly landingSent = new Map<string, string>();
   private landingRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private landingRetryMs = 0;
+  /** A landing sync waiting its turn on the chain, which a later call joins instead of queueing another. */
+  private landingQueued: Promise<void> | null = null;
 
   /** What the last landing list send could not do; null when the page holds the list. */
   landingNotice(): { at: string; message: string } | null {
@@ -994,9 +996,16 @@ export class StagePlotsPublisher {
     if (hadNote || this.followNote) await this.tellCard();
   }
 
-  /** Send the page set up the landing list made from the document, when it differs from what it was last sent. On its own chain. */
+  /**
+   * Send the page set up the landing list made from the document, when it differs from what it was
+   * last sent. On its own chain, and one waiting at most: it reads the document when it runs, so it
+   * covers every change saved before then, and a burst of edits while a send hangs is one more send,
+   * not one each.
+   */
   private syncLanding(): Promise<void> {
-    return this.serial(LANDING_CHAIN, async () => {
+    if (this.landingQueued) return this.landingQueued;
+    const run = this.serial(LANDING_CHAIN, async () => {
+      this.landingQueued = null;
       if (this.stopped || this.paused) return;
       let target: PublishTarget;
       let doc: StagePlotsDoc;
@@ -1018,6 +1027,8 @@ export class StagePlotsPublisher {
         await this.tellCard();
       }
     });
+    this.landingQueued = run;
+    return run;
   }
 
   /**

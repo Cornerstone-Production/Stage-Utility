@@ -256,6 +256,25 @@ describe("the landing list", () => {
     }
   };
 
+  test("a burst of changes while the page is down is one send at a time and one more after it, not one each", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await quietly(() => h.publisher.setListed("v-1", true));
+    await h.publisher.settle();
+    // The page fails every list, slowly: each send is out a while.
+    h.page.respond = async (req) => (req.path === LANDING ? (await new Promise((r) => setTimeout(r, 40)), { status: 500, body: "" }) : h.page.worker(req));
+    const mark = h.page.requests.length;
+    await quietly(async () => {
+      // Six renames: each a different list.
+      for (let i = 0; i < 6; i++) await h.edit((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, name: `Main room ${i}` })) }));
+      await h.publisher.settle();
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    const sends = h.page.requests.slice(mark).filter((r) => r.path === LANDING).length;
+    assert.ok(sends <= 2, `${sends} landing sends for one burst of changes`);
+    h.page.respond = (req) => h.page.worker(req);
+  });
+
   test("a send whose answer was lost goes again, even when the list is back to what the page was sent before it", async () => {
     const h = await harness();
     assert.ok((await h.publisher.publish("v-1")).ok);
