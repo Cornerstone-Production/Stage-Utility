@@ -1017,7 +1017,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "qsys:bindings":
       return apiFetch<T>("/api/qsys/bindings");
     case "qsys:setAllowlist":
-      return put<T>("/api/qsys/allowlist", { entries: p.entries, ...(p.replaceInvalid === true ? { replaceInvalid: true } : {}) });
+      return put<T>("/api/qsys/allowlist", { entries: p.entries, ...(typeof p.rev === "string" ? { rev: p.rev } : {}), ...(p.replaceInvalid === true ? { replaceInvalid: true } : {}) });
     case "qsys:catalog":
       return apiFetch<T>("/api/qsys/catalog");
     case "qsys:lease":

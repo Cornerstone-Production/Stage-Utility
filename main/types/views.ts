@@ -297,6 +297,12 @@ export interface View {
    */
   qsys?: QsysPanelBlock;
   /**
+   * Q-SYS panel settings kept aside, whole and as they were, when a load found them
+   * on a view that cannot be a panel or could not read them (qsys-slug-repair.ts).
+   * Never read as a panel: /qsys/manage shows them so they can be restored.
+   */
+  qsysInactive?: unknown[];
+  /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
    * parses; nothing sets it, and nothing renders from it. Drop it once no

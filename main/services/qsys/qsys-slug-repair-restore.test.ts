@@ -31,7 +31,7 @@ describe("restoring views with Q-SYS panel blocks that do not hold", () => {
     await fs.rm(TMP, { recursive: true, force: true });
   });
 
-  it("restores, and the load after it gives the later duplicate a suffix and drops a block a display cannot carry", async () => {
+  it("restores, and the load after it gives the later duplicate a suffix and keeps aside, whole, a block a display cannot carry", async () => {
     const views = [
       panel("p1", "Zone 1", "zone-1"),
       panel("p2", "Zone 1 copy", "zone-1"),
@@ -57,16 +57,55 @@ describe("restoring views with Q-SYS panel blocks that do not hold", () => {
     assert.equal(slugOf("p2"), "zone-1-3");
     assert.equal(slugOf("p3"), "zone-1-2", "a panel's own address was given to a duplicate");
     assert.equal(slugOf("d1"), null, "a display kept panel settings");
+    const d1 = loaded.find((v) => v.id === "d1") as unknown as { qsysInactive?: unknown[] };
+    assert.deepEqual(d1.qsysInactive, [block("lobby")], "the display's panel settings were lost, not kept aside");
     assert.equal("qsys" in loaded.find((v) => v.id === "c1")!, false, "qsys: null was kept");
     assert.deepEqual(lines, [
       '[qsys] views.json: "Zone 1 copy" (p2) shared /qsys/zone-1 with an earlier panel; it opens at /qsys/zone-1-3 now',
-      '[qsys] views.json: "Lobby wall" (d1) had panel settings for /qsys/lobby but is not a custom console; it is an ordinary view now',
+      `[qsys] views.json: "Lobby wall" (d1) had panel settings for /qsys/lobby but is not a custom console; kept aside, not a panel: ${JSON.stringify(block("lobby"))}`,
     ]);
+    // The next save of the views writes the repair, the settings kept aside with it.
+    await viewsStore.save(loaded as never);
+    const saved = JSON.parse(await fs.readFile(path.join(TMP, "views.json"), "utf8")) as { id: string; qsysInactive?: unknown[]; qsys?: { slug: string } }[];
+    assert.deepEqual(saved.find((v) => v.id === "d1")?.qsysInactive, [block("lobby")], "a save after the repair lost the kept-aside settings");
+    assert.equal(saved.find((v) => v.id === "p2")?.qsys?.slug, "zone-1-3");
     const r = await callRoute(qsysRoutes, "/api/qsys/panel-repairs");
     assert.deepEqual(r.json, [
       { viewId: "p2", name: "Zone 1 copy", from: "zone-1", to: "zone-1-3", why: "shared" },
       { viewId: "d1", name: "Lobby wall", from: "lobby", to: null, why: "not-a-console" },
     ]);
+  });
+
+  it("a hand-edited file with a malformed panel slug loads: the block is kept aside whole and logged", async () => {
+    const odd = { kind: "staff", slug: "Not A Slug!", siblings: [], returnAfterMin: 5 };
+    const noSlug = { kind: "volunteer" };
+    await fs.writeFile(
+      path.join(TMP, "views.json"),
+      JSON.stringify([
+        { id: "p1", name: "Zone 1", kind: "custom", surface: "console", createdAt: NOW, layout, qsys: odd },
+        { id: "p2", name: "Booth", kind: "custom", surface: "console", createdAt: NOW, layout, qsys: noSlug },
+        panel("p3", "Side", "side"),
+      ]),
+    );
+    const lines: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => void lines.push(a.join(" ")));
+    let loaded: { id: string; qsys?: unknown; qsysInactive?: unknown[] }[];
+    try {
+      loaded = (await viewsStore.reload()) as typeof loaded;
+    } finally {
+      warn.mock.restore();
+    }
+    const v = (id: string) => loaded.find((x) => x.id === id)!;
+    assert.equal(v("p1").qsys, undefined);
+    assert.deepEqual(v("p1").qsysInactive, [odd]);
+    assert.deepEqual(v("p2").qsysInactive, [noSlug]);
+    assert.equal((v("p3").qsys as { slug: string }).slug, "side", "a good panel was touched");
+    assert.equal(lines.length, 2);
+    assert.ok(lines[0].includes(JSON.stringify(odd)), `the whole block is not on the line: ${lines[0]}`);
+    assert.ok(lines[0].startsWith('[qsys] views.json: "Zone 1" (p1) has panel settings this app cannot read'));
+    await viewsStore.save(loaded as never);
+    const saved = JSON.parse(await fs.readFile(path.join(TMP, "views.json"), "utf8")) as { id: string; qsysInactive?: unknown[] }[];
+    assert.deepEqual(saved.find((x) => x.id === "p1")?.qsysInactive, [odd], "a save after the repair lost the settings");
   });
 
   it("a file that needs nothing is handed back as it is, and reports nothing", () => {

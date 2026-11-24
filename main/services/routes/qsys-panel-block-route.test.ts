@@ -118,6 +118,16 @@ describe("the Q-SYS panel block", () => {
     assert.equal(view("p1")?.kind, "custom");
   });
 
+  it("restoring settings kept aside makes the view a panel and takes them off the kept-aside list", async () => {
+    const kept = { kind: "volunteer", slug: "zone-1" };
+    const other = { kind: "staff", slug: "Bad Slug" };
+    seed({ ...consoleView("c1", "Lobby panel"), qsysInactive: [other, kept] } as View);
+    const r = await patch("c1", { qsys: { kind: "volunteer", slug: "zone-1", siblings: [], returnAfterMin: 5 } });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(view("c1")?.qsys?.slug, "zone-1");
+    assert.deepEqual(view("c1")?.qsysInactive, [other], "the restored block stayed on the list, or the other one went");
+  });
+
   it("Home cannot be a panel", async () => {
     seed({ id: "home", name: "Home", kind: "custom", surface: "console", createdAt: "", layout: LAYOUT } as View);
     const r = await patch("home", { qsys: { kind: "staff", slug: "home-panel" } });

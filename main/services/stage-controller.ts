@@ -38,7 +38,7 @@ import { keepKnownConsoles, resolveSidebar, sidebarConsolesOf, type SidebarArran
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
-import { qsysSlugOwner, qsysSlugsOf, slugTakenMessage, uniqueQsysSlug, type QsysPanelBlock } from "../types/qsys.js";
+import { parseQsysPanelBlock, qsysSlugOwner, qsysSlugsOf, slugTakenMessage, uniqueQsysSlug, type QsysPanelBlock } from "../types/qsys.js";
 import { isSafeKey } from "./safe-key.js";
 import {
   CAPTION_COLOR,
@@ -4390,15 +4390,23 @@ export class StageController {
 
   /** Make a view a Q-SYS panel, change its panel settings, or (null) make it an ordinary console. */
   async setViewQsys(id: string, block: QsysPanelBlock | null): Promise<StageState> {
-    this.requireView(id, "views:setQsys");
+    const view = this.requireView(id, "views:setQsys");
     const refused = this.qsysPanelRefusal(id, block);
     if (refused) {
       console.warn(`[stage-controller] setViewQsys id=${scrub(id)} refused: ${scrub(refused)}`);
       throw new QsysPanelRefused(refused);
     }
+    // Restoring settings kept aside (qsysInactive): the one restored leaves that list.
+    const kept = Array.isArray(view.qsysInactive) ? view.qsysInactive : [];
+    const same = (raw: unknown) => {
+      const p = parseQsysPanelBlock(raw);
+      return block !== null && "block" in p && JSON.stringify(p.block) === JSON.stringify(block);
+    };
+    const restored = kept.findIndex(same);
+    const rest = restored < 0 ? kept : kept.filter((_, i) => i !== restored);
     return this.commitViewPatch(
       id,
-      { qsys: block ?? undefined },
+      { qsys: block ?? undefined, ...(restored < 0 ? {} : { qsysInactive: rest.length > 0 ? rest : undefined }) },
       `[stage-controller] setViewQsys id=${scrub(id)} → ${block ? `${scrub(block.kind)} /qsys/${scrub(block.slug)}` : "not a panel"}`,
     );
   }

@@ -86,7 +86,7 @@ interface Server {
   patchAnswer: { status: number; body: unknown };
   puts: Record<string, unknown>[];
   posts: Record<string, unknown>[];
-  allow: { entries: unknown[]; invalid: string | null };
+  allow: { entries: unknown[]; invalid: string | null; rev: string };
   repairs: unknown[];
 }
 
@@ -112,6 +112,7 @@ function freshServer(): Server {
 }
 
 const ALLOW = {
+  rev: "r1",
   entries: [
     { component: MIX, control: "gain", label: "", min: -100, max: 20, confirm: "none" },
     { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
@@ -135,10 +136,12 @@ const f = stubFetchWithLog((url, init) => {
   }
   if (url === "/api/qsys/status") return ok(server.status);
   if (url === "/api/qsys/allowlist" && init?.method === "PUT") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { entries: unknown[] };
+    const body = JSON.parse(String(init.body ?? "{}")) as { entries: unknown[]; rev?: string };
+    // As the server does: a save naming a revision other than the stored one is refused.
+    if (body.rev !== undefined && body.rev !== server.allow.rev) return reply(409, { error: "the allowlist was changed since this list was read", code: "rev-changed" });
     server.puts.push(body);
-    server.allow = { entries: body.entries, invalid: null };
-    return ok({ entries: body.entries });
+    server.allow = { entries: body.entries, invalid: null, rev: `r${server.puts.length + 1}` };
+    return ok({ entries: body.entries, rev: server.allow.rev });
   }
   if (url === "/api/qsys/allowlist") return ok(server.allow);
   if (url === "/api/qsys/panel-repairs") return ok(server.repairs);
@@ -401,7 +404,7 @@ describe("/qsys/manage", () => {
     assert.equal(screen.queryByText("Make it a panel") !== null, false, "Home was offered as a panel");
   });
 
-  test("an allowlist save over a list changed elsewhere sends nothing, says so, and Discard shows the new list", async () => {
+  test("an allowlist save carries the revision it read: over a list changed elsewhere it is refused, said, and Discard shows the new list", async () => {
     await open("/qsys/manage");
     await wait(60);
     act(() => {
@@ -409,7 +412,7 @@ describe("/qsys/manage", () => {
       fireEvent.blur(screen.getByLabelText(`Max for ${MIX} gain`));
     });
     // Another operator saves meanwhile.
-    server.allow = { entries: [{ component: MIX, control: "gain", label: "", min: -50, max: 10, confirm: "none" }], invalid: null };
+    server.allow = { entries: [{ component: MIX, control: "gain", label: "", min: -50, max: 10, confirm: "none" }], invalid: null, rev: "elsewhere" };
     act(() => {
       fireEvent.click(screen.getByText("Save the allowlist"));
     });
@@ -421,6 +424,24 @@ describe("/qsys/manage", () => {
     });
     await wait(10);
     assert.equal((screen.getByLabelText(`Min for ${MIX} gain`) as HTMLInputElement).value, "-50");
+  });
+
+  test("panel settings kept aside are shown; one on a custom console restores, one on a display says what to do first", async () => {
+    const kept = { kind: "volunteer", slug: "lobby" };
+    const WALL = { id: "v-wall", name: "Lobby wall", kind: "custom", surface: "display", createdAt: NOW, layout: layoutWith(), qsysInactive: [kept] };
+    const SPARE = { id: "v-spare", name: "Spare", kind: "custom", surface: "console", createdAt: NOW, layout: layoutWith(), qsysInactive: [{ kind: "staff", slug: "spare" }] };
+    server.views = [ZONE, BOOTH, WALL, SPARE];
+    await open("/qsys/manage");
+    await wait(60);
+    const box = document.querySelector("[data-qsys-kept-aside]")!;
+    assert.match(box.textContent ?? "", /Lobby wall.*\/qsys\/lobby.*Make it a custom console first/);
+    assert.deepEqual([...box.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim()), ["Restore as panel"], "a display was offered a restore");
+    act(() => {
+      fireEvent.click(screen.getByText("Restore as panel"));
+    });
+    await wait(40);
+    assert.equal(server.patches.at(-1)?.url, "/api/views/v-spare");
+    assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "spare", siblings: [], returnAfterMin: 5 } });
   });
 
   test("in the shell, a panel's header carries its address and kind", async () => {

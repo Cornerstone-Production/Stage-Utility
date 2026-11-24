@@ -5,11 +5,12 @@
 //   GET  /api/qsys/status              the connection, plus `writable`: connected and re-read
 //   GET  /api/qsys/catalog             { designCode, components }; 503 while not connected
 //   POST /api/qsys/catalog/refresh     reads the catalog again; 503 while not connected, 502 on failure
-//   GET  /api/qsys/allowlist           { entries, invalid }: invalid says why a stored file is refused, else null
-//   PUT  /api/qsys/allowlist           { entries, replaceInvalid? } -> { entries }; 400 naming the first broken
-//                                      entry; 409 over an invalid stored file unless replaceInvalid is true
+//   GET  /api/qsys/allowlist           { entries, invalid, rev }: invalid says why a stored file is refused, else null
+//   PUT  /api/qsys/allowlist           { entries, rev?, replaceInvalid? } -> { entries, rev }; 400 naming the first broken
+//                                      entry; 409 over an invalid stored file unless replaceInvalid is true;
+//                                      409 code "rev-changed" when rev is not the stored list's revision
 //   POST /api/qsys/allowlist/export    the allowlist file
-//   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
+//   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?, rev?) -> { entries, rev }; 400 keeps the old list; 409 as PUT
 //   POST /api/qsys/allowlist/add-panel { panelId } -> { entries, added, skipped }: every control the panel writes
 //                                      and the list lacks, at the Core's range; 503 while not connected,
 //                                      404 unknown view, 409 over an invalid stored file
@@ -30,7 +31,7 @@
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
-import { AllowlistRefused, AllowlistStoredInvalid, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
+import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type Saved, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
 import { viewsStore } from "../views-store.js";
 import { qsysSlugRepairs } from "../qsys/qsys-slug-repair.js";
 import { isReadOnlyDirection } from "../../types/qsys.js";
@@ -58,13 +59,15 @@ export function deviceOf(req: http.IncomingMessage): string {
   return oneLine(`${remoteOf(req)} ${agent}`).trim().slice(0, MAX_DEVICE);
 }
 
-async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: { replaceInvalid: boolean }) => Promise<unknown>): Promise<void> {
+async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: { replaceInvalid: boolean; expectRev?: string }) => Promise<Saved>): Promise<void> {
   const body = await readObjectBody(c.req, c.res);
   if (!body) return;
   if (body.replaceInvalid !== undefined && typeof body.replaceInvalid !== "boolean") return error(c.res, "replaceInvalid must be true or false");
+  if (body.rev !== undefined && !isLine(body.rev, 64)) return error(c.res, "rev must be the revision GET /api/qsys/allowlist answered");
   try {
-    json(c.res, { entries: await change(body, { replaceInvalid: body.replaceInvalid === true }) });
+    json(c.res, await change(body, { replaceInvalid: body.replaceInvalid === true, ...(typeof body.rev === "string" ? { expectRev: body.rev } : {}) }));
   } catch (err) {
+    if (err instanceof AllowlistRevChanged) return error(c.res, err.message, 409, "rev-changed");
     if (err instanceof AllowlistStoredInvalid) return error(c.res, err.message, 409);
     if (!(err instanceof AllowlistRefused)) throw err;
     error(c.res, err.message);
@@ -105,7 +108,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "PUT" && pathname === "/api/qsys/allowlist") {
-    return allowlistChange(c, (body, opts) => qsysAllowlist.replace(body.entries, opts));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.saveChecked(body.entries, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/export") {
@@ -114,7 +117,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/import") {
-    return allowlistChange(c, (body, opts) => qsysAllowlist.importFile(body, opts));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.importChecked(body, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/add-panel") {

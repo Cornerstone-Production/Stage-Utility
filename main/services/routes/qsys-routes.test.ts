@@ -138,7 +138,7 @@ describe("/api/qsys", () => {
     assert.equal(kept.length, 1, `the invalid file was not kept beside: ${kept.join(", ")}`);
     assert.match(await fs.readFile(path.join(TMP, kept[0]), "utf8"), /"min":5/);
     const after = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { entries: AllowEntry[]; invalid: string | null };
-    assert.deepEqual(after, { entries: [MUTE], invalid: null });
+    assert.deepEqual({ entries: after.entries, invalid: after.invalid }, { entries: [MUTE], invalid: null });
   });
 
   test("with no Core: status is not writable, the catalog is 503, and a write is refused offline", async () => {
@@ -426,4 +426,28 @@ describe("/api/qsys", () => {
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "gone" } })).status, 404);
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: 7 } })).status, 400);
   });
+  test("PUT /api/qsys/allowlist with the revision it read saves; over a revision since moved it is refused 409 and saves nothing", async () => {
+    await quietly(() => put([GAIN]));
+    const read = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string };
+    assert.equal(typeof read.rev, "string");
+    const ok = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [GAIN, MUTE], rev: read.rev } }));
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const after = ok.json as { rev: string };
+    assert.notEqual(after.rev, read.rev, "the revision did not move with the list");
+    assert.equal(((await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string }).rev, after.rev, "the save answered a revision GET does not");
+    // A page still holding the first revision.
+    const stale = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [], rev: read.rev } }));
+    assert.equal(stale.status, 409);
+    assert.equal((stale.json as { code?: string }).code, "rev-changed");
+    assert.deepEqual((await listed()).map((e) => e.control), ["gain", "mute"], "a stale save went through");
+    // Two pages that read the same revision save at once: one lands, the other is refused.
+    const both = await quietly(() =>
+      Promise.all([
+        callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [GAIN], rev: after.rev } }),
+        callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [MUTE], rev: after.rev } }),
+      ]),
+    );
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 409], "both saves over one revision landed");
+  });
+
 });

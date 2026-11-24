@@ -230,9 +230,12 @@ console first. Home cannot be a panel.
 
 A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A restored
 backup is never refused over panel addresses: when its views put two panels at one
-address, the first keeps it and each later one takes the next free suffix, and panel
-settings on a view that is not a custom console are dropped. Both are logged when the
-views are loaded and listed at the top of the panels on `/qsys/manage`. A console
+address, the first keeps it and each later one takes the next free suffix. Panel
+settings on a view that is not a custom console, or settings this app cannot read (a
+hand-edited address), are kept aside on the view, whole, and nothing reads them as a
+panel. All of these are logged when the views are loaded (a kept-aside block in full)
+and listed at the top of the panels on `/qsys/manage`, where kept-aside settings can
+be restored once the view is a custom console (**Restore as panel**). A console
 with Q-SYS objects and no panel settings still works where it is shown, as a staff
 panel, and `/qsys/manage` offers to make it a panel.
 
@@ -311,7 +314,9 @@ A panel's settings travel in its view bundle (see
   (for its cog menu) which does not exist is listed here, with the missing names.
 - **Connection**: whether the Core is connected, and a link to its settings.
 - **Allowlist**: every allowlisted control, with its limits (blank for none) and
-  whether it asks for a hold. Edits are saved together with **Save the allowlist**.
+  whether it asks for a hold. Edits are saved together with **Save the allowlist**,
+  and only over the list the page read: if it was saved elsewhere meanwhile, nothing is
+  written and the page says so.
   **Add all controls <panel> uses** adds every control that panel's objects change
   (a fader's level, a mute, a button, a switch, presets, a selector, a strip's gain
   and mute; never a meter, a label or an indicator) that the list lacks, at the
@@ -469,8 +474,10 @@ Look at `/log` and filter for `[qsys]`.
 | `the allowlist save was refused: <why>`, `adding a panel's controls to the allowlist was refused: <why>`, `replacing the invalid allowlist was refused: <why>` | From `/qsys/manage`: the server refused the change; the page shows the same reason. |
 | `could not read the allowlist for /qsys/manage`, `… the binding check for /qsys/manage`, `… the Q-SYS connection` (the sidebar's Q-SYS row reads it on every page, so this one is not specific to /qsys/manage), `… the panel repairs for /qsys/manage` | A read on the Q-SYS page failed; that section says so. |
 | `views.json: "<view>" (<id>) shared /qsys/<slug> with an earlier panel; it opens at /qsys/<new> now` | The saved views (a restored backup, a hand edit) put two panels at one address. The later one was given the next free address; `/qsys/manage` lists it. Said on each load until the views are next saved. |
-| `views.json: "<view>" (<id>) had panel settings for /qsys/<slug> but is not a custom console; it is an ordinary view now` | Panel settings on a display or another kind were dropped when the views were loaded. |
-| `an allowlist save was stopped: the list changed since the page read it` | From `/qsys/manage`: the list was changed elsewhere after the page read it, so the save sent nothing; Discard shows the new list. |
+| `views.json: "<view>" (<id>) had panel settings for /qsys/<slug> but is not a custom console; kept aside, not a panel: <block>` | Panel settings on a display or another kind were kept aside, whole, when the views were loaded. `/qsys/manage` lists them; make the view a custom console and **Restore as panel**. |
+| `views.json: "<view>" (<id>) has panel settings this app cannot read (<why>); kept aside, not a panel: <block>` | A panel block the app cannot read (a hand-edited address, say) was kept aside, whole. Set the panel up again from the logged block. |
+| `an allowlist save was stopped: the list changed since the page read it` | From `/qsys/manage`: the list was saved elsewhere after the page read it, so the server refused the save (`409`, `rev-changed`) and nothing was written; Discard shows the new list. |
+| `restoring kept-aside panel settings on <view> was refused: <why>` | From `/qsys/manage`: **Restore as panel** was refused, as for an address another panel has. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 | `ready listener failed: <reason>` | A bug in this app's handling of writes becoming possible again (where an owed release is sent). Writes carry on; report the line. |
 
