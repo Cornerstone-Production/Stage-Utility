@@ -45,7 +45,7 @@ import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { CueButton } from "./cue-button";
-import { QsysObject } from "./qsys-object";
+import { QsysObject } from "./qsys/qsys-objects";
 import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -784,6 +784,12 @@ function proFor(
   return named
     ? { pro: ctx.propInstances?.status[named], known: ctx.propInstances != null }
     : { pro: ctx.propresenter, known: ctx.propresenterKnown };
+}
+
+/** A Q-SYS object's panel: the View that holds it, the innermost of the embed chain,
+ *  which is what the server builds its panels from. Null on Home. */
+function qsysPanelOf(ctx: LayoutRenderCtx): string | null {
+  return ctx.embedChain.at(-1) ?? null;
 }
 
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
@@ -1724,25 +1730,25 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "qsys-fader":
-      return <QsysObject type="qsys-fader" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-meter":
-      return <QsysObject type="qsys-meter" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-mute":
-      return <QsysObject type="qsys-mute" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-button":
-      return <QsysObject type="qsys-button" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-switch":
-      return <QsysObject type="qsys-switch" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-presets":
-      return <QsysObject type="qsys-presets" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-selector":
-      return <QsysObject type="qsys-selector" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-label":
-      return <QsysObject type="qsys-label" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-strip":
-      return <QsysObject type="qsys-strip" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-status":
-      return <QsysObject type="qsys-status" ts={ts} />;
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "messages":
       return (
         <MessagesObject

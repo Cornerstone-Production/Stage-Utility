@@ -865,10 +865,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => PILL({ fontSize: 0.045 }),
   },
 
-  // Q-SYS objects. Each starts unbound. group is null, so none is offered in the palette
-  // yet: they draw only an Unavailable placeholder until their live renderers and the
-  // binding inspector land, and an operator should not be able to place one. Give each
-  // a group when it works.
+  // Q-SYS objects (drawn by qsys/qsys-objects.tsx). Each starts unbound. group is null,
+  // so none is offered in the palette yet: there is no inspector to bind one, and an
+  // operator should not be able to place an object that cannot be bound. The task
+  // that adds the binding inspector gives each a group.
   "qsys-fader": {
     label: "Q-SYS fader",
     blurb: "A level fader for a Q-SYS control",

@@ -19,6 +19,10 @@
 // appeared" — and replaying it on every connect would toast on every page load,
 // which is the hounding the once-per-version rule exists to prevent. The fact
 // that survives is stored server-side as `announcedTag`, not replayed.
+//
+// Nor are `qsys:values` and `qsys:meters:*`. They carry changes, not a snapshot:
+// a replayed frame would be one old change, shown as current. A Q-SYS panel reads
+// where everything stands from GET /api/qsys/values (renderer/main/qsys/use-qsys-values.ts).
 export const HYDRATED_CHANNELS = [
   "server:hello",
   "stage:state-changed",

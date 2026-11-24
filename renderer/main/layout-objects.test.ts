@@ -405,9 +405,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
 ];
 
 /**
- * The Q-SYS objects, registered with no palette group until their live renderers and
- * the binding inspector exist (they draw only an Unavailable placeholder). Sorted, one
- * per line. Give one a group and it moves to ADDED_SINCE with its place in the palette.
+ * The Q-SYS objects, registered with no palette group until the binding inspector
+ * exists: they render live values, but nothing in the editor can bind one yet. Sorted,
+ * one per line. Give one a group and it moves to ADDED_SINCE with its place in the palette.
  */
 const NOT_YET_OFFERED = [
   "qsys-button",

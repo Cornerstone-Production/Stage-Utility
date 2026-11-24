@@ -75,7 +75,7 @@ import; there is no page for it yet. Every write is checked by the server.
 | component, control | The control's address: the component's Code Name and the control's name. |
 | label | A name for the control. Up to 120 characters on one line. |
 | min, max | The value range a numeric write may reach, in the control's own units (dB for a gain). Both set, or both empty. |
-| confirm | `none` or `hold`. Stored with the entry and exported with it; nothing in this release reads it yet. |
+| confirm | `none` or `hold`. With `hold`, every button that fires the control (a button, a preset, a switch's On or Off) writes only once held for a second; letting go early sends nothing. |
 
 - A numeric control is writable only with a range on its entry. With `min` and
   `max` empty it is refused (`no-range`).

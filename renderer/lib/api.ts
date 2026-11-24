@@ -572,6 +572,11 @@ export type IpcChannel =
   | "propresenter:getInstances"
   | "propresenter:getStatus"
   | "pvp:getStatus"
+  | "qsys:allowlist"
+  | "qsys:catalog"
+  | "qsys:panelValues"
+  | "qsys:status"
+  | "qsys:write"
   | "reaper:getStatus"
   | "resi:getStatus"
   | "rosstalk:addTarget"
@@ -996,6 +1001,19 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/reaper/status");
     case "pvp:getStatus":
       return apiFetch<T>("/api/pvp/status");
+
+    // Q-SYS panels. The values read is a panel's hydration (its pushes carry only
+    // changes); a write is one control, checked again on the server.
+    case "qsys:allowlist":
+      return apiFetch<T>("/api/qsys/allowlist");
+    case "qsys:catalog":
+      return apiFetch<T>("/api/qsys/catalog");
+    case "qsys:panelValues":
+      return apiFetch<T>(`/api/qsys/values?panel=${encodeURIComponent(String(p.panel ?? ""))}`);
+    case "qsys:status":
+      return apiFetch<T>("/api/qsys/status");
+    case "qsys:write":
+      return post<T>("/api/qsys/write", p);
 
     case "scores:getStatus":
       return apiFetch<T>("/api/scores/status");
