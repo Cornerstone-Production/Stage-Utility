@@ -8,6 +8,7 @@ const MAX_CHANGE_GROUPS = 4;
 
 interface Group {
   controls: Set<string>;
+  rate: number | null;
 }
 
 interface Session {
@@ -83,6 +84,14 @@ export class FakeQrcServer {
     this.failures.set(method, queue);
   }
 
+  /** Simulates a change made at the Core (a UCI, a script): updates and pushes to change groups. */
+  setControl(component: string, name: string, value: number | boolean | string): void {
+    const control = this.find(component, name);
+    if (!control) throw new Error(`fake core has no ${component}/${name}`);
+    this.apply(control, value);
+    this.pushChange(component, control);
+  }
+
   /** Answer every request held so far, in order. `holdReplies` is left as it is,
    *  so a test can let one step of a sequence through and hold the next. */
   releaseHeld(): void {
@@ -100,8 +109,28 @@ export class FakeQrcServer {
     return this.components.get(component)?.find((c) => c.Name === name);
   }
 
+  private apply(control: QrcControl, value: number | boolean | string): void {
+    control.Value = value;
+    control.String = typeof value === "number" && control.ValueMin !== undefined ? `${value}dB` : String(value);
+    if (typeof value === "number" && control.ValueMin !== undefined && control.ValueMax !== undefined) {
+      const span = control.ValueMax - control.ValueMin;
+      control.Position = span > 0 ? (value - control.ValueMin) / span : 0;
+    } else if (typeof value === "boolean") control.Position = value ? 1 : 0;
+    else if (typeof value === "number") control.Position = value;
+  }
+
   private change(component: string, c: QrcControl): QrcChange {
     return { Component: component, Name: c.Name, Value: c.Value, String: c.String, Position: c.Position };
+  }
+
+  private pushChange(component: string, control: QrcControl): void {
+    for (const s of this.sessions) {
+      for (const [id, group] of s.groups) {
+        if (group.controls.has(key(component, control.Name))) {
+          this.notify(s, "ChangeGroup.Poll", { Id: id, Changes: [this.change(component, control)] });
+        }
+      }
+    }
   }
 
   private accept(socket: net.Socket): void {
@@ -195,35 +224,110 @@ export class FakeQrcServer {
         this.reply(session, msg.id, { Name: p.Name, Controls: controls.map((c) => ({ ...c })) });
         return;
       }
+      case "Component.Set":
+        return this.componentSet(session, msg.id, p);
       case "ChangeGroup.AddComponentControl":
         return this.groupAdd(session, msg.id, p);
+      case "ChangeGroup.Remove":
+        return this.groupRemove(session, msg.id, p);
+      case "ChangeGroup.AutoPoll": {
+        const group = session.groups.get(String(p.Id));
+        if (group) group.rate = Number(p.Rate);
+        this.reply(session, msg.id, true);
+        return;
+      }
+      case "ChangeGroup.Clear": {
+        const group = session.groups.get(String(p.Id));
+        if (group) group.controls.clear();
+        this.reply(session, msg.id, true);
+        return;
+      }
+      case "ChangeGroup.Destroy":
+        session.groups.delete(String(p.Id));
+        this.reply(session, msg.id, true);
+        return;
+      case "ChangeGroup.Invalidate": {
+        const group = session.groups.get(String(p.Id));
+        this.reply(session, msg.id, true);
+        if (group) this.pushGroup(session, String(p.Id), group);
+        return;
+      }
       default:
         this.fail(session, msg.id, -32601, "Method not found");
     }
   }
 
+  private componentSet(session: Session, id: unknown, p: Record<string, unknown>): void {
+    const name = String(p.Name);
+    const controls = this.components.get(name);
+    if (!controls) return this.fail(session, id, 7, "Unknown component");
+    if (!Array.isArray(p.Controls)) return this.fail(session, id, -32602, "Invalid params: Controls is not a list");
+    const requested = p.Controls as { Name: string; Value: number | boolean | string }[];
+    const targets: QrcControl[] = [];
+    for (const r of requested) {
+      const control = controls.find((c) => c.Name === r.Name);
+      if (!control) return this.fail(session, id, 8, "Unknown control");
+      targets.push(control);
+    }
+    requested.forEach((r, i) => this.apply(targets[i], r.Value));
+    this.reply(
+      session,
+      id,
+      p.ResponseValues
+        ? {
+            Name: name,
+            Controls: targets.map((c) => ({ Name: c.Name, Value: c.Value, String: c.String, Position: c.Position })),
+          }
+        : true,
+    );
+    for (const c of targets) this.pushChange(name, c);
+  }
+
   private groupAdd(session: Session, id: unknown, p: Record<string, unknown>): void {
     const gid = String(p.Id);
     // Validate before creating the group, so a refused add never consumes one of the four.
-    const comp = p.Component as { Name: string; Controls: { Name: string }[] } | undefined;
+    const comp = p.Component as { Name: string; Controls?: unknown } | undefined;
     if (!comp) return this.fail(session, id, 7, "Unknown component");
+    if (!Array.isArray(comp.Controls)) return this.fail(session, id, -32602, "Invalid params: Component.Controls is not a list");
+    const controls = comp.Controls as { Name: string }[];
     if (!this.components.has(comp.Name)) return this.fail(session, id, 7, "Unknown component");
-    for (const c of comp.Controls) {
+    for (const c of controls) {
       if (!this.find(comp.Name, c.Name)) return this.fail(session, id, 8, "Unknown control");
     }
     let group = session.groups.get(gid);
     if (!group) {
       if (session.groups.size >= MAX_CHANGE_GROUPS) return this.fail(session, id, 5, "Change groups exhausted");
-      group = { controls: new Set() };
+      group = { controls: new Set(), rate: null };
       session.groups.set(gid, group);
     }
     const fresh: QrcChange[] = [];
-    for (const c of comp.Controls) {
+    for (const c of controls) {
       group.controls.add(key(comp.Name, c.Name));
       fresh.push(this.change(comp.Name, this.find(comp.Name, c.Name)!));
     }
     this.reply(session, id, true);
     // Adding a control resends its current state.
     this.notify(session, "ChangeGroup.Poll", { Id: gid, Changes: fresh });
+  }
+
+  /**
+   * QRC's Remove takes `{ Id, Controls: [names] }` and works on Named Controls
+   * only; there is no Component form. The fake has no Named Controls, so every
+   * name is unknown and nothing leaves the group. A component control leaves a
+   * group only through Clear (or Destroy) and a re-add.
+   */
+  private groupRemove(session: Session, id: unknown, p: Record<string, unknown>): void {
+    const names = Array.isArray(p.Controls) ? p.Controls.map(String) : [];
+    this.reply(session, id, names);
+  }
+
+  private pushGroup(session: Session, id: string, group: Group): void {
+    const changes: QrcChange[] = [];
+    for (const k of group.controls) {
+      const [component, name] = k.split("\u0000");
+      const control = this.find(component, name);
+      if (control) changes.push(this.change(component, control));
+    }
+    this.notify(session, "ChangeGroup.Poll", { Id: id, Changes: changes });
   }
 }

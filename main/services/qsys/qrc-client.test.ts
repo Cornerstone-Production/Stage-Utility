@@ -148,6 +148,33 @@ test("the fake survives an unparseable request and a refused group add keeps its
   );
 });
 
+test("the fake answers a group add or a Set whose Controls is not a list with an error, and keeps serving", async () => {
+  const c = await connect();
+  await assert.rejects(
+    c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer" } }),
+    (err: unknown) => err instanceof QrcError && err.code === -32602,
+  );
+  await assert.rejects(
+    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: { Name: "gain", Value: 0 } }),
+    (err: unknown) => err instanceof QrcError && err.code === -32602,
+  );
+  await c.send("NoOp");
+});
+
+test("the fake's ChangeGroup.Remove is named-controls only, like the Core's: a Component form removes nothing", async () => {
+  const c = await connect();
+  const pushes: unknown[] = [];
+  c.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params);
+  });
+  await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  await c.send("ChangeGroup.Remove", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  pushes.length = 0;
+  fake.setControl("Lobby_Mixer", "gain", -3);
+  await c.send("NoOp");
+  assert.equal(pushes.length, 1, "a component control left the group through Remove, which QRC does not document");
+});
+
 test("an error response rejects with QrcError carrying the code", async () => {
   const c = await connect();
   fake.failNext("Component.Set", 8);
