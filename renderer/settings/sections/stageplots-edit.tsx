@@ -130,7 +130,10 @@ function PlotEditor({
   const update = async (changes: { backgroundId?: string | null; bgFade?: number }) => {
     const r = await save(() => stageplotsApi.updatePlot(plot.id, changes));
     setError(r.ok ? null : r.error);
-    if (!r.ok) setFade(plot.bgFade);
+    if (r.ok) return;
+    // Back to what is saved, the slider and what counts as sent alike: the same fade let go again goes again.
+    setFade(plot.bgFade);
+    setSentFade(plot.bgFade);
   };
   // Let go, a key up and leaving the slider each commit, so the value last sent
   // is kept: the same fade is sent once, not again before the save lands.

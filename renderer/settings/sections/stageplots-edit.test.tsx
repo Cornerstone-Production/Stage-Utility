@@ -812,6 +812,23 @@ describe("/stageplots/edit", () => {
     assert.deepEqual(sent[0].body, { bgFade: 0.7 });
   });
 
+  test("a fade the server refused is sent again when the same value is let go again", async () => {
+    await mount();
+    const slider = screen.getByLabelText("Fade");
+    const letGoAt = async (value: string) => {
+      await act(async () => {
+        fireEvent.change(slider, { target: { value } });
+        fireEvent.pointerUp(slider);
+      });
+      await settle();
+    };
+    refuse = { what: "PATCH /api/stageplots/plots/p-1", error: "the server refused the fade" };
+    await letGoAt("70");
+    assert.equal((slider as HTMLInputElement).value, "40", "the slider kept the fade the server refused");
+    await letGoAt("70");
+    assert.deepEqual(writes(), ["PATCH /api/stageplots/plots/p-1", "PATCH /api/stageplots/plots/p-1"], "the same fade, let go again, was never sent");
+  });
+
   test("choosing another background saves the plot", async () => {
     await mount();
     await act(async () => {
