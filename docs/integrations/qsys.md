@@ -219,14 +219,14 @@ never its own.
 
 A Q-SYS panel is a custom console with panel settings. It is built, edited, exported
 and imported like any console, and it is listed on `/qsys/manage` rather than among
-the consoles in the sidebar.
+the consoles in the sidebar. It cannot be made a display or another kind while it
+is a panel; **Make it a console** in its settings turns it back into an ordinary
+console first. Home cannot be a panel.
 
 | Setting | Meaning |
 |---|---|
 | Who uses it | **Volunteer** (big targets; meters at the volunteer rate) or **Staff** (dense; meters at the staff rate). |
 | Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's is refused, naming that panel. `manage` is not allowed. |
-| Panels in its cog menu | Other panels, by slug. One that no longer exists is kept, not refused. |
-| Go back to the home panel after | Minutes without a touch; 0 never goes back. Default 5. |
 
 A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A console
 with Q-SYS objects and no panel settings still works where it is shown, as a staff
@@ -277,8 +277,8 @@ its wall panels are not affected.
   **Start a new, empty list**, which keeps the old file beside the new one.
 - **Binding check**: each problem with its panel and control, "Every binding
   resolves", "Connect a Core to check the bindings", or why the check could not run.
-- **Staff PIN** and **Meter rates**: the PIN a volunteer panel's cog asks for, and a
-  link to the rates on the integration.
+- **Staff PIN**: whether one is set (none can be yet).
+- **Meter rates**: a link to the two rates on the integration.
 
 ## Write log
 

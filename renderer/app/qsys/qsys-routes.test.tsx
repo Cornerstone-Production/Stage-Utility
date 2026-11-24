@@ -84,6 +84,9 @@ interface Server {
   bindings: { status: number; body: unknown };
   patches: { url: string; body: Record<string, unknown> }[];
   patchAnswer: { status: number; body: unknown };
+  puts: Record<string, unknown>[];
+  posts: Record<string, unknown>[];
+  allow: { entries: unknown[]; invalid: string | null };
 }
 
 let server: Server;
@@ -100,10 +103,19 @@ function freshServer(): Server {
     bindings: { status: 200, body: [] },
     patches: [],
     patchAnswer: { status: 200, body: {} },
+    puts: [],
+    posts: [],
+    allow: structuredClone(ALLOW),
   };
 }
 
-const ALLOW = { entries: [{ component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" }], invalid: null };
+const ALLOW = {
+  entries: [
+    { component: MIX, control: "gain", label: "", min: -100, max: 20, confirm: "none" },
+    { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
+  ],
+  invalid: null as string | null,
+};
 const CATALOG = { designCode: "d1", components: [{ name: MIX, type: "mixer", controls: [{ Name: "mute", Type: "Boolean" }, { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 }] }] };
 
 const f = stubFetchWithLog((url, init) => {
@@ -120,13 +132,23 @@ const f = stubFetchWithLog((url, init) => {
     return answer();
   }
   if (url === "/api/qsys/status") return ok(server.status);
-  if (url === "/api/qsys/allowlist") return ok(ALLOW);
+  if (url === "/api/qsys/allowlist" && init?.method === "PUT") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { entries: unknown[] };
+    server.puts.push(body);
+    server.allow = { entries: body.entries, invalid: null };
+    return ok({ entries: body.entries });
+  }
+  if (url === "/api/qsys/allowlist") return ok(server.allow);
   if (url === "/api/qsys/catalog") return ok(CATALOG);
   if (url === "/api/qsys/bindings") return reply(server.bindings.status, server.bindings.body);
   if (url === "/api/qsys/write") {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     server.writes.push(body);
     return ok({ ok: true, value: body.value, string: String(body.value), clamped: false });
+  }
+  if (url === "/api/views" && init?.method === "POST") {
+    server.posts.push(JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>);
+    return reply(201, { views: server.views, outputs: [] });
   }
   if (url.startsWith("/api/views/") && init?.method === "PATCH") {
     server.patches.push({ url, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
@@ -156,7 +178,10 @@ const wait = (ms: number) =>
     await new Promise((r) => setTimeout(r, ms));
   });
 
+let client: InstanceType<typeof QueryClient>;
+
 async function open(path: string) {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const root = createRootRoute();
   const routes = [
     createRoute({ getParentRoute: () => root, path: "/qsys/manage", component: QsysManageRoute }),
@@ -167,7 +192,7 @@ async function open(path: string) {
   render(
     React.createElement(
       QueryClientProvider,
-      { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+      { client },
       React.createElement(RouterProvider, { router }),
     ),
   );
@@ -391,5 +416,93 @@ describe("/qsys/manage", () => {
     assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "zone-1", siblings: [], returnAfterMin: 5 } });
     assert.equal(document.querySelector("[data-qsys-refused]")?.textContent, message, "the refusal was not shown");
     assert.ok(screen.getByLabelText("Address"), "the dialog closed on a refused save");
+  });
+
+  test("the allowlist: a limit edited and saved, a row removed and saved; an empty box touched marks nothing edited", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    const rows = () => [...document.querySelectorAll("[data-qsys-allowlist] tbody tr")] as HTMLElement[];
+    const boxes = (row: HTMLElement) => [...row.querySelectorAll("input")] as HTMLInputElement[];
+    // The mute row's empty Min, focused and left: NumberInput reports nothing for a
+    // click in and out, so the list is not marked edited and Add-all stays enabled.
+    const muteMin = boxes(rows()[1])[0];
+    act(() => {
+      fireEvent.focus(muteMin);
+      fireEvent.blur(muteMin);
+    });
+    await wait(10);
+    assert.equal(screen.queryByText("Save the allowlist") !== null, false, "touching an empty box marked the list edited");
+    assert.equal((screen.getByText("Add all controls Zone 1 uses") as HTMLButtonElement).disabled, false);
+    // Tighten the gain's max and save.
+    const gainMax = boxes(rows()[0])[1];
+    act(() => {
+      fireEvent.change(gainMax, { target: { value: "0" } });
+      fireEvent.blur(gainMax);
+    });
+    await wait(10);
+    assert.equal((screen.getByText("Add all controls Zone 1 uses") as HTMLButtonElement).disabled, true, "add-all over unsaved edits");
+    act(() => {
+      fireEvent.click(screen.getByText("Save the allowlist"));
+    });
+    await wait(40);
+    assert.deepEqual((server.puts.at(-1)!.entries as { max: unknown }[]).map((e) => e.max), [0, null]);
+    assert.equal(screen.queryByText("Save the allowlist") !== null, false, "still edited after a save");
+    // Remove the mute and save.
+    act(() => {
+      fireEvent.click(screen.getByLabelText(`Remove ${MIX} mute`));
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Save the allowlist"));
+    });
+    await wait(40);
+    assert.deepEqual((server.puts.at(-1)!.entries as { control: string }[]).map((e) => e.control), ["gain"]);
+    assert.equal(rows().length, 1);
+  });
+
+  test("a panel's settings save its kind and address and keep its siblings and return time", async () => {
+    server.views = [{ ...ZONE, qsys: { kind: "volunteer", slug: "zone-1", siblings: ["booth"], returnAfterMin: 9 } }, BOOTH];
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Settings for Zone 1"));
+    });
+    await wait(20);
+    act(() => {
+      fireEvent.click(screen.getByLabelText(/Staff panel/));
+    });
+    act(() => {
+      fireEvent.change(screen.getByLabelText("Address"), { target: { value: "zone-one" } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Save"));
+    });
+    await wait(40);
+    assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "zone-one", siblings: ["booth"], returnAfterMin: 9 } });
+    assert.equal(screen.queryByLabelText("Address") !== null, false, "the dialog stayed open after a save");
+  });
+
+  test("a new panel opens only once the page's own state has it", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(screen.getByText("New panel"));
+    });
+    await wait(20);
+    act(() => {
+      fireEvent.change(screen.getByPlaceholderText("Zone 1"), { target: { value: "Side Stage" } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Make the panel"));
+    });
+    await wait(40);
+    assert.deepEqual(server.posts.at(-1), { name: "Side Stage", kind: "custom", surface: "console", qsys: { kind: "volunteer", slug: "side-stage", siblings: [], returnAfterMin: 5 } });
+    assert.equal(document.querySelector("[data-qsys-not-found]") !== null, false, "opened before the view arrived: a not-found page");
+    assert.ok(screen.getByText("Make the panel"), "left the dialog before the view arrived");
+    const SIDE = { ...ZONE, id: "v-side", name: "Side Stage", qsys: block("volunteer", "side-stage") };
+    server.views = [ZONE, BOOTH, SIDE];
+    // The shell's live wiring puts a pushed state into this query; done by hand here.
+    act(() => client.setQueryData(["stage:getState"], { views: server.views, outputs: [], appName: "Stage Utility" }));
+    await wait(80);
+    assert.equal(document.querySelector('[data-qsys-panel="side-stage"]') !== null, true, "the new panel did not open");
   });
 });

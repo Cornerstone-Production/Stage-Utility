@@ -70,7 +70,7 @@ export function QsysPanelNotFound({ slug, link }: { slug: string; link?: boolean
         Nothing is at <span className="font-mono text-fg">{qsysPanelPath(slug)}</span>. It may have been renamed or removed. Find a tech.
       </div>
       {link && (
-        <AppLink to={QSYS_MANAGE_PATH} className="mt-2 text-footnote text-accent-text hover:underline">
+        <AppLink to={QSYS_MANAGE_PATH} className="mt-2 inline-flex min-h-11 items-center text-footnote text-accent-text hover:underline">
           All panels
         </AppLink>
       )}
@@ -170,12 +170,12 @@ function useAfter(on: boolean, ms: number): boolean {
 
 function NoCoreStrip({ settingsLink }: { settingsLink: boolean }) {
   return (
-    <div role="status" className="flex shrink-0 items-center gap-4 border-b border-line bg-warn-9/14 px-6 py-3 text-subheadline text-warn-11" data-qsys-no-core>
+    <div role="status" className="flex shrink-0 items-center gap-4 border-b border-line bg-warn-9/14 px-6 py-1.5 text-subheadline text-warn-11" data-qsys-no-core>
       <span className="grow">
         <strong className="font-semibold">{NO_CORE_TITLE}</strong>. Its controls are disabled until one is.
       </span>
       {settingsLink && (
-        <AppLink to={INTEGRATIONS_PATH} className="shrink-0 text-footnote font-medium text-fg hover:underline">
+        <AppLink to={INTEGRATIONS_PATH} className="inline-flex min-h-11 shrink-0 items-center text-footnote font-medium text-fg hover:underline">
           Q-SYS settings
         </AppLink>
       )}

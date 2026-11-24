@@ -378,6 +378,11 @@ export class QsysPanelRefused extends Error {
   readonly status = 400;
 }
 
+/** Why a Q-SYS panel cannot become a display or another kind. */
+function stillPanelMessage(view: View): string {
+  return `"${view.name}" is a Q-SYS panel; make it an ordinary console on the Q-SYS page first`;
+}
+
 export class LayoutConflictError extends Error {
   readonly code = "layout-conflict";
   constructor(
@@ -4187,6 +4192,7 @@ export class StageController {
     opts: { screensConfirmed?: boolean } = {},
   ): Promise<StageState> {
     const view = this.requireView(id, "setViewSurface");
+    this.assertStaysPanel(view, { surface });
     if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
     if (!opts.screensConfirmed) {
@@ -4232,6 +4238,7 @@ export class StageController {
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
     const current = this.requireView(id, "views:setKind");
+    this.assertStaysPanel(current, { kind });
     // A console is live on every screen showing it, so it may only become a kind
     // that still has something to operate.
     if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
@@ -4363,11 +4370,22 @@ export class StageController {
     if (!block) return null;
     const view = this.state.views.find((v) => v.id === id);
     if (!view) return null;
+    // Home is a console, and has its own page at /.
+    if (id === HOME_VIEW_ID) return "Home cannot be a Q-SYS panel";
     if ((change.surface ?? viewSurface(view)) !== "console" || (change.kind ?? view.kind) !== "custom") {
       return `"${view.name}" is not a custom console, so it cannot be a Q-SYS panel`;
     }
     const owner = qsysSlugOwner(this.state.views, block.slug, id);
     return owner ? slugTakenMessage(block.slug, owner) : null;
+  }
+
+  /** Refuse, as a 400, a change that would leave a Q-SYS panel something other than a custom console. */
+  private assertStaysPanel(view: View, change: { kind?: ViewKind; surface?: ViewSurface }): void {
+    if (!view.qsys) return;
+    if ((change.surface ?? viewSurface(view)) === "console" && (change.kind ?? view.kind) === "custom") return;
+    const refused = stillPanelMessage(view);
+    console.warn(`[stage-controller] ${scrub(view.id)}: ${scrub(refused)}`);
+    throw new QsysPanelRefused(refused);
   }
 
   /** Make a view a Q-SYS panel, change its panel settings, or (null) make it an ordinary console. */
@@ -5302,9 +5320,7 @@ export class StageController {
     const surface = change.surface ?? viewSurface(view);
     // A Q-SYS panel stays a custom console while it is one; /qsys/<slug> draws its layout.
     const panel = change.qsys === undefined ? view.qsys : change.qsys;
-    if (panel && (surface !== "console" || final.kind !== "custom")) {
-      return `"${view.name}" is a Q-SYS panel; make it an ordinary console on the Q-SYS page first`;
-    }
+    if (panel && (surface !== "console" || final.kind !== "custom")) return stillPanelMessage(view);
     try {
       if (surface === "console") this.assertCanBeControlSurface(final);
     } catch (err) {
@@ -5347,6 +5363,7 @@ export class StageController {
     const view = this.requireViewToShow(id);
     if (viewSurface(view) === surface) return this.state;
     if (surface === "console") this.assertCanBeControlSurface(view);
+    this.assertStaysPanel(view, { surface });
 
     const changing = screensShowing(id, this.state.outputs);
     if (opts.screens !== undefined) {

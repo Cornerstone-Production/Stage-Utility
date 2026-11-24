@@ -103,6 +103,28 @@ describe("the Q-SYS panel block", () => {
     assert.equal(view("p1")?.surface, "display");
   });
 
+  it("every way of changing a view's surface or kind keeps a panel a custom console", async () => {
+    seed(panel("p1", "zone-1"));
+    const role = await callRoute(viewRoutes, "/api/views/p1/surface", { method: "POST", body: { surface: "display" } });
+    assert.equal(role.status, 400, JSON.stringify(role.json));
+    assert.match(errorOf(role), /is a Q-SYS panel/);
+    const kind = await patch("p1", { kind: "calendar" });
+    assert.equal(kind.status, 400);
+    assert.match(errorOf(kind), /is a Q-SYS panel/);
+    // The writers themselves, not only the routes' up-front checks.
+    await assert.rejects(() => stageController.setViewSurface("p1", "display", { screensConfirmed: true }), /is a Q-SYS panel/);
+    await assert.rejects(() => stageController.setViewKind("p1", "calendar"), /is a Q-SYS panel/);
+    assert.equal(view("p1")?.surface, "console");
+    assert.equal(view("p1")?.kind, "custom");
+  });
+
+  it("Home cannot be a panel", async () => {
+    seed({ id: "home", name: "Home", kind: "custom", surface: "console", createdAt: "", layout: LAYOUT } as View);
+    const r = await patch("home", { qsys: { kind: "staff", slug: "home-panel" } });
+    assert.equal(r.status, 400);
+    assert.match(errorOf(r), /Home cannot be a Q-SYS panel/);
+  });
+
   it("qsys: null makes it an ordinary console again", async () => {
     seed(panel("p1", "zone-1"));
     assert.equal((await patch("p1", { qsys: null })).status, 200);

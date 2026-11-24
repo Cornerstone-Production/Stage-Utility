@@ -15,7 +15,6 @@ import { useParams, useRouter } from "@tanstack/react-router";
 
 import {
   QSYS_RETURN_DEFAULT_MIN,
-  QSYS_RETURN_MAX_MIN,
   findPanelBySlug,
   isQsysPanel,
   isQsysSlug,
@@ -29,7 +28,7 @@ import {
 import type { View } from "@main/types/views";
 import { viewSurface, walkLayoutObjects } from "@main/types/views";
 import { errorMessage } from "@main/services/errors";
-import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
+import { Button, Callout, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
 import { invoke, onNotification } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
 import { canEditInPlace } from "../../editor/can-edit";
@@ -108,7 +107,7 @@ export function QsysManageRoute() {
       <ConnectionSection status={status} />
       <AllowlistSection allow={allow} saved={allowSaved} panels={panels} connected={status?.connected === true} />
       <BindingsSection bindings={bindings} views={views} />
-      <Section title="Staff PIN" hint="What a volunteer panel's cog asks for before it opens Stage Utility. It keeps curious taps out; the network is still the real boundary.">
+      <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
         <p className="text-footnote text-fg-muted" data-qsys-pin>No staff PIN is set.</p>
       </Section>
       <Section title="Meter rates" hint="Volunteer panels' meters move at the volunteer rate and staff panels' at the staff rate. Both are set on the Q-SYS integration.">
@@ -299,15 +298,22 @@ function NewPanelDialog({ views, onClose }: { views: View[]; onClose: () => void
   const [kind, setKind] = useState<PanelKind>("volunteer");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /** The slug just made: opened once the page's own state has the view, never before (it would read as no panel). */
+  const [made, setMade] = useState<string | null>(null);
   const slug = uniqueQsysSlug(slugify(name || "panel"), qsysSlugsOf(views));
+  const arrived = made !== null && views.some((v) => v.qsys?.slug === made);
+  useEffect(() => {
+    if (!arrived || made === null) return;
+    onClose();
+    void router.navigate({ to: qsysManagePanelPath(made) });
+  }, [arrived, made, onClose, router]);
   async function create() {
     setBusy(true);
     setMessage(null);
     try {
       const block: QsysPanelBlock = { kind, slug, siblings: [], returnAfterMin: QSYS_RETURN_DEFAULT_MIN };
       await invoke("views:add", { name: name.trim() || "Panel", kind: "custom", surface: "console", qsys: block });
-      onClose();
-      void router.navigate({ to: qsysManagePanelPath(slug) });
+      setMade(slug);
     } catch (err) {
       logToServer("qsys", `a new panel was refused: ${errorMessage(err)}`);
       setMessage(errorMessage(err));
@@ -337,16 +343,17 @@ function NewPanelDialog({ views, onClose }: { views: View[]; onClose: () => void
   );
 }
 
-/** A panel's settings: who it is for, its address, its cog's siblings, its auto-return. */
+/**
+ * A panel's settings: who it is for and its address. Its cog's siblings and its
+ * auto-return time are kept as they are: nothing on a panel reads them yet, so
+ * they are not offered as if they did something.
+ */
 export function PanelSettingsDialog({ view, views, onClose }: { view: View; views: View[]; onClose: () => void }) {
   const was = view.qsys;
   const [kind, setKind] = useState<PanelKind>(was?.kind ?? "staff");
   const [slug, setSlug] = useState(was?.slug ?? uniqueQsysSlug(slugify(view.name), qsysSlugsOf(views)));
-  const [returnAfterMin, setReturnAfterMin] = useState(was?.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN);
-  const [siblings, setSiblings] = useState<string[]>(was?.siblings ?? []);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const others = views.filter((v) => v.qsys && v.id !== view.id);
   const shapeOk = isQsysSlug(slug);
 
   async function save(qsys: QsysPanelBlock | null) {
@@ -386,28 +393,6 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
           </span>
           {!shapeOk && <span className="text-caption1 font-normal text-warn-11">Lowercase letters, digits and single hyphens, and not "manage".</span>}
         </label>
-        <label className="flex flex-col gap-1 text-footnote font-medium text-fg">
-          Go back to the home panel after
-          <span className="flex items-center gap-2">
-            <NumberInput value={returnAfterMin} onChange={setReturnAfterMin} min={0} max={QSYS_RETURN_MAX_MIN} step={1} suffix="min" className="w-28" />
-            <span className="text-caption1 font-normal text-fg-muted">without a touch; 0 never goes back</span>
-          </span>
-        </label>
-        {others.length > 0 && (
-          <fieldset className="flex flex-col gap-1">
-            <legend className="mb-1 text-footnote font-medium text-fg">Panels in its cog menu</legend>
-            {others.map((o) => (
-              <label key={o.id} className="flex min-h-11 items-center gap-2 text-footnote text-fg">
-                <Checkbox
-                  checked={siblings.includes(o.qsys!.slug)}
-                  onCheckedChange={(on) => setSiblings((cur) => (on === true ? [...cur, o.qsys!.slug] : cur.filter((x) => x !== o.qsys!.slug)))}
-                  aria-label={o.name}
-                />
-                {o.name}
-              </label>
-            ))}
-          </fieldset>
-        )}
         {message && <p role="alert" className="text-footnote text-danger-11" data-qsys-refused>{message}</p>}
         <div className="flex items-center justify-between gap-2">
           {was ? (
@@ -415,7 +400,12 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
           ) : <span />}
           <span className="flex gap-2">
             <Button variant="transparent" onClick={onClose}>Cancel</Button>
-            <Button onClick={() => void save({ kind, slug, siblings, returnAfterMin })} disabled={busy || !shapeOk}>Save</Button>
+            <Button
+              onClick={() => void save({ kind, slug, siblings: was?.siblings ?? [], returnAfterMin: was?.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN })}
+              disabled={busy || !shapeOk}
+            >
+              Save
+            </Button>
           </span>
         </div>
       </DialogContent>
