@@ -661,10 +661,10 @@ out unlinked) and again when it can, and each plot sent with linked points that 
 unlinked names them and why (the device is gone, or the sheet cannot be read).
 The editor logs a draft it could not keep (once, until it is kept again, and then that it is), one it could not delete, one it could not send as the page closed, and a failed read of the drafts.
 A page that cannot read the plots logs that too, so does one that cannot read the patch
-sheet for its linked points, so does a print whose
-background did not load, and so does a page that finds Planning Center
-unreachable and falls back to each venue's default, and again when it can be
-read once more. See [Updates and logs](../ops/updates-and-logs.md).
+sheet for its linked points, and so does a print whose
+background did not load. Planning Center becoming unreachable, which makes
+`/stageplots` show each venue's default plot, is the server's `[plans]` line, once,
+not one from every page open on it. See [Updates and logs](../ops/updates-and-logs.md).
 
 ## API
 

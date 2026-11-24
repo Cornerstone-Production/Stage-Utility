@@ -23,14 +23,13 @@
 // (appZoneOf), never the browser's clock. Not connected is not unreachable:
 // with no credentials there is no plan to follow, no notice and no plan badge.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { UpcomingPlan } from "@main/types/pco";
 import type { PlotOverride } from "@main/types/stageplots";
 import { hostTimeZone, zonedDateKey } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
 
-import { logToServer } from "../../lib/client-log";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { appZoneOf } from "../../lib/app-zone";
 import { planDateLabel } from "../../settings/sections/plan-date-label";
@@ -165,25 +164,9 @@ export function useFollowedPlan(overrides: readonly PlotOverride[]): FollowedPla
     else if (readAt > 0) setReach((prev) => nextReach(prev, { at: readAt, unavailable: failedLast || !!list.unavailable }, { drawn }));
   });
 
-  // Said once per change each way, on the tag the rest of the feature uses:
-  // an operator asking why every venue shows its default has the reason on
-  // /log, and when it came back. The reason is read from a ref so a new
-  // wording within one outage is not a second line.
+  // Not logged from here: every crew tab would post the same outage. The server's own [plans]
+  // lines say when the upcoming list cannot be read and when it can again, once.
   const down = connected && reach.unreachable;
-  const reason = useRef<string | null>(null);
-  const wasDown = useRef(false);
-  useEffect(() => {
-    reason.current = current.listProblem;
-  });
-  useEffect(() => {
-    if (down && !wasDown.current) {
-      logToServer("stageplots", `Planning Center is unreachable (${reason.current ?? "no reason given"}); /stageplots shows each venue's default plot`);
-    } else if (!down && wasDown.current) {
-      logToServer("stageplots", "Planning Center can be read again; /stageplots follows the live or next plan");
-    }
-    wasDown.current = down;
-  }, [down]);
-
   const unreachable = down && current.planId !== null;
   return { ...current, resolvedPlanId: unreachable ? null : current.planId, unreachable, known: drawn || ready };
 }
