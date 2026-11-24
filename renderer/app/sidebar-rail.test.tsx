@@ -400,6 +400,46 @@ describe("whose save is newer", () => {
       assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "a change on the restarted server was taken for an old echo"),
     );
   });
+
+  describe("a server that restarts before the stream reconnects", () => {
+    // The page still holds the old run's last broadcast; the new run answers saves.
+    // The new run is newer than the old, but never the other way round.
+    async function restartWithStreamDown(): Promise<void> {
+      await mount();
+      await act(async () => api!.open("sidebar"));
+      state = { ...state, listRevisions: { boot: "boot-2", sidebar: 0, bar: 0 } };
+      mode = "late"; // no broadcast reaches the page: the stream is down
+    }
+    const settle = () => act(async () => new Promise((r) => setTimeout(r, 50)));
+
+    test("a save answered by the new run is not drawn back by the old run's state", async () => {
+      await restartWithStreamDown();
+      await act(async () => api!.hide("patch", "Patch"));
+      await eventually(() => assert.equal(saves.length, 1));
+      await settle();
+      assert.deepEqual(api!.resolved.hiddenPages, ["patch"], "the old run's state was drawn over the new run's answer");
+    });
+
+    test("the next change builds on that save, not on the old run's state", async () => {
+      await restartWithStreamDown();
+      await act(async () => api!.hide("patch", "Patch"));
+      await eventually(() => assert.equal(saves.length, 1));
+      await settle();
+      await act(async () => api!.hide("history", "History"));
+      await eventually(() => assert.equal(saves.length, 2));
+      assert.deepEqual([...saves[1].hidden].sort(), ["history", "patch"], "the second save dropped the first");
+    });
+
+    test("a refused save reads back the new run's arrangement and keeps it", async () => {
+      await restartWithStreamDown();
+      serverSaves({ sections: [], hidden: ["baptisms"] }); // the new run holds this; nobody has heard
+      mode = "refuse";
+      await act(async () => api!.hide("patch", "Patch"));
+      await eventually(() => assert.equal(saves.length, 1));
+      await settle();
+      assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "the read-back was drawn over by the old run's state");
+    });
+  });
 });
 
 describe("what a change lands on", () => {

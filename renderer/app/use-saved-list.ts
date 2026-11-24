@@ -18,7 +18,8 @@
 //    of a save under an edit that is still waiting would apply that edit twice
 //    (a second Space, say), and the answer to the save is what the list builds on.
 //  - Once nothing is waiting, it is taken in only if its count is newer than the
-//    newest answer or broadcast already held. Our own echo, early or late, never
+//    newest answer or broadcast already held. A restarted server's first count is
+//    newer than any of the run before; that run's counts are never newer again. Our own echo, early or late, never
 //    is; another browser's change that landed after our last save always is, even
 //    if it arrived while that save was out.
 //  - A newer one that says what the list already holds is noted, not redrawn.
@@ -29,7 +30,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useListSaves, type ListEdit, type ListIo, type ListSaveResult, type ListStepResult } from "../lib/use-list-saves";
 
-/** Which save of a list a reading of it is. A different `boot` is a restarted server, and newer. */
+/** Which save of a list a reading of it is. A different `boot` is a restarted server. */
 export interface Revision {
   boot: string;
   n: number;
@@ -52,8 +53,6 @@ export function revisionOf(state: Pick<StageState, "listRevisions"> | null | und
   const r = state?.listRevisions;
   return { boot: r?.boot ?? "", n: r?.[list] ?? 0 };
 }
-
-const isNewer = (a: Revision, than: Revision) => a.boot !== than.boot || a.n > than.n;
 
 export interface SavedList<T> {
   /** What to draw: the server's last answer with the waiting edits applied. Empty until the first broadcast is taken in. */
@@ -86,11 +85,27 @@ export function useSavedList<T>({
 }): SavedList<T> {
   /** The newest revision held, answered or broadcast. Null until the first, which anything is newer than. */
   const newest = useRef<Revision | null>(null);
+  /**
+   * Boots this list has seen a later run replace. A new boot is newer than the run
+   * before it, but not the other way round: after a restart, the state the old run
+   * last broadcast can still be what the page holds (the stream has not reconnected)
+   * when an answer from the new run arrives, and must not be drawn over it.
+   */
+  const retired = useRef(new Set<string>());
+  /** Hold `r` as the newest if it is newer; whether it was. */
+  const take = useCallback((r: Revision): boolean => {
+    if (retired.current.has(r.boot)) return false;
+    const held = newest.current;
+    if (held !== null && r.boot === held.boot && r.n <= held.n) return false;
+    if (held !== null && r.boot !== held.boot) retired.current.add(held.boot);
+    newest.current = r;
+    return true;
+  }, []);
   const unwrap = useCallback(async (answer: Promise<Revised<T>>): Promise<T[]> => {
     const { list, revision: r } = await answer;
-    if (newest.current === null || isNewer(r, newest.current)) newest.current = r;
+    take(r);
     return list;
-  }, []);
+  }, [take]);
   const counted = useMemo<ListIo<T>>(() => ({ save: (l) => unwrap(io.save(l)), read: () => unwrap(io.read()) }), [io, unwrap]);
   const { list, adopt, editTracked: edit, request: queueRequest, pending } = useListSaves(counted);
   const request = useCallback((r: () => Promise<Revised<T>>) => queueRequest(() => unwrap(r())), [queueRequest, unwrap]);
@@ -105,11 +120,9 @@ export function useSavedList<T>({
   useEffect(() => {
     const broadcast = latest.current;
     if (broadcast === null || pending > 0 || hold) return;
-    const r = { boot, n };
-    if (newest.current !== null && !isNewer(r, newest.current)) return;
-    newest.current = r;
+    if (!take({ boot, n })) return;
     if (savedKey !== drawnKey) adopt(broadcast);
-  }, [savedKey, drawnKey, boot, n, pending, hold, adopt]);
+  }, [savedKey, drawnKey, boot, n, pending, hold, adopt, take]);
 
   return { list, edit, request };
 }
