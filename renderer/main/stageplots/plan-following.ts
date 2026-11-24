@@ -1,10 +1,10 @@
 // plan-following.ts — which Planning Center plan stage plots follow, and, on
 // /stageplots, whether Planning Center can be read.
 //
-// The plan is /patch's: the live or next plan in the stage state (planId). On
-// this branch the server clears that plan when a poll of Planning Center fails
-// for every service type, so until the server-side hold (its own fix) is
-// merged, a single failed poll can flick a venue to its default and back.
+// The plan is /patch's: the live or next plan in the stage state (planId). The
+// server holds it through a failed poll of Planning Center
+// (stage-controller.plan-outage.test.ts), so a venue does not flick to its
+// default and back on one.
 //
 // useCurrentPlan is the light half, for the editor's This week card: the plan,
 // its date and the upcoming list, read once. useFollowedPlan adds what only

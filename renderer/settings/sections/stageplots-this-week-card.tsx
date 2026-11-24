@@ -13,7 +13,7 @@
 // "upcoming" is looked at again every minute, so a card left open overnight
 // drops yesterday's plans.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { XIcon } from "lucide-react";
 
 import type { StagePlotsView, VenueView } from "@main/types/stageplots";
@@ -22,18 +22,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { plotsOf } from "../../main/stageplots/doc-helpers";
 import { Mono } from "../../main/stageplots/mono";
 import { isUpcoming, type CurrentPlan } from "../../main/stageplots/plan-following";
+import { useNow } from "../../lib/use-now";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { CardHeader, SaveError, eyebrow, iconButton, type Save } from "./stageplots-shared";
-
-/** Now, to the minute: what "upcoming" is measured against. */
-function useMinuteNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
-}
 
 /** A row of the overrides list: date, plot, and its control. */
 const ROW = "grid min-h-7 grid-cols-[minmax(86px,auto)_minmax(0,1fr)_24px] items-center gap-1.5 border-t border-line text-caption1 first:border-t-0";
@@ -56,7 +47,7 @@ export function ThisWeekCard({
   const [error, setError] = useState<string | null>(null);
   /** The upcoming plan being given a plot, before its plot is chosen. */
   const [adding, setAdding] = useState<string | null>(null);
-  const now = useMinuteNow();
+  const now = useNow(60_000);
 
   const plots = plotsOf(doc, venue);
   if (plots.length === 0) return null;
