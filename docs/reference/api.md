@@ -853,8 +853,9 @@ something to change:
 `video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
 [Network traffic](../ops/network-traffic.md#slot-boards)) · `photo-themes:changed`
-(`{epoch, seq, running, queued, active: [{themeId, personId}]}`: theme photos being
-made or waiting, sent when the queue or a theme changes and only while somebody is
+(`{epoch, seq, running, queued, active: [{themeId, personId}], connection}`: theme
+photos being made or waiting, and the OpenAI connection as `GET /api/openai` answers
+it, sent when the queue, a theme or the connection changes and only while somebody is
 subscribed; a `seq` that is not the next one, or a new `epoch`, says a change was
 missed and `GET /api/photo-themes` should be read again)
 

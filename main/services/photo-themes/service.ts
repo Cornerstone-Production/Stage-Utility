@@ -227,7 +227,12 @@ export class PhotoThemesService {
   private missing!: Set<string>;
 
   constructor() {
-    this.connection = new OpenAiConnection(() => this.now());
+    // A key saved, removed or refused goes out on the channel: the Integrations tile
+    // and every open Theme photos sheet follow it without a reload.
+    this.connection = new OpenAiConnection(
+      () => this.now(),
+      () => this.changedNow(),
+    );
     this.resetState();
   }
 
@@ -354,7 +359,7 @@ export class PhotoThemesService {
     const active = [...this.running.values(), ...this.queue]
       .map((j) => ({ themeId: j.themeId, personId: j.personId }))
       .sort((a, b) => a.themeId.localeCompare(b.themeId) || a.personId.localeCompare(b.personId));
-    return { epoch: this.epoch, seq: this.seq, running: this.running.size, queued: this.queue.length, active };
+    return { epoch: this.epoch, seq: this.seq, running: this.running.size, queued: this.queue.length, active, connection: this.connection.status() };
   }
 
   /** A stored edit, for review or for a slot. */

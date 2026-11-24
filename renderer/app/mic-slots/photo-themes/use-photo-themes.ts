@@ -39,8 +39,23 @@ export const planPeopleKey = (planId: string, serviceTypeId: string) => [...PHOT
 export const OPENAI_KEY = ["openai", "status"] as const;
 
 /** OpenAI's connection, read once and shared: the Integrations tile, its dialog and the
- *  key form all draw from this one query, so a saved key moves all three at once. */
+ *  key form all draw from this one query, so a saved key moves all three at once. A
+ *  live `photo-themes:changed` frame carries the connection as it stands, so a key
+ *  saved in another browser, or refused by an edit, moves them too. A replayed frame
+ *  is the cached last one and may be old: the read stands over it. */
 export function useOpenAiConnection() {
+  const qc = useQueryClient();
+  useEffect(
+    () =>
+      onNotification(PHOTO_THEMES_CHANNEL, (payload, replayed) => {
+        const connection = (payload as Partial<PhotoThemesChanged>).connection;
+        if (replayed || !connection) return;
+        // A read still out would land after this and put the older value back: drop it.
+        void qc.cancelQueries({ queryKey: OPENAI_KEY });
+        qc.setQueryData(OPENAI_KEY, connection);
+      }),
+    [qc],
+  );
   return useQuery({ queryKey: OPENAI_KEY, queryFn: () => ipc<OpenAiConnectionDTO>("openai:getStatus") });
 }
 

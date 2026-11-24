@@ -197,6 +197,8 @@ export interface PhotoThemesChanged {
   queued: number;
   /** Who is being made now or is waiting, sorted. */
   active: { themeId: string; personId: string }[];
+  /** How the OpenAI connection stands now: a frame is also sent when only this changed. */
+  connection: OpenAiConnectionDTO;
 }
 
 /** One edit an approve-all was sent: the person, and the file they were shown. */

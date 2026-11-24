@@ -763,4 +763,15 @@ describe("the key", () => {
     // It is the key that went to OpenAI, in the one header.
     assert.equal(fake.requests.at(-1)!.authorization, `Bearer ${KEY}`);
   });
+
+  it("a key saved, removed or refused goes out on the channel, with the connection as it stands", async () => {
+    const said = () => frames.filter((f) => f.startsWith("photo-themes:changed")).map((f) => (JSON.parse(f.slice(f.indexOf(" ") + 1)) as { connection: { state: string } }).connection.state);
+    frames.length = 0;
+    await photoThemes.connection.clearKey();
+    await photoThemes.connection.saveKey("sk-another-key-".padEnd(40, "a"));
+    fake.models = () => ({ status: 401, body: errorBody("invalid_api_key", null) });
+    await photoThemes.connection.test();
+    await photoThemes.connection.test();
+    assert.deepEqual(said(), ["not-connected", "unchecked", "invalid-key"], "one frame per change, none for a test that changes nothing");
+  });
 });
