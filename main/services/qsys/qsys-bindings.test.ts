@@ -92,6 +92,19 @@ describe("checkBindings", () => {
     assert.deepEqual(report.map((r) => `${r.objectId} ${r.problem}`), ["a read-only", "b read-only"]);
   });
 
+  test("a numeric control that lists choices needs no range for a selector's choice list, and still does for a fader", () => {
+    const withCombo: QsysCatalog = {
+      ...CATALOG,
+      components: [...CATALOG.components, { name: "Router", type: "router", controls: [{ ...ctl("source", "Float"), ValueMin: undefined, ValueMax: undefined, Choices: ["Mic", "Laptop"] } as never] }],
+    };
+    const allow = allowMap(entry("Router", "source", { min: null, max: null }));
+    const selector: LayoutObjectConfig = { type: "qsys-selector", binding: bind("Router", "source"), items: [] };
+    assert.deepEqual(checkBindings([view("p1", obj("s1", selector))], withCombo, allow), [], "a selector on a choice list was reported");
+    assert.deepEqual(checkBindings([view("p1", obj("f1", fader(bind("Router", "source"))))], withCombo, allow), [
+      { panelId: "p1", objectId: "f1", address: bind("Router", "source"), problem: "read-only" },
+    ]);
+  });
+
   test("a boolean with no range is writable", () => {
     const v = view("p1", obj("mu", { type: "qsys-mute", binding: bind("Lobby_Mixer", "mute") }));
     assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer", "mute", { min: null, max: null }))), []);

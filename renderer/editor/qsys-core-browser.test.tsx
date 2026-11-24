@@ -177,6 +177,20 @@ describe("the Core browser", () => {
     assert.deepEqual(controls(ro.container), ["gain", "gain_free", "gain_ro", "gain_nolimit"], "a read object needs no allowlist");
   });
 
+  test("a numeric control that lists choices and has no write limits is offered to a choice list, not to a fader", async () => {
+    const ROUTER = "Router";
+    server.catalog = () =>
+      ok({ ...CATALOG, components: [...CATALOG.components, { name: ROUTER, type: "router", controls: [{ Name: "src", Type: "Float", ValueMin: 0, ValueMax: 3, Choices: ["Mic", "Laptop"] }] }] });
+    server.allowlist = () => ok({ entries: [...ALLOW.entries, entry(ROUTER, "src", null, null)] });
+    const choice = await open({ kind: "choice", writable: true });
+    assert.ok(components(choice.container).includes(ROUTER), "a choice list was not offered the control its choices bound");
+    await into(choice, ROUTER);
+    assert.deepEqual(controls(choice.container), ["src"]);
+    cleanup();
+    const gain = await open({ kind: "gain", writable: true });
+    assert.ok(!components(gain.container).includes(ROUTER), "a fader was offered a numeric control with no write limits");
+  });
+
   test("search filters by component and control name", async () => {
     const r = await open({ kind: "boolean", writable: false });
     const search = r.getByLabelText("Search controls") as HTMLInputElement;
