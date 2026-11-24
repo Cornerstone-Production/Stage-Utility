@@ -13,6 +13,7 @@
 //   POST /api/qsys/write               { component, control, value, panelId?, final? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
+//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -23,6 +24,7 @@ import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
 import { AllowlistRefused, AllowlistStoredInvalid, isLine, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
+import { qsysBindings } from "../qsys/qsys-bindings.js";
 import { qsysService } from "../qsys/qsys-service.js";
 import { qsysWatch } from "../qsys/qsys-watch.js";
 import { writeControl } from "../qsys/qsys-write.js";
@@ -135,6 +137,13 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       position: v.Position,
     }));
     json(res, { ready: qsysWatch.ready(), values });
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/bindings") {
+    // Rerun first: the answer reflects the views and allowlist as saved now.
+    await qsysBindings.refresh();
+    json(res, qsysBindings.current());
     return;
   }
 

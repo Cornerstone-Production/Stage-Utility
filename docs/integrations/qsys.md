@@ -48,8 +48,8 @@ the reason it could not connect. `/log` shows the decisions, tagged `[qsys]`; se
 | Volunteer meter rate | Meter updates per second for volunteer panels. Whole number, 1 to 30, default 10. |
 | Staff meter rate | Meter updates per second for staff panels. Whole number, 1 to 30, default 20. |
 
-The two meter rates are stored for the Q-SYS panels, which arrive in a later
-release. Nothing in this release reads them.
+Every Q-SYS panel polls its meters at the staff rate for now; the volunteer rate is
+stored and not yet read.
 
 Enable the integration and use **Test connection**. It connects, logs on, and
 reports `Connected to <design name>` with the number of components it read, or
@@ -92,8 +92,8 @@ import; there is no page for it yet. Every write is checked by the server.
   removed it, is refused (`not-in-design`) without anything being sent.
 - A write is refused (`offline`) while the Core is offline or reconnecting, and
   after a reconnect (or a new design) until the Core has resent the current values
-  of every control Stage Utility watches. Nothing is watched in this release, so
-  writes resume once the catalog is read. A refused write is dropped, never queued
+  of every control Stage Utility watches (see [Binding check](#binding-check)). With
+  no panel open, writes resume once the catalog is read. A refused write is dropped, never queued
   and sent later: only a fresh write sends again.
 - Every write asks the Core for the resulting value in the same call
   (`Component.Set` with `ResponseValues`). The caller gets the Core's value back; a
@@ -116,6 +116,35 @@ before the new list is saved. Nothing deletes that copy.
 The allowlist, its limits and the write route are not PIN-gated: anyone who can reach
 the server can change them. Restrict the server's port to staff and panel devices.
 
+## Binding check
+
+A Q-SYS object stores the address of the control it reads or writes. Any View with
+Q-SYS objects (containers' children included) is a panel, and every time the Views
+are saved, the catalog is read, or the allowlist is saved, the server checks each
+binding against the Core:
+
+| Problem | Meaning |
+|---|---|
+| `missing-component` | The Core has no component with that Code Name (renamed or removed in the design). |
+| `missing-control` | The component has no control with that name. |
+| `not-allowed` | A write object is bound to a control that is not on the allowlist. |
+| `read-only` | A write object is bound to a control the Core reports as read-only, or to a number that has no range set on the allowlist. |
+
+Objects that write (fader, mute, button, switch, preset group, selector, and a
+strip's gain and mute) need the control to exist, be allowlisted and be writable.
+Objects that only read (meter, label, a strip's name and meters, and any binding's
+indicator) need the control to exist.
+
+Each problem is one `[qsys] binding: <view>/<object> <problem> (<component>/<control>)`
+line on `/log`, written when the problem first appears and not again while it
+stands; a line says when every problem has been fixed. The report is at
+`GET /api/qsys/bindings`. The check has nothing to compare with while the Core is
+not connected, and says nothing then.
+
+The same step gives the watch its panels: every View with Q-SYS objects, and the
+controls its objects read. When two people move one fader, the last write wins, and
+each panel shows the Core's value after the next poll, never its own.
+
 ## Write log
 
 Every write gesture is one entry in a rolling log of the last 2000
@@ -132,7 +161,7 @@ result: `ok`, `clamped`, `mismatch`, or the reason it was refused (`not-allowed`
 `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `core-error`). The
 value before is the Core's value when the gesture started (its first write from that
 address, panel and control, within 10 seconds of the next), as Stage Utility last read
-it; it is empty when nothing watches the control, which in this release is always. A
+it; it is empty when nothing watches the control. A
 successful write goes to the write log, not `/log`.
 
 A refusal made before anything was sent (every reason but `core-error`) that repeats
@@ -177,11 +206,10 @@ Look at `/log` and filter for `[qsys]`.
 | `could not save the write log; entries since are in memory only` | The write log file cannot be written. Writes still go through; `/api/qsys/write-log` reports `saveError`. Logged once per run of failures. |
 | `write log saved again` | A save succeeded after failures. |
 | `catalog refresh failed: <reason>` | A catalog refresh asked for over the API failed. |
-| `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; in this release it is always 0, since only the Q-SYS panels of a later release ask to watch controls. |
+| `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 
-The lines below are about watching controls, which only the Q-SYS panels of a later
-release ask for. This release does not write them.
+The lines below are about watching the controls open panels read.
 
 | Line or message | Meaning |
 |---|---|

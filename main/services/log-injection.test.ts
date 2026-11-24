@@ -166,6 +166,9 @@ const REQUEST_FACING = [
   // Its save and refusal lines quote the reason an allowlist from PUT
   // /api/qsys/allowlist or an imported file was refused, naming its addresses.
   "qsys/qsys-allowlist-store.ts",
+  // Its binding lines name a view id, an object id and a control address, all saved into
+  // a View over HTTP.
+  "qsys/qsys-bindings.ts",
   // Its skip line names a panel id and a control address, both saved into a View
   // over HTTP; the rest is fixed group names, counts and what the Core said back.
   "qsys/qsys-watch.ts",
@@ -603,6 +606,8 @@ function requestFacingFiles(): string[] {
     // A panel id and control address saved into a View over HTTP; see REQUEST_FACING.
     // An allowlist refusal quotes addresses from an HTTP body or an imported file.
     path.join(HERE, "qsys/qsys-allowlist-store.ts"),
+    // View, object and control names saved into a View over HTTP.
+    path.join(HERE, "qsys/qsys-bindings.ts"),
     path.join(HERE, "qsys/qsys-watch.ts"),
     // Only its own file's failures; scanned rather than excused, so a later line naming an entry is held to scrub().
     path.join(HERE, "qsys/qsys-write-log.ts"),

@@ -290,4 +290,24 @@ describe("/api/qsys", () => {
     assert.equal(r.ready, true);
     assert.deepEqual(r.values, [{ component: "Lobby_Mixer", control: "mute", value: false, string: "false", position: 0 }]);
   });
+  test("GET /api/qsys/bindings reports the views' broken bindings against the live catalog and allowlist", async () => {
+    await quietly(connect);
+    const { viewsStore } = await import("../views-store.js");
+    const object = (id: string, control: string) => ({
+      id,
+      x: 0,
+      y: 0,
+      w: 0.1,
+      h: 0.1,
+      z: 0,
+      config: { type: "qsys-mute", binding: { component: "Lobby_Mixer", control } },
+    });
+    await viewsStore.save([
+      { id: "v1", name: "V", kind: "custom", createdAt: "2026-01-01", layout: { version: 1, canvas: {}, objects: [object("ok", "mute"), object("bad", "nope")] } },
+    ] as never);
+    assert.equal((await put([MUTE])).status, 200);
+    const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/bindings"));
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, [{ panelId: "v1", objectId: "bad", address: { component: "Lobby_Mixer", control: "nope" }, problem: "missing-control" }]);
+  });
 });

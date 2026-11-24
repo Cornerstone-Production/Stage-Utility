@@ -236,6 +236,11 @@ export const qsysAllowlist = {
     return accept("save", () => parseAllowEntries(raw), replaceInvalid);
   },
 
+  /** Told after every save that landed (a save, an import, a restore). */
+  onSaved(listener: () => void): void {
+    store.onSaved(() => listener());
+  },
+
   async exportFile(): Promise<AllowlistFile> {
     return { format: ALLOWLIST_FILE_FORMAT, version: ALLOWLIST_FILE_VERSION, entries: await this.list() };
   },
