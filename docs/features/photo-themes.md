@@ -130,7 +130,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
    link to Integrations, and the switch, Approve, Remove and Delete work as ever.
 3. **Pick a theme**, or **New theme…** (a name and a prompt). Photos the theme
    already has for people on this service arrive approved, marked *From <date>*.
-4. **Generate N for <theme>** sends only the people without a photo in it. Each
+4. **Generate N for <theme>** sends only the people without a photo in it, and names
+   anyone it did not send with the reason (no Planning Center photo, one not on
+   Planning Center, already being made, waiting for review). Each
    person's card shows their original beside the edit while it is made, then waits
    for **Approve** (or **Approve all ready**, which approves the ready edits made
    for this service). Each approves the edit on screen: one redone after it was

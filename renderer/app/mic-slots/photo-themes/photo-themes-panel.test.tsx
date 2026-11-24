@@ -85,6 +85,8 @@ let refuse: Record<string, { status: number; error: string }> = {};
 let hold: Promise<void> | null = null;
 /** The people an approve-all answers it skipped (their edit changed since it was shown). */
 let approveAllSkips: string[] = [];
+/** What a generate answers. */
+let generateAnswer: { queued: number; reused: number; skipped: { personId: string; name: string; reason: string }[] } = { queued: 0, reused: 0, skipped: [] };
 let closed = 0;
 
 const theme = (id: string, name: string, over: Record<string, unknown> = {}) => ({
@@ -116,6 +118,7 @@ beforeEach(() => {
   refuse = {};
   hold = null;
   approveAllSkips = [];
+  generateAnswer = { queued: 0, reused: 0, skipped: [] };
   closed = 0;
   roster = { roster: "plan" };
   connection = { method: "api-key", hint: "sk-…3f2a", state: "connected", reason: null, checkedAt: null };
@@ -138,6 +141,7 @@ beforeEach(() => {
       out = { error: no.error };
     } else if (path === "/api/photo-themes") out = state();
     else if (path === "/api/state") out = { timezone: "America/Chicago" };
+    else if (path.endsWith("/generate")) out = generateAnswer;
     else if (path.endsWith("/approve-all")) {
       const sent = (body as { people: { personId: string }[] }).people;
       out = { approved: sent.length - approveAllSkips.length, skipped: approveAllSkips };
@@ -475,6 +479,14 @@ describe("what costs money", () => {
     const posts = writes().filter((c) => c.path.endsWith("/generate"));
     assert.equal(posts.length, 1);
     assert.deepEqual(posts[0]!.body, { serviceTypeId: "100", mode: "missing" });
+  });
+
+  test("Generate says whom it did not send, and why", async () => {
+    people = [person("9001", "Alex R.", "none"), person("9004", "Dana K.", "none")];
+    generateAnswer = { queued: 1, reused: 0, skipped: [{ personId: "9004", name: "Dana K.", reason: "Their photo is not on Planning Center" }] };
+    await mount();
+    await click(screen.getByRole("button", { name: /Generate 2 for/ }));
+    assert.match(document.body.textContent ?? "", /Not sent: Dana K\. \(Their photo is not on Planning Center\)/);
   });
 
   test("a prompt typed and not yet kept is saved BEFORE Generate sends", async () => {

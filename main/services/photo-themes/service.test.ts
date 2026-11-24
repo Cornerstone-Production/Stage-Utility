@@ -134,6 +134,14 @@ describe("generating", () => {
     assert.equal(fake.edits(), 0);
   });
 
+  it("counts for the Generate button only the people a Generate would send", async () => {
+    await themed([person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }, { personId: "3", name: "Person 3", photoUrl: null }]);
+    assert.equal((await photoThemes.planPeople(PLAN, TYPE)).toGenerate, 1);
+    const r = await generated();
+    assert.equal(r.queued, 1, "the count and the send agree");
+    assert.deepEqual(r.skipped.map((x) => x.reason).sort(), ["No Planning Center photo", "Their photo is not on Planning Center"]);
+  });
+
   it("a Redo from a plan whose roster cannot be read says so, and sends nothing", async () => {
     const theme = await themed([person("1")]);
     await generated();

@@ -13,7 +13,7 @@
 import { CheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, themedPhotoFileOf, type ApproveAllResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, themedPhotoFileOf, type ApproveAllResultDTO, type GenerateResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
 import { errorMessage } from "@main/services/errors";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea, toast } from "../../../components/ui";
@@ -165,7 +165,9 @@ function PanelBody({
 
   async function generate(mode: "missing" | "all") {
     if (!theme || !(await flushPrompt())) return;
-    await photos.write(`generate:${plan.planId}`, () => ipc("photoThemes:generate", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, mode }));
+    const r = await photos.write<GenerateResultDTO>(`generate:${plan.planId}`, () => ipc("photoThemes:generate", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, mode }));
+    // Whoever was not sent, and why, said where the operator is looking rather than only in the log.
+    if (r.ok && r.value.skipped.length > 0) toast.info(`Not sent: ${r.value.skipped.map((x) => `${x.name} (${x.reason})`).join(", ")}`);
   }
 
   async function act(person: PlanPersonDTO, action: CardAction) {

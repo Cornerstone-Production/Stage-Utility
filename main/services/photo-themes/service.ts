@@ -381,7 +381,8 @@ export class PhotoThemesService {
       roster: read.roster,
       ...(read.reason ? { reason: read.reason } : {}),
       people,
-      toGenerate: theme ? people.filter((p) => p.originalUrl && !p.approved && (p.status === "none" || p.status === "failed")).length : 0,
+      // The people a Generate would send: the same test generate() applies, so the button's count is what it bills.
+      toGenerate: theme ? people.filter((p) => p.originalUrl && isAllowedPhotoUrl(p.originalUrl) && !p.approved && (p.status === "none" || p.status === "failed")).length : 0,
     };
   }
 
