@@ -17,7 +17,7 @@ type Overrides = Record<string, Partial<PatchEndpoint>>;
 type ByPlan = PatchSheet["assignments"]["byPlan"];
 
 /** Told each value left out, in a sentence naming where it was. */
-export type Dropped = (what: string) => void;
+type Dropped = (what: string) => void;
 
 const quiet: Dropped = () => undefined;
 
@@ -52,7 +52,7 @@ function readByServiceType(v: unknown, drop: Dropped, where: string): Record<str
 }
 
 /** Plan to its entry: an object, its variantId text when present, its tweaks overrides. */
-export function readByPlan(v: unknown, drop: Dropped = quiet, where = "the sheet"): ByPlan {
+function readByPlan(v: unknown, drop: Dropped = quiet, where = "the sheet"): ByPlan {
   if (v === undefined) return {};
   if (!isRecord(v)) {
     drop(`${where}'s plan assignments are not an object`);
