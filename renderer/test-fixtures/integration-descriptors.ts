@@ -218,7 +218,7 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
     "id": "qsys",
     "kind": "control",
     "label": "Q-SYS",
-    "description": "Connects to a Q-SYS Core so layouts can show and control its faders, mutes, meters and snapshots.",
+    "description": "Connects to a Q-SYS Core and reads its design's components and controls.",
     "docs": "qsys",
     "configSchema": [
       {
@@ -252,7 +252,7 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "default": 10,
         "min": 1,
         "max": 30,
-        "help": "Meter updates per second on volunteer panels (1 to 30)."
+        "help": "Meter updates per second for volunteer panels (1 to 30). Stored for the Q-SYS panels of a later release."
       },
       {
         "key": "staffMeterHz",
@@ -261,7 +261,7 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "default": 20,
         "min": 1,
         "max": 30,
-        "help": "Meter updates per second on staff panels (1 to 30)."
+        "help": "Meter updates per second for staff panels (1 to 30). Stored for the Q-SYS panels of a later release."
       }
     ]
   },

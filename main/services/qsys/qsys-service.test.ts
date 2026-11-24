@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { after, afterEach, before, beforeEach, mock, test } from "node:test";
 import { FakeQrcServer } from "./fake-qrc-server.js";
-import { QsysService } from "./qsys-service.js";
+import { QsysService, qsysTestMessage } from "./qsys-service.js";
 import type { QsysCatalog } from "./qsys-service.js";
-import type { QsysSettings } from "./qsys-settings-store.js";
+import type { QsysSettings } from "./qsys-settings.js";
 
 let fake: FakeQrcServer;
 let port: number;
@@ -232,4 +232,24 @@ test("an error the Core answered with is not reported as unreachable", async () 
   await until(() => messages.length > 0, "a report");
   assert.match(messages[0] ?? "", /answered with an error/);
   assert.doesNotMatch(messages[0] ?? "", /Can't reach/);
+});
+
+const lobby = { State: "Active" as const, DesignName: "Lobby Design", DesignCode: "c1", IsRedundant: false, IsEmulator: false };
+
+test("a successful Test says which design it reached and how many components it read", () => {
+  assert.deepEqual(qsysTestMessage({ ok: true, status: lobby, components: 12 }), {
+    ok: true,
+    message: "Connected to Lobby Design — 12 component(s)",
+    rowMessage: "Lobby Design — 12 component(s)",
+  });
+});
+
+test("an emulator is named as one in the Test answer", () => {
+  const r = qsysTestMessage({ ok: true, status: { ...lobby, IsEmulator: true }, components: 1 });
+  assert.equal(r.message, "Connected to Lobby Design (emulator) — 1 component(s)");
+  assert.equal(r.rowMessage, "Lobby Design (emulator) — 1 component(s)");
+});
+
+test("a failed Test carries the reason, not a success", () => {
+  assert.deepEqual(qsysTestMessage({ ok: false, error: "connection refused" }), { ok: false, message: "connection refused", rowMessage: "connection refused" });
 });

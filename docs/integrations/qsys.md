@@ -46,13 +46,17 @@ was last read.
 | Core host | The Core's address. |
 | Port | QRC port. Default 1710. |
 | User, Password | Only if the Core requires a QRC logon. The password is stored encrypted on this machine and is never sent to a browser. |
-| Volunteer meter rate | Meter updates per second on volunteer panels. Whole number, 1 to 30, default 10. |
-| Staff meter rate | Meter updates per second on staff panels. Whole number, 1 to 30, default 20. |
+| Volunteer meter rate | Meter updates per second for volunteer panels. Whole number, 1 to 30, default 10. |
+| Staff meter rate | Meter updates per second for staff panels. Whole number, 1 to 30, default 20. |
+
+The two meter rates are stored for the Q-SYS panels, which arrive in a later
+release. Nothing in this release reads them.
 
 Enable the integration and use **Test connection**. It connects, logs on, and
 reports `Connected to <design name>` with the number of components it read, or
 the reason it could not. Saving any field, the meter rates included, reconnects to
-the Core. A rate outside 1 to 30 is brought into range when it is saved.
+the Core. A stored rate outside 1 to 30 is read as the nearer bound, and one that
+is not a number as its default.
 
 ### Trying it without a Core
 
@@ -76,5 +80,3 @@ Look at `/log` and filter for `[qsys]`.
 | `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
 | `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
 | `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
-| `meter rates set: volunteer <n>/s, staff <n>/s` | A meter rate was changed. |
-| `ignoring a non-numeric <rate>; the stored rate is unchanged` | A save carried a meter rate that was not a number. |

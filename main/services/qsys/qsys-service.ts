@@ -11,7 +11,7 @@ import { StatusIntegration } from "../integration-base.js";
 import { scrub } from "../scrub.js";
 import { QrcClient, QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcComponent, QrcControl, QrcStatus } from "./qrc-types.js";
-import type { QsysSettings } from "./qsys-settings-store.js";
+import type { QsysSettings } from "./qsys-settings.js";
 
 /** The Core drops a connection after 60 s of silence; ping at half that. */
 const KEEPALIVE_MS = 30_000;
@@ -35,6 +35,15 @@ const OFFLINE: QsysStatusDto = { connected: false, state: "offline", designName:
 export type QsysTestResult =
   | { ok: true; status: QrcStatus; components: number }
   | { ok: false; error: string };
+
+/** What the Integrations card's Test connection says. `message` is the Test
+ *  button's answer; `rowMessage` sits beside the row's "Connected" badge, so it
+ *  leaves that word out. */
+export function qsysTestMessage(result: QsysTestResult): { ok: boolean; message: string; rowMessage: string } {
+  if (!result.ok) return { ok: false, message: result.error, rowMessage: result.error };
+  const reached = `${result.status.DesignName}${result.status.IsEmulator ? " (emulator)" : ""} — ${result.components} component(s)`;
+  return { ok: true, message: `Connected to ${reached}`, rowMessage: reached };
+}
 
 /** Logon (when a user is set) then StatusGet on an open transport. */
 async function openSession(t: QrcTransport, s: QsysSettings, password: string | null): Promise<QrcStatus> {

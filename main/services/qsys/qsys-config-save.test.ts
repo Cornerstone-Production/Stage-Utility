@@ -1,12 +1,13 @@
 // A Q-SYS config save through integrationManager.setConfig, the route
-// POST /api/integrations/qsys/config takes: the two meter rates go to the rates
-// store (clamped to 1-30), never into settings.json's integration config, and
-// come back on the state the card re-seeds from. Qsys stays DISABLED, so the
-// save stops the service rather than dialling anything. Same seeding as
-// safespace-marker-writes.test.ts, for the same reason (init() cannot run here).
+// POST /api/integrations/qsys/config takes. The two meter rates are ordinary
+// integration config: they go into settings.json beside the host, come back on
+// the state the card re-seeds from, and reach the service clamped to 1-30 on the
+// next apply, with no restart. qsysService.configure is replaced so nothing is
+// dialled. Same seeding as safespace-marker-writes.test.ts, for the same reason
+// (init() cannot run here).
 
 import assert from "node:assert/strict";
-import { describe, test, beforeEach, mock } from "node:test";
+import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,12 +17,16 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { integrationManager, configuredFor } = await import("./../integration-manager.js");
-const { qsysSettingsStore } = await import("./qsys-settings-store.js");
+const { qsysService } = await import("./qsys-service.js");
+const { secretsStore } = await import("../secrets.js");
+const { settingsStore } = await import("../settings-store.js");
+const { MASK } = await import("../mask.js");
+type QsysSettings = import("./qsys-settings.js").QsysSettings;
 
 const manager = integrationManager as unknown as { states: Map<string, { config: Record<string, unknown> }> };
 
-function seed(config: Record<string, unknown>): void {
-  manager.states.set("qsys", { id: "qsys", enabled: false, connection: "disconnected", message: null, config } as never);
+function seed(enabled: boolean): void {
+  manager.states.set("qsys", { id: "qsys", enabled, connection: "disconnected", message: null, config: {} } as never);
 }
 
 const save = (config: Record<string, unknown>) => integrationManager.setConfig("qsys", config);
@@ -33,73 +38,89 @@ async function settingsOnDisk(): Promise<Record<string, unknown>> {
   return raw.integrationConfigs?.qsys ?? {};
 }
 
+/** What the service was last handed, and with which password. */
+let configured: { settings: QsysSettings; password: string | null }[] = [];
+
 beforeEach(async () => {
-  await qsysSettingsStore.saveRates({ volunteerMeterHz: 10, staffMeterHz: 20 });
-  seed({ volunteerMeterHz: 10, staffMeterHz: 20 });
+  configured = [];
+  mock.method(qsysService, "configure", (settings: QsysSettings, password: string | null) => {
+    configured.push({ settings, password });
+  });
+  mock.method(qsysService, "stop", () => {});
+  await secretsStore.setSecrets("qsys", {});
+  await settingsStore.removeIntegrationConfigKeys("qsys", ["host", "port", "user", "volunteerMeterHz", "staffMeterHz"]);
+  seed(true);
 });
+
+afterEach(() => mock.restoreAll());
+
+const last = () => configured.at(-1)?.settings;
 
 describe("saving the Q-SYS card", () => {
-  test("a rate is stored in the rates store, not in the integration's config", async () => {
-    await save({ host: "10.0.0.5", port: 1710, volunteerMeterHz: 15, staffMeterHz: 25 });
-    assert.deepEqual(await qsysSettingsStore.loadRates(), { volunteerMeterHz: 15, staffMeterHz: 25 });
+  test("the rates are the integration's own config, on disk and on the card's state", async () => {
+    const state = await save({ host: "10.0.0.5", port: 1710, volunteerMeterHz: 15, staffMeterHz: 25 });
     const disk = await settingsOnDisk();
     assert.equal(disk.host, "10.0.0.5");
-    assert.equal("volunteerMeterHz" in disk, false, "the rate went into settings.json as well as its own store");
-    assert.equal("staffMeterHz" in disk, false);
+    assert.equal(disk.volunteerMeterHz, 15);
+    assert.equal(disk.staffMeterHz, 25);
+    assert.equal(state.config.volunteerMeterHz, 15);
+    assert.equal(state.config.staffMeterHz, 25);
   });
 
-  test("the state the card re-seeds from carries the saved rates", async () => {
-    const state = await save({ host: "10.0.0.5", volunteerMeterHz: 12 });
-    assert.equal(state.config.volunteerMeterHz, 12);
-    assert.equal(state.config.staffMeterHz, 20);
+  test("a rate change reaches the running service on the save, with no restart", async () => {
+    await save({ host: "10.0.0.5", port: 1710, volunteerMeterHz: 10, staffMeterHz: 20 });
+    await save({ host: "10.0.0.5", port: 1710, volunteerMeterHz: 12, staffMeterHz: 24 });
+    assert.equal(configured.length, 2, "the second save did not re-apply the service");
+    assert.deepEqual([last()?.volunteerMeterHz, last()?.staffMeterHz], [12, 24]);
   });
 
-  test("a rate out of range is clamped to 1-30 on the server", async () => {
-    const state = await save({ host: "10.0.0.5", volunteerMeterHz: 500, staffMeterHz: 0 });
-    assert.deepEqual(await qsysSettingsStore.loadRates(), { volunteerMeterHz: 30, staffMeterHz: 1 });
-    assert.equal(state.config.volunteerMeterHz, 30);
+  test("no rate saved yet: the service gets the defaults, 10 and 20", async () => {
+    await save({ host: "10.0.0.5" });
+    assert.deepEqual([last()?.volunteerMeterHz, last()?.staffMeterHz], [10, 20]);
   });
 
-  test("a save without rates leaves the stored rates alone", async () => {
-    await save({ host: "10.0.0.5", volunteerMeterHz: 17 });
-    await save({ host: "10.0.0.6" });
-    assert.equal((await qsysSettingsStore.loadRates()).volunteerMeterHz, 17);
+  test("a stored rate out of range reaches the service clamped to 1-30", async () => {
+    await save({ host: "10.0.0.5", volunteerMeterHz: 500, staffMeterHz: 0 });
+    assert.deepEqual([last()?.volunteerMeterHz, last()?.staffMeterHz], [30, 1]);
+  });
+
+  test("a rate stored as typed text is read as its number; one that is not a number reads as the default", async () => {
+    await save({ host: "10.0.0.5", volunteerMeterHz: "12", staffMeterHz: "fast" });
+    assert.deepEqual([last()?.volunteerMeterHz, last()?.staffMeterHz], [12, 20]);
+  });
+
+  test("the user is handed over trimmed", async () => {
+    await save({ host: "10.0.0.5", user: "  op  " });
+    assert.equal(last()?.user, "op");
   });
 });
 
-/** The [qsys] lines a save writes, via console.log and console.warn. */
-async function linesFrom(config: Record<string, unknown>): Promise<string[]> {
-  const log = mock.method(console, "log", () => {});
-  const warn = mock.method(console, "warn", () => {});
-  try {
-    await save(config);
-    return [...log.mock.calls, ...warn.mock.calls].map((c) => String(c.arguments[0])).filter((l) => l.startsWith("[qsys]"));
-  } finally {
-    log.mock.restore();
-    warn.mock.restore();
-  }
-}
-
-describe("what a Q-SYS save says on /log", () => {
-  test("a rate that changed is logged", async () => {
-    const lines = await linesFrom({ host: "h", volunteerMeterHz: 15, staffMeterHz: 20 });
-    assert.deepEqual(lines, ["[qsys] meter rates set: volunteer 15/s, staff 20/s"]);
+describe("the Q-SYS password goes only to the Core it was entered for", () => {
+  test("a save that moves the host clears it, even when it also changes a rate", async () => {
+    await save({ host: "core-a.example", port: 1710, user: "op", password: "s3cret" });
+    assert.equal((await secretsStore.getSecrets("qsys")).password, "s3cret");
+    await save({ host: "core-b.example", port: 1710, user: "op", password: MASK, volunteerMeterHz: 14 });
+    assert.equal((await secretsStore.getSecrets("qsys")).password, undefined, "the password followed the save to another Core");
+    assert.equal(last()?.volunteerMeterHz, 14);
+    assert.equal(configured.at(-1)?.password, null, "the service was handed the old Core's password for the new one");
   });
 
-  test("the dialog's every-save post of unchanged rates is silent", async () => {
-    assert.deepEqual(await linesFrom({ host: "h", volunteerMeterHz: 10, staffMeterHz: 20 }), []);
-  });
-
-  test("a rate that is not a number is named, never its value, and the stored rate stays", async () => {
-    const lines = await linesFrom({ host: "h", volunteerMeterHz: "fast-secret" });
-    assert.deepEqual(lines, ["[qsys] ignoring a non-numeric volunteerMeterHz; the stored rate is unchanged"]);
-    assert.equal((await qsysSettingsStore.loadRates()).volunteerMeterHz, 10);
+  test("a save that changes only a rate keeps it", async () => {
+    await save({ host: "core-a.example", port: 1710, user: "op", password: "s3cret" });
+    await save({ host: "core-a.example", port: 1710, user: "op", password: MASK, staffMeterHz: 26 });
+    assert.equal((await secretsStore.getSecrets("qsys")).password, "s3cret");
+    assert.equal(configured.at(-1)?.password, "s3cret");
+    assert.equal(last()?.staffMeterHz, 26);
   });
 });
 
 describe("a Q-SYS card is configured only once it has a host", () => {
   test("the rates alone do not make it configured", () => {
     assert.equal(configuredFor({ id: "qsys", config: { volunteerMeterHz: 10, staffMeterHz: 20, password: "" } }, {} as never, false), false);
+  });
+
+  test("a blank host does not either, the same as the dialler reads it", () => {
+    assert.equal(configuredFor({ id: "qsys", config: { host: "   ", volunteerMeterHz: 10 } }, {} as never, false), false);
   });
 
   test("a host does", () => {

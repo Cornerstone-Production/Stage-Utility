@@ -3,7 +3,7 @@
 // screen, and the Test answer drawn in the dialog.
 //
 // The wording of the answer ("Connected to <design>") is the manager's, covered
-// in main/services/qsys/qsys-settings-config.test.ts; here the fetch is wrapped so
+// in main/services/qsys/qsys-service.test.ts; here the fetch is wrapped so
 // the dialog is shown the answer a real server would give.
 
 import { strict as assert } from "node:assert";

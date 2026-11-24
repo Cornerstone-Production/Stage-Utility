@@ -117,8 +117,6 @@ const EXPECTED_CONFIG = [
   // themselves ride in the snapshot's images (photo-theme-images/).
   "photo-themes.json",
   "presets.json",
-  // The Q-SYS meter poll rates. Host, port and user ride in settings.json; the password never does.
-  "qsys-settings.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
   // The operator's own colours, kept from the picker.

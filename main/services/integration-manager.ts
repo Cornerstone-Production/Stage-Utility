@@ -44,10 +44,8 @@ import {
   smaartTarget,
 } from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
-import { qsysService } from "./qsys/qsys-service.js";
-import { QSYS_MAX_HZ, QSYS_MIN_HZ, splitQsysConfig, withQsysRates } from "./qsys/qsys-settings-config.js";
-import { qsysTestMessage } from "./qsys/qsys-test-message.js";
-import { qsysSettingsStore, type QsysSettings } from "./qsys/qsys-settings-store.js";
+import { qsysService, qsysTestMessage } from "./qsys/qsys-service.js";
+import { QSYS_DEFAULT_RATES, QSYS_MAX_HZ, QSYS_MIN_HZ, qsysRates, type QsysSettings } from "./qsys/qsys-settings.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
@@ -365,14 +363,14 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
-// Q-SYS integration — QRC (JSON-RPC over TCP, default port 1710) to a Core, for
-// the Q-SYS panels. Reads the design's components and controls; writes only
-// controls the operator has put on the allowlist.
+// Q-SYS integration — QRC (JSON-RPC over TCP, default port 1710) to a Core.
+// Connects, reports status and reads the design's components and controls (the
+// catalog). The two meter rates are stored for the Q-SYS panels of a later release.
 const QSYS_DESCRIPTOR: IntegrationDescriptor = {
   id: "qsys",
   kind: "control",
   label: "Q-SYS",
-  description: "Connects to a Q-SYS Core so layouts can show and control its faders, mutes, meters and snapshots.",
+  description: "Connects to a Q-SYS Core and reads its design's components and controls.",
   docs: "qsys",
   configSchema: [
     { key: "host", label: "Core host", type: "text", placeholder: "192.168.1.50" },
@@ -388,19 +386,19 @@ const QSYS_DESCRIPTOR: IntegrationDescriptor = {
       key: "volunteerMeterHz",
       label: "Volunteer meter rate",
       type: "number",
-      default: 10,
+      default: QSYS_DEFAULT_RATES.volunteerMeterHz,
       min: QSYS_MIN_HZ,
       max: QSYS_MAX_HZ,
-      help: "Meter updates per second on volunteer panels (1 to 30).",
+      help: "Meter updates per second for volunteer panels (1 to 30). Stored for the Q-SYS panels of a later release.",
     },
     {
       key: "staffMeterHz",
       label: "Staff meter rate",
       type: "number",
-      default: 20,
+      default: QSYS_DEFAULT_RATES.staffMeterHz,
       min: QSYS_MIN_HZ,
       max: QSYS_MAX_HZ,
-      help: "Meter updates per second on staff panels (1 to 30).",
+      help: "Meter updates per second for staff panels (1 to 30). Stored for the Q-SYS panels of a later release.",
     },
   ],
 };
@@ -1060,9 +1058,9 @@ export function configuredFor(
       refreshToken: String(c.refreshToken ?? ""),
     });
   }
-  // The Q-SYS state always carries its two meter rates (they come from their own
-  // store), so "any value present" would call a Core with no host configured.
-  if (state.id === "qsys") return typeof state.config.host === "string" && state.config.host !== "";
+  // The dialog posts both meter rates on every save, so "any value present" would
+  // call a Core with no host configured. Read the host the way the dialler does.
+  if (state.id === "qsys") return qsysTarget(state.config).host !== null;
   return Object.values(state.config).some((v) => v !== "" && v != null);
 }
 
@@ -1382,17 +1380,12 @@ class IntegrationManager {
     // of reading like a site that never had it.
     const savedConfigs = plan?.configs ?? saved;
 
-    const qsysRates = await qsysSettingsStore.loadRates();
-
     for (const descriptor of DESCRIPTORS) {
       // Tolerate a settings.json missing this key entirely. DataStore does not
       // deep-merge on load (deliberately — it keeps migrations honest), so an older
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
-      const savedConfig =
-        descriptor.id === "qsys"
-          ? withQsysRates(savedConfigs[descriptor.id] ?? {}, qsysRates)
-          : (savedConfigs[descriptor.id] ?? {});
+      const savedConfig = savedConfigs[descriptor.id] ?? {};
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
@@ -1687,12 +1680,11 @@ class IntegrationManager {
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
     const secretKeys = secretKeysFor(id);
-    const folded = foldConfigEntries(config, secretKeys, id);
-    const { secrets: newSecrets, clearedSecrets } = folded;
-    // Q-SYS's two meter rates live in their own store, not in the integration's
-    // config: split them off here, and they are put back on the state below.
-    const qsysSplit = id === "qsys" ? splitQsysConfig(folded.config) : null;
-    const nonSecretConfig = qsysSplit ? qsysSplit.rest : folded.config;
+    const { config: nonSecretConfig, secrets: newSecrets, clearedSecrets } = foldConfigEntries(
+      config,
+      secretKeys,
+      id,
+    );
 
     // THE MARKER IS DERIVED, SO IT NEVER COMES OFF A REQUEST BODY.
     //
@@ -1796,22 +1788,6 @@ class IntegrationManager {
     // config it replaced because the address check below does. Reading either
     // off a second load() is the other half of the same race.
     const { before, merged } = await settingsStore.swapIntegrationConfig(id, nonSecretConfig);
-    if (qsysSplit) {
-      // Names only, never the value: it is whatever the client sent.
-      for (const key of qsysSplit.ignored) {
-        console.warn(`[qsys] ignoring a non-numeric ${scrub(key)}; the stored rate is unchanged`);
-      }
-      if (Object.keys(qsysSplit.rates).length > 0) {
-        const before = await qsysSettingsStore.loadRates();
-        const saved = await qsysSettingsStore.saveRates({ ...before, ...qsysSplit.rates });
-        // The dialog posts both rates on every save; say so only when one moved.
-        if (saved.volunteerMeterHz !== before.volunteerMeterHz || saved.staffMeterHz !== before.staffMeterHz) {
-          console.log(
-            `[qsys] meter rates set: volunteer ${scrub(saved.volunteerMeterHz)}/s, staff ${scrub(saved.staffMeterHz)}/s`,
-          );
-        }
-      }
-    }
 
     // A stored credential goes only where it was entered for. The form posts an
     // unchanged password back as the mask, which keeps it, so a save that moved
@@ -1877,8 +1853,7 @@ class IntegrationManager {
     }
 
     // Rebuild masked config for state.
-    const visible = id === "qsys" ? withQsysRates(merged, await qsysSettingsStore.loadRates()) : merged;
-    this.states.set(id, { ...state, config: maskSecrets(id, visible, await secretsStore.getSecrets(id)) });
+    this.states.set(id, { ...state, config: maskSecrets(id, merged, await secretsStore.getSecrets(id)) });
 
     // Side-effects for specific integrations.
     if (id === "companion") {
@@ -2066,12 +2041,10 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("qsys");
-        const result = await qsysService.test(await this.qsysSettings(host, port), secrets.password ?? null);
+        const result = await qsysService.test(this.qsysSettings(host, port), secrets.password ?? null);
         const said = qsysTestMessage(result);
         // The row's badge already says "Connected", so it gets the message without it.
-        this.setConnectionState("qsys", said.ok ? "connected" : "error", said.rowMessage);
-        this.broadcastStates();
-        return { ok: said.ok, message: said.message };
+        return this.reportTest("qsys", { ok: said.ok, message: said.message }, said.rowMessage);
       }
 
       if (id === "obs") {
@@ -2173,8 +2146,9 @@ class IntegrationManager {
   // ── Internals ─────────────────────────────────────────────────────────
 
   /** Put a Test's answer on the integration's row, and hand it back to the caller. */
-  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T): T {
-    this.setConnectionState(id, result.ok ? "connected" : "error", result.message ?? null);
+  /** `rowMessage` replaces the Test answer on the card's row, when the two read differently. */
+  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T, rowMessage?: string): T {
+    this.setConnectionState(id, result.ok ? "connected" : "error", rowMessage ?? result.message ?? null);
     this.broadcastStates();
     return result;
   }
@@ -2303,15 +2277,15 @@ class IntegrationManager {
     return qsysTarget(this.configOf("qsys"));
   }
 
-  /** Connection fields from the integration's config, meter rates from the Q-SYS store. */
-  private async qsysSettings(host: string, port: number): Promise<QsysSettings> {
-    const user = this.configOf("qsys").user;
+  /** Everything QsysService is handed, off the integration's config. */
+  private qsysSettings(host: string, port: number): QsysSettings {
+    const cfg = this.configOf("qsys");
     return {
       host,
       port,
-      user: typeof user === "string" ? user : "",
+      user: typeof cfg.user === "string" ? cfg.user.trim() : "",
       enabled: this.states.get("qsys")?.enabled ?? false,
-      ...(await qsysSettingsStore.loadRates()),
+      ...qsysRates(cfg),
     };
   }
 
@@ -2321,7 +2295,7 @@ class IntegrationManager {
       const { host, port } = this.getQsysTarget();
       if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("qsys");
-      const settings = await this.qsysSettings(host, port);
+      const settings = this.qsysSettings(host, port);
       return {
         connecting: `Connecting ${host}:${port}`,
         start: () => qsysService.configure(settings, secrets.password ?? null),
