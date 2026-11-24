@@ -2,9 +2,9 @@
 //
 // Every field is the integration's own config in settings.json (integrationConfigs.qsys),
 // like any other integration's, except the password, which is in secretsStore under
-// integration "qsys", key "password". The two meter rates are stored now for the
-// Q-SYS panels, which arrive in a later release; nothing in this release reads them
-// beyond handing them to the service.
+// integration "qsys", key "password". The two meter rates are for the Q-SYS
+// panels, which arrive in a later release: the change-group watch (qsys-watch.ts)
+// polls meters at them once a panel shows one.
 
 import { configNumber } from "../integration-targets.js";
 
