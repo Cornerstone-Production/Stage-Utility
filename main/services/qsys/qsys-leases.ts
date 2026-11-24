@@ -21,6 +21,8 @@ export const LEASE_EXPIRE_MS = 2_000;
 
 /** Why the server released a momentary. */
 export type LeaseEnd = "lease expired" | "stream closed";
+/** Why the server wrote a release: a lease ending, or one owed from when the Core could not take it. */
+export type ReleaseCause = LeaseEnd | "lease owed";
 
 export interface Lease extends QsysAddress {
   /** The pressing page's event-stream client id; null when it sent none. */
@@ -47,11 +49,16 @@ export class QsysLeases {
     this.held.set(k, { ...lease, timer: this.arm(k) });
   }
 
-  /** Renewal from the pressing page (same remote address). False when no such lease is held. */
-  renew(a: QsysAddress, remote: string): boolean {
+  /**
+   * Renewal from the pressing page: the same remote address, and the same stream
+   * client id when the press named one (two pages behind one address cannot keep
+   * each other's press alive). False when no such lease is held.
+   */
+  renew(a: QsysAddress, remote: string, cid: string | null = null): boolean {
     const k = addressKey(a);
     const lease = this.held.get(k);
     if (!lease || lease.remote !== remote) return false;
+    if (lease.cid !== null && lease.cid !== cid) return false;
     clearTimeout(lease.timer);
     lease.timer = this.arm(k);
     return true;

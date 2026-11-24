@@ -96,6 +96,9 @@ export class QsysWatch {
   /** Set when the connection or the design is new; cleared once the rebuilt
    *  groups have been Invalidated. */
   private rebuilding = true;
+  /** What ready() said when last asked by noteReady; listeners hear only a false-to-true turn. */
+  private wasReady = false;
+  private readonly readyListeners = new Set<() => void>();
   /**
    * Groups Invalidated since the last reset whose resent values have not all
    * arrived: the keys still missing. Write readiness waits for it to empty.
@@ -216,9 +219,35 @@ export class QsysWatch {
 
   /** Adopt the service's current transport. A different one means the old groups
    *  died with the old connection: forget them, and every value read on it. */
+  /**
+   * Call `cb` each time writes become possible again: after a connect, a
+   * reconnect or a new design, once every rebuilt group's resent values have
+   * arrived (the moment ready() turns true). A release the server owes is sent
+   * from here (qsys-write.ts). Returns the function that stops listening.
+   */
+  onReady(cb: () => void): () => void {
+    this.readyListeners.add(cb);
+    return () => this.readyListeners.delete(cb);
+  }
+
+  private noteReady(): void {
+    const r = this.ready();
+    if (r === this.wasReady) return;
+    this.wasReady = r;
+    if (!r) return;
+    for (const cb of [...this.readyListeners]) {
+      try {
+        cb();
+      } catch (err) {
+        console.error(`[qsys] ready listener failed: ${scrub(errorMessage(err))}`);
+      }
+    }
+  }
+
   private sync(): void {
     const t = this.source.transport;
     if (t === this.transport) return;
+    this.wasReady = false;
     this.transport = t;
     this.designCode = null;
     this.broken = false;
@@ -232,6 +261,7 @@ export class QsysWatch {
 
   /** Forget the groups and every value: the connection or the design is new. */
   private reset(): void {
+    this.wasReady = false;
     this.groups.clear();
     this.meterKinds = new Map();
     this.cache.clear();
@@ -283,6 +313,7 @@ export class QsysWatch {
       this.cancelRetry();
       this.failures = 0;
       this.logSummary();
+      this.noteReady();
     } catch (err) {
       // The connection went away under us: the service logs that, and the next
       // connection's catalog rebuilds everything.
@@ -496,6 +527,7 @@ export class QsysWatch {
       this.cancelReread();
       this.rereadAttempts = 0;
     }
+    this.noteReady();
   }
 
   /** Cache a push and broadcast what actually changed, on the channels of the

@@ -105,6 +105,9 @@ interface Server {
   reads: number;
   subscribes: string[][];
   renewals: number;
+  /** What a renewal answers. */
+  leaseHeld: boolean;
+  renewCids: unknown[];
 }
 
 let server: Server;
@@ -125,6 +128,8 @@ function freshServer(): Server {
     reads: 0,
     subscribes: [],
     renewals: 0,
+    leaseHeld: true,
+    renewCids: [],
   };
 }
 
@@ -152,7 +157,8 @@ const f = stubFetchWithLog((url, init) => {
   }
   if (url === "/api/qsys/lease") {
     server.renewals++;
-    return ok({ held: true });
+    server.renewCids.push((JSON.parse(String(init?.body ?? "{}")) as { cid?: unknown }).cid);
+    return ok({ held: server.leaseHeld });
   }
   if (url === "/api/qsys/status") return ok({ connected: server.coreState === "connected", state: server.coreState });
   if (url === "/api/qsys/allowlist") {
@@ -1195,6 +1201,24 @@ describe("review round 2", () => {
     stream(true);
     act(() => {
       window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 7 }));
+    });
+  });
+});
+
+describe("review round 3", () => {
+  test("renewals name the page's stream, and stop once the server says no lease is held", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    server.leaseHeld = false; // the press took no lease (or it ended)
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 21 });
+    });
+    await wait(1_150);
+    assert.equal(server.renewals, 1, "one renewal, answered held: false");
+    assert.equal(server.renewCids[0], server.writes[0].body.cid, "the renewal names the stream the press named");
+    await wait(1_100);
+    assert.equal(server.renewals, 1, "kept renewing a lease the server does not hold");
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 21 }));
     });
   });
 });

@@ -704,7 +704,7 @@ export class QsysPanel {
    * notice (the lease lapses and it releases the control), so it is not retried.
    */
   renewLease(a: QsysAddress): Promise<boolean> {
-    return invoke<{ held?: unknown }>("qsys:lease", { component: a.component, control: a.control }).then(
+    return invoke<{ held?: unknown }>("qsys:lease", { component: a.component, control: a.control, cid: streamClientId() }).then(
       (r) => r.held === true,
       () => false,
     );

@@ -418,7 +418,11 @@ function TriggerButton({
           stopRenewing();
           renewal.current = setInterval(() => {
             if (panel.epoch !== at) stopRenewing();
-            else void panel.renewLease(ADDR(binding)!);
+            else
+              void panel.renewLease(ADDR(binding)!).then((held) => {
+                // No lease to renew (the press was refused, or the lease ended): stop asking.
+                if (!held && panel.epoch === at) stopRenewing();
+              });
           }, LEASE_RENEW_MS);
         }
         void write(ADDR(binding)!, true, { final: true, lease: isMomentary }).then((r) => {

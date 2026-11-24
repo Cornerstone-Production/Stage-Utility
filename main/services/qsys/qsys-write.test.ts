@@ -745,6 +745,10 @@ describe("allowEntryFromCatalog", () => {
 const { LEASE_EXPIRE_MS, LEASE_RENEW_MS } = await import("./qsys-leases.js");
 
 describe("momentary leases", () => {
+  // The panel has a momentary button on the control (panelHasMomentary, read from views).
+  beforeEach(() => {
+    writer.momentaryCheck = async () => true;
+  });
   const press = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
   const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
 
@@ -755,7 +759,7 @@ describe("momentary leases", () => {
       assert.equal((await press()).ok, true);
       for (let i = 0; i < 4; i++) {
         mock.timers.tick(LEASE_RENEW_MS);
-        assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "192.0.2.10"), true);
+        assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "192.0.2.10", "page-1"), true);
       }
       await settle();
       assert.deepEqual(muteSets(), [true], "released while renewals kept coming");
@@ -807,5 +811,131 @@ describe("momentary leases", () => {
     const r = await press();
     assert.equal(r.ok, false);
     assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+  });
+});
+
+describe("owed releases and who may take a lease", () => {
+  const MUTE_ADDR = { component: "Lobby_Mixer", control: "mute" };
+  const press = (w = writer) => w.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
+  beforeEach(() => {
+    writer.momentaryCheck = async () => true;
+  });
+
+  /** Press, lose the Core, let the lease lapse while it is away: the release is owed. */
+  async function owedWhileAway(): Promise<void> {
+    await connect();
+    await openPanel();
+    assert.equal((await press()).ok, true);
+    await fake.dropClients();
+    await until(() => svc.transport === null, "disconnect");
+    mock.timers.tick(LEASE_EXPIRE_MS);
+    await until(() => writer.owes(MUTE_ADDR), "the release owed");
+    assert.deepEqual(muteSets(), [true], "a release reached a Core that was away");
+  }
+
+  test("a release due while the Core is away is sent after the reconnect, when the Core still reports it on", async () => {
+    const warn = capture("warn");
+    try {
+      await owedWhileAway();
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      await until(() => muteSets().length === 2, "the owed release");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(muteSets(), [true, false]);
+    assert.equal(coreMute(), false);
+    assert.equal(writer.owes(MUTE_ADDR), false);
+    const entry = (await qsysWriteLog.list()).entries[0];
+    assert.equal(entry.cause, "lease owed");
+    assert.equal(entry.device, "server (lease owed)");
+    assert.ok(warn.lines.some((l) => /\[qsys\] sending the owed release of Lobby_Mixer\/mute/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("an owed release is not sent when the Core reports the control off", async () => {
+    const warn = capture("warn");
+    const log = capture("log");
+    try {
+      await owedWhileAway();
+      fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value = false; // turned off at the Core
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      await until(() => watch.ready(), "re-read");
+      await until(() => !writer.owes(MUTE_ADDR), "settled");
+      await settle();
+    } finally {
+      warn.restore();
+      log.restore();
+    }
+    assert.deepEqual(muteSets(), [true], "a release was sent to a control the Core reports off");
+    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/mute not sent/.test(l)));
+  });
+
+  test("another write to the control cancels an owed release", async () => {
+    // This writer hears readiness only when the test says, so the other write lands first.
+    let ready: () => void = () => {};
+    const held = new QsysWriter(svc, { ready: () => watch.ready(), current: (a) => watch.current(a), onReady: (cb) => ((ready = cb), () => {}) });
+    held.momentaryCheck = async () => true;
+    const warn = capture("warn");
+    try {
+      await connect();
+      await openPanel();
+      await press(held);
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => held.owes(MUTE_ADDR), "owed");
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null && watch.ready(), "reconnected and re-read");
+      const other = await held.write(req({ control: "mute", value: true, device: "198.51.100.4 Other/1" }));
+      assert.equal(other.ok, true);
+      assert.equal(held.owes(MUTE_ADDR), false, "the other write did not cancel the owed release");
+      ready();
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(muteSets(), [true, true], "the owed release went out over someone else's write");
+  });
+
+  test("a press cut off mid-send (it may have landed) takes its lease", async () => {
+    await connect();
+    fake.holdReplies = true;
+    const pending = press();
+    await until(() => fake.received.some((r) => r.method === "Component.Set"), "the press sent");
+    const warn = capture("warn");
+    try {
+      await fake.dropClients();
+      const r = await pending;
+      assert.equal(r.ok ? null : r.reason, "core-error");
+    } finally {
+      warn.restore();
+      fake.holdReplies = false;
+    }
+    assert.equal(writer.leases.has(MUTE_ADDR), true, "a press that may have landed has no lease to release it");
+  });
+
+  test("a lease is taken only for a momentary button on the asking panel, and the refusal is one line", async () => {
+    writer.momentaryCheck = async () => false;
+    await connect();
+    const warn = capture("warn");
+    try {
+      assert.equal((await press()).ok, true, "the write itself goes through");
+      await press();
+    } finally {
+      warn.restore();
+    }
+    assert.equal(writer.leases.has(MUTE_ADDR), false);
+    assert.equal(warn.lines.filter((l) => /lease asked for Lobby_Mixer\/mute by panel panel-a/.test(l)).length, 1);
+  });
+
+  test("a renewal counts only from the pressing page's stream", async () => {
+    await connect();
+    await press();
+    assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-2"), false, "another page behind the same address renewed it");
+    assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-1"), true);
   });
 });

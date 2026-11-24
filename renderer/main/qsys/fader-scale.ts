@@ -2,7 +2,8 @@
 //
 // Linear in dB from a floor to the top, as the approved panel mockup draws it
 // (-60 to +12): the floor is -60 dB, or the allowlist's minimum when that is
-// higher; the top is the allowlist's maximum, or the Core's when there is none.
+// higher, or 12 dB under the top when the top is at or below -60; the top is the
+// allowlist's maximum, or the Core's when there is none.
 // The very bottom of travel is the lowest value the fader may write (the Core's
 // minimum, typically -100 dB, read as "-inf"); everything below the floor sits
 // there. A gain fader spends its travel where people listen, not on -100..-60.
@@ -11,6 +12,8 @@
 // slider's aria values, so the thumb never jumps when the Core's answer lands.
 
 export const FADER_FLOOR_DB = -60;
+/** With a low top, how far under it the linear part starts. */
+const FLOOR_BELOW_TOP_DB = 12;
 
 /** The staff strip's marks, as many as fall inside the scale. */
 export const TICK_MARKS_DB = [12, 0, -12, -24, -36, -48, -60];
@@ -30,7 +33,9 @@ export function faderScale(range: { min: number; max: number } | null, limits: {
   const bottom = Math.max(range.min, limits.min ?? range.min);
   const top = Math.min(range.max, limits.max ?? range.max);
   if (!(top > bottom)) return null;
-  const floor = Math.min(top, Math.max(FADER_FLOOR_DB, bottom));
+  // A top at or under -60 dB would leave no linear part at all; the floor then sits
+  // 12 dB under it (one tick), so the travel stays a fader rather than two stops.
+  const floor = Math.max(bottom, Math.min(FADER_FLOOR_DB, top - FLOOR_BELOW_TOP_DB));
   return { bottom, floor, top };
 }
 

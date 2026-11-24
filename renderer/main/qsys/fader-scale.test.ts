@@ -46,3 +46,12 @@ test("a step stays on the scale: up from below the floor goes to the floor, down
   assert.equal(stepFrom(s, -58, -1, 3), -60);
   assert.equal(stepFrom(s, -60, -1, 3), -100);
 });
+
+test("a top at or under -60 dB still leaves a fader: the linear part starts 12 dB under it", () => {
+  const s = faderScale(GAIN, { min: -100, max: -70 })!;
+  assert.deepEqual(s, { bottom: -100, floor: -82, top: -70 });
+  assert.equal(travelOf(s, -76), 0.5);
+  const tight = faderScale(GAIN, { min: -75, max: -70 })!;
+  assert.equal(tight.floor, -75, "never under the bottom");
+  assert.ok(travelOf(tight, -72.5) > 0 && travelOf(tight, -72.5) < 1);
+});

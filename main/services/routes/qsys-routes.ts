@@ -12,7 +12,7 @@
 //   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
 //   POST /api/qsys/write               { component, control, value, panelId?, final?, lease?, cid? } -> WriteResult;
 //                                      body capped at 16 KB (413)
-//   POST /api/qsys/lease               { component, control } -> { held }: renew a held momentary
+//   POST /api/qsys/lease               { component, control, cid? } -> { held }: renew a held momentary
 //   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
 //   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not connected
 //   GET  /api/qsys/write-log           { entries, saveError }
@@ -133,8 +133,10 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     const body = await readObjectBody(req, res, MAX_WRITE_BODY_BYTES);
     if (!body) return;
     const { component, control } = body;
+    const cid = body.cid ?? null;
     if (typeof component !== "string" || typeof control !== "string") return error(res, "component and control must be text");
-    json(res, { held: qsysWriter.leases.renew({ component, control }, remoteOf(req)) });
+    if (cid !== null && !usableCid(cid)) return error(res, "cid must be null or a stream client id");
+    json(res, { held: qsysWriter.leases.renew({ component, control }, remoteOf(req), cid) });
     return;
   }
 

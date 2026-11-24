@@ -247,6 +247,11 @@ describe("/api/qsys", () => {
   test("a momentary press over the route takes a lease; renewals over /api/qsys/lease hold it; its stream closing releases it", async () => {
     const { streamClosed } = await import("../broadcaster.js");
     const { qsysWriter } = await import("../qsys/qsys-write.js");
+    const { panelHasMomentary } = await import("../../types/qsys.js");
+    // The views as the server reads them: panel-m has a momentary button on the mute.
+    const views = [{ id: "panel-m", layout: { objects: [{ id: "b1", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false } }] } }] as never;
+    const realCheck = qsysWriter.momentaryCheck;
+    qsysWriter.momentaryCheck = async (panelId, a) => panelHasMomentary(views, panelId, a);
     for (const [what, body] of [
       ["lease not boolean", { component: "Lobby_Mixer", control: "mute", value: true, lease: "yes" }],
       ["cid a number", { component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: 5 }],
@@ -255,9 +260,11 @@ describe("/api/qsys", () => {
     }
     const mute = () => fake.received.filter((r) => r.method === "Component.Set" && (r.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").length;
     const before = mute();
-    const press = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9" }));
+    const press = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9", panelId: "panel-m" }));
     assert.equal((press.json as { ok: boolean }).ok, true);
-    const renew = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute" } });
+    const stranger = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-8" } });
+    assert.deepEqual(stranger.json, { held: false }, "another page's stream renewed it");
+    const renew = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-9" } });
     assert.deepEqual(renew.json, { held: true });
     const other = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "gain" } });
     assert.deepEqual(other.json, { held: false });
@@ -267,6 +274,11 @@ describe("/api/qsys", () => {
       await until(() => mute() === before + 2, "the server's release");
     });
     assert.equal(qsysWriter.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+    // A panel with no momentary button on the control: written, no lease.
+    await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9", panelId: "panel-x" }));
+    assert.equal(qsysWriter.leases.has({ component: "Lobby_Mixer", control: "mute" }), false, "a lease for a panel with no momentary on it");
+    await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: false }));
+    qsysWriter.momentaryCheck = realCheck;
   });
 
   test("the write log serves only entries with the shape one is written with", async () => {

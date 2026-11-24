@@ -20,10 +20,11 @@
 // [qsys] line at a limited rate (an OutageLog: see refusalLine).
 
 import { addStreamClosedListener } from "../broadcaster.js";
+import { viewsStore } from "../views-store.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey, isWritable, kindOf, unwritableReason, type QsysControlKind } from "../../types/qsys.js";
+import { addressKey, isWritable, kindOf, panelHasMomentary, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
 
 // The rules live in types/qsys.ts so the editor shares them; re-exported for the server.
 export { isWritable, kindOf, unwritableReason };
@@ -32,7 +33,7 @@ import type { QrcControl } from "./qrc-types.js";
 import { isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
-import { QsysLeases, type Lease, type LeaseEnd } from "./qsys-leases.js";
+import { QsysLeases, type Lease, type LeaseEnd, type ReleaseCause } from "./qsys-leases.js";
 import { PRE_SEND_REFUSALS, qsysWriteLog } from "./qsys-write-log.js";
 
 export interface WriteRequest {
@@ -63,8 +64,8 @@ export interface WriteRequest {
   lease?: boolean;
   /** The pressing page's event-stream client id, so its stream closing ends the lease. */
   cid?: string | null;
-  /** Why the server wrote this itself (a lease ending); in the write log. */
-  cause?: LeaseEnd;
+  /** Why the server wrote this itself (a lease ending, or a release owed); in the write log. */
+  cause?: ReleaseCause;
 }
 
 export type WriteRefusal = "not-allowed" | "not-in-design" | "read-only" | "no-range" | "offline" | "bad-value" | "core-error";
@@ -83,6 +84,8 @@ export interface WriteSource {
 export interface WriteReadiness {
   ready(): boolean;
   current(addresses: { component: string; control: string }[]): Map<string, { Value: unknown }>;
+  /** Each time writes become possible again; where an owed release is sent. Optional for stand-ins. */
+  onReady?(cb: () => void): () => void;
 }
 
 /** A refusal line already written is not repeated for this long, unless its state changed. */
@@ -172,12 +175,30 @@ export class QsysWriter {
 
   /** Momentary presses the server will release if the page cannot. */
   readonly leases = new QsysLeases((lease, why) => void this.releaseLease(lease, why));
+  /**
+   * Releases the server could not send (the Core away or not yet re-read), by
+   * address. A fail-safe to off, not a replay: when writes are possible again the
+   * control is read, and the release goes only if the Core still reports it on.
+   * Any other write to the control in the meantime cancels it.
+   */
+  private readonly owed = new Map<string, Lease>();
+  /**
+   * Whether `panelId` has a momentary button on the address: only then does a
+   * press take a lease (main/types/qsys.ts panelHasMomentary). Read from the
+   * saved views; a stand-in for tests.
+   */
+  momentaryCheck: (panelId: string | null, a: { component: string; control: string }) => Promise<boolean> = async (panelId, a) =>
+    panelHasMomentary(await viewsStore.load(), panelId, a);
+  /** Lease asks already logged as refused, so a client repeating one is one line. */
+  private readonly leaseRefusals = new Set<string>();
 
   constructor(
     private readonly source: WriteSource,
     private readonly watch: WriteReadiness,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    watch.onReady?.(() => void this.sendOwed());
+  }
 
   /** Write a lapsed momentary's release, through every check, as its own write-log entry. */
   private async releaseLease(lease: Lease, why: LeaseEnd): Promise<void> {
@@ -194,7 +215,73 @@ export class QsysWriter {
       final: true,
       cause: why,
     });
-    if (!result.ok) console.warn(`[qsys] the server's release of ${scrub(where)} was refused (${scrub(result.reason)}); it may still be on at the Core`);
+    if (result.ok) return;
+    if (result.reason === "offline" || result.reason === "core-error") {
+      // The Core is away (or the send may not have landed): owed, until writes are possible again.
+      this.owed.set(addressKey(lease), lease);
+      console.warn(`[qsys] the server's release of ${scrub(where)} could not be sent (${scrub(result.reason)}); it is owed, and goes once the Core's values have been read again, if the Core still reports it on`);
+      return;
+    }
+    console.warn(`[qsys] the server's release of ${scrub(where)} was refused (${scrub(result.reason)}); it may still be on at the Core`);
+  }
+
+  /** Writes are possible again: send each owed release whose control the Core still reports on. */
+  async sendOwed(): Promise<void> {
+    for (const [k, lease] of [...this.owed]) {
+      const where = `${lease.component}/${lease.control}`;
+      let on: boolean;
+      try {
+        on = await this.isOn(lease);
+      } catch (err) {
+        // Could not read it: it stays owed for the next time writes open.
+        console.warn(`[qsys] could not read ${scrub(where)} to settle its owed release: ${scrub(errorMessage(err))}`);
+        continue;
+      }
+      // Another write to the control while it was read settles it: nothing is owed.
+      if (this.owed.get(k) !== lease) continue;
+      this.owed.delete(k);
+      if (!on) {
+        console.log(`[qsys] owed release of ${scrub(where)} not sent: the Core reports it off`);
+        continue;
+      }
+      console.warn(`[qsys] sending the owed release of ${scrub(where)}: the Core still reports it on`);
+      const result = await this.write({
+        component: lease.component,
+        control: lease.control,
+        value: false,
+        panelId: lease.panelId,
+        device: "server (lease owed)",
+        remote: lease.remote,
+        final: true,
+        cause: "lease owed",
+      });
+      if (!result.ok && (result.reason === "offline" || result.reason === "core-error")) {
+        if (!this.owed.has(k)) this.owed.set(k, lease);
+      } else if (!result.ok) {
+        console.warn(`[qsys] the owed release of ${scrub(where)} was refused (${scrub(result.reason)}); it may still be on at the Core`);
+      }
+    }
+  }
+
+  /** Whether the Core reports the control on: from the watch's re-read values, else asked directly. */
+  private async isOn(a: Lease): Promise<boolean> {
+    const watched = this.watch.current([a]).get(addressKey(a));
+    const value = watched
+      ? watched.Value
+      : await (async () => {
+          const t = this.source.transport;
+          if (!t) throw new Error("not connected");
+          const reply = (await t.send("Component.GetControls", { Name: a.component })) as { Controls?: { Name?: unknown; Value?: unknown }[] } | null;
+          const c = reply?.Controls?.find((x) => x?.Name === a.control);
+          if (!c) throw new Error("the Core did not report it");
+          return c.Value;
+        })();
+    return value === true || value === 1;
+  }
+
+  /** Whether a release is owed on the address; for tests and diagnostics. */
+  owes(a: { component: string; control: string }): boolean {
+    return this.owed.has(addressKey(a));
   }
 
   private connectionKind(t: QrcTransport | null): string {
@@ -257,7 +344,10 @@ export class QsysWriter {
     if (!isAddressPart(component) || !isAddressPart(control)) return refuse("not-allowed", "that is not a control address");
     const where = `${component}/${control}`;
     // The one await before the send. Everything after it, through the send, is synchronous.
-    const entry = await qsysAllowlist.lookup(component, control);
+    const [entry, momentary] = await Promise.all([
+      qsysAllowlist.lookup(component, control),
+      req.lease ? this.momentaryCheck(req.panelId, { component, control }) : Promise.resolve(false),
+    ]);
     if (!entry) return refuse("not-allowed", `${where} is not on the allowlist`);
 
     // ready() is the one answer to "may anything be written now" (it is false with
@@ -280,9 +370,24 @@ export class QsysWriter {
     const address = { component, control };
     from = this.gestureFrom(`${req.remote}\u0000${req.panelId ?? ""}\u0000${addressKey(address)}`, final, () => this.watch.current([address]).get(addressKey(address))?.Value ?? null);
     to = checked.send;
-    // Any write to a held momentary ends its lease: the page's release, or someone's.
-    // A press that takes a lease starts a new one once it lands (below).
+    // Any write to a held momentary ends its lease, and any release owed on it: the
+    // page's release, or someone's. A press that takes a lease starts a new one once
+    // it lands (below).
     this.leases.cancel(address);
+    if (!req.cause) this.owed.delete(addressKey(address));
+    // A lease only for a momentary button on the asking panel, on a Boolean.
+    const takesLease = !!req.lease && checked.send === true && momentary;
+    if (req.lease && !takesLease) {
+      const k = `${req.panelId ?? ""}\u0000${addressKey(address)}`;
+      if (!this.leaseRefusals.has(k)) {
+        if (this.leaseRefusals.size >= MAX_GESTURES) this.leaseRefusals.clear();
+        this.leaseRefusals.add(k);
+        console.warn(`[qsys] lease asked for ${scrub(where)} by panel ${scrub(req.panelId ?? "(none)")}, which has no momentary button on it; written without one`);
+      }
+    }
+    const lease = (): void => {
+      if (takesLease) this.leases.hold({ component, control, cid: req.cid ?? null, panelId: req.panelId, device: req.device, remote: req.remote });
+    };
     const sending = t.send("Component.Set", { Name: component, Controls: [{ Name: control, Value: checked.send }], ResponseValues: true });
 
     let reply: unknown;
@@ -290,6 +395,8 @@ export class QsysWriter {
       reply = await sending;
     } catch (err) {
       if (err instanceof QrcError) return refuse("core-error", `the Core refused the write to ${where}: ${err.message}`);
+      // It may have landed: a momentary press takes its lease all the same, so it is released.
+      lease();
       // The reason (a socket error can name the Core's address) goes to /log, not to the page.
       const message = `the connection to the Core dropped during the write to ${where}, so it may or may not have landed`;
       return refuse("core-error", message, `${message}: ${errorMessage(err)}`);
@@ -298,7 +405,10 @@ export class QsysWriter {
     const back = Array.isArray(controls)
       ? (controls as { Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown }[]).find((x) => x?.Name === control)
       : undefined;
-    if (!back || !("Value" in back)) return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);
+    if (!back || !("Value" in back)) {
+      lease();
+      return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);
+    }
 
     // A write landed: a run of pre-send refusals that has been quiet for a minute is over.
     for (const reason of PRE_SEND_REFUSALS) if (reason !== "offline") this.refusals.ok(reason, this.now());
@@ -312,9 +422,7 @@ export class QsysWriter {
       clamped: checked.clamped,
     };
     if (typeof back.Position === "number") result.position = back.Position;
-    if (req.lease && checked.send === true) {
-      this.leases.hold({ component, control, cid: req.cid ?? null, panelId: req.panelId, device: req.device, remote: req.remote });
-    }
+    lease();
     return finish(result, !matched ? "mismatch" : checked.clamped ? "clamped" : "ok");
   }
 }

@@ -207,8 +207,9 @@ keeps its own entry and value.
 
 ## Momentary buttons
 
-A button bound to a Boolean control is a momentary: on while pressed, off on
-release. The release is the page's to send, and a page that cannot send it (an iPad
+A button set to Momentary in the editor (which then binds it to a Boolean
+control) is a momentary: on while pressed, off on release. A button set to Trigger
+fires once, and a Boolean on a switch or a mute is a toggle; neither is a momentary. The release is the page's to send, and a page that cannot send it (an iPad
 asleep mid-press, a dropped connection, a closed tab) never sends it later. So the
 press is sent with `lease: true` and the page's event-stream id, and when it lands
 the server holds a lease on the control. While the button stays down the page
@@ -216,11 +217,24 @@ renews it about once a second (`POST /api/qsys/lease`). The server writes the
 release itself when no renewal arrives for 2 seconds, or at once when the pressing
 page's event stream closes. The page's own release, or any other write to the
 control, ends the lease with no extra write. One lease per control: a second press
-takes it over.
+takes it over. Renewals count only from the address and event stream that pressed,
+so two pages behind one address cannot keep each other's press on.
+
+The server takes a lease only for a momentary button: the panel the press came
+from must have a Q-SYS button on that control, and the control must be a Boolean.
+A lease asked for anything else (a toggle, a mute) is not taken; the write goes
+through as an ordinary one, and `/log` says so once.
+
+If the Core is away when the server's release is due (a drop that also stopped the
+page's renewals is the usual reason), the release is owed rather than lost. When
+writes are possible again (the Core reconnected and its values have been read
+again), the server reads the control and sends the release only if the Core still
+reports it on; any other write to the control first cancels it. A press whose write
+was cut off mid-send (it may have landed) takes its lease all the same.
 
 The server's release is a write like any other, with every allowlist, type and
-range check, and its own write-log entry: device `server (lease expired)` or
-`server (stream closed)`, and `cause` saying which.
+range check, and its own write-log entry: device `server (lease expired)`,
+`server (stream closed)` or `server (lease owed)`, and `cause` saying which.
 
 ## What it never does
 
@@ -246,7 +260,10 @@ Look at `/log` and filter for `[qsys]`.
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
 | `momentary <component>/<control> released by the server: <why>` | A momentary's page stopped renewing its press, or its event stream closed, and the server turned the control off itself. The write log has the entry. |
-| `the server's release of <component>/<control> was refused (<reason>); it may still be on at the Core` | The server could not write a lapsed momentary's release (the Core offline, the control taken off the allowlist). Check the control at the Core. |
+| `the server's release of <component>/<control> could not be sent (<reason>); it is owed, …` | The Core was away when a momentary's release was due. It is sent once writes are possible again, if the Core still reports the control on. |
+| `sending the owed release of <component>/<control>: the Core still reports it on` / `owed release of <component>/<control> not sent: the Core reports it off` | The Core is back and the owed release was settled, one way or the other. |
+| `the server's release of <component>/<control> was refused (<reason>); it may still be on at the Core` | The server could not write a momentary's release and will not retry (the control taken off the allowlist, or out of the design). Check the control at the Core. |
+| `lease asked for <component>/<control> by panel <id>, which has no momentary button on it; written without one` | A client asked for a lease on a control its panel has no momentary button for. The write went through as an ordinary one. |
 | `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
