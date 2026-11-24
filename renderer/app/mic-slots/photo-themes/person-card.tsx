@@ -12,7 +12,7 @@ import type { ThemeDTO, ThemePersonDTO } from "@main/types/photo-themes";
 import { Button, MENU_ITEM, MENU_ITEM_DANGER, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, menuContent } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
 import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, useEscapeFirst, type ChipTone } from "./photo-bits";
-import { planDateLabel } from "../../../settings/sections/plan-date-label";
+import { planLabel } from "../../../settings/sections/slots-target-pill";
 
 export type CardAction = "redo" | "approve" | "keep";
 
@@ -57,7 +57,7 @@ export function cardView(p: ThemePersonDTO, ctx: CardContext): CardView {
       };
     case "approved": {
       // `fromDate` is the plan's sort date, an instant: named on the app's calendar.
-      const fromDay = planDateLabel(p.approved?.fromDate, ctx.timeZone);
+      const fromDay = p.approved?.fromDate ? planLabel(p.approved.fromDate, null, ctx.timeZone) : null;
       const from = p.approved?.fromPlanId && p.approved.fromPlanId !== ctx.planId ? fromDay : ctx.planId ? null : fromDay;
       return {
         chip: { tone: "ok", label: "Approved", check: true },

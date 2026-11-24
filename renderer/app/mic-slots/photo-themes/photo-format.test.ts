@@ -29,11 +29,11 @@ const theme = (sortDates: (string | null)[]): ThemeDTO => ({
 
 describe("photo dates", () => {
   test("a 7pm Sunday service in Chicago is used on Sunday", () => {
-    assert.deepEqual(usedBy(theme([SUNDAY_7PM]), CHICAGO), ["Sun 20 Dec"]);
+    assert.deepEqual(usedBy(theme([SUNDAY_7PM]), CHICAGO), ["Sun, Dec 20"]);
   });
 
   test("soonest first, and a plan with no date says so", () => {
-    assert.deepEqual(usedBy(theme([null, "2026-12-28T01:00:00Z", SUNDAY_7PM]), CHICAGO), ["Sun 20 Dec", "Sun 27 Dec", "a plan with no date"]);
+    assert.deepEqual(usedBy(theme([null, "2026-12-28T01:00:00Z", SUNDAY_7PM]), CHICAGO), ["Sun, Dec 20", "Sun, Dec 27", "a plan with no date"]);
   });
 
   test("an approved photo made for a 7pm Sunday service is From that Sunday", () => {
@@ -46,8 +46,8 @@ describe("photo dates", () => {
       pending: null,
       originalUrl: null,
     };
-    assert.equal(cardView(p, { planId: "7002", timeZone: CHICAGO }).note, "From Sun 20 Dec");
-    assert.equal(cardView(p, { timeZone: CHICAGO }).note, "From Sun 20 Dec", "Manage, across every plan");
+    assert.equal(cardView(p, { planId: "7002", timeZone: CHICAGO }).note, "From Sun, Dec 20");
+    assert.equal(cardView(p, { timeZone: CHICAGO }).note, "From Sun, Dec 20", "Manage, across every plan");
   });
 
   test("a keep date is a day already worked out in the app's zone, and stays that day", () => {

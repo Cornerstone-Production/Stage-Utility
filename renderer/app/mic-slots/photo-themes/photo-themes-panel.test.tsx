@@ -232,7 +232,7 @@ describe("each status a card can be in", () => {
   });
 
   test("an approved photo from another service says which; this service's own does not", () => {
-    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-15T01:00:00Z", approvedAt: "", stale: false } })).note, "From Mon 14 Dec");
+    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-15T01:00:00Z", approvedAt: "", stale: false } })).note, "From Mon, Dec 14");
     assert.equal(view(person("1", "A", "approved")).note, null);
   });
 
@@ -709,7 +709,7 @@ describe("themes: creating one, and Manage themes", () => {
     await click(screen.getByRole("button", { name: /Christmas 2026/ }));
     await click(screen.getByRole("button", { name: "Delete theme…" }));
     const box = screen.getByRole("group", { name: "Confirm delete theme" });
-    assert.match(box.textContent ?? "", /Delete Christmas 2026\? Its 2 photos are removed, and these services go back to the originals: Thu 24 Dec\./);
+    assert.match(box.textContent ?? "", /Delete Christmas 2026\? Its 2 photos are removed, and these services go back to the originals: Thu, Dec 24\./);
     assert.deepEqual(writes(), []);
     await click(within(box).getByRole("button", { name: "Delete theme" }));
     assert.deepEqual(writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`), ["DELETE /api/photo-themes/themes/T"]);
