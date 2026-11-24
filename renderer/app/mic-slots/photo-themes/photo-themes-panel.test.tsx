@@ -250,7 +250,7 @@ describe("each status a card can be in", () => {
     assert.equal(chipOf("9001"), "Approved");
     assert.equal(chipOf("9002"), "Ready to review");
     assert.equal(chipOf("9003"), "No Planning Center photo");
-    assert.equal(document.querySelector("[data-generate]")?.textContent, "Everyone has a photo in Christmas 2026");
+    assert.equal(document.querySelector("[data-generate]")?.textContent, "Nothing to send: 1 without a usable Planning Center photo", "Casey has no photo, and none to make one from");
   });
 });
 
@@ -271,6 +271,18 @@ describe("the header and the hints", () => {
     people = [person("9002", "Jordan P.", "ready")];
     await mount();
     assert.equal(screen.queryByRole("group", { name: /Photos shown on screens/ }), null);
+  });
+
+  test("with nobody it could send, Generate says why instead of claiming everyone has a photo", async () => {
+    people = [person("9001", "Alex R.", "approved"), person("9003", "Casey L.", "none")];
+    await mount();
+    const btn = document.querySelector("[data-generate]") as HTMLButtonElement;
+    assert.equal(btn.textContent, "Nothing to send: 1 without a usable Planning Center photo");
+    assert.equal(btn.disabled, true);
+    people = [person("9001", "Alex R.", "approved")];
+    cleanup();
+    await mount();
+    assert.equal((document.querySelector("[data-generate]") as HTMLButtonElement).textContent, "Everyone has a photo in Christmas 2026");
   });
 
   test("a failing connection says so in the panel, with the way to Integrations", async () => {
