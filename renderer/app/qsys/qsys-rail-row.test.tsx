@@ -15,7 +15,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installDom();
 
@@ -38,9 +38,12 @@ const PLAIN = { id: "view-foh", name: "FOH", kind: "custom", surface: "console",
 type Sidebar = { sections: { id: string; label: string; kind: string; members: string[] }[]; hidden: string[] };
 let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sidebar };
 let configured = false;
+/** The status read answers 500. */
+let statusFails = false;
 
 const f = stubFetchWithLog((path) => {
   if (path.startsWith("/api/state")) return ok(state);
+  if (path === "/api/qsys/status" && statusFails) return reply(500, { error: "boom" });
   if (path === "/api/qsys/status") return ok({ connected: false, state: "offline", designName: null, isEmulator: null, configured });
   return ok({});
 });
@@ -67,6 +70,7 @@ after(async () => {
 beforeEach(() => {
   state = { views: [PLAIN, ...PANELS], outputs: [], appName: "Rail test app", sidebar: { sections: [], hidden: [] } };
   configured = false;
+  statusFails = false;
 });
 afterEach(() => {
   cleanup();
@@ -128,6 +132,13 @@ describe("the Q-SYS row is drawn only when it has something to open", () => {
     await mount();
     await wait(50);
     assert.equal(rowButton() === null, true, "the row is drawn with no panel and no Core");
+  });
+
+  test("a status read that failed draws it, so the page that says so can be reached", async () => {
+    state.views = [PLAIN];
+    statusFails = true;
+    await mount();
+    await eventually(() => assert.ok(rowButton(), "a failed read hid the row, as if no Core were set up"));
   });
 
   test("Customize's hide and reorder act on it like any other row", async () => {

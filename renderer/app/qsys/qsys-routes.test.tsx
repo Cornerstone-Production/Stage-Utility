@@ -561,7 +561,7 @@ describe("/qsys/manage", () => {
       fireEvent.click(document.querySelector("[data-qsys-dismiss]")!);
     });
     await wait(40);
-    assert.equal(server.posts.length, 0, "it dismissed without asking");
+    assert.deepEqual(server.dismissed, [], "it dismissed without asking");
     act(() => {
       fireEvent.click([...document.querySelectorAll("button")].find((b) => b.textContent === "Dismiss" && !b.hasAttribute("data-qsys-dismiss"))!);
     });
