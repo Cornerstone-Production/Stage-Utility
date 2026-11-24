@@ -1008,6 +1008,8 @@ async function venueLink(c: RouteCtx, id: string): Promise<void> {
   const venue = (await stageplotsStore.get()).venues.find((v) => v.id === id);
   if (!venue) return error(c.res, "no such venue", 404);
   const link: VenueLink = { url: venue.publish ? `${venue.publish.origin}${STAGEPLOTS_PATH}/${venue.publish.secret}` : null };
+  // Never kept by the browser or anything between: a secret in a cache outlives its regenerate.
+  c.res.setHeader("Cache-Control", "no-store");
   json(c.res, link);
 }
 

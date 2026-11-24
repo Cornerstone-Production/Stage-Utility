@@ -1324,7 +1324,9 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       const seen: [string, unknown][] = [["GET /api/stageplots", get.json], ...frames.map((f, i): [string, unknown] => [`stageplots:updated frame ${i + 1} of ${frames.length}`, f]), ...answers];
       for (const [what, body] of seen) assert.equal(JSON.stringify(body).includes(secret), false, `${what} carries the secret`);
       // The manage page's own read.
-      assert.deepEqual((await call("GET", `/api/stageplots/venues/${id}/link`)).json, { url: `${origin.origin}/stageplots/${secret}` });
+      const link = await call("GET", `/api/stageplots/venues/${id}/link`);
+      assert.deepEqual(link.json, { url: `${origin.origin}/stageplots/${secret}` });
+      assert.equal(link.headers["Cache-Control"], "no-store", "the link may be cached, and outlive a regenerate");
       await answer("POST", `/api/stageplots/venues/${id}/unpublish`);
       assert.deepEqual((await call("GET", `/api/stageplots/venues/${id}/link`)).json, { url: null });
       assert.equal((await call("GET", "/api/stageplots/venues/v-000000000000/link")).status, 404);

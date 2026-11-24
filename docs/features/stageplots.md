@@ -596,7 +596,9 @@ is listed as not yet published, with that reason.
 The secret is in `stageplots.json` and so in config backups: anyone holding a backup can
 open the venue's link. It never reaches a browser with the document: `GET /api/stageplots`
 and `stageplots:updated`, which the crew's `/stageplots` reads, leave it out, and the
-Publish card reads the link on its own. A restore merges the backup's links with the live ones so that none
+Publish card reads the link on its own, on demand, uncached. The app has no login on
+the LAN, so any device there can still ask for the link: keeping it off the crew's page
+keeps it off a shared tablet, not out of reach of the network. A restore merges the backup's links with the live ones so that none
 is left live and unknown here and none that was revoked comes back: a link both hold stays
 published; another server's links stay with it, unless this box replaces that server; and
 every live link the restore does not keep is queued as an [old link](#old-links) and
