@@ -448,7 +448,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     for (const r of renamed) {
       const why = r.from.trim() ? "that name was taken here" : "it had no name";
       skipped.push(`ServiceCue layout "${r.from}" — imported as "${r.to}", ${why}`);
-      console.log(`[view-import] ServiceCue preset "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
+      console.log(`[view-import] ServiceCue layout "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
     }
   }
 

@@ -244,7 +244,10 @@ making a role first. No role is created for it; a named layout shows only the ro
 chose, so the category stays out of those until it is in a role and the layout picks it.
 Until the roles have been read (or when they cannot be), nothing is appended, since no
 category can be said to be in no role. The rundown pages, ServiceCue displays and the
-public page all draw columns the same way.
+public page all draw columns the same way. A rundown whose categories Planning Center
+cannot be asked for still answers with its items and the columns they use, in the order
+last read (after a restart, the order the items use them); the server says so once per
+outage as `[pco]`, and holds a failed read 30 seconds before asking again.
 
 **Managing them:** the **Category roles** section of the ServiceCue layouts page, which is
 there whether or not a layout exists. Each role shows its name (saved when you leave the
