@@ -7,11 +7,11 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import type { PlotItem } from "@main/types/stageplots";
+import { SYMBOL_KINDS, TEXT_KINDS, type PlotItem } from "@main/types/stageplots";
 import { validateItems } from "@main/services/stageplots-store";
 
 import { CLIPBOARD_KEY, canPaste, clearClipboard, copyItems, takePaste } from "./clipboard";
-import { DUPLICATE_OFFSET } from "./editor-state";
+import { DUPLICATE_OFFSET, editorReducer, initialEditorState, type AddKind } from "./editor-state";
 
 /** The page's localStorage, in memory; `throwing` makes every touch of it refuse, as a private window does. */
 function installStorage(throwing = false): Map<string, string> {
@@ -169,4 +169,26 @@ describe("the clipboard's check agrees with the server's", () => {
       assert.equal(canPaste(), ok, ok ? "a valid item was refused by the clipboard" : "an item the server refuses was accepted by the clipboard");
     });
   }
+});
+
+describe("what the editor copies", () => {
+  test("every kind the palette adds, copied in one tab and read back in another, pastes whole and is what the server saves", () => {
+    // Made by the editor's own add, as the palette makes them: not a table written to match the check.
+    const kinds: AddKind[] = ["box", "circle", "zone", "cable", "conn", ...TEXT_KINDS, ...SYMBOL_KINDS.map((k) => `sym:${k}` as const)];
+    const H = 562.5;
+    let state = initialEditorState([], H);
+    kinds.forEach((kind, i) => (state = editorReducer(state, { type: "add", kind, at: { x: 100 + i * 20, y: 150 }, id: `i-${i}` })));
+    assert.equal(state.items.length, kinds.length);
+    assert.equal(validateItems(state.items, H), null, "the editor made an item the server refuses");
+    copyItems(state.items);
+    // Another tab: nothing in memory, only what storage holds.
+    const raw = stored.get(CLIPBOARD_KEY)!;
+    clearClipboard();
+    stored.set(CLIPBOARD_KEY, raw);
+    const pasted = takePaste();
+    assert.ok(pasted, "the copy was refused when read back");
+    assert.deepEqual(new Set(pasted.items.map((it) => it.type)), new Set(["box", "circle", "zone", "cable", "conn", "text", "symbol"]));
+    assert.equal(pasted.items.length, kinds.length);
+    assert.equal(validateItems(pasted.items, H), null);
+  });
 });
