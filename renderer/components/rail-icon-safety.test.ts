@@ -65,7 +65,7 @@ describe("the console rail's icon", () => {
     assert.doesNotMatch(ICON, /color:\s*(DEFAULT_TINT|"var\()/, "a fallback colour here overrides the row");
   });
 
-  test("opens on the GLYPH, and the row's own menu never opens over it", () => {
+  test("rail.tsx wires every menu through useContextMenuTrigger, one handler each", () => {
     // The icon menu is the glyph's. A right-click anywhere else on the row opens
     // the ROW's menu (Hide, Move to, Customize sidebar…), which customizing the
     // sidebar added; before that, the row had no menu and this guard said so.

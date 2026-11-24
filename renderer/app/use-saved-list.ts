@@ -19,9 +19,9 @@
 //    (a second Space, say), and the answer to the save is what the list builds on.
 //  - Once nothing is waiting, it is taken in only if its count is newer than the
 //    newest answer or broadcast already held. A restarted server's first count is
-//    newer than any of the run before; that run's counts are never newer again. Our own echo, early or late, never
-//    is; another browser's change that landed after our last save always is, even
-//    if it arrived while that save was out.
+//    newer than any of the run before; that run's counts are never newer again.
+//    Our own echo, early or late, never is newer; another browser's change that
+//    landed after our last save always is, even if it arrived while that save was out.
 //  - A newer one that says what the list already holds is noted, not redrawn.
 //  - Not while `hold` is true (a drag in progress: the rows measured at its start
 //    must stay). It is taken in when the hold ends.
