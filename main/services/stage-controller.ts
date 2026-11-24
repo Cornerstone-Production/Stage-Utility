@@ -84,7 +84,7 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, RolloverHeld, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
 import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -478,6 +478,7 @@ export class StageController {
     showQr: true,
     kioskDiscovery: false,
     serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
+    rolloverHeld: null,
     autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
@@ -2288,24 +2289,32 @@ export class StageController {
    * manual mode, when unconfigured, or when already advanced from this plan.
    */
   async maybeAutoAdvance(): Promise<void> {
-    if (this.state.planMode !== "auto") return;
-    if (!this.pcoAppId || !this.pcoSecret) return;
-    if (!this.state.serviceTypeId || !this.state.planId) return;
-    if (this.autoAdvancedFromPlanId === this.state.planId) return;
-    const retry = this.rolloverRetry?.planId === this.state.planId ? this.rolloverRetry : null;
-    if (retry && Date.now() < retry.at) return;
+    const planId = this.state.planId;
+    // A hold is about the plan it was set for. Cleared here, before any return below:
+    // an end that cannot be read keeps a hold, but only this plan's.
+    if (this.state.rolloverHeld && this.state.rolloverHeld.planId !== planId) this.setRolloverHeld(null);
+    if (this.state.planMode !== "auto" || !this.pcoAppId || !this.pcoSecret || !this.state.serviceTypeId || !planId) {
+      return this.setRolloverHeld(null);
+    }
+    if (this.autoAdvancedFromPlanId === planId) return this.setRolloverHeld(null);
+    const retry = this.rolloverRetry?.planId === planId ? this.rolloverRetry : null;
+    if (retry && Date.now() < retry.at) return this.setRolloverHeld(null);
     const endIso = await pcoService
-      .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId)
+      .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, planId)
       .catch(() => null);
+    // An end that cannot be read changes nothing: a held plan stays said, and none is
+    // said on a guess.
     if (!endIso) return;
     const end = Date.parse(endIso);
     if (!Number.isFinite(end)) return;
-    if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
+    if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return this.setRolloverHeld(null);
 
     // A service Planning Center still reports running is not over, however long
     // past its planned end it runs: nothing time-based may stop it. No time limit,
-    // as the recorders have none, so it is said once per plan instead.
+    // as the recorders have none. Said once per plan on the log, and on Home's Needs
+    // attention for as long as it holds, with the way to pick another plan.
     if (this.followedPlanLive()) {
+      this.setRolloverHeld({ planId, planTitle: this.state.planTitle, planDates: this.state.planDates, endsAt: new Date(end).toISOString() });
       if (this.rolloverWaitSaidFor !== this.state.planId) {
         this.rolloverWaitSaidFor = this.state.planId;
         const live = this.lastLive!;
@@ -2317,10 +2326,11 @@ export class StageController {
       return;
     }
 
+    this.setRolloverHeld(null);
     console.log(
-      `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
+      `[stage-controller] auto rollover — plan ${scrub(planId)} ended >1h ago, selecting next`,
     );
-    const from = this.state.planId;
+    const from = planId;
     this.autoAdvancedFromPlanId = from;
     await this.selectGlobalNextPlan().catch((err) =>
       console.error("[stage-controller] auto rollover error:", scrubError(err)),
@@ -2334,6 +2344,16 @@ export class StageController {
     const delayMs = retry ? Math.min(retry.delayMs * 2, StageController.ROLLOVER_RETRY_MAX_MS) : StageController.ROLLOVER_RETRY_MS;
     this.rolloverRetry = { planId: from, at: Date.now() + delayMs, delayMs };
     console.warn(`[stage-controller] auto rollover — still on plan ${scrub(from)}; trying again in ${scrub(Math.round(delayMs / 1000))} s`);
+  }
+
+  /** What Home's Needs attention says about a held plan. Broadcast only when it changes:
+   *  the poller asks every tick. */
+  private setRolloverHeld(next: RolloverHeld | null): void {
+    const cur = this.state.rolloverHeld;
+    if (cur === next) return;
+    if (cur && next && cur.planId === next.planId && cur.endsAt === next.endsAt && cur.planTitle === next.planTitle && cur.planDates === next.planDates) return;
+    this.state = { ...this.state, rolloverHeld: next };
+    this.broadcast();
   }
 
   /** Whether Planning Center reports the followed plan live: in one of its
