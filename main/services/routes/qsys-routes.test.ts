@@ -12,6 +12,12 @@ import { after, before, describe, mock, test } from "node:test";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-qsys-routes-"));
 process.env.STAGE_UTILITY_DATA = TMP;
+// A hand-broken allowlist on disk before the server first reads it: it names the
+// gain, but with min above max, so it must be enforced as no allowlist at all.
+await fs.writeFile(
+  path.join(TMP, "qsys-allowlist.json"),
+  JSON.stringify({ entries: [{ component: "Lobby_Mixer", control: "gain", label: "x", min: 5, max: 0, confirm: "none" }] }),
+);
 
 const { qsysRoutes } = await import("./qsys-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -80,6 +86,22 @@ const write = (body: unknown, headers: Record<string, string> = {}) =>
 describe("/api/qsys", () => {
   test("is dispatched by the server", () => {
     assert.ok(ROUTE_MODULES.includes(qsysRoutes));
+  });
+
+  test("an allowlist file the validator would refuse is enforced as empty, and said", async () => {
+    const warn = mock.method(console, "warn", () => {});
+    try {
+      assert.deepEqual(await listed(), []);
+      const r = await write({ component: "Lobby_Mixer", control: "gain", value: -5 });
+      assert.equal((r.json as { reason: string }).reason, "not-allowed");
+      assert.ok(
+        warn.mock.calls.some((c) => String(c.arguments[0]).startsWith("[qsys] qsys-allowlist.json is not a valid allowlist (entry 1: min must not be above max)")),
+        "the broken file was not logged",
+      );
+    } finally {
+      warn.mock.restore();
+    }
+    assert.match(await fs.readFile(path.join(TMP, "qsys-allowlist.json"), "utf8"), /"min":5/, "the file was rewritten on read");
   });
 
   test("with no Core: status is not writable, the catalog is 503, and a write is refused offline", async () => {

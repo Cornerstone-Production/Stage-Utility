@@ -14,6 +14,7 @@
 // bundle: it is safety policy, reviewed on its own.
 
 import { DataStore } from "../data-store.js";
+import { errorMessage } from "../errors.js";
 import { isRecord } from "../is-record.js";
 import { asObject, checked } from "../restore-check.js";
 import { scrub } from "../scrub.js";
@@ -126,7 +127,21 @@ export function allowEntryFromCatalog(c: QrcControl, component: string): AllowEn
 
 const restoreCheck = checked((raw) => ({ entries: parseAllowEntries(asObject(raw, "the Q-SYS allowlist").entries) }));
 
-const store = new DataStore<{ entries: AllowEntry[] }>("qsys-allowlist.json", { entries: [] }, "config", { restoreCheck });
+/**
+ * A file the validator would refuse (edited by hand, or written by a build with
+ * other rules) is enforced as an empty list: nothing writable, failing closed.
+ * The file itself is left as it is until the next save, and the reason is logged.
+ */
+function normalize(parsed: { entries: AllowEntry[] }): { entries: AllowEntry[] } {
+  try {
+    return { entries: parseAllowEntries(isRecord(parsed) ? parsed.entries : undefined) };
+  } catch (err) {
+    console.warn(`[qsys] qsys-allowlist.json is not a valid allowlist (${scrub(errorMessage(err))}); nothing is writable until it is saved again`);
+    return { entries: [] };
+  }
+}
+
+const store = new DataStore<{ entries: AllowEntry[] }>("qsys-allowlist.json", { entries: [] }, "config", { restoreCheck, normalize });
 
 /** The lookup, built from the object the store last loaded. A new object (a save,
  *  or a reload after a restore) rebuilds it, so it never enforces an old list. */
