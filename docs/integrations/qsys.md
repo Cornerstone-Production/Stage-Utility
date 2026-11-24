@@ -500,6 +500,26 @@ The server's release is a write like any other, with every allowlist, type and
 range check, and its own write-log entry: device `server (lease expired)`,
 `server (stream closed)` or `server (lease owed)`, and `cause` saying which.
 
+## Latency
+
+Stage Utility times two things on the server and reports them on
+`GET /api/qsys/status` (`latency`), each as a count, a median (`p50`) and a 95th
+percentile (`p95`) in milliseconds over the last 500 samples. A window with no
+samples reports `null`.
+
+| Figure | What it measures | Target |
+|---|---|---|
+| `latency.write` | Time from sending a write to the Core's reply to it (the reply carries the value the Core now holds). A write the Core refused, or one lost to a dropped connection, is not timed. | 95th percentile under 100 ms |
+| `latency.broadcast` | Time from a pushed change arriving at the server to it being sent to the open panels. It covers the server's share only: the Core's own poll interval (the AutoPoll rate) comes before it, and the network after it. Meter pushes are not counted. | A change made at the Core reaches an open panel within 250 ms |
+
+While the Core is connected and writes have been made, `/log` gets one line an hour,
+`[qsys] write p95 <n> ms (<count> writes)`, `<count>` being the writes confirmed
+since the last line. Nothing is logged per write, and nothing runs while no write
+has been made. The figures start empty after a restart.
+
+A write p95 well above 100 ms points at the Core or the network between it and the
+server (a busy Core, Wi-Fi on the path), not at the panel.
+
 ## What it never does
 
 It never calls a method that changes the design: no components are added, no designs
@@ -534,6 +554,7 @@ Look at `/log` and filter for `[qsys]`.
 | `write refused (no-lease): <component>/<control> was not pressed: the saved views could not be read …` | A momentary press arrived while the saved views could not be read, so the server could not hold its release and sent nothing. See the views store's own line for the cause. |
 | `write refused (no-lease): <component>/<control> was not pressed: panel <id> has no momentary button on it, so the server will not hold it on` | A press asked for a lease on a control its panel has no momentary button for (the panel was edited since the page loaded, or a client other than a panel asked). Nothing was sent. Reload the panel; if it persists, check the button's Control type in the editor. |
 | `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `no-lease`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
+| `write p95 <n> ms (<count> writes)` | Once an hour while connected, if writes were made: the 95th percentile of the time the Core took to confirm them. See [Latency](#latency). |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
 | `allowlist saved: <n> entries`, `allowlist imported: <n> entries` | The allowlist was replaced. |

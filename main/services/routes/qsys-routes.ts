@@ -89,7 +89,11 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   if (!pathname.startsWith("/api/qsys/")) return;
 
   if (method === "GET" && pathname === "/api/qsys/status") {
-    json(res, { ...qsysService.getStatus(), writable: qsysWatch.ready() });
+    json(res, {
+      ...qsysService.getStatus(),
+      writable: qsysWatch.ready(),
+      latency: { write: qsysWriter.latencyStats(), broadcast: qsysWatch.broadcastStats() },
+    });
     return;
   }
 
