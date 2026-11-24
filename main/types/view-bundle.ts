@@ -5,6 +5,7 @@
 // resolves anyway, needs rebinding — so no caller has to re-derive them.
 
 import type { View } from "./views.js";
+import type { ImportedQsysPanel } from "./qsys.js";
 import type { Slot, ServiceCueLayout, SlotPreset } from "./pco.js";
 import type { PatchVariant } from "./patch.js";
 import type { OscTargetConfig } from "./osc.js";
@@ -111,7 +112,7 @@ export interface ImportReport {
   /** Every Q-SYS panel the file brought: the address it landed under, the one the
    *  file named when that was taken here, and the siblings it names that no panel
    *  here has. */
-  qsysPanels: { id: string; name: string; slug: string; renamedFrom?: string; missingSiblings: string[] }[];
+  qsysPanels: ImportedQsysPanel[];
   /** How many slot boards the import made (each a new board, so none clash —
    *  see the note in view-import.ts), and how many rows landed across them. */
   slotBoards: number;

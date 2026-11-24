@@ -108,6 +108,63 @@ describe("restoring views with Q-SYS panel blocks that do not hold", () => {
     assert.deepEqual(saved.find((x) => x.id === "p1")?.qsysInactive, [odd], "a save after the repair lost the settings");
   });
 
+  it("a backup taken while a block it cannot read is kept aside (not yet saved) restores, and the load keeps it aside again", async () => {
+    // A block from a newer build (a field this one does not have) or a hand edit.
+    const odd = { kind: "volunteer", slug: "Foyer Main", siblings: [], returnAfterMin: 5, fromLater: true };
+    await fs.writeFile(path.join(TMP, "views.json"), JSON.stringify([{ id: "b1", name: "Booth", kind: "custom", surface: "console", createdAt: NOW, layout, qsys: odd }]));
+    const warn = mock.method(console, "warn", () => {});
+    const log = mock.method(console, "log", () => {});
+    try {
+      await viewsStore.reload();
+      // A backup reads views.json raw: the block is still in it, as the operator had it.
+      const backup = await configSnapshot.build();
+      assert.deepEqual((backup.files["views.json"] as { qsys?: unknown }[])[0].qsys, odd, "the backup did not carry the block");
+      await configSnapshot.apply(backup);
+      const loaded = (await viewsStore.reload()) as unknown as { qsys?: unknown; qsysInactive?: unknown[] }[];
+      assert.equal(loaded[0].qsys, undefined);
+      assert.deepEqual(loaded[0].qsysInactive, [odd], "the restored block was lost, not kept aside");
+    } finally {
+      warn.mock.restore();
+      log.mock.restore();
+    }
+  });
+
+  it("kept-aside settings that are not a list are wrapped, never replaced", () => {
+    const warn = mock.method(console, "warn", () => {});
+    try {
+      const [onlyOdd, withBlock] = repairQsysBlocks([
+        { id: "c1", name: "Booth", kind: "custom", surface: "console", createdAt: NOW, layout, qsysInactive: "hand edit" },
+        { id: "d1", name: "Wall", kind: "custom", surface: "display", createdAt: NOW, layout, qsysInactive: { kind: "staff" }, qsys: block("wall") },
+      ] as never[]) as unknown as { qsysInactive?: unknown[] }[];
+      assert.deepEqual(onlyOdd.qsysInactive, ["hand edit"]);
+      assert.deepEqual(withBlock.qsysInactive, [{ kind: "staff" }, block("wall")], "the old value was lost when a block was set aside");
+    } finally {
+      warn.mock.restore();
+    }
+  });
+
+  it("an old address another panel now has, or an earlier panel already keeps, is no longer kept; the panel is untouched", () => {
+    const warn = mock.method(console, "warn", () => {});
+    try {
+      const out = repairQsysBlocks([
+        { ...panel("p1", "One", "a"), qsys: { ...block("a"), aliases: ["b", "keep"] } },
+        panel("p2", "Two", "b"),
+        { ...panel("p3", "Three", "c"), qsys: { ...block("c"), aliases: ["keep", "own"] } },
+      ] as never[]) as unknown as { qsys: { slug: string; aliases?: string[] } }[];
+      assert.deepEqual(out.map((v) => [v.qsys.slug, v.qsys.aliases ?? null]), [["a", ["keep"]], ["b", null], ["c", ["own"]]]);
+    } finally {
+      warn.mock.restore();
+    }
+  });
+
+  it("repairs stay listed for /qsys/manage after a later load finds nothing more to do", async () => {
+    const before = (await callRoute(qsysRoutes, "/api/qsys/panel-repairs")).json as unknown[];
+    assert.ok(before.length > 0, "no repairs from the tests above (positive control)");
+    await fs.writeFile(path.join(TMP, "views.json"), JSON.stringify([panel("p1", "Zone 1", "zone-1")]));
+    await viewsStore.reload();
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/panel-repairs")).json, before, "a clean reload emptied the repairs");
+  });
+
   it("a file that needs nothing is handed back as it is, and reports nothing", () => {
     const views = [panel("p1", "Zone 1", "zone-1"), panel("p2", "Booth", "booth")];
     assert.equal(repairQsysBlocks(views), views);

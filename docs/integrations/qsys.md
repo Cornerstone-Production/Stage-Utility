@@ -227,20 +227,24 @@ console first. Home cannot be a panel.
 | Setting | Meaning |
 |---|---|
 | Who uses it | **Volunteer** (big targets; meters at the volunteer rate) or **Staff** (dense; meters at the staff rate). |
-| Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's is refused, naming that panel. `manage` is not allowed. |
+| Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's address, or an address another panel had before a rename, is refused, naming that panel. `manage` is not allowed. A new address keeps the old one leading to the panel: `/qsys/<old>` opens it and corrects the URL, so an iPad's home-screen icon still works, and every other panel whose cog menu named the old address names the new one. A panel keeps its last 20 old addresses. |
 | In its cog menu | The other panels its [cog menu](#cog-menu-and-staff-pin) lists. A volunteer panel opened full screen shows them; none by default. |
 | Go back here after | Minutes without a touch before a device whose home this panel is comes back to it from another panel ([auto-return](#auto-return)). 0 to 1440; default 5; 0 never comes back. |
 
-A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A restored
-backup is never refused over panel addresses: when its views put two panels at one
-address, the first keeps it and each later one takes the next free suffix. Panel
-settings on a view that is not a custom console, or settings this app cannot read (a
-hand-edited address), are kept aside on the view, whole, and nothing reads them as a
-panel. All of these are logged when the views are loaded (a kept-aside block in full)
-and listed at the top of the panels on `/qsys/manage`, where kept-aside settings can
-be restored once the view is a custom console (**Restore as panel**). A console
-with Q-SYS objects and no panel settings still works where it is shown, as a staff
-panel, and `/qsys/manage` offers to make it a panel.
+A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`), and none of
+the original's old addresses. A restored backup is never refused over panel
+settings: when its views put two panels at one address, the first keeps it and each
+later one takes the next free suffix. Panel settings on a view that is not a custom
+console, or settings this app cannot read (a hand-edited address, a field from a
+newer build), are kept aside on the view, whole, and nothing reads them as a panel.
+All of these are logged when the views are loaded (a kept-aside block in full) and
+listed at the top of the panels on `/qsys/manage` for as long as the server runs.
+There, kept-aside settings can be restored once the view is a custom console
+(**Restore as panel**; when the view is a panel now, it asks first and its current
+settings are kept aside in their place), or forgotten (**Dismiss**, confirmed; the
+log keeps a copy of the settings). A console with Q-SYS objects and no panel
+settings still works where it is shown, as a staff panel, and `/qsys/manage`
+offers to make it a panel.
 
 ### In the sidebar
 
@@ -260,13 +264,18 @@ sidebar**: hide it, or move it to another section.
   closes it and returns to the row.
 
 Choosing a panel opens `/qsys/manage/<slug>`; the last item opens `/qsys/manage`. The
-row is lit on any page under `/qsys/manage`.
+row is lit on any page under `/qsys/manage`. Escape closes the flyout and nothing
+else: on a phone, the sidebar drawer it was opened in stays open.
+
+A console's place among the sidebar's consoles is kept while it is a panel (a panel
+is listed under Q-SYS instead), so making it an ordinary console again puts it back
+where it was, even if the sidebar was arranged in the meantime.
 
 ### Addresses
 
 | URL | What it is |
 |---|---|
-| `/qsys/<slug>` | The panel full screen, with no sidebar or header from the app: what an iPad opens, saved to its home screen. Its own header shows the panel's name and the connection, and on a volunteer panel the cog. `?return=<slug>` names the device's home panel (see [Auto-return](#auto-return)). |
+| `/qsys/<slug>` | The panel full screen, with no sidebar or header from the app: what an iPad opens, saved to its home screen. Its own header shows the panel's name and the connection, and on a volunteer panel (or any panel a cog opened) the cog. `?return=<slug>` names the device's home panel (see [Auto-return](#auto-return)). An old address of a renamed panel opens it and corrects the URL, `?return` included. |
 | `/qsys/manage` | The Q-SYS page, in the app (see below). |
 | `/qsys/manage/<slug>` | The panel inside the app, with **Edit** in its top-right corner, as on a console. |
 
@@ -342,6 +351,10 @@ A panel's settings travel in its view bundle (see
 
 - The bundle's panel settings are checked as a save of them is: a malformed block,
   or a panel that is not a custom console, refuses the whole file and writes nothing.
+  `qsys: null` is no panel settings. Settings a view keeps aside travel with it, up
+  to 20 per view of up to 4096 characters each; more refuses the file.
+- A panel's old addresses travel with it, except those taken here, which the import
+  result names.
 - A panel whose address is already taken here, by a panel on this install or another
   in the same file, takes the next free one (`<slug>-2`, `<slug>-3`). The panel here
   is untouched, the import result says which address each panel landed at, and a
@@ -523,6 +536,7 @@ Look at `/log` and filter for `[qsys]`.
 | `the staff PIN could not be checked: <reason>`, `could not read whether a staff PIN is set: <reason>` | A panel's PIN pad could not reach the server (sent from the page). It said so on the pad, not "wrong PIN". |
 | `Q-SYS panel "<name>" address /qsys/<a> was taken here; imported as /qsys/<b>` | An imported panel's address clashed and took a suffix. Tagged `[view-import]`. |
 | `Q-SYS panel "<name>" names panels that do not exist here: <slugs>` | An imported panel's sibling list names panels no panel has. Tagged `[view-import]`. |
+| `Q-SYS panel "<name>" no longer keeps its old address(es) /qsys/<a>: a panel here has them` | An imported panel's old addresses clashed with this install's; it keeps the rest. Tagged `[view-import]`. |
 | `allowlist: added <n> control(s) a panel uses, at the Core's own ranges` | **Add all controls … uses** on `/qsys/manage` added entries. |
 | `allowlist add refused: <why>` | **Add all controls … uses** saved nothing: the stored list is invalid, or the result broke a rule. |
 | `panel settings for <view> were refused: <why>`, `a new panel was refused: <why>` | From the page: a panel's settings or a new panel were refused, as for an address another panel has. The server's own line is `[stage-controller] setViewQsys … refused` or `createView refused`. |
@@ -530,9 +544,15 @@ Look at `/log` and filter for `[qsys]`.
 | `could not read the allowlist for /qsys/manage`, `… the binding check for /qsys/manage`, `… the Q-SYS connection` (the sidebar's Q-SYS row reads it on every page, so this one is not specific to /qsys/manage), `… the panel repairs for /qsys/manage` | A read on the Q-SYS page failed; that section says so. |
 | `views.json: "<view>" (<id>) shared /qsys/<slug> with an earlier panel; it opens at /qsys/<new> now` | The saved views (a restored backup, a hand edit) put two panels at one address. The later one was given the next free address; `/qsys/manage` lists it. Said on each load until the views are next saved. |
 | `views.json: "<view>" (<id>) had panel settings for /qsys/<slug> but is not a custom console; kept aside, not a panel: <block>` | Panel settings on a display or another kind were kept aside, whole, when the views were loaded. `/qsys/manage` lists them; make the view a custom console and **Restore as panel**. |
-| `views.json: "<view>" (<id>) has panel settings this app cannot read (<why>); kept aside, not a panel: <block>` | A panel block the app cannot read (a hand-edited address, say) was kept aside, whole. Set the panel up again from the logged block. |
-| `an allowlist save was stopped: the list changed since the page read it` | From `/qsys/manage`: the list was saved elsewhere after the page read it, so the server refused the save (`409`, `rev-changed`) and nothing was written; Discard shows the new list. |
-| `restoring kept-aside panel settings on <view> was refused: <why>` | From `/qsys/manage`: **Restore as panel** was refused, as for an address another panel has. |
+| `views.json: "<view>" (<id>) has panel settings this app cannot read (<why>); kept aside, not a panel: <block>` | A panel block the app cannot read (a hand-edited address, a newer build's field) was kept aside, whole. Set the panel up again from the logged block. |
+| `views.json: "<view>" (<id>) had kept-aside panel settings that were not a list; kept as a list of one: <value>` | A hand edit left the view's kept-aside settings as something other than a list. Nothing was dropped. |
+| `views.json: "<view>" (<id>) no longer keeps its old address(es) /qsys/<a>: another panel has them` | An old address of a renamed panel is now another panel's address (or an earlier panel keeps it), so it no longer leads to this one. |
+| `panel "<view>" moved from /qsys/<a> to /qsys/<b>; the old address still leads to it, and <n> other panel(s) list the new one in their cog menus` | A panel's address was changed. `/qsys/<a>` keeps opening it. |
+| `"<view>" keeps its last 20 old addresses; /qsys/<a> no longer lead to it` | A rename past 20 old addresses forgot the oldest. |
+| `"<view>": its panel settings for /qsys/<a> were kept aside, whole, to restore /qsys/<b>: <block>` | **Restore as panel** on a view that was a panel: its settings went aside in place of the restored ones. |
+| `"<view>" (<id>): kept-aside panel settings dismissed by the operator: <block>` | **Dismiss** on `/qsys/manage` forgot kept-aside settings. The line is the only copy left. |
+| `an allowlist save was stopped: the list changed since the edits began; the page shows what changed` | From `/qsys/manage`: the list was saved elsewhere after the edits began, so the server refused the save (`409`, `rev-changed`) and nothing was written. The page shows what changed and waits for the operator. |
+| `restoring kept-aside panel settings on <view> was refused: <why>`, `dismissing kept-aside panel settings on <view> was refused: <why>` | From `/qsys/manage`: **Restore as panel** or **Dismiss** was refused, as for an address another panel has, or settings already gone. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 | `ready listener failed: <reason>` | A bug in this app's handling of writes becoming possible again (where an owed release is sent). Writes carry on; report the line. |
 

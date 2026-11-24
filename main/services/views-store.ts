@@ -9,7 +9,6 @@
 import type { View } from "../types/stage.js";
 import { isSelectionList } from "../types/calendar.js";
 import { isDisplayKind, isLayoutShape, isSlotsLayoutValue } from "../types/views.js";
-import { parseQsysPanelBlock } from "../types/qsys.js";
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse, textOrNull, uniqueIds } from "./restore-check.js";
 import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
@@ -21,7 +20,7 @@ import { isSafeKey } from "./safe-key.js";
  * and held to what PATCH /api/views/:id checks of each field, through the same
  * predicates: a kind the app has (isDisplayKind), a layout of the layout shape,
  * `slotsLayout` an object or null, the slot board, the ServiceCue layout and
- * NDI source text or null, the two flags booleans, a Q-SYS panel block of its shape, the calendar lists `{ id, name }` lists, the
+ * NDI source text or null, the two flags booleans, the calendar lists `{ id, name }` lists, the
  * surface display or console. No id twice.
  */
 const restoreCheck = checked((raw) => {
@@ -40,13 +39,12 @@ const restoreCheck = checked((raw) => {
     textOrNull(v.ndiSource, `${what}'s NDI source`);
     optional(v.hideChrome, "boolean", `${what}'s hideChrome`);
     optional(v.showInSidebar, "boolean", `${what}'s showInSidebar`);
-    // Null reads as no block. Its shape is checked; whether it is a console and its
-    // address is free are not refused here: the load after the restore repairs them
-    // (qsys-slug-repair.ts), because a backup that fails to restore is worse.
-    if (v.qsys !== undefined && v.qsys !== null) {
-      const parsed = parseQsysPanelBlock(v.qsys);
-      if ("error" in parsed) refuse(`${what}'s Q-SYS panel settings: ${parsed.error}`);
-    }
+    // A Q-SYS panel block, and the settings kept aside beside one, are never refused
+    // here, whatever their shape: the load after the restore keeps a block it cannot
+    // read (or one on a view that cannot be a panel) aside whole, suffixes a shared
+    // address, and wraps a kept-aside value that is not a list (qsys-slug-repair.ts).
+    // A backup that fails to restore over one is worse, and the views a backup
+    // carries are read raw from disk, repairs not yet saved included.
     for (const k of ["calendarSources", "calendarTags"] as const) {
       if (v[k] !== undefined && !isSelectionList(v[k])) refuse(`${what}'s ${k} must be a list of { id, name }`);
     }

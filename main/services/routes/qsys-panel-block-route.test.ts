@@ -7,15 +7,16 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 
 import { outputRouteHarness } from "../fixtures/output-routes.js";
 
 const { viewRoutes, callRoute, stageController } = await outputRouteHarness("stage-qsys-panel-block-");
-const { sidebarConsolesOf } = await import("../sidebar-arrangement.js");
+const { resolveSidebar, sidebarConsolesOf } = await import("../sidebar-arrangement.js");
 await import("../views-store.js");
 const { restoreCheckFor } = await import("../store-registry.js");
-const { findPanelBySlug, parseQsysPanelBlock, slugify, uniqueQsysSlug } = await import("../../types/qsys.js");
+const { findPanelBySlug, parseQsysPanelBlock, qsysSlugFromName, uniqueQsysSlug } = await import("../../types/qsys.js");
+const { slugify: serviceCueSlugify } = await import("../servicecue-slug.js");
 
 type Mutable = { state: { views: View[] } };
 const ctl = stageController as unknown as Mutable;
@@ -180,28 +181,173 @@ describe("the Q-SYS panel block", () => {
     }
   });
 
+  it("a console's place in the sidebar survives its time as a panel, and a save made meanwhile", async () => {
+    seed(consoleView("c1", "Booth"), consoleView("c2", "Stage"), consoleView("p1", "Lobby"));
+    const order = () => resolveSidebar(stageController.getState().sidebar, sidebarConsolesOf(stageController.getState().views)).sections.find((x) => x.kind === "consoles")!.members;
+    const withConsoles = (members: string[]) => ({ sections: [{ id: "consoles", label: "Consoles", kind: "consoles" as const, members }], hidden: [] });
+    await stageController.setSidebar(withConsoles(["console:c2", "console:p1", "console:c1"]));
+    assert.equal((await patch("p1", { qsys: { kind: "staff", slug: "lobby" } })).status, 200);
+    assert.deepEqual(order(), ["console:c2", "console:c1"], "a panel is drawn among the consoles");
+    // What a page saves now: the consoles it draws, which leaves the panel out.
+    await stageController.setSidebar(withConsoles(["console:c2", "console:c1"]));
+    assert.equal((await patch("p1", { qsys: null })).status, 200);
+    assert.deepEqual(order(), ["console:c2", "console:p1", "console:c1"], "the console's place was lost while it was a panel");
+  });
+
   it("a Q-SYS panel is not among the sidebar's consoles; an ordinary console still is", () => {
     const consoles = sidebarConsolesOf([panel("p1", "zone-1"), consoleView("c1", "Booth")]);
     assert.deepEqual(consoles.all, ["console:c1"]);
+    assert.deepEqual([...(consoles.held ?? [])], ["console:p1"]);
   });
 
-  it("the restore check never refuses a backup over panel addresses or a null block; it still refuses a malformed block", async () => {
+  it("the restore check never refuses a backup over panel addresses, a null block, or a block it cannot read", async () => {
     // The repair happens on the load after the restore: qsys-slug-repair-restore.test.ts.
     const check = restoreCheckFor("views.json")!;
     assert.equal((await check([panel("p1", "zone-1"), panel("p2", "zone-1")])).ok, true, "two panels at one address refused a backup");
     assert.equal((await check([{ ...consoleView("c1", "Booth"), qsys: null } as unknown as View])).ok, true, "qsys: null refused");
-    const bad = await check([{ ...consoleView("c1", "Booth"), qsys: { kind: "guest", slug: "x" } } as unknown as View]);
-    assert.equal(bad.ok, false, "a malformed block got through (positive control)");
+    const bad = await check([{ ...consoleView("c1", "Booth"), qsys: { kind: "guest", slug: "Foyer Main" }, qsysInactive: "not a list" } as unknown as View]);
+    assert.equal(bad.ok, true, "a block the parser refuses refused the whole backup");
   });
 
-  it("slugify and uniqueQsysSlug make legal, free slugs", () => {
-    assert.equal(slugify("Zone 1 (Main)"), "zone-1-main");
-    assert.equal(slugify("Café Room"), "cafe-room");
-    assert.equal(slugify("!!!"), "panel");
-    assert.equal(slugify("Manage"), "manage-panel");
+  it("qsysSlugFromName and uniqueQsysSlug make legal, free slugs", () => {
+    assert.equal(qsysSlugFromName("Zone 1 (Main)"), "zone-1-main");
+    assert.equal(qsysSlugFromName("Café Room"), "cafe-room");
+    assert.equal(qsysSlugFromName("!!!"), "panel");
+    assert.equal(qsysSlugFromName("Manage"), "manage-panel");
     assert.equal(uniqueQsysSlug("zone-1", new Set(["zone-1", "zone-1-2"])), "zone-1-3");
     for (const name of ["Zone 1 (Main)", "!!!", "Manage", "a".repeat(100)]) {
-      assert.ok("block" in parseQsysPanelBlock({ kind: "staff", slug: slugify(name) }), `slugify(${JSON.stringify(name)}) is not a legal slug`);
+      assert.ok("block" in parseQsysPanelBlock({ kind: "staff", slug: qsysSlugFromName(name) }), `qsysSlugFromName(${JSON.stringify(name)}) is not a legal slug`);
     }
+  });
+
+  it("ServiceCue's slugify, which shares the core, still gives every address it gave before", () => {
+    // The rule as it was written before the core was shared: addresses pinned on
+    // tablets and displays were built by exactly this.
+    const before = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+    for (const name of ["The Gathering", "  Main Room  ", "Звук", "!!!", "", "Café", "a--b", "-x-", "Audio", "MIXED case 12", "tab\tand\nnewline"]) {
+      assert.equal(serviceCueSlugify(name), before(name), JSON.stringify(name));
+    }
+    assert.equal(serviceCueSlugify("Café"), "caf", "ServiceCue's slugs are not accent-folded; changing that would move pinned addresses");
+  });
+});
+
+describe("renaming a panel's address", () => {
+  it("keeps the old address as an alias that leads to it, and other panels' cog menus follow, in one save", async () => {
+    seed(panel("p1", "zone-1", "Zone one"), { ...panel("p2", "side"), qsys: { kind: "volunteer", slug: "side", siblings: ["zone-1", "gone"], returnAfterMin: 5 } } as View, panel("p3", "back"));
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.join(" ")));
+    let r;
+    try {
+      r = await patch("p1", { qsys: { kind: "volunteer", slug: "front", siblings: [], returnAfterMin: 5 } });
+    } finally {
+      log.mock.restore();
+    }
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(view("p1")?.qsys, { kind: "volunteer", slug: "front", siblings: [], returnAfterMin: 5, aliases: ["zone-1"] });
+    assert.deepEqual(view("p2")?.qsys?.siblings, ["front", "gone"], "another panel's cog menu lost the renamed panel");
+    assert.deepEqual(view("p3")?.qsys, panel("p3", "back").qsys, "a panel that did not list it was touched");
+    assert.equal(findPanelBySlug(stageController.getState().views, "zone-1")?.id, "p1", "the old address leads nowhere");
+    const disk = await onDisk();
+    assert.deepEqual(disk.find((v) => v.id === "p2")?.qsys?.siblings, ["front", "gone"], "the sibling rewrite was not saved with the rename");
+    assert.ok(lines.some((l) => l.includes('[qsys] panel "Zone one" moved from /qsys/zone-1 to /qsys/front') && l.includes("1 other panel(s)")), lines.join("\n"));
+  });
+
+  it("an old address is taken: no other panel, new view or copy may have it", async () => {
+    seed({ ...panel("p1", "front", "Zone one"), qsys: { kind: "volunteer", slug: "front", siblings: [], returnAfterMin: 5, aliases: ["zone-1"] } } as View, consoleView("c1", "Booth"));
+    const r = await patch("c1", { qsys: { kind: "staff", slug: "zone-1" } });
+    assert.equal(r.status, 400);
+    assert.match(errorOf(r), /\/qsys\/zone-1 is already used by "Zone one" \(it was that panel's address before a rename/);
+    const made = await callRoute(viewRoutes, "/api/views", { method: "POST", body: { name: "New", kind: "custom", surface: "console", qsys: { kind: "staff", slug: "zone-1" } } });
+    assert.equal(made.status, 400, "a new panel took an old address");
+    const { view: copy } = await stageController.duplicateView("p1");
+    assert.equal(copy.qsys?.slug, "front-2");
+    assert.equal(copy.qsys?.aliases, undefined, "a copy took the original's old addresses");
+  });
+
+  it("a request's aliases are ignored: the server keeps them; a rename back reclaims the old address", async () => {
+    seed(panel("p1", "a"));
+    assert.equal((await patch("p1", { qsys: { kind: "volunteer", slug: "b", aliases: ["stolen"] } })).status, 200);
+    assert.deepEqual(view("p1")?.qsys?.aliases, ["a"], "a request named its own aliases");
+    assert.equal((await patch("p1", { qsys: { kind: "volunteer", slug: "a" } })).status, 200);
+    assert.equal(view("p1")?.qsys?.slug, "a");
+    assert.deepEqual(view("p1")?.qsys?.aliases, ["b"], "a -> b -> a lost or doubled an address");
+    // A save that keeps the slug keeps the aliases as they are.
+    assert.equal((await patch("p1", { qsys: { kind: "staff", slug: "a", returnAfterMin: 0 } })).status, 200);
+    assert.deepEqual(view("p1")?.qsys?.aliases, ["b"]);
+  });
+
+  it("past twenty old addresses the oldest is forgotten, and the log says which", async () => {
+    seed({ ...panel("p1", "s0"), qsys: { kind: "volunteer", slug: "s20", siblings: [], returnAfterMin: 5, aliases: Array.from({ length: 20 }, (_, i) => `s${i}`) } } as View);
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.join(" ")));
+    try {
+      assert.equal((await patch("p1", { qsys: { kind: "volunteer", slug: "s21" } })).status, 200);
+    } finally {
+      log.mock.restore();
+    }
+    const aliases = view("p1")?.qsys?.aliases ?? [];
+    assert.equal(aliases.length, 20);
+    assert.equal(aliases[0], "s1");
+    assert.equal(aliases.at(-1), "s20");
+    assert.ok(lines.some((l) => l.includes("/qsys/s0 no longer lead")), lines.join("\n"));
+  });
+});
+
+describe("panel settings kept aside", () => {
+  it("restoring one onto a view that is a panel now keeps the live block aside first, whole, and logs it", async () => {
+    const kept = { kind: "volunteer", slug: "zone-b", siblings: ["x"], returnAfterMin: 3 };
+    seed({ ...panel("c1", "zone-a", "Lobby"), qsys: { kind: "staff", slug: "zone-a", siblings: ["y"], returnAfterMin: 9, aliases: ["old-a"] }, qsysInactive: [kept] } as View);
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.join(" ")));
+    let r;
+    try {
+      r = await patch("c1", { qsys: kept });
+    } finally {
+      log.mock.restore();
+    }
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(view("c1")?.qsys?.slug, "zone-b");
+    assert.deepEqual(view("c1")?.qsysInactive, [{ kind: "staff", slug: "zone-a", siblings: ["y"], returnAfterMin: 9, aliases: ["old-a"] }], "the live block was dropped, not kept aside");
+    assert.ok(lines.some((l) => l.includes('[qsys] "Lobby": its panel settings for /qsys/zone-a were kept aside')), lines.join("\n"));
+    assert.deepEqual((await onDisk()).find((v) => v.id === "c1")?.qsysInactive?.length, 1);
+  });
+
+  it("a restored block keeps its own old addresses, less any another panel has taken since", async () => {
+    const kept = { kind: "volunteer", slug: "zone-b", siblings: [], returnAfterMin: 5, aliases: ["mine", "taken"] };
+    seed({ ...consoleView("c1", "Lobby"), qsysInactive: [kept] } as View, panel("p2", "taken"));
+    assert.equal((await patch("c1", { qsys: kept })).status, 200);
+    assert.deepEqual(view("c1")?.qsys?.aliases, ["mine"]);
+  });
+
+  it("dismiss forgets one entry, matched whole (an unreadable one too), logs it, and 404s when it is not there", async () => {
+    const unreadable = { kind: "guest", slug: "Foyer Main" };
+    const other = { kind: "staff", slug: "zone-1" };
+    seed({ ...consoleView("c1", "Booth"), qsysInactive: [other, unreadable] } as View);
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.join(" ")));
+    let r;
+    try {
+      r = await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: { entry: unreadable } });
+    } finally {
+      log.mock.restore();
+    }
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(view("c1")?.qsysInactive, [other], "the wrong entry went, or none did");
+    assert.ok(lines.some((l) => l.includes("kept-aside panel settings dismissed by the operator") && l.includes("Foyer Main")), lines.join("\n"));
+    const again = await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: { entry: unreadable } });
+    assert.equal(again.status, 404);
+    assert.deepEqual(view("c1")?.qsysInactive, [other]);
+    assert.equal((await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: { entry: other } })).status, 200);
+    assert.equal(view("c1")?.qsysInactive, undefined, "an empty list was left behind");
+    assert.equal((await callRoute(viewRoutes, "/api/views/nope/qsys-inactive/dismiss", { method: "POST", body: { entry: other } })).status, 404);
+    assert.equal((await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: {} })).status, 400);
+  });
+
+  it("POST /api/views reads qsys: null as no block, as PATCH does", async () => {
+    seed();
+    const made = await callRoute(viewRoutes, "/api/views", { method: "POST", body: { name: "Plain", kind: "custom", surface: "console", qsys: null } });
+    assert.equal(made.status, 201, JSON.stringify(made.json));
+    const v = stageController.getState().views.find((x) => x.name === "Plain");
+    assert.ok(v && v.qsys === undefined);
   });
 });

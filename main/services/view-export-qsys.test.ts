@@ -24,7 +24,7 @@ const bundle = (views: unknown[]) => ({
   targets: { osc: [], rosstalk: [] }, images: {},
 });
 
-type Report = { views: { id: string; name: string }[]; qsysPanels: { id: string; name: string; slug: string; renamedFrom?: string; missingSiblings: string[] }[] };
+type Report = { views: { id: string; name: string }[]; qsysPanels: { id: string; name: string; slug: string; renamedFrom?: string; droppedAliases?: string[]; missingSiblings: string[] }[] };
 const importBundle = (b: unknown) => callRoute(viewRoutes, "/api/views/import", { method: "POST", body: b });
 const have = async () => await viewsStore.load();
 
@@ -88,7 +88,6 @@ describe("Q-SYS panels in a view bundle", () => {
       ["the reserved manage", panel("x", "manage", "Bad"), /not "manage"/],
       ["an unknown field", panel("x", "ok", "Bad", { qsys: { kind: "staff", slug: "ok", power: 1 } }), /field this app does not have/],
       ["a bad kind", panel("x", "ok", "Bad", { qsys: { kind: "guest", slug: "ok" } }), /volunteer or staff/],
-      ["null", panel("x", "ok", "Bad", { qsys: null }), /refused/],
       ["a display", panel("x", "ok", "Bad", { surface: "display" }), /custom console/],
       ["a slots screen", panel("x", "ok", "Bad", { kind: "slots", layout: null }), /custom console/],
     ];
@@ -99,6 +98,44 @@ describe("Q-SYS panels in a view bundle", () => {
       assert.match((r.json as { error: string }).error, message, what);
       assert.deepEqual((await have()).map((v) => v.id), ["p1"], `${what}: something was written`);
     }
+  });
+
+  it("qsys: null in a file is no block, as PATCH and the load read it", async () => {
+    await viewsStore.save([]);
+    const r = await importBundle(bundle([panel("x", "ok", "Plain", { qsys: null })]));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const landed = (await have()).find((v) => v.name === "Plain");
+    assert.ok(landed && !("qsys" in landed), "a null block landed as a block");
+  });
+
+  it("settings a view keeps aside travel, bounded: not a list, more than 20, or an entry over 4 KB is refused whole", async () => {
+    const kept = [{ kind: "guest", slug: "Foyer" }];
+    await viewsStore.save([]);
+    const ok = await importBundle(bundle([panel("x", "ok", "Keeps", { qsysInactive: kept })]));
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.deepEqual((await have()).find((v) => v.name === "Keeps")?.qsysInactive, kept);
+    const bad: [string, unknown, RegExp][] = [
+      ["not a list", "x", /not a list/],
+      ["21 entries", Array.from({ length: 21 }, () => ({})), /more than 20/],
+      ["an entry over 4 KB", [{ note: "x".repeat(5000) }], /over 4096 characters/],
+    ];
+    for (const [what, qsysInactive, message] of bad) {
+      await viewsStore.save([panel("p1", "zone-1", "Zone 1")]);
+      const r = await importBundle(bundle([panel("x", "ok", "Bad", { qsysInactive })]));
+      assert.equal(r.status, 400, `${what}: ${JSON.stringify(r.json)}`);
+      assert.match((r.json as { error: string }).error, message, what);
+      assert.deepEqual((await have()).map((v) => v.id), ["p1"], `${what}: something was written`);
+    }
+  });
+
+  it("a panel's old addresses travel, less any taken here, and the report names those", async () => {
+    await viewsStore.save([panel("p1", "front", "Here")]);
+    const r = await importBundle(bundle([panel("x", "zone-9", "From file", { qsys: { kind: "staff", slug: "zone-9", siblings: [], returnAfterMin: 5, aliases: ["front", "old-9"] } })]));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const landed = (await have()).find((v) => v.name === "From file");
+    assert.deepEqual(landed?.qsys?.aliases, ["old-9"], "an old address taken here was kept, or a free one dropped");
+    assert.deepEqual((r.json as Report).qsysPanels[0], { id: landed!.id, name: "From file", slug: "zone-9", droppedAliases: ["front"], missingSiblings: [] });
+    assert.equal(qsysSlugsOf(await have()).size, 3);
   });
 
   it("a bundle imports on a server with no Q-SYS integration: it lands, the check says there is no Core, nothing throws", async () => {

@@ -136,6 +136,12 @@ export interface SidebarConsoles {
   all: string[];
   /** Those whose "Show in the sidebar" is off. */
   hidden: ReadonlySet<string>;
+  /**
+   * Consoles that are Q-SYS panels, listed under Q-SYS rather than here. Where the
+   * saved arrangement places one is kept, not drawn and not dropped, so making it
+   * an ordinary console again puts it back where the operator had it.
+   */
+  held?: ReadonlySet<string>;
 }
 
 /**
@@ -152,7 +158,32 @@ export function sidebarConsolesOf(views: readonly View[] | undefined): SidebarCo
   return {
     all: list.map((v) => consoleMemberId(v.id)),
     hidden: new Set(list.filter((v) => !viewShownInSidebar(v)).map((v) => consoleMemberId(v.id))),
+    held: new Set(consoleViews(views).filter(isQsysPanel).map((v) => consoleMemberId(v.id))),
   };
+}
+
+/**
+ * `next` with each held console (a Q-SYS panel) put back where `prev` placed it:
+ * the arrangement a page saves draws no panel, so without this a save would forget
+ * a panel's place. Into the section of the same id, after the member it followed
+ * there (or first); a section the save removed takes its panels with it.
+ */
+export function keepHeldPlacements(prev: SidebarArrangement | null | undefined, next: SidebarArrangement, consoles: SidebarConsoles): SidebarArrangement {
+  const held = consoles.held;
+  if (!held || held.size === 0 || !prev || next.sections.length === 0) return next;
+  const present = new Set(next.sections.flatMap((x) => x.members));
+  const sections = cloneSections(next.sections);
+  for (const was of prev.sections) {
+    const into = sections.find((x) => x.id === was.id);
+    if (!into) continue;
+    was.members.forEach((id, i) => {
+      if (!held.has(id) || present.has(id)) return;
+      const after = was.members.slice(0, i).reverse().find((m) => into.members.includes(m));
+      into.members.splice(after === undefined ? 0 : into.members.indexOf(after) + 1, 0, id);
+      present.add(id);
+    });
+  }
+  return { ...next, sections };
 }
 
 /** The arrangement drawn: every known page and console placed once. */
@@ -231,6 +262,8 @@ export function resolveSidebar(
     for (const id of s.members) {
       if (placed.has(id) || hiddenSet.has(id)) continue;
       const consoleId = isConsoleId(id);
+      // A Q-SYS panel's place is kept for when it is an ordinary console again.
+      if (consoleId && consoles.held?.has(id)) continue;
       if (consoleId ? !knownConsoles.has(id) : !knownPages.has(id)) {
         dropped.push(id);
         continue;
@@ -399,7 +432,7 @@ export function keepKnownConsoles(
   arrangement: SidebarArrangement,
   consoles: SidebarConsoles,
 ): { arrangement: SidebarArrangement; dropped: string[] } {
-  const known = new Set(consoles.all);
+  const known = new Set([...consoles.all, ...(consoles.held ?? [])]);
   const dropped: string[] = [];
   const sections = arrangement.sections.map((s) => ({
     ...s,

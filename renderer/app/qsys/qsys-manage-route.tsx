@@ -22,7 +22,7 @@ import {
   isQsysSlug,
   qsysSlugsOf,
   siblingsOf,
-  slugify,
+  qsysSlugFromName,
   uniqueQsysSlug,
   type PanelKind,
   type QsysAddress,
@@ -390,7 +390,7 @@ function NewPanelDialog({ views, onClose }: { views: View[]; onClose: () => void
   const [message, setMessage] = useState<string | null>(null);
   /** The slug just made: opened once the page's own state has the view, never before (it would read as no panel). */
   const [made, setMade] = useState<string | null>(null);
-  const slug = uniqueQsysSlug(slugify(name || "panel"), qsysSlugsOf(views));
+  const slug = uniqueQsysSlug(qsysSlugFromName(name || "panel"), qsysSlugsOf(views));
   const arrived = made !== null && views.some((v) => v.qsys?.slug === made);
   useEffect(() => {
     if (!arrived || made === null) return;
@@ -440,7 +440,7 @@ function NewPanelDialog({ views, onClose }: { views: View[]; onClose: () => void
 export function PanelSettingsDialog({ view, views, onClose }: { view: View; views: View[]; onClose: () => void }) {
   const was = view.qsys;
   const [kind, setKind] = useState<PanelKind>(was?.kind ?? "staff");
-  const [slug, setSlug] = useState(was?.slug ?? uniqueQsysSlug(slugify(view.name), qsysSlugsOf(views)));
+  const [slug, setSlug] = useState(was?.slug ?? uniqueQsysSlug(qsysSlugFromName(view.name), qsysSlugsOf(views)));
   // A sibling no panel has is kept as it was: /qsys/manage lists it for somebody to fix.
   const [siblings, setSiblings] = useState<string[]>(was?.siblings ?? []);
   const [returnAfterMin, setReturnAfterMin] = useState(was?.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN);

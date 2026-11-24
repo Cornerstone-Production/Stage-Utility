@@ -3,53 +3,63 @@
 // Every write path keeps a panel's slug unique, its block well formed and a panel a
 // custom console. A file can still arrive that breaks one of those: a backup taken
 // before an import learned to suffix a clashing slug, a hand edit, a downgrade and
-// back. Such a file is the operator's work, so a restore never refuses it over
-// these, a load never throws on them, and nothing in a block is thrown away:
+// back, a newer build's field. Such a file is the operator's work, so a restore
+// never refuses it over these, a load never throws on them, and nothing in a block
+// is thrown away:
 //
 //   - two panels at one address: the first view in the file keeps it, and each
 //     later one takes the next free numeric suffix (uniqueQsysSlug, the rule an
-//     import uses), never another panel's own slug;
+//     import uses), never another panel's own slug or old address;
 //   - a block on a view that cannot be a panel (Home, a display, another kind), or
-//     one the parser refuses (a hand-edited slug): moved whole, as it was, onto the
-//     view's `qsysInactive` list, which nothing reads as a panel. /qsys/manage shows
-//     it and offers to restore it once the view can be a panel again;
+//     one the parser refuses (a hand-edited slug, a field this build does not
+//     have): moved whole, as it was, onto the view's `qsysInactive` list, which
+//     nothing reads as a panel. /qsys/manage shows it and offers to restore it once
+//     the view can be a panel again, or to dismiss it;
+//   - a `qsysInactive` that is not a list (a hand edit): wrapped as a list of one,
+//     never replaced;
+//   - an old address (alias) that is now another panel's address, or that an
+//     earlier panel in the file already keeps: no longer kept, since it cannot
+//     lead to this panel. The panel itself is untouched;
 //   - `qsys: null` reads as no block.
 //
 // Each change is a `[qsys]` line naming the view and, for a block moved aside, the
-// whole block; and is kept for /qsys/manage for as long as this process runs. The
+// whole block. The changes to a block are also kept for /qsys/manage for as long
+// as this process runs, every load's added to the last's, so a reload after the
+// repaired file was saved (which finds nothing more to do) does not hide them. The
 // file is not written here: the next save of the views writes it repaired (the
 // inert blocks with it), and a load after that finds nothing to say.
 
-import { HOME_VIEW_ID } from "../home-view.js";
 import { scrub } from "../scrub.js";
-import { parseQsysPanelBlock, uniqueQsysSlug, type QsysPanelBlock } from "../../types/qsys.js";
-import { viewSurface, type View } from "../../types/views.js";
+import { canBeQsysPanel, parseQsysPanelBlock, uniqueQsysSlug, type QsysPanelBlock, type QsysSlugRepair } from "../../types/qsys.js";
+import type { View } from "../../types/views.js";
 
-/** One change a load made to a panel block. `to` null: the block was moved aside, whole. */
-export interface QsysSlugRepair {
-  viewId: string;
-  name: string;
-  /** The slug the file gave, when it had a usable one. */
-  from: string | null;
-  to: string | null;
-  why: "shared" | "not-a-console" | "malformed";
+export type { QsysSlugRepair };
+
+const repairsSeen: QsysSlugRepair[] = [];
+const seenKeys = new Set<string>();
+
+/** What every load of the views this process made changed, for /qsys/manage. */
+export function qsysSlugRepairs(): QsysSlugRepair[] {
+  return repairsSeen;
 }
 
-let lastRepairs: QsysSlugRepair[] = [];
+/** Test seam: forget the repairs. */
+export function __resetQsysSlugRepairsForTests(): void {
+  repairsSeen.length = 0;
+  seenKeys.clear();
+}
 
-/** A panel is a custom console, and never Home. */
-const canBePanel = (v: View): boolean => v.id !== HOME_VIEW_ID && v.kind === "custom" && viewSurface(v) === "console";
-
-/** What the last load of the views changed, for /qsys/manage. */
-export function qsysSlugRepairs(): QsysSlugRepair[] {
-  return lastRepairs;
+/** A view's kept-aside list as a list: a value that is not one becomes its only entry. */
+function inactiveOf(v: View): unknown[] {
+  const raw = (v as { qsysInactive?: unknown }).qsysInactive;
+  if (raw === undefined) return [];
+  return Array.isArray(raw) ? raw : [raw];
 }
 
 /** The view with `block` moved, as it was, onto its inert list. */
 function setAside(v: View, block: unknown): View {
   const { qsys: _moved, ...rest } = v;
-  const kept = Array.isArray(v.qsysInactive) ? v.qsysInactive : [];
-  return { ...rest, qsysInactive: [...kept, block] } as View;
+  return { ...rest, qsysInactive: [...inactiveOf(v), block] } as View;
 }
 
 /**
@@ -66,22 +76,31 @@ export function repairQsysBlocks<V>(raw: V): V {
   for (const v of views) {
     if (v !== null && typeof v === "object" && v.qsys !== undefined && v.qsys !== null) parsed.set(v, parseQsysPanelBlock(v.qsys));
   }
-  // Every usable panel slug as the file has it, so a later duplicate's suffix never
-  // takes a slug another panel in the file already holds. The first view naming a
-  // slug owns it.
+  // Every usable panel address as the file has it (slugs and old addresses), so a
+  // later duplicate's suffix never takes one another panel in the file holds. The
+  // first view naming a slug owns it.
   const taken = new Set<string>();
   const owner = new Map<string, View>();
   for (const [v, p] of parsed) {
-    if (!("block" in p) || !canBePanel(v)) continue;
+    if (!("block" in p) || !canBeQsysPanel(v)) continue;
     taken.add(p.block.slug);
+    for (const a of p.block.aliases ?? []) taken.add(a);
     if (!owner.has(p.block.slug)) owner.set(p.block.slug, v);
   }
   let changed = false;
   const out = views.map((v) => {
-    if (v === null || typeof v !== "object" || !("qsys" in v)) return v;
-    if (v.qsys === null || v.qsys === undefined) {
+    if (v === null || typeof v !== "object") return v;
+    let view = v;
+    const inactive = (v as { qsysInactive?: unknown }).qsysInactive;
+    if (inactive !== undefined && !Array.isArray(inactive)) {
       changed = true;
-      const { qsys: _none, ...rest } = v;
+      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had kept-aside panel settings that were not a list; kept as a list of one: ${scrub(JSON.stringify(inactive), 600)}`);
+      view = { ...v, qsysInactive: [inactive] };
+    }
+    if (!("qsys" in view)) return view;
+    if (view.qsys === null || view.qsys === undefined) {
+      changed = true;
+      const { qsys: _none, ...rest } = view;
       return rest as View;
     }
     const p = parsed.get(v)!;
@@ -89,22 +108,44 @@ export function repairQsysBlocks<V>(raw: V): V {
       changed = true;
       repairs.push({ viewId: String(v.id), name: String(v.name), from: null, to: null, why: "malformed" });
       console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) has panel settings this app cannot read (${scrub(p.error)}); kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), 600)}`);
-      return setAside(v, v.qsys);
+      return setAside(view, view.qsys);
     }
-    if (!canBePanel(v)) {
+    if (!canBeQsysPanel(v)) {
       changed = true;
       repairs.push({ viewId: v.id, name: v.name, from: p.block.slug, to: null, why: "not-a-console" });
       console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had panel settings for /qsys/${scrub(p.block.slug)} but is not a custom console; kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), 600)}`);
-      return setAside(v, v.qsys);
+      return setAside(view, view.qsys);
     }
-    if (owner.get(p.block.slug) === v) return v;
+    if (owner.get(p.block.slug) === v) return view;
     const slug = uniqueQsysSlug(p.block.slug, taken);
     taken.add(slug);
     changed = true;
     repairs.push({ viewId: v.id, name: v.name, from: p.block.slug, to: slug, why: "shared" });
     console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) shared /qsys/${scrub(p.block.slug)} with an earlier panel; it opens at /qsys/${scrub(slug)} now`);
-    return { ...v, qsys: { ...p.block, slug } };
+    return { ...view, qsys: { ...p.block, slug } };
   });
-  lastRepairs = repairs;
-  return (changed ? out : raw) as V;
+
+  // Old addresses: one that is now a panel's own, or that an earlier panel already
+  // keeps, cannot lead here, so it is no longer kept.
+  const live = new Set(out.flatMap((v) => (v && typeof v === "object" && v.qsys ? [v.qsys.slug] : [])));
+  const claimed = new Set<string>();
+  const final = out.map((v) => {
+    if (!v || typeof v !== "object" || !v.qsys?.aliases) return v;
+    const keep = v.qsys.aliases.filter((a) => !live.has(a) && !claimed.has(a));
+    for (const a of keep) claimed.add(a);
+    if (keep.length === v.qsys.aliases.length) return v;
+    changed = true;
+    const gone = v.qsys.aliases.filter((a) => !keep.includes(a));
+    console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) no longer keeps its old address(es) ${scrub(gone.map((a) => `/qsys/${a}`).join(", "))}: another panel has them`);
+    const { aliases: _old, ...block } = v.qsys;
+    return { ...v, qsys: keep.length > 0 ? { ...block, aliases: keep } : block };
+  });
+
+  for (const r of repairs) {
+    const key = JSON.stringify(r);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    repairsSeen.push(r);
+  }
+  return (changed ? final : raw) as V;
 }

@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../is-record.js";
-import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, readBody, readObjectBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
@@ -94,8 +94,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
       const surface = body.surface === "console" ? "console" : "display";
-      // A new Q-SYS panel: refused whole, making nothing, when the block is bad or its slug is taken.
-      const qsys = body.qsys === undefined ? null : parseQsysPanelBlock(body.qsys);
+      // A new Q-SYS panel: refused whole, making nothing, when the block is bad or its
+      // slug is taken. `qsys: null` is no block, as PATCH and the load read it.
+      const qsys = body.qsys === undefined || body.qsys === null ? null : parseQsysPanelBlock(body.qsys);
       if (qsys && "error" in qsys) {
         error(res, qsys.error);
         return;
@@ -377,6 +378,24 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name, { copyBoards: body.copyBoards !== false });
       // The copy this call made, beside the state, as POST /api/outputs answers.
       json(res, { ...state, viewId: view.id }, 201);
+      return;
+    }
+
+    // POST /api/views/:id/qsys-inactive/dismiss — { entry }: forget one of the panel
+    // settings a load kept aside on this view, as the operator chose to. `entry` is
+    // the kept value itself, matched whole; 404 when the view keeps nothing like it.
+    const dismissMatch = pathname.match(/^\/api\/views\/([^/]+)\/qsys-inactive\/dismiss$/);
+    if (method === "POST" && dismissMatch) {
+      const body = await readObjectBody(req, res);
+      if (!body) return;
+      if (!("entry" in body)) return error(res, "entry (the kept-aside settings, as GET /api/state lists them) is required");
+      if (!stageController.getState().views.some((v) => v.id === dismissMatch[1])) return error(res, "no view has that id", 404);
+      try {
+        json(res, await stageController.dismissQsysInactive(dismissMatch[1], body.entry));
+      } catch (err) {
+        if (!(err instanceof QsysPanelRefused)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 
