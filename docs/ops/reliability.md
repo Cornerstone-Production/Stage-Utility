@@ -392,7 +392,10 @@ others are resumed, nothing is written, and `[config-snapshot]` names which.
   here, its dialog says "Screens set up on this server will be released and need
   setting up again.", including for a config with no server id, which asks
   nothing else; with the box ticked, only when the config brings no bindings. A bundle with no `settings.json` changes no screens, and leaves
-  this server's bindings as they are.
+  this server's bindings as they are. While a restore lands, nothing writes the
+  bindings: a screen's probe, heartbeat or first enrolment skips its write (the enrolment still opens its display), and setting a screen up or
+  releasing one is refused with a `503` until the server is back, so nothing puts the bindings from
+  before the restore back over the restored file.
 - **Stage plots links are merged, never lost.** A published venue's secret link is in
   `stageplots.json`, and a restore merges the bundle's with the live file's so that no
   link is left live on the page with nothing here that knows it, and none that was

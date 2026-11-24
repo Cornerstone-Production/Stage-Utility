@@ -514,6 +514,7 @@ describe("a deploy whose answer was lost", () => {
     assert.equal(outcome.kind, "failed");
     assert.equal(d.status().state, "failed");
     assert.equal(d.status().error?.unsure, true, "the card was not told whether the page took it is not known");
+    assert.equal(outcome.kind === "failed" && outcome.unsure, true, "the caller (Update the page now) was not told whether the page took it is not known");
     assert.ok(lines.some((l) => /what Cloudflare holds could not be read to see whether it went through: .*internal error/.test(l)), lines.join("\n"));
     assert.ok(lines.some((l) => /the update failed at "upload the Worker" \(no answer\).*Whether the page took it is not known\./.test(l)), lines.join("\n"));
     assert.ok(!lines.some((l) => /The page is unchanged/.test(l)), lines.join("\n"));

@@ -9,6 +9,7 @@
 import { layoutNameKey } from "@main/services/servicecue-slug";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
+import { norm, unassignedCategoryRoles } from "../../main/role-resolve";
 import { freeLayoutName } from "./servicecue-layout-names";
 
 /** The columns a layout stores as a show flag, each with a fixed place in the row. */
@@ -40,8 +41,6 @@ export const FOOTER = [{ key: "showTotalTime", label: "Total time" }] as const s
 export type ToggleKey = (typeof UNDER_TITLE)[number]["key"] | (typeof FOOTER)[number]["key"];
 
 export const toggleOn = (l: ServiceCueLayout, key: ToggleKey): boolean => l[key] !== false;
-
-const norm = (s: string) => s.trim().toLowerCase();
 
 /** Layouts in the landing page's order. */
 export const byOrder = <T extends { order: number }>(list: readonly T[]): T[] => [...list].sort((a, b) => a.order - b.order);
@@ -94,21 +93,40 @@ export function moveTo<T>(list: readonly T[], item: T, index: number): T[] {
   return out;
 }
 
-/** One change to a layout's Columns row. `index` counts role columns, the moved one left out. */
+/** One change to a layout's Columns row. `index` counts the role columns DRAWN (layoutRoles),
+ *  the moved one left out: what the operator sees and drops between. */
 export type ColumnChange =
   | { kind: "move-role"; roleId: string; index: number }
   | { kind: "add-role"; roleId: string; index?: number }
   | { kind: "remove-role"; roleId: string }
   | { kind: "set-fixed"; key: FixedKey; on: boolean };
 
+/**
+ * `cols` with its drawn ids put in `order`, every id no role has kept in its own slot.
+ *
+ * A layout can name a role this install does not have: an imported layout brings its
+ * columns, not its roles. Those ids draw nothing, so the operator's drop index counts
+ * the drawn columns only. Applied to the stored list as it stood, a drop after a ghost
+ * landed one place short (dragging A after B in [ghost, A, B] saved the same list) and
+ * was announced as a move.
+ */
+export function placeDrawn(cols: readonly string[], drawn: ReadonlySet<string>, order: readonly string[]): string[] {
+  const next = [...order];
+  const out = cols.map((id) => (drawn.has(id) ? next.shift() : id)).filter((id): id is string => id !== undefined);
+  return [...out, ...next];
+}
+
 /** The patch a Columns change makes to the layout as it is when the change saves. */
-export function columnPatch(l: ServiceCueLayout, c: ColumnChange): Partial<ServiceCueLayout> {
+export function columnPatch(l: ServiceCueLayout, c: ColumnChange, roles: readonly CategoryRole[]): Partial<ServiceCueLayout> {
   const cols = l.columnRoles ?? [];
+  const drawn = new Set(layoutRoles(l, roles).map((r) => r.id));
+  const shown = cols.filter((id) => drawn.has(id));
   switch (c.kind) {
     case "move-role":
-      return { columnRoles: moveTo(cols, c.roleId, c.index) };
-    case "add-role":
-      return { columnRoles: moveTo(cols, c.roleId, c.index ?? cols.length) };
+    case "add-role": {
+      const order = moveTo(shown, c.roleId, c.index ?? shown.length);
+      return { columnRoles: placeDrawn(cols.filter((id) => id !== c.roleId), drawn, order) };
+    }
     case "remove-role":
       // A layout must not keep tinting rows by a role it no longer shows.
       return { columnRoles: cols.filter((id) => id !== c.roleId), ...(l.accentRole === c.roleId ? { accentRole: null } : {}) };
@@ -220,15 +238,16 @@ export function deleteRoleBody(role: CategoryRole, layouts: readonly ServiceCueL
   return out;
 }
 
-/** Categories on `typeIds`, in each type's order, that no role claims; types with none left out. */
+/** Categories on `typeIds`, in each type's order, that no role claims; types with none left out.
+ *  The columns All columns draws for each type (unassignedCategoryRoles): spellings that differ
+ *  only in case are one, and a blank name is none. */
 export function unassignedByType(
   roles: readonly CategoryRole[],
   typeIds: readonly string[],
   catsByType: ReadonlyMap<string, readonly string[]>,
 ): { typeId: string; cats: string[] }[] {
-  const claimed = new Set(roles.flatMap((r) => r.members.map(norm)));
   return typeIds
-    .map((typeId) => ({ typeId, cats: (catsByType.get(typeId) ?? []).filter((c) => !claimed.has(norm(c))) }))
+    .map((typeId) => ({ typeId, cats: unassignedCategoryRoles(roles, catsByType.get(typeId) ?? []).map((r) => r.name) }))
     .filter((g) => g.cats.length > 0);
 }
 
@@ -271,8 +290,3 @@ export function ambiguousCategories(roles: readonly CategoryRole[]): { name: str
   return [...byKey.values()].filter((e) => e.roles.length > 1);
 }
 
-/** Does a role have a member among these categories? A role with none draws no column. */
-export function roleApplies(role: CategoryRole, cats: readonly string[]): boolean {
-  const have = new Set(cats.map(norm));
-  return role.members.some((m) => have.has(norm(m)));
-}

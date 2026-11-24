@@ -27,7 +27,7 @@ import { setAvatarGeometry, withoutAvatarGeometry } from "../avatar-geometry.js"
 import { broadcast, channelHasSubscribers } from "../broadcaster.js";
 import { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
-import { imageDir, listImages, readImage, saveImageBytes } from "../image-files.js";
+import { contentName, imageDir, listImages, readImage, saveImageBytes, storedImageProblem } from "../image-files.js";
 import { checked } from "../restore-check.js";
 import { scrub, scrubError } from "../scrub.js";
 import { loadSharp } from "../sharp-load.js";
@@ -36,12 +36,15 @@ import {
   PHOTO_THEMES_CHANNEL,
   THEMED_PHOTO_FILE,
   THEMED_PHOTO_REF_PREFIX,
+  themedPhotoUrl,
+  type ApproveAllResultDTO,
   type GenerateResultDTO,
   type PhotoShow,
   type PhotoThemesChanged,
   type PhotoThemesDTO,
   type PlanChoiceDTO,
   type PlanPeopleDTO,
+  type ShownEdit,
   type ThemeDTO,
   type ThemePersonDTO,
   type ThemedPhotoStatus,
@@ -58,7 +61,9 @@ import {
   emptyBook,
   extendUse,
   keptUntil,
+  madeUnderEarlierPrompt,
   parseBook,
+  promptKey,
   referencedFiles,
   serializeBook,
   serviceDay,
@@ -146,6 +151,8 @@ interface Job {
   runId: number;
   attempts: number;
   notBefore: number;
+  /** The prompt the edit was sent with, once it has been: what the result records. */
+  prompt?: string;
 }
 
 interface Run {
@@ -161,7 +168,6 @@ interface Run {
 const NO_PHOTOS: ReadonlyMap<string, string> = new Map();
 
 const jobKey = (themeId: string, personId: string) => `${themeId}\u0000${personId}`;
-const imageUrl = (file: string) => `/api/photo-themes/images/${file}`;
 
 async function defaultLoadOriginal(url: string): Promise<Buffer | null> {
   // Through the photo cache, so the original is fetched the way every slot's is
@@ -181,11 +187,10 @@ async function toPng(bytes: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-/** An edit's bytes as a type the store keeps, by their magic. */
+/** An edit's bytes as a type the store keeps: the one whose content check they
+ *  pass, the same check saveImageBytes makes before it writes them. */
 function editExtension(bytes: Buffer): "webp" | "png" | null {
-  if (bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
-  if (bytes[0] === 0x89 && bytes.subarray(1, 4).toString("latin1") === "PNG") return "png";
-  return null;
+  return (["webp", "png"] as const).find((ext) => storedImageProblem(contentName(bytes, ext), bytes, { checkContent: true }) === null) ?? null;
 }
 
 export class PhotoThemesService {
@@ -222,7 +227,12 @@ export class PhotoThemesService {
   private missing!: Set<string>;
 
   constructor() {
-    this.connection = new OpenAiConnection(() => this.now());
+    // A key saved, removed or refused goes out on the channel: the Integrations tile
+    // and every open Theme photos sheet follow it without a reload.
+    this.connection = new OpenAiConnection(
+      () => this.now(),
+      () => this.changedNow(),
+    );
     this.resetState();
   }
 
@@ -349,7 +359,7 @@ export class PhotoThemesService {
     const active = [...this.running.values(), ...this.queue]
       .map((j) => ({ themeId: j.themeId, personId: j.personId }))
       .sort((a, b) => a.themeId.localeCompare(b.themeId) || a.personId.localeCompare(b.personId));
-    return { epoch: this.epoch, seq: this.seq, running: this.running.size, queued: this.queue.length, active };
+    return { epoch: this.epoch, seq: this.seq, running: this.running.size, queued: this.queue.length, active, connection: this.connection.status() };
   }
 
   /** A stored edit, for review or for a slot. */
@@ -375,7 +385,9 @@ export class PhotoThemesService {
       roster: read.roster,
       ...(read.reason ? { reason: read.reason } : {}),
       people,
-      toGenerate: theme ? people.filter((p) => p.originalUrl && !p.approved && (p.status === "none" || p.status === "failed")).length : 0,
+      // What a press would send, by the rule generate() applies: the buttons' counts are what they bill.
+      toGenerate: theme ? read.people.filter((p) => this.wouldSend(theme, p, "missing") === "send").length : 0,
+      toRedoAll: theme ? read.people.filter((p) => this.wouldSend(theme, p, "all") === "send").length : 0,
     };
   }
 
@@ -384,7 +396,7 @@ export class PhotoThemesService {
       id: t.id,
       name: t.name,
       prompt: t.prompt,
-      promptChanged: t.prompt !== t.baselinePrompt && [...t.people.values()].some((p) => p.approved || p.pending?.file),
+      promptChanged: [...t.people.values()].some((p) => this.promptChangedFor(t, p)),
       createdAt: t.createdAt,
       lastUsedDate: t.lastUsedDate,
       keptUntil: keptUntil(t),
@@ -400,6 +412,7 @@ export class PhotoThemesService {
     const key = jobKey(t.id, personId);
     const generating = this.running.has(key) || this.queue.some((j) => j.key === key);
     const stale = entry?.approved ? this.isStale(entry) : false;
+    const promptChanged = entry ? this.promptChangedFor(t, entry) : false;
     let status: ThemedPhotoStatus = "none";
     if (generating) status = "generating";
     else if (entry?.pending) status = entry.pending.status;
@@ -410,9 +423,10 @@ export class PhotoThemesService {
       // What Manage themes draws beside the edit: their photo as this server last saw it, else what the edit was made from.
       originalUrl: this.currentPhoto(personId) ?? entry?.approved?.sourceUrl ?? entry?.pending?.sourceUrl ?? null,
       status,
+      promptChanged,
       approved: entry?.approved
         ? {
-            url: imageUrl(entry.approved.file),
+            url: themedPhotoUrl(entry.approved.file),
             fromPlanId: entry.approved.planId,
             fromDate: entry.approved.serviceDate,
             approvedAt: entry.approved.approvedAt,
@@ -420,16 +434,22 @@ export class PhotoThemesService {
           }
         : null,
       pending: generating
-        ? { status: "generating", url: null, reason: null, planId: this.jobFor(key)?.planId ?? null }
+        ? { status: "generating", url: null, file: null, reason: null, planId: this.jobFor(key)?.planId ?? null }
         : entry?.pending
           ? {
               status: entry.pending.status,
-              url: entry.pending.file ? imageUrl(entry.pending.file) : null,
+              url: entry.pending.file ? themedPhotoUrl(entry.pending.file) : null,
+              file: entry.pending.file ?? null,
               reason: entry.pending.reason ?? null,
               planId: entry.pending.planId,
             }
           : null,
     };
+  }
+
+  /** Their photo was made under an earlier prompt, and is not being made again now. */
+  private promptChangedFor(t: Theme, p: ThemePerson): boolean {
+    return !this.expected.has(jobKey(t.id, p.personId)) && madeUnderEarlierPrompt(t, p);
   }
 
   private jobFor(key: string): Job | undefined {
@@ -490,11 +510,16 @@ export class PhotoThemesService {
     return this.themeDto(this.book.themes.get(id)!);
   }
 
-  /** Keep the photos made under the old prompt: "Keep these". */
+  /** Keep the photos made under an earlier prompt, everyone's, on every plan: "Keep these". */
   async keepPrompt(id: string): Promise<ThemeDTO> {
     await this.mutate((b) => {
       const t = themeIn(b, id);
       t.baselinePrompt = t.prompt;
+      const key = promptKey(t.prompt);
+      for (const p of t.people.values()) {
+        if (p.approved) p.approved.prompt = key;
+        if (p.pending) p.pending.prompt = key;
+      }
     });
     return this.themeDto(this.book.themes.get(id)!);
   }
@@ -503,7 +528,7 @@ export class PhotoThemesService {
     let plans = 0;
     let photos = 0;
     let name = "";
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       const t = themeIn(b, id);
       name = t.name;
       photos = [...t.people.values()].filter((p) => p.approved).length;
@@ -514,7 +539,7 @@ export class PhotoThemesService {
         }
       }
       b.themes.delete(id);
-      this.cancelTheme(id);
+      afterSave(() => this.cancelTheme(id));
     });
     console.log(
       `[photo-theme] theme "${scrub(name)}" deleted with ${scrub(photos)} approved photo(s); ${scrub(plans)} plan(s) back to their original photos`,
@@ -554,36 +579,54 @@ export class PhotoThemesService {
 
   // ── People ──────────────────────────────────────────────────────────────
 
-  /** Approve a ready edit: it replaces any approved photo, and goes on screens. */
-  async approve(themeId: string, personId: string): Promise<ThemePersonDTO> {
+  /**
+   * Approve the ready edit the operator was shown (`file`): it replaces any
+   * approved photo, and goes on screens. Checked again inside the write, after
+   * the roster read: an edit that replaced the shown one meanwhile (a Redo that
+   * landed) is refused, never approved unseen.
+   */
+  async approve(themeId: string, personId: string, file: string): Promise<ThemePersonDTO> {
     const entry = this.entry(themeId, personId);
     if (entry.pending?.status !== "ready") throw new PhotoThemeRefused("There is no edit waiting for review", 409);
     const turnOn = await this.plansToTurnOn(themeId, entry.pending.planId ? [entry.pending.planId] : []);
     await this.mutate((b) => {
-      promote(themeIn(b, themeId), personId, this.now());
+      const t = themeIn(b, themeId);
+      if (!isShownEdit(t, personId, file)) throw new PhotoThemeRefused("Their edit changed since it was shown: look at it again", 409);
+      promote(t, personId, this.now());
       for (const planId of turnOn) b.plans.get(planId)!.show = "themed";
     });
     return this.personDto(this.book.themes.get(themeId)!, personId, entry.name);
   }
 
-  /** Approve every edit made for this plan that is waiting for review. */
-  async approveAll(planId: string): Promise<{ approved: number }> {
+  /**
+   * Approve the edits the operator was shown for this plan, each by the file
+   * they saw. One that is no longer that file, or no longer waiting for review
+   * for this plan, is skipped and named; none left to approve is refused.
+   */
+  async approveAll(planId: string, shown: readonly ShownEdit[]): Promise<ApproveAllResultDTO> {
     const choice = this.book.plans.get(planId);
     if (!choice?.themeId) throw new PhotoThemeRefused("This plan has no theme", 409);
     const themeId = choice.themeId;
     const turnOn = await this.plansToTurnOn(themeId, [planId]);
     let approved = 0;
+    const skipped: string[] = [];
     await this.mutate((b) => {
       const t = themeIn(b, themeId);
-      for (const p of t.people.values()) {
-        if (p.pending?.status === "ready" && p.pending.planId === planId) {
-          promote(t, p.personId, this.now());
+      for (const { personId, file } of shown) {
+        if (isShownEdit(t, personId, file) && t.people.get(personId)!.pending!.planId === planId) {
+          promote(t, personId, this.now());
           approved++;
+        } else {
+          skipped.push(personId);
         }
       }
-      if (approved > 0) for (const id of turnOn) b.plans.get(id)!.show = "themed";
+      if (approved === 0) throw new PhotoThemeRefused("None of those edits is waiting for review as it was shown: look again", 409);
+      for (const id of turnOn) b.plans.get(id)!.show = "themed";
     });
-    return { approved };
+    if (skipped.length > 0) {
+      console.log(`[photo-theme] approve all for plan ${scrub(planId)}: ${scrub(approved)} approved, ${scrub(skipped.length)} left for review (their edit changed since it was shown)`);
+    }
+    return { approved, skipped };
   }
 
   /**
@@ -629,24 +672,27 @@ export class PhotoThemesService {
     if (kind === "move" && this.expected.has(jobKey(themeId, personId))) {
       throw new PhotoThemeRefused("Their photo in this theme is still being made", 409);
     }
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       const from = themeIn(b, themeId);
       const target = themeIn(b, to);
       const src = from.people.get(personId);
       // Checked again here: a remove queued ahead of this write may have taken it.
       if (!src?.approved) throw new PhotoThemeRefused("They have no approved photo in this theme to " + kind, 409);
-      this.cancel(jobKey(to, personId));
-      target.people.set(personId, { personId, name: src.name, approved: { ...src.approved } });
+      afterSave(() => this.cancel(jobKey(to, personId)));
+      // Put there on purpose: it stands for the target's prompt, not the one it was made under.
+      target.people.set(personId, { personId, name: src.name, approved: { ...src.approved, prompt: promptKey(target.prompt) } });
       if (kind === "move") from.people.delete(personId);
     });
   }
 
   /** Take a person out of a theme: every plan using it shows their original again. */
   async remove(themeId: string, personId: string): Promise<void> {
-    this.entry(themeId, personId);
-    await this.mutate((b) => {
+    // Someone whose first photo is still being made has no entry yet, and removing
+    // them cancels that edit: refused only when there is neither.
+    if (!this.expected.has(jobKey(themeId, personId))) this.entry(themeId, personId);
+    await this.mutate((b, _saved, afterSave) => {
       themeIn(b, themeId).people.delete(personId);
-      this.cancel(jobKey(themeId, personId));
+      afterSave(() => this.cancel(jobKey(themeId, personId)));
     });
   }
 
@@ -661,8 +707,10 @@ export class PhotoThemesService {
   /**
    * Queue edits for the people on a plan. `missing` sends only those with no
    * approved photo in the theme and none waiting for review: anyone with an
-   * approved one is reused at no cost. `all` redoes everyone (after a prompt change), and takes the new
-   * prompt as the one the photos are made under.
+   * approved one is reused at no cost. `all` (Redo all, after a prompt change)
+   * also sends those on this plan whose photo was made under an earlier prompt.
+   * Each photo records its own prompt, so people on other plans still made
+   * under the old one keep the theme's `promptChanged` until they are redone too.
    */
   async generate(planId: string, serviceTypeId: string, mode: "missing" | "all"): Promise<GenerateResultDTO> {
     const usable = this.connection.usable();
@@ -671,36 +719,16 @@ export class PhotoThemesService {
     if (!choice?.themeId) throw new PhotoThemeRefused("Pick a theme for this plan first", 409);
     const themeId = choice.themeId;
     const read = await this.deps!.planPeople(serviceTypeId, planId);
-    if (read.roster === "unavailable") {
-      throw new PhotoThemeRefused(`Could not read who is on this plan: ${read.reason ?? "Planning Center did not answer"}`, 502);
-    }
+    if (read.roster === "unavailable") throw rosterUnreadable(read);
     this.see(read.people);
     const theme = themeIn(this.book, themeId);
     const result: GenerateResultDTO = { queued: 0, reused: 0, skipped: [] };
     const toSend: PlanPerson[] = [];
     for (const p of read.people) {
-      const entry = theme.people.get(p.personId);
-      if (this.expected.has(jobKey(themeId, p.personId))) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Already being made" });
-      } else if (mode === "missing" && entry?.approved) {
-        // On screen already: reused at no cost, whatever a later Redo did.
-        // A failed Redo is tried again only by Redo.
-        result.reused++;
-      } else if (mode === "missing" && entry?.pending?.status === "ready") {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Made, waiting for review" });
-      } else if (!p.photoUrl) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "No Planning Center photo" });
-      } else if (!isAllowedPhotoUrl(p.photoUrl)) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Their photo is not on Planning Center" });
-      } else {
-        toSend.push(p);
-      }
-    }
-    if (mode === "all" && theme.baselinePrompt !== theme.prompt) {
-      await this.mutate((b) => {
-        const t = themeIn(b, themeId);
-        t.baselinePrompt = t.prompt;
-      });
+      const what = this.wouldSend(theme, p, mode);
+      if (what === "send") toSend.push(p);
+      else if (what === "reused") result.reused++;
+      else result.skipped.push({ personId: p.personId, name: p.name, reason: what.skip });
     }
     const runId = this.nextRunId++;
     const run: Run = { label: `plan ${planId}`, themeName: theme.name, made: 0, failed: 0, reused: result.reused, skipped: 0, outstanding: 0 };
@@ -722,6 +750,24 @@ export class PhotoThemesService {
     return result;
   }
 
+  /**
+   * What a Generate in `mode` does with one person on the plan: send them, reuse
+   * their approved photo, or skip them and why. The one rule: Generate applies it,
+   * and the plan read counts it for the buttons, so a count is what a press sends.
+   */
+  private wouldSend(theme: Theme, p: PlanPerson, mode: "missing" | "all"): "send" | "reused" | { skip: string } {
+    const entry = theme.people.get(p.personId);
+    // Redo all sends again only a photo made under an earlier prompt.
+    const keep = entry && !(mode === "all" && madeUnderEarlierPrompt(theme, entry));
+    if (this.expected.has(jobKey(theme.id, p.personId))) return { skip: "Already being made" };
+    // On screen already: reused at no cost, whatever a later Redo did. A failed Redo is tried again only by Redo.
+    if (keep && entry.approved) return "reused";
+    if (keep && entry.pending?.status === "ready") return { skip: "Made, waiting for review" };
+    if (!p.photoUrl) return { skip: "No Planning Center photo" };
+    if (!isAllowedPhotoUrl(p.photoUrl)) return { skip: "Their photo is not on Planning Center" };
+    return "send";
+  }
+
   /** Make one person's photo again. Their approved photo stays on screens until the new one is approved. */
   async redo(themeId: string, personId: string, from: { planId: string; serviceTypeId: string } | null): Promise<ThemePersonDTO> {
     const usable = this.connection.usable();
@@ -734,6 +780,8 @@ export class PhotoThemesService {
     let serviceDate: string | null = null;
     if (from) {
       const read = await this.deps!.planPeople(from.serviceTypeId, from.planId);
+      // Not knowing who is on the plan is not knowing they are off it: said as what it is.
+      if (read.roster === "unavailable") throw rosterUnreadable(read);
       this.see(read.people);
       const p = read.people.find((x) => x.personId === personId);
       if (!p) throw new PhotoThemeRefused("That person is not on this plan", 404);
@@ -837,8 +885,7 @@ export class PhotoThemesService {
   }
 
   private async attempt(job: Job): Promise<void> {
-    const theme = this.book.themes.get(job.themeId);
-    if (!theme || this.expected.get(job.key) !== job.id) return this.settle(job, null);
+    if (!this.book.themes.has(job.themeId) || this.expected.get(job.key) !== job.id) return this.settle(job, null);
     const usable = this.connection.usable();
     if (!usable.ok) return this.fail(job, usable.reason);
     const apiKey = await this.connection.apiKey();
@@ -853,7 +900,13 @@ export class PhotoThemesService {
       console.warn(`[photo-theme] the photo of ${scrub(job.name)} could not be decoded: ${scrub(errorMessage(err))}`);
       return this.fail(job, "Their Planning Center photo could not be read as an image");
     }
-    const result = await editImage({ apiKey, prompt: theme.prompt, png, fetchImpl: this.deps?.fetchImpl });
+    // Checked again after the awaits, just before the request that bills: a person
+    // removed, a theme deleted or a job cancelled while the original was read is
+    // not sent. The prompt is the theme's as it stands now.
+    const current = this.book.themes.get(job.themeId);
+    if (!current || this.expected.get(job.key) !== job.id) return this.settle(job, null);
+    job.prompt = current.prompt;
+    const result = await editImage({ apiKey, prompt: job.prompt, png, fetchImpl: this.deps?.fetchImpl });
     if (result.ok) {
       this.connection.recordSuccess();
       const ext = editExtension(result.bytes);
@@ -873,11 +926,12 @@ export class PhotoThemesService {
     await this.fail(job, result.reason);
     if (FATAL.has(result.kind)) {
       // The rest of the run would fail the same way, each one a request: failed
-      // here, without asking.
-      for (const queued of [...this.queue]) {
-        this.queue = this.queue.filter((j) => j !== queued);
-        await this.fail(queued, result.reason);
-      }
+      // here, without asking. Taken off the queue all at once, before the first
+      // await: another job's drain, or a pump from its finally, then finds
+      // nothing left to fail twice or to send.
+      const rest = this.queue;
+      this.queue = [];
+      for (const queued of rest) await this.fail(queued, result.reason);
     }
   }
 
@@ -888,23 +942,32 @@ export class PhotoThemesService {
 
   /** Record a finished job, if anything still wants it. */
   private async commit(job: Job, outcome: { status: "ready"; bytes: Buffer; ext: "webp" | "png" } | { status: "failed"; reason: string }): Promise<void> {
-    if (this.expected.get(job.key) !== job.id) {
-      if (outcome.status === "ready") {
-        console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
-      }
-      return this.settle(job, null);
-    }
+    if (this.expected.get(job.key) !== job.id) return this.notKept(job, outcome.status);
     if (this.paused) {
       console.warn(`[photo-theme] an edit of ${scrub(job.name)} finished while a restore was landing, and was not kept`);
       this.expected.delete(job.key);
       return this.settle(job, null);
     }
+    let dropped = false;
     try {
       await this.mutate(async (b, saved) => {
+        // Checked again in the write: a remove, move or copy, delete or sweep
+        // queued ahead of this one cancels the job only once its own save has
+        // landed, which can be after the check above.
         const t = b.themes.get(job.themeId);
-        if (!t) return;
+        if (this.expected.get(job.key) !== job.id || !t) {
+          dropped = true;
+          return;
+        }
         const at = new Date(this.now()).toISOString();
-        const base = { madeFrom: photoFingerprint(job.sourceUrl), sourceUrl: job.sourceUrl, planId: job.planId, serviceDate: job.serviceDate, at };
+        const base = {
+          madeFrom: photoFingerprint(job.sourceUrl),
+          sourceUrl: job.sourceUrl,
+          planId: job.planId,
+          serviceDate: job.serviceDate,
+          at,
+          ...(job.prompt !== undefined ? { prompt: promptKey(job.prompt) } : {}),
+        };
         const person = t.people.get(job.personId) ?? { personId: job.personId, name: job.name };
         person.name = job.name;
         if (outcome.status === "ready") {
@@ -925,8 +988,15 @@ export class PhotoThemesService {
       this.settle(job, false);
       return;
     }
+    if (dropped) return this.notKept(job, outcome.status);
     this.expected.delete(job.key);
     this.settle(job, outcome.status === "ready");
+  }
+
+  /** A finished job nothing wants any more (removed, moved, deleted): said when it was a paid edit, and counted as skipped. */
+  private notKept(job: Job, status: "ready" | "failed"): void {
+    if (status === "ready") console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
+    this.settle(job, null);
   }
 
   /** A job is over: count it into its run, and log the run when it is the last. */
@@ -954,16 +1024,22 @@ export class PhotoThemesService {
   /**
    * Change the book. The change is made on a copy, saved, and only then becomes
    * the book: a failed save changes nothing and throws.
+   *
+   * `afterSave` holds what must happen only once the change is the book, such as
+   * dropping a queued or running edit for a person it removed: a failed save
+   * leaves the person, so their edit must still land. It runs in the same turn
+   * of the write queue, so no job's commit queued behind can slip in between.
    */
-  private async mutate(fn: (b: Book, saved: string[]) => void | Promise<void>): Promise<void> {
+  private async mutate(fn: (b: Book, saved: string[], afterSave: (then: () => void) => void) => void | Promise<void>): Promise<void> {
     await this.writes.enqueue(async () => {
       if (this.unusable) throw new PhotoThemeRefused(`Theme photos are off: ${this.unusable}`, 503);
       if (this.paused) throw new PhotoThemeRefused("A config restore is landing; try again in a moment", 503);
       const before = referencedFiles(this.book);
       const saved: string[] = [];
+      const then: (() => void)[] = [];
       try {
         const next = cloneBook(this.book);
-        await fn(next, saved);
+        await fn(next, saved, (f) => then.push(f));
         // Held to the rules a load applies before it is written: a value that
         // saved and was then refused at the next start would switch the whole
         // feature off. This way only the change that carried it fails.
@@ -972,6 +1048,7 @@ export class PhotoThemesService {
         await store.save(file);
         this.book = next;
         this.shownCache.clear();
+        for (const f of then) f();
       } finally {
         // Only what this change let go of (or saved and did not keep): never
         // "everything the book does not name", which on a book read empty
@@ -1049,11 +1126,11 @@ export class PhotoThemesService {
     // Decided again inside the write, on the book as it is then: a theme chosen
     // for a later service while this waited its turn is no longer due.
     let found = glance;
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       found = due(b);
       for (const e of found.expired) {
         b.themes.get(e.id)?.people.clear();
-        this.cancelTheme(e.id);
+        afterSave(() => this.cancelTheme(e.id));
       }
       for (const p of found.oldPlans) b.plans.delete(p.planId);
     });
@@ -1099,6 +1176,11 @@ export class PhotoThemesService {
   }
 }
 
+/** A plan whose roster could not be read: a 502 naming why, never "not on this plan". */
+function rosterUnreadable(read: PlanPeopleRead): PhotoThemeRefused {
+  return new PhotoThemeRefused(`Could not read who is on this plan: ${read.reason ?? "Planning Center did not answer"}`, 502);
+}
+
 function themeIn(b: Book, id: string): Theme {
   const t = b.themes.get(id);
   if (!t) throw new PhotoThemeRefused("There is no theme with that id", 404);
@@ -1109,9 +1191,15 @@ function themeIn(b: Book, id: string): Theme {
 function promote(t: Theme, personId: string, now: number): void {
   const p = t.people.get(personId);
   if (!p?.pending || p.pending.status !== "ready" || !p.pending.file) return;
-  const { file, madeFrom, sourceUrl, planId, serviceDate } = p.pending;
-  p.approved = { file, madeFrom, sourceUrl, planId, serviceDate, approvedAt: new Date(now).toISOString() };
+  const { file, madeFrom, sourceUrl, planId, serviceDate, prompt } = p.pending;
+  p.approved = { file, madeFrom, sourceUrl, planId, serviceDate, approvedAt: new Date(now).toISOString(), ...(prompt !== undefined ? { prompt } : {}) };
   delete p.pending;
+}
+
+/** The person's edit waiting for review is still the file the operator was shown. */
+function isShownEdit(t: Theme, personId: string, file: string): boolean {
+  const pending = t.people.get(personId)?.pending;
+  return pending?.status === "ready" && pending.file === file;
 }
 
 function choiceDto(c: PlanChoice): PlanChoiceDTO {
@@ -1119,7 +1207,7 @@ function choiceDto(c: PlanChoice): PlanChoiceDTO {
 }
 
 function noneDto(personId: string, name: string): ThemePersonDTO {
-  return { personId, name, status: "none", approved: null, pending: null, originalUrl: null };
+  return { personId, name, status: "none", promptChanged: false, approved: null, pending: null, originalUrl: null };
 }
 
 export const photoThemes = new PhotoThemesService();

@@ -1890,8 +1890,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return del<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}`);
     case "photoThemes:keepPrompt":
       return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/keep-prompt`);
+    // An approval names the edit it was shown, so one that replaced it meanwhile is refused.
     case "photoThemes:approve":
-      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/approve`);
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/approve`, { file: p.file });
     case "photoThemes:keep":
       return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/keep`);
     case "photoThemes:redo":
@@ -1913,7 +1914,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "photoThemes:generate":
       return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/generate`, { serviceTypeId: p.serviceTypeId, mode: p.mode });
     case "photoThemes:approveAll":
-      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/approve-all`);
+      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/approve-all`, { people: p.people });
     case "photoThemes:getPlanPeople":
       return apiFetch<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}?serviceTypeId=${encodeURIComponent(p.serviceTypeId as string)}`);
 

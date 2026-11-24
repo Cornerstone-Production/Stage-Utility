@@ -12,7 +12,7 @@
 //   PATCH  /api/photo-themes/themes/:id                   { name?, prompt? }
 //   DELETE /api/photo-themes/themes/:id                   with its photos
 //   POST   /api/photo-themes/themes/:id/keep-prompt       keep photos made under the old prompt
-//   POST   /api/photo-themes/themes/:id/people/:pid/approve
+//   POST   /api/photo-themes/themes/:id/people/:pid/approve  { file }: the edit that was shown
 //   POST   /api/photo-themes/themes/:id/people/:pid/keep  keep one made from an older photo
 //   POST   /api/photo-themes/themes/:id/people/:pid/redo  { planId?, serviceTypeId? }; 202
 //   POST   /api/photo-themes/themes/:id/people/:pid/move  { to }
@@ -21,7 +21,7 @@
 //   GET    /api/photo-themes/plans/:planId?serviceTypeId= the plan's people and their photos
 //   PATCH  /api/photo-themes/plans/:planId                { serviceTypeId, sortDate?, themeId?, show? }
 //   POST   /api/photo-themes/plans/:planId/generate       { serviceTypeId, mode? }; 202
-//   POST   /api/photo-themes/plans/:planId/approve-all
+//   POST   /api/photo-themes/plans/:planId/approve-all    { people: [{ personId, file }] }: the edits shown
 //   GET    /api/photo-themes/images/:file                 a stored edit
 //
 // Every id in a path or body is checked against its shape before anything is
@@ -31,9 +31,11 @@
 import type http from "node:http";
 
 import { storedImageHeaders } from "../image-files.js";
+import { isRecord } from "../is-record.js";
 import { isPcoId } from "../pco-path.js";
 import { isPersonId, isPlanId, isThemeId, sortDate } from "../photo-themes/book.js";
 import { PhotoThemeRefused, photoThemes } from "../photo-themes/service.js";
+import { MAX_APPROVE_ALL, THEMED_PHOTO_FILE, type ShownEdit } from "../../types/photo-themes.js";
 import { type RouteCtx, error, json, readObjectBody } from "./context.js";
 
 const THEME = /^\/api\/photo-themes\/themes\/([^/]+)$/;
@@ -76,6 +78,27 @@ function planId(id: string): string {
 
 function serviceTypeId(v: unknown): string {
   return isPcoId(v) ? v : refuse("serviceTypeId must be a Planning Center id");
+}
+
+/** A stored edit's file name, as an approval names the one it was shown. */
+function shownFile(v: unknown, what: string): string {
+  return typeof v === "string" && THEMED_PHOTO_FILE.test(v) ? v : refuse(`${what} must be the name of the edit that was shown`);
+}
+
+/** What an approve-all was shown: each person once, with the file they were shown. */
+function shownEdits(v: unknown): ShownEdit[] {
+  if (!Array.isArray(v) || v.length === 0) refuse("people must be a list of the edits that were shown");
+  if (v.length > MAX_APPROVE_ALL) refuse(`people must name at most ${MAX_APPROVE_ALL} edits`);
+  const seen = new Set<string>();
+  return v.map((e: unknown, i) => {
+    const what = `people[${i}]`;
+    if (!isRecord(e)) refuse(`${what} must be {personId, file}`);
+    const { personId: pid, file } = e;
+    if (!isPersonId(pid)) refuse(`${what}.personId must be a Planning Center person id`);
+    if (seen.has(pid)) refuse(`${what} names a person already listed`);
+    seen.add(pid);
+    return { personId: pid, file: shownFile(file, `${what}.file`) };
+  });
 }
 
 export async function photoThemeRoutes(c: RouteCtx): Promise<void> {
@@ -129,10 +152,10 @@ export async function photoThemeRoutes(c: RouteCtx): Promise<void> {
   if (action && method === "POST") {
     const [, rawTheme, rawPerson, verb] = action as unknown as [string, string, string, string];
     if (!isThemeId(rawTheme) || !isPersonId(rawPerson)) return respond(res, async () => [themeId(rawTheme), personId(rawPerson)]);
-    if (verb === "approve") return respond(res, () => photoThemes.approve(rawTheme, rawPerson));
     if (verb === "keep") return respond(res, () => photoThemes.keep(rawTheme, rawPerson));
     const b = await body();
     if (!b) return;
+    if (verb === "approve") return respond(res, () => photoThemes.approve(rawTheme, rawPerson, shownFile(b.file, "file")));
     if (verb === "redo") {
       return respond(
         res,
@@ -181,10 +204,10 @@ export async function photoThemeRoutes(c: RouteCtx): Promise<void> {
   const planAction = PLAN_ACTION.exec(pathname);
   if (planAction && method === "POST") {
     const [, rawPlan, verb] = planAction as unknown as [string, string, string];
-    if (verb === "approve-all") return respond(res, () => photoThemes.approveAll(planId(rawPlan)));
     if (!isPlanId(rawPlan)) return respond(res, async () => planId(rawPlan));
     const b = await body();
     if (!b) return;
+    if (verb === "approve-all") return respond(res, () => photoThemes.approveAll(rawPlan, shownEdits(b.people)));
     return respond(
       res,
       () => {

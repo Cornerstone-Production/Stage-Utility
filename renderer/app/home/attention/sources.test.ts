@@ -20,6 +20,7 @@ const EXPECTED = [
   "note-categories",
   "readiness",
   "recorder-idle",
+  "rollover-held",
   "screen-offline",
   "wireless-battery",
   "wireless-offline",
@@ -49,6 +50,7 @@ describe("attention sources", () => {
   it("the registry lists them in the order the docs table does", () => {
     assert.deepEqual(ATTENTION_SOURCES.map((s) => s.id), [
       "readiness",
+      "rollover-held",
       "wireless-battery",
       "wireless-offline",
       "duplicate-server",

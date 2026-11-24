@@ -54,8 +54,9 @@ export interface HubApi {
 
   /**
    * The landing page's list (LandingList, as validated JSON text), replacing the one held. It
-   * names secrets, so like a venue's plots it is never in the status answer, never touched by a
-   * manifest and never sent to a viewer.
+   * names secrets, so like a venue's plots it is never in the status answer and never touched by
+   * a manifest. It is served whole at GET /api/landing (handle.ts), secrets included, by design:
+   * a listed venue is linked by its secret, and listing one is that choice (main/types/servicecue-publish.ts).
    */
   putLanding(text: string): Promise<void>;
   /** The landing list as stored, or null before the first. */
