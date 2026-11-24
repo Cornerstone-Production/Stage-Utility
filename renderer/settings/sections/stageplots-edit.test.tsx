@@ -1384,6 +1384,16 @@ describe("the plot editor", () => {
     assert.ok(DOC.plots[0].items.every((it) => it.y <= 562.5));
   });
 
+  test("Discard and switch drops the draft's save error with it, as Discard does", async () => {
+    await mount();
+    await addFromPalette("box");
+    refuse = { what: "PUT /api/stageplots/plots/p-1/items", error: "the server refused this save" };
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.match(document.body.textContent!, /the server refused this save/);
+    await chooseBackground("", "Discard and switch");
+    assert.doesNotMatch(document.body.textContent!, /the server refused this save/, "the discarded draft's error is still shown");
+  });
+
   test("Discard and switch: the saved item the server moves is taken, and editing it saves (the 409 path)", async () => {
     DOC.plots[0].items = [item({ id: "b", y: 600, h: 60 })];
     await mount();

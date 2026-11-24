@@ -89,6 +89,7 @@ function PlotEditor({
   dispatch,
   dirty,
   saveDraft,
+  discard,
   shown,
   patch,
 }: {
@@ -100,6 +101,8 @@ function PlotEditor({
   dispatch: Dispatch<EditorAction>;
   dirty: boolean;
   saveDraft: () => Promise<boolean>;
+  /** The editor's Discard: the draft, its banner and its error go, and the keeper deletes it on the server. */
+  discard: () => void;
   /** The draft as drawn: linked points with their devices' names and colours. */
   shown: ResolvedItems;
   patch: PatchRead | null;
@@ -157,7 +160,7 @@ function PlotEditor({
     setPendingBackground(null);
     if (!target) return;
     if (how === "save" && !(await saveDraft())) return;
-    if (how === "discard") dispatch({ type: "discard" });
+    if (how === "discard") discard();
     await update({ backgroundId: target.id });
   };
 
@@ -803,6 +806,7 @@ function EditorBody({
                   dispatch={dispatch}
                   dirty={dirty}
                   saveDraft={saveDraft}
+                  discard={discard}
                   shown={shown}
                   patch={patch}
                 />
