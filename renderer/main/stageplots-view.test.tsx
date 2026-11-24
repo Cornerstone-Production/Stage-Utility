@@ -163,7 +163,7 @@ describe("/stageplots/manage: Edit", () => {
     assert.equal(edit.getAttribute("href"), "/stageplots/edit?venue=v-main&plot=p-alt", "the address names the plan's plot (the default here)");
     await act(async () => void fireEvent.click(edit));
     for (let i = 0; i < 3; i++) await settle();
-    assert.equal(addressOf(router), "/stageplots/edit", "Edit did not open the editor in the app");
+    assert.equal(router.state.location.pathname, "/stageplots/edit", "Edit did not open the editor in the app");
     assert.deepEqual({ ...router.state.location.search }, { venue: "v-main", plot: "p-std" }, "the editor did not open on the tab on screen");
   });
 });
