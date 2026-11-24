@@ -883,6 +883,12 @@ async function uploadImage(c: RouteCtx): Promise<void> {
       throw new Refused(400, errorMessage(err));
     }
     const { source, converted } = prepared;
+    // The source is re-encoded (2400 px, sRGB), so it is not the upload and not held to its cap:
+    // one over what the image store keeps is refused by name here, not a 500 from the store.
+    if (source.length > STAGEPLOT_LIMITS.imageBytes) {
+      const why = `is over 12 MB once brought to 2400 px in sRGB (${kb(source.length)}); save it as a JPEG and upload that`;
+      refuseUpload(name, bytes.length, why, { answer: `the upload ${why}` });
+    }
     // The source as stored, 2400 px and no metadata, is a PNG or JPEG upload's original too.
     const sourceHash = await storeStagePlotImage(source, ext);
     const convertedHash = await storeStagePlotImage(converted.webp, "webp");
