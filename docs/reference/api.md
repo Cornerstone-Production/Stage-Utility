@@ -471,7 +471,7 @@ routes, not this server's.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET / POST | `/api/patch` | The whole patch file / replace it |
+| GET / POST | `/api/patch` | The whole patch file / replace it. A save whose variants, overrides or assignments are not the shape the editor writes (an override that is not an object, a null where a list or object belongs) is `400` naming the first, logged on `[patch]`, and saves nothing; a `patch.json` already holding one is read without it, each value left out logged on `[patch]` once |
 | GET | `/api/patch/export?sheetId=…&format=csv\|xlsx[&variantId=&includeUnused=1&planId=&serviceTypeId=]` | One sheet as a file. Unknown sheet, variant or format is `400` |
 | POST | `/api/patch/parse-xlsx` | Read a spreadsheet into `{headers, rows}` for the import mapper. Writes nothing |
 

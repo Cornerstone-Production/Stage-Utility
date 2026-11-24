@@ -7,6 +7,7 @@
 // Consumed by the variant editor, the /patch volunteer view, and patch-export.ts.
 
 import type { PatchEndpoint, PatchSheet } from "../types/stage.js";
+import { readOverrides } from "./patch-shape.js";
 
 export function endpointKey(e: { rackId: string; dir: "in" | "out"; index: number }): string {
   return `${e.rackId}:${e.dir}:${e.index}`;
@@ -39,16 +40,13 @@ export function endpointsEqual(a: PatchEndpoint, b: PatchEndpoint): boolean {
 }
 
 /**
- * Apply a set of overrides (keyed by endpointKey) onto a base endpoint list. POST /api/patch
- * holds a sheet to little more than "a list of sheets", so an override set or an override that
- * is not an object (null, a string) is skipped rather than read: one bad entry must not stop
- * /patch, the export or a stage plots publish from resolving the rest.
+ * Apply a set of overrides (keyed by endpointKey) onto a base endpoint list. Read through
+ * patch-shape.ts's readOverrides, the rule a saved and a loaded sheet are held to: one that is
+ * not an object (null, text, a list) is left out rather than spread.
  */
 export function mergeOverrides(base: PatchEndpoint[], overrides: Record<string, Partial<PatchEndpoint>>): PatchEndpoint[] {
   const map = new Map<string, PatchEndpoint>(base.map((e) => [endpointKey(e), { ...e }]));
-  if (!overrides || typeof overrides !== "object") return Array.from(map.values());
-  for (const [k, ov] of Object.entries(overrides)) {
-    if (!ov || typeof ov !== "object") continue;
+  for (const [k, ov] of Object.entries(readOverrides(overrides))) {
     const cur = map.get(k);
     if (cur) map.set(k, { ...cur, ...ov });
     else if (ov.rackId && ov.dir && typeof ov.index === "number") map.set(k, { rackId: ov.rackId, dir: ov.dir, index: ov.index, ...ov });
