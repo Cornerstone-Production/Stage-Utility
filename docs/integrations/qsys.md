@@ -26,11 +26,55 @@ was last read.
 
 ## Setup
 
-**In Stage:** Settings → Integrations → **Q-SYS** → enter the **Core Host**, the
-**QRC Port** if it is not 1710, and a **User** and **Password** only if the Core
-requires a logon. Enable it and use **Test connection**, which reports the design
-name and how many components it found. The password is stored encrypted on this
-machine.
+### On the Core
 
-Q-SYS Designer in Emulate answers QRC on the machine it runs on, port 1710, so the
-integration can be tried without a Core.
+1. **QRC** answers on TCP port **1710**. Nothing needs enabling for the connection
+   itself.
+2. **Script Access.** Set Script Access to **External** (or **All**) in Q-SYS
+   Designer on every component whose controls this integration should reach, then
+   deploy. If a component is missing from the catalog, check this first.
+3. **Access Control.** If the Core has Access Control on, create a user for this
+   app (a Core Manager user with the access the design needs) and enter its name
+   and password below. With Access Control off, leave both blank.
+
+### In Stage
+
+**Settings → Integrations → Q-SYS**:
+
+| Field | Meaning |
+|---|---|
+| Core host | The Core's address. |
+| Port | QRC port. Default 1710. |
+| User, Password | Only if the Core requires a QRC logon. The password is stored encrypted on this machine and is never sent to a browser. |
+| Volunteer meter rate | Meter updates per second on volunteer panels. Whole number, 1 to 30, default 10. |
+| Staff meter rate | Meter updates per second on staff panels. Whole number, 1 to 30, default 20. |
+
+Enable the integration and use **Test connection**. It connects, logs on, and
+reports `Connected to <design name>` with the number of components it read, or
+the reason it could not. Saving any field, the meter rates included, reconnects to
+the Core. A rate outside 1 to 30 is brought into range when it is saved.
+
+### Trying it without a Core
+
+Q-SYS Designer in **Emulate** answers QRC on the machine it runs on, port 1710.
+Point **Core host** at that machine to try the integration with no Core. The
+status reports `emulator` so it is not mistaken for a live Core.
+
+## What it never does
+
+It reads the design and sets controls. It never calls a method that changes the
+design: no components are added, no designs loaded, no Core settings changed.
+
+## Troubleshooting
+
+Look at `/log` and filter for `[qsys]`.
+
+| Line or message | Meaning |
+|---|---|
+| `connecting to <host>:<port>` | The service is dialling. If nothing follows, the address or port is wrong, or the machine is not reachable. |
+| `<host> connection failed: <reason>` | The Core did not answer. `ECONNREFUSED` usually means nothing listens on that port; a timeout means a network path problem. |
+| `logon refused` | The user or password is wrong, or the user lacks access. Test connection reports "The Core refused the user name or password". |
+| `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
+| `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
+| `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
+| `meter rates set: volunteer <n>/s, staff <n>/s` | The meter rates were saved. |

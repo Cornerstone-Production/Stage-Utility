@@ -80,7 +80,7 @@ const seeded: Seeded[] = INTEGRATION_DESCRIPTOR_FIXTURE.flatMap((d) => {
 const where = (s: Seeded) => `${s.id}.${s.key}`;
 
 describe("what a number field starts out holding", () => {
-  test("there are exactly fourteen of them", () => {
+  test("there are exactly sixteen of them", () => {
     // EXACT, not a floor. A fifteenth number field is a field nobody has
     // decided the unset behaviour of, and the whole point of this file is that
     // the decision is made per field rather than defaulted into. Update this
@@ -88,8 +88,8 @@ describe("what a number field starts out holding", () => {
     // this file first.
     assert.equal(
       seeded.length,
-      14,
-      `the app ships ${seeded.length} number fields, not 14: ${seeded.map(where).join(", ")}`,
+      16,
+      `the app ships ${seeded.length} number fields, not 16: ${seeded.map(where).join(", ")}`,
     );
   });
 
@@ -200,7 +200,7 @@ describe("which number fields say blank is a setting", () => {
     assert.deepEqual(bad.map((f) => `${f.at}=${f.shown}`), [], "a number field reached the input as 0");
   });
 
-  test("all eleven fields with no unsetHint are still handed 0 for an empty value", () => {
+  test("all thirteen fields with no unsetHint are still handed 0 for an empty value", () => {
     // The opt-in, at the render site. Without the `unsetHint` test in
     // numberFieldValue this would blank every number field in the app whose
     // value happened to be missing.
@@ -212,8 +212,8 @@ describe("which number fields say blank is a setting", () => {
     const plain = fields.filter((f) => f.field.unsetHint == null);
     assert.equal(
       plain.length,
-      11,
-      `${plain.length} number fields declare no unsetHint, not 11: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
+      13,
+      `${plain.length} number fields declare no unsetHint, not 13: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
     );
     for (const f of plain) {
       const at = `${f.id}.${f.field.key}`;
@@ -412,18 +412,20 @@ const OUT_OF_BOUNDS: { id: string; key: string; stored: number; why: string }[] 
 });
 
 describe("a stored number outside the field's bounds", () => {
-  test("nine reachable cases, across six bounded fields", () => {
+  test("eleven reachable cases, across eight bounded fields", () => {
     // EXACT, like the counts above it. A new bound on a number field is a new
     // way for an already-stored value to be outside it, and it should arrive
-    // here rather than be covered by luck. Six of the thirteen number fields
-    // declare a bound: five declare both a floor and a ceiling, one
-    // (propresenter.pollMs) declares only a floor. Nine rather than eleven
-    // because companion.port and ross-tsl.port floor at 1, and nothing below
-    // that survives initialConfig — see OUT_OF_BOUNDS.
+    // here rather than be covered by luck. Eight of the sixteen number fields
+    // declare a bound: seven declare both a floor and a ceiling, one
+    // (propresenter.pollMs) declares only a floor. Eleven rather than fifteen
+    // because companion.port, ross-tsl.port and both Q-SYS meter rates floor at
+    // 1, and nothing below that survives initialConfig — see OUT_OF_BOUNDS.
     const bounded = [...new Set(OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key}`))].sort();
     assert.deepEqual(bounded, [
       "companion.port",
       "propresenter.pollMs",
+      "qsys.staffMeterHz",
+      "qsys.volunteerMeterHz",
       "ross-tsl.port",
       "sensource.attendancePollSeconds",
       "sensource.pollSeconds",
@@ -431,7 +433,7 @@ describe("a stored number outside the field's bounds", () => {
     ]);
     assert.equal(
       OUT_OF_BOUNDS.length,
-      9,
+      11,
       `out-of-bounds cases: ${OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key} ${o.why}`).join(", ")}`,
     );
   });

@@ -8,6 +8,7 @@
 
 import { DataStore } from "../data-store.js";
 import { asObject, checked, optional } from "../restore-check.js";
+import { clampRate } from "./qsys-settings-config.js";
 
 export interface QsysSettings {
   host: string;
@@ -29,12 +30,7 @@ export const QSYS_DEFAULTS: QsysSettings = {
   staffMeterHz: 20,
 };
 
-const MIN_HZ = 1;
-const MAX_HZ = 30;
-
-function rate(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isFinite(v) ? Math.min(MAX_HZ, Math.max(MIN_HZ, Math.round(v))) : fallback;
-}
+const rate = clampRate;
 
 const restoreCheck = checked((raw) => {
   const o = asObject(raw, "the Q-SYS settings");

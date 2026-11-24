@@ -223,13 +223,13 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
     "configSchema": [
       {
         "key": "host",
-        "label": "Core Host",
+        "label": "Core host",
         "type": "text",
         "placeholder": "192.168.1.50"
       },
       {
         "key": "port",
-        "label": "QRC Port",
+        "label": "Port",
         "type": "number",
         "default": 1710
       },
@@ -244,6 +244,24 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "label": "Password",
         "type": "password",
         "help": "Only if a user is set."
+      },
+      {
+        "key": "volunteerMeterHz",
+        "label": "Volunteer meter rate",
+        "type": "number",
+        "default": 10,
+        "min": 1,
+        "max": 30,
+        "help": "Meter updates per second on volunteer panels (1 to 30)."
+      },
+      {
+        "key": "staffMeterHz",
+        "label": "Staff meter rate",
+        "type": "number",
+        "default": 20,
+        "min": 1,
+        "max": 30,
+        "help": "Meter updates per second on staff panels (1 to 30)."
       }
     ]
   },
