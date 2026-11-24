@@ -78,7 +78,7 @@ export function CategoryRoles({
     source.pcoConfigured === false
       ? "Connect Planning Center to list its note categories."
       : source.shownIds.length === 0
-        ? "No service types are on the landing page yet. Pick them under Landing page, below, and their note categories are listed here."
+        ? "No service types are on the landing page yet. Pick them under Landing page, above, and their note categories are listed here."
         : null;
 
   if (roles.length === 0) {
