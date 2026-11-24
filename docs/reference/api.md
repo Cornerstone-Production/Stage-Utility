@@ -341,7 +341,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw: `{metrics}`, server-wide; `POST` takes `{metrics: string[]}` |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
-| GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
+| GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker). `502` when Planning Center cannot be read for either, never an empty list for it; a failed read is held 30 seconds |
 | GET | `/api/pco/calendar?viewId=…[&month=YYYY-MM]` | A month as a six-week grid of days, bucketed in the app time zone and filtered by the view's calendars and tags. Omit `month` for the current one. 400 if `month` is malformed or more than 36 months away; 502 if Planning Center cannot be reached |
 | GET | `/api/pco/calendar-sources` | The organisation's calendars and tags (settings picker) |
 | POST | `/api/pco/checklist/tick` | `{ key, done }` — tick one row; answers with the whole list |

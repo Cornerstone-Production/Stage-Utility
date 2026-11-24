@@ -587,12 +587,14 @@ export class StageController {
   /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
    *  said again every time its cache expires. */
   private lastRefreshLine = "";
-  /** Plan-list reads that keep failing, said once per outage. Keys:
-   *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
+  /** Planning Center reads that keep failing, said once per outage. Keys:
+   *  `followed:<serviceTypeId>`, `upcoming:<serviceTypeId>`, `hold:<serviceTypeId>`, and
+   *  a rundown part's (rundownPart): `note categories:<serviceTypeId>`,
+   *  `service times:<serviceTypeId>`, and the org-wide `the time zone` and `service types`. */
   private readonly plansOutage = new OutageLog();
-  /** Planning Center's own note-category order per service type, as last read. It only
-   *  orders a rundown's columns, so a failed read falls back to it. */
-  private readonly categoryOrder = new Map<string, string[]>();
+  /** Each rundown part's last good answer, by part and what it is for (rundownPart):
+   *  what a failed read answers with, so a degraded rundown is not an emptied one. */
+  private readonly rundownLastGood = new Map<string, unknown>();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -1711,34 +1713,68 @@ export class StageController {
 
   /**
    * Planning Center's order for a service type's note categories, for a rundown's columns.
-   * Never rejects.
    *
    * The order is all this decides: which columns a rundown has comes from its items' own
    * notes. So a failed read is not the rundown's failure, as it was while this threw
    * through the Promise.all beside the items and blanked the ServiceCue page, the public
    * page and the plan items over one failed request. It falls back to the order last read,
-   * or none (the items' own order), and is said once per outage on [pco]. The
-   * note-categories route and Home's row read the categories themselves, and still fail.
+   * or none (the items' own order). The note-categories route and Home's row read the
+   * categories themselves, and still fail.
    */
-  private async noteCategoryOrder(serviceTypeId: string): Promise<string[]> {
-    const key = `categories:${serviceTypeId}`;
+  private noteCategoryOrder(serviceTypeId: string): Promise<string[]> {
+    return this.rundownPart({
+      what: "note categories",
+      serviceTypeId,
+      keep: serviceTypeId,
+      read: () => pcoService.listItemNoteCategories(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
+      none: { value: [], without: "their columns in the order the items use them" },
+    });
+  }
+
+  /**
+   * One read that only dresses a rundown whose items were read: its column order,
+   * service times, time zone or row colours. Never rejects.
+   *
+   * A failure answers with the part's last good value (kept per `keep`: the plan for
+   * its times, the service type for its categories), so a degraded rundown is the one
+   * last served rather than an emptied one: the public page's publisher keeps its last
+   * good copy only for a failed read, and would otherwise replace a good page with one
+   * in the wrong zone, without its projected clock or row colours. Only with nothing
+   * read yet does it answer `none`. Said once per outage on [pco], keyed by the part
+   * and, for a per-type read, its service type: an org-wide read (`serviceTypeId`
+   * null) is one outage however many types' rundowns ask.
+   */
+  private async rundownPart<T>(part: {
+    what: string;
+    serviceTypeId: string | null;
+    keep: string;
+    read: () => Promise<T>;
+    none: { value: T; without: string };
+  }): Promise<T> {
+    const { what, serviceTypeId, read, none } = part;
+    const outageKey = serviceTypeId === null ? what : `${what}:${serviceTypeId}`;
+    const keepKey = `${what}:${part.keep}`;
+    const forWhom = serviceTypeId === null ? "" : ` for service type ${serviceTypeId}`;
     try {
-      const categories = await pcoService.listItemNoteCategories(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
-      this.categoryOrder.set(serviceTypeId, categories);
-      const back = this.plansOutage.ok(key, Date.now());
-      if (back.log) {
-        console.log(`[pco] note categories for service type ${scrub(serviceTypeId)} can be read again; rundown columns follow Planning Center's order${scrub(back.note)}`);
-      }
-      return categories;
+      const value = await read();
+      // Re-set, so the most recently used stay when the map is bounded below.
+      this.rundownLastGood.delete(keepKey);
+      this.rundownLastGood.set(keepKey, value);
+      if (this.rundownLastGood.size > 500) this.rundownLastGood.delete(this.rundownLastGood.keys().next().value!);
+      const back = this.plansOutage.ok(outageKey, Date.now());
+      if (back.log) console.log(`[pco] ${scrub(what)}${scrub(forWhom)} can be read again${scrub(back.note)}`);
+      return value;
     } catch (err) {
-      const last = this.categoryOrder.get(serviceTypeId) ?? [];
-      const decision = this.plansOutage.fail(key, errorMessage(err), Date.now());
+      const kept = this.rundownLastGood.has(keepKey);
+      const value = kept ? (this.rundownLastGood.get(keepKey) as T) : none.value;
+      const without = kept ? `with the ${what} last read` : none.without;
+      const decision = this.plansOutage.fail(outageKey, errorMessage(err), Date.now());
       if (decision.log) {
         console.warn(
-          `[pco] note categories for service type ${scrub(serviceTypeId)} could not be read (${scrub(errorMessage(err))}); rundowns still answer, their columns ${last.length > 0 ? "in the order last read" : "in the order the items use them"}${scrub(decision.note)}`,
+          `[pco] ${scrub(what)}${scrub(forWhom)} could not be read (${scrub(errorMessage(err))}); rundowns still answer, ${scrub(without)}${scrub(decision.note)}`,
         );
       }
-      return last;
+      return value;
     }
   }
 
@@ -2079,8 +2115,10 @@ export class StageController {
       planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false, isDefaultPlan: true,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
+    const appId = this.pcoAppId;
+    const secret = this.pcoSecret;
 
-    const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
+    const plans = await pcoService.listUpcomingPlans(appId, secret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
 
     /**
@@ -2137,9 +2175,28 @@ export class StageController {
     const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       this.noteCategoryOrder(serviceTypeId),
-      pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
-      pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
-      pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret),
+      this.rundownPart({
+        what: "service times",
+        serviceTypeId,
+        keep: plan.id,
+        read: () => pcoService.listPlanServiceTimes(appId, secret, serviceTypeId, plan.id),
+        none: { value: [] as string[], without: "with no service times to anchor the projected clock" },
+      }),
+      // Org-wide, so one outage however many types ask. Never read: the app's own zone.
+      this.rundownPart<string | null>({
+        what: "the time zone",
+        serviceTypeId: null,
+        keep: appId,
+        read: () => pcoService.listOrgTimeZone(appId, secret),
+        none: { value: appTimeZone(), without: "in this server's time zone" },
+      }),
+      this.rundownPart({
+        what: "service types",
+        serviceTypeId: null,
+        keep: appId,
+        read: () => pcoService.listServiceTypes(appId, secret),
+        none: { value: [] as ServiceTypeDTO[], without: "with no item row colours" },
+      }),
     ]);
     return {
       serviceTypeId,

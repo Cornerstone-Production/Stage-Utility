@@ -636,6 +636,9 @@ class PcoService {
    * not 3,600 times an hour.
    */
   private readonly rundownErrors = new RepeatLog("[pco] plan rundown unavailable:");
+  /** The live reading's plan times: without them the service time (the countdown
+   *  target, and which of the day's services a recorder files under) is unknown. */
+  private readonly liveTimesErrors = new RepeatLog("[pco] plan times unavailable to the live reading; the service time is unknown until they read:");
   /**
    * What PCO last said about our quota. Read from the three rate headers on
    * EVERY response, including failures — see pco-rate-limit.ts for why a constant
@@ -684,13 +687,15 @@ class PcoService {
    * so a held failure can never be read back as data.
    */
   private async heldRead<T>(cacheKey: string, ttl: number | (() => number), read: () => Promise<T>): Promise<T> {
-    const cached = this.cacheGet<T>(cacheKey);
-    if (cached !== null) return cached;
+    // Wrapped, so an answer that IS null (an organization with no time zone set) is
+    // held like any other rather than read back as a miss and asked for every time.
+    const cached = this.cacheGet<{ value: T }>(cacheKey);
+    if (cached) return cached.value;
     const held = this.cacheGet<{ error: unknown }>(`failed:${cacheKey}`);
     if (held) throw held.error;
     try {
       const value = await read();
-      this.cacheSet(cacheKey, value, ttl);
+      this.cacheSet(cacheKey, { value }, ttl);
       return value;
     } catch (err) {
       this.cacheSet(`failed:${cacheKey}`, { error: err }, TTL_FAILED_MS);
@@ -1219,27 +1224,23 @@ class PcoService {
   }
 
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {
-    const cacheKey = `service-types:${appId}`;
-    const cached = this.cacheGet<ServiceTypeDTO[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types?per_page=100`;
-    const json = await this.request(url, appId, secret);
-    const items = Array.isArray(json.data) ? json.data : [json.data];
-
-    const result: ServiceTypeDTO[] = items.map((item) => ({
-      id: item.id,
-      name: String(item.attributes.name ?? "Unknown"),
-      // Free: this resource already carries the colors, we just stopped throwing
-      // them away. `index` is PCO's palette slot and is not useful to us.
-      itemTypeColors: [
-        ...toItemColors(item.attributes.standard_item_types, false),
-        ...toItemColors(item.attributes.custom_item_types, true),
-      ],
-    }));
-
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
-    return result;
+    // A failure held like the other long reads (heldRead): every rundown, the plan scan
+    // and the reconnect windows read this, and a 429 episode must not be asked again by each.
+    return this.heldRead(`service-types:${appId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [json.data];
+      return items.map((item) => ({
+        id: item.id,
+        name: String(item.attributes.name ?? "Unknown"),
+        // Free: this resource already carries the colors, we just stopped throwing
+        // them away. `index` is PCO's palette slot and is not useful to us.
+        itemTypeColors: [
+          ...toItemColors(item.attributes.standard_item_types, false),
+          ...toItemColors(item.attributes.custom_item_types, true),
+        ],
+      }));
+    });
   }
 
   async listUpcomingPlans(
@@ -1353,23 +1354,20 @@ class PcoService {
    * than one extra request every fifteen minutes.
    */
   async listTeamNames(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
-    const cacheKey = `team-names:${appId}:${serviceTypeId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const result = [
-      ...new Set(
-        items
-          .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
-          .filter(Boolean),
-      ),
-    ].sort((a, b) => a.localeCompare(b));
-
-    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return result;
+    // A failed read throws (held, see heldRead): it used to parse to no teams, so the
+    // checklist picker offered none and said nothing while Planning Center was down.
+    return this.heldRead(`team-names:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [];
+      return [
+        ...new Set(
+          items
+            .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
+            .filter(Boolean),
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+    });
   }
 
   /**
@@ -1544,15 +1542,13 @@ class PcoService {
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
    *  projected clock times in the plan's local time rather than the viewer's. */
   async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {
-    const cacheKey = `org-tz:${appId}`;
-    const cached = this.cacheGet<string>(cacheKey);
-    if (cached) return cached;
-
-    const json = await this.request(pcoUrl``, appId, secret).catch(() => null);
-    const data = json && !Array.isArray(json.data) ? json.data : null;
-    const tz = data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
-    if (tz) this.cacheSet(cacheKey, tz, TTL_LONG_MS);
-    return tz;
+    // A failed read throws (held, see heldRead). It used to answer null, the same as
+    // an organization with no zone set, and cached nothing: every rundown asked again.
+    return this.heldRead(`org-tz:${appId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(pcoUrl``, appId, secret);
+      const data = !Array.isArray(json.data) ? json.data : null;
+      return data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
+    });
   }
 
   /**
@@ -1845,7 +1841,20 @@ class PcoService {
     // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
     // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
     // and (b) let SPL history separate back-to-back services that share one plan.
-    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    // Times that cannot be read leave the service time unknown, as no times did: the
+    // live reading itself is what this answers, and it is not failed for them.
+    // The line says once per outage what is lost, as the rundown's below does.
+    let timesRead = true;
+    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId).catch((err: unknown) => {
+      timesRead = false;
+      const decision = this.liveTimesErrors.fail(errorMessage(err), Date.now());
+      if (decision.line) console.warn(scrub(decision.line));
+      return [] as PlanTime[];
+    });
+    if (timesRead) {
+      const recovered = this.liveTimesErrors.ok(Date.now());
+      if (recovered.line) console.log(scrub(recovered.line));
+    }
     const serviceTime = this.pickServiceTime(planTimes.filter((t) => t.timeType === "service"));
     const serviceTimeId = serviceTime?.id ?? null;
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
@@ -2021,25 +2030,24 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<PlanTime[]> {
-    const cacheKey = `plan-times:${appId}:${planId}`;
-    const cached = this.cacheGet<PlanTime[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/plan_times?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const raw = json && Array.isArray(json.data) ? json.data : [];
-    const times = raw
-      .map((t) => ({
-        id: t.id,
-        name: typeof t.attributes.name === "string" ? t.attributes.name : null,
-        timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
-        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }))
-      .filter((t): t is PlanTime => !!t.startsAt);
-
-    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return times;
+    // A failed read throws (held, see heldRead), and each caller says what it does
+    // without the times. It used to parse to none, so the reconnect windows read
+    // "nothing planned" with their own gap check never firing, and a rundown lost its
+    // service times with no line anywhere.
+    return this.heldRead(`plan-times:${appId}:${planId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const raw = Array.isArray(json.data) ? json.data : [];
+      return raw
+        .map((t) => ({
+          id: t.id,
+          name: typeof t.attributes.name === "string" ? t.attributes.name : null,
+          timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
+          startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+          endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+        }))
+        .filter((t): t is PlanTime => !!t.startsAt);
+    });
   }
 
   /** Just the "service" occurrences (e.g. 9am vs 11am). */

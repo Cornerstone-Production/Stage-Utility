@@ -34,7 +34,7 @@ type Mutable = {
   pcoAppId: string | null;
   pcoSecret: string | null;
   plansOutage: InstanceType<typeof OutageLog>;
-  categoryOrder: Map<string, string[]>;
+  rundownLastGood: Map<string, unknown>;
 };
 const ctl = stageController as unknown as Mutable;
 const svc = pcoService as unknown as Record<string, unknown>;
@@ -61,7 +61,7 @@ beforeEach(() => {
   ctl.state = { ...keptState, serviceTypeId: TYPE, planId: PLAN };
   // Each test is its own outage, with no order read before it.
   ctl.plansOutage = new OutageLog();
-  ctl.categoryOrder.clear();
+  ctl.rundownLastGood.clear();
   svc.listUpcomingPlans = async () => [plan];
   svc.listRecentPlans = async () => [];
   svc.listPlanItems = async () => ITEMS;
