@@ -1088,6 +1088,29 @@ describe("a republish around a missing page, a restore and a start", () => {
   });
 });
 
+describe("when the link was made (linkAt)", () => {
+  test("is set by a publish and a regenerate, kept by every republish, and read as publishedAt from a state saved before it", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const first = (await h.venue()).publish!;
+    assert.equal(first.linkAt, first.publishedAt);
+    await new Promise((r) => setTimeout(r, 5));
+    await h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name: "Renamed", version: p.version + 1 } : p)) }));
+    await h.publisher.settle();
+    const republished = (await h.venue()).publish!;
+    assert.notEqual(republished.publishedAt, first.publishedAt, "nothing was republished, so this tests nothing");
+    assert.equal(republished.linkAt, first.linkAt, "a republish moved linkAt, so every open Publish card reads the link again");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok((await h.publisher.regenerate("v-1")).ok);
+    assert.notEqual((await h.venue()).publish!.linkAt, first.linkAt, "a regenerate kept the old link's time");
+    const { linkAt: _linkAt, ...older } = (await h.venue()).publish!;
+    const doc = await stageplotsStore.get();
+    const read = checkStagePlotsDoc({ ...doc, venues: doc.venues.map((v) => ({ ...v, publish: older })) });
+    assert.equal(read.venues[0]!.publish!.linkAt, older.publishedAt);
+  });
+});
+
 describe("what goes wrong in the background", () => {
   test("a republish that throws (settings unreadable) is logged on [stageplots] and never escapes as an unhandled rejection", async () => {
     let throwNow = false;

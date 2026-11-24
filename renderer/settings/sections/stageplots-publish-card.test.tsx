@@ -47,6 +47,7 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     secret: SECRET,
     origin: ORIGIN,
     publishedAt: "2026-11-12T20:32:00.000Z",
+    linkAt: "2026-11-12T20:32:00.000Z",
     lastError: null,
     publishedImages: [],
     unpublishedImages: [],
@@ -246,7 +247,7 @@ describe("the Publish card, published", () => {
     const NEW = "B".repeat(42) + "Q";
     let open!: () => void;
     linkGate = new Promise((r) => (open = r));
-    VENUE.publish = published({ secret: NEW, publishedAt: "2026-11-12T21:05:00.000Z" });
+    VENUE.publish = published({ secret: NEW, publishedAt: "2026-11-12T21:05:00.000Z", linkAt: "2026-11-12T21:05:00.000Z" });
     await m.refresh();
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(linkReads, 2, "the link was not read again");
@@ -260,6 +261,22 @@ describe("the Publish card, published", () => {
     await m.refresh();
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(linkReads, 2);
+  });
+
+  test("a republish (a new publishedAt, the same link) reads nothing and leaves the hand-copy field open", async () => {
+    VENUE.publish = published();
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    (document as unknown as { execCommand: () => boolean }).execCommand = () => false;
+    const m = await mount();
+    await click(screen.getByRole("button", { name: "Copy link" }));
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "no hand-copy field, so this tests nothing");
+    // Every edit anywhere republishes, which writes a new publishedAt and leaves the link alone.
+    VENUE.publish = { ...VENUE.publish, publishedAt: "2026-11-12T21:09:00.000Z" };
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 1, "a republish read the link again");
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "the hand-copy field closed under the operator on an automatic republish");
   });
 
   test("a link that cannot be read says so, offers no link, and Try again reads it", async () => {

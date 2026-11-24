@@ -46,6 +46,12 @@ export interface VenuePublish {
   origin: string;
   /** When a publish last went through, as an ISO instant. */
   publishedAt: string;
+  /**
+   * When this link (this secret on this page) was made, as an ISO instant: a publish, regenerate
+   * or move, never a republish. Not a secret: the Publish card reads the link again only when it
+   * changes. A state saved before it existed reads it as publishedAt.
+   */
+  linkAt?: string;
   /** The last failure, said in the operator's words and never naming the secret; null once one goes through. */
   lastError: { at: string; message: string } | null;
   /** Converted backgrounds (by hash) the page holds under this secret. Sorted. */

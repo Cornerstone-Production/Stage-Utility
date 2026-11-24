@@ -73,18 +73,23 @@ function usePublishTarget() {
   });
 }
 
+/** What names the venue's link without carrying it: changed by a publish, regenerate or move, never by a republish. */
+function linkKey(venue: VenueView): string | null {
+  const pub = venue.publish;
+  return pub ? `${venue.id} ${pub.origin} ${pub.linkAt ?? pub.publishedAt}` : null;
+}
+
 /**
  * The venue's public link, read on its own (GET /api/stageplots/venues/:id/link): the document
- * the crew's /stageplots reads carries no secret. Read again whenever the venue's publish state
- * says the link may have changed: a publish, regenerate, move or Publish now each writes a new
- * publishedAt (or origin), here or from another desk. Until the read for the state shown answers,
- * no link is offered, never the one before it. A read that fails is said on the client log and on
- * the card, with Try again.
+ * the crew's /stageplots reads carries no secret. Read again when the link may have changed
+ * (linkAt: a publish, regenerate or move, here or from another desk), never on a republish, which
+ * every edit sets off. Until the read for a new link answers, no link is offered, never the one
+ * before it; Try again keeps the link it has while it reads. A read that fails is said on the
+ * client log and on the card.
  */
 export function usePublishedLink(venue: VenueView): { url: string | null; failed: boolean; retry: () => void } {
-  const pub = venue.publish;
+  const key = linkKey(venue);
   const [attempt, setAttempt] = useState(0);
-  const key = pub ? `${venue.id} ${pub.origin} ${pub.publishedAt} ${attempt}` : null;
   const [read, setRead] = useState<{ key: string; url: string | null; failed: boolean } | null>(null);
   useEffect(() => {
     if (key === null) return;
@@ -93,7 +98,7 @@ export function usePublishedLink(venue: VenueView): { url: string | null; failed
       (r) => live && setRead({ key, url: r.url, failed: false }),
       (err: unknown) => {
         logReadFailure("stageplots", `the public link of ${venue.name}`, err);
-        if (live) setRead({ key, url: null, failed: true });
+        if (live) setRead((was) => ({ key, url: was?.key === key ? was.url : null, failed: true }));
       },
     );
     return () => {
@@ -101,7 +106,7 @@ export function usePublishedLink(venue: VenueView): { url: string | null; failed
     };
     // The name is only for the log line: a rename is no reason to read the link again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, venue.id]);
+  }, [key, attempt, venue.id]);
   const retry = () => setAttempt((n) => n + 1);
   return read && read.key === key ? { url: read.url, failed: read.failed, retry } : { url: null, failed: false, retry };
 }
@@ -209,7 +214,7 @@ export function PublishCard({
   const published = usePublishedLink(venue);
   const link = published.url ?? "";
   // A new venue, or the same one published, unpublished or moved to a new link, starts clean.
-  useResyncOn([venue.id, link], () => {
+  useResyncOn([venue.id, linkKey(venue) ?? ""], () => {
     setError(null);
     setCopy("idle");
   });

@@ -265,6 +265,7 @@ function checkPublish(raw: unknown, what: string): VenuePublish {
     secret: p.secret,
     origin,
     publishedAt: isoInstant(p.publishedAt, `${what}'s publish time`),
+    linkAt: p.linkAt === undefined ? isoInstant(p.publishedAt, `${what}'s publish time`) : isoInstant(p.linkAt, `${what}'s link time`),
     lastError,
     publishedImages: sortedSet(p.publishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s published backgrounds`),
     unpublishedImages: sortedSet(p.unpublishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s backgrounds not yet published`),

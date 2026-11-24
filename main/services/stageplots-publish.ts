@@ -643,7 +643,7 @@ export class StagePlotsPublisher {
       }
       const { secret, r } = fresh;
       const at = this.at();
-      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, [secret], false), null);
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, at, r, [secret], false), null);
       if (!landed.ok) {
         say("error", [secret], `"${venue.name}" was not published: ${landed.message}`);
         return { ok: false, status: 503, error: hide(landed.message, [secret]) };
@@ -706,7 +706,7 @@ export class StagePlotsPublisher {
       const at = this.at();
       // One write: the new link onto the venue and the old one into the queue, so a crash after it
       // leaves the old secret queued for removal rather than nowhere.
-      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, r, all, pub.listed), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, at, r, all, pub.listed), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
       if (!landed.ok) {
         const message = `The link was not changed: ${landed.message}`;
         await this.venueFailed(venue, message);
@@ -932,7 +932,7 @@ export class StagePlotsPublisher {
       return { ok: false, status: fresh.status, error: hide(message, all) };
     }
     const at = this.at();
-    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, fresh.r, all, pub.listed), {
+    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, at, fresh.r, all, pub.listed), {
       secret: pub.secret,
       origin: pub.origin,
       since: at,
@@ -1429,7 +1429,7 @@ export class StagePlotsPublisher {
       const saved = await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, r.message, secrets) }));
       return { ok: false, status: saved ? r.status : 404, error: saved ? hide(r.message, secrets) : "no such venue" };
     }
-    const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, r, secrets, p.listed));
+    const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, p.linkAt ?? p.publishedAt, r, secrets, p.listed));
     if (!saved) return { ok: false, status: 404, error: "no such venue" };
     say("log", secrets, `"${venue.name}" ${what} on ${host}: ${plural(r.sent, "request")}${missingNote(r)}`);
     for (const w of r.warnings) say("warn", secrets, `"${venue.name}": ${w}`);
@@ -1592,14 +1592,14 @@ export class StagePlotsPublisher {
  * (backgrounds not yet published, or what could not be pruned). One rule for a first publish,
  * a regenerate, a move and every republish.
  */
-function stateAfterSend(secret: string, origin: string, at: string, r: Sent, secrets: readonly string[], listed: boolean): VenuePublish {
+function stateAfterSend(secret: string, origin: string, at: string, linkAt: string, r: Sent, secrets: readonly string[], listed: boolean): VenuePublish {
   const lastError =
     r.unpublished.length > 0
       ? errorAt(at, `${plural(r.unpublished.length, "background")} not yet published: ${r.unpublished[0]!.why}`, secrets)
       : r.warnings.length > 0
         ? errorAt(at, r.warnings[0]!, secrets)
         : null;
-  return { secret, origin, publishedAt: at, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort(), listed };
+  return { secret, origin, publishedAt: at, linkAt, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort(), listed };
 }
 
 /** A [stageplots] line for a plot just sent with linked points that went out unlinked, naming each and why. */
