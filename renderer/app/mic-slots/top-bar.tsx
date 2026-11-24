@@ -6,6 +6,8 @@ import { DropdownMenu } from "radix-ui";
 import { useState } from "react";
 
 import { Button, ButtonGroup, MENU_ITEM, menuContent } from "../../components/ui";
+import { cn } from "../../lib/cn";
+import { INLINE_LINK } from "../../lib/link-classes";
 import { PlanSwitcher } from "../../settings/sections/plan-switcher";
 import { namedType } from "../../settings/sections/slots-target-pill";
 import { CopyFromDialog } from "./board-dialogs";
@@ -151,7 +153,7 @@ export function ThemePhotosReasonLine({ reason, mic }: { reason: ThemePhotosReas
       <SparklesIcon className="size-3.5 flex-none" aria-hidden />
       <span>Theme photos is off. {reason.why}.</span>
       {reason.fix === "plan" && (
-        <button type="button" className="font-semibold text-accent underline" onClick={() => void mic.setSide("plan")}>
+        <button type="button" className={cn(INLINE_LINK, "font-semibold")} onClick={() => void mic.setSide("plan")}>
           Switch to this plan
         </button>
       )}

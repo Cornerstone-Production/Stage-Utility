@@ -19,6 +19,7 @@ import { errorMessage } from "@main/services/errors";
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea, toast } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
+import { INLINE_LINK } from "../../../lib/link-classes";
 import { useInAppLink } from "../../../lib/use-search-param";
 import { useCardOps } from "./card-ops";
 import { ManageThemes } from "./manage-themes";
@@ -303,7 +304,7 @@ function PanelBody({
           {trouble && (
             <div role="status" className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-danger-9/35 bg-danger-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">{trouble.reason ?? STATES[trouble.state].detail}</span>
-              <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className="text-accent underline">
+              <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className={INLINE_LINK}>
                 Open Integrations
               </a>
             </div>
