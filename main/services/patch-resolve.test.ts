@@ -16,7 +16,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PatchEndpoint } from "../types/patch.js";
-import { CONTENT_FIELDS, diffEndpoints, endpointsEqual } from "./patch-resolve.js";
+import type { PatchSheet } from "../types/patch.js";
+import { CONTENT_FIELDS, diffEndpoints, endpointKey, endpointsEqual, mergeOverrides, resolvePatch } from "./patch-resolve.js";
 
 /** What identifies an endpoint rather than describing it. Never diffed. */
 type IdentityField = "rackId" | "dir" | "index";
@@ -75,5 +76,27 @@ describe("patch override diffing", () => {
 
   it("an unchanged endpoint diffs to nothing", () => {
     assert.deepEqual(diffEndpoints([base()], [base()]), {});
+  });
+});
+
+describe("a malformed override", () => {
+  // POST /api/patch checks only that `sheets` is a list, so a variant's overrides, or one of them,
+  // can be null or text. Reading `.rackId` off a null one threw, and took /patch and every stage
+  // plots publish that resolves the sheet down with it.
+  const base: PatchEndpoint[] = [{ rackId: "r1", dir: "in", index: 1, label: "Kick" } as PatchEndpoint];
+
+  it("is skipped, and the overrides beside it still apply", () => {
+    const merged = mergeOverrides(base, { "r1:in:2": null, "r1:in:3": "text", "r1:in:1": { label: "Kick In" } } as never);
+    assert.deepEqual(merged.map((e) => [endpointKey(e), e.label]), [["r1:in:1", "Kick In"]]);
+  });
+
+  it("set that is not an object leaves the endpoints as they are, through resolvePatch too", () => {
+    assert.deepEqual(mergeOverrides(base, null as never), base);
+    const sheet = {
+      id: "s", name: "S", kind: "dante", devices: [], endpoints: base,
+      variants: [{ id: "v", name: "V", overrides: null }],
+      assignments: { byServiceType: { st: "v" }, byPlan: { p: { variantId: "v", tweaks: { "r1:in:9": null } } } },
+    } as unknown as PatchSheet;
+    assert.deepEqual(resolvePatch(sheet, { serviceTypeId: "st", planId: "p" }).endpoints, base);
   });
 });
