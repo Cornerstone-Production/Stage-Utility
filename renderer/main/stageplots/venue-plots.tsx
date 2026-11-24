@@ -20,6 +20,7 @@ import { plotHeight, type PlotReason } from "@main/services/stageplots-doc";
 
 import { EmptyState } from "../../components/ui/empty-state";
 import { cn } from "../../lib/cn";
+import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { selectedPlot, tabClass } from "./doc-helpers";
 import { ItemDetails, detailsPosition } from "./item-details";
@@ -321,9 +322,11 @@ export interface VenuePlotsProps {
   channelsOf?: ChannelsOf;
   /** What a venue with no plots offers: /stageplots links to the editor. Absent on the published page, which has no editor. */
   emptyAction?: ReactNode;
+  /** Told the plot on screen whenever it changes (a tab picked, the plan moving): the app bar's Edit opens the editor on it. */
+  onShown?: (plotId: string | null) => void;
 }
 
-export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf, emptyAction }: VenuePlotsProps) {
+export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf, emptyAction, onShown }: VenuePlotsProps) {
   // A tab picked by hand holds only while the plan's plot is the one it was
   // picked over: when the plan moves on (or Planning Center drops), the new
   // plan's plot is selected again rather than hidden behind an old pick.
@@ -331,6 +334,9 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
   const pick = picked && picked.over === (resolved.plot?.id ?? null) ? picked : null;
   const selected = selectedPlot({ id, defaultPlotId } as Parameters<typeof selectedPlot>[0], plots, pick, resolved.plot?.id);
   const background = selected ? backgroundOf(selected) : null;
+  const told = useLatestRef(onShown);
+  const shownId = selected?.id ?? null;
+  useEffect(() => told.current?.(shownId), [told, shownId]);
   const forPlan = !!selected && resolved.reason === "plan" && selected.id === resolved.plot?.id;
   const isDefault = !!selected && resolved.reason === "default" && selected.id === defaultPlotId;
   const planLabel = planDay && forPlan ? `For this plan · ${planDay}` : "For this plan";
