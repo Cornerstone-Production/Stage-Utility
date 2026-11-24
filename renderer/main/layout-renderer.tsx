@@ -45,6 +45,7 @@ import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { CueButton } from "./cue-button";
+import { QsysObject } from "./qsys-object";
 import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -1722,6 +1723,26 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
+    case "qsys-fader":
+      return <QsysObject type="qsys-fader" ts={ts} />;
+    case "qsys-meter":
+      return <QsysObject type="qsys-meter" ts={ts} />;
+    case "qsys-mute":
+      return <QsysObject type="qsys-mute" ts={ts} />;
+    case "qsys-button":
+      return <QsysObject type="qsys-button" ts={ts} />;
+    case "qsys-switch":
+      return <QsysObject type="qsys-switch" ts={ts} />;
+    case "qsys-presets":
+      return <QsysObject type="qsys-presets" ts={ts} />;
+    case "qsys-selector":
+      return <QsysObject type="qsys-selector" ts={ts} />;
+    case "qsys-label":
+      return <QsysObject type="qsys-label" ts={ts} />;
+    case "qsys-strip":
+      return <QsysObject type="qsys-strip" ts={ts} />;
+    case "qsys-status":
+      return <QsysObject type="qsys-status" ts={ts} />;
     case "messages":
       return (
         <MessagesObject

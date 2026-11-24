@@ -11,6 +11,7 @@
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
 import type { Rotation } from "./output-format.js";
+import type { QsysBinding } from "./qsys.js";
 
 export type ViewKind =
   | "slots"
@@ -648,6 +649,41 @@ export type LayoutObjectConfig =
   // manifest id: a pair's base for a switch, the cue name for a lone button.
   // Empty is unbound and renders as such, never as a fake state.
   | { type: "cue-button"; cue: string; label?: string; showDevice?: boolean }
+  // Q-SYS controls. A binding is the control on the Core an object reads or writes;
+  // null is unbound and renders as such. See main/types/qsys.ts.
+  | {
+      type: "qsys-fader";
+      binding: QsysBinding | null;
+      orientation: "vertical" | "horizontal";
+      showDb: boolean;
+      steps: boolean;
+      stepDb: number;
+    }
+  | { type: "qsys-meter"; binding: QsysBinding | null; binding2?: QsysBinding | null; form: "bar" | "number"; unit?: string }
+  | { type: "qsys-mute"; binding: QsysBinding | null }
+  | { type: "qsys-button"; binding: QsysBinding | null; label: string; hold: boolean }
+  // A boolean control, or a pair of trigger controls (on and off).
+  | {
+      type: "qsys-switch";
+      binding: QsysBinding | null;
+      onBinding?: QsysBinding | null;
+      offBinding?: QsysBinding | null;
+      label: string;
+    }
+  | { type: "qsys-presets"; items: { label: string; binding: QsysBinding }[]; previous?: QsysBinding | null }
+  // binding is the control holding the choice list; items are fixed alternatives.
+  | { type: "qsys-selector"; binding?: QsysBinding | null; items: { label: string; binding: QsysBinding }[] }
+  | { type: "qsys-label"; binding: QsysBinding | null; text: string }
+  | {
+      type: "qsys-strip";
+      name: QsysBinding | null;
+      label: string;
+      gain: QsysBinding | null;
+      mute: QsysBinding | null;
+      meter: QsysBinding | null;
+      meter2?: QsysBinding | null;
+    }
+  | { type: "qsys-status" }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {

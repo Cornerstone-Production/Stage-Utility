@@ -405,6 +405,24 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
 ];
 
 /**
+ * The Q-SYS objects, registered with no palette group until their live renderers and
+ * the binding inspector exist (they draw only an Unavailable placeholder). Sorted, one
+ * per line. Give one a group and it moves to ADDED_SINCE with its place in the palette.
+ */
+const NOT_YET_OFFERED = [
+  "qsys-button",
+  "qsys-fader",
+  "qsys-label",
+  "qsys-meter",
+  "qsys-mute",
+  "qsys-presets",
+  "qsys-selector",
+  "qsys-status",
+  "qsys-strip",
+  "qsys-switch",
+];
+
+/**
  * Types RETIRED since the consolidation: still rendered, still restorable from
  * an old snapshot, but out of the palette so no new ones appear.
  *
@@ -440,7 +458,7 @@ const OFF_PALETTE = new Set(RETIRED.map((r) => r.type));
 describe("layout-object registry vs. the structures it replaced", () => {
   test("still covers every original type, plus only deliberate additions", () => {
     const actual = Object.keys(LAYOUT_OBJECTS).sort();
-    const expected = [...ALL, ...ADDED_SINCE.map((a) => a.type)].sort();
+    const expected = [...ALL, ...ADDED_SINCE.map((a) => a.type), ...NOT_YET_OFFERED].sort();
     assert.deepEqual(actual, expected,
       "an unexpected type appeared or an original vanished — add it to ADDED_SINCE if intended");
   });
@@ -506,6 +524,14 @@ describe("layout-object registry vs. the structures it replaced", () => {
       const types = group!.types as string[];
       assert.equal(types[types.indexOf(a.after) + 1], a.type,
         `${a.type} should sit immediately after ${a.after}`);
+    }
+  });
+
+  test("the not-yet-offered Q-SYS objects are out of the palette", () => {
+    const inPalette = PALETTE_GROUPS.flatMap((g) => g.types as string[]);
+    for (const t of NOT_YET_OFFERED) {
+      assert.equal(LAYOUT_OBJECTS[t as LayoutObjectType].group, null, `${t} has a group; move it to ADDED_SINCE`);
+      assert.ok(!inPalette.includes(t), `${t} is in the palette`);
     }
   });
 

@@ -21,6 +21,8 @@ import { DEFAULT_WARN_AMBER_SEC, DEFAULT_WARN_RED_SEC } from "./pvp-now-config";
 import { readTimerConfig } from "./timer-config";
 import { LYRICS_DEFAULTS } from "./lyrics-config";
 
+const QSYS_INTEGRATION = { id: "qsys", label: "Q-SYS" } as const;
+
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
   "Layout",
@@ -861,6 +863,92 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     // room line fit the box a new button is placed in (default-size.test.tsx). The
     // Ultritouch strips set their own, larger size.
     style: () => PILL({ fontSize: 0.045 }),
+  },
+
+  // Q-SYS objects. Each starts unbound. group is null, so none is offered in the palette
+  // yet: they draw only an Unavailable placeholder until their live renderers and the
+  // binding inspector land, and an operator should not be able to place one. Give each
+  // a group when it works.
+  "qsys-fader": {
+    label: "Q-SYS fader",
+    blurb: "A level fader for a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-fader", binding: null, orientation: "vertical", showDb: true, steps: false, stepDb: 3 }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-meter": {
+    label: "Q-SYS meter",
+    blurb: "A level meter for a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-meter", binding: null, form: "bar" }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-mute": {
+    label: "Q-SYS mute",
+    blurb: "A mute button for a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-mute", binding: null }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-button": {
+    label: "Q-SYS button",
+    blurb: "Triggers a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-button", binding: null, label: "", hold: false }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-switch": {
+    label: "Q-SYS switch",
+    blurb: "An on and off switch for a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-switch", binding: null, label: "" }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-presets": {
+    label: "Q-SYS presets",
+    blurb: "A row of Q-SYS snapshot buttons",
+    group: null,
+    config: () => ({ type: "qsys-presets", items: [] }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-selector": {
+    label: "Q-SYS selector",
+    blurb: "Chooses one of several Q-SYS options",
+    group: null,
+    config: () => ({ type: "qsys-selector", items: [] }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-label": {
+    label: "Q-SYS label",
+    blurb: "Text from a Q-SYS control",
+    group: null,
+    config: () => ({ type: "qsys-label", binding: null, text: "" }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-strip": {
+    label: "Q-SYS channel strip",
+    blurb: "Name, fader, mute and meter for one channel",
+    group: null,
+    config: () => ({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+  },
+  "qsys-status": {
+    label: "Q-SYS status",
+    blurb: "Whether the Q-SYS Core is connected",
+    group: null,
+    config: () => ({ type: "qsys-status" }),
+    style: () => PILL(),
+    integration: QSYS_INTEGRATION,
+    stylingOnly: true,
   },
 
   // The newest three stage messages for the screen's groups. Sized so a message

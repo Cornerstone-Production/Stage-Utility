@@ -41,8 +41,14 @@ describe("the widget reference covers the registry", () => {
   // labels any more (the layer list, the inspector and Home name them "Timer"),
   // so a row for each would describe a widget nobody can find. The reference says
   // in one line that a saved one opens as a Timer.
+  //
+  // And less the Q-SYS objects: they are registered with no palette group, drawing only
+  // an Unavailable placeholder, so there is nothing yet for an operator to look up. The
+  // task that gives them a palette group deletes this filter and documents them in the
+  // same commit.
   const registry = Object.entries(LAYOUT_OBJECTS)
     .filter(([type]) => !(LEGACY_TIMER_TYPES as readonly string[]).includes(type))
+    .filter(([type]) => !type.startsWith("qsys-"))
     .map(([, e]) => (e as { label: string }).label);
 
   test("the scan finds rows at all", () => {

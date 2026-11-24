@@ -46,6 +46,19 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   // Sends messages and ends alerts: only a control, with nothing to read on a wall.
   "message-composer": ["control"],
 
+  // Q-SYS: the objects that write to the Core are controls, so a wall display
+  // renders them as readouts and never binds a press. Label, meter and status only read.
+  "qsys-fader": ["control"],
+  "qsys-mute": ["control"],
+  "qsys-button": ["control"],
+  "qsys-switch": ["control"],
+  "qsys-presets": ["control"],
+  "qsys-selector": ["control"],
+  "qsys-strip": ["control"],
+  "qsys-label": ["readout"],
+  "qsys-meter": ["readout"],
+  "qsys-status": ["readout"],
+
   // ── Editable. These hold the operator's own work product. ───────────────
   notes: ["editable"],
   checklist: ["editable"],
