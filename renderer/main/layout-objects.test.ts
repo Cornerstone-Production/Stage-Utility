@@ -402,24 +402,17 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The words on the slide with their group's tag. Sits after the two slide-text
   // widgets it is the richer form of.
   { type: "lyrics", label: "Lyrics", group: "ProPresenter", after: "next-slide-text" },
-];
-
-/**
- * The Q-SYS objects, registered with no palette group until the binding inspector
- * exists: they render live values, but nothing in the editor can bind one yet. Sorted,
- * one per line. Give one a group and it moves to ADDED_SINCE with its place in the palette.
- */
-const NOT_YET_OFFERED = [
-  "qsys-button",
-  "qsys-fader",
-  "qsys-label",
-  "qsys-meter",
-  "qsys-mute",
-  "qsys-presets",
-  "qsys-selector",
-  "qsys-status",
-  "qsys-strip",
-  "qsys-switch",
+  // The Q-SYS objects, in their own group. Sorted by palette order, one per line.
+  { type: "qsys-fader", label: "Q-SYS fader", group: "Q-SYS", after: null },
+  { type: "qsys-meter", label: "Q-SYS meter", group: "Q-SYS", after: "qsys-fader" },
+  { type: "qsys-mute", label: "Q-SYS mute", group: "Q-SYS", after: "qsys-meter" },
+  { type: "qsys-button", label: "Q-SYS button", group: "Q-SYS", after: "qsys-mute" },
+  { type: "qsys-switch", label: "Q-SYS switch", group: "Q-SYS", after: "qsys-button" },
+  { type: "qsys-presets", label: "Q-SYS presets", group: "Q-SYS", after: "qsys-switch" },
+  { type: "qsys-selector", label: "Q-SYS selector", group: "Q-SYS", after: "qsys-presets" },
+  { type: "qsys-label", label: "Q-SYS label", group: "Q-SYS", after: "qsys-selector" },
+  { type: "qsys-strip", label: "Q-SYS channel strip", group: "Q-SYS", after: "qsys-label" },
+  { type: "qsys-status", label: "Q-SYS status", group: "Q-SYS", after: "qsys-strip" },
 ];
 
 /**
@@ -458,7 +451,7 @@ const OFF_PALETTE = new Set(RETIRED.map((r) => r.type));
 describe("layout-object registry vs. the structures it replaced", () => {
   test("still covers every original type, plus only deliberate additions", () => {
     const actual = Object.keys(LAYOUT_OBJECTS).sort();
-    const expected = [...ALL, ...ADDED_SINCE.map((a) => a.type), ...NOT_YET_OFFERED].sort();
+    const expected = [...ALL, ...ADDED_SINCE.map((a) => a.type)].sort();
     assert.deepEqual(actual, expected,
       "an unexpected type appeared or an original vanished — add it to ADDED_SINCE if intended");
   });
@@ -524,14 +517,6 @@ describe("layout-object registry vs. the structures it replaced", () => {
       const types = group!.types as string[];
       assert.equal(types[types.indexOf(a.after) + 1], a.type,
         `${a.type} should sit immediately after ${a.after}`);
-    }
-  });
-
-  test("the not-yet-offered Q-SYS objects are out of the palette", () => {
-    const inPalette = PALETTE_GROUPS.flatMap((g) => g.types as string[]);
-    for (const t of NOT_YET_OFFERED) {
-      assert.equal(LAYOUT_OBJECTS[t as LayoutObjectType].group, null, `${t} has a group; move it to ADDED_SINCE`);
-      assert.ok(!inPalette.includes(t), `${t} is in the palette`);
     }
   });
 

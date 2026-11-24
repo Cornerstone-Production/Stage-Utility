@@ -24,7 +24,7 @@ import type { QsysAddress, QsysBinding, QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
-import { atBottom, faderScale, stepFrom, TICK_MARKS_DB, travelOf, valueAt } from "./fader-scale";
+import { atBottom, faderScale, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
 import {
   DRAG_COALESCE_MS,
   QsysPanelContext,
@@ -38,7 +38,6 @@ import {
   useQsysWriteState,
   useQsysWrite,
   type QsysControlInfo,
-  type QsysReading,
   type QsysState,
 } from "./use-qsys-values";
 
@@ -65,14 +64,6 @@ export function truthy(v: unknown): boolean {
 
 /** The catalog's Type decides; only before the catalog is read does the value's own type. */
 const isBooleanControl = (info: QsysControlInfo, value: unknown) => (info.type ? /^bool/i.test(info.type) : typeof value === "boolean");
-
-/** A 0..1 height for a reading: linear over the control's range, else the Core's position. */
-function levelOf(r: Pick<QsysReading, "value" | "position">, range: QsysControlInfo["range"]): number {
-  if (range && typeof r.value === "number") return clamp01((r.value - range.min) / (range.max - range.min));
-  return r.position === null ? 0 : clamp01(r.position);
-}
-
-const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
 /** "-12.0", "+3.5", "0.0": a level as the readout shows it, in Plex Mono. */
 export function formatDb(v: unknown): string {
@@ -697,7 +688,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     </div>
   );
 
-  const meterBars = meters.filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical={vertical} thin={dense} />);
+  const meterBars = meters.filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical={vertical} thin={dense} scale={scale} />);
   const db = showDb && (
     <span data-db style={{ ...MONO, fontSize: dense ? 12 : "0.5em", color: atLimit ? "var(--color-warn-9)" : "var(--color-fg-muted)", minHeight: "1.2em" }}>
       {muted ? (dense ? "mute" : "Muted") : shown !== null && scale && atBottom(scale, shown) ? "-inf" : formatDb(shown)}
@@ -739,17 +730,18 @@ function bandColour(level: number): string {
 }
 
 /** A meter bar, drawn by the panel's animation loop straight into the element. */
-function MeterBar({ binding, vertical, thin = false }: { binding: QsysBinding; vertical: boolean; thin?: boolean }) {
+function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: QsysBinding; vertical: boolean; thin?: boolean; scale?: FaderScale | null }) {
   const panel = useQsysPanelContext();
   const { component, control } = binding;
-  const info = useQsysControl(ADDR(binding));
   const bar = useRef<HTMLDivElement | null>(null);
-  const min = info.range?.min;
-  const max = info.range?.max;
+  // The scale's numbers, not the object: a new object each render would resubscribe the sink.
+  const bottom = scale?.bottom;
+  const floor = scale?.floor;
+  const top = scale?.top;
   useEffect(() => {
     if (!panel) return;
-    const range = min !== undefined && max !== undefined ? { min, max } : null;
-    return panel.addMeterSink({ component, control }, (r) => levelOf(r, range), {
+    const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top } : null;
+    return panel.addMeterSink({ component, control }, (r) => meterLevel(r, on), {
       draw: (level) => {
         const el = bar.current;
         if (!el) return;
@@ -757,7 +749,7 @@ function MeterBar({ binding, vertical, thin = false }: { binding: QsysBinding; v
         el.style.background = bandColour(level);
       },
     });
-  }, [panel, component, control, min, max, vertical]);
+  }, [panel, component, control, bottom, floor, top, vertical]);
   return (
     <div
       data-meter

@@ -23,10 +23,13 @@ import { addStreamClosedListener } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey, isReadOnlyDirection } from "../../types/qsys.js";
+import { addressKey, isWritable, kindOf, unwritableReason, type QsysControlKind } from "../../types/qsys.js";
+
+// The rules live in types/qsys.ts so the editor shares them; re-exported for the server.
+export { isWritable, kindOf, unwritableReason };
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcControl } from "./qrc-types.js";
-import { type AllowEntry, isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
+import { isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
 import { QsysLeases, type Lease, type LeaseEnd } from "./qsys-leases.js";
@@ -94,37 +97,7 @@ const MAX_TEXT = 1024;
 /** A numeric read-back this close to what was sent is the same value (the Core's float precision is unverified). */
 const READBACK_TOLERANCE = 0.01;
 
-type Kind = "boolean" | "trigger" | "text" | "number";
-
-/**
- * Which rules a control's writes follow. Fails closed: anything not positively a
- * boolean, trigger or text control is numeric, so it is range-checked. The Type
- * strings the Core reports are on the spec's "verify in Emulate" list; the
- * value's own type backs them up.
- */
-export function kindOf(c: QrcControl): Kind {
-  const type = String(c.Type ?? "");
-  if (/^bool/i.test(type) || typeof c.Value === "boolean") return "boolean";
-  if (/^trigger/i.test(type)) return "trigger";
-  if (/^(text|string)$/i.test(type)) return "text";
-  return "number";
-}
-
-/**
- * Why `c` cannot be written under `entry` whatever the value, or null when it
- * can: the Core reports it read-only, or it is numeric and the entry sets no
- * range. The one rule for "is this writable"; the writer refuses on it before
- * sending, and anything that asks the same question asks here.
- */
-export function unwritableReason(c: QrcControl, entry: Pick<AllowEntry, "min" | "max">): "read-only" | "no-range" | null {
-  if (isReadOnlyDirection(c.Direction)) return "read-only";
-  if (kindOf(c) === "number" && (entry.min === null || entry.max === null)) return "no-range";
-  return null;
-}
-
-export function isWritable(c: QrcControl, entry: Pick<AllowEntry, "min" | "max">): boolean {
-  return unwritableReason(c, entry) === null;
-}
+type Kind = QsysControlKind;
 
 type Refused = Extract<WriteResult, { ok: false }>;
 type Checked = { ok: true; send: number | boolean | string; clamped: boolean } | Refused;

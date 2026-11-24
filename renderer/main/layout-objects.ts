@@ -37,6 +37,7 @@ export const PALETTE_GROUP_ORDER = [
   "REAPER",
   "ProVideoPlayer",
   "Control",
+  "Q-SYS",
   "Status",
 ] as const;
 export type PaletteGroup = (typeof PALETTE_GROUP_ORDER)[number];
@@ -865,14 +866,12 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => PILL({ fontSize: 0.045 }),
   },
 
-  // Q-SYS objects (drawn by qsys/qsys-objects.tsx). Each starts unbound. group is null,
-  // so none is offered in the palette yet: there is no inspector to bind one, and an
-  // operator should not be able to place an object that cannot be bound. The task
-  // that adds the binding inspector gives each a group.
+  // Q-SYS objects (drawn by qsys/qsys-objects.tsx, bound in editor/qsys-inspector.tsx).
+  // Each starts unbound and says so until a control is chosen.
   "qsys-fader": {
     label: "Q-SYS fader",
     blurb: "A level fader for a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-fader", binding: null, orientation: "vertical", showDb: true, steps: false, stepDb: 3 }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -880,7 +879,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-meter": {
     label: "Q-SYS meter",
     blurb: "A level meter for a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-meter", binding: null, form: "bar" }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -888,7 +887,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-mute": {
     label: "Q-SYS mute",
     blurb: "A mute button for a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-mute", binding: null }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -896,7 +895,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-button": {
     label: "Q-SYS button",
     blurb: "Triggers a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-button", binding: null, label: "", hold: false }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -904,7 +903,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-switch": {
     label: "Q-SYS switch",
     blurb: "An on and off switch for a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-switch", binding: null, label: "" }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -912,7 +911,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-presets": {
     label: "Q-SYS presets",
     blurb: "A row of Q-SYS snapshot buttons",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-presets", items: [] }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -920,7 +919,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-selector": {
     label: "Q-SYS selector",
     blurb: "Chooses one of several Q-SYS options",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-selector", items: [] }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -928,7 +927,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-label": {
     label: "Q-SYS label",
     blurb: "Text from a Q-SYS control",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-label", binding: null, text: "" }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -936,7 +935,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-strip": {
     label: "Q-SYS channel strip",
     blurb: "Name, fader, mute and meter for one channel",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
@@ -944,7 +943,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "qsys-status": {
     label: "Q-SYS status",
     blurb: "Whether the Q-SYS Core is connected",
-    group: null,
+    group: "Q-SYS",
     config: () => ({ type: "qsys-status" }),
     style: () => PILL(),
     integration: QSYS_INTEGRATION,

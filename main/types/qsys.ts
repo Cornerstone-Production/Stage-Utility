@@ -25,6 +25,54 @@ export function isReadOnlyDirection(direction: unknown): boolean {
   return /^read$/i.test(String(direction ?? "").trim());
 }
 
+/** The parts of a QRC control the rules below read. */
+export interface QsysControlFacts {
+  Type?: unknown;
+  Value?: unknown;
+  Direction?: unknown;
+}
+
+export type QsysControlKind = "boolean" | "trigger" | "text" | "number";
+
+/**
+ * Which rules a control's writes follow. Fails closed: anything not positively a
+ * boolean, trigger or text control is numeric, so it is range-checked. The Type
+ * strings the Core reports are on the spec's "verify in Emulate" list; the
+ * value's own type backs them up. The writer and the editor's Core browser both ask here.
+ */
+export function kindOf(c: QsysControlFacts): QsysControlKind {
+  const type = String(c.Type ?? "");
+  if (/^bool/i.test(type) || typeof c.Value === "boolean") return "boolean";
+  if (/^trigger/i.test(type)) return "trigger";
+  if (/^(text|string)$/i.test(type)) return "text";
+  return "number";
+}
+
+/**
+ * Why `c` cannot be written under an allowlist entry whatever the value, or null
+ * when it can: the Core reports it read-only, or it is numeric and the entry sets
+ * no range. The one rule for "is this writable"; the writer refuses on it before
+ * sending, and anything that asks the same question asks here.
+ */
+export function unwritableReason(c: QsysControlFacts, entry: { min: number | null; max: number | null }): "read-only" | "no-range" | null {
+  if (isReadOnlyDirection(c.Direction)) return "read-only";
+  if (kindOf(c) === "number" && (entry.min === null || entry.max === null)) return "no-range";
+  return null;
+}
+
+export function isWritable(c: QsysControlFacts, entry: { min: number | null; max: number | null }): boolean {
+  return unwritableReason(c, entry) === null;
+}
+
+/**
+ * A meter: a control on a meter component (meter2 and kin), or a control named
+ * `meter...`. Which component types the Core reports for meters is one of the
+ * spec's "verify in Emulate" items; the name rule covers meter2's `meter_1`.
+ */
+export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
+  return /^meter/i.test(componentType) || /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
+}
+
 /** A map key for an address. NUL cannot appear in a Code Name or a control name. */
 export function addressKey(a: QsysAddress): string {
   return `${a.component}\u0000${a.control}`;

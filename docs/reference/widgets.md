@@ -750,6 +750,28 @@ buttons under the newest message it shows, and the server checks the press again
 the widget's groups ([Replies](../features/stage-messages.md#replies-and-who-may-answer)).
 A wall display draws no buttons.
 
+## Q-SYS
+
+Controls and readouts for a Q-SYS Core. Add them from **Q-SYS** in the palette; each
+is bound to a control on the Core with the **Core browser** in the inspector
+([binding](../integrations/qsys.md#binding-objects-to-controls)). An unbound object
+says **Not bound**, and one whose Core is offline, or whose control is missing or may
+not be written, greys out and takes no input. A Q-SYS object only writes from a
+surface that accepts input.
+
+| Widget | What it shows or does | Binds to |
+|---|---|---|
+| **Q-SYS fader** | A level fader, vertical or horizontal. A drag is relative to where the finger lands and never jumps. Optional dB readout, step buttons with a step size, and a **Dense** look with a dB scale | An allowlisted numeric control with a range and write limits |
+| **Q-SYS meter** | A level as a bar (one or two channels, green, amber and red) or as a number with a unit. A bar spans -60 to +12 dB | Any meter control |
+| **Q-SYS mute** | A mute button that says **Mute** or **Muted** | An allowlisted on and off control |
+| **Q-SYS button** | Presses a trigger, or holds a momentary control on while pressed. Optional **Hold to confirm**; a trigger with no readable state flashes when the Core confirms it | An allowlisted trigger or on and off control |
+| **Q-SYS switch** | An on and off switch over one control, or over a pair of triggers (on and off) that becomes one switch when the On trigger has a **Lit by** control | An allowlisted on and off control, or two triggers |
+| **Q-SYS presets** | A row of snapshot or plugin buttons, one lit at a time from the Core's match state where it has one, with an optional **Previous** | Allowlisted triggers |
+| **Q-SYS selector** | Radio options: a control's own choice list, or a set of trigger buttons | An allowlisted choice control, or triggers |
+| **Q-SYS label** | A control's live text, or text typed in the editor, which wins | Any text control |
+| **Q-SYS channel strip** | Name, fader, mute and meter for one channel, standard or **Dense**. The strip's meter uses its fader's dB scale, so the two line up | A name, level, mute and one or two meters, each from its own kind of control |
+| **Q-SYS status** | Whether the Core is **Connected**, **Reconnecting** or **Offline** | The Q-SYS integration |
+
 ## Layout
 
 | Widget | What it is |

@@ -551,13 +551,43 @@ describe("Q-SYS objects", () => {
     assert.equal(dbText(), "-20.0", "still shows the live value");
   });
 
-  test("a meter push draws the bar", async () => {
+  // A meter's height is where its level sits on a dB scale: a standalone meter's is
+  // a fixed -60..+12 window, a strip's meter uses its fader's (floor max(-60 dB, the
+  // allowlist's minimum), top the allowlist's maximum), so the two line up as in the
+  // approved mockup. The Core's own -100..+20 range is NOT the scale: spent linearly,
+  // it gave the bottom 40 dB of the bar to levels nobody listens to.
+  test("a standalone meter draws on a -60..+12 dB window", async () => {
     await mount([{ type: "qsys-meter", binding: b("meter"), form: "bar" }]);
     const bar = q("qsys-meter", "[data-meter] > div");
-    assert.ok(Math.abs(parseFloat(bar.style.height) - 58.333) < 0.01, `hydrated at -30 dB of -100..+20, drew ${bar.style.height}`);
-    push("qsys:meters:staff", [{ control: "meter", value: 20 }]);
+    assert.ok(Math.abs(parseFloat(bar.style.height) - 41.667) < 0.01, `hydrated at -30 dB drew ${bar.style.height}`);
+    push("qsys:meters:staff", [{ control: "meter", value: 6 }]);
     await wait(150);
-    assert.equal(bar.style.height, "100%");
+    assert.ok(Math.abs(parseFloat(bar.style.height) - 91.667) < 0.01, `+6 dB drew ${bar.style.height}`);
+    push("qsys:meters:staff", [{ control: "meter", value: 20 }]);
+    await wait(250);
+    assert.ok(parseFloat(bar.style.height) > 99.9, `above the top is the top, drew ${bar.style.height}`);
+    push("qsys:meters:staff", [{ control: "meter", value: -80 }]);
+    await wait(250);
+    assert.ok(parseFloat(bar.style.height) < 0.5, `below the floor is empty, drew ${bar.style.height}`);
+  });
+
+  test("a strip's meter uses its fader's scale", async () => {
+    // gain is allowlisted -100..0 on a -100..+20 control: the fader's travel is -60..0.
+    await mount([{ type: "qsys-strip", name: null, label: "Lead", gain: b("gain"), mute: null, meter: b("meter") }]);
+    const bar = q("qsys-strip", "[data-meter] > div");
+    assert.ok(Math.abs(parseFloat(bar.style.height) - 50) < 0.01, `-30 dB on a -60..0 fader drew ${bar.style.height}`);
+    push("qsys:meters:staff", [{ control: "meter", value: -80 }]);
+    await wait(250);
+    assert.ok(parseFloat(bar.style.height) < 0.5, `below the fader's floor is -inf, drew ${bar.style.height}`);
+    push("qsys:meters:staff", [{ control: "meter", value: 6 }]);
+    await wait(250);
+    assert.ok(parseFloat(bar.style.height) > 99, `above the fader's top is the top, drew ${bar.style.height}`);
+  });
+
+  test("a meters-only strip has no fader to follow and uses the standalone window", async () => {
+    await mount([{ type: "qsys-strip", name: null, label: "Room", gain: null, mute: null, meter: b("meter") }]);
+    const bar = q("qsys-strip", "[data-meter] > div");
+    assert.ok(Math.abs(parseFloat(bar.style.height) - 41.667) < 0.01, `drew ${bar.style.height}`);
   });
 });
 

@@ -90,6 +90,7 @@ import {
 import { SlotsGridBoard } from "./slots-grid-board";
 import { TimerInspector } from "./timer-inspector";
 import { LyricsInspector } from "./lyrics-inspector";
+import { isQsysConfig, QsysInspector } from "./qsys-inspector";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
@@ -1479,6 +1480,7 @@ export function Inspector({
       })()}
       {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
       {c.type === "lyrics" && <LyricsInspector c={c} onConfig={onConfig} />}
+      {isQsysConfig(c) && <QsysInspector c={c} onConfig={onConfig} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {

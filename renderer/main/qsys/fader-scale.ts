@@ -59,3 +59,21 @@ export function stepFrom(s: FaderScale, v: number, dir: 1 | -1, step: number): n
   const next = v - step;
   return next < s.floor ? (v > s.floor ? s.floor : s.bottom) : next;
 }
+
+/**
+ * A standalone meter's window: -60..+12 dB, as the approved mockup draws it.
+ * Not the control's own range: a meter control reports -100..+20, and spending
+ * that linearly gives the bottom 40 dB of the bar to levels nobody listens to.
+ */
+export const STANDALONE_METER_SCALE: FaderScale = { bottom: FADER_FLOOR_DB, floor: FADER_FLOOR_DB, top: 12 };
+
+/**
+ * 0..1 bar height for a meter reading on `scale`: its fader's, so a strip's meter
+ * and fader line up, or the standalone window. Below the floor is empty ("-inf").
+ * A reading that is not a number (a meter the Core reports as text) falls back to
+ * the Core's own position.
+ */
+export function meterLevel(r: { value: unknown; position: number | null }, scale: FaderScale | null): number {
+  if (typeof r.value === "number" && Number.isFinite(r.value)) return travelOf(scale ?? STANDALONE_METER_SCALE, r.value);
+  return r.position === null ? 0 : Math.min(1, Math.max(0, r.position));
+}

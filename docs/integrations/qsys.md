@@ -116,6 +116,37 @@ before the new list is saved. Nothing deletes that copy.
 The allowlist, its limits and the write route are not PIN-gated: anyone who can reach
 the server can change them. Restrict the server's port to staff and panel devices.
 
+## Binding objects to controls
+
+Q-SYS objects are in the layout editor's palette under **Q-SYS** (fader, meter, mute,
+button, switch, presets, selector, label, channel strip and status; see the
+[widget reference](../reference/widgets.md#q-sys)). Selecting one shows its options
+in the inspector, and each control it takes is chosen with the **Core browser**: the
+Core's components, then the controls of one that fit. Search matches component and
+control names.
+
+What is offered depends on the field:
+
+| Field | Offered |
+|---|---|
+| Fader and strip level | Numeric controls with a range on the Core, not meters |
+| Mute, switch, momentary button, **Lit by** | On and off controls |
+| Trigger button, switch pair, preset, selector button, Previous | Triggers |
+| Selector choice list | Controls with a list of choices (when the Core reports one) |
+| Meter, strip meter | Meter controls (a meter component, or a name or type starting `meter`) |
+| Label text, strip name | Text controls |
+
+A field that **writes** is offered only controls that are on the allowlist and that the
+writer would accept: not read-only, and a number needs write limits. A field that only
+reads is offered every control of the right kind. A list (presets, selector buttons)
+adds a row only once a control is chosen. A binding made in the browser is an address
+(component and control); a **Lit by** control is a second address that says whether
+the object is on, such as a snapshot's match.
+
+With no Core connected the browser says so and lists nothing; an existing binding
+stays shown and can be cleared. A read that fails for any other reason is logged to
+`/log` as a `[qsys]` line and the browser says it could not read.
+
 ## Binding check
 
 A Q-SYS object stores the address of the control it reads or writes. Any View with

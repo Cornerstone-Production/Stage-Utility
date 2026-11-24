@@ -122,7 +122,7 @@ export const ICONS: Record<LayoutObjectType, LucideIcon> = {
 /**
  * Accent per GROUP, not per type.
  *
- * Thirteen colours to maintain rather than forty-one, and the colour means
+ * Fourteen colours to maintain rather than forty-one, and the colour means
  * something: it is the group. This is editor chrome — it tints the icon tile so
  * a type can be found in a long list. It never reaches a display, where the cull
  * left widgets with a plain outline and no colour at all.
@@ -140,6 +140,7 @@ export const GROUP_ACCENT: Record<PaletteGroup, string> = {
   REAPER: "var(--gray-9)",
   ProVideoPlayer: "var(--blue-9)",
   Control: "var(--amber-9)",
+  "Q-SYS": "var(--blue-9)",
   Status: "var(--gray-9)",
 };
 

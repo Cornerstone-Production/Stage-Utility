@@ -31,7 +31,7 @@ import { backoffMs } from "../backoff.js";
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
-import { addressKey, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
+import { addressKey, isMeterControl, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcChange } from "./qrc-types.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
@@ -59,14 +59,8 @@ export interface WatchSource {
   onCatalog(cb: (c: QsysCatalog) => void): void;
 }
 
-/**
- * A meter: a control on a meter component (meter2 and kin), or a control named
- * `meter...`. Which component types the Core reports for meters is one of the
- * spec's "verify in Emulate" items; the name rule covers meter2's `meter_1`.
- */
-export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
-  return /^meter/i.test(componentType) || /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
-}
+// The rule lives in types/qsys.ts so the editor shares it; re-exported for the server.
+export { isMeterControl };
 
 interface Group {
   keys: Set<string>;

@@ -21,6 +21,7 @@ const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { LayoutEditor } = await import("./layout-editor.js");
+const { PALETTE_GROUP_ORDER } = await import("../main/layout-objects.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 // The editor calls useBlocker, which needs a router in context even when
@@ -247,7 +248,7 @@ test("Hide what is not set up removes unconfigured widgets and dims the groups l
     await settleAct();
     assert.ok(tiles() < all, `hiding removed nothing (${all} -> ${tiles()})`);
     assert.ok(groups().some((b) => b.getAttribute("data-empty") === "true"), "a group with no configured widget should be dimmed");
-    assert.equal(groups().length, 13, "every group stays in the list");
+    assert.equal(groups().length, PALETTE_GROUP_ORDER.length, "every group stays in the list");
   } finally {
     // Unmount first: a failing assertion would otherwise leave the editor's event
     // stream reconnecting against a restored fetch until the run times out.
