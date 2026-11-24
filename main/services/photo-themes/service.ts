@@ -36,12 +36,15 @@ import {
   PHOTO_THEMES_CHANNEL,
   THEMED_PHOTO_FILE,
   THEMED_PHOTO_REF_PREFIX,
+  themedPhotoUrl,
+  type ApproveAllResultDTO,
   type GenerateResultDTO,
   type PhotoShow,
   type PhotoThemesChanged,
   type PhotoThemesDTO,
   type PlanChoiceDTO,
   type PlanPeopleDTO,
+  type ShownEdit,
   type ThemeDTO,
   type ThemePersonDTO,
   type ThemedPhotoStatus,
@@ -161,7 +164,6 @@ interface Run {
 const NO_PHOTOS: ReadonlyMap<string, string> = new Map();
 
 const jobKey = (themeId: string, personId: string) => `${themeId}\u0000${personId}`;
-const imageUrl = (file: string) => `/api/photo-themes/images/${file}`;
 
 async function defaultLoadOriginal(url: string): Promise<Buffer | null> {
   // Through the photo cache, so the original is fetched the way every slot's is
@@ -412,7 +414,7 @@ export class PhotoThemesService {
       status,
       approved: entry?.approved
         ? {
-            url: imageUrl(entry.approved.file),
+            url: themedPhotoUrl(entry.approved.file),
             fromPlanId: entry.approved.planId,
             fromDate: entry.approved.serviceDate,
             approvedAt: entry.approved.approvedAt,
@@ -424,7 +426,7 @@ export class PhotoThemesService {
         : entry?.pending
           ? {
               status: entry.pending.status,
-              url: entry.pending.file ? imageUrl(entry.pending.file) : null,
+              url: entry.pending.file ? themedPhotoUrl(entry.pending.file) : null,
               reason: entry.pending.reason ?? null,
               planId: entry.pending.planId,
             }
@@ -554,36 +556,54 @@ export class PhotoThemesService {
 
   // ── People ──────────────────────────────────────────────────────────────
 
-  /** Approve a ready edit: it replaces any approved photo, and goes on screens. */
-  async approve(themeId: string, personId: string): Promise<ThemePersonDTO> {
+  /**
+   * Approve the ready edit the operator was shown (`file`): it replaces any
+   * approved photo, and goes on screens. Checked again inside the write, after
+   * the roster read: an edit that replaced the shown one meanwhile (a Redo that
+   * landed) is refused, never approved unseen.
+   */
+  async approve(themeId: string, personId: string, file: string): Promise<ThemePersonDTO> {
     const entry = this.entry(themeId, personId);
     if (entry.pending?.status !== "ready") throw new PhotoThemeRefused("There is no edit waiting for review", 409);
     const turnOn = await this.plansToTurnOn(themeId, entry.pending.planId ? [entry.pending.planId] : []);
     await this.mutate((b) => {
-      promote(themeIn(b, themeId), personId, this.now());
+      const t = themeIn(b, themeId);
+      if (!isShownEdit(t, personId, file)) throw new PhotoThemeRefused("Their edit changed since it was shown: look at it again", 409);
+      promote(t, personId, this.now());
       for (const planId of turnOn) b.plans.get(planId)!.show = "themed";
     });
     return this.personDto(this.book.themes.get(themeId)!, personId, entry.name);
   }
 
-  /** Approve every edit made for this plan that is waiting for review. */
-  async approveAll(planId: string): Promise<{ approved: number }> {
+  /**
+   * Approve the edits the operator was shown for this plan, each by the file
+   * they saw. One that is no longer that file, or no longer waiting for review
+   * for this plan, is skipped and named; none left to approve is refused.
+   */
+  async approveAll(planId: string, shown: readonly ShownEdit[]): Promise<ApproveAllResultDTO> {
     const choice = this.book.plans.get(planId);
     if (!choice?.themeId) throw new PhotoThemeRefused("This plan has no theme", 409);
     const themeId = choice.themeId;
     const turnOn = await this.plansToTurnOn(themeId, [planId]);
     let approved = 0;
+    const skipped: string[] = [];
     await this.mutate((b) => {
       const t = themeIn(b, themeId);
-      for (const p of t.people.values()) {
-        if (p.pending?.status === "ready" && p.pending.planId === planId) {
-          promote(t, p.personId, this.now());
+      for (const { personId, file } of shown) {
+        if (isShownEdit(t, personId, file) && t.people.get(personId)!.pending!.planId === planId) {
+          promote(t, personId, this.now());
           approved++;
+        } else {
+          skipped.push(personId);
         }
       }
-      if (approved > 0) for (const id of turnOn) b.plans.get(id)!.show = "themed";
+      if (approved === 0) throw new PhotoThemeRefused("None of those edits is waiting for review as it was shown: look again", 409);
+      for (const id of turnOn) b.plans.get(id)!.show = "themed";
     });
-    return { approved };
+    if (skipped.length > 0) {
+      console.log(`[photo-theme] approve all for plan ${scrub(planId)}: ${scrub(approved)} approved, ${scrub(skipped.length)} left for review (their edit changed since it was shown)`);
+    }
+    return { approved, skipped };
   }
 
   /**
@@ -1112,6 +1132,12 @@ function promote(t: Theme, personId: string, now: number): void {
   const { file, madeFrom, sourceUrl, planId, serviceDate } = p.pending;
   p.approved = { file, madeFrom, sourceUrl, planId, serviceDate, approvedAt: new Date(now).toISOString() };
   delete p.pending;
+}
+
+/** The person's edit waiting for review is still the file the operator was shown. */
+function isShownEdit(t: Theme, personId: string, file: string): boolean {
+  const pending = t.people.get(personId)?.pending;
+  return pending?.status === "ready" && pending.file === file;
 }
 
 function choiceDto(c: PlanChoice): PlanChoiceDTO {

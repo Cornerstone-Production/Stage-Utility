@@ -16,7 +16,7 @@ const { photoThemes, photoFingerprint, PHOTO_THEME_IMAGE_DIR } = await import(".
 const { setAppTimeZone } = await import("../app-timezone.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { captureConsole } = await import("../fixtures/capture-console.js");
-const { errorBody, fakeServer, pcoPhoto, startFakeOpenAi } = await import("./photo-themes-harness.js");
+const { approveAllShown, approveShown, errorBody, fakeServer, pcoPhoto, shownFile, startFakeOpenAi } = await import("./photo-themes-harness.js");
 const { THEMED_PHOTO_REF_PREFIX } = await import("../../types/photo-themes.js");
 type FakeOpenAi = Awaited<ReturnType<typeof startFakeOpenAi>>;
 type FakeServer = Awaited<ReturnType<typeof fakeServer>>;
@@ -104,7 +104,7 @@ describe("generating", () => {
   it("reuses an approved photo at no cost, on this plan and the next", async () => {
     const theme = await themed();
     await generated();
-    assert.equal((await photoThemes.approveAll(PLAN)).approved, 3);
+    assert.equal((await approveAllShown(photoThemes, PLAN)).approved, 3);
     fake.requests.length = 0;
     srv.loads.length = 0;
 
@@ -211,7 +211,7 @@ describe("paying once", () => {
   it("a double-clicked Redo sends one edit", async () => {
     const theme = await themed([person("1"), person("2")]);
     await generated();
-    await photoThemes.approveAll(PLAN);
+    await approveAllShown(photoThemes, PLAN);
     fake.requests.length = 0;
     const edits = slowEdits();
     const from = { planId: PLAN, serviceTypeId: TYPE };
@@ -226,7 +226,7 @@ describe("paying once", () => {
   it("a double-clicked Generate after a prompt change sends each person once", async () => {
     const theme = await themed([person("1"), person("2"), person("3")]);
     await generated();
-    await photoThemes.approveAll(PLAN);
+    await approveAllShown(photoThemes, PLAN);
     await photoThemes.updateTheme(theme.id, { prompt: "Snow, keep the face the same" });
     fake.requests.length = 0;
     const edits = slowEdits();
@@ -240,7 +240,7 @@ describe("paying once", () => {
   it("Generate does not spend again on somebody with an approved photo whose Redo failed", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     fake.edit = () => ({ status: 400, body: { error: { code: "moderation_blocked" } } });
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
@@ -256,7 +256,7 @@ describe("what screens are given", () => {
   it("approved photos of a plan set to Themed, and nothing else", async () => {
     const theme = await themed();
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const shown = photoThemes.shownPhotos(PLAN);
     assert.deepEqual([...shown.keys()], ["1"], "the two still waiting for review are not shown");
     assert.match(shown.get("1")!, new RegExp(`^${THEMED_PHOTO_REF_PREFIX}[0-9a-f]{16}\\.webp$`));
@@ -274,7 +274,7 @@ describe("what screens are given", () => {
     const theme = await themed([person("1")]);
     await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "original" });
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().plans[0]!.show, "themed");
   });
 
@@ -283,14 +283,14 @@ describe("what screens are given", () => {
     await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "original" });
     await generated();
     srv.unreadable.set(PLAN, "Planning Center did not answer");
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().plans[0]!.show, "original");
   });
 
   it("keeps the approved photo on screen while a redo is made, until the redo is approved", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const before = photoThemes.shownPhotos(PLAN).get("1");
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
@@ -300,9 +300,61 @@ describe("what screens are given", () => {
     fake.edit = async () => ({ status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("x")]).toString("base64") }] } });
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.notEqual(photoThemes.shownPhotos(PLAN).get("1"), before);
     assert.equal((await fs.readdir(path.join(TMP, PHOTO_THEME_IMAGE_DIR))).length, 1, "the replaced photo's file is gone");
+  });
+});
+
+describe("an approval approves only what was shown", () => {
+  /** Edits from here on are a different file from the ones already made. */
+  function nextEditsDiffer() {
+    fake.edit = async () => ({ status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("redo")]).toString("base64") }] } });
+  }
+
+  it("Approve all leaves an edit that landed after the view unapproved, and says who", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    await generated();
+    // What the panel shows: 1 and 2 ready.
+    const shown = [
+      { personId: "1", file: shownFile(photoThemes, theme.id, "1") },
+      { personId: "2", file: shownFile(photoThemes, theme.id, "2") },
+    ];
+    // Meanwhile: 1 is redone into a different edit, and 3 joins the plan and is made.
+    nextEditsDiffer();
+    srv.rosters.set(PLAN, [person("1"), person("2"), person("3")]);
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await generated();
+    assert.equal(statusOf(theme.id, "3"), "ready");
+
+    const r = await photoThemes.approveAll(PLAN, shown);
+    assert.deepEqual(r, { approved: 1, skipped: ["1"] });
+    assert.equal(statusOf(theme.id, "1"), "ready", "the redo nobody saw waits for review");
+    assert.equal(statusOf(theme.id, "2"), "approved");
+    assert.equal(statusOf(theme.id, "3"), "ready", "an edit not on screen when Approve all was pressed waits for review");
+    assert.deepEqual([...photoThemes.shownPhotos(PLAN).keys()], ["2"]);
+  });
+
+  it("Approve refuses an edit that replaced the one shown, and approves nothing", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    const seen = shownFile(photoThemes, theme.id, "1");
+    nextEditsDiffer();
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await photoThemes.idle();
+    assert.notEqual(shownFile(photoThemes, theme.id, "1"), seen);
+
+    await assert.rejects(photoThemes.approve(theme.id, "1", seen), (e: Error & { status?: number }) => e.status === 409 && /changed since it was shown/.test(e.message));
+    assert.equal(statusOf(theme.id, "1"), "ready");
+    assert.equal(photoThemes.shownPhotos(PLAN).size, 0);
+  });
+
+  it("Approve all with nothing left as it was shown is refused, not a silent success", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    const shown = [{ personId: "1", file: shownFile(photoThemes, theme.id, "1") }];
+    await photoThemes.remove(theme.id, "1");
+    await assert.rejects(photoThemes.approveAll(PLAN, shown), (e: Error & { status?: number }) => e.status === 409);
   });
 });
 
@@ -310,7 +362,7 @@ describe("made from an older photo", () => {
   it("is flagged when the Planning Center photo changes, and Keep clears it", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(statusOf(theme.id, "1"), "approved");
     // The same upload at another size is the same photo.
     assert.equal(photoFingerprint(pcoPhoto("1", 1)), photoFingerprint(pcoPhoto("1", 1).replace("256x256%23", "512x512")));
@@ -329,7 +381,7 @@ describe("a person's original photo, for Manage themes", () => {
   it("is their current Planning Center photo where this server has seen it", async () => {
     const theme = await themed([person("1"), person("2")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const of = (id: string) => photoThemes.state().themes.find((t) => t.id === theme.id)!.people.find((p) => p.personId === id)!.originalUrl;
     assert.equal(of("1"), pcoPhoto("1", 1));
     // A new upload is what Manage should draw as their original, so it shows what the edit was NOT made from.
@@ -344,7 +396,7 @@ describe("move, copy and remove", () => {
     const b = await photoThemes.createTheme({ name: "Easter 2027", prompt: "Spring" });
     const c = await photoThemes.createTheme({ name: "Summer 2027", prompt: "Sun" });
     await generated();
-    await photoThemes.approve(a.id, "1");
+    await approveShown(photoThemes, a.id, "1");
     const files = () => fs.readdir(path.join(TMP, PHOTO_THEME_IMAGE_DIR));
 
     await photoThemes.transfer(a.id, "1", b.id, "copy");
@@ -381,7 +433,7 @@ describe("move, copy and remove", () => {
   it("deleting a theme puts its plans back on the originals and removes its photos", async () => {
     const a = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(a.id, "1");
+    await approveShown(photoThemes, a.id, "1");
     assert.deepEqual(await photoThemes.deleteTheme(a.id), { plans: 1, photos: 1 });
     assert.equal(photoThemes.state().plans[0]!.themeId, null);
     assert.equal(photoThemes.shownPhotos(PLAN).size, 0);
@@ -394,7 +446,7 @@ describe("retention", () => {
     const lines = captureConsole(t, "log", "warn");
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().themes[0]!.keptUntil, "2027-03-24");
 
     // 03:00 UTC on the 25th is still the 24th in Chicago: kept. A sweep that
@@ -425,7 +477,7 @@ describe("retention", () => {
   it("does not clear a theme chosen for a later service while the sweep waited its turn", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     now = Date.parse("2027-03-25T12:00:00Z");
     // Queued first, so it lands before the sweep's write.
     const chosen = photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2027-04-04T15:00:00Z", themeId: theme.id });
@@ -438,7 +490,7 @@ describe("retention", () => {
   it("leaves alone a theme a plan with no known date uses", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     await photoThemes.choosePlan("2003", { serviceTypeId: TYPE, sortDate: null, themeId: theme.id });
     now = Date.parse("2028-01-01T12:00:00Z");
     assert.equal((await photoThemes.sweep()).photos, 0);
@@ -479,7 +531,7 @@ describe("files on disk", () => {
   it("are never removed because the book read empty from a damaged file", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const dir = path.join(TMP, PHOTO_THEME_IMAGE_DIR);
     const [file] = await fs.readdir(dir);
     await fs.writeFile(path.join(TMP, "photo-themes.json"), '{"version":1,"themes":[{"id"');
@@ -493,7 +545,7 @@ describe("files on disk", () => {
     const lines = captureConsole(t, "warn");
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.shownPhotos(PLAN).size, 1);
     await fs.rm(path.join(TMP, PHOTO_THEME_IMAGE_DIR), { recursive: true });
     await photoThemes.reloadForTests();

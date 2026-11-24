@@ -13,10 +13,10 @@
 import { CheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, themedPhotoFileOf, type ApproveAllResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
 import { errorMessage } from "@main/services/errors";
 
-import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from "../../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea, toast } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
 import { useInAppLink } from "../../../lib/use-search-param";
@@ -173,9 +173,22 @@ function PanelBody({
         ipc("photoThemes:redo", { id: theme.id, personId: person.personId, planId: plan.planId, serviceTypeId: plan.serviceTypeId }),
       );
     } else if (action === "approve") {
-      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId }));
+      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId, file: themedPhotoFileOf(person.pending?.url) }));
     } else {
       await photos.write(`keep:${theme.id}:${person.personId}`, () => ipc("photoThemes:keep", { id: theme.id, personId: person.personId }));
+    }
+  }
+
+  /** Approve the ready edits on screen, each by the file shown: one redone meanwhile stays for another look. */
+  async function approveAll() {
+    const shown = readyHere.flatMap((p) => {
+      const file = themedPhotoFileOf(p.pending?.url);
+      return file ? [{ personId: p.personId, file }] : [];
+    });
+    const r = await photos.write<ApproveAllResultDTO>(`approve-all:${plan.planId}`, () => ipc("photoThemes:approveAll", { planId: plan.planId, people: shown }));
+    if (r.ok && r.value.skipped.length > 0) {
+      const names = r.value.skipped.map((id) => list.find((p) => p.personId === id)?.name ?? "Someone");
+      toast.info(`Changed since it was shown, so left for another look: ${names.join(", ")}`);
     }
   }
 
@@ -311,7 +324,7 @@ function PanelBody({
             <h4 className="m-0 text-[10px] font-medium uppercase tracking-[0.07em] text-fg-subtle">
               People · <Num>{list.length}</Num>
             </h4>
-            <Button variant="filled" size="small" disabled={readyHere.length === 0 || planBusy("approve-all")} onClick={() => void photos.write(`approve-all:${plan.planId}`, () => ipc("photoThemes:approveAll", { planId: plan.planId }))}>
+            <Button variant="filled" size="small" disabled={readyHere.length === 0 || planBusy("approve-all")} onClick={() => void approveAll()}>
               <CheckIcon className="size-3.5" />
               Approve all ready{readyHere.length > 0 && <> (<Num>{readyHere.length}</Num>)</>}
             </Button>

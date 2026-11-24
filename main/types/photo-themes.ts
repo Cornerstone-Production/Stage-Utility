@@ -11,6 +11,27 @@ export const THEME_ID = /^th-[0-9a-f]{12}$/;
 /** A stored edit's file name: the first 16 hex of its SHA-256 and its type. */
 export const THEMED_PHOTO_FILE = /^[0-9a-f]{16}\.(?:webp|png)$/;
 
+const THEMED_PHOTO_PATH = "/api/photo-themes/images/";
+
+/** Where a stored edit is served, for review or for a slot. */
+export function themedPhotoUrl(file: string): string {
+  return THEMED_PHOTO_PATH + file;
+}
+
+/**
+ * The stored edit a {@link themedPhotoUrl} names, or null. What an approval
+ * sends back: the file the operator was shown, so an edit that replaced it
+ * meanwhile is never the one approved.
+ */
+export function themedPhotoFileOf(url: string | null | undefined): string | null {
+  if (!url?.startsWith(THEMED_PHOTO_PATH)) return null;
+  const file = url.slice(THEMED_PHOTO_PATH.length);
+  return THEMED_PHOTO_FILE.test(file) ? file : null;
+}
+
+/** The most people one approve-all names: more than any plan's boards hold. */
+export const MAX_APPROVE_ALL = 500;
+
 /**
  * How a resolved slot names a themed photo in its `photoUrl`.
  *
@@ -173,6 +194,22 @@ export interface PhotoThemesChanged {
   queued: number;
   /** Who is being made now or is waiting, sorted. */
   active: { themeId: string; personId: string }[];
+}
+
+/** One edit an approve-all was sent: the person, and the file they were shown. */
+export interface ShownEdit {
+  personId: string;
+  file: string;
+}
+
+/**
+ * What an approve-all answers. `skipped` are the people sent whose edit is no
+ * longer the one they were shown (redone, removed or approved meanwhile): they
+ * are left as they are, for another look.
+ */
+export interface ApproveAllResultDTO {
+  approved: number;
+  skipped: string[];
 }
 
 /** What a generate answers: what it queued, and what it did not send and why. */

@@ -63,10 +63,12 @@ interface P {
   approved: null | { url: string; fromPlanId: string | null; fromDate: string | null; approvedAt: string; stale: boolean };
   pending: null | { status: "generating" | "ready" | "failed"; url: string | null; reason: string | null; planId: string | null };
 }
+/** A stored edit's name for a person: 16 hex, as the server's are. */
+const editFile = (kind: "a" | "b", personId: string) => `${kind}${personId.padStart(15, "0")}.webp`;
 const person = (personId: string, name: string, status: Status, over: Partial<P> = {}): P => {
-  const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/a${personId}.webp`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
+  const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/${editFile("a", personId)}`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
   const pending =
-    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/r${personId}.webp`, reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
+    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/${editFile("b", personId)}`, reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
   return { personId, name, status, approved, pending, ...over };
 };
 
@@ -79,6 +81,8 @@ let calls: { method: string; path: string; body: unknown }[] = [];
 /** "METHOD /path" to the status and body it answers instead. */
 let refuse: Record<string, { status: number; error: string }> = {};
 let hold: Promise<void> | null = null;
+/** The people an approve-all answers it skipped (their edit changed since it was shown). */
+let approveAllSkips: string[] = [];
 let closed = 0;
 
 const theme = (id: string, name: string, over: Record<string, unknown> = {}) => ({
@@ -109,6 +113,7 @@ beforeEach(() => {
   calls = [];
   refuse = {};
   hold = null;
+  approveAllSkips = [];
   closed = 0;
   roster = { roster: "plan" };
   connection = { method: "api-key", hint: "sk-…3f2a", state: "connected", reason: null, checkedAt: null };
@@ -130,6 +135,10 @@ beforeEach(() => {
       status = no.status;
       out = { error: no.error };
     } else if (path === "/api/photo-themes") out = state();
+    else if (path.endsWith("/approve-all")) {
+      const sent = (body as { people: { personId: string }[] }).people;
+      out = { approved: sent.length - approveAllSkips.length, skipped: approveAllSkips };
+    }
     else if (path.startsWith("/api/photo-themes/plans/") && method === "GET") {
       out = {
         planId: "7001",
@@ -280,12 +289,13 @@ describe("the header and the hints", () => {
 });
 
 describe("Approve and Approve all", () => {
-  test("Approve sends that one person and the card follows the server", async () => {
+  test("Approve sends that one person, with the edit it showed, and the card follows the server", async () => {
     await mount();
     people = people.map((p) => (p.personId === "9002" ? person("9002", "Jordan P.", "approved") : p));
     await click(screen.getByRole("button", { name: "Approve Jordan P." }));
     const post = writes().find((c) => c.path.endsWith("/people/9002/approve"))!;
     assert.equal(post.method, "POST");
+    assert.deepEqual(post.body, { file: editFile("b", "9002") });
     assert.equal(chipOf("9002"), "Approved");
   });
 
@@ -309,6 +319,20 @@ describe("Approve and Approve all", () => {
     await click(btn);
     const post = writes().find((c) => c.path === "/api/photo-themes/plans/7001/approve-all")!;
     assert.equal(post.method, "POST");
+    assert.deepEqual(post.body, {
+      people: [
+        { personId: "9002", file: editFile("b", "9002") },
+        { personId: "9005", file: editFile("b", "9005") },
+      ],
+    }, "the edits on screen, by file: nothing that lands later");
+  });
+
+  test("Approve all names whoever it left for another look", async () => {
+    people = [person("9002", "Jordan P.", "ready"), person("9005", "Riley S.", "ready")];
+    approveAllSkips = ["9005"];
+    await mount();
+    await click(screen.getByRole("button", { name: /Approve all ready/ }));
+    assert.match(document.body.textContent ?? "", /Changed since it was shown, so left for another look: Riley S\./);
   });
 
   test("with nothing ready, Approve all cannot be pressed", async () => {

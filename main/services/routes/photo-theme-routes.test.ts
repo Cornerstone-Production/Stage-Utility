@@ -97,7 +97,7 @@ describe("themes", () => {
 
     // People: a person id is digits; a target is a theme id.
     assert.equal((await call(`/api/photo-themes/themes/${id}/people/AC1001/approve`, "POST")).status, 400);
-    assert.equal((await call(`/api/photo-themes/themes/${id}/people/1001/approve`, "POST")).status, 404);
+    assert.equal((await call(`/api/photo-themes/themes/${id}/people/1001/approve`, "POST", { file: "0123456789abcdef.webp" })).status, 404);
     assert.equal((await call(`/api/photo-themes/themes/${id}/people/1001/move`, "POST", { to: "elsewhere" })).status, 400);
     assert.equal((await call(`/api/photo-themes/themes/${id}/people/1001/redo`, "POST", { planId: "2001" })).status, 400);
     assert.equal((await call(`/api/photo-themes/themes/${id}/people/1001`, "DELETE")).status, 404);
@@ -129,7 +129,8 @@ describe("plans", () => {
     assert.equal((await call("/api/photo-themes/plans/2001/generate", "POST", { serviceTypeId: "100", mode: "everything" })).status, 400);
     assert.equal((await call("/api/photo-themes/plans/2001/generate", "POST", {})).status, 400);
     assert.equal((await call("/api/photo-themes/plans/2002/generate", "POST", { serviceTypeId: "100" })).status, 409, "no theme on that plan");
-    assert.equal((await call("/api/photo-themes/plans/2002/approve-all", "POST")).status, 409);
+    const shown = [{ personId: "1001", file: "0123456789abcdef.webp" }];
+    assert.equal((await call("/api/photo-themes/plans/2002/approve-all", "POST", { people: shown })).status, 409);
   });
 
   it("generates, approves and serves the edit", async () => {
@@ -137,7 +138,24 @@ describe("plans", () => {
     assert.equal(r.status, 202);
     assert.deepEqual(r.json, { queued: 1, reused: 0, skipped: [] });
     await photoThemes.idle();
-    assert.deepEqual((await call("/api/photo-themes/plans/2001/approve-all", "POST")).json, { approved: 1 });
+    const ready = (await call("/api/photo-themes")).json as { themes: { id: string; people: { personId: string; pending: { url: string } | null }[] }[] };
+    const themeId = ready.themes.find((t) => t.people.length > 0)!.id;
+    const file = ready.themes.flatMap((t) => t.people).find((p) => p.pending)!.pending!.url.split("/").pop()!;
+    const approvePath = `/api/photo-themes/themes/${themeId}/people/1001/approve`;
+    // Each names the edit it was shown, checked for shape before anything is looked up.
+    const refused: [string, unknown][] = [
+      [approvePath, {}],
+      [approvePath, { file: "../secrets.webp" }],
+      ["/api/photo-themes/plans/2001/approve-all", {}],
+      ["/api/photo-themes/plans/2001/approve-all", { people: [] }],
+      ["/api/photo-themes/plans/2001/approve-all", { people: [{ personId: "1001" }] }],
+      ["/api/photo-themes/plans/2001/approve-all", { people: [{ personId: "x", file }] }],
+      ["/api/photo-themes/plans/2001/approve-all", { people: [{ personId: "1001", file }, { personId: "1001", file }] }],
+      ["/api/photo-themes/plans/2001/approve-all", { people: Array.from({ length: 501 }, (_, i) => ({ personId: String(1 + i), file })) }],
+    ];
+    for (const [p, body] of refused) assert.equal((await call(p, "POST", body)).status, 400, `${p} ${JSON.stringify(body).slice(0, 80)}`);
+    assert.equal((await call(approvePath, "POST", { file: "0123456789abcdef.webp" })).status, 409, "an edit other than the one waiting");
+    assert.deepEqual((await call("/api/photo-themes/plans/2001/approve-all", "POST", { people: [{ personId: "1001", file }] })).json, { approved: 1, skipped: [] });
     const state = (await call("/api/photo-themes")).json as { themes: { people: { approved: { url: string } | null }[] }[] };
     const url = state.themes.flatMap((t) => t.people).find((p) => p.approved)!.approved!.url;
     const image = await call(url);

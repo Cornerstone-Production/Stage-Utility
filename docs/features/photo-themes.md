@@ -131,7 +131,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 4. **Generate N for <theme>** sends only the people without a photo in it. Each
    person's card shows their original beside the edit while it is made, then waits
    for **Approve** (or **Approve all ready**, which approves the ready edits made
-   for this service). **Redo** makes one person again.
+   for this service). Each approves the edit on screen: one redone after it was
+   shown is left for another look, and the sheet names who. **Redo** makes one
+   person again.
 5. **Original | Themed** appears beside the button once the theme has an approved
    photo, and in the sheet's header while it is open (the bar's copy gives way, so
    the bar does not wrap). It chooses what this service's screens show;

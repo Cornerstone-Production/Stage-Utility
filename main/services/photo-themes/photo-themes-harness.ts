@@ -6,7 +6,8 @@ import type { AddressInfo } from "node:net";
 
 import sharp from "sharp";
 
-import type { PhotoThemesDeps, PlanPerson, PlanPeopleRead } from "./service.js";
+import { themedPhotoFileOf } from "../../types/photo-themes.js";
+import type { PhotoThemesDeps, PhotoThemesService, PlanPerson, PlanPeopleRead } from "./service.js";
 
 export interface FakeRequest {
   path: string;
@@ -135,4 +136,28 @@ export async function fakeServer(fetchImpl?: typeof fetch): Promise<FakeServer> 
     ...(fetchImpl ? { fetchImpl } : {}),
   };
   return s;
+}
+
+/** The edit waiting for review for a person, as the panel would show it: its file. */
+export function shownFile(service: PhotoThemesService, themeId: string, personId: string): string {
+  const p = service.state().themes.find((t) => t.id === themeId)?.people.find((x) => x.personId === personId);
+  const file = themedPhotoFileOf(p?.pending?.url);
+  if (!file) throw new Error(`no edit is waiting for review for ${personId}`);
+  return file;
+}
+
+/** Approve what the panel shows for a person: the edit waiting for review now. */
+export function approveShown(service: PhotoThemesService, themeId: string, personId: string) {
+  return service.approve(themeId, personId, shownFile(service, themeId, personId));
+}
+
+/** Approve all ready for a plan, as the panel sends it: every ready edit made for the plan, by file. */
+export function approveAllShown(service: PhotoThemesService, planId: string) {
+  const themeId = service.state().plans.find((c) => c.planId === planId)?.themeId;
+  const people = service.state().themes.find((t) => t.id === themeId)?.people ?? [];
+  const shown = people.flatMap((p) => {
+    const file = p.pending?.status === "ready" && p.pending.planId === planId ? themedPhotoFileOf(p.pending.url) : null;
+    return file ? [{ personId: p.personId, file }] : [];
+  });
+  return service.approveAll(planId, shown);
 }
