@@ -281,6 +281,22 @@ describe("saves that are still out", () => {
     await eventually(() => assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "the other browser's hide was dropped, or this browser's kept"));
   });
 
+  test("a new section is the same section while its save is out and once it has saved", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    holdNextSave();
+    let id = "";
+    await act(async () => {
+      id = api!.addSection();
+    });
+    await eventually(() => assert.equal(saves.length, 1));
+    // Drawn while the save is out: the id the save carries, not another one made on a redraw.
+    assert.ok(api!.resolved.sections.some((s) => s.id === id), "the drawn section is not the one that was asked for");
+    assert.ok(saves[0].sections.some((s) => s.id === id), "the saved section is not the one that was drawn");
+    await act(async () => releaseHold!());
+    await eventually(() => assert.ok(api!.resolved.sections.some((s) => s.id === id)));
+  });
+
   test("the Hid toast and its Undo wait for the save, and never appear for one the server refused", async () => {
     await mount();
     holdNextSave();

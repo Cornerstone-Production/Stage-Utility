@@ -42,7 +42,8 @@ import { CustomizeContext, useCustomize, type CustomizeTab, type CustomizeValue 
 import { sidebarListIo } from "./set-sidebar";
 import { useSavedList } from "./use-saved-list";
 import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
-import { hidePage } from "./sidebar-edits";
+import { addSection, hidePage } from "./sidebar-edits";
+import { uid } from "../lib/uid";
 import { BarDragGhost, RailDragGhost } from "./rail-drag-ghost";
 import { isBarDrag, useBarEditor } from "./bar-editor";
 import { usePointerSensors } from "./drag-parts";
@@ -202,6 +203,16 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     [apply, setConsoleShown],
   );
 
+  /** A new, empty section at the end; its id. The id is made here, once: a change is
+   *  run again for every redraw and for the save, and an id made inside it would be a
+   *  different section each time, so a rename or a drop on the drawn one would miss
+   *  the saved one. */
+  const addNewSection = useCallback(() => {
+    const id = uid("s");
+    void apply((r) => addSection(r, id));
+    return id;
+  }, [apply]);
+
   const [tab, setTab] = useState<CustomizeTab>("sidebar");
   const open = useCallback((which: CustomizeTab) => {
     setTab(which);
@@ -277,6 +288,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     draft,
     consoles,
     apply,
+    addSection: addNewSection,
     setConsoleShown,
     hide,
     drag: railDrag.drag,

@@ -34,8 +34,7 @@ import { Caret, DRAGGABLE } from "./drag-parts";
 import type { RailDrag } from "./rail-drop";
 import type { Destination } from "./destinations";
 import { setBranding } from "./set-branding";
-import { uid } from "../lib/uid";
-import { addSection, removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
+import { removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
 
 const X_BUTTON =
   "grid size-5 shrink-0 place-items-center rounded-full border border-line-strong bg-surface text-fg-muted " +
@@ -68,9 +67,7 @@ export function RailEditor({
   const [renaming, setRenaming] = useState<string | null>(null);
 
   function addNew() {
-    const id = uid("s");
-    customize.apply((r) => addSection(r, id));
-    setRenaming(id);
+    setRenaming(customize.addSection());
   }
 
   return (
