@@ -336,7 +336,9 @@ export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, pl
   const background = selected ? backgroundOf(selected) : null;
   const told = useLatestRef(onShown);
   const shownId = selected?.id ?? null;
-  useEffect(() => told.current?.(shownId), [told, shownId]);
+  useEffect(() => {
+    told.current?.(shownId);
+  }, [told, shownId]);
   const forPlan = !!selected && resolved.reason === "plan" && selected.id === resolved.plot?.id;
   const isDefault = !!selected && resolved.reason === "default" && selected.id === defaultPlotId;
   const planLabel = planDay && forPlan ? `For this plan · ${planDay}` : "For this plan";
