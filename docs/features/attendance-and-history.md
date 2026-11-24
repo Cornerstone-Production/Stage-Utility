@@ -229,7 +229,7 @@ no sound keeps its tile and says so (*no LAeq 2 reading*) rather than
 disappearing when you switch. The Attendance / Sound choice is remembered per
 browser.
 
-Under **Sound** a **metric** select appears between the switch and the range. It
+Under **Sound**, on `/history/manage`, a **metric** select appears between the switch and the range. It
 lists every metric the loaded recordings carry, in one stable order (*LAeq 2*
 before *LAeq 10*). A name the server would refuse as a choice is left out (see
 `POST /api/history/trends-prefs` in the [API reference](../reference/api.md)). The

@@ -9,6 +9,12 @@ you can place on a screen.
 **Planning Center is the exception** — it supplies the plan, the people and the
 countdown, so the app needs it.
 
+**OpenAI** has a tile on the page too, though it is not an integration: it holds the
+API key [Photo themes](../features/photo-themes.md#connecting-openai) uses, and its
+dialog has **Save**, **Test** and **Remove key**. It has no enable switch, sits under
+*Not set up* until a key is saved, and counts in *N of M connected* only while it is
+connected.
+
 | Integration | What it surfaces |
 |---|---|
 | [Planning Center](planning-center.md) | Service plans, live rundown, pre-service countdown, room and event calendar |
@@ -59,7 +65,7 @@ it, and they mean different things:
 | Clear the field and save | The stored value is **deleted** |
 
 Clearing is how you take a credential back off the box — there is no separate
-button for it. It is recorded on `/log` as
+button for it. (OpenAI's key, which belongs to no integration, has **Remove key**.) It is recorded on `/log` as
 `[integration-manager] cleared N stored credential(s) on <id>`, naming the fields
 and never the values.
 
@@ -115,7 +121,7 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    `layout-objects.ts` (it dims the widget on the shelf until the integration is set up);
    a place in `CATEGORY_ORDER` in `integrations-panel.tsx`.
 
-Settings → Integrations is a grid of cards, one per integration, showing its name,
+Settings → Integrations is a grid of cards, one per integration (and the OpenAI key's tile), showing its name,
 what it is pointed at and its connection. All of them are on the page at all
 times: the ones not set up sort below a "Not set up" heading and are drawn
 quietly. Clicking a card opens its settings in a dialog — `?integration=<id>` on

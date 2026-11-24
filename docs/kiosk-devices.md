@@ -600,8 +600,9 @@ server does not need SSH.
 
 A server's id (`serverId` in its `settings.json`) is what every screen and Mac
 output binds to. Two servers carrying the same id both answer those screens, which
-then switch between them: a helper output reloads, and reports its health to
-whichever answered last. A config restore is the usual way it happens, which is
+then switch between them. A Mac output helper with no `server` file stays on the
+address it loaded, logs it once, and says in its window that two servers answer for
+the id; the note clears once no second address has answered for 75 seconds. A config restore is the usual way it happens, which is
 why a restore keeps this server's own id unless told this box replaces the one the
 config came from ([Restoring a config snapshot](ops/reliability.md#restoring-a-config-snapshot)).
 A restore that keeps the id but brings the config's screens also releases every
@@ -636,8 +637,8 @@ found by both.
   An older Pi or Linux kiosk that sends no binding of its own, set up on both, is
   answered by both until it is released on one. Nothing restarts, and the check
   runs again at once under the new id.
-- The Server id row says what the last check found and when (**Checking…** for
-  the three seconds its answers are counted), **Not checked** while
+- The Server id row says what the last check found and when (*Checking for another
+  server with this id…* for the three seconds its answers are counted), **Not checked** while
   discovery is off (nothing answers or checks), and why when the check could not
   be sent.
 - A server older than this check answers it too, and also lists the server that

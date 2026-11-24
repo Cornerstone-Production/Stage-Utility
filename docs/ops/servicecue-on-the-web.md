@@ -18,6 +18,7 @@ How it works is in [ServiceCue publishing protocol](../reference/servicecue-publ
   every column: audio and band notes, lighting and video cues, and whatever else is
   written in a plan's item notes. Do not publish a plan whose notes you would not put
   on a poster in the lobby.
+- A [published stage plots venue](../features/stageplots.md#publishing) is the exception to the open link: it is at `/stageplots/<secret>`, seen only by whoever was sent that link, and nothing lists the links.
 - The address is `servicecue.<your-subdomain>.workers.dev`, a name that can be
   guessed. The page tells search engines to leave it out (`noindex`), which asks them
   and hides nothing from a person or a script that finds or guesses the address.
@@ -118,6 +119,7 @@ the LAN.
 | `/servicecue` | the ServiceCue index, as a stage tablet sees it, without the **Edit layouts** link |
 | `/servicecue/<service type>/<layout>` | a rundown. The same links as the app's: `weekend/audio`, a layout by id, `all-columns`, `?plan=`, `?text=` |
 | `/` | the [landing page](#the-landing-page) while a stage plots venue is listed on it; otherwise sends the visitor on to `/servicecue` |
+| `/stageplots/<secret>` | a published [stage plots venue](../features/stageplots.md#publishing), for whoever was sent its link; nothing lists the secrets |
 | anything else | `404`. There is no `/servicecue/presets` and no settings of any kind |
 
 Give people the `/servicecue` link; every rundown they open from it works like the
@@ -252,10 +254,11 @@ the build it carries. When they differ:
 | the window around a rehearsal or service is open (the window integration reconnects use, [Winding down between services](reliability.md#winding-down-between-services), which the Mac helpers' updates also wait out) | waits the same way until the window closes. "Update the page now" goes ahead of it |
 | the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
 
-The check is made again just before the upload, so a service that goes live while the
-server is asking Cloudflare what the page holds (up to a minute) is waited out too.
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
+
+The check is made again just before the upload, so a service that goes live while the
+server is asking Cloudflare what the page holds (up to a minute) is waited out too.
 
 **A page of another protocol.** A release that changes the [publishing protocol](../reference/servicecue-publishing.md)
 finds the page still running the old Worker, which does not answer the new status path

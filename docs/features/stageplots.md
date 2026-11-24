@@ -436,8 +436,9 @@ they were added, with their text.
 ### Printing
 
 **Print** opens the browser's print dialog with the plot on one landscape page:
-the venue and plot, "Default plot" when it is, the date printed in the app's time
-zone, the plot, its legend and callout key, and each connection point's inputs.
+the venue and plot, a line reading "For this plan · Sun 15 Nov" or "Default plot" when
+the plot shown is one of those (the editor's print names only the default), the date
+printed in the app's time zone, the plot, its legend and callout key, and each connection point's inputs.
 The page is white paper in either theme. To make a PDF, choose Save as PDF in the
 dialog. The browser's own print (Cmd/Ctrl+P) gives the same page.
 
@@ -486,7 +487,7 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
 | | |
 |---|---|
 | **Off** | **Publish *venue***. Nothing is sent until it is pressed |
-| **Published** | When it was last published, the link with **Copy**, **Show on the landing page**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
+| **Published** | When it was last published, the link with **Copy link**, **Show on the landing page**, **Regenerate…**, **Unpublish…**, the backgrounds not yet published with **Publish now**, and the last error |
 | **Old links still live** | Under either state, and on its own when no venue is selected: "*n* old links still live on *host*", with **Remove now** when that page is the one set up, and "Set that page up again to remove it" when not. See [Old links](#old-links) |
 
 - **Publish** makes the secret on the server, sends every background the venue's plots
@@ -518,7 +519,7 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
   page until the page is set up again. Publishing again makes a new link.
 - **Deleting** a published venue unpublishes it first. A link the page does not take
   down waits as an old link, and the delete says so.
-- **Copy** copies the link. Over plain HTTP, where the browser has no clipboard API, it
+- **Copy link** copies the link. Over plain HTTP, where the browser has no clipboard API, it
   selects the link for copying by hand if the older copy command does not work.
 
 The page shows the plot each venue had for the followed plan when it was last published,

@@ -81,7 +81,7 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `views.json`, `slots.json` | view definitions and slot sets |
 | `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
 | `notes.json` | what an operator typed into a notes object |
-| `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue columns and category roles. An install that has them as `scriptview-*.json` has them renamed on the next start; a backup taken before that restores into the new names. A release older than 1.25.0 reads only the old names, so a server switched back to one (for example from the beta track to an older stable) shows ServiceCue with no layouts until it runs 1.25.0 or later again; the files are not touched |
+| `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue layouts and category roles. An install that has them as `scriptview-*.json` has them renamed on the next start; a backup taken before that restores into the new names. A release older than 1.25.0 reads only the old names, so a server switched back to one (for example from the beta track to an older stable) shows ServiceCue with no layouts until it runs 1.25.0 or later again; the files are not touched |
 | `servicecue-publish.json` | whether ServiceCue is published to the web, and the address of its page. Restored switched on, it has no token until one is entered again: the card then says so |
 | `patch.json` | the stage patch sheet |
 | `automation-rules.json`, `automation-settings.json` | rules, and simulate/disarm |
@@ -94,7 +94,7 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
-| `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots, backgrounds and per-plan overrides |
+| `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots, backgrounds, per-plan overrides, each published venue's secret link and the old links waiting to be removed |
 | `stageplot-drafts.json` | the [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts |
 | `photo-themes.json` | [photo themes](../features/photo-themes.md): prompts, approvals and each plan's theme. The OpenAI key is in `secrets.bin`, never here |
 | `branding-images/`, `layout-images/`, `stageplot-images/`, `photo-theme-images/` | uploaded images and themed photos, named by content hash |

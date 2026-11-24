@@ -14,7 +14,7 @@ original's. See
 
 ## The Mic slots page
 
-**Mic slots**, in the Screens group of the sidebar, edits every board at once.
+**Mic slots**, in the sidebar's Screens section by default, edits every board at once.
 A Mic Slots screen's **Edit** on the Screens page opens it on that screen's board
 (`/mic-slots?board=<id>`), scrolled to and selected.
 

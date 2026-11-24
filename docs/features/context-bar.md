@@ -140,7 +140,7 @@ tray measures your arrangement at 320px and says when something will be cut.
 A **console** can be set to run without the app's chrome, and that hides this bar
 along with the top bar for as long as that console is open — see
 [Running a console without the app's chrome](operator-app.md#running-a-console-without-the-apps-chrome).
-It is per console, not per device, and no other page is affected.
+It is per console, not per device, and no other page is affected. Customize mode on such a console says its Context bar tab has nothing to arrange: open Customize from a page that has a bar.
 
 Reach for it only when you want the whole window. If what you actually want is
 *less* bar rather than no bar, trim the phone's item set above: that keeps the

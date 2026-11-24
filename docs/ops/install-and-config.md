@@ -359,15 +359,15 @@ page's and layout editor's switcher steps — within one type, or across every a
 See [Switching plans in the editor](../slots.md#switching-plans-in-the-editor).
 
 **Screens** — build the content and route it to your physical screens. A view is a
-mic slots view, dashboard, stage screen, captions, script rundown, SPL rundown, or a
+mic slots view, dashboard, stage screen, transcription, ServiceCue rundown, SPL rundown, calendar, or a
 custom layout you design on a canvas; build once and route it to any number of
-screens, each with its own URL. **Mic slots**, in the same sidebar group, edits the
+screens, each with its own URL. **Mic slots**, beside it in the sidebar by default, edits the
 [slot boards](../slots.md#the-mic-slots-page) those views show.
 
 **Branding, Automation, History, Baptisms, Patch** — appearance, event-driven
 rules, recorded services, the baptism timer and the stage patch sheet.
 
-**Advanced** — updates and the update track, the server log, the context bar,
+**Advanced** — updates and the update track, the server log, the sidebar and context bar layout, the public ServiceCue link,
 kiosk devices and the server id they bind to, time zone and clock format, the
 public address, host names, how integrations back off between services, backup
 and restore, automatic backups, and the data archive.
@@ -399,7 +399,7 @@ automation conditions.
 
 It also governs the dates the app writes for you to read:
 
-- the date in the name of every downloaded file: config, archive, view, patch and
+- the date in the name of every downloaded file: config, archive, view, plan, patch and
   Video feeds exports
 - the plan dates in the editor's plan switcher and its pill, and in the Mic slots
   **Copy from** dialog

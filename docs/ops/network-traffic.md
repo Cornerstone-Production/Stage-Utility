@@ -185,6 +185,7 @@ What reaches the internet, and when:
 | ESPN | Live scores for followed teams, only while any are followed |
 | YouTube, and Resi | Whether you are live, only while those integrations are on |
 | OpenAI | [Photo themes](../features/photo-themes.md): each original photo and the theme's prompt, only while a Generate or Redo runs; a key test lists OpenAI's models |
+| Your public ServiceCue page, and Cloudflare | [ServiceCue on the web](servicecue-on-the-web.md), only while the Public link is on: the layouts, rundowns and live position ServiceCue shows, and published stage plots, to the page address you set. With a Cloudflare API token saved, Cloudflare's API too, to update that page |
 | Wherever an embed or external feed points | A YouTube or Resi player reaches its own platform, and an external feed reaches whatever address it names |
 
 Once, the first time video is switched on with a pull or push feed, the server

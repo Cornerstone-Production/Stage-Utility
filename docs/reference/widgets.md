@@ -772,7 +772,7 @@ once changes every screen. See [Layout editor](layout-editor.md) for containers.
 NDI needs the native client. The web build ignores this widget.
 
 **Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
-page under Screens — renaming a feed there does not break a widget bound to it,
+page (under Screens by default) — renaming a feed there does not break a widget bound to it,
 since the binding is the feed's id, not its name. Muted, with no controls
 (except Listen, below), and it only opens a connection while it is actually on
 screen and the tab is visible. **Feed** picks which one it plays. **Fit** chooses between

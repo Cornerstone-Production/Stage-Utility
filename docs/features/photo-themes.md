@@ -114,13 +114,14 @@ when they have no approved photo; a failed Redo is tried again only by Redo.
 
 Theme photos is for one service, so it works on a plan, never on a Default.
 
-1. **Connect OpenAI.** On the Integrations page, the **OpenAI**
-   card under the integration tiles takes the API key: **Save**, **Test** (a free
-   call that lists models) and **Remove key**. The field shows only the saved key's
-   last four characters, and the key is not kept in the page after it is saved.
-   The card's status line says in plain words how the connection stands: *Connected*,
-   *Connected, out of credits*, *Image edits refused*, *Could not reach OpenAI*, or
-   *Not connected* when there is no key saved or OpenAI rejected the one that is.
+1. **Connect OpenAI.** Open the **OpenAI** tile on Settings → Integrations
+   ([Connecting OpenAI](#connecting-openai)). Its dialog takes the API key: **Save**,
+   **Test** (a free call that lists models) and **Remove key**. The field shows only
+   the saved key's last four characters, and the key is not kept in the page after it
+   is saved. The tile's footer and the dialog's header say in plain words how the
+   connection stands: *Connected*, *Connected, out of credits*, *Image edits refused*,
+   *Could not reach OpenAI*, *Key saved* (not used yet), or *Not connected* when
+   there is no key saved or OpenAI rejected the one that is.
 2. **Open a plan on Mic slots** and choose **<plan> only**. **Theme photos**, beside
    the **⋯** menu, opens the sheet: at the right of the boards on a wide screen, over
    the bottom of the page on a phone. It is off, with the reason on hover and in a
