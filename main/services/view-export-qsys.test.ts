@@ -112,4 +112,18 @@ describe("Q-SYS panels in a view bundle", () => {
     assert.equal(status.status, 200);
     assert.equal((status.json as { configured?: boolean }).configured, false);
   });
+
+  it("importing with onClash replace does not replace a panel here: its address stays taken and the file's copy is suffixed", async () => {
+    // onClash decides a patch variant and a preset; a view is never overwritten, so the
+    // panel already here keeps its address whichever way the choice is made.
+    for (const onClash of ["keep", "replace"]) {
+      await viewsStore.save([panel("p1", "zone-1", "Zone 1 here")]);
+      const r = await importBundle({ bundle: bundle([panel("x", "zone-1", "Zone 1 from file")]), onClash });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      const views = await have();
+      assert.equal(views.find((v) => v.id === "p1")?.qsys?.slug, "zone-1", `${onClash}: the panel here lost its address`);
+      assert.equal(views.find((v) => v.name === "Zone 1 from file")?.qsys?.slug, "zone-1-2", `${onClash}: the file's copy shares it`);
+      assert.equal(views.length, 2, `${onClash}: a view was replaced`);
+    }
+  });
 });

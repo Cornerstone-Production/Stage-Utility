@@ -95,11 +95,25 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
       setFlyout(false);
     };
     const away = () => setFlyout(false);
+    // Escape closes it whenever it is open, wherever focus is; focus that was in the
+    // row or the flyout goes back to the row.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (wrapper.current?.contains(document.activeElement) || flyoutEl.current?.contains(document.activeElement)) {
+        wrapper.current?.querySelector("button")?.focus();
+      }
+      setFlyout(false);
+    };
     document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
     window.addEventListener("resize", away);
+    // Capture: a scroll does not bubble, and the sidebar is the element that scrolls.
+    document.addEventListener("scroll", away, true);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", escape, true);
       window.removeEventListener("resize", away);
+      document.removeEventListener("scroll", away, true);
     };
   }, [flyout]);
 
@@ -131,9 +145,6 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
       focusFirst.current = true;
       if (flyout) flyoutEl.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
       else setFlyout(true);
-    } else if (e.key === "Escape" && flyout) {
-      e.stopPropagation();
-      close();
     }
   }
 
@@ -148,9 +159,8 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
     else if (e.key === "ArrowUp") move(at - 1);
     else if (e.key === "Home") move(0);
     else if (e.key === "End") move(buttons.length - 1);
-    else if (e.key === "Escape" || e.key === "ArrowLeft") {
+    else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      e.stopPropagation();
       close(true);
     }
   }
@@ -191,7 +201,14 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
   return (
     // The mobile drawer's close-on-select belongs to a row that navigates; this one opens a list.
     <SidebarChromeProvider value={{ collapsed: chrome.collapsed, isMobile: chrome.isMobile }}>
-      <div ref={wrapper} onPointerEnter={hoverIn} onPointerLeave={hoverOut} onContextMenuCapture={() => close()} data-qsys-rail-row>
+      <div ref={wrapper} onPointerEnter={hoverIn} onPointerLeave={hoverOut} onContextMenuCapture={() => close()}
+        // Focus moving out of the row and the flyout (both, a portal being a React child) closes it.
+        onBlur={(e) => {
+          const to = e.relatedTarget as Node | null;
+          if (to && (wrapper.current?.contains(to) || flyoutEl.current?.contains(to))) return;
+          close();
+        }}
+        data-qsys-rail-row>
         <RailRow
           d={d}
           menuItems={menuItems}

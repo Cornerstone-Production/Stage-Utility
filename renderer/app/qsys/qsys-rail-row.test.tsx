@@ -247,6 +247,39 @@ describe("hovering the row", () => {
   });
 });
 
+describe("an open flyout goes away when the sidebar is left", () => {
+  const open = async () => {
+    await mount();
+    await hover();
+    await eventually(() => assert.ok(flyout()), 1500);
+  };
+
+  test("Escape closes it wherever focus is, including nowhere", async () => {
+    await open();
+    assert.equal(document.activeElement === document.body, true, "the test needs focus elsewhere");
+    await act(async () => void fireEvent.keyDown(document.body, { key: "Escape" }));
+    assert.equal(flyout() === null, true, "Escape with focus elsewhere left it open");
+  });
+
+  test("scrolling the sidebar closes it", async () => {
+    await open();
+    await act(async () => void fireEvent.scroll(document.querySelector(".bg-rail")!));
+    assert.equal(flyout() === null, true, "the flyout stayed put while the sidebar scrolled");
+  });
+
+  test("focus leaving the row and the flyout closes it; focus moving between them does not", async () => {
+    await mount();
+    rowButton()!.focus();
+    await act(async () => void fireEvent.keyDown(rowButton()!, { key: "ArrowRight" }));
+    await eventually(() => assert.ok(flyout()));
+    const first = flyout()!.querySelector<HTMLElement>("[role=menuitem]")!;
+    await eventually(() => assert.equal(document.activeElement === first, true));
+    assert.ok(flyout(), "focus moving from the row into the flyout closed it");
+    await act(async () => void fireEvent.blur(first, { relatedTarget: document.body }));
+    assert.equal(flyout() === null, true, "a keyboard-opened flyout stayed after focus left");
+  });
+});
+
 describe("the row's own menu", () => {
   test("a right-click closes a flyout that is open, and cancels one that is about to", async () => {
     await mount();
