@@ -459,6 +459,59 @@ for (const form of ["notify", "reply"] as const) {
       assert.equal(watch.current([GAIN]).size, 1);
     });
 
+    test("a design change while a failed update is pending destroys a group the watch had stopped tracking", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN, MUTE)]);
+      await open("a");
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        // Dropping MUTE rebuilds "values": the watch forgets the group, then the Core refuses its Destroy.
+        fake.failNext("ChangeGroup.Destroy", -32604);
+        // setPanels runs the one pass; a recompute() here would queue a second, which would repair it.
+        watch.setPanels([panel("a", "staff", GAIN)]);
+        await until(() => warn.mock.calls.length > 0, "refused Destroy");
+        await settle();
+        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"], "setup: the refused Destroy left the old group");
+        // The design changes before the retry timer fires.
+        fake.status = { ...fake.status, DesignCode: "design-2" };
+        pushEngineStatus();
+        await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
+        await watch.recompute();
+        await settle();
+        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"], "an old-design control stayed in a group nobody tracked");
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
+    test("a new connection starts the retry backoff over", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      const warn = mock.method(console, "warn", () => {});
+      const retries = () => warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.startsWith("[qsys] change group update failed"));
+      try {
+        fake.failNext("ChangeGroup.AutoPoll", 5);
+        fake.failNext("ChangeGroup.AutoPoll", 5);
+        named.add(watchChannel("a"));
+        subscriptionsChanged();
+        await until(() => retries().length === 1, "first refusal");
+        mock.timers.tick(1_000);
+        await until(() => retries().length === 2, "second refusal");
+        assert.match(retries()[1], /retrying in 2 s$/);
+        await fake.dropClients();
+        await until(() => svc.transport === null, "disconnect");
+        fake.failNext("ChangeGroup.Invalidate", -32604);
+        mock.timers.tick(3_000);
+        await until(() => retries().length === 3, "refused rebuild on the new connection");
+        assert.match(retries()[2], /retrying in 1 s$/, "the new connection inherited the old backoff, blocking writes longer");
+        assert.equal(watch.ready(), false);
+        mock.timers.tick(1_000);
+        await until(() => watch.ready(), "retry after 1 s");
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
     test("a disposed watch no longer reacts to subscriptions or catalogs", async () => {
       await connect();
       watch.setPanels([panel("a", "staff", GAIN)]);

@@ -212,6 +212,9 @@ export class QsysWatch {
     this.designCode = null;
     this.broken = false;
     this.cancelRetry();
+    // A new connection starts its backoff over: a refused first rebuild must
+    // not wait out the old connection's 30 s while writes are blocked.
+    this.retryDelay = 0;
     this.reset();
     if (t) t.onNotification((method, params) => this.onNotification(t, method, params));
   }
@@ -233,7 +236,8 @@ export class QsysWatch {
       if (this.designStale()) {
         console.log("[qsys] design changed, rebuilding change groups");
         // Same connection, so the groups are still on the Core: remove them.
-        for (const id of [...this.groups.keys()]) await this.destroyLeftover(t, id);
+        // After a failure the Core may hold a group we never recorded (half built).
+        for (const id of this.broken ? GROUP_IDS : [...this.groups.keys()]) await this.destroyLeftover(t, id);
         this.reset();
       } else if (this.broken) {
         console.log("[qsys] rebuilding change groups after a failed update");
@@ -254,6 +258,7 @@ export class QsysWatch {
         for (const id of this.groups.keys()) await t.send("ChangeGroup.Invalidate", { Id: id });
         this.rebuilding = false;
       }
+      this.cancelRetry();
       this.retryDelay = 0;
       this.logSummary();
     } catch (err) {
