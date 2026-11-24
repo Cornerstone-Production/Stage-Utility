@@ -17,6 +17,7 @@ import type { Metadata, OutputInfo } from "sharp";
 import { loadSharp } from "./sharp-load.js";
 
 import { errorMessage } from "./errors.js";
+import { WriteQueue } from "./write-queue.js";
 
 /** The largest source a conversion decodes. 4000 × 3000 is 12 MP; 50 MP is ample. */
 export const MAX_SOURCE_PIXELS = 50_000_000;
@@ -118,7 +119,7 @@ async function storableSource(input: Buffer, kind: "png" | "jpeg"): Promise<Buff
 }
 
 /** Conversions run one at a time: each holds a decoded image in memory. */
-let queue: Promise<unknown> = Promise.resolve();
+const queue = new WriteQueue();
 
 /** Conversions running now, and the most there have been at once: the seam
  *  that shows the queue holds. */
@@ -161,13 +162,11 @@ export function prepareBackground(input: Buffer, opts: { kind: "png" | "jpeg"; c
 
 /** Run `job` on the conversion queue, counted, its failure a sentence. */
 function enqueue<T>(job: () => Promise<T>): Promise<T> {
-  const run = queue.then(() =>
+  return queue.enqueue(() =>
     counted(job).catch((err: unknown) => {
       throw new Error(`could not convert the background: ${errorMessage(err)}`, { cause: err });
     }),
   );
-  queue = run.catch(() => undefined);
-  return run;
 }
 
 /**

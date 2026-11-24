@@ -61,6 +61,7 @@ import { errorMessage } from "./errors.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
 import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { backoffMs } from "./servicecue-publisher.js";
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";
@@ -116,11 +117,11 @@ export interface StagePlotsPublishDeps {
   /** How long a change waits for more before it is published. */
   debounceMs?: number;
   /** How long after a failed patch read it is tried again, doubling up to `maxMs`. A seam for a test. */
-  patchRetry?: { firstMs: number; maxMs: number };
+  patchRetry?: Backoff;
   /** How long after a landing list that did not get through it is tried again, doubling up to `maxMs`. A seam for a test. */
-  landingRetry?: { firstMs: number; maxMs: number };
+  landingRetry?: Backoff;
   /** How long after a republish the page did not take it is tried again, doubling up to `maxMs`. A seam for a test. */
-  republishRetry?: { firstMs: number; maxMs: number };
+  republishRetry?: Backoff;
   now?: () => number;
 }
 
@@ -139,14 +140,24 @@ function leftOn(host: string): string {
 /** The host of an origin, for every sentence that names a page. */
 const hostOf = (origin: string) => new URL(origin).host;
 
-/** A patch that cannot be read is read again after a minute, then two, four… up to fifteen. */
-export const PATCH_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
+/** A backoff: the first wait, doubling on each failure in a row (backoffMs) up to the last. */
+export interface Backoff {
+  firstMs: number;
+  maxMs: number;
+}
+
+/**
+ * Every retry here waits a minute, then two, four… up to fifteen: a patch that cannot be read, a
+ * landing list and a republish the page did not take.
+ */
+export const RETRY: Backoff = { firstMs: 60_000, maxMs: 15 * 60_000 };
+
+/** How long the retry after `failures` failures in a row waits, on `backoff` (a test's seam) or RETRY. */
+const retryWait = (failures: number, backoff: Backoff = RETRY) => backoffMs(failures, backoff.firstMs, backoff.maxMs);
 
 /** How long a change waits for the next before it is published. */
 export const REPUBLISH_WAIT_MS = 2000;
 
-/** A republish the page did not take is tried again after a minute, then two, four… up to fifteen. */
-export const REPUBLISH_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
 
 const MB = 1_000_000;
 const mb = (bytes: number) => (bytes / MB).toFixed(1);
@@ -291,8 +302,6 @@ const ADDRESS_CHAIN = "\u0000address";
 /** The chain the landing list is sent on. */
 const LANDING_CHAIN = "\u0000landing";
 
-/** A landing list the page would not take is tried again after a minute, then two, four… up to fifteen. */
-export const LANDING_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
 
 /** What the landing page on `origin` lists: the venues published there and marked listed, home ones first. Names, plot counts and links only. */
 export function landingList(doc: StagePlotsDoc, origin: string): LandingList {
@@ -324,7 +333,8 @@ export class StagePlotsPublisher {
   /** Venues whose last republish the page did not take: tried again on the backoff until each goes. */
   private readonly failing = new Set<string>();
   private republishRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private republishRetryMs = 0;
+  /** Failed republish rounds in a row: how long the next retry waits (backoffMs). */
+  private republishFailures = 0;
   /** True while this publisher's own write is being broadcast: that is no change to publish. */
   private ownWrite = false;
   /** Pending removals whose failure has been said: said once, not on every change. */
@@ -339,7 +349,8 @@ export class StagePlotsPublisher {
   private patchDown = false;
   /** The next read of a patch that could not be read, and how long the one after it waits. */
   private patchRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private patchRetryMs = 0;
+  /** Failed reads of the patch in a row. */
+  private patchFailures = 0;
   private started = false;
   private stopped = false;
   private paused = false;
@@ -409,7 +420,8 @@ export class StagePlotsPublisher {
   /** The landing list each page was last sent, by origin, as JSON. */
   private readonly landingSent = new Map<string, string>();
   private landingRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private landingRetryMs = 0;
+  /** Failed landing list sends in a row. */
+  private landingFailures = 0;
   /** A landing sync waiting its turn on the chain, which a later call joins instead of queueing another. */
   private landingQueued: Promise<void> | null = null;
 
@@ -459,7 +471,7 @@ export class StagePlotsPublisher {
       if (!this.patchDown) {
         say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours, and it is read again until it can be: ${errorMessage(err)}`);
         this.patchDown = true;
-        this.patchRetryMs = (this.deps.patchRetry ?? PATCH_RETRY).firstMs;
+        this.patchFailures = 1;
         this.retryPatchLater();
       }
       return { ok: false };
@@ -476,11 +488,11 @@ export class StagePlotsPublisher {
       void this.deps.patch().then(
         () => this.patchDown && this.patchHealed(),
         () => {
-          this.patchRetryMs = Math.min(this.patchRetryMs * 2, (this.deps.patchRetry ?? PATCH_RETRY).maxMs);
+          this.patchFailures++;
           this.retryPatchLater();
         },
       );
-    }, this.patchRetryMs);
+    }, retryWait(this.patchFailures, this.deps.patchRetry));
     this.patchRetryTimer.unref?.();
   }
 
@@ -869,20 +881,19 @@ export class StagePlotsPublisher {
     if (went) {
       this.failing.delete(venueId);
       if (this.failing.size > 0) return;
-      this.republishRetryMs = 0;
+      this.republishFailures = 0;
       if (this.republishRetryTimer) clearTimeout(this.republishRetryTimer);
       this.republishRetryTimer = null;
       return;
     }
     this.failing.add(venueId);
     if (this.republishRetryTimer || this.stopped) return;
-    const retry = this.deps.republishRetry ?? REPUBLISH_RETRY;
-    this.republishRetryMs = Math.min(retry.maxMs, this.republishRetryMs === 0 ? retry.firstMs : this.republishRetryMs * 2);
-    say("log", [], `${plural(this.failing.size, "published venue")} the page did not take ${this.failing.size === 1 ? "is" : "are"} sent again in ${Math.round(this.republishRetryMs / 1000)} s, and on every change before that`);
+    const ms = retryWait(++this.republishFailures, this.deps.republishRetry);
+    say("log", [], `${plural(this.failing.size, "published venue")} the page did not take ${this.failing.size === 1 ? "is" : "are"} sent again in ${Math.round(ms / 1000)} s, and on every change before that`);
     this.republishRetryTimer = setTimeout(() => {
       this.republishRetryTimer = null;
       void this.republishAll();
-    }, this.republishRetryMs);
+    }, ms);
     this.republishRetryTimer.unref?.();
   }
 
@@ -1029,7 +1040,7 @@ export class StagePlotsPublisher {
       const list = landingList(doc, target.origin);
       const failed = await this.sendLanding(target, list);
       if (failed) return this.landingFailed(list.venues.map((v) => v.secret), failed);
-      this.landingRetryMs = 0;
+      this.landingFailures = 0;
       if (this.landingNote) {
         this.landingNote = null;
         say("log", [], `the landing page on ${hostOf(target.origin)} is up to date again`);
@@ -1072,12 +1083,13 @@ export class StagePlotsPublisher {
       await this.tellCard();
     }
     if (this.landingRetryTimer || this.stopped) return;
-    const retry = this.deps.landingRetry ?? LANDING_RETRY;
-    this.landingRetryMs = Math.min(retry.maxMs, this.landingRetryMs === 0 ? retry.firstMs : this.landingRetryMs * 2);
-    this.landingRetryTimer = setTimeout(() => {
-      this.landingRetryTimer = null;
-      void this.syncLanding();
-    }, this.landingRetryMs);
+    this.landingRetryTimer = setTimeout(
+      () => {
+        this.landingRetryTimer = null;
+        void this.syncLanding();
+      },
+      retryWait(++this.landingFailures, this.deps.landingRetry),
+    );
     this.landingRetryTimer.unref?.();
   }
 
