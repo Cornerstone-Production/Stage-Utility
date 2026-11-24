@@ -405,8 +405,10 @@ export class StagePlotsPublisher {
     await Promise.all([...this.chains.values()]);
     return () => {
       this.paused = false;
-      // A change heard while paused, or a retry that came due, was skipped: the list is made again now.
+      // A change heard while paused, or a retry that came due, was skipped: the list is made again
+      // now, and anything the page did not take is sent.
       void this.syncLanding();
+      void this.republishAll();
     };
   }
 
@@ -1292,6 +1294,8 @@ export class StagePlotsPublisher {
       return { ...d, venues: d.venues.map((x) => (x.id === venueId ? after! : x)), pendingRemovals: queued ? [...d.pendingRemovals, queued] : d.pendingRemovals };
     });
     this.attempted.delete(venueId);
+    // Nothing of it is left to resend: a retry still counting it would never start its backoff over.
+    this.republished(venueId, true);
     if (queued) say("log", [queued.secret], `a link on ${hostOf(queued.origin)} is queued for removal (${queued.reason})`);
     return after;
   }
