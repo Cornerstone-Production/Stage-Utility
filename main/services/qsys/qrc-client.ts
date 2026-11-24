@@ -93,6 +93,11 @@ export class QrcClient implements QrcTransport {
     });
   }
 
+  /**
+   * Register a notification handler. The Core pushes EngineStatus as soon as it
+   * accepts the connection, and notifications are not queued: register in the
+   * same tick `connect()` resolves (before any other await), or ask `StatusGet`.
+   */
   onNotification(cb: (method: string, params: unknown) => void): void {
     this.notificationHandlers.push(cb);
   }
@@ -122,6 +127,8 @@ export class QrcClient implements QrcTransport {
       this.buffer = this.buffer.subarray(nul + 1);
       if (text) this.dispatch(text);
     }
+    // Measured after complete messages are drained: this bounds an unterminated
+    // message growing without limit, not a single large complete one.
     if (this.buffer.length > MAX_BUFFER_BYTES) {
       console.warn(`[qsys] QRC receive buffer passed ${MAX_BUFFER_BYTES} bytes without a terminator, dropping the connection`);
       this.closeError ??= new Error("QRC receive buffer limit exceeded");
@@ -140,7 +147,7 @@ export class QrcClient implements QrcTransport {
     if (typeof msg.id === "number" && this.pending.has(msg.id)) {
       const { error } = msg;
       this.settle(msg.id, (p) => {
-        if (error) p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number(error.code)));
+        if (error) p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number.isFinite(Number(error.code)) ? Number(error.code) : -1));
         else p.resolve(msg.result);
       });
     } else if (typeof msg.method === "string" && msg.id === undefined) {
@@ -152,6 +159,7 @@ export class QrcClient implements QrcTransport {
         }
       }
     } else {
+      // Also what a reply arriving after its request timed out looks like.
       console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})`);
     }
   }
@@ -161,6 +169,12 @@ export class QrcClient implements QrcTransport {
     this.closed = true;
     const reason = this.closeError ?? new Error("QRC connection closed");
     for (const id of [...this.pending.keys()]) this.settle(id, (p) => p.reject(toError(reason)));
-    for (const cb of this.closeHandlers) cb(this.closeError);
+    for (const cb of this.closeHandlers) {
+      try {
+        cb(this.closeError);
+      } catch (err) {
+        console.warn(`[qsys] QRC close handler threw: ${scrubError(err)}`);
+      }
+    }
   }
 }

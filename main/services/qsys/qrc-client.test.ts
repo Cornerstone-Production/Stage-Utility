@@ -7,6 +7,20 @@ import { QrcClient, QrcError } from "./qrc-client.js";
 let fake: FakeQrcServer;
 let port: number;
 const clients: QrcClient[] = [];
+// Raw servers made inside a test, closed in afterEach so a failed assertion leaks nothing.
+const rawServers: net.Server[] = [];
+const rawSockets: net.Socket[] = [];
+
+async function rawServer(onConnection: (s: net.Socket) => void): Promise<number> {
+  const server = net.createServer((s) => {
+    rawSockets.push(s);
+    s.on("error", () => {});
+    onConnection(s);
+  });
+  rawServers.push(server);
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  return (server.address() as net.AddressInfo).port;
+}
 
 beforeEach(async () => {
   fake = new FakeQrcServer();
@@ -18,6 +32,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const c of clients.splice(0)) c.close();
+  for (const s of rawSockets.splice(0)) s.destroy();
+  for (const s of rawServers.splice(0)) await new Promise<void>((r) => s.close(() => r()));
   await fake.stop();
 });
 
@@ -40,18 +56,15 @@ test("frames each message with a trailing NUL and matches responses by numeric i
 
 test("the wire carries NUL-terminated JSON-RPC 2.0 with numeric ids", async () => {
   const raw: Buffer[] = [];
-  const server = net.createServer((s) => {
+  const p = await rawServer((s) => {
     s.on("data", (d) => {
       raw.push(d);
       s.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: true })}\0`);
     });
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const p = (server.address() as net.AddressInfo).port;
   const c = await QrcClient.connect("127.0.0.1", p);
   await c.send("NoOp");
   c.close();
-  server.close();
   const bytes = Buffer.concat(raw);
   assert.equal(bytes[bytes.length - 1], 0);
   const msg = JSON.parse(bytes.subarray(0, -1).toString());
@@ -61,7 +74,7 @@ test("the wire carries NUL-terminated JSON-RPC 2.0 with numeric ids", async () =
 });
 
 test("a split TCP chunk and two messages in one chunk both parse", async () => {
-  const server = net.createServer((s) => {
+  const p = await rawServer((s) => {
     s.on("data", () => {
       const one = JSON.stringify({ jsonrpc: "2.0", id: 1, result: "one" });
       const two = JSON.stringify({ jsonrpc: "2.0", id: 2, result: "two" });
@@ -74,13 +87,65 @@ test("a split TCP chunk and two messages in one chunk both parse", async () => {
       }, 20);
     });
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const p = (server.address() as net.AddressInfo).port;
   const c = await QrcClient.connect("127.0.0.1", p);
   const results = await Promise.all([c.send("A"), c.send("B"), c.send("C")]);
   c.close();
-  server.close();
   assert.deepEqual(results, ["one", "two", "three"]);
+});
+
+test("a multi-byte character split across two chunks decodes intact", async () => {
+  const message = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: "caf\u00e9 \u4e2d" })}\0`);
+  const cut = message.indexOf(0xc3) + 1; // between the two bytes of the e-acute
+  const p = await rawServer((s) => {
+    s.on("data", () => {
+      s.write(message.subarray(0, cut));
+      setTimeout(() => s.write(message.subarray(cut)), 20);
+    });
+  });
+  const c = await QrcClient.connect("127.0.0.1", p);
+  clients.push(c);
+  assert.equal(await c.send("A"), "caf\u00e9 \u4e2d");
+});
+
+test("a non-numeric error code becomes -1, never NaN", async () => {
+  const p = await rawServer((s) => {
+    s.on("data", () => s.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: "x", message: "bad" } })}\0`));
+  });
+  const c = await QrcClient.connect("127.0.0.1", p);
+  clients.push(c);
+  await assert.rejects(c.send("A"), (err: unknown) => err instanceof QrcError && err.code === -1);
+});
+
+test("a throwing onClose handler does not stop the next one or crash the process", async () => {
+  const c = await connect();
+  c.onClose(() => {
+    throw new Error("boom");
+  });
+  const second = new Promise<Error | null>((resolve) => c.onClose(resolve));
+  c.close();
+  await second;
+});
+
+test("the fake survives an unparseable request and a refused group add keeps its slot free", async () => {
+  const c = await connect();
+  const raw = net.createConnection({ host: "127.0.0.1", port });
+  rawSockets.push(raw);
+  await new Promise<void>((r) => raw.once("connect", () => r()));
+  raw.write("{not json\0");
+  await c.send("NoOp"); // the fake is still serving
+  for (let i = 0; i < 5; i++) {
+    await assert.rejects(
+      c.send("ChangeGroup.AddComponentControl", { Id: `g${i}`, Component: { Name: "Nope", Controls: [{ Name: "x" }] } }),
+      (err: unknown) => err instanceof QrcError && err.code === 7,
+    );
+  }
+  for (let i = 0; i < 4; i++) {
+    await c.send("ChangeGroup.AddComponentControl", { Id: `ok${i}`, Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  }
+  await assert.rejects(
+    c.send("ChangeGroup.AddComponentControl", { Id: "ok4", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } }),
+    (err: unknown) => err instanceof QrcError && err.code === 5,
+  );
 });
 
 test("an error response rejects with QrcError carrying the code", async () => {
@@ -127,19 +192,15 @@ test("a send with no reply rejects after timeoutMs", async () => {
 });
 
 test("a receive buffer over 1 MB drops the socket", async () => {
-  const server = net.createServer((s) => {
+  const p = await rawServer((s) => {
     s.on("data", () => s.write(Buffer.alloc(1024 * 1024 + 10, 0x61)));
-    s.on("error", () => {});
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const p = (server.address() as net.AddressInfo).port;
   const c = await QrcClient.connect("127.0.0.1", p);
   const closed = new Promise<Error | null>((resolve) => c.onClose(resolve));
   const pending = c.send("NoOp");
   await assert.rejects(pending, /buffer/);
   const err = await closed;
   assert.ok(err instanceof Error);
-  server.close();
 });
 
 test("connect rejects when nothing listens", async () => {

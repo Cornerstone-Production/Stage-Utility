@@ -153,7 +153,13 @@ export class FakeQrcServer {
   }
 
   private handle(session: Session, text: string): void {
-    const msg = JSON.parse(text) as { id?: number; method: string; params?: Record<string, unknown> };
+    let msg: { id?: number; method: string; params?: Record<string, unknown> };
+    try {
+      msg = JSON.parse(text);
+    } catch {
+      this.write(session, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+      return;
+    }
     this.received.push({ method: msg.method, params: msg.params });
     if (this.holdReplies) return;
 
@@ -257,17 +263,18 @@ export class FakeQrcServer {
 
   private groupAdd(session: Session, id: unknown, p: Record<string, unknown>): void {
     const gid = String(p.Id);
-    let group = session.groups.get(gid);
-    if (!group) {
-      if (session.groups.size >= MAX_CHANGE_GROUPS) return this.fail(session, id, 5, "Change groups exhausted");
-      group = { controls: new Set(), rate: null };
-      session.groups.set(gid, group);
-    }
+    // Validate before creating the group, so a refused add never consumes one of the four.
     const comp = p.Component as { Name: string; Controls: { Name: string }[] } | undefined;
     if (!comp) return this.fail(session, id, 7, "Unknown component");
     if (!this.components.has(comp.Name)) return this.fail(session, id, 7, "Unknown component");
     for (const c of comp.Controls) {
       if (!this.find(comp.Name, c.Name)) return this.fail(session, id, 8, "Unknown control");
+    }
+    let group = session.groups.get(gid);
+    if (!group) {
+      if (session.groups.size >= MAX_CHANGE_GROUPS) return this.fail(session, id, 5, "Change groups exhausted");
+      group = { controls: new Set(), rate: null };
+      session.groups.set(gid, group);
     }
     const fresh: QrcChange[] = [];
     for (const c of comp.Controls) {
