@@ -19,16 +19,19 @@
 // The value cache serves hydration (`current`). It belongs to one connection:
 // a new transport, or a new DesignCode on the same one, empties it before
 // anything is re-read, so a value from before a drop is never served or
-// replayed. `ready()` (write readiness) is false from such a reset until the
-// rebuilt groups have been Invalidated; `current()` answers per address.
+// replayed. `ready()` (write readiness) is false from such a reset until every
+// rebuilt group's values, resent by its Invalidate, have arrived and been
+// cached; `current()` answers per address. With no group to build (no panel
+// open), there is nothing to read back and readiness follows the catalog.
 //
 // AutoPoll pushes arrive as `ChangeGroup.Poll` notifications, or as repeated
 // replies to the AutoPoll request, which QrcClient hands over in the same shape.
 
+import { backoffMs } from "../backoff.js";
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
-import { addressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
+import { addressKey, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcChange } from "./qrc-types.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
@@ -53,8 +56,7 @@ export interface WatchSource {
   readonly transport: QrcTransport | null;
   readonly meterRates: QsysMeterRates;
   getCatalog(): QsysCatalog | null;
-  /** Returns a function that stops listening. */
-  onCatalog(cb: (c: QsysCatalog) => void): () => void;
+  onCatalog(cb: (c: QsysCatalog) => void): void;
 }
 
 /**
@@ -73,7 +75,7 @@ interface Group {
 }
 
 interface Desired {
-  groups: Map<GroupId, { keys: Set<string>; rate: number }>;
+  groups: Map<GroupId, Group>;
   /** Which panel kinds show each meter, for routing a push to both meter channels. */
   meterKinds: Map<string, Set<PanelKind>>;
 }
@@ -84,6 +86,8 @@ const sameChange = (a: QrcChange, b: QrcChange): boolean =>
 /** Retry a failed update after 1 s, doubling to this cap. */
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
+/** How long an Invalidate's resent values may take before it is asked again. */
+export const REREAD_TIMEOUT_MS = 10_000;
 
 export class QsysWatch {
   private panels: WatchPanel[] = [];
@@ -95,38 +99,44 @@ export class QsysWatch {
   private meterKinds = new Map<string, Set<PanelKind>>();
   private readonly cache = new Map<string, QrcChange>();
   /** Set when the connection or the design is new; cleared once the rebuilt
-   *  groups have been Invalidated. Write readiness is exactly its negation. */
+   *  groups have been Invalidated. */
   private rebuilding = true;
+  /**
+   * Groups Invalidated since the last reset whose resent values have not all
+   * arrived: the keys still missing. Write readiness waits for it to empty.
+   */
+  private readonly rereading = new Map<GroupId, Set<string>>();
+  private rereadTimer: ReturnType<typeof setTimeout> | null = null;
   /** A run failed on the live connection, so which groups the Core holds is unknown. */
   private broken = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retryDelay = 0;
+  private failures = 0;
 
-  /** Addresses already logged as missing from this catalog. */
+  /** Addresses already logged as missing from this catalog, and those the Core
+   *  would not add to a group; neither is asked for again until the catalog changes. */
   private skipped = new Set<string>();
+  private refused = new Set<string>();
   private skippedFor: QsysCatalog | null = null;
   private lastSummary = "";
 
   private running: Promise<void> | null = null;
   private dirty = false;
-  private readonly unsubscribe: (() => void)[] = [];
 
   constructor(
     private readonly source: WatchSource,
-    onSubscriptions: (cb: () => void) => () => void = addSubscriptionListener,
+    onSubscriptions: (cb: () => void) => void = addSubscriptionListener,
   ) {
-    this.unsubscribe.push(source.onCatalog(() => this.kick()), onSubscriptions(() => this.kick()));
+    source.onCatalog(() => this.kick());
+    onSubscriptions(() => this.kick());
   }
 
-  /** Stop listening and cancel a pending retry. For tests; the singleton lives as long as the process. */
-  dispose(): void {
-    for (const off of this.unsubscribe.splice(0)) off();
-    this.cancelRetry();
-  }
-
-  /** Every panel that could be open, with the addresses its objects read. */
+  /** Every panel that could be open, with the addresses its objects read (each once). */
   setPanels(panels: WatchPanel[]): void {
-    this.panels = panels.map((p) => ({ id: p.id, kind: p.kind, addresses: [...p.addresses] }));
+    this.panels = panels.map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      addresses: [...new Map(p.addresses.map((a) => [addressKey(a), { component: a.component, control: a.control }])).values()],
+    }));
     this.kick();
   }
 
@@ -141,6 +151,9 @@ export class QsysWatch {
     this.dirty = true;
     this.running ??= this.drain().finally(() => {
       this.running = null;
+      // A call between drain() leaving its loop and this line found the run
+      // still going and joined it; nobody would run its pass.
+      if (this.dirty) this.kick();
     });
     return this.running;
   }
@@ -170,13 +183,14 @@ export class QsysWatch {
 
   /**
    * Write readiness, at connection level. False from a connect, a reconnect or a
-   * new DesignCode until the rebuilt groups have been Invalidated, so nothing is
-   * written before the Core's current state has been read again. Opening a panel
-   * or a refused group update on a live connection does not change it.
+   * new DesignCode until every rebuilt group's Invalidate has resent its values
+   * and they have arrived, so nothing is written before the Core's current state
+   * has been read again. Opening a panel or a refused group update on a live
+   * connection does not change it.
    */
   ready(): boolean {
     this.sync();
-    return !!this.transport && !this.rebuilding && !this.designStale();
+    return !!this.transport && !this.rebuilding && this.rereading.size === 0 && !this.designStale();
   }
 
   /** The catalog moved to a new design that the groups have not caught up with yet. */
@@ -214,7 +228,7 @@ export class QsysWatch {
     this.cancelRetry();
     // A new connection starts its backoff over: a refused first rebuild must
     // not wait out the old connection's 30 s while writes are blocked.
-    this.retryDelay = 0;
+    this.failures = 0;
     this.reset();
     if (t) t.onNotification((method, params) => this.onNotification(t, method, params));
   }
@@ -225,6 +239,8 @@ export class QsysWatch {
     this.meterKinds = new Map();
     this.cache.clear();
     this.rebuilding = true;
+    this.rereading.clear();
+    this.cancelReread();
   }
 
   private async reconcile(): Promise<void> {
@@ -245,6 +261,11 @@ export class QsysWatch {
         // connection, so the cached values stay good; the re-adds resend them.
         for (const id of GROUP_IDS) await this.destroyLeftover(t, id);
         this.groups.clear();
+        // A group still waiting on its Invalidate is gone with the rest: ask again once rebuilt.
+        if (this.rereading.size) {
+          this.rereading.clear();
+          this.rebuilding = true;
+        }
       }
       this.broken = false;
       this.designCode = catalog.designCode;
@@ -255,11 +276,11 @@ export class QsysWatch {
       for (const k of [...this.cache.keys()]) if (!this.watched(k)) this.cache.delete(k);
 
       if (this.rebuilding) {
-        for (const id of this.groups.keys()) await t.send("ChangeGroup.Invalidate", { Id: id });
+        for (const id of this.groups.keys()) await this.invalidate(t, id);
         this.rebuilding = false;
       }
       this.cancelRetry();
-      this.retryDelay = 0;
+      this.failures = 0;
       this.logSummary();
     } catch (err) {
       // The connection went away under us: the service logs that, and the next
@@ -271,15 +292,47 @@ export class QsysWatch {
     }
   }
 
+  /**
+   * Ask the Core to resend a group's values, and wait for them: the group's
+   * keys are marked missing BEFORE the send, because the Core can write the
+   * push straight after the reply and it may be handled before this resumes.
+   * Values that arrived earlier (from the adds) do not count.
+   */
+  private async invalidate(t: QrcTransport, id: GroupId): Promise<void> {
+    const group = this.groups.get(id);
+    if (!group) return;
+    this.rereading.set(id, new Set(group.keys));
+    this.armReread();
+    await t.send("ChangeGroup.Invalidate", { Id: id });
+  }
+
+  /** If the resent values have not all arrived in time, say so and Invalidate every group again. */
+  private armReread(): void {
+    if (this.rereadTimer) return;
+    this.rereadTimer = setTimeout(() => {
+      this.rereadTimer = null;
+      if (!this.rereading.size || this.source.transport !== this.transport) return;
+      console.warn(`[qsys] the Core has not resent the values of ${scrub([...this.rereading.keys()].join(", "))} ${scrub(REREAD_TIMEOUT_MS / 1000)} s after Invalidate; asking again, and writes wait`);
+      this.rereading.clear();
+      this.rebuilding = true;
+      this.kick();
+    }, REREAD_TIMEOUT_MS);
+  }
+
+  private cancelReread(): void {
+    if (this.rereadTimer) clearTimeout(this.rereadTimer);
+    this.rereadTimer = null;
+  }
+
   /** One retry at a time, 1 s doubling to 30 s; cancelled when the connection changes. */
   private scheduleRetry(err: unknown): void {
     this.cancelRetry();
-    this.retryDelay = this.retryDelay ? Math.min(this.retryDelay * 2, RETRY_MAX_MS) : RETRY_FIRST_MS;
-    console.warn(`[qsys] change group update failed: ${scrub(errorMessage(err))}; retrying in ${scrub(this.retryDelay / 1000)} s`);
+    const delay = backoffMs(++this.failures, RETRY_FIRST_MS, RETRY_MAX_MS);
+    console.warn(`[qsys] change group update failed: ${scrub(errorMessage(err))}; retrying in ${scrub(delay / 1000)} s`);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       this.kick();
-    }, this.retryDelay);
+    }, delay);
   }
 
   private cancelRetry(): void {
@@ -311,6 +364,7 @@ export class QsysWatch {
     if (catalog !== this.skippedFor) {
       this.skippedFor = catalog;
       this.skipped = new Set();
+      this.refused = new Set();
     }
     const known = new Map<string, boolean>();
     for (const c of catalog.components) {
@@ -325,6 +379,7 @@ export class QsysWatch {
       for (const a of p.addresses) {
         const k = addressKey(a);
         const meter = known.get(k);
+        if (this.refused.has(k)) continue;
         if (meter === undefined) {
           if (!this.skipped.has(k)) {
             this.skipped.add(k);
@@ -343,7 +398,7 @@ export class QsysWatch {
     const volunteerMeters = new Set<string>();
     const staffMeters = new Set<string>();
     for (const [k, kinds] of meterKinds) (kinds.has("staff") ? staffMeters : volunteerMeters).add(k);
-    const groups: Desired["groups"] = new Map();
+    const groups = new Map<GroupId, Group>();
     if (values.size) groups.set("values", { keys: values, rate: 1 / fastest });
     if (volunteerMeters.size) groups.set("meters-volunteer", { keys: volunteerMeters, rate: 1 / hz.volunteer });
     if (staffMeters.size) groups.set("meters-staff", { keys: staffMeters, rate: 1 / hz.staff });
@@ -356,52 +411,84 @@ export class QsysWatch {
    * cannot take component controls, and a second AutoPoll on a live group is not
    * documented to replace the first.
    */
-  private async apply(t: QrcTransport, id: GroupId, want: { keys: Set<string>; rate: number } | undefined): Promise<void> {
+  private async apply(t: QrcTransport, id: GroupId, want: Group | undefined): Promise<void> {
     const have = this.groups.get(id);
     if (have && want && have.rate === want.rate && [...have.keys].every((k) => want.keys.has(k))) {
       const added = [...want.keys].filter((k) => !have.keys.has(k));
       if (!added.length) return;
       // Membership first: the Core pushes the added controls' state with its reply.
       for (const k of added) have.keys.add(k);
-      await this.add(t, id, added);
+      await this.add(t, id, have, added);
       return;
     }
+    // A group still waiting on its Invalidate is rebuilt and asked again below.
+    const awaited = this.rereading.delete(id);
     if (have) {
       this.groups.delete(id);
       await t.send("ChangeGroup.Destroy", { Id: id });
     }
     if (!want) return;
-    this.groups.set(id, { keys: new Set(want.keys), rate: want.rate });
-    await this.add(t, id, [...want.keys]);
+    const group: Group = { keys: new Set(want.keys), rate: want.rate };
+    this.groups.set(id, group);
+    await this.add(t, id, group, [...want.keys]);
+    if (!group.keys.size) {
+      // The Core would add none of it. It may or may not have made the group.
+      this.groups.delete(id);
+      await this.destroyLeftover(t, id);
+      return;
+    }
     const reply = await t.send("ChangeGroup.AutoPoll", { Id: id, Rate: want.rate });
     // QSC's reference shows changes on the AutoPoll reply; take them if present.
     this.ingest(id, reply);
+    if (awaited) await this.invalidate(t, id);
   }
 
-  private async add(t: QrcTransport, id: GroupId, keys: string[]): Promise<void> {
-    const byComponent = new Map<string, { Name: string }[]>();
+  /**
+   * Add `keys` to group `id`, one request per component. A component the Core
+   * refuses (a control it lists but will not add) is logged, dropped from the
+   * group and not asked for again on this catalog; the rest carry on, so one
+   * control cannot keep every write waiting. A lost connection still throws.
+   */
+  private async add(t: QrcTransport, id: GroupId, group: Group, keys: string[]): Promise<void> {
+    const byComponent = new Map<string, string[]>();
     for (const k of keys) {
-      const [component, control] = k.split("\u0000");
-      const list = byComponent.get(component) ?? [];
-      list.push({ Name: control });
-      byComponent.set(component, list);
+      const { component } = parseAddressKey(k);
+      byComponent.set(component, [...(byComponent.get(component) ?? []), k]);
     }
-    for (const [Name, Controls] of byComponent) {
-      await t.send("ChangeGroup.AddComponentControl", { Id: id, Component: { Name, Controls } });
+    for (const [Name, ks] of byComponent) {
+      try {
+        await t.send("ChangeGroup.AddComponentControl", { Id: id, Component: { Name, Controls: ks.map((k) => ({ Name: parseAddressKey(k).control })) } });
+      } catch (err) {
+        if (!(err instanceof QrcError)) throw err;
+        console.warn(`[qsys] the Core would not watch ${scrub(Name)} (${scrub(ks.map((k) => parseAddressKey(k).control).join(", "))}): ${scrub(err.message)}; not watched`);
+        for (const k of ks) {
+          group.keys.delete(k);
+          this.refused.add(k);
+        }
+      }
     }
   }
 
   private onNotification(t: QrcTransport, method: string, params: unknown): void {
     if (method !== "ChangeGroup.Poll" || t !== this.transport) return;
     const id = (params as { Id?: unknown } | null)?.Id;
-    if (typeof id === "string" && (GROUP_IDS as readonly string[]).includes(id)) this.ingest(id as GroupId, params);
+    if (typeof id !== "string" || !(GROUP_IDS as readonly string[]).includes(id)) return;
+    const received = this.ingest(id as GroupId, params);
+    const missing = this.rereading.get(id as GroupId);
+    if (!missing) return;
+    for (const k of received) missing.delete(k);
+    if (missing.size) return;
+    this.rereading.delete(id as GroupId);
+    if (!this.rereading.size) this.cancelReread();
   }
 
-  /** Cache a push and broadcast what actually changed, on the channels of the panels that show it. */
-  private ingest(id: GroupId, payload: unknown): void {
+  /** Cache a push and broadcast what actually changed, on the channels of the
+   *  panels that show it. Returns the keys it cached. */
+  private ingest(id: GroupId, payload: unknown): string[] {
     const changes = (payload as { Changes?: unknown } | null)?.Changes;
     const group = this.groups.get(id);
-    if (!group || !Array.isArray(changes)) return;
+    const received: string[] = [];
+    if (!group || !Array.isArray(changes)) return received;
     const out = new Map<string, QrcChange[]>();
     for (const c of changes as QrcChange[]) {
       if (!c || typeof c.Component !== "string" || typeof c.Name !== "string") continue;
@@ -409,6 +496,7 @@ export class QsysWatch {
       if (!group.keys.has(k)) continue;
       const prev = this.cache.get(k);
       this.cache.set(k, c);
+      received.push(k);
       if (prev && sameChange(prev, c)) continue;
       const channels =
         id === "values" ? [QSYS_VALUES_CHANNEL] : [...(this.meterKinds.get(k) ?? [])].map(qsysMeterChannel);
@@ -419,6 +507,7 @@ export class QsysWatch {
       }
     }
     for (const [ch, list] of out) broadcast(ch, { changes: list });
+    return received;
   }
 
   private logSummary(): void {

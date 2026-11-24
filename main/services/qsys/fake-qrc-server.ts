@@ -2,6 +2,7 @@
 // Binds 127.0.0.1 on an ephemeral port; no real device is ever contacted.
 
 import net from "node:net";
+import { addressKey, parseAddressKey } from "../../types/qsys.js";
 import type { QrcChange, QrcControl, QrcStatus } from "./qrc-types.js";
 
 const MAX_CHANGE_GROUPS = 4;
@@ -22,7 +23,7 @@ interface Session {
   groups: Map<string, Group>;
 }
 
-const key = (component: string, name: string): string => `${component}\u0000${name}`;
+const key = (component: string, name: string): string => addressKey({ component, control: name });
 
 export class FakeQrcServer {
   components = new Map<string, QrcControl[]>();
@@ -52,7 +53,10 @@ export class FakeQrcServer {
   coerceSet: ((component: string, name: string, value: number | boolean | string) => number | boolean | string) | null = null;
   /** The most change groups any one connection has held at once. */
   maxGroups = 0;
+  /** When true, an Invalidate is answered but the values it resends are held until releaseInvalidatePushes(). */
+  holdInvalidatePushes = false;
   private held: { session: Session; text: string }[] = [];
+  private heldPushes: (() => void)[] = [];
 
   private server: net.Server | null = null;
   private sessions = new Set<Session>();
@@ -116,6 +120,11 @@ export class FakeQrcServer {
     const held = this.held;
     this.held = [];
     for (const h of held) this.answer(h.session, h.text);
+  }
+
+  /** Send the values held back from every Invalidate so far, in order. */
+  releaseInvalidatePushes(): void {
+    for (const push of this.heldPushes.splice(0)) push();
   }
 
   /** Push EngineStatus with the current `status` to every connected client. */
@@ -268,7 +277,9 @@ export class FakeQrcServer {
       case "ChangeGroup.Invalidate": {
         const group = session.groups.get(String(p.Id));
         this.reply(session, msg.id, true);
-        if (group) this.pushGroup(session, String(p.Id), group);
+        if (!group) return;
+        if (this.holdInvalidatePushes) this.heldPushes.push(() => this.pushGroup(session, String(p.Id), group));
+        else this.pushGroup(session, String(p.Id), group);
         return;
       }
       default:
@@ -344,7 +355,7 @@ export class FakeQrcServer {
   private pushGroup(session: Session, id: string, group: Group): void {
     const changes: QrcChange[] = [];
     for (const k of group.controls) {
-      const [component, name] = k.split("\u0000");
+      const { component, control: name } = parseAddressKey(k);
       const control = this.find(component, name);
       if (control) changes.push(this.change(component, control));
     }

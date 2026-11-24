@@ -10,7 +10,7 @@ import { after, afterEach, before, beforeEach, describe, mock, test } from "node
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-qsys-write-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { setNamedSubscriberCheck, subscriptionsChanged } = await import("../broadcaster.js");
+const { setNamedSubscriberCheck } = await import("../broadcaster.js");
 const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
@@ -28,6 +28,11 @@ let svc: InstanceType<typeof QsysService>;
 let watch: InstanceType<typeof QsysWatch>;
 let writer: InstanceType<typeof QsysWriter>;
 const named = new Set<string>();
+/** This test's watch hears subscription changes from here, not the shared broadcaster. */
+let subscriptionListeners: (() => void)[] = [];
+const subscriptionsChanged = () => {
+  for (const cb of subscriptionListeners) cb();
+};
 
 const settings = (): QsysSettings => ({ host: "127.0.0.1", port, user: "", enabled: true, volunteerMeterHz: 10, staffMeterHz: 20 });
 
@@ -79,13 +84,13 @@ beforeEach(async () => {
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
   port = await fake.start();
   svc = new QsysService();
-  watch = new QsysWatch(svc);
+  subscriptionListeners = [];
+  watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
   writer = new QsysWriter(svc, watch);
   await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN]);
 });
 
 afterEach(async () => {
-  watch.dispose();
   svc.stop();
   await fake.stop();
 });
@@ -252,6 +257,28 @@ describe("writeControl", () => {
     const late = await writer.write(req({ value: -40 }));
     assert.ok(late.ok, "a fresh write after the re-read was refused");
     assert.equal(sets().length, 1, "only the fresh write was sent");
+  });
+
+  test("after the Core reconnects, a write is refused until the Invalidate's resent values have arrived", async () => {
+    await connect();
+    await openPanel();
+    await fake.dropClients();
+    await until(() => svc.transport === null, "disconnect");
+    fake.holdInvalidatePushes = true;
+    const warn = capture("warn");
+    try {
+      mock.timers.tick(3_000);
+      await until(() => fake.received.filter((r) => r.method === "ChangeGroup.Invalidate").length === 1, "the reconnect's Invalidate");
+      await settle();
+      const early = await writer.write(req({ value: -40 }));
+      assert.equal(early.ok ? null : early.reason, "offline", "a write landed on the Invalidate's reply, before the values came back");
+      assert.equal(sets().length, 0);
+    } finally {
+      warn.restore();
+    }
+    fake.releaseInvalidatePushes();
+    await until(() => watch.ready(), "the resent values");
+    assert.ok((await writer.write(req({ value: -40 }))).ok);
   });
 
   test("rejects wrong types: string to a gain, NaN, Infinity", async () => {

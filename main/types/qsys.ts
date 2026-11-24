@@ -14,3 +14,9 @@ export type PanelKind = "volunteer" | "staff";
 export function addressKey(a: QsysAddress): string {
   return `${a.component}\u0000${a.control}`;
 }
+
+/** The address a key was made from: the inverse of addressKey. */
+export function parseAddressKey(k: string): QsysAddress {
+  const i = k.indexOf("\u0000");
+  return { component: k.slice(0, i), control: k.slice(i + 1) };
+}

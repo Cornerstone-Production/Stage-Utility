@@ -5,13 +5,13 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, mock, test } from "node:test";
-import { addBroadcastListener, setNamedSubscriberCheck, subscriptionsChanged } from "../broadcaster.js";
+import { addBroadcastListener, setNamedSubscriberCheck } from "../broadcaster.js";
 import { addressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
 import { FakeQrcServer } from "./fake-qrc-server.js";
 import type { QrcChange } from "./qrc-types.js";
 import { QsysService } from "./qsys-service.js";
 import type { QsysSettings } from "./qsys-settings.js";
-import { isMeterControl, QsysWatch, watchChannel } from "./qsys-watch.js";
+import { isMeterControl, QsysWatch, REREAD_TIMEOUT_MS, watchChannel } from "./qsys-watch.js";
 
 let fake: FakeQrcServer;
 let port: number;
@@ -19,6 +19,13 @@ let svc: QsysService;
 let watch: QsysWatch;
 
 const named = new Set<string>();
+/** This test's watch hears subscription changes from here, not the shared broadcaster,
+ *  so a previous test's watch never reacts to this one's. */
+let subscriptionListeners: (() => void)[] = [];
+const onSubscriptions = (cb: () => void) => void subscriptionListeners.push(cb);
+const subscriptionsChanged = () => {
+  for (const cb of subscriptionListeners) cb();
+};
 const sent: { channel: string; changes: QrcChange[] }[] = [];
 addBroadcastListener((channel, payload) => {
   if (channel.startsWith("qsys:") && channel !== "qsys:status") sent.push({ channel, changes: (payload as { changes: QrcChange[] }).changes });
@@ -63,12 +70,12 @@ beforeEach(async () => {
     { Name: "meter_2", Type: "Float", Value: -50, String: "-50dB", Position: 0.4, Direction: "Read" },
   ]);
   port = await fake.start();
+  subscriptionListeners = [];
   svc = new QsysService();
-  watch = new QsysWatch(svc);
+  watch = new QsysWatch(svc, onSubscriptions);
 });
 
 afterEach(async () => {
-  watch.dispose();
   svc.stop();
   await fake.stop();
 });
@@ -441,10 +448,10 @@ for (const form of ["notify", "reply"] as const) {
           return svc.meterRates;
         },
         getCatalog: () => svc.getCatalog(),
-        onCatalog: () => () => {},
+        onCatalog: () => {},
       };
-      watch.dispose();
-      watch = new QsysWatch(quiet, () => () => {});
+      subscriptionListeners = [];
+      watch = new QsysWatch(quiet, onSubscriptions);
       await connect();
       watch.setPanels([panel("a", "staff", GAIN)]);
       await open("a");
@@ -455,7 +462,7 @@ for (const form of ["notify", "reply"] as const) {
       assert.equal(watch.ready(), false, "writes allowed against a design the groups have not caught up with");
       assert.equal(watch.current([GAIN]).size, 0, "a value from the old design was served");
       await watch.recompute();
-      assert.equal(watch.ready(), true);
+      await until(() => watch.ready(), "the rebuilt group's values");
       assert.equal(watch.current([GAIN]).size, 1);
     });
 
@@ -512,18 +519,121 @@ for (const form of ["notify", "reply"] as const) {
       }
     });
 
-    test("a disposed watch no longer reacts to subscriptions or catalogs", async () => {
+    test("after a reconnect, writes wait until the Invalidate's resent values have arrived, not its reply", async () => {
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      named.add(watchChannel("a"));
+      fake.holdInvalidatePushes = true;
+      await connect();
+      await until(() => fake.received.some((r) => r.method === "ChangeGroup.Invalidate"), "Invalidate");
+      await settle();
+      assert.equal(watch.ready(), false, "ready() on the Invalidate's reply, before its values arrived");
+      fake.releaseInvalidatePushes();
+      await until(() => watch.ready(), "the resent values");
+      assert.equal(watch.current([GAIN]).size, 1);
+    });
+
+    test("resent values that never come are asked for again, with a [qsys] line", async () => {
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      named.add(watchChannel("a"));
+      fake.holdInvalidatePushes = true;
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        await connect();
+        await until(() => methods().includes("ChangeGroup.Invalidate"), "Invalidate");
+        await settle();
+        mock.timers.tick(REREAD_TIMEOUT_MS);
+        await until(() => methods().filter((m) => m === "ChangeGroup.Invalidate").length === 2, "a second Invalidate");
+        const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("has not resent the values"));
+        assert.equal(lines.length, 1, "no [qsys] line for values that never came");
+        assert.equal(watch.ready(), false);
+        fake.holdInvalidatePushes = false;
+        fake.releaseInvalidatePushes();
+        await until(() => watch.ready(), "the resent values");
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
+    test("with no panel open there is nothing to read back: writes are ready once the catalog is read", async () => {
+      await connect();
+      assert.equal(watch.ready(), true);
+      assert.deepEqual(methods().filter((m) => m.startsWith("ChangeGroup.")), []);
+    });
+
+    test("a component the Core will not add is dropped with one line; the rest is watched and writes are not blocked", async () => {
+      watch.setPanels([panel("a", "staff", GAIN, ZONE_GAIN)]);
+      named.add(watchChannel("a"));
+      fake.failNext("ChangeGroup.AddComponentControl", 8);
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        await connect();
+        await until(() => watch.ready(), "readiness on the fresh connection");
+        assert.deepEqual(membership(), ["Zone 1/gain@values"]);
+        await watch.recompute();
+        subscriptionsChanged();
+        await watch.recompute();
+        const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("would not watch"));
+        assert.equal(lines.length, 1, `expected one line, got ${JSON.stringify(lines)}`);
+        assert.equal(methods().filter((m) => m === "ChangeGroup.AddComponentControl").length, 2, "the refused component was asked for again");
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
+    test("a push from the old connection after a reconnect never reaches the new connection's cache", async () => {
       await connect();
       watch.setPanels([panel("a", "staff", GAIN)]);
-      watch.dispose();
-      named.add(watchChannel("a"));
-      const mark = fake.received.length;
-      subscriptionsChanged();
-      await settle();
-      assert.deepEqual(methods(mark).filter((m) => m.startsWith("ChangeGroup.")), []);
+      await open("a");
+      const old = svc.transport!;
+      // The QrcClient under it, whose notification handlers the watch registered on.
+      const oldClient = (svc as unknown as { client: { notify(m: string, p: unknown): void } }).client;
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null && svc.transport !== old, "reconnected");
+      await until(() => watch.ready(), "re-read");
+      oldClient.notify("ChangeGroup.Poll", {
+        Id: "values",
+        Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: 99, String: "99dB", Position: 1 }],
+      });
+      assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -10, "the old connection's push was cached");
     });
   });
 }
+
+test("a recompute that joins a run as it finishes still gets its pass", async () => {
+  // A stub Core: every request answers at once, so a run is a few microtasks long.
+  const transport = { send: async () => true, onNotification: () => {}, close: () => {} };
+  const catalog = { designCode: "d", components: [] };
+  for (let hops = 0; hops < 40; hops++) {
+    let reads = 0;
+    let armed = true;
+    let late: Promise<void> | null = null;
+    const source = {
+      transport,
+      get meterRates() {
+        reads++;
+        if (armed) {
+          armed = false;
+          // Join the run this many microtasks before (or after) it ends.
+          let p = Promise.resolve();
+          for (let i = 0; i < hops; i++) p = p.then(() => undefined);
+          late = p.then(() => {
+            void w.recompute().catch(() => undefined);
+          });
+        }
+        return { volunteerMeterHz: 10, staffMeterHz: 20 };
+      },
+      getCatalog: () => catalog,
+      onCatalog: () => {},
+    };
+    const w = new QsysWatch(source, () => {});
+    await w.recompute();
+    await late;
+    await settle();
+    assert.equal(reads, 2, `a recompute ${hops} microtasks into the end of a run was dropped`);
+  }
+});
 
 test("isMeterControl: meter components and controls named meter*", () => {
   assert.equal(isMeterControl("meter2", { Name: "x", Type: "Float" }), true);
