@@ -37,11 +37,15 @@ const MAX_PANEL_ID = 200;
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const CONTROL_CHARS = new RegExp(CONTROL_CHAR.source, "g");
 
+/** The request's remote address, bounded; "unknown" without a socket. */
+export function remoteOf(req: http.IncomingMessage): string {
+  return String(req.socket?.remoteAddress ?? "unknown").replace(CONTROL_CHARS, " ").slice(0, 64);
+}
+
 /** Who sent a write, for the write log: the address and user agent, one bounded line. */
 export function deviceOf(req: http.IncomingMessage): string {
-  const address = req.socket?.remoteAddress ?? "unknown";
   const agent = String(req.headers["user-agent"] ?? "");
-  return `${address} ${agent}`.replace(CONTROL_CHARS, " ").trim().slice(0, MAX_DEVICE);
+  return `${remoteOf(req)} ${agent}`.replace(CONTROL_CHARS, " ").trim().slice(0, MAX_DEVICE);
 }
 
 async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>) => Promise<unknown>): Promise<void> {
@@ -114,7 +118,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       return error(res, `panelId must be null or text of up to ${MAX_PANEL_ID} characters on one line`);
     }
     if (final !== undefined && typeof final !== "boolean") return error(res, "final must be true or false");
-    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req), final }));
+    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req), remote: remoteOf(req), final }));
     return;
   }
 

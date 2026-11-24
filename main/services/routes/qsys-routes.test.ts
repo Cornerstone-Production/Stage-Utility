@@ -197,6 +197,7 @@ describe("/api/qsys", () => {
     const { entries } = (await callRoute(qsysRoutes, "/api/qsys/write-log")).json as { entries: { device: string; panelId: string; result: string }[] };
     assert.equal(entries[0].device, "unknown Pad  [qsys] forged", "the user agent reached the write log with its line breaks");
     assert.equal(entries[0].panelId, "panel-a");
+    assert.equal((entries[0] as { remote?: string }).remote, "unknown", "the remote address was not recorded apart from the user agent");
     assert.equal(entries[0].result, "clamped");
 
     const notAllowed = await quietly(() => write({ component: "Lobby_Mixer", control: "other", value: 1 }));

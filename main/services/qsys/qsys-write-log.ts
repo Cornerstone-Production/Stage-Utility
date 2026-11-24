@@ -4,10 +4,12 @@
 // recorded when it is a gesture's last (see WriteRequest.final), a refusal every
 // time. Runtime: it is an observation, never restored onto another box.
 //
-// A refusal repeating one already recorded (same device, panel, control and
-// reason, within a minute of its last) is counted on that entry (`repeats`,
-// `lastAt`) instead of pushing real entries out: a client looping on a bad
-// request cannot empty the log of what actually happened.
+// A refusal made before anything was sent, repeating one already recorded (same
+// remote address, panel, control and reason, within a minute of its last), is
+// counted on that entry (`repeats`, `lastAt`) instead of pushing real entries
+// out: a client looping on a bad request cannot empty the log of what actually
+// happened. Anything that reached the Core (a success, or a core-error that may
+// have landed) always keeps its own entry and its own value.
 //
 // A write does not wait for the file. Entries go into memory at once and the
 // file follows: one save in flight at a time, and whatever arrives meanwhile is
@@ -24,6 +26,8 @@ export interface WriteLogEntry {
   at: number;
   panelId: string | null;
   device: string;
+  /** The remote address alone (absent in entries from before it was kept). */
+  remote?: string;
   component: string;
   control: string;
   /** The Core's value before the write as the watch last read it, or null when no open panel watches it. */
@@ -39,7 +43,8 @@ export interface WriteLogEntry {
 
 /** The phrase list() answers while the file cannot be read or saved. */
 export const WRITE_LOG_SAVE_ERROR = "the write log could not be saved, so recent entries are in memory only; see /log";
-const SUCCESS = new Set(["ok", "clamped", "mismatch"]);
+/** Refusals made before anything was sent to the Core: the only results that merge. */
+export const PRE_SEND_REFUSALS: ReadonlySet<string> = new Set(["offline", "not-allowed", "no-range", "bad-value"]);
 /** How far back, in entries and in time, a refusal looks for one it repeats. */
 const REPEAT_LOOKBACK = 50;
 const REPEAT_WINDOW_MS = 60_000;
@@ -55,6 +60,7 @@ function isEntry(v: unknown): v is WriteLogEntry {
     Number.isFinite(e.at) &&
     (e.panelId === null || typeof e.panelId === "string") &&
     typeof e.device === "string" &&
+    (e.remote === undefined || typeof e.remote === "string") &&
     typeof e.component === "string" &&
     typeof e.control === "string" &&
     typeof e.result === "string"
@@ -121,13 +127,13 @@ export const qsysWriteLog = {
   /** Never rejects: a failure to read or save the file is reported by list(). */
   async add(entry: WriteLogEntry): Promise<void> {
     const list = await loaded();
-    if (!SUCCESS.has(entry.result)) {
+    if (PRE_SEND_REFUSALS.has(entry.result) && entry.remote !== undefined) {
       const same = list
         .slice(0, REPEAT_LOOKBACK)
         .find(
           (e) =>
             e.result === entry.result &&
-            e.device === entry.device &&
+            e.remote === entry.remote &&
             e.panelId === entry.panelId &&
             e.component === entry.component &&
             e.control === entry.control &&

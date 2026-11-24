@@ -26,7 +26,7 @@ import type { QrcControl } from "./qrc-types.js";
 import { isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
-import { qsysWriteLog } from "./qsys-write-log.js";
+import { PRE_SEND_REFUSALS, qsysWriteLog } from "./qsys-write-log.js";
 
 export interface WriteRequest {
   component: string;
@@ -35,6 +35,12 @@ export interface WriteRequest {
   panelId: string | null;
   /** Who asked: the request's address and user agent. */
   device: string;
+  /**
+   * The request's remote address alone. Refusal lines are rate-limited and
+   * repeated refusals merged by it, not by `device`: the user agent is the
+   * client's to choose, so a key containing it could be changed per request.
+   */
+  remote: string;
   /**
    * False for a write in the middle of a gesture (a fader drag). Such a write is
    * checked and sent like any other, but when it succeeds it leaves no write-log
@@ -142,31 +148,46 @@ function findControl(catalog: QsysCatalog, component: string, control: string): 
  * (for offline: a different connection, or none) or a minute has passed, saying
  * how many it held back. A refusal from the Core itself is always written.
  */
+type Gate = { state: unknown; at: number; held: number };
+
 class RefusalLines {
-  private readonly seen = new Map<string, { state: unknown; at: number; held: number }>();
+  /** Offline is one connection-wide state, kept apart so no other key can evict it. */
+  private offline: Gate | null = null;
+  /** Per reason and remote address, oldest first; past the cap the oldest is dropped, never the lot. */
+  private readonly byRemote = new Map<string, Gate>();
 
   constructor(private readonly now: () => number) {}
 
-  forget(key: string): void {
-    this.seen.delete(key);
+  forgetOffline(): void {
+    this.offline = null;
   }
 
   /** Null when this line is held back; otherwise how many like it were held back since the last. */
-  gate(key: string, state: unknown): number | null {
+  gateOffline(state: unknown): number | null {
+    const { gate, held } = this.pass(this.offline, state);
+    this.offline = gate;
+    return held;
+  }
+
+  gateRemote(key: string): number | null {
+    const last = this.byRemote.get(key);
+    const { gate, held } = this.pass(last ?? null, undefined);
+    // Re-inserted, so the map stays in order of last use.
+    this.byRemote.delete(key);
+    if (!last && this.byRemote.size >= MAX_REFUSAL_KEYS) this.byRemote.delete(this.byRemote.keys().next().value!);
+    this.byRemote.set(key, gate);
+    return held;
+  }
+
+  private pass(last: Gate | null, state: unknown): { gate: Gate; held: number | null } {
     const t = this.now();
-    const last = this.seen.get(key);
     if (last && last.state === state && t - last.at < REFUSAL_LINE_INTERVAL_MS) {
       last.held++;
-      return null;
+      return { gate: last, held: null };
     }
-    if (!last && this.seen.size >= MAX_REFUSAL_KEYS) this.seen.clear();
-    this.seen.set(key, { state, at: t, held: 0 });
-    return last?.held ?? 0;
+    return { gate: { state, at: t, held: 0 }, held: last?.held ?? 0 };
   }
 }
-
-/** Refused before the Core was asked: these are rate-limited. */
-const PRECHECK: ReadonlySet<WriteRefusal> = new Set(["offline", "not-allowed", "no-range", "bad-value"]);
 
 export class QsysWriter {
   private readonly lines: RefusalLines;
@@ -190,6 +211,7 @@ export class QsysWriter {
         at: this.now(),
         panelId: req.panelId,
         device: req.device,
+        remote: req.remote,
         component: isAddressPart(component) ? component : "",
         control: isAddressPart(control) ? control : "",
         from,
@@ -200,11 +222,11 @@ export class QsysWriter {
     };
     /** `detail` goes to /log only; the caller gets `message`. */
     const refuse = (reason: WriteRefusal, message: string, detail = message): Promise<WriteResult> => {
-      const held = !PRECHECK.has(reason)
+      const held = !PRE_SEND_REFUSALS.has(reason)
         ? 0
         : reason === "offline"
-          ? this.lines.gate("offline", this.source.transport)
-          : this.lines.gate(`${reason}\u0000${req.device}`, undefined);
+          ? this.lines.gateOffline(this.source.transport)
+          : this.lines.gateRemote(`${reason}\u0000${req.remote}`);
       if (held !== null) {
         console.warn(`[qsys] write refused (${scrub(reason)}): ${scrub(detail)}${scrub(held ? ` (${held} more like it not logged)` : "")}`);
       }
@@ -225,7 +247,7 @@ export class QsysWriter {
       return refuse("offline", `the Core is not connected, or its current values have not been read since it reconnected; ${where} was not written`);
     }
     // Readiness is back: the next offline refusal starts a new episode and is logged.
-    this.lines.forget("offline");
+    this.lines.forgetOffline();
     const c = findControl(catalog, component, control);
     if (!c) return refuse("core-error", `${where} is not in the Core's design`);
     const kind = kindOf(c);

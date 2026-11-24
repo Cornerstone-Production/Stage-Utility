@@ -45,6 +45,8 @@ const req = (over: Partial<WriteRequest> = {}): WriteRequest => ({
   panelId: "panel-a",
   device: "192.0.2.10 TestBrowser/1.0",
   ...over,
+  // The address half of `device`, as the route splits it, unless the test says otherwise.
+  remote: over.remote ?? (over.device ?? "192.0.2.10 TestBrowser/1.0").split(" ")[0],
 });
 
 before(() => {
@@ -327,7 +329,7 @@ describe("writeControl", () => {
     const [refused, clamped, plain] = entries;
     assert.deepEqual(
       { ...plain, at: 0 },
-      { at: 0, panelId: "panel-a", device: "192.0.2.10 iPad", component: "Lobby_Mixer", control: "gain", from: null, to: -15, result: "ok" },
+      { at: 0, panelId: "panel-a", device: "192.0.2.10 iPad", remote: "192.0.2.10", component: "Lobby_Mixer", control: "gain", from: null, to: -15, result: "ok" },
     );
     assert.equal(clamped.panelId, null);
     assert.equal(clamped.device, "192.0.2.11 Laptop");
@@ -511,6 +513,73 @@ describe("review round 1", () => {
     assert.equal(r.reason, "core-error");
     assert.ok(!r.message.includes("192.0.2.50"), `the Core's address reached the page: ${r.message}`);
     assert.ok(warn.lines.some((l) => l.includes("192.0.2.50:1710")), "the reason did not reach /log");
+  });
+});
+
+describe("review round 2", () => {
+  test("core-errors after a send never merge: each keeps its own entry and value", async () => {
+    // A Core whose reply carries no read-back: every write takes the "may have landed" path.
+    const catalog: QsysCatalog = { designCode: "d", components: [{ name: "Lobby_Mixer", type: "mixer", controls: fake.components.get("Lobby_Mixer")! }] };
+    const source = { transport: { send: async () => true, onNotification: () => {}, close: () => {} }, getCatalog: () => catalog };
+    const always = { ready: () => true, current: () => new Map() };
+    const timed = new QsysWriter(source, always, () => 3_000_000);
+    const warn = capture("warn");
+    try {
+      for (const value of [-40, -30, -20]) await timed.write(req({ value, device: "198.51.100.40 Pad" }));
+    } finally {
+      warn.restore();
+    }
+    const mine = (await qsysWriteLog.list()).entries.filter((e) => e.device === "198.51.100.40 Pad");
+    assert.deepEqual(
+      mine.map((e) => [e.result, e.to, e.repeats]),
+      [
+        ["core-error", -20, undefined],
+        ["core-error", -30, undefined],
+        ["core-error", -40, undefined],
+      ],
+      "a send that may have landed was merged into another entry",
+    );
+  });
+
+  test("a client changing its user agent per request is still one line and one entry", async () => {
+    let clock = 4_000_000;
+    const timed = new QsysWriter(svc, watch, () => clock);
+    await connect();
+    const warn = capture("warn");
+    try {
+      for (let i = 0; i < 8; i++) {
+        clock += 1;
+        await timed.write(req({ control: "nope", device: `198.51.100.77 Agent/${i}` }));
+      }
+    } finally {
+      warn.restore();
+    }
+    assert.equal(warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-allowed)")).length, 1, "a new user agent escaped the limiter");
+    const mine = (await qsysWriteLog.list()).entries.filter((e) => e.device.startsWith("198.51.100.77 "));
+    assert.equal(mine.length, 1, "a new user agent escaped the merge");
+    assert.equal(mine[0].repeats, 8);
+  });
+
+  test("many addresses cannot clear the offline limiter", async () => {
+    const timed = new QsysWriter(svc, watch, () => 6_000_000);
+    const warn = capture("warn");
+    const offline = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (offline)")).length;
+    try {
+      await timed.write(req());
+      assert.equal(offline(), 1);
+      for (let i = 0; i < 300; i++) await timed.write(req({ control: "nope", remote: `10.9.${i >> 8}.${i & 255}` }));
+      await timed.write(req());
+      assert.equal(offline(), 1, "key churn reset the offline limiter");
+      // Bounded by dropping the oldest: the newest address is still held, the first was dropped.
+      const refusedLines = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-allowed)")).length;
+      const n = refusedLines();
+      await timed.write(req({ control: "nope", remote: "10.9.1.43" })); // i = 299
+      assert.equal(refusedLines(), n, "the newest address was forgotten");
+      await timed.write(req({ control: "nope", remote: "10.9.0.0" })); // i = 0
+      assert.equal(refusedLines(), n + 1, "the limiter kept every address: it is unbounded");
+    } finally {
+      warn.restore();
+    }
   });
 });
 
