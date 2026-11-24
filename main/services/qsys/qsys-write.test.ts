@@ -33,6 +33,9 @@ const settings = (): QsysSettings => ({ host: "127.0.0.1", port, user: "", enabl
 const GAIN: AllowEntry = { component: "Lobby_Mixer", control: "gain", label: "Lobby gain", min: -100, max: 0, confirm: "none" };
 const MUTE: AllowEntry = { component: "Lobby_Mixer", control: "mute", label: "Lobby mute", min: null, max: null, confirm: "hold" };
 const LEVEL: AllowEntry = { component: "Zone 1", control: "level", label: "Zone level", min: null, max: null, confirm: "none" };
+const CHIME: AllowEntry = { component: "Paging", control: "chime", label: "Chime", min: null, max: null, confirm: "none" };
+/** On the allowlist, not in the design. */
+const GHOST: AllowEntry = { component: "Lobby_Mixer", control: "gone", label: "Gone", min: -10, max: 0, confirm: "none" };
 
 const req = (over: Partial<WriteRequest> = {}): WriteRequest => ({
   component: "Lobby_Mixer",
@@ -63,11 +66,12 @@ beforeEach(async () => {
   ]);
   // A numeric control the Core reports no range for.
   fake.components.set("Zone 1", [{ Name: "level", Type: "Float", Value: 3, String: "3", Position: 0.3, Direction: "Read/Write" }]);
+  fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
   port = await fake.start();
   svc = new QsysService();
   watch = new QsysWatch(svc);
   writer = new QsysWriter(svc, watch);
-  await qsysAllowlist.replace([GAIN, MUTE, LEVEL]);
+  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST]);
 });
 
 afterEach(async () => {
@@ -250,6 +254,56 @@ describe("writeControl", () => {
       }
       const r = await writer.write(req({ control: "mute", value: 1 }));
       assert.equal(r.ok ? null : r.reason, "bad-value", "a number was written to a boolean");
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sets().length, 0);
+  });
+
+  test("a write the Core refuses is a core-error, logged once, and not sent again", async () => {
+    await connect();
+    fake.failNext("Component.Set", 8);
+    const before = (await qsysWriteLog.list()).entries.length;
+    const warn = capture("warn");
+    let r;
+    try {
+      r = await writer.write(req({ value: -20 }));
+    } finally {
+      warn.restore();
+    }
+    assert.equal(r.ok ? null : r.reason, "core-error");
+    assert.ok(!r.ok && /the Core refused the write to Lobby_Mixer\/gain/.test(r.message), "the Core's refusal was not named");
+    assert.equal(warn.lines.filter((l) => l.startsWith("[qsys] write refused (core-error)")).length, 1);
+    const { entries } = await qsysWriteLog.list();
+    assert.equal(entries.length - before, 1);
+    assert.equal(entries[0].result, "core-error");
+    assert.equal(entries[0].to, -20);
+    await settle();
+    assert.equal(sets().length, 1, "a refused write was retried");
+  });
+
+  test("a trigger takes no range and is sent as 1", async () => {
+    await connect();
+    const r = await writer.write(req({ component: "Paging", control: "chime", value: true }));
+    assert.ok(r.ok, `a trigger with no range was refused: ${JSON.stringify(r)}`);
+    assert.deepEqual((sets()[0].params as { Controls: unknown }).Controls, [{ Name: "chime", Value: 1 }]);
+    const warn = capture("warn");
+    try {
+      const off = await writer.write(req({ component: "Paging", control: "chime", value: false }));
+      assert.equal(off.ok ? null : off.reason, "bad-value");
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sets().length, 1);
+  });
+
+  test("an allowlisted control missing from the design is refused before anything is sent", async () => {
+    await connect();
+    const warn = capture("warn");
+    try {
+      const r = await writer.write(req({ control: "gone", value: -5 }));
+      assert.equal(r.ok ? null : r.reason, "core-error");
+      assert.ok(!r.ok && /not in the Core's design/.test(r.message));
     } finally {
       warn.restore();
     }
