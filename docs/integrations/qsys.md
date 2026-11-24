@@ -190,5 +190,5 @@ release ask for. This release does not write them.
 | `change group <id> was not on the Core (<reason>)` | Removing a watch the Core no longer had; harmless. |
 | `<component>/<control> is on panel <id> but not in the Core's design; not watched` | A panel names a control the design lacks. |
 | `the Core would not watch <component> (<controls>): <reason>; not watched` | The Core refused to report these controls. The rest are watched and writes carry on. |
-| `the Core has not resent the values of <groups> 10 s after Invalidate; asking again, and writes wait` | After a reconnect the Core has not sent the current values; writes stay refused until it does. |
+| `the Core has not resent the values of <groups> <n> s after Invalidate; asking again, and writes wait` | After a reconnect the Core has not sent the current values; writes stay refused until it does. It is asked again after 10 s, then 20 s, doubling to 5 minutes, one line each time. |
 |

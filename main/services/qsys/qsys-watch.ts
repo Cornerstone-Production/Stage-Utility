@@ -86,8 +86,9 @@ const sameChange = (a: QrcChange, b: QrcChange): boolean =>
 /** Retry a failed update after 1 s, doubling to this cap. */
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
-/** How long an Invalidate's resent values may take before it is asked again. */
+/** How long an Invalidate's resent values may take before it is asked again; doubling to the cap. */
 export const REREAD_TIMEOUT_MS = 10_000;
+const REREAD_MAX_MS = 5 * 60_000;
 
 export class QsysWatch {
   private panels: WatchPanel[] = [];
@@ -106,7 +107,12 @@ export class QsysWatch {
    * arrived: the keys still missing. Write readiness waits for it to empty.
    */
   private readonly rereading = new Map<GroupId, Set<string>>();
+  /** Groups that must be Invalidated (again) before writes may resume: one rebuilt
+   *  while it was waiting, or one whose values did not come back in time. */
+  private readonly toInvalidate = new Set<GroupId>();
   private rereadTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Re-asks in a row on this connection; backs the next one off. */
+  private rereadAttempts = 0;
   /** A run failed on the live connection, so which groups the Core holds is unknown. */
   private broken = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -187,7 +193,7 @@ export class QsysWatch {
    */
   ready(): boolean {
     this.sync();
-    return !!this.transport && !this.rebuilding && this.rereading.size === 0 && !this.designStale();
+    return !!this.transport && !this.rebuilding && this.toInvalidate.size === 0 && this.rereading.size === 0 && !this.designStale();
   }
 
   /** The catalog moved to a new design that the groups have not caught up with yet. */
@@ -237,6 +243,8 @@ export class QsysWatch {
     this.cache.clear();
     this.rebuilding = true;
     this.rereading.clear();
+    this.toInvalidate.clear();
+    this.rereadAttempts = 0;
     this.cancelReread();
   }
 
@@ -259,8 +267,9 @@ export class QsysWatch {
         for (const id of GROUP_IDS) await this.destroyLeftover(t, id);
         this.groups.clear();
         // A group still waiting on its Invalidate is gone with the rest: ask again once rebuilt.
-        if (this.rereading.size) {
+        if (this.rereading.size || this.toInvalidate.size) {
           this.rereading.clear();
+          this.toInvalidate.clear();
           this.rebuilding = true;
         }
       }
@@ -272,10 +281,11 @@ export class QsysWatch {
       for (const id of GROUP_IDS) await this.apply(t, id, want.groups.get(id));
       for (const k of [...this.cache.keys()]) if (!this.watched(k)) this.cache.delete(k);
 
-      if (this.rebuilding) {
-        for (const id of this.groups.keys()) await this.invalidate(t, id);
-        this.rebuilding = false;
-      }
+      if (this.rebuilding) for (const id of this.groups.keys()) this.toInvalidate.add(id);
+      this.rebuilding = false;
+      // Every group stays in toInvalidate until invalidate() marks it waiting, so
+      // one group's values arriving cannot open readiness before the next is asked.
+      for (const id of [...this.toInvalidate]) await this.invalidate(t, id);
       this.cancelRetry();
       this.failures = 0;
       this.logSummary();
@@ -297,23 +307,31 @@ export class QsysWatch {
    */
   private async invalidate(t: QrcTransport, id: GroupId): Promise<void> {
     const group = this.groups.get(id);
+    this.toInvalidate.delete(id);
     if (!group) return;
     this.rereading.set(id, new Set(group.keys));
     this.armReread();
     await t.send("ChangeGroup.Invalidate", { Id: id });
   }
 
-  /** If the resent values have not all arrived in time, say so and Invalidate every group again. */
+  /**
+   * If the resent values have not all arrived in time, say so and Invalidate
+   * those groups again. Each re-ask on a connection waits twice as long as the
+   * last (10 s to 5 min), so a Core that never answers costs a line per wait,
+   * not one every 10 s.
+   */
   private armReread(): void {
     if (this.rereadTimer) return;
+    const wait = backoffMs(this.rereadAttempts + 1, REREAD_TIMEOUT_MS, REREAD_MAX_MS);
     this.rereadTimer = setTimeout(() => {
       this.rereadTimer = null;
       if (!this.rereading.size || this.source.transport !== this.transport) return;
-      console.warn(`[qsys] the Core has not resent the values of ${scrub([...this.rereading.keys()].join(", "))} ${scrub(REREAD_TIMEOUT_MS / 1000)} s after Invalidate; asking again, and writes wait`);
+      this.rereadAttempts++;
+      console.warn(`[qsys] the Core has not resent the values of ${scrub([...this.rereading.keys()].join(", "))} ${scrub(wait / 1000)} s after Invalidate; asking again, and writes wait`);
+      for (const id of this.rereading.keys()) this.toInvalidate.add(id);
       this.rereading.clear();
-      this.rebuilding = true;
       this.kick();
-    }, REREAD_TIMEOUT_MS);
+    }, wait);
   }
 
   private cancelReread(): void {
@@ -418,26 +436,30 @@ export class QsysWatch {
       await this.add(t, id, have, added);
       return;
     }
-    // A group still waiting on its Invalidate is rebuilt and asked again below.
-    const awaited = this.rereading.delete(id);
+    // A group still waiting on its Invalidate is rebuilt and asked again after
+    // this pass; readiness stays closed meanwhile (toInvalidate).
+    if (this.rereading.delete(id)) this.toInvalidate.add(id);
     if (have) {
       this.groups.delete(id);
       await t.send("ChangeGroup.Destroy", { Id: id });
     }
-    if (!want) return;
+    if (!want) {
+      this.toInvalidate.delete(id);
+      return;
+    }
     const group: Group = { keys: new Set(want.keys), rate: want.rate };
     this.groups.set(id, group);
     await this.add(t, id, group, [...want.keys]);
     if (!group.keys.size) {
       // The Core would add none of it. It may or may not have made the group.
       this.groups.delete(id);
+      this.toInvalidate.delete(id);
       await this.destroyLeftover(t, id);
       return;
     }
     const reply = await t.send("ChangeGroup.AutoPoll", { Id: id, Rate: want.rate });
     // QSC's reference shows changes on the AutoPoll reply; take them if present.
     this.ingest(id, reply);
-    if (awaited) await this.invalidate(t, id);
   }
 
   /**
@@ -476,7 +498,10 @@ export class QsysWatch {
     for (const k of received) missing.delete(k);
     if (missing.size) return;
     this.rereading.delete(id as GroupId);
-    if (!this.rereading.size) this.cancelReread();
+    if (!this.rereading.size) {
+      this.cancelReread();
+      this.rereadAttempts = 0;
+    }
   }
 
   /** Cache a push and broadcast what actually changed, on the channels of the

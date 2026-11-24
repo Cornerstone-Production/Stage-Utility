@@ -532,7 +532,33 @@ for (const form of ["notify", "reply"] as const) {
       assert.equal(watch.current([GAIN]).size, 1);
     });
 
-    test("resent values that never come are asked for again, with a [qsys] line", async () => {
+    test("a group rebuilt while its resent values are awaited keeps writes closed until its new Invalidate's values arrive", async () => {
+      watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
+      named.add(watchChannel("a"));
+      named.add(watchChannel("b"));
+      fake.holdInvalidatePushes = true;
+      await connect();
+      await until(() => methods().includes("ChangeGroup.Invalidate"), "Invalidate");
+      await settle();
+      assert.equal(watch.ready(), false);
+      // Closing b rebuilds "values" (a control leaving is Destroy and re-add); hold the Core mid-rebuild.
+      fake.holdReplies = true;
+      named.delete(watchChannel("b"));
+      const pass = watch.recompute();
+      await until(() => methods().filter((m) => m === "ChangeGroup.Destroy").length === 1, "the rebuild's Destroy");
+      assert.equal(watch.ready(), false, "readiness opened while a group awaiting its values was torn down and rebuilt");
+      fake.holdReplies = false;
+      fake.releaseHeld();
+      await pass;
+      await settle();
+      assert.equal(watch.ready(), false, "readiness opened before the rebuilt group's Invalidate was answered with values");
+      assert.equal(methods().filter((m) => m === "ChangeGroup.Invalidate").length, 2, "the rebuilt group was not Invalidated again");
+      fake.holdInvalidatePushes = false;
+      fake.releaseInvalidatePushes();
+      await until(() => watch.ready(), "the resent values");
+    });
+
+    test("resent values that never come are asked for again, backing off, with a [qsys] line each time", async () => {
       watch.setPanels([panel("a", "staff", GAIN)]);
       named.add(watchChannel("a"));
       fake.holdInvalidatePushes = true;
@@ -543,9 +569,17 @@ for (const form of ["notify", "reply"] as const) {
         await settle();
         mock.timers.tick(REREAD_TIMEOUT_MS);
         await until(() => methods().filter((m) => m === "ChangeGroup.Invalidate").length === 2, "a second Invalidate");
-        const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("has not resent the values"));
-        assert.equal(lines.length, 1, "no [qsys] line for values that never came");
+        const lines = () => warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("has not resent the values"));
+        assert.equal(lines().length, 1, "no [qsys] line for values that never came");
         assert.equal(watch.ready(), false);
+        // The next re-ask waits twice as long.
+        mock.timers.tick(REREAD_TIMEOUT_MS);
+        await settle();
+        assert.equal(methods().filter((m) => m === "ChangeGroup.Invalidate").length, 2, "re-asked every 10 s: a dead Core writes a line every 10 s");
+        mock.timers.tick(REREAD_TIMEOUT_MS);
+        await until(() => methods().filter((m) => m === "ChangeGroup.Invalidate").length === 3, "a third Invalidate after 20 s");
+        assert.equal(lines().length, 2);
+        assert.match(lines()[1], / 20 s after Invalidate/);
         fake.holdInvalidatePushes = false;
         fake.releaseInvalidatePushes();
         await until(() => watch.ready(), "the resent values");
