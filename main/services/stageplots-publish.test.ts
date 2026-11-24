@@ -1002,6 +1002,18 @@ describe("taking back what went up", () => {
       return m && m[1] !== keep && m[2] === "index" && req.method === "PUT" ? { status: 500, body: "" } : h.page.worker(req);
     });
 
+  test("a 404 after the page took the backgrounds is no Worker from before StagePlots: what went up is taken back", async () => {
+    const h = await harness(venueDoc(2, 2));
+    h.page.respond = (req) => {
+      const m = SP.exec(req.path);
+      return m && req.method === "PUT" && m[2]?.startsWith("plot/") ? { status: 404, body: "" } : h.page.worker(req);
+    };
+    assert.equal((await h.publisher.publish("v-1")).ok, false);
+    assert.ok(spRequests(h.page).some((q) => q.method === "PUT" && q.key?.startsWith("image/")), "no background went up, so this tests nothing");
+    assert.equal(h.page.hub.stageplots.size, 0, "the backgrounds the page took are left on it under a secret nothing knows");
+    assert.deepEqual(await pending(), []);
+  });
+
   test("a publish that fails at the index takes back the backgrounds and plots it had put up", async () => {
     const h = await harness(venueDoc(2, 2));
     failIndex(h);

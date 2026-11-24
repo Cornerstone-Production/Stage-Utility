@@ -1451,8 +1451,11 @@ export class StagePlotsPublisher {
     const sent = opts.force ? new Map<string, string>() : (this.sent.get(secret) ?? new Map<string, string>());
     this.sent.set(secret, sent);
     let count = 0;
-    // A Worker from before StagePlots answers every path 404 and stored nothing, so there is nothing to take back.
-    const fail = (r: PushFailure): SendResult => ({ ok: false, status: 502, message: sentence(r, host), sent: r.kind === "refused" && r.status === 404 ? 0 : count });
+    /** Requests the page took: a 404 after one is not a Worker from before StagePlots. */
+    let took = 0;
+    // A Worker from before StagePlots answers every path 404 and stored nothing, so there is nothing
+    // to take back; a 404 after the page took something is a refusal like any other, and what went up goes back.
+    const fail = (r: PushFailure): SendResult => ({ ok: false, status: 502, message: sentence(r, host), sent: r.kind === "refused" && r.status === 404 && took === 0 ? 0 : count });
 
     // Backgrounds first: a plot names one only once the page holds it.
     const needed = venueImages(doc, venue);
@@ -1479,6 +1482,7 @@ export class StagePlotsPublisher {
       const r = await client.putStagePlot(secret, key, bytes, STAGEPLOTS_IMAGE_TYPE);
       count++;
       this.unkeep(secret, r);
+      if (r.ok) took++;
       if (r.ok) held.add(hash);
       else if (aboutThePage(r)) return fail(r);
       else unpublished.push({ hash, why: sentence(r, host) });
@@ -1493,6 +1497,7 @@ export class StagePlotsPublisher {
       if (sent.get(key) === h) return null;
       const r = await client.putStagePlot(secret, key, text, "application/json");
       count++;
+      if (r.ok) took++;
       // A failure may have been stored and its answer lost: what the page holds is not known, so
       // the next send of this key goes whatever it is, the text sent before this one included.
       if (r.ok) sent.set(key, h);
