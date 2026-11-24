@@ -200,6 +200,25 @@ test("a meter on both a volunteer and a staff panel goes in the staff group only
   );
 });
 
+test("unchanged demand sends nothing, and a pure addition sends only the new control's add", async () => {
+  // Every subscribe anywhere in the app runs a recompute; it must cost the Core nothing.
+  await connect();
+  watch.setPanels([panel("a", "staff", GAIN, METER), panel("b", "staff", MUTE)]);
+  await open("a");
+  let mark = fake.received.length;
+  subscriptionsChanged();
+  await watch.recompute();
+  await settle();
+  assert.deepEqual(methods(mark).filter((m) => m.startsWith("ChangeGroup.")), [], "a recompute with unchanged demand touched the Core");
+  mark = fake.received.length;
+  await open("b");
+  assert.deepEqual(
+    fake.received.slice(mark).filter((r) => r.method.startsWith("ChangeGroup.")),
+    [{ method: "ChangeGroup.AddComponentControl", params: { Id: "values", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "mute" }] } } }],
+    "adding one control rebuilt more than it added",
+  );
+});
+
 test("never uses more than 3 change groups", async () => {
   await connect();
   watch.setPanels([
