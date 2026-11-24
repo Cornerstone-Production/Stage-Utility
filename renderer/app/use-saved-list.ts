@@ -57,8 +57,13 @@ export function revisionOf(state: Pick<StageState, "listRevisions"> | null | und
 export interface SavedList<T> {
   /** What to draw: the server's last answer with the waiting edits applied. Empty until the first broadcast is taken in. */
   list: T[];
-  /** Queue an edit; resolves once it has been saved or refused, with what it changed and what it was applied to. */
-  edit: (e: ListEdit<T>) => Promise<ListStepResult<T>>;
+  /**
+   * Queue an edit; resolves once it has been saved or refused, with what it changed
+   * and what it was applied to. Named as useListSaves names the same thing: there,
+   * `edit` answers only {ok} (the ServiceCue page reads it so) and `editTracked`
+   * answers this. Every caller here wants the toast and the Undo, so only this one.
+   */
+  editTracked: (e: ListEdit<T>) => Promise<ListStepResult<T>>;
   /** Queue a request that answers with the whole list; resolves once it has answered or failed. */
   request: (r: () => Promise<Revised<T>>) => Promise<ListSaveResult>;
 }
@@ -107,7 +112,7 @@ export function useSavedList<T>({
     return list;
   }, [take]);
   const counted = useMemo<ListIo<T>>(() => ({ save: (l) => unwrap(io.save(l)), read: () => unwrap(io.read()) }), [io, unwrap]);
-  const { list, adopt, editTracked: edit, request: queueRequest, pending } = useListSaves(counted);
+  const { list, adopt, editTracked, request: queueRequest, pending } = useListSaves(counted);
   const request = useCallback((r: () => Promise<Revised<T>>) => queueRequest(() => unwrap(r())), [queueRequest, unwrap]);
 
   const savedKey = saved === null ? null : keyOf(saved);
@@ -124,5 +129,5 @@ export function useSavedList<T>({
     if (savedKey !== drawnKey) adopt(broadcast);
   }, [savedKey, drawnKey, boot, n, pending, hold, adopt, take]);
 
-  return { list, edit, request };
+  return { list, editTracked, request };
 }

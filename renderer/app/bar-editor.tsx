@@ -228,7 +228,7 @@ export function useBarEditor({
    */
   async function change(set: BarSet, make: (cur: BarEditRow[]) => BarEditRow[]): Promise<{ result: ListStepResult<BarEditRow>; ticket: number }> {
     const ticket = undo.retire();
-    const result = await (set === "mobile" ? mobile : desktop).edit((l) => {
+    const result = await (set === "mobile" ? mobile : desktop).editTracked((l) => {
       const cur = set === "mobile" && l.length === 0 ? desktopRows.current : l;
       const next = make(cur);
       if (next === cur) return l;

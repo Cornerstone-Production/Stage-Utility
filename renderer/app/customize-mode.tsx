@@ -107,7 +107,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const savedKey = state ? JSON.stringify(state.sidebar ?? EMPTY_SIDEBAR) : null;
   const savedList = useMemo(() => (savedKey === null ? null : [JSON.parse(savedKey) as SidebarArrangement]), [savedKey]);
   const io = useMemo(() => sidebarListIo(queryClient), [queryClient]);
-  const { list, edit } = useSavedList({ io, saved: savedList, revision: revisionOf(state, "sidebar"), keyOf: keyOfArrangement });
+  const { list, editTracked } = useSavedList({ io, saved: savedList, revision: revisionOf(state, "sidebar"), keyOf: keyOfArrangement });
   // The draft is held while the mode is on, and outside it for as long as the
   // broadcast of our last save has not arrived: dropped sooner, the rail would
   // flicker back to the arrangement before it.
@@ -144,14 +144,14 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   /** Save a change, saying the server's words if it is refused. How it went. */
   const save = useCallback(
     async (change: (arrangement: SidebarArrangement) => SidebarArrangement | null) => {
-      const result = await edit((l) => {
+      const result = await editTracked((l) => {
         const next = change(l[0] ?? EMPTY_SIDEBAR);
         return next ? [next] : l;
       });
       if (!result.ok) toast.error(result.error);
       return result;
     },
-    [edit],
+    [editTracked],
   );
 
   /** Make a change; whether it saved one. */
