@@ -26,6 +26,7 @@ import {
   SlidersHorizontalIcon,
   VideoIcon,
   ZapIcon,
+  SlidersVerticalIcon,
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
@@ -161,6 +162,16 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
     Component: AutomationRoute,
+  },
+  // Q-SYS. The row is drawn by QsysRailRow (a flyout and a folder, not a link) and
+  // only when a panel exists or a Core is set up; the destination is /qsys/manage.
+  {
+    id: "qsys",
+    path: QSYS_MANAGE_PATH,
+    label: "Q-SYS",
+    description: "Panels, the connection to the Core, and what panels may change.",
+    icon: <SlidersVerticalIcon className="size-4" />,
+    Component: QsysManageRoute,
   },
   {
     id: "plan",
@@ -375,11 +386,10 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // nowhere to be: it rendered only on a panel Output, which meant the one
   // surface built for the operator was the one the operator could not open.
   { path: "/consoles/$viewId", Component: ConsoleRoute },
-  // Q-SYS: the operator's page, titled here because nothing in the rail prefixes it;
-  // a panel inside the shell, titled with the panel's own name (active-page.ts,
-  // qsysPanelPages); and the panel full screen, chromeless, what an iPad opens. The
+  // Q-SYS: /qsys/manage is the Q-SYS destination in the rail. A panel inside the
+  // shell is titled with the panel's own name (active-page.ts, qsysPanelPages) and
+  // lights that row; the panel full screen is chromeless, what an iPad opens. The
   // static /qsys/manage wins over the /qsys/$slug parameter.
-  { path: QSYS_MANAGE_PATH, Component: QsysManageRoute, label: "Q-SYS", description: "Panels, the connection to the Core, and what panels may change." },
   { path: "/qsys/manage/$slug", Component: QsysManagePanelRoute },
   { path: "/qsys/$slug", Component: QsysPanelRoute },
 ];

@@ -74,7 +74,7 @@ export const DEFAULT_SIDEBAR: readonly SidebarSection[] = [
   { id: "content", label: "Content", kind: "pages", members: ["servicecue", "patch", "stageplots"] },
   { id: "screens", label: "Screens", kind: "pages", members: ["screens", "mic-slots", "video-feeds"] },
   // Automation rules act ON integrations.
-  { id: "devices", label: "Devices", kind: "pages", members: ["automation"] },
+  { id: "devices", label: "Devices", kind: "pages", members: ["automation", "qsys"] },
   { id: "services", label: "Services", kind: "pages", members: ["plan", "history", "baptisms"] },
   {
     id: "settings",

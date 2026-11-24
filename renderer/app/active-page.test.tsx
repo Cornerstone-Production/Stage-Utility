@@ -348,7 +348,9 @@ describe("exact versus prefix", () => {
       "/patch -> /patch",
       "/patch/edit -> /patch",
       "/plan -> /plan",
-      "/qsys/manage -> /qsys/manage (no rail row)",
+      "/qsys/manage -> /qsys/manage",
+      // Titled with the panel's own name, so it resolves to its own page, which is no
+      // row. The Q-SYS row is lit by QsysRailRow from the path (qsys-rail-row.test.tsx).
       `/qsys/manage/$slug -> /qsys/manage/${QSYS_SLUG} (no rail row)`,
       "/screens -> /screens",
       "/screens/$viewId/edit -> /screens",

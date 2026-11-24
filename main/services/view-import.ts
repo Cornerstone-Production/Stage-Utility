@@ -28,7 +28,9 @@ import { isSafeKey } from "./safe-key.js";
 import { isRecord } from "./is-record.js";
 import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
-import { isLayoutShape } from "../types/views.js";
+import { isLayoutShape, viewSurface } from "../types/views.js";
+import { parseQsysPanelBlock } from "../types/qsys.js";
+import { landQsysPanels, normalizeQsysBlocks } from "./qsys/qsys-import.js";
 import type { Slot } from "../types/stage.js";
 import type { ViewBundle, ImportReport } from "../types/view-bundle.js";
 import type { View } from "../types/views.js";
@@ -67,6 +69,16 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
     // null is legitimate — only a custom view has a layout at all.
     if (v.layout != null && !isLayoutShape(v.layout)) {
       throw new Error(`import — view "${v.name}" has a layout the renderer cannot draw`);
+    }
+    // A Q-SYS panel block is held to what a save of one is: the same parser, and
+    // the same rule that a panel is a custom console. Import writes through the
+    // views store, past the controller's own check of both.
+    if (v.qsys !== undefined) {
+      const parsed = parseQsysPanelBlock(v.qsys);
+      if ("error" in parsed) throw new Error(`import — view "${v.name}" has Q-SYS panel settings that are refused: ${parsed.error}`);
+      if (v.kind !== "custom" || viewSurface(v as Pick<View, "surface">) !== "console") {
+        throw new Error(`import — view "${v.name}" is a Q-SYS panel, which must be a custom console`);
+      }
     }
   }
 
@@ -243,7 +255,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // A file exported before slot boards is moved onto them the way a boot moves
   // slots.json: one board per key, named after its view or widget, every slots
   // view and widget pointed at one. After this every file is read the same way.
-  const bundle: ViewBundle = boardsBundle({ ...raw, views: adoptLegacyViewFields(raw.views) });
+  const bundle: ViewBundle = boardsBundle({ ...raw, views: normalizeQsysBlocks(adoptLegacyViewFields(raw.views)) });
 
   // Retyping. Only a plan export names a service type, so only a plan export can
   // be landed under a different one; for a view export the choice has no
@@ -379,11 +391,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // failure after this leaves boards nothing shows, listed as unused.
   await slotsStore.createBoards(newBoards);
 
+  // A panel's address is its URL, so it is unique across the views: a slug taken
+  // here (or by another panel in the file) gets the next numeric suffix, and the
+  // report says so. After the names, before the views are saved.
+  const qsys = landQsysPanels(named, existing);
+
   // A Run an action Button in the file ignores Simulate and Disarm, so it is made a
   // cue Button with a rule of its own, as the start-up pass does. The rules are
   // written first and the views after, so a crash between them leaves rules whose
   // Buttons never landed (kept, and listed as such) and never Buttons bound to nothing.
-  const actions = await runActionButtonMigration(named, { onImport: true });
+  const actions = await runActionButtonMigration(qsys.views, { onImport: true });
   if (actions.failure) {
     console.error(scrub(actions.failure));
     skipped.push("Run an action buttons were imported unconverted: their commands could not be made, so they show Needs converting and do nothing (see the log)");
@@ -409,6 +426,15 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   }
   // After the save: a conversion whose import was refused is not one to announce.
   if (actions.line) console.log(scrub(actions.line));
+  // Likewise after the save: a refused import renamed nothing.
+  for (const p of qsys.panels) {
+    if (p.renamedFrom !== undefined) {
+      console.log(`[view-import] Q-SYS panel "${scrub(p.name)}" address /qsys/${scrub(p.renamedFrom)} was taken here; imported as /qsys/${scrub(p.slug)}`);
+    }
+    if (p.missingSiblings.length > 0) {
+      console.log(`[view-import] Q-SYS panel "${scrub(p.name)}" names panels that do not exist here: ${scrub(p.missingSiblings.join(", "))}`);
+    }
+  }
 
   // Every board this import made, rows or none: a screen the file carried with
   // an empty board is still a board the operator now has.
@@ -703,6 +729,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     ...(planned
       ? { plan: { serviceTypeId: targetType!, serviceTypeName: planned.serviceTypeName, ...(retypedFrom ? { retypedFrom } : {}) } }
       : {}),
+    qsysPanels: qsys.panels,
     slotBoards,
     slotRows,
     patchVariants: patchOutcomes,

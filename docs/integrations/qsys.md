@@ -232,6 +232,26 @@ A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A consol
 with Q-SYS objects and no panel settings still works where it is shown, as a staff
 panel, and `/qsys/manage` offers to make it a panel.
 
+### In the sidebar
+
+One **Q-SYS** row, in the Devices section, appears once a Q-SYS panel exists or a Core
+is set up; with neither it is not drawn. It is a row like any other for **Customize
+sidebar**: hide it, or move it to another section.
+
+- **Hover** (a mouse, resting for half a second): a flyout opens to the right of the
+  sidebar listing every panel with its kind, and **All panels and Q-SYS settings**
+  last. Items light up under the pointer, and the panel you are on stays lit. The
+  flyout stays open while the pointer crosses into it.
+- **Tap, Enter or Space**: the row opens in place like a folder, with the same list.
+  Touch has no hover, so this is how a phone or tablet reaches it. In the narrow
+  icon-only sidebar a tap opens the flyout instead.
+- **Keyboard**: the row is focusable. Right or Down arrow opens the flyout and moves
+  into it; the arrow keys, Home and End move between items; Escape or Left arrow
+  closes it and returns to the row.
+
+Choosing a panel opens `/qsys/manage/<slug>`; the last item opens `/qsys/manage`. The
+row is lit on any page under `/qsys/manage`.
+
 ### Addresses
 
 | URL | What it is |
@@ -258,13 +278,32 @@ own values back: only a fresh touch writes.
 If Stage Utility itself is down, an iPad shows the browser's own error. The Core and
 its wall panels are not affected.
 
+### Moving a panel between installs
+
+A panel's settings travel in its view bundle (see
+[Moving a view](../moving-a-view.md)); the allowlist never does. On import:
+
+- The bundle's panel settings are checked as a save of them is: a malformed block,
+  or a panel that is not a custom console, refuses the whole file and writes nothing.
+- A panel whose address is already taken here, by a panel on this install or another
+  in the same file, takes the next free one (`<slug>-2`, `<slug>-3`). The panel here
+  is untouched, the import result says which address each panel landed at, and a
+  sibling the file names follows the rename.
+- A sibling that no panel has after the import is kept and not an error: the cog menu
+  leaves it out, the import result names it, and `/qsys/manage` lists it.
+- A bundle imports on a server with no Core set up. The panel arrives, shows "No
+  Q-SYS Core is set up" and stays editable; its controls are greyed until a Core is
+  connected.
+
 ## The Q-SYS page
 
-`/qsys/manage`, reached from the Q-SYS integration's dialog (**Open Q-SYS panels**):
+`/qsys/manage`, reached from the sidebar's Q-SYS row or the Q-SYS integration's dialog
+(**Open Q-SYS panels**):
 
 - **Panels**: a card per panel with its address, its kind and how many binding
   problems it has; its name opens it inside the app, **Settings** edits its panel
-  settings, and **New panel** makes a blank one.
+  settings, and **New panel** makes a blank one. A panel that names another panel
+  (for its cog menu) which does not exist is listed here, with the missing names.
 - **Connection**: whether the Core is connected, and a link to its settings.
 - **Allowlist**: every allowlisted control, with its limits (blank for none) and
   whether it asks for a hold. Edits are saved together with **Save the allowlist**.
@@ -417,6 +456,8 @@ Look at `/log` and filter for `[qsys]`.
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
 | `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
+| `Q-SYS panel "<name>" address /qsys/<a> was taken here; imported as /qsys/<b>` | An imported panel's address clashed and took a suffix. Tagged `[view-import]`. |
+| `Q-SYS panel "<name>" names panels that do not exist here: <slugs>` | An imported panel's sibling list names panels no panel has. Tagged `[view-import]`. |
 | `allowlist: added <n> control(s) a panel uses, at the Core's own ranges` | **Add all controls … uses** on `/qsys/manage` added entries. |
 | `allowlist add refused: <why>` | **Add all controls … uses** saved nothing: the stored list is invalid, or the result broke a rule. |
 | `panel settings for <view> were refused: <why>`, `a new panel was refused: <why>` | From the page: a panel's settings or a new panel were refused, as for an address another panel has. The server's own line is `[stage-controller] setViewQsys … refused` or `createView refused`. |

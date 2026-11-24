@@ -108,6 +108,10 @@ export interface ImportReport {
    *  importer landed the boards under a different service type than the file
    *  named — the id they came from, so the report can say so. */
   plan?: { serviceTypeId: string; serviceTypeName: string; retypedFrom?: string };
+  /** Every Q-SYS panel the file brought: the address it landed under, the one the
+   *  file named when that was taken here, and the siblings it names that no panel
+   *  here has. */
+  qsysPanels: { id: string; name: string; slug: string; renamedFrom?: string; missingSiblings: string[] }[];
   /** How many slot boards the import made (each a new board, so none clash —
    *  see the note in view-import.ts), and how many rows landed across them. */
   slotBoards: number;

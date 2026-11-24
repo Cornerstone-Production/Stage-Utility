@@ -19,6 +19,7 @@ import {
   isQsysPanel,
   isQsysSlug,
   qsysSlugsOf,
+  siblingsOf,
   slugify,
   uniqueQsysSlug,
   type PanelKind,
@@ -29,7 +30,7 @@ import type { View } from "@main/types/views";
 import { viewSurface, walkLayoutObjects } from "@main/types/views";
 import { errorMessage } from "@main/services/errors";
 import { Button, Callout, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
-import { invoke, onNotification } from "../../lib/api";
+import { invoke } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
 import { canEditInPlace } from "../../editor/can-edit";
 import { AppLink } from "../app-link";
@@ -37,12 +38,12 @@ import { ConsoleEditor, InPlaceEditFrame } from "../console-route";
 import { useStageSettings } from "../use-stage-settings";
 import { QsysPanelNotFound, QsysPanelSurface } from "./qsys-panel-route";
 import { qsysManagePanelPath, qsysPanelPath } from "./qsys-paths";
+import { useQsysStatus, type Status } from "./use-qsys-status";
 
 const INTEGRATIONS_PATH = "/settings/integrations";
 
 type AllowEntry = { component: string; control: string; label: string; min: number | null; max: number | null; confirm: "none" | "hold" };
 type Problem = { panelId: string; objectId: string; address: QsysAddress; problem: "missing-component" | "missing-control" | "not-allowed" | "read-only" };
-type Status = { connected: boolean; state: "connected" | "reconnecting" | "offline"; designName: string | null; isEmulator: boolean | null; configured?: boolean };
 
 /** What the binding check said: a list; not connected (503 `not-connected`); or could not run (503
  *  `check-failed`, or any other failure), with the sentence to show. */
@@ -136,24 +137,6 @@ function Section({ title, hint, children, action }: { title: string; hint?: stri
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
-/** The connection, read once and then followed on qsys:status. Null until known. */
-function useQsysStatus(): Status | null {
-  const [status, setStatus] = useState<Status | null>(null);
-  useEffect(() => {
-    let live = true;
-    invoke<Status>("qsys:status").then(
-      (st) => live && setStatus((cur) => cur ?? st),
-      (err: unknown) => logReadFailure("qsys", "the Q-SYS connection for /qsys/manage", err),
-    );
-    const off = onNotification("qsys:status", (p) => live && setStatus(p as Status));
-    return () => {
-      live = false;
-      off();
-    };
-  }, []);
-  return status;
-}
-
 type AllowState = { state: "loading" } | { state: "ok"; entries: AllowEntry[]; invalid: string | null } | { state: "failed" };
 
 /** The allowlist as read, and a way to put what a save answered in its place. */
@@ -212,6 +195,7 @@ function PanelsSection({ views, panels, bindings }: { views: View[]; panels: Vie
   // Consoles with Q-SYS objects and no panel block: their objects work, as staff
   // panels, but they have no address of their own until they are made one.
   const unmade = views.filter((v) => !isQsysPanel(v) && viewSurface(v) === "console" && v.kind === "custom" && hasQsysObjects(v));
+  const gaps = panels.map((panel) => ({ panel, missing: siblingsOf(panel, views).missing })).filter((g) => g.missing.length > 0);
   const problemsOf = (id: string) => (bindings.state === "ok" ? bindings.problems.filter((p) => p.panelId === id).length : 0);
   return (
     <Section
@@ -258,6 +242,16 @@ function PanelsSection({ views, panels, bindings }: { views: View[]; panels: Vie
                 Make it a panel
               </Button>
             </div>
+          ))}
+        </div>
+      )}
+      {gaps.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-xl border border-line p-3" data-qsys-missing-siblings>
+          <p className="text-footnote text-fg-muted">These panels name others that do not exist, so their cog menus leave them out.</p>
+          {gaps.map((g) => (
+            <p key={g.panel.id} className="text-footnote text-fg">
+              {g.panel.name}: <span className="font-mono">{g.missing.join(", ")}</span>
+            </p>
           ))}
         </div>
       )}

@@ -213,6 +213,7 @@ describe("Q-SYS panel pages", () => {
       "qsys-objects.tsx",
       "qsys-panel-route.tsx",
       "qsys-paths.ts",
+      "use-qsys-status.ts",
       "use-qsys-values.ts",
     ]);
   });
@@ -379,6 +380,25 @@ describe("/qsys/manage", () => {
     assert.match(report.textContent ?? "", /Booth.*Lobby_Mixer gone.*no such control/);
     assert.ok(document.querySelector("[data-qsys-pin]"), "no staff PIN section");
     assert.equal(document.querySelector("[data-qsys-rates]")?.getAttribute("href"), "/settings/integrations");
+  });
+
+  test("a panel's sibling that no panel has is listed, once and by name, and is not an error", async () => {
+    server.views = [
+      { ...ZONE, qsys: { ...block("volunteer", "zone-1"), siblings: ["booth", "gone-1", "gone-2"] } },
+      BOOTH,
+    ];
+    await open("/qsys/manage");
+    await wait(60);
+    const gaps = document.querySelector("[data-qsys-missing-siblings]");
+    assert.ok(gaps, "a sibling that does not exist is not reported");
+    assert.match(gaps!.textContent ?? "", /Zone 1: gone-1, gone-2/);
+    assert.equal((gaps!.textContent ?? "").includes("booth"), false, "a sibling that exists was reported missing");
+    cleanup();
+    __resetQsysPanelsForTests();
+    server.views = [ZONE, BOOTH];
+    await open("/qsys/manage");
+    await wait(60);
+    assert.equal(document.querySelector("[data-qsys-missing-siblings]"), null, "nothing is missing and something is said");
   });
 
   test("the binding report says when the check could not run, and when there is no Core to check against", async () => {

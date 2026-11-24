@@ -302,3 +302,23 @@ export function parseQsysPanelBlock(raw: unknown): { block: QsysPanelBlock } | {
 export function slugTakenMessage(slug: string, owner: { name: string }): string {
   return `the panel address /qsys/${slug} is already used by "${owner.name}"; pick another`;
 }
+
+/**
+ * The panels a panel's cog menu lists, and the siblings it names that no panel
+ * has. A missing one is not an error: it is dropped from the menu where the menu
+ * is drawn, and /qsys/manage lists it so somebody can fix the list. The one place
+ * that decides which is which.
+ */
+export function siblingsOf<V extends { qsys?: QsysPanelBlock | null }>(
+  panel: { qsys?: QsysPanelBlock | null },
+  views: readonly V[],
+): { present: V[]; missing: string[] } {
+  const present: V[] = [];
+  const missing: string[] = [];
+  for (const slug of panel.qsys?.siblings ?? []) {
+    const found = findPanelBySlug(views, slug);
+    if (found && found.qsys?.slug !== panel.qsys?.slug) present.push(found);
+    else if (!found) missing.push(slug);
+  }
+  return { present, missing };
+}

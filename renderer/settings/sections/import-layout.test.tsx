@@ -67,8 +67,10 @@ function planFile(over: Record<string, unknown> = {}, sideOver: Record<string, u
   };
 }
 
+type QsysPanelsReport = { id: string; name: string; slug: string; renamedFrom?: string; missingSiblings: string[] }[];
+
 /** What the Confirm button posted, and the render handle. */
-function mount(file: unknown) {
+function mount(file: unknown, qsysPanels: QsysPanelsReport = []) {
   const posted: Record<string, unknown>[] = [];
   const before = globalThis.fetch;
   globalThis.fetch = (async (_url: string, init: { body?: string }) => {
@@ -78,7 +80,7 @@ function mount(file: unknown) {
       json: async () => ({
         views: [{ id: "v-new", name: "Mic Board" }],
         targetsAdded: [], targetsKept: [], images: { written: 0, shared: 0, failed: [] },
-        skipped: [], rebind: [],
+        skipped: [], rebind: [], qsysPanels,
         plan: { serviceTypeId: "st-other", serviceTypeName: "Sunday AM", retypedFrom: "st-here" },
         slotBoards: 1, slotRows: 2,
         patchVariants: [{ sheetName: "Analog", variantName: "Sunday rig", outcome: "added" }],
@@ -317,6 +319,23 @@ describe("the report", () => {
     assert.ok(!!screen.queryByText("1 board, 2 rows"));
     assert.ok(!!screen.queryByText('"Sunday rig" on Analog'));
     assert.ok(!!screen.queryByText("1 added, 0 kept, 0 replaced"));
+    m.unmount();
+    m.restore();
+  });
+
+  test("says where a Q-SYS panel landed when its address was taken, and which siblings it names that do not exist", async () => {
+    const m = mount(planFile(), [
+      { id: "v1", name: "Zone 1", slug: "zone-1-2", renamedFrom: "zone-1", missingSiblings: ["gone"] },
+      { id: "v2", name: "Booth", slug: "booth", missingSiblings: [] },
+    ]);
+    await m.take();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Import 1 view/ })); });
+    for (let i = 0; i < 100 && !screen.queryByText(/was taken here/); i++) {
+      await act(async () => { await new Promise((res) => setTimeout(res, 5)); });
+    }
+    assert.ok(!!screen.queryByText("address /qsys/zone-1 was taken here, so this panel is at /qsys/zone-1-2"));
+    assert.ok(!!screen.queryByText("names panels that do not exist here, so its cog menu leaves them out: gone"));
+    assert.equal(document.body.textContent?.includes("Booth"), false, "a panel that landed as asked is listed as a problem");
     m.unmount();
     m.restore();
   });

@@ -57,7 +57,8 @@ describe("resolving the sidebar", () => {
     const saved = spelledOut();
     saved.sections = saved.sections.filter((s) => s.id !== "devices");
     const r = resolveSidebar(saved, NO_CONSOLES);
-    assert.equal(membersOf(r, "settings")?.at(-1), "automation");
+    // Devices held Automation and Q-SYS, both land at the end, in their default order.
+    assert.deepEqual(membersOf(r, "settings")?.slice(-2), ["automation", "qsys"]);
   });
 
   test("a new console joins the end of Consoles", () => {
