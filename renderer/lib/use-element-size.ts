@@ -3,7 +3,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 /**
  * An element's own box, `clientWidth` by `clientHeight` (padding in, border and
  * scrollbar out), watched as it resizes: the room a widget has to lay itself
- * out in.
+ * out in. An HTML element, or an outer <svg>, which has a CSS box of its own.
  *
  * `{ w: 0, h: 0 }` until the first measurement, which is taken before the first
  * paint, so the element must already be attached when the hook mounts. 0 is
@@ -15,7 +15,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
  * (scrollWidth, offsetHeight) is fit-to-box.ts's job, and
  * fit-one-measurement.test.ts lists every place that does.
  */
-export function useElementSize(ref: RefObject<HTMLElement | null>): { w: number; h: number } {
+export function useElementSize(ref: RefObject<Element | null>): { w: number; h: number } {
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
     const el = ref.current;
