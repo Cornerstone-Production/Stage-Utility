@@ -65,16 +65,9 @@ const PLAN_DATE_CHARS = 40;
  *  which is the evening before across the Americas. */
 const PLAN_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
-/**
- * A plan date as stored: null, or the ISO instant `v` names, in toISOString's
- * one spelling, so the same instant always compares equal. A string over 40
- * characters, without a time, or one Date cannot read, is a refusal (thrown).
- */
+/** A plan date as stored: null, or the ISO instant `v` names (isoInstant). */
 function planDateOf(v: unknown): string | null {
-  if (v === null || v === undefined) return null;
-  const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
-  if (!Number.isFinite(at)) refuse("the plan date must be an ISO date and time, or null");
-  return new Date(at).toISOString();
+  return v === null || v === undefined ? null : isoInstant(v, "the plan date", ", or null");
 }
 
 /** Why `v` is not a usable name for `what` ("the venue"), or null. */
@@ -238,9 +231,14 @@ function pageOrNull(v: unknown, what: string): number | null {
 /** The longest last-error sentence kept. */
 const PUBLISH_ERROR_CHARS = 600;
 
-export function isoInstant(v: unknown, what: string): string {
+/**
+ * The ISO instant `v` names, in toISOString's one spelling, so the same instant always compares
+ * equal. A string over 40 characters, without a time, or one Date cannot read, is a refusal
+ * (thrown): "<what> must be an ISO date and time<or>".
+ */
+export function isoInstant(v: unknown, what: string, or = ""): string {
   const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
-  if (!Number.isFinite(at)) refuse(`${what} must be an ISO date and time`);
+  if (!Number.isFinite(at)) refuse(`${what} must be an ISO date and time${or}`);
   return new Date(at).toISOString();
 }
 

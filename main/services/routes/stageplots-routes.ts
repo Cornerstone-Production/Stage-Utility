@@ -95,6 +95,7 @@ import {
   type Background,
   type Plot,
   type PlotDraft,
+  type PlotDraftNotes,
   type StagePlotsDoc,
   type Venue,
   type VenueKind,
@@ -108,7 +109,7 @@ import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
 import { CONVERTED_MAX_BYTES, convertBackground, prepareBackground, sniffUpload } from "../stageplots-convert.js";
-import { overridesOfPlot, plotsUsing } from "../stageplots-doc.js";
+import { overridesOfPlot, plotHeight, plotsUsing } from "../stageplots-doc.js";
 import {
   MAX_PENDING_ORIGINALS,
   pendingOriginals,
@@ -121,7 +122,6 @@ import {
   tidyStagePlotFiles,
 } from "../stageplots-files.js";
 import { broadcastStagePlots, stageplotsPublisher, stagePlotsViewNow } from "../stageplots-publish-instance.js";
-import { plotHeight } from "../stageplots-doc.js";
 import {
   STAGEPLOT_ID,
   addressOwners,
@@ -202,6 +202,22 @@ async function mutate(
   const picked = pick(doc);
   json(res, draftNotice ? { ...(picked as object), draftNotice } : picked, status);
   return changed ? doc : null;
+}
+
+/**
+ * The request's JSON object, or null once a 400 has answered it. A body that is not an object, or
+ * is over the cap, is said on [stageplots] as `refused` ("items refused for plot p-1") with why.
+ */
+async function readBodyOrSay(c: RouteCtx, refused: string): Promise<Record<string, unknown> | null> {
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readObjectBody(c.req, c.res);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] ${refused}: ${scrub(err.message)}`);
+    throw err;
+  }
+  if (!body) console.warn(`[stageplots] ${refused}: the body is not a JSON object`);
+  return body;
 }
 
 function findVenue(doc: StagePlotsDoc, id: string): Venue {
@@ -512,17 +528,8 @@ function refuseItems(id: string, status: number, why: string, extra: Record<stri
  * to the stored one changes nothing: no write, no broadcast, no new version.
  */
 async function saveItems(c: RouteCtx, id: string): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] items refused for plot ${scrub(id)}: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn(`[stageplots] items refused for plot ${scrub(id)}: the body is not a JSON object`);
-    return;
-  }
+  const body = await readBodyOrSay(c, `items refused for plot ${scrub(id)}`);
+  if (!body) return;
   const version = body.version;
   await mutate(
     c.res,
@@ -598,7 +605,7 @@ async function deletePlot(c: RouteCtx, id: string): Promise<void> {
 // ── Drafts ───────────────────────────────────────────────────────────────
 
 /** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
-const draftNotes = (drafts: readonly PlotDraft[]) => ({ drafts: drafts.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
+const draftNotes = (drafts: readonly PlotDraft[]): PlotDraftNotes => ({ drafts: drafts.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
 
 /** Change the drafts and, when that changed anything, say which plots have one now on stageplots:drafts. A failed write is said on [stageplots] and thrown. */
 async function changeDrafts(fn: (drafts: PlotDraft[]) => PlotDraft[]): Promise<PlotDraft[]> {
@@ -685,17 +692,8 @@ function refuseDraft(res: http.ServerResponse, id: string, status: number, why: 
 
 /** Keep a plot's unsaved items: held to a save's rules, never written to the plot. */
 async function putDraft(c: RouteCtx, id: string): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] draft refused for plot ${scrub(id)}: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn(`[stageplots] draft refused for plot ${scrub(id)}: the body is not a JSON object`);
-    return;
-  }
+  const body = await readBodyOrSay(c, `draft refused for plot ${scrub(id)}`);
+  if (!body) return;
   const doc = await stageplotsStore.get();
   const plot = doc.plots.find((p) => p.id === id);
   if (!plot) return refuseDraft(c.res, id, 404, "no such plot");
@@ -727,17 +725,8 @@ async function deleteDraft(c: RouteCtx, id: string): Promise<void> {
  * refusal is said there too, with why.
  */
 async function saveOverride(c: RouteCtx): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] override refused: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn("[stageplots] override refused: the body is not a JSON object");
-    return;
-  }
+  const body = await readBodyOrSay(c, "override refused");
+  if (!body) return;
   const change = readOverrideChange(body);
   if ("problem" in change) {
     console.warn(`[stageplots] override refused: ${scrub(change.problem)}`);
@@ -797,8 +786,6 @@ async function uploadBytes(c: RouteCtx, name: string, cap: number): Promise<Buff
   return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
 }
 
-/** The tidy over a document a change just saved, still holding off if the
- *  store started from a damaged file. */
 /** sniffUpload, saying so on [stageplots] when sharp itself will not load (a 500). */
 async function sniffOrSay(bytes: Buffer): ReturnType<typeof sniffUpload> {
   try {

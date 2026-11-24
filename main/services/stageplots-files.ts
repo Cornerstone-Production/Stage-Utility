@@ -55,7 +55,6 @@ export function stagePlotImageUrl(hash: string, ext: StagePlotImageExt): string 
   return `/${STAGEPLOT_IMAGE_DIR}/${hash}.${ext}`;
 }
 
-/** A source raster's bytes, for a re-conversion, or null when it is missing. */
 /** A background as the API serves it, with the URLs of its converted image and its source. */
 export function backgroundView(b: Background): BackgroundView {
   return { ...b, url: stagePlotImageUrl(b.converted.hash, "webp"), sourceUrl: stagePlotImageUrl(b.source.hash, b.source.ext) };
@@ -97,6 +96,7 @@ export async function readStagePlotImage(hash: string): Promise<Buffer | null> {
   return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.webp`))?.data ?? null;
 }
 
+/** A source raster's bytes, for a re-conversion, or null when it is missing. */
 export async function readStagePlotSource(hash: string, ext: "png" | "jpg"): Promise<Buffer | null> {
   return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.${ext}`))?.data ?? null;
 }
