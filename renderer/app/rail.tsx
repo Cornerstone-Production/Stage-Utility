@@ -361,21 +361,16 @@ export function Rail({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
+          // The press is this handle's, and its trigger claims it: the rail around
+          // it leaves it alone, so the one-item menu opens and not the rail's too.
           onPointerDown={(e) => {
             onStartResize(e);
             resizeTrigger.onPointerDown(e);
-            // The press is this handle's: the rail around it must not time the same
-            // finger into its own menu as well.
-            if (e.pointerType !== "mouse") e.stopPropagation();
           }}
           onPointerMove={resizeTrigger.onPointerMove}
           onPointerUp={resizeTrigger.onPointerUp}
           onPointerCancel={resizeTrigger.onPointerCancel}
-          onContextMenu={(e) => {
-            // Its own one-item menu, not the rail's as well.
-            e.stopPropagation();
-            resizeTrigger.onContextMenu(e);
-          }}
+          onContextMenu={resizeTrigger.onContextMenu}
           onClickCapture={resizeTrigger.onClickCapture}
           onDoubleClick={onResetWidth}
           style={resizeTrigger.style}
@@ -432,18 +427,11 @@ function RailRow({
         title={d.label}
         ariaLabel={ariaLabel}
         badge={badge}
-        onContextMenu={(e) => {
-          // The rail's own menu must not open on top of this one.
-          e.stopPropagation();
-          trigger.onContextMenu(e);
-        }}
-        onPointerDown={(e) => {
-          trigger.onPointerDown(e);
-          // The press is this row's: the rail around it must not time the same finger
-          // into its own menu as well. A console's glyph stops its press before it
-          // gets here, so the glyph's icon menu is the only one it opens.
-          if (e.pointerType !== "mouse") e.stopPropagation();
-        }}
+        // The row's trigger claims the press or right-click, so the rail around it
+        // does not open its own menu as well; a console's glyph claims it first, so
+        // its icon menu is the only one that opens there.
+        onContextMenu={trigger.onContextMenu}
+        onPointerDown={trigger.onPointerDown}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}
         onPointerCancel={trigger.onPointerCancel}

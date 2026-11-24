@@ -69,9 +69,12 @@ describe("the console rail's icon", () => {
     // The icon menu is the glyph's. A right-click anywhere else on the row opens
     // the ROW's menu (Hide, Move to, Customize sidebar…), which customizing the
     // sidebar added; before that, the row had no menu and this guard said so.
-    // What must hold now is that the two never both open: the glyph stops its
-    // right-click before it reaches the row.
-    assert.match(ICON, /onContextMenu=\{\(e\) => \{\s*e\.stopPropagation\(\);\s*trigger\.onContextMenu\(e\);/);
+    // What must hold now is that the two never both open: the glyph's trigger
+    // claims the right-click, and the row's trigger leaves a claimed one alone.
+    // That is behaviour, so it is driven in app/sidebar-rail.test.tsx ("a
+    // right-click on a console's glyph opens its icon menu and not the row's");
+    // here, only that the glyph hands its right-click to its own trigger.
+    assert.match(ICON, /onContextMenu=\{trigger\.onContextMenu\}/);
     assert.match(
       RAIL,
       /import\s*\{[^}]*\buseContextMenuTrigger\b[^}]*\}\s*from\s*["']\.\.\/components\/ui\/context-menu-trigger["']/,

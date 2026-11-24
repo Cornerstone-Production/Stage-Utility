@@ -357,6 +357,15 @@ describe("which menu opens", () => {
     assert.match(text(menus[0]), /Hide “Patch”/);
   });
 
+  test("a right-click on a console's glyph opens its icon menu and not the row's", async () => {
+    await mount();
+    const glyph = document.querySelector<HTMLElement>("[data-rail-glyph]");
+    assert.ok(glyph, "no console glyph in the rail");
+    fireEvent.contextMenu(glyph.firstElementChild ?? glyph);
+    await eventually(() => assert.ok(screen.queryAllByRole("dialog").length > 0, "the icon picker never opened"));
+    assert.deepEqual(screen.queryAllByRole("menu").map((m) => text(m)), [], "a menu opened beside the icon picker");
+  });
+
   /** A touch held past the long-press delay on `target`, then lifted. */
   async function longPress(target: Element, pointerId: number): Promise<void> {
     fireEvent.pointerDown(target, { pointerId, pointerType: "touch", clientX: 10, clientY: 10 });
@@ -403,6 +412,31 @@ describe("which menu opens", () => {
     const menus = menuTexts();
     assert.equal(menus.length, 1, `${menus.length} menus opened: ${JSON.stringify(menus)}`);
     assert.match(menus[0], /Reset sidebar width/);
+  });
+
+  test("a tap on a row still closes an open popover", async () => {
+    // A popover (a non-modal Radix one, as Customize's own menus and pickers are)
+    // closes on a press outside it, which it hears on `document`. A trigger that
+    // stopped a touch's press from getting there left it open.
+    const { Popover } = await import("radix-ui");
+    let closed = false;
+    await mount();
+    render(
+      React.createElement(
+        Popover.Root,
+        { open: true, modal: false, onOpenChange: (open: boolean) => (closed ||= !open) },
+        React.createElement(Popover.Anchor, null, React.createElement("span", null, "anchor")),
+        React.createElement(Popover.Portal, null, React.createElement(Popover.Content, null, "Popover body")),
+      ),
+    );
+    await eventually(() => assert.ok(screen.getByText("Popover body")));
+    // Radix starts listening for a press outside on the tick after it opens.
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+    const row = screen.getByRole("button", { name: "Patch" });
+    fireEvent.pointerDown(row, { pointerId: 7, pointerType: "touch", clientX: 1, clientY: 1 });
+    fireEvent.pointerUp(row, { pointerId: 7, pointerType: "touch", clientX: 1, clientY: 1 });
+    fireEvent.click(row);
+    await eventually(() => assert.ok(closed, "a tap on a rail row left the popover open"));
   });
 
   test("a long-press on the rail's own space still opens the rail's menu", async () => {
