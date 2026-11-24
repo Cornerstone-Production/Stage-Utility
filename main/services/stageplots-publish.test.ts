@@ -261,17 +261,28 @@ describe("the landing list", () => {
     assert.ok((await h.publisher.publish("v-1")).ok);
     await quietly(() => h.publisher.setListed("v-1", true));
     await h.publisher.settle();
-    // The page fails every list, slowly: each send is out a while.
-    h.page.respond = async (req) => (req.path === LANDING ? (await new Promise((r) => setTimeout(r, 40)), { status: 500, body: "" }) : h.page.worker(req));
+    // The page fails every list; the first send is held out until the whole burst is saved.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let first = true;
+    h.page.respond = async (req) => {
+      if (req.path !== LANDING) return h.page.worker(req);
+      if (first) {
+        first = false;
+        await held;
+      }
+      return { status: 500, body: "" };
+    };
     const mark = h.page.requests.length;
+    const sendsNow = () => h.page.requests.slice(mark).filter((r) => r.path === LANDING).length;
     await quietly(async () => {
-      // Six renames: each a different list.
+      // Six renames: each a different list, all saved while the first send is out.
       for (let i = 0; i < 6; i++) await h.edit((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, name: `Main room ${i}` })) }));
+      await waitFor(() => sendsNow() === 1, "the first send to go out");
+      release();
       await h.publisher.settle();
-      await new Promise((r) => setTimeout(r, 200));
     });
-    const sends = h.page.requests.slice(mark).filter((r) => r.path === LANDING).length;
-    assert.ok(sends <= 2, `${sends} landing sends for one burst of changes`);
+    assert.equal(sendsNow(), 2, `${sendsNow()} landing sends for one burst of changes`);
     h.page.respond = (req) => h.page.worker(req);
   });
 
