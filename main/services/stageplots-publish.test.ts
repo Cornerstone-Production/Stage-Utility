@@ -2162,6 +2162,39 @@ describe("linked connection points on the public page", () => {
     assert.deepEqual(plot.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2", "SB-1/9"]);
   });
 
+  test("a patch whose overrides and plan entries are not objects still publishes, and republishes, the channels it can read", async () => {
+    const { h, s1 } = await twoVenues();
+    const f = h.patch.file! as unknown as { sheets: Record<string, unknown>[] };
+    // What POST /api/patch lets through: it checks only that `sheets` is a list.
+    f.sheets[0]!.variants = [
+      { id: "var-week", name: "Week", overrides: { "rack-SENTINEL-ID:in:9": null, "rack-SENTINEL-ID:in:3": { label: "Keys", path: [{ deviceId: "sb1-SENTINEL-ID", connector: "9" }] }, odd: "text" } },
+      { id: "var-null", name: "Null", overrides: null },
+    ];
+    f.sheets[0]!.assignments = { byServiceType: { "st-1": "var-null" }, byPlan: { "plan-week": { variantId: "var-week", tweaks: { "rack-SENTINEL-ID:in:8": null, odd: 7 } }, "plan-null": null } };
+    h.plan.planId = "plan-week";
+    h.plan.serviceTypeId = "st-1";
+    const errors: string[] = [];
+    const spy = mock.method(console, "error", (...a: unknown[]) => void errors.push(a.map(String).join(" ")));
+    try {
+      h.hear("stage:state-changed");
+      await h.publisher.settle();
+      const now = await h.publisher.publishNow("v-1");
+      assert.equal(now.ok, true, now.ok ? "" : now.error);
+    } finally {
+      spy.mock.restore();
+    }
+    assert.deepEqual(errors, [], "publishing threw on the malformed patch");
+    const plot = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.deepEqual(plot.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2", "SB-1/9"]);
+    // A plan whose entry is null, under a service type whose variant has no overrides: the default patch.
+    h.plan.planId = "plan-null";
+    h.hear("stage:state-changed");
+    await h.publisher.settle();
+    assert.deepEqual(errors, []);
+    const after = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.deepEqual(after.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2"]);
+  });
+
   test("an unreadable patch publishes linked points unlinked with their last names, said once on [stageplots]", async () => {
     const lines: string[] = [];
     const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
