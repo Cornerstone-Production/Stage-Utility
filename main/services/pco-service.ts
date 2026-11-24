@@ -1322,10 +1322,9 @@ class PcoService {
     collection: "item_note_categories" | "plan_note_categories",
   ): Promise<string[]> {
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/${pcoSegment("collection", collection)}?per_page=100`;
-    // A failed read throws to the caller, which names it ([pco] on the route) and answers 502. It
-    // used to parse to an empty list with a 200, so Planning Center being down read as "this service
-    // type has no note categories": Home said All clear and the layouts page said nothing at all.
-    // The failure is held, never as an empty list: see heldRead.
+    // A failed read throws to the caller, which names it ([pco] on the route) and answers 502,
+    // never an empty list: Planning Center being down must not read as "this service type has
+    // no note categories". The failure is held, never as an empty list: see heldRead.
     return this.heldRead(`${collection}:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
       const json = await this.request(url, appId, secret);
       const items = Array.isArray(json.data) ? json.data : [];
@@ -1355,8 +1354,8 @@ class PcoService {
    */
   async listTeamNames(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams?per_page=100`;
-    // A failed read throws (held, see heldRead): it used to parse to no teams, so the
-    // checklist picker offered none and said nothing while Planning Center was down.
+    // A failed read throws (held, see heldRead), so the checklist picker says Planning
+    // Center could not be read rather than offering no teams.
     return this.heldRead(`team-names:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
       const json = await this.request(url, appId, secret);
       const items = Array.isArray(json.data) ? json.data : [];
@@ -1542,8 +1541,8 @@ class PcoService {
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
    *  projected clock times in the plan's local time rather than the viewer's. */
   async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {
-    // A failed read throws (held, see heldRead). It used to answer null, the same as
-    // an organization with no zone set, and cached nothing: every rundown asked again.
+    // A failed read throws (held, see heldRead); null means the organization has no zone
+    // set, and that answer is held too, so a rundown does not ask again.
     return this.heldRead(`org-tz:${appId}`, TTL_LONG_MS, async () => {
       const json = await this.request(pcoUrl``, appId, secret);
       const data = !Array.isArray(json.data) ? json.data : null;
@@ -2032,9 +2031,8 @@ class PcoService {
   ): Promise<PlanTime[]> {
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/plan_times?per_page=100`;
     // A failed read throws (held, see heldRead), and each caller says what it does
-    // without the times. It used to parse to none, so the reconnect windows read
-    // "nothing planned" with their own gap check never firing, and a rundown lost its
-    // service times with no line anywhere.
+    // without the times: the reconnect windows run their own gap check, and a rundown
+    // keeps the times it last read.
     return this.heldRead(`plan-times:${appId}:${planId}`, TTL_LONG_MS, async () => {
       const json = await this.request(url, appId, secret);
       const raw = Array.isArray(json.data) ? json.data : [];
