@@ -9,7 +9,7 @@
 import { ChevronLeftIcon } from "lucide-react";
 import { useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, themedPhotoFileOf, type ThemeDTO, type ThemePersonDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, type ThemeDTO, type ThemePersonDTO } from "@main/types/photo-themes";
 
 import { Button, Input, Textarea } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
@@ -116,7 +116,7 @@ function ThemeDetail({
     if (action === "redo") {
       if (!(await keep("prompt"))) return;
       await photos.write(`redo:${theme.id}:${p.personId}`, () => ipc("photoThemes:redo", { id: theme.id, personId: p.personId }));
-    } else if (action === "approve") await photos.write(`approve:${theme.id}:${p.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: p.personId, file: themedPhotoFileOf(p.pending?.url) }));
+    } else if (action === "approve") await photos.write(`approve:${theme.id}:${p.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: p.personId, file: p.pending?.file }));
     else await photos.write(`keep:${theme.id}:${p.personId}`, () => ipc("photoThemes:keep", { id: theme.id, personId: p.personId }));
   }
 

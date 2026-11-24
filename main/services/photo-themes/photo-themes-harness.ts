@@ -6,7 +6,6 @@ import type { AddressInfo } from "node:net";
 
 import sharp from "sharp";
 
-import { themedPhotoFileOf } from "../../types/photo-themes.js";
 import type { PhotoThemesDeps, PhotoThemesService, PlanPerson, PlanPeopleRead } from "./service.js";
 
 export interface FakeRequest {
@@ -141,7 +140,7 @@ export async function fakeServer(fetchImpl?: typeof fetch): Promise<FakeServer> 
 /** The edit waiting for review for a person, as the panel would show it: its file. */
 export function shownFile(service: PhotoThemesService, themeId: string, personId: string): string {
   const p = service.state().themes.find((t) => t.id === themeId)?.people.find((x) => x.personId === personId);
-  const file = themedPhotoFileOf(p?.pending?.url);
+  const file = p?.pending?.file;
   if (!file) throw new Error(`no edit is waiting for review for ${personId}`);
   return file;
 }
@@ -156,7 +155,7 @@ export function approveAllShown(service: PhotoThemesService, planId: string) {
   const themeId = service.state().plans.find((c) => c.planId === planId)?.themeId;
   const people = service.state().themes.find((t) => t.id === themeId)?.people ?? [];
   const shown = people.flatMap((p) => {
-    const file = p.pending?.status === "ready" && p.pending.planId === planId ? themedPhotoFileOf(p.pending.url) : null;
+    const file = p.pending?.status === "ready" && p.pending.planId === planId ? p.pending.file : null;
     return file ? [{ personId: p.personId, file }] : [];
   });
   return service.approveAll(planId, shown);

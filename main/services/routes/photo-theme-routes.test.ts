@@ -138,9 +138,9 @@ describe("plans", () => {
     assert.equal(r.status, 202);
     assert.deepEqual(r.json, { queued: 1, reused: 0, skipped: [] });
     await photoThemes.idle();
-    const ready = (await call("/api/photo-themes")).json as { themes: { id: string; people: { personId: string; pending: { url: string } | null }[] }[] };
+    const ready = (await call("/api/photo-themes")).json as { themes: { id: string; people: { personId: string; pending: { file: string } | null }[] }[] };
     const themeId = ready.themes.find((t) => t.people.length > 0)!.id;
-    const file = ready.themes.flatMap((t) => t.people).find((p) => p.pending)!.pending!.url.split("/").pop()!;
+    const file = ready.themes.flatMap((t) => t.people).find((p) => p.pending)!.pending!.file;
     const approvePath = `/api/photo-themes/themes/${themeId}/people/1001/approve`;
     // Each names the edit it was shown, checked for shape before anything is looked up.
     const refused: [string, unknown][] = [

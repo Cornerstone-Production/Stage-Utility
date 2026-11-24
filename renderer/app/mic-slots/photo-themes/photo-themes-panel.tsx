@@ -13,7 +13,7 @@
 import { CheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, themedPhotoFileOf, type ApproveAllResultDTO, type GenerateResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, type ApproveAllResultDTO, type GenerateResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
 import { errorMessage } from "@main/services/errors";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea, toast } from "../../../components/ui";
@@ -179,7 +179,7 @@ function PanelBody({
         ipc("photoThemes:redo", { id: theme.id, personId: person.personId, planId: plan.planId, serviceTypeId: plan.serviceTypeId }),
       );
     } else if (action === "approve") {
-      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId, file: themedPhotoFileOf(person.pending?.url) }));
+      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId, file: person.pending?.file }));
     } else {
       await photos.write(`keep:${theme.id}:${person.personId}`, () => ipc("photoThemes:keep", { id: theme.id, personId: person.personId }));
     }
@@ -188,7 +188,7 @@ function PanelBody({
   /** Approve the ready edits on screen, each by the file shown: one redone meanwhile stays for another look. */
   async function approveAll() {
     const shown = readyHere.flatMap((p) => {
-      const file = themedPhotoFileOf(p.pending?.url);
+      const file = p.pending?.file;
       return file ? [{ personId: p.personId, file }] : [];
     });
     const r = await photos.write<ApproveAllResultDTO>(`approve-all:${plan.planId}`, () => ipc("photoThemes:approveAll", { planId: plan.planId, people: shown }));

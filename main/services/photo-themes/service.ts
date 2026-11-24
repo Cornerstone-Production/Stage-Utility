@@ -434,11 +434,12 @@ export class PhotoThemesService {
           }
         : null,
       pending: generating
-        ? { status: "generating", url: null, reason: null, planId: this.jobFor(key)?.planId ?? null }
+        ? { status: "generating", url: null, file: null, reason: null, planId: this.jobFor(key)?.planId ?? null }
         : entry?.pending
           ? {
               status: entry.pending.status,
               url: entry.pending.file ? themedPhotoUrl(entry.pending.file) : null,
+              file: entry.pending.file ?? null,
               reason: entry.pending.reason ?? null,
               planId: entry.pending.planId,
             }

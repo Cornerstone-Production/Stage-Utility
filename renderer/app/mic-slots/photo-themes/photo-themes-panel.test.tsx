@@ -63,14 +63,14 @@ interface P {
   status: Status;
   promptChanged: boolean;
   approved: null | { url: string; fromPlanId: string | null; fromDate: string | null; approvedAt: string; stale: boolean };
-  pending: null | { status: "generating" | "ready" | "failed"; url: string | null; reason: string | null; planId: string | null };
+  pending: null | { status: "generating" | "ready" | "failed"; url: string | null; file?: string | null; reason: string | null; planId: string | null };
 }
 /** A stored edit's name for a person: 16 hex, as the server's are. */
 const editFile = (kind: "a" | "b", personId: string) => `${kind}${personId.padStart(15, "0")}.webp`;
 const person = (personId: string, name: string, status: Status, over: Partial<P> = {}): P => {
   const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/${editFile("a", personId)}`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
   const pending =
-    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/${editFile("b", personId)}`, reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
+    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/${editFile("b", personId)}`, file: editFile("b", personId), reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
   return { personId, name, status, promptChanged: false, approved, pending, ...over };
 };
 
@@ -319,7 +319,7 @@ describe("Approve and Approve all", () => {
   test("Approve all counts what the route approves: ready edits made for THIS plan", async () => {
     people = [
       person("9002", "Jordan P.", "ready"),
-      person("9004", "Morgan T.", "ready", { pending: { status: "ready", url: "/x.webp", reason: null, planId: "6000" } }),
+      person("9004", "Morgan T.", "ready", { pending: { status: "ready", url: "/x.webp", file: editFile("b", "9004"), reason: null, planId: "6000" } }),
       person("9005", "Riley S.", "ready"),
     ];
     await mount();

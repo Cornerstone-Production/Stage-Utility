@@ -18,17 +18,6 @@ export function themedPhotoUrl(file: string): string {
   return THEMED_PHOTO_PATH + file;
 }
 
-/**
- * The stored edit a {@link themedPhotoUrl} names, or null. What an approval
- * sends back: the file the operator was shown, so an edit that replaced it
- * meanwhile is never the one approved.
- */
-export function themedPhotoFileOf(url: string | null | undefined): string | null {
-  if (!url?.startsWith(THEMED_PHOTO_PATH)) return null;
-  const file = url.slice(THEMED_PHOTO_PATH.length);
-  return THEMED_PHOTO_FILE.test(file) ? file : null;
-}
-
 /** The most people one approve-all names: more than any plan's boards hold. */
 export const MAX_APPROVE_ALL = 500;
 
@@ -78,6 +67,9 @@ export interface PendingPhotoDTO {
   status: "generating" | "ready" | "failed";
   /** The edit, once there is one. */
   url: string | null;
+  /** The stored edit's name, once there is one: what an approval sends back, so an edit
+   *  that replaced the one shown is never the one approved. */
+  file: string | null;
   /** Why it failed, in words for an operator. */
   reason: string | null;
   /** The plan it is being made for. */
