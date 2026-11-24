@@ -483,6 +483,21 @@ describe("move, copy and remove", () => {
     assert.equal(fake.edits(), 0, "nothing billed for somebody no longer in the theme");
   });
 
+  it("removing someone whose first photo is still being made cancels it, and is not a 404", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    const held = holdOriginals();
+    await photoThemes.generate(PLAN, TYPE, "missing");
+    await held.reading();
+    assert.equal((await photoThemes.planPeople(PLAN, TYPE)).people.find((p) => p.personId === "1")?.status, "generating");
+    await photoThemes.remove(theme.id, "1");
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 1, "only person 2 is sent");
+    assert.equal(statusOf(theme.id, "1"), "none");
+    assert.equal(statusOf(theme.id, "2"), "ready");
+    await assert.rejects(photoThemes.remove(theme.id, "1"), (e: Error & { status?: number }) => e.status === 404, "once nothing is being made, a remove of nobody is still a 404");
+  });
+
   it("a theme deleted while its originals are being read sends nothing", async () => {
     const theme = await themed([person("1")]);
     const held = holdOriginals();

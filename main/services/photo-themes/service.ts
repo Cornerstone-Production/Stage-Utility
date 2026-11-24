@@ -687,7 +687,9 @@ export class PhotoThemesService {
 
   /** Take a person out of a theme: every plan using it shows their original again. */
   async remove(themeId: string, personId: string): Promise<void> {
-    this.entry(themeId, personId);
+    // Someone whose first photo is still being made has no entry yet, and removing
+    // them cancels that edit: refused only when there is neither.
+    if (!this.expected.has(jobKey(themeId, personId))) this.entry(themeId, personId);
     await this.mutate((b, _saved, afterSave) => {
       themeIn(b, themeId).people.delete(personId);
       afterSave(() => this.cancel(jobKey(themeId, personId)));
