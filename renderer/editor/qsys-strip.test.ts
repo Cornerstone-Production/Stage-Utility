@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { breakApartStrip, channelsOf, matchStrip, replaceById, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
+import { breakApartStrip, channelsOf, matchStrip, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
 import { isMeterControl } from "@main/types/qsys";
 import type { LayoutObject } from "@main/types/views";
 
@@ -141,16 +141,5 @@ describe("breakApartStrip", () => {
     const parts = breakApartStrip(strip({ name: null, mute: null, meter: null, meter2: null }), () => "x" + Math.random());
     assert.deepEqual(parts.map((p) => p.config.type), ["qsys-fader"]);
     assert.deepEqual([parts[0]!.x, parts[0]!.y, parts[0]!.w, parts[0]!.h], [0.2, 0.1, 0.1, 0.8]);
-  });
-});
-
-describe("replaceById", () => {
-  test("replaces at the top level and inside a container, leaving the rest", () => {
-    const a = { id: "a" } as LayoutObject;
-    const b = { id: "b" } as LayoutObject;
-    const z = { id: "z" } as LayoutObject;
-    const box = { id: "box", children: [a, b] } as LayoutObject;
-    assert.deepEqual(replaceById([box, z], "b", [{ id: "1" } as LayoutObject, { id: "2" } as LayoutObject]).map((o) => [o.id, o.children?.map((c) => c.id)]), [["box", ["a", "1", "2"]], ["z", undefined]]);
-    assert.deepEqual(replaceById([a, z], "z", []).map((o) => o.id), ["a"]);
   });
 });

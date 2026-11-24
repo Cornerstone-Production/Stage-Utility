@@ -104,11 +104,16 @@ function switchArms(lines: string[], header: string): Map<string, string> {
     if (m) at.push({ type: m[1], line: i });
   }
   const arms = new Map<string, string>();
+  const upTo = (from: number, k: number) => lines.slice(from, k < at.length ? at[k].line : lines.length - 1).join("\n");
   at.forEach((a, k) => {
-    const text = lines.slice(a.line, k + 1 < at.length ? at[k + 1].line : lines.length - 1).join("\n");
-    // A bodiless arm falls through to the next one, and attributing no reads to
-    // it would hide exactly what this file looks for. None exist today; if one
-    // appears, this says so rather than going quietly green.
+    // A bodiless arm falls through, and attributing no reads to it would hide
+    // exactly what this file looks for. Stacked labels over one body (the Q-SYS
+    // types) are each drawn by that body, so each takes the text down to the end
+    // of the first arm below it that returns. An arm that never reaches a return
+    // says so rather than going quietly green.
+    let end = k + 1;
+    let text = upTo(a.line, end);
+    while (!/\breturn\b/.test(text) && end < at.length) text = upTo(a.line, ++end);
     assert.match(text, /\breturn\b/, `case "${a.type}" falls through — the scan cannot attribute its reads`);
     arms.set(a.type, text);
   });

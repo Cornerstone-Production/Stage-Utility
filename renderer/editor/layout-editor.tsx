@@ -52,6 +52,7 @@ import {
   findById,
   mapById,
   removeById,
+  replaceById,
   getParentOf,
   getSiblings,
   insertChild,
@@ -103,7 +104,7 @@ import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from ".
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
-import { breakApartStrip, replaceById } from "./qsys-strip";
+import { breakApartStrip } from "./qsys-strip";
 
 /** How close an edge must come before it snaps, in rendered pixels. Small enough
  *  that deliberate placement is never fought, large enough to catch a hand. */

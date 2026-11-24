@@ -1730,23 +1730,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "qsys-fader":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-meter":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-mute":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-button":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-switch":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-presets":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-selector":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-label":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-strip":
-      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "qsys-status":
       return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "messages":

@@ -2205,18 +2205,20 @@ export function whenSubscribed(): Promise<boolean> {
   if (isPublicMode()) return Promise.resolve(true);
   return new Promise<boolean>((resolve) => {
     let done = false;
+    /** This wait's token with the shared worker, when it asked the worker. */
+    let token: number | null = null;
     const finish = (acked: boolean) => {
       if (done) return;
       done = true;
       clearTimeout(deadline);
       subscribedWaiters.delete(ack);
-      for (const [t, w] of workerAckWaiters) if (w === ack) workerAckWaiters.delete(t);
+      if (token !== null) workerAckWaiters.delete(token);
       resolve(acked);
     };
     const ack = () => finish(true);
     const deadline = setTimeout(() => finish(false), subscribedDeadlineMs);
     if (sharedSse && sseWorker) {
-      const token = nextAckToken++;
+      token = nextAckToken++;
       workerAckWaiters.set(token, ack);
       sseWorker.port.postMessage({ type: "subscribe", channels: [...workerHandlers.keys()], ack: token });
       return;

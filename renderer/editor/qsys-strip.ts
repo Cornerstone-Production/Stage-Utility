@@ -140,14 +140,6 @@ export function problemWords(slot: StripSlot, p: SlotProblem): string {
 
 type Strip = Extract<LayoutObjectConfig, { type: "qsys-strip" }>;
 
-/** `replacement` in place of the object `id`, wherever it sits in the tree; the tree is returned unchanged when it is not there. */
-export function replaceById(tree: LayoutObject[], id: string, replacement: LayoutObject[]): LayoutObject[] {
-  return tree.flatMap((o) => {
-    if (o.id === id) return replacement;
-    return o.children ? [{ ...o, children: replaceById(o.children, id, replacement) }] : [o];
-  });
-}
-
 /**
  * The strip as separate objects in the same footprint: its name over a fader with
  * its meter or meters beside it, mute underneath. Every binding and the density

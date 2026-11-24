@@ -17,7 +17,8 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, XIcon } from "lucide-react";
 
-import { isMeterControl, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
+import { choicesOf, isMeterControl, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
+import { rangeOf } from "../main/qsys/fader-scale";
 import { Button, Input } from "../components/ui";
 import { invoke, type ApiError } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -47,8 +48,10 @@ interface AllowEntry {
   max: number | null;
 }
 
-const hasRange = (c: CatalogControl) => Number.isFinite(c.ValueMin) && Number.isFinite(c.ValueMax) && c.ValueMin! < c.ValueMax!;
-const hasChoices = (c: CatalogControl) => Array.isArray(c.Choices) && c.Choices.length > 0;
+// The panel's own rules (fader-scale.ts rangeOf, types/qsys.ts choicesOf), so the
+// editor offers exactly what a panel will draw live.
+const hasRange = (c: CatalogControl) => rangeOf(c) !== null;
+const hasChoices = (c: CatalogControl) => choicesOf(c) !== null;
 
 /** Whether a control is the kind of thing an object of `kind` binds to. Writability is separate. */
 export function fitsKind(kind: QsysBrowseKind, componentType: string, c: CatalogControl): boolean {
@@ -73,12 +76,56 @@ export type QsysCoreLoad =
   | { state: "no-core" }
   | { state: "failed"; what: "catalog" | "allowlist" }
   | { state: "ready"; components: CatalogComponent[]; allow: Map<string, AllowEntry> | null };
-type Load = QsysCoreLoad;
 export type { CatalogComponent, CatalogControl, AllowEntry };
 export { hasChoices };
 
 const keyOf = (component: string, control: string) => `${component}\u0000${control}`;
 export const allowKey = keyOf;
+
+const LOADING: QsysCoreLoad = { state: "loading" };
+
+/**
+ * The Core's catalog (and the allowlist when `writable`) for an editor control,
+ * read once per `request`: a number the caller bumps each time it wants a fresh
+ * read (a browser opening; the design may have been redeployed since), or null
+ * for none. "loading" until that request's read answers.
+ */
+export function useQsysCoreLoad(request: number | null, writable: boolean): QsysCoreLoad {
+  const [answer, setAnswer] = useState<{ request: number; writable: boolean; load: Exclude<QsysCoreLoad, { state: "loading" }> } | null>(null);
+  useEffect(() => {
+    if (request === null) return;
+    let current = true;
+    void loadQsysCore(writable).then((load) => {
+      if (current) setAnswer({ request, writable, load });
+    });
+    return () => {
+      current = false;
+    };
+  }, [request, writable]);
+  return answer && answer.request === request && answer.writable === writable ? answer.load : LOADING;
+}
+
+/** What a Core read says while it is not ready: reading, no Core, or what could not be read. Nothing once ready. */
+export function CoreLoadNotice({ load, className }: { load: QsysCoreLoad; className?: string }) {
+  switch (load.state) {
+    case "loading":
+      return <p className={cn("text-caption2 text-fg-muted", className)}>Reading the Core…</p>;
+    case "no-core":
+      return (
+        <p role="status" className={cn("text-caption2 text-fg-muted", className)}>
+          No Q-SYS Core is connected, so there is nothing to choose from. Set it up under Settings, Integrations, Q-SYS.
+        </p>
+      );
+    case "failed":
+      return (
+        <p role="alert" className={cn("text-caption2 text-danger-11", className)}>
+          {load.what === "catalog" ? "The Core's controls could not be read. See /log." : "The allowlist could not be read, so no writable control is known. See /log."}
+        </p>
+      );
+    case "ready":
+      return null;
+  }
+}
 
 /** The Core's catalog, and the allowlist when `writable`, as the browser reads them. Never throws; says what failed. */
 export async function loadQsysCore(writable: boolean): Promise<Exclude<QsysCoreLoad, { state: "loading" }>> {
@@ -127,20 +174,11 @@ export function QsysCoreBrowser({
   clearable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [load, setLoad] = useState<Load>({ state: "loading" });
+  /** Bumped on each open: a fresh read each time, since the design may have been redeployed. */
+  const [opened, setOpened] = useState(0);
+  const load = useQsysCoreLoad(open ? opened : null, writable);
   const [component, setComponent] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  // Read when opened (see the button's click), and again each time.
-  useEffect(() => {
-    if (!open) return;
-    let current = true;
-    void loadQsysCore(writable).then((r) => {
-      if (current) setLoad(r);
-    });
-    return () => {
-      current = false;
-    };
-  }, [open, writable]);
 
   const offered = (comp: CatalogComponent): CatalogControl[] =>
     load.state !== "ready"
@@ -149,7 +187,8 @@ export function QsysCoreBrowser({
           if (!fitsKind(kind, comp.type, c)) return false;
           if (!writable) return true;
           const entry = load.allow?.get(keyOf(comp.name, c.Name));
-          return !!entry && isWritable(c, entry);
+          // A choice list is written with one of its choices, which bound it in place of a range.
+          return !!entry && isWritable(c, entry, kind === "choice");
         });
 
   const pick = (comp: string, control: string) => {
@@ -197,8 +236,7 @@ export function QsysCoreBrowser({
           aria-expanded={open}
           className="min-w-0 flex-1 justify-start"
           onClick={() => {
-            // A fresh read each time it opens: the design may have been redeployed since.
-            setLoad({ state: "loading" });
+            setOpened((n) => n + 1);
             setOpen((o) => !o);
             setComponent(null);
             setQuery("");
@@ -215,17 +253,7 @@ export function QsysCoreBrowser({
 
       {open && (
         <div className="flex flex-col gap-1 rounded-md border border-line bg-surface p-1.5" data-qsys-browser>
-          {load.state === "loading" && <p className="px-1 text-caption2 text-fg-muted">Reading the Core…</p>}
-          {load.state === "no-core" && (
-            <p role="status" className="px-1 text-caption2 text-fg-muted">
-              No Q-SYS Core is connected, so there is nothing to choose from. Set it up under Settings, Integrations, Q-SYS.
-            </p>
-          )}
-          {load.state === "failed" && (
-            <p role="alert" className="px-1 text-caption2 text-danger-11">
-              {load.what === "catalog" ? "The Core's controls could not be read. See /log." : "The allowlist could not be read, so no writable control is known. See /log."}
-            </p>
-          )}
+          <CoreLoadNotice load={load} className="px-1" />
           {load.state === "ready" && (
             <>
               <Input aria-label="Search controls" placeholder="Search components and controls" value={query} onChange={(e) => setQuery(e.target.value)} />

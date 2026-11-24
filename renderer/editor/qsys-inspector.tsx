@@ -7,14 +7,24 @@
 // never gets an empty row: "Add" opens the browser first, and a row exists only
 // once it has a control.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, Trash2Icon } from "lucide-react";
 
-import type { QsysAddress, QsysBinding } from "@main/types/qsys";
+import { addressOf, isWritable, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { Button } from "../components/ui";
-import { isWritable } from "@main/types/qsys";
-import { allowKey, fitsKind, hasChoices, loadQsysCore, QsysCoreBrowser, type CatalogComponent, type CatalogControl, type QsysBrowseKind, type QsysCoreLoad } from "./qsys-core-browser";
+import {
+  allowKey,
+  CoreLoadNotice,
+  fitsKind,
+  hasChoices,
+  QsysCoreBrowser,
+  useQsysCoreLoad,
+  type CatalogComponent,
+  type CatalogControl,
+  type QsysBrowseKind,
+  type QsysCoreLoad,
+} from "./qsys-core-browser";
 import { channelLabel, channelsOf, matchStrip, problemWords, type Eligibility, type StripChannel, type StripSlot } from "./qsys-strip";
 import { Row, RowNumber, RowSwitch, RowText, RowToggle, Section } from "./inspector-rows";
 
@@ -27,8 +37,6 @@ export const isQsysConfig = (c: LayoutObjectConfig): c is QsysConfig => c.type.s
 /** A new binding keeps the control that lights it: choosing another target is not choosing another lamp. */
 const rebind = (old: QsysBinding | null | undefined, next: QsysBinding | null): QsysBinding | null =>
   next && old?.indicator ? { ...next, indicator: old.indicator } : next;
-
-const addressOf = (b: QsysBinding | null): QsysAddress | null => (b ? { component: b.component, control: b.control } : null);
 
 function Bind({
   label,
@@ -171,7 +179,7 @@ function FaderInspector({ c, onConfig }: { c: Of<"qsys-fader">; onConfig: (c: La
     <div className="flex flex-col gap-2.5">
       <Bind label="Level control" hint="A numeric control with a range. Only allowlisted controls with write limits are offered." kind="gain" writable value={c.binding} onChange={(b) => onConfig({ ...c, binding: b })} />
       <RowToggle label="Direction" value={c.orientation} options={[{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }]} onChange={(orientation) => onConfig({ ...c, orientation })} />
-      <RowToggle label="Density" hint="Dense is the staff panel's narrow strip, with a dB scale." value={c.density ?? "standard"} options={DENSITY} onChange={(v) => onConfig({ ...c, density: v === "dense" ? "dense" : undefined })} />
+      <DensityRow value={c.density} onChange={(density) => onConfig({ ...c, density })} />
       <RowSwitch label="Show dB" checked={c.showDb} onChange={(showDb) => onConfig({ ...c, showDb })} />
       <RowSwitch label="Step buttons" hint="Plus and minus buttons beside the fader." checked={c.steps} onChange={(steps) => onConfig({ ...c, steps })} />
       {c.steps && <RowNumber label="Step size" value={c.stepDb} step={0.5} min={0.5} max={12} suffix="dB" onChange={(stepDb) => onConfig({ ...c, stepDb })} />}
@@ -262,7 +270,7 @@ function StripInspector({ c, onConfig, onBreakApart }: { c: Of<"qsys-strip">; on
       <Bind label="Mute" kind="boolean" writable value={c.mute} onChange={(mute) => onConfig({ ...c, mute })} />
       <Bind label="Meter" kind="meter" writable={false} value={c.meter} onChange={(meter) => onConfig({ ...c, meter })} />
       <Bind label="Second meter" hint="A second channel beside the first." kind="meter" writable={false} value={c.meter2} onChange={(meter2) => onConfig({ ...c, meter2 })} />
-      <RowToggle label="Density" hint="Dense is the staff panel's narrow strip, with a dB scale." value={c.density ?? "standard"} options={DENSITY} onChange={(v) => onConfig({ ...c, density: v === "dense" ? "dense" : undefined })} />
+      <DensityRow value={c.density} onChange={(density) => onConfig({ ...c, density })} />
       {onBreakApart && (
         <Button variant="transparent" onClick={onBreakApart} aria-label="Break apart" tooltip="Replace this strip with a label, fader, meter and mute you can place separately">
           Break apart
@@ -272,19 +280,23 @@ function StripInspector({ c, onConfig, onBreakApart }: { c: Of<"qsys-strip">; on
   );
 }
 
+/** Standard or the staff panel's dense strip; absent is standard. */
+function DensityRow({ value, onChange }: { value: QsysDensity | undefined; onChange: (d: QsysDensity | undefined) => void }) {
+  return (
+    <RowToggle
+      label="Density"
+      hint="Dense is the staff panel's narrow strip, with a dB scale."
+      value={value ?? "standard"}
+      options={DENSITY}
+      onChange={(v) => onChange(v === "dense" ? "dense" : undefined)}
+    />
+  );
+}
+
 /** Whether the Core reports a control with a list of choices: read once. Nothing is offered that the Core did not say. */
 function useCoreHasChoices(): boolean {
-  const [has, setHas] = useState(false);
-  useEffect(() => {
-    let current = true;
-    void loadQsysCore(false).then((r) => {
-      if (current) setHas(r.state === "ready" && r.components.some((comp) => comp.controls.some(hasChoices)));
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
-  return has;
+  const load = useQsysCoreLoad(1, false);
+  return load.state === "ready" && load.components.some((comp) => comp.controls.some(hasChoices));
 }
 
 function SelectorInspector({ c, onConfig }: { c: Of<"qsys-selector">; onConfig: (c: LayoutObjectConfig) => void }) {
@@ -329,19 +341,11 @@ function eligibilityOver(comp: CatalogComponent, load: Extract<QsysCoreLoad, { s
 /** Bind a whole channel at once: pick a component, then a channel; the fields fill from the control names. */
 function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutObjectConfig) => void }) {
   const [open, setOpen] = useState(false);
-  const [load, setLoad] = useState<QsysCoreLoad>({ state: "loading" });
+  /** Bumped on each open, so each open reads the Core afresh. */
+  const [opened, setOpened] = useState(0);
+  const load = useQsysCoreLoad(open ? opened : null, true);
   const [component, setComponent] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
-  useEffect(() => {
-    if (!open) return;
-    let current = true;
-    void loadQsysCore(true).then((r) => {
-      if (current) setLoad(r);
-    });
-    return () => {
-      current = false;
-    };
-  }, [open]);
   const withChannels = load.state === "ready" ? load.components.filter((comp) => channelsOf(comp.controls.map((x) => x.Name)).length > 0) : [];
   const comp = withChannels.find((x) => x.name === component);
 
@@ -356,14 +360,12 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Button variant="soft" aria-expanded={open} onClick={() => { setOpen((o) => !o); setLoad({ state: "loading" }); }}>
+      <Button variant="soft" aria-expanded={open} onClick={() => { setOpen((o) => !o); setOpened((n) => n + 1); }}>
         Bind a channel
       </Button>
       {open && (
         <div className="flex flex-col gap-1.5 rounded-md border border-line p-2" data-qsys-strip-fill>
-          {load.state === "loading" && <p className="text-caption2 text-fg-muted">Reading the Core…</p>}
-          {load.state === "no-core" && <p role="status" className="text-caption2 text-fg-muted">No Q-SYS Core is connected, so there is nothing to choose from.</p>}
-          {load.state === "failed" && <p role="alert" className="text-caption2 text-danger-11">{load.what === "catalog" ? "The Core's controls could not be read. See /log." : "The allowlist could not be read, so no writable control is known. See /log."}</p>}
+          <CoreLoadNotice load={load} />
           {load.state === "ready" && (withChannels.length === 0 ? (
             <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input_3_gain, meter_3, text_display_3).</p>
           ) : (
