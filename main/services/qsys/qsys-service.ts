@@ -1,10 +1,10 @@
 // qsys-service.ts — the connection to a Q-SYS Core over QRC.
 //
 // Owns what QrcClient deliberately does not: Logon, the 30 s keepalive, status,
-// reconnect with backoff, and the component/control catalog. Tasks that read and
-// write controls (bindings, change groups) go through `transport`, which resets
-// the keepalive on every send. Nothing here ever calls a method that changes the
-// design.
+// reconnect with backoff, and the component/control catalog. `transport`,
+// `getCatalog`, `onCatalog` and `refreshCatalog` are the seam the Q-SYS panels of
+// a later release build on; nothing in this release calls them outside tests.
+// Nothing here ever calls a method that changes the design.
 
 import { errorMessage } from "../errors.js";
 import { StatusIntegration } from "../integration-base.js";
@@ -51,28 +51,41 @@ async function openSession(t: QrcTransport, s: QsysSettings, password: string | 
   return (await t.send("StatusGet")) as QrcStatus;
 }
 
+/** Code 10: the Core wants a logon it has not had (a wrong one, or none at all). */
 const isLogonRefused = (err: unknown): boolean => err instanceof QrcError && err.code === 10;
+
+/** What the operator is told when the Core answers code 10. With no user set the
+ *  Core was never sent a name, so "refused the user name" would mislead. */
+const logonMessage = (user: string): string =>
+  user ? "The Core refused the user name or password" : "The Core requires a logon: set User and Password";
+
+/** A catalog read, and the status it was read against. */
+interface CatalogRead {
+  status: QrcStatus;
+  catalog: QsysCatalog;
+}
 
 export class QsysService extends StatusIntegration<QsysStatusDto> {
   private settings: QsysSettings | null = null;
   private password: string | null = null;
 
   private client: QrcClient | null = null;
-  /** Open from the dial until the connection ends. Not exposed: see `wrapped`. */
-  private session: QrcTransport | null = null;
   /** The transport handed to other code. Set only once logon, status and the
    *  catalog have been read, so nothing can write before the current state is known. */
   private wrapped: QrcTransport | null = null;
-  /** Bumped by every teardown. A connect() that finds it changed was superseded
-   *  (stop, or configure -> restart) and must not adopt its client. */
+  /** Bumped by every teardown, so each connection has its own number. Work started
+   *  on one connection (a dial, a catalog read) checks it before it lands. */
   private generation = 0;
-  /** An EngineStatus that arrived while the connect sequence was still reading. */
-  private earlyStatus: QrcStatus | null = null;
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private catalog: QsysCatalog | null = null;
   private catalogAt: number | null = null;
-  private refreshing: Promise<QsysCatalog> | null = null;
+  /** The catalog read in flight, and the connection it belongs to: a read left
+   *  over from an earlier connection is never joined. */
+  private refreshing: { generation: number; promise: Promise<CatalogRead> } | null = null;
+  /** The latest EngineStatus the Core pushed on this connection, and how many it has pushed. */
+  private pushed: QrcStatus | null = null;
+  private pushes = 0;
   private readonly catalogListeners: ((c: QsysCatalog) => void)[] = [];
 
   constructor() {
@@ -83,8 +96,9 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     return !!this.settings?.enabled && !!this.settings.host && this.settings.port > 0;
   }
 
+  /** `s` arrives trimmed: the manager reads host through hostPortOf and trims user. */
   configure(s: QsysSettings, password: string | null): void {
-    this.settings = { ...s, host: s.host.trim(), user: s.user.trim() };
+    this.settings = s;
     this.password = password;
     this.resetReport();
     this.restart();
@@ -96,16 +110,17 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     super.start();
   }
 
+  /** Drop the connection and everything read on it. Also how a failed connection ends. */
   protected override teardown(): void {
     this.generation++;
     this.clearKeepalive();
     const client = this.client;
     this.client = null;
-    this.session = null;
     this.wrapped = null;
     this.catalog = null;
-    this.earlyStatus = null;
     this.catalogAt = null;
+    this.pushed = null;
+    this.pushes = 0;
     // Deliberate: detach first so the close is not read as a lost connection.
     client?.close();
   }
@@ -132,27 +147,31 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
   refreshCatalog(): Promise<QsysCatalog> {
     const t = this.wrapped;
     if (!t) return Promise.reject(new Error("Q-SYS Core is not connected"));
-    return this.loadCatalog(t);
+    return this.loadCatalog(t).then((r) => r.catalog);
   }
 
-  /** One read at a time: concurrent callers share it. */
-  private loadCatalog(t: QrcTransport): Promise<QsysCatalog> {
-    this.refreshing ??= this.readCatalog(t).finally(() => {
-      this.refreshing = null;
+  /** One read at a time per connection: callers on the same connection share it,
+   *  and a read left over from an earlier connection is never joined. */
+  private loadCatalog(t: QrcTransport, status?: QrcStatus): Promise<CatalogRead> {
+    const generation = this.generation;
+    if (this.refreshing?.generation === generation) return this.refreshing.promise;
+    const promise: Promise<CatalogRead> = this.readCatalog(t, generation, status).finally(() => {
+      if (this.refreshing?.promise === promise) this.refreshing = null;
     });
-    return this.refreshing;
+    this.refreshing = { generation, promise };
+    return promise;
   }
 
   /** One-shot check for the Integrations "Test connection" button. Touches no instance state. */
   async test(s: QsysSettings, password: string | null): Promise<QsysTestResult> {
     let client: QrcClient | null = null;
     try {
-      client = await QrcClient.connect(s.host.trim(), s.port);
-      const status = await openSession(client, { ...s, user: s.user.trim() }, password);
+      client = await QrcClient.connect(s.host, s.port);
+      const status = await openSession(client, s, password);
       const components = (await client.send("Component.GetComponents")) as QrcComponent[];
       return { ok: true, status, components: components.length };
     } catch (err) {
-      return { ok: false, error: isLogonRefused(err) ? "The Core refused the user name or password" : errorMessage(err) };
+      return { ok: false, error: isLogonRefused(err) ? logonMessage(s.user) : errorMessage(err) };
     } finally {
       client?.close();
     }
@@ -168,7 +187,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     } catch (err) {
       // Stopped or reconfigured while dialling: nothing to report.
       if (gen !== this.generation || !this.running) return;
-      this.failed(err, null);
+      this.failed(err);
       return;
     }
     if (gen !== this.generation || !this.running) {
@@ -181,34 +200,29 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     client.onNotification((method, params) => this.onNotification(client, method, params));
     client.onClose((err) => this.onClosed(client, err));
     const transport = this.wrap(client);
-    this.session = transport;
     this.armKeepalive(client);
     try {
       const status = await openSession(transport, s, this.password);
       if (!this.live(client)) return;
-      const catalog = await this.loadCatalog(transport);
+      const { catalog } = await this.loadCatalog(transport, status);
       if (!this.live(client)) return;
       this.wrapped = transport;
       this.resetBackoff();
-      this.catalogAt = Date.now();
-      this.publishConnected(status);
-      this.report("connected", `Connected to ${status.DesignName}`);
+      this.announce(status, catalog);
       console.log(
-        `[qsys] connected to ${scrub(status.DesignName)} (${catalog.components.length} components, emulator=${status.IsEmulator})`,
+        `[qsys] connected to ${scrub(status.DesignName)} (${catalog.components.length} components, emulator=${status.IsEmulator === true})`,
       );
-      for (const cb of this.catalogListeners) this.notifyCatalog(cb, catalog);
-      const early = this.earlyStatus;
-      this.earlyStatus = null;
-      if (early) this.onNotification(client, "EngineStatus", early);
+      // A push that arrived while the sequence was reading is compared now.
+      this.checkDesign();
     } catch (err) {
       if (!this.live(client)) return;
-      this.failed(err, client);
+      this.failed(err);
     }
   }
 
   /** True while `client` is the current connection. `client.close()` on every
    *  stale return is the caller's job when it owns an unadopted client; an adopted
-   *  one is closed by teardown() or failed(). */
+   *  one is closed by teardown(). */
   private live(client: QrcClient): boolean {
     return this.running && this.client === client;
   }
@@ -216,7 +230,9 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
   private wrap(client: QrcClient): QrcTransport {
     return {
       send: (method, params) => {
-        this.armKeepalive(client);
+        // A transport kept past its connection must not re-arm the live one's
+        // keepalive for a client that is gone: the live connection would go silent.
+        if (this.live(client)) this.armKeepalive(client);
         return client.send(method, params);
       },
       onNotification: (cb) => client.onNotification(cb),
@@ -232,7 +248,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
       client.send("NoOp").then(
         () => this.armKeepalive(client),
         (err: unknown) => {
-          if (this.live(client)) this.lost(client, err);
+          if (this.live(client)) this.lost(err);
         },
       );
     }, KEEPALIVE_MS);
@@ -243,8 +259,11 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     this.keepaliveTimer = null;
   }
 
-  private async readCatalog(t: QrcTransport): Promise<QsysCatalog> {
-    const status = (await t.send("StatusGet")) as QrcStatus;
+  /** Read the catalog against `status` (the connect sequence has one) or a fresh
+   *  StatusGet. Lands only if `generation` is still the live connection's. */
+  private async readCatalog(t: QrcTransport, generation: number, given?: QrcStatus): Promise<CatalogRead> {
+    const seen = this.pushes;
+    const status = given ?? ((await t.send("StatusGet")) as QrcStatus);
     const list = (await t.send("Component.GetComponents")) as QrcComponent[];
     if (!Array.isArray(list)) throw new Error("the Core's component list was not a list");
     const components: QsysCatalog["components"] = [];
@@ -255,43 +274,56 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
       components.push({ name: c.Name, type: c.Type, controls: reply.Controls });
     }
     const catalog = { designCode: status.DesignCode, components };
-    // Only the live connection's read may land: a superseded one is dropped.
-    if (this.session === t) {
-      this.catalog = catalog;
-      this.catalogAt = Date.now();
-    }
-    return catalog;
+    if (generation !== this.generation) return { status, catalog };
+    this.catalog = catalog;
+    this.catalogAt = Date.now();
+    // This read is done: a check below may start the next one, and must not see
+    // this one as still in flight.
+    this.refreshing = null;
+    // Once connected, every read that lands is announced, whoever asked for it.
+    // During the connect sequence, connect() announces.
+    if (this.wrapped) this.announce(status, catalog);
+    // The Core pushed again while this read ran: that push may name a newer design.
+    if (this.pushes !== seen) this.checkDesign();
+    return { status, catalog };
   }
 
-  private notifyCatalog(cb: (c: QsysCatalog) => void, catalog: QsysCatalog): void {
-    try {
-      cb(catalog);
-    } catch (err) {
-      console.warn(`[qsys] catalog listener threw: ${scrub(errorMessage(err))}`);
+  private announce(status: QrcStatus, catalog: QsysCatalog): void {
+    this.publishConnected(status);
+    this.report("connected", `Connected to ${status.DesignName}`);
+    for (const cb of this.catalogListeners) {
+      try {
+        cb(catalog);
+      } catch (err) {
+        console.warn(`[qsys] catalog listener threw: ${scrub(errorMessage(err))}`);
+      }
     }
   }
 
   private onNotification(client: QrcClient, method: string, params: unknown): void {
     if (method !== "EngineStatus" || !this.live(client) || !params || typeof params !== "object") return;
-    const status = params as QrcStatus;
-    // While the connect sequence is reading it owns the catalog; remember the
-    // latest push and compare once it is done.
-    if (!this.wrapped) {
-      this.earlyStatus = status;
-      return;
-    }
-    if (!this.catalog || status.DesignCode === this.catalog.designCode) return;
+    this.pushed = params as QrcStatus;
+    this.pushes++;
+    this.checkDesign();
+  }
+
+  /**
+   * Read the catalog again if the latest push names a design other than the one
+   * read. Waits while the connect sequence owns the catalog (connect() calls this
+   * when it is done) and while a read is in flight (that read calls this when it
+   * lands, if a push arrived meanwhile), so a push is never lost to a read that
+   * started before it.
+   */
+  private checkDesign(): void {
+    const client = this.client;
+    const t = this.wrapped;
+    if (!client || !t || !this.pushed || !this.catalog) return;
+    if (this.pushed.DesignCode === this.catalog.designCode) return;
+    if (this.refreshing?.generation === this.generation) return;
     console.log("[qsys] design changed, refreshing catalog");
-    this.refreshCatalog().then(
-      (catalog) => {
-        if (!this.live(client)) return;
-        this.publishConnected(status);
-        for (const cb of this.catalogListeners) this.notifyCatalog(cb, catalog);
-      },
-      (err: unknown) => {
-        if (this.live(client)) this.lost(client, err);
-      },
-    );
+    this.loadCatalog(t).catch((err: unknown) => {
+      if (this.live(client)) this.lost(err);
+    });
   }
 
   private publishConnected(status: Pick<QrcStatus, "DesignName" | "IsEmulator">): void {
@@ -306,34 +338,28 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
 
   private onClosed(client: QrcClient, err: Error | null): void {
     if (!this.live(client)) return;
-    this.lost(client, err ?? new Error("connection closed"));
+    this.lost(err ?? new Error("connection closed"));
   }
 
   /** A live connection failed: say so, drop it, and try again. */
-  private lost(client: QrcClient, err: unknown): void {
+  private lost(err: unknown): void {
     console.warn(`[qsys] connection lost: ${scrub(errorMessage(err))}`);
-    this.failed(err, client, true);
+    this.failed(err, true);
   }
 
-  /** A connection attempt, or a connection, failed: report, tear down, schedule a retry. */
-  private failed(err: unknown, client: QrcClient | null, alreadyLogged = false): void {
+  /** A connection attempt, or a connection, failed: report, tear down, schedule a retry.
+   *  Logs only the first failure in a run of them; the backoff retries quietly. */
+  private failed(err: unknown, alreadyLogged = false): void {
+    const first = !alreadyLogged && this.attempt === 0;
     if (isLogonRefused(err)) {
-      console.warn("[qsys] logon refused");
-      this.report("error", "The Core refused the user name or password");
+      const user = this.settings?.user ?? "";
+      if (first) console.warn(user ? "[qsys] logon refused" : "[qsys] logon required, and no user is set");
+      this.report("error", logonMessage(user));
     } else {
-      if (!alreadyLogged && this.attempt === 0) console.warn(`[qsys] ${scrub(this.settings?.host)} connection failed: ${scrub(errorMessage(err))}`);
+      if (first) console.warn(`[qsys] ${scrub(this.settings?.host)} connection failed: ${scrub(errorMessage(err))}`);
       this.report("error", err instanceof QrcError ? `The Core answered with an error: ${err.message}` : `Can't reach the Core: ${errorMessage(err)}`);
     }
-    if (client) {
-      this.clearKeepalive();
-      this.client = null;
-      this.session = null;
-      this.wrapped = null;
-      this.earlyStatus = null;
-      client.close();
-    }
-    this.catalog = null;
-    this.catalogAt = null;
+    this.teardown();
     this.emitIfChanged({ ...OFFLINE, state: "reconnecting" });
     this.scheduleReconnect();
   }

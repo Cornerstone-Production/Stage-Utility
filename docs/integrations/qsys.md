@@ -11,18 +11,15 @@ reads the design's components and controls.
   request; the Core drops a connection after 60 seconds of silence.
 - If the connection drops, the service reconnects with exponential backoff, capped
   by the PCO-time-aware service window. A logon the Core refuses is retried the
-  same way and logged.
+  same way. The first failure in a run of them is logged; the retries are not.
 - When the Core reports a new design (a different design code, as after a redeploy
-  or a Core restart), the catalog is read again.
+  or a Core restart), the catalog is read again. A second change reported while
+  that read runs is read after it.
 - The integration never calls a method that changes the design.
 
-`/log` shows the decisions, tagged `[qsys]`: `connected to <design> (<n> components,
-emulator=<bool>)`, `logon refused`, `connection lost: <reason>` and `design changed,
-refreshing catalog`.
-
-Status broadcasts on the `qsys:status` SSE channel: connected, reconnecting or
-offline, the design name, whether the Core is an emulator, and when the catalog
-was last read.
+The card's row shows the state: connected with the design name, reconnecting, or
+the reason it could not connect. `/log` shows the decisions, tagged `[qsys]`; see
+[Troubleshooting](#troubleshooting).
 
 ## Setup
 
@@ -76,11 +73,12 @@ Look at `/log` and filter for `[qsys]`.
 |---|---|
 | `connecting to <host>:<port>` | The service is dialling. If nothing follows, the address or port is wrong, or the machine is not reachable. |
 | `<host> connection failed: <reason>` | The Core did not answer. `ECONNREFUSED` usually means nothing listens on that port; a timeout means a network path problem. |
-| `logon refused` | The user or password is wrong, or the user lacks access. Test connection reports "The Core refused the user name or password". |
+| `logon refused` | The user or password is wrong, or the user lacks access. Test connection reports "The Core refused the user name or password". Logged once; the retries are quiet until it connects. |
+| `logon required, and no user is set` | The Core has Access Control on and the card has no User. Test connection reports "The Core requires a logon: set User and Password". |
 | `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
 | `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
 | `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
 | `a QRC message passed <n> bytes without a terminator, dropping the connection` | One message from the Core ran past 32 MiB without ending. Real designs stay far under that; the service reconnects, and if this repeats, the address is probably not a Q-SYS Core. |
 | `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. |
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
-| `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
+| `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
