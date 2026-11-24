@@ -1555,6 +1555,16 @@ describe("the kept draft", () => {
     assert.deepEqual(DRAFTS, [], "a draft of what was just saved was left on the server");
   });
 
+  test("a Save that fails keeps the draft at once, rather than leaving it unkept with nothing on its way", async () => {
+    await mount();
+    await addFromPalette("box");
+    // Pressed inside the second before the change is kept: Save stops that wait.
+    refuse = { what: "PUT /api/stageplots/plots/p-1/items", error: "the server refused it" };
+    await click(screen.getByRole("button", { name: "Save" }));
+    await until(isKept, "the draft to be kept after the failed save");
+    assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft"]);
+  });
+
   test("a plot's draft survives a save on another plot, and opens again when its tab is picked", async () => {
     await mount();
     const mine = await addFromPalette("box");

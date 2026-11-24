@@ -636,6 +636,9 @@ function EditorBody({
     } catch (err) {
       if ((err as ApiError).status === 409) setConflict(true);
       else setSaveError(errorMessage(err));
+      // The Save stopped the wait to keep the draft (hold, above): with the Save gone, nothing
+      // else would keep it, and the banner would say "Keeping draft" with nothing on its way.
+      void keeper.flush();
       return false;
     } finally {
       setSaving(false);
@@ -658,6 +661,8 @@ function EditorBody({
       setSaveError(null);
     } catch (err) {
       setSaveError(errorMessage(err));
+      // As a failed Save: the draft is still there, and the wait to keep it was stopped.
+      void keeper.flush();
     }
     void refresh();
   };
