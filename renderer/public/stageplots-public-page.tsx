@@ -75,14 +75,17 @@ export function StagePlotsPublicPage({ path }: { path: string }) {
     if (!secret) return;
     let live = true;
     let current: Loaded = { kind: "loading" };
+    /** Reads started: one answered after a newer one began is older than it, and is dropped. */
+    let reads = 0;
     const show = (next: Loaded) => {
       current = next;
       if (live) setLoaded(next);
     };
     const refresh = () => {
+      const mine = ++reads;
       load(secret, current).then(
-        (next) => show(next.kind === "failed" && current.kind === "ready" ? current : next),
-        () => show(current.kind === "ready" ? current : { kind: "failed" }),
+        (next) => mine === reads && show(next.kind === "failed" && current.kind === "ready" ? current : next),
+        () => mine === reads && show(current.kind === "ready" ? current : { kind: "failed" }),
       );
     };
     refresh();
