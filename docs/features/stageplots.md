@@ -525,6 +525,13 @@ The page shows the plot each venue had for the followed plan when it was last pu
 and republishes when the plan moves, so it follows the week as `/stageplots` does. Dates
 are in the app's time zone.
 
+A change the page does not take (it is down, or its token is wrong) stays the venue's last
+error and is sent again: on the next change of any kind, after a minute and then longer
+(up to every fifteen) while the page keeps failing, and when the Public link is saved, so
+fixing the token sends it. A restart sends every published venue again, so a change that
+failed before it, or was saved in the moment before it, is not left behind; a venue with
+linked points waits until the patch can be read.
+
 A [linked connection point](#patch-link) is published as its device's name and colour and
 the channels a tap lists, resolved when it is sent. Of the patch the page gets only that:
 the sheet's name, and for each channel its console channel, its source or destination, and
@@ -644,7 +651,7 @@ address and the old one that still opens it), old addresses dropped, and every
 address refused and why. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
-that failed and why, every one refused before anything was sent (an unknown venue, one
+that failed and why, how long until a republish the page did not take is tried again, every one refused before anything was sent (an unknown venue, one
 published or not, no page set up, too many old links waiting), each old link queued for
 removal, removed, failing (once) or waiting for its page (once), what went up before a
 failure that could not be taken back, and each venue moved to a new page. The secret is

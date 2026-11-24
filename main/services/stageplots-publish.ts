@@ -29,6 +29,11 @@
 //                  points): each published venue is sent what changed, after a short wait, one
 //                  run at a time per venue. A change that alters nothing published (the publish
 //                  state this writes, a patch channel no published point lists) sends nothing.
+//                  A send the page did not take is sent again on the next change, after a minute
+//                  and then longer while the page keeps failing, when the Public link is saved
+//                  (a token fixed, the same address saved again) and at start, which sends every
+//                  published venue: what this process last sent is not known after a restart,
+//                  and a change saved in the wait before it would otherwise never go.
 //   The landing    the page's own address lists the venues marked listed on it: their names,
 //                  plot counts and secret links, nothing else. The list is made from the
 //                  document after every change to it and sent whenever it differs from what
@@ -114,6 +119,8 @@ export interface StagePlotsPublishDeps {
   patchRetry?: { firstMs: number; maxMs: number };
   /** How long after a landing list that did not get through it is tried again, doubling up to `maxMs`. A seam for a test. */
   landingRetry?: { firstMs: number; maxMs: number };
+  /** How long after a republish the page did not take it is tried again, doubling up to `maxMs`. A seam for a test. */
+  republishRetry?: { firstMs: number; maxMs: number };
   now?: () => number;
 }
 
@@ -137,6 +144,9 @@ export const PATCH_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
 
 /** How long a change waits for the next before it is published. */
 export const REPUBLISH_WAIT_MS = 2000;
+
+/** A republish the page did not take is tried again after a minute, then two, four… up to fifteen. */
+export const REPUBLISH_RETRY = { firstMs: 60_000, maxMs: 15 * 60_000 } as const;
 
 const MB = 1_000_000;
 const mb = (bytes: number) => (bytes / MB).toFixed(1);
@@ -185,6 +195,11 @@ export function venueImages(doc: StagePlotsDoc, venue: Venue): string[] {
 function plotsOf(doc: StagePlotsDoc, venue: Venue): Plot[] {
   const byId = new Map(doc.plots.map((p) => [p.id, p]));
   return venue.plotIds.map((id) => byId.get(id)).filter((p): p is Plot => p !== undefined);
+}
+
+/** Whether any of the venue's plots has a connection point linked to the patch. */
+function linksThePatch(doc: StagePlotsDoc, venue: Venue): boolean {
+  return plotsOf(doc, venue).some((p) => p.items.some((it) => it.patchLink));
 }
 
 /** The plan a link lists channels for: the one published. */
@@ -295,8 +310,14 @@ export class StagePlotsPublisher {
   private readonly sent = new Map<string, Map<string, string>>();
   /** Per secret, the keys last kept. */
   private readonly kept = new Map<string, string>();
-  /** Per venue, what the last republish was built from, sent or not: the same again is not tried again. */
+  /** Per venue, what the page last took (or what was refused for its own sake, a plot too large): the same again is not sent again. A send the page did not take is not here, so it goes again. */
   private readonly attempted = new Map<string, string>();
+  /** Venues whose last republish the page did not take: tried again on the backoff until each goes. */
+  private readonly failing = new Set<string>();
+  private republishRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private republishRetryMs = 0;
+  /** True while this publisher's own write is being broadcast: that is no change to publish. */
+  private ownWrite = false;
   /** Pending removals whose failure has been said: said once, not on every change. */
   private readonly saidStuck = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -331,17 +352,21 @@ export class StagePlotsPublisher {
     // What the page lists may have changed while this server was down (an un-list that never
     // reached it): sent once now, and after that whenever it changes.
     void this.syncLanding();
-    // What the page holds was sent before this start, maybe against a patch that could not be
-    // read then: once it reads, the venues that link it are sent again (only what differs from
-    // what this process has sent goes, which after a start is their plots). Unreadable now, it
-    // is tried again on the backoff until it reads.
-    void this.readPatch().then((p) => (p.ok ? this.republishLinked() : undefined));
+    // What the page holds is not known after a restart: a send that failed before it, or a change
+    // saved in the wait before it, was never sent. Every published venue goes again (its plots,
+    // index and keep list; the backgrounds the store says the page holds are not resent). A venue
+    // that links the patch waits until the patch reads, so it never goes out unlinked over a
+    // page that showed its devices: unreadable now, the patch is read again on the backoff and
+    // those venues go then (patchHealed).
+    void this.readPatch().then((p) => this.republishAll(p.ok ? "all" : "unlinked"));
   }
 
   /** Shutdown: no more republishing, and whatever is running finishes. */
   async stop(): Promise<void> {
     this.stopped = true;
     this.cancelWait();
+    if (this.republishRetryTimer) clearTimeout(this.republishRetryTimer);
+    this.republishRetryTimer = null;
     if (this.landingRetryTimer) clearTimeout(this.landingRetryTimer);
     this.landingRetryTimer = null;
     if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
@@ -469,7 +494,7 @@ export class StagePlotsPublisher {
     }
     for (const venue of doc.venues) {
       const pub = venue.publish;
-      if (!pub || !plotsOf(doc, venue).some((p) => p.items.some((it) => it.patchLink))) continue;
+      if (!pub || !linksThePatch(doc, venue)) continue;
       void this.serial(venue.id, () => this.republish(venue.id)).catch((err: unknown) => {
         say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
       });
@@ -484,6 +509,10 @@ export class StagePlotsPublisher {
       // Every write to the document, this publisher's own included, is broadcast here: the one
       // place the landing list is made from what was saved.
       void this.syncLanding();
+      // Its own writes are publish state, which nothing published shows. Taken for a change, a
+      // failure's own last error would set off the next republish, and that its next failure,
+      // every wait for as long as the page is down.
+      if (this.ownWrite) return;
       return this.changed();
     }
     if (channel === "patch:updated") return this.changed();
@@ -522,7 +551,9 @@ export class StagePlotsPublisher {
     this.fireTimer = null;
   }
 
-  private async republishAll(): Promise<void> {
+  /** Republish each published venue (`unlinked`: only those with no point linked to the patch). The fingerprint sends nothing where nothing changed. */
+  private async republishAll(which: "all" | "unlinked" = "all"): Promise<void> {
+    if (this.stopped || this.paused) return;
     let doc: StagePlotsDoc;
     try {
       doc = await this.deps.store.get();
@@ -533,6 +564,7 @@ export class StagePlotsPublisher {
     for (const venue of doc.venues) {
       const pub = venue.publish;
       if (!pub) continue;
+      if (which === "unlinked" && linksThePatch(doc, venue)) continue;
       // Nobody is waiting on a republish: what throws in one (the settings or the store
       // unreadable) is said here, or it is never said at all.
       void this.serial(venue.id, () => this.republish(venue.id)).catch((err: unknown) => {
@@ -745,8 +777,12 @@ export class StagePlotsPublisher {
       if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now", patch);
       else {
         const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [], patch });
-        this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
         result = await this.finish(venueId, venue, r, host, [pub.secret], "published again");
+        // As a republish: what the page took is not sent again on the next change; what it did not take is.
+        const went = result.ok || (!r.ok && r.status === 400);
+        if (went) this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
+        else this.attempted.delete(venueId);
+        this.republished(venueId, went);
       }
       // The old links it was asked to remove too: a list that could not be read is said beside the venue, never taken for done.
       if (drained.ok || !result.ok) return result;
@@ -779,24 +815,62 @@ export class StagePlotsPublisher {
     const patch = await this.readPatch();
     const print = this.fingerprint(doc, venue, patch);
     if (this.attempted.get(venueId) === print) return;
-    this.attempted.set(venueId, print);
     const target = await this.deps.target();
     if (!target.ok) {
+      // No page to send to: nothing to try again on a timer. A Public link save follows it (pageSaved).
       say("warn", [pub.secret], `"${venue.name}" changed and could not be republished: ${target.message}`);
       const at = this.at();
       await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, target.message, [pub.secret]) }));
       return;
     }
     if (pub.origin !== target.origin) {
-      await this.move(venue, doc, target, "A change", patch);
-      return;
+      // move() records what it sent once the new page has it all.
+      const moved = await this.move(venue, doc, target, "A change", patch);
+      if (!moved.ok) this.attempted.delete(venueId);
+      return this.republished(venueId, moved.ok);
     }
     const host = hostOf(target.origin);
     const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages, patch });
+    // Nothing went and nothing changed: nothing to save. (A send the page did not take always has
+    // something to send again: a key that failed is dropped from what was sent.)
     if (r.ok && r.sent === 0 && sameList(r.held, pub.publishedImages) && sameList(r.unpublished.map((u) => u.hash).sort(), pub.unpublishedImages) && r.warnings.length === 0) {
+      this.attempted.set(venueId, print);
+      return this.republished(venueId, true);
+    }
+    const out = await this.finish(venueId, venue, r, host, [pub.secret], "republished");
+    // A plot too large to publish is refused here, not by the page: the same again would be refused
+    // again. Anything else that failed leaves what the page holds unknown (it may have stored a
+    // request whose answer was lost), so nothing is taken as on it, a change back included.
+    const went = out.ok || (!r.ok && r.status === 400);
+    if (went) this.attempted.set(venueId, print);
+    else this.attempted.delete(venueId);
+    this.republished(venueId, went);
+  }
+
+  /**
+   * After a venue's republish: one the page did not take is tried again after the backoff (and
+   * on every change before it); once every venue has gone, the backoff starts again from the
+   * first wait.
+   */
+  private republished(venueId: string, went: boolean): void {
+    if (went) {
+      this.failing.delete(venueId);
+      if (this.failing.size > 0) return;
+      this.republishRetryMs = 0;
+      if (this.republishRetryTimer) clearTimeout(this.republishRetryTimer);
+      this.republishRetryTimer = null;
       return;
     }
-    await this.finish(venueId, venue, r, host, [pub.secret], "republished");
+    this.failing.add(venueId);
+    if (this.republishRetryTimer || this.stopped) return;
+    const retry = this.deps.republishRetry ?? REPUBLISH_RETRY;
+    this.republishRetryMs = Math.min(retry.maxMs, this.republishRetryMs === 0 ? retry.firstMs : this.republishRetryMs * 2);
+    say("log", [], `${plural(this.failing.size, "published venue")} the page did not take ${this.failing.size === 1 ? "is" : "are"} sent again in ${Math.round(this.republishRetryMs / 1000)} s, and on every change before that`);
+    this.republishRetryTimer = setTimeout(() => {
+      this.republishRetryTimer = null;
+      void this.republishAll();
+    }, this.republishRetryMs);
+    this.republishRetryTimer.unref?.();
   }
 
   /**
@@ -910,6 +984,9 @@ export class StagePlotsPublisher {
       const d = await this.drainQueued(false);
       // Said once: the same failure under the old token already names it.
       if (!d.ok && !notes.some((n) => n.includes(d.message))) notes.push(d.message);
+      // A token fixed or entered again, or the same address saved: what the page did not take
+      // before goes now. What it took is not sent again (the fingerprint).
+      await this.republishAll();
     }
     if (notes.length > 0) this.followNote = { at: this.at(), message: notes.join(" ") };
     if (hadNote || this.followNote) await this.tellCard();
@@ -985,7 +1062,7 @@ export class StagePlotsPublisher {
   /** Broadcast the document again, so the Publish card shows (or drops) the follow's notice. */
   private async tellCard(): Promise<void> {
     try {
-      this.deps.onSaved(await this.deps.store.get());
+      this.tellSaved(await this.deps.store.get());
     } catch (err) {
       say("error", [], `the Publish card could not be told what following the page address left undone: ${errorMessage(err)}`);
     }
@@ -1275,8 +1352,18 @@ export class StagePlotsPublisher {
       changed = next !== d && JSON.stringify(next) !== JSON.stringify(d);
       return changed ? next : d;
     });
-    if (changed) this.deps.onSaved(doc);
+    if (changed) this.tellSaved(doc);
     return doc;
+  }
+
+  /** Hand the routes a write of this publisher's to broadcast. The broadcast comes back here (heard) as its own, not as a change. */
+  private tellSaved(doc: StagePlotsDoc): void {
+    this.ownWrite = true;
+    try {
+      this.deps.onSaved(doc);
+    } finally {
+      this.ownWrite = false;
+    }
   }
 
   /** Save a send's outcome on a published venue, say it, and answer. */
