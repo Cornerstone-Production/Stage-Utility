@@ -15,6 +15,7 @@ import { useParams, useRouter } from "@tanstack/react-router";
 
 import {
   QSYS_RETURN_DEFAULT_MIN,
+  QSYS_RETURN_MAX_MIN,
   parseQsysPanelBlock,
   findPanelBySlug,
   isQsysPanel,
@@ -30,11 +31,12 @@ import {
 import type { View } from "@main/types/views";
 import { viewSurface, walkLayoutObjects } from "@main/types/views";
 import { errorMessage } from "@main/services/errors";
-import { Button, Callout, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
+import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
 import { canEditInPlace } from "../../editor/can-edit";
 import { AppLink } from "../app-link";
+import { cn } from "../../lib/cn";
 import { ConsoleEditor, InPlaceEditFrame } from "../console-route";
 import { useStageSettings } from "../use-stage-settings";
 import { HOME_VIEW_ID } from "@main/services/home-view";
@@ -111,7 +113,7 @@ export function QsysManageRoute() {
       <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} />
       <BindingsSection bindings={bindings} views={views} />
       <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
-        <p className="text-footnote text-fg-muted" data-qsys-pin>No staff PIN is set.</p>
+        <PinSection />
       </Section>
       <Section title="Meter rates" hint="Volunteer panels' meters move at the volunteer rate and staff panels' at the staff rate. Both are set on the Q-SYS integration.">
         <AppLink to={INTEGRATIONS_PATH} className="text-footnote font-medium text-accent hover:underline" data-qsys-rates>
@@ -372,7 +374,7 @@ function KindChoice({ value, onChange }: { value: PanelKind; onChange: (k: Panel
           <input type="radio" name="qsys-kind" value={k} checked={value === k} onChange={() => onChange(k)} className="size-4 accent-[var(--su-accent)]" />
           <span>
             {KIND_TEXT[k]}
-            <span className="text-fg-muted">{k === "volunteer" ? ": big targets, a cog with no way into settings" : ": dense, every control"}</span>
+            <span className="text-fg-muted">{k === "volunteer" ? ": big targets, and a cog that opens the app only with the staff PIN" : ": dense, every control"}</span>
           </span>
         </label>
       ))}
@@ -432,14 +434,17 @@ function NewPanelDialog({ views, onClose }: { views: View[]; onClose: () => void
 }
 
 /**
- * A panel's settings: who it is for and its address. Its cog's siblings and its
- * auto-return time are kept as they are: nothing on a panel reads them yet, so
- * they are not offered as if they did something.
+ * A panel's settings: who it is for, its address, the panels its cog lists, and
+ * how long a device whose home it is may be away before it comes back.
  */
 export function PanelSettingsDialog({ view, views, onClose }: { view: View; views: View[]; onClose: () => void }) {
   const was = view.qsys;
   const [kind, setKind] = useState<PanelKind>(was?.kind ?? "staff");
   const [slug, setSlug] = useState(was?.slug ?? uniqueQsysSlug(slugify(view.name), qsysSlugsOf(views)));
+  // A sibling no panel has is kept as it was: /qsys/manage lists it for somebody to fix.
+  const [siblings, setSiblings] = useState<string[]>(was?.siblings ?? []);
+  const [returnAfterMin, setReturnAfterMin] = useState(was?.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN);
+  const others = views.filter((v) => v.id !== view.id && isQsysPanel(v));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const shapeOk = isQsysSlug(slug);
@@ -481,6 +486,27 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
           </span>
           {!shapeOk && <span className="text-caption1 font-normal text-warn-11">Lowercase letters, digits and single hyphens, and not "manage".</span>}
         </label>
+        <fieldset className="flex flex-col gap-0.5" data-qsys-siblings>
+          <legend className="mb-1 text-footnote font-medium text-fg">In its cog menu</legend>
+          {others.length === 0 && <p className="text-caption1 text-fg-muted">No other panels yet.</p>}
+          {others.map((o) => {
+            const s = o.qsys?.slug ?? "";
+            return (
+              <label key={o.id} className="flex min-h-11 cursor-pointer items-center gap-2 text-footnote text-fg">
+                <Checkbox checked={siblings.includes(s)} onCheckedChange={(on) => setSiblings((cur) => (on === true ? [...cur.filter((x) => x !== s), s] : cur.filter((x) => x !== s)))} />
+                <span className="grow">{o.name}</span>
+                <span className="font-mono text-caption1 text-fg-subtle">{qsysPanelPath(s)}</span>
+              </label>
+            );
+          })}
+        </fieldset>
+        <label className="flex flex-col gap-1 text-footnote font-medium text-fg">
+          Go back here after
+          <span className="flex items-center gap-2">
+            <NumberInput value={returnAfterMin} onChange={(n) => setReturnAfterMin(Math.max(0, Math.min(QSYS_RETURN_MAX_MIN, Math.round(n))))} min={0} max={QSYS_RETURN_MAX_MIN} className="w-24" aria-label="Minutes before going back" />
+            <span className="font-normal text-fg-muted">minutes without a touch, on a device whose home this is. 0 never goes back.</span>
+          </span>
+        </label>
         {message && <p role="alert" className="text-footnote text-danger-11" data-qsys-refused>{message}</p>}
         <div className="flex items-center justify-between gap-2">
           {was ? (
@@ -489,7 +515,7 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
           <span className="flex gap-2">
             <Button variant="transparent" onClick={onClose}>Cancel</Button>
             <Button
-              onClick={() => void save({ kind, slug, siblings: was?.siblings ?? [], returnAfterMin: was?.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN })}
+              onClick={() => void save({ kind, slug, siblings, returnAfterMin })}
               disabled={busy || !shapeOk}
             >
               Save
@@ -498,6 +524,99 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
         </div>
       </DialogContent>
     </DialogRoot>
+  );
+}
+
+// ── Staff PIN ────────────────────────────────────────────────────────────────
+
+/**
+ * Whether a staff PIN is set, and setting, changing or removing it. Four digits,
+ * typed as text (a PIN may start with 0). The server keeps only a salted hash, so
+ * the PIN is never shown back. Not PIN-gated itself, by Henry's decision: the
+ * network is the boundary.
+ */
+function PinSection() {
+  const [set, setSet] = useState<boolean | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    invoke<{ set: boolean }>("qsys:pin").then(
+      (r) => live && setSet(r.set === true),
+      (err: unknown) => {
+        logReadFailure("qsys", "whether a staff PIN is set", err);
+        if (live) setReadFailed(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  async function save(next: string | null) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await invoke<{ set: boolean }>("qsys:setPin", { pin: next });
+      setSet(r.set === true);
+      setPin("");
+      setMessage({ tone: "ok", text: next === null ? "The staff PIN is removed." : "The staff PIN is set." });
+    } catch (err) {
+      logToServer("qsys", `the staff PIN could not be saved: ${errorMessage(err)}`);
+      setMessage({ tone: "danger", text: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    const ok = await confirm({
+      title: "Remove the staff PIN?",
+      message: "Volunteer panels cannot open Stage Utility until a new one is set.",
+      confirmLabel: "Remove the PIN",
+    });
+    if (ok) await save(null);
+  }
+
+  const valid = /^\d{4}$/.test(pin);
+  let state: string;
+  if (readFailed) state = "Couldn't read whether a staff PIN is set; see /log.";
+  else if (set === null) state = "Reading…";
+  else if (set) state = "A staff PIN is set.";
+  else state = "No staff PIN is set. Volunteer panels cannot open Stage Utility until one is.";
+  return (
+    <div className="flex flex-col gap-2" data-qsys-pin={set === null ? "unknown" : set ? "set" : "none"}>
+      <p className="text-footnote text-fg-muted">{state}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="4 digits"
+          aria-label={set ? "New staff PIN" : "Staff PIN"}
+          className="w-32 font-mono"
+        />
+        <Button onClick={() => void save(pin)} disabled={busy || !valid}>
+          {set ? "Change PIN" : "Set PIN"}
+        </Button>
+        {set && (
+          <Button variant="transparent" onClick={() => void remove()} disabled={busy}>
+            Remove PIN
+          </Button>
+        )}
+      </div>
+      {message && (
+        <p role={message.tone === "danger" ? "alert" : "status"} className={cn("text-footnote", message.tone === "danger" ? "text-danger-11" : "text-fg-muted")}>
+          {message.text}
+        </p>
+      )}
+    </div>
   );
 }
 

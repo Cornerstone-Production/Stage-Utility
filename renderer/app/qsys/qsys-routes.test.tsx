@@ -55,6 +55,7 @@ const { __resetForTests: resetStageState } = await import("../../main/use-stage-
 const { __resetReplayCacheForTests, __sseFallback } = await import("../../lib/api.js");
 const { __resetQsysPanelsForTests } = await import("../../main/qsys/use-qsys-values.js");
 const { slugTakenMessage } = await import("@main/types/qsys");
+const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
@@ -88,6 +89,8 @@ interface Server {
   posts: Record<string, unknown>[];
   allow: { entries: unknown[]; invalid: string | null; rev: string };
   repairs: unknown[];
+  pinSet: boolean;
+  pinPuts: unknown[];
 }
 
 let server: Server;
@@ -108,6 +111,8 @@ function freshServer(): Server {
     posts: [],
     allow: structuredClone(ALLOW),
     repairs: [],
+    pinSet: false,
+    pinPuts: [],
   };
 }
 
@@ -144,6 +149,13 @@ const f = stubFetchWithLog((url, init) => {
     return ok({ entries: body.entries, rev: server.allow.rev });
   }
   if (url === "/api/qsys/allowlist") return ok(server.allow);
+  if (url === "/api/qsys/pin" && init?.method === "PUT") {
+    const { pin } = JSON.parse(String(init.body ?? "{}")) as { pin: unknown };
+    server.pinPuts.push(pin);
+    server.pinSet = pin !== null;
+    return ok({ set: server.pinSet });
+  }
+  if (url === "/api/qsys/pin") return ok({ set: server.pinSet });
   if (url === "/api/qsys/panel-repairs") return ok(server.repairs);
   if (url === "/api/qsys/catalog") return ok(CATALOG);
   if (url === "/api/qsys/bindings") return reply(server.bindings.status, server.bindings.body);
@@ -215,10 +227,12 @@ describe("Q-SYS panel pages", () => {
     assert.deepEqual(compiled(), [
       "fader-scale.ts",
       "meter-tween.ts",
+      "qsys-cog-menu.tsx",
       "qsys-manage-route.tsx",
       "qsys-objects.tsx",
       "qsys-panel-route.tsx",
       "qsys-paths.ts",
+      "use-auto-return.ts",
       "use-qsys-status.ts",
       "use-qsys-values.ts",
     ]);
@@ -594,6 +608,81 @@ describe("/qsys/manage", () => {
     await wait(40);
     assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "zone-one", siblings: ["booth"], returnAfterMin: 9 } });
     assert.equal(screen.queryByLabelText("Address") !== null, false, "the dialog stayed open after a save");
+  });
+
+  test("a panel's settings choose the panels its cog lists and how long a device may be away", async () => {
+    server.views = [
+      { ...ZONE, qsys: { kind: "volunteer", slug: "zone-1", siblings: ["gone"], returnAfterMin: 5 } },
+      BOOTH,
+      { ...BOOTH, id: "v-lobby", name: "Lobby", qsys: block("volunteer", "lobby") },
+    ];
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Settings for Zone 1"));
+    });
+    await wait(20);
+    const box = (name: string) =>
+      [...document.querySelectorAll("[data-qsys-siblings] label")].find((l) => l.textContent?.includes(name))!.querySelector("button") as HTMLElement;
+    assert.deepEqual([...document.querySelectorAll("[data-qsys-siblings] label")].map((l) => l.textContent?.replace(/\/qsys\/.*/, "")), ["Booth", "Lobby"], "the panel itself, or not every other panel, was offered");
+    act(() => {
+      fireEvent.click(box("Lobby"));
+    });
+    act(() => {
+      fireEvent.click(box("Booth"));
+    });
+    act(() => {
+      fireEvent.click(box("Booth"));
+    });
+    const minutes = screen.getByLabelText("Minutes before going back") as HTMLInputElement;
+    act(() => {
+      fireEvent.change(minutes, { target: { value: "1" } });
+    });
+    act(() => {
+      fireEvent.blur(minutes);
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Save"));
+    });
+    await wait(40);
+    // The missing sibling is kept, for /qsys/manage to list; the booth was ticked and unticked.
+    assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "volunteer", slug: "zone-1", siblings: ["gone", "lobby"], returnAfterMin: 1 } });
+  });
+
+  test("the staff PIN section sets, changes and removes the PIN, and never shows it back", async () => {
+    render(React.createElement(ConfirmHost));
+    await open("/qsys/manage");
+    await wait(40);
+    const section = () => document.querySelector("[data-qsys-pin]") as HTMLElement;
+    assert.equal(section().dataset.qsysPin, "none");
+    assert.match(section().textContent ?? "", /No staff PIN is set/);
+    const field = () => section().querySelector("input") as HTMLInputElement;
+    assert.equal(field().type, "password");
+    act(() => {
+      fireEvent.change(field(), { target: { value: "12a" } });
+    });
+    assert.equal(field().value, "12", "a letter got into the PIN");
+    assert.equal((screen.getByText("Set PIN").closest("button") as HTMLButtonElement).disabled, true, "three digits could be saved");
+    act(() => {
+      fireEvent.change(field(), { target: { value: "0123" } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByText("Set PIN"));
+    });
+    await wait(40);
+    assert.deepEqual(server.pinPuts, ["0123"], "the PIN went as a number, or not at all");
+    assert.equal(section().dataset.qsysPin, "set");
+    assert.equal(field().value, "", "the PIN stayed on the page");
+    act(() => {
+      fireEvent.click(screen.getByText("Remove PIN"));
+    });
+    await wait(40);
+    act(() => {
+      fireEvent.click(screen.getByText("Remove the PIN"));
+    });
+    await wait(60);
+    assert.deepEqual(server.pinPuts, ["0123", null], "the PIN could not be removed");
+    assert.equal(section().dataset.qsysPin, "none");
   });
 
   test("a new panel opens only once the page's own state has it", async () => {

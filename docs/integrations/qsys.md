@@ -114,8 +114,9 @@ import over it is refused (`409`) unless the request carries `replaceInvalid: tr
 then the invalid file is kept beside it as `qsys-allowlist.json.invalid-<time>`
 before the new list is saved. Nothing deletes that copy.
 
-The allowlist, its limits and the write route are not PIN-gated: anyone who can reach
-the server can change them. Restrict the server's port to staff and panel devices.
+The allowlist, its limits and the write route are not PIN-gated (the staff PIN guards
+only a volunteer panel's way into the app): anyone who can reach the server can change
+them. Restrict the server's port to staff and panel devices.
 
 ## Binding objects to controls
 
@@ -227,6 +228,8 @@ console first. Home cannot be a panel.
 |---|---|
 | Who uses it | **Volunteer** (big targets; meters at the volunteer rate) or **Staff** (dense; meters at the staff rate). |
 | Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's is refused, naming that panel. `manage` is not allowed. |
+| In its cog menu | The other panels its [cog menu](#cog-menu-and-staff-pin) lists. A volunteer panel opened full screen shows them; none by default. |
+| Go back here after | Minutes without a touch before a device whose home this panel is comes back to it from another panel ([auto-return](#auto-return)). 0 to 1440; default 5; 0 never comes back. |
 
 A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A restored
 backup is never refused over panel addresses: when its views put two panels at one
@@ -263,7 +266,7 @@ row is lit on any page under `/qsys/manage`.
 
 | URL | What it is |
 |---|---|
-| `/qsys/<slug>` | The panel full screen, with no sidebar or header from the app: what an iPad opens, saved to its home screen. Its own header shows the panel's name and the connection. |
+| `/qsys/<slug>` | The panel full screen, with no sidebar or header from the app: what an iPad opens, saved to its home screen. Its own header shows the panel's name and the connection, and on a volunteer panel the cog. `?return=<slug>` names the device's home panel (see [Auto-return](#auto-return)). |
 | `/qsys/manage` | The Q-SYS page, in the app (see below). |
 | `/qsys/manage/<slug>` | The panel inside the app, with **Edit** in its top-right corner, as on a console. |
 
@@ -285,6 +288,52 @@ own values back: only a fresh touch writes.
 An iPad that opens a panel while Stage Utility is down shows the browser's own error;
 one that already had it open shows the card above. Either way the Core and its wall
 panels are not affected.
+
+### Cog menu and staff PIN
+
+A volunteer panel opened full screen (`/qsys/<slug>`) has a cog at the right of its
+header. Staff panels and panels inside the app have none. The cog opens a menu:
+
+- **Panels**: the device's home panel, marked "This iPad's home", then the panels
+  this panel's **In its cog menu** setting names. A named panel that does not exist
+  is left out. Tapping one opens it, with no PIN.
+- **Open Stage Utility**, with a lock and "PIN": asks for the 4-digit staff PIN. The
+  server checks it; the right PIN opens the app at `/`, and unlocks nothing else.
+  Five wrong tries in a row from one device (its network address) lock that device
+  out for a minute, the right PIN included, and the pad counts the minute down.
+  With no PIN set the pad says "No staff PIN is set. Set one on /qsys/manage
+  first." and never opens the app.
+
+The PIN is set on `/qsys/manage` and stored on the server as a salted scrypt hash in
+`qsys-pin.json`, which a config backup carries. It keeps curious taps out; it is not
+security. `/qsys/manage`, the allowlist and the PIN itself are open to anyone who can
+reach the server, so restrict the server's port to staff and panel devices (a
+firewall rule, or a VLAN the panels share with the server).
+
+### Auto-return
+
+The panel a device opens first is its home. A panel opened from the cog carries
+`?return=<home slug>` in its address, so the way back survives a reload and needs no
+device id. While a page is away from home, a bar under its header says "Going back to
+<home> in m:ss unless someone touches the screen." with **Go back now**. The count
+runs from the last touch: any tap, drag, scroll or key press anywhere on the page
+starts it again. At zero the page opens its home, which reads the Core's values
+before it takes a touch, as any panel does when it opens.
+
+How long is the HOME panel's **Go back here after**, so every panel a device
+wanders to sends it back on the same clock. 0 never goes back (the cog still lists
+home). A `?return=` that names no panel is ignored: the page is its own home.
+
+### Setting up an iPad
+
+1. Open `http://<server>/qsys/<slug>` in Safari, with the panel the iPad lives on
+   as `<slug>`. Use the address with no `?return=`: whatever the iPad opens from its
+   home-screen icon is its home.
+2. Share, **Add to Home Screen**. The panel opens from the icon full screen, with
+   no browser bar.
+3. Set a staff PIN on `/qsys/manage`, so the cog's **Open Stage Utility** works for
+   staff and only for staff.
+4. Optional: Guided Access (Settings, Accessibility) keeps the iPad in that one app.
 
 ### Moving a panel between installs
 
@@ -326,7 +375,10 @@ A panel's settings travel in its view bundle (see
   **Start a new, empty list**, which keeps the old file beside the new one.
 - **Binding check**: each problem with its panel and control, "Every binding
   resolves", "Connect a Core to check the bindings", or why the check could not run.
-- **Staff PIN**: whether one is set (none can be yet).
+- **Staff PIN**: whether one is set, and a field to set or change it (four digits,
+  never shown back), with **Remove PIN**. With none set, a volunteer panel's
+  **Open Stage Utility** does not open the app. See
+  [Cog menu and staff PIN](#cog-menu-and-staff-pin).
 - **Meter rates**: a link to the two rates on the integration.
 
 ## Write log
@@ -466,6 +518,9 @@ Look at `/log` and filter for `[qsys]`.
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
 | `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
+| `staff PIN set by <address>`, `staff PIN removed by <address>; …` | The staff PIN was set, changed or removed from `/qsys/manage` (or `PUT /api/qsys/pin`). |
+| `PIN locked for <address> after 5 wrong tries; it can try again in 60 s` | A device sent five wrong PINs in a row. It cannot open the app for a minute. Repeated lines from one address mean someone is guessing. |
+| `the staff PIN could not be checked: <reason>`, `could not read whether a staff PIN is set: <reason>` | A panel's PIN pad could not reach the server (sent from the page). It said so on the pad, not "wrong PIN". |
 | `Q-SYS panel "<name>" address /qsys/<a> was taken here; imported as /qsys/<b>` | An imported panel's address clashed and took a suffix. Tagged `[view-import]`. |
 | `Q-SYS panel "<name>" names panels that do not exist here: <slugs>` | An imported panel's sibling list names panels no panel has. Tagged `[view-import]`. |
 | `allowlist: added <n> control(s) a panel uses, at the Core's own ranges` | **Add all controls … uses** on `/qsys/manage` added entries. |

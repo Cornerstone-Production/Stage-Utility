@@ -121,7 +121,10 @@ editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
 of the app's sidebar or header: the address an iPad opens and saves to its home
 screen. It draws its own header (the panel's name and the connection to the sound
 system), and an address no panel has says so rather than showing a blank page.
-`manage` is never a panel's slug.
+`manage` is never a panel's slug. A volunteer panel's cog opens its sibling panels as
+`/qsys/<slug>?return=<home slug>`, which goes back to the home panel after a few
+minutes without a touch ([auto-return](integrations/qsys.md#auto-return)); save the
+address without `?return=` to the home screen.
 
 Moving between them does not reload the page, so the event stream and cached
 plan data survive a navigation.

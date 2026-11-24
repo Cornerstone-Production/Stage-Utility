@@ -576,10 +576,13 @@ export type IpcChannel =
   | "qsys:allowlist"
   | "qsys:bindings"
   | "qsys:catalog"
+  | "qsys:checkPin"
   | "qsys:lease"
   | "qsys:panelRepairs"
   | "qsys:panelValues"
+  | "qsys:pin"
   | "qsys:setAllowlist"
+  | "qsys:setPin"
   | "qsys:status"
   | "qsys:write"
   | "reaper:getStatus"
@@ -1026,6 +1029,14 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/qsys/panel-repairs");
     case "qsys:panelValues":
       return apiFetch<T>(`/api/qsys/values?panel=${encodeURIComponent(String(p.panel ?? ""))}`);
+    // The staff PIN: whether one is set, setting it (or null to remove it), and a
+    // volunteer panel's check. The server holds the hash and the lock.
+    case "qsys:pin":
+      return apiFetch<T>("/api/qsys/pin");
+    case "qsys:setPin":
+      return put<T>("/api/qsys/pin", { pin: p.pin ?? null });
+    case "qsys:checkPin":
+      return post<T>("/api/qsys/pin/check", { pin: p.pin });
     case "qsys:status":
       return apiFetch<T>("/api/qsys/status");
     case "qsys:write":

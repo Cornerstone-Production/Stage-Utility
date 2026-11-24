@@ -14,11 +14,13 @@
 // The objects keep their own rules (greyed and deaf until the Core's state has
 // been read); the page adds the words.
 //
-// The cog menu, PIN and auto-return of the mockup are not here yet: a cog that
-// opens nothing would be a control that does nothing.
+// A volunteer panel opened full screen also carries the cog menu (its siblings,
+// and "Open Stage Utility" behind the staff PIN), and any panel opened from a
+// cog with `?return=<home>` the banner that counts down to going home
+// (qsys-cog-menu.tsx, use-auto-return.ts). Neither is drawn in the shell.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useParams, useSearch } from "@tanstack/react-router";
 
 import { findPanelBySlug, panelKindOf } from "@main/types/qsys";
 import type { View } from "@main/types/views";
@@ -29,6 +31,7 @@ import { AppLink } from "../app-link";
 import { useStageSettings } from "../use-stage-settings";
 import { cn } from "../../lib/cn";
 import { QSYS_MANAGE_PATH, qsysPanelPath } from "./qsys-paths";
+import { QsysCogMenu, QsysReturnBanner } from "./qsys-cog-menu";
 
 /** How long the server must have been without the Core before the offline card
  *  covers the panel. A blip shorter than this reads as Reconnecting instead. */
@@ -51,20 +54,43 @@ export const NO_CORE_TITLE = "No Q-SYS Core is set up";
 
 const INTEGRATIONS_PATH = "/settings/integrations";
 
+/** A `?return=` value as text. The router parses search values as JSON, so an
+ *  all-digit slug arrives as a number. */
+function returnParam(search: Record<string, unknown>): string | null {
+  const r = search.return;
+  if (typeof r === "string") return r;
+  if (typeof r === "number" && Number.isSafeInteger(r) && r >= 0) return String(r);
+  return null;
+}
+
 /** /qsys/<slug>: the panel full screen. */
 export function QsysPanelRoute() {
   const { slug = "" } = useParams({ strict: false }) as { slug?: string };
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
   const s = useStageSettings();
   // Never "not found" before the views are known: a cold load on a Pi takes a moment.
   if (!s.stageState) return null;
-  const view = findPanelBySlug(s.stageState.views ?? [], slug);
+  const views = s.stageState.views ?? [];
+  const view = findPanelBySlug(views, slug);
+  // The device's home: the panel `?return=` names, when one has that slug and it is
+  // not this one; otherwise this panel is home. An unknown slug is ignored.
+  const ret = returnParam(search);
+  const away = ret !== null && ret !== slug ? findPanelBySlug(views, ret) : null;
   return (
     // The shell gutters its content; a panel paints its own ground to the edges.
     <div className="-mx-2 h-full max-sm:-mx-3">
-      {view ? <QsysPanelSurface view={view} settingsLink={view.qsys?.kind === "staff"} /> : <QsysPanelNotFound slug={slug} />}
+      {view ? (
+        <QsysPanelSurface view={view} settingsLink={view.qsys?.kind === "staff"} device={{ home: away ?? view, away: away !== null, views }} />
+      ) : (
+        <QsysPanelNotFound slug={slug} />
+      )}
     </div>
   );
 }
+
+/** A panel open full screen on a device: its home panel, whether it is away from
+ *  it, and every view (for the cog's list). Absent in the shell. */
+type Device = { home: View; away: boolean; views: readonly View[] };
 
 /** No panel at this address: said, on the panel's own ground, never a blank page. */
 export function QsysPanelNotFound({ slug, link }: { slug: string; link?: boolean }) {
@@ -89,13 +115,13 @@ export function QsysPanelNotFound({ slug, link }: { slug: string; link?: boolean
  * the shell get one, a volunteer panel does not. `inShell`: the app's context bar
  * already names the page, so the header carries the connection line alone.
  */
-export function QsysPanelSurface({ view, settingsLink = false, inShell = false }: { view: View; settingsLink?: boolean; inShell?: boolean }) {
+export function QsysPanelSurface({ view, settingsLink = false, inShell = false, device }: { view: View; settingsLink?: boolean; inShell?: boolean; device?: Device }) {
   // The store every object on this panel reads (same id, same kind), held here too so
   // the header and the card follow it.
   const panel = useQsysPanel(view.id, panelKindOf(view));
   return (
     <QsysPanelContext.Provider value={panel}>
-      <PanelFrame view={view} settingsLink={settingsLink} inShell={inShell} />
+      <PanelFrame view={view} settingsLink={settingsLink} inShell={inShell} device={device} />
     </QsysPanelContext.Provider>
   );
 }
@@ -124,8 +150,10 @@ function useConnection(): { line: Line; noCore: boolean; overlay: boolean } {
 
 const DOT: Record<Line["tone"], string> = { ok: "bg-ok-9", warn: "bg-warn-9", danger: "bg-danger-9" };
 
-function PanelFrame({ view, settingsLink, inShell }: { view: View; settingsLink: boolean; inShell: boolean }) {
+function PanelFrame({ view, settingsLink, inShell, device }: { view: View; settingsLink: boolean; inShell: boolean; device?: Device }) {
   const { line, noCore, overlay } = useConnection();
+  // Keyed by panel and home, so a move to another panel starts the menu and the count afresh.
+  const key = `${view.id}:${device?.home.id ?? ""}`;
   return (
     <div className="kiosk-surface relative flex h-full min-h-0 flex-col" data-qsys-panel={view.qsys?.slug ?? view.id}>
       <header className={cn("flex shrink-0 items-center gap-4 border-b border-line px-6", inShell ? "h-10" : "h-[72px]")}>
@@ -145,7 +173,10 @@ function PanelFrame({ view, settingsLink, inShell }: { view: View; settingsLink:
             <span className="text-fg-muted">{view.qsys.kind === "volunteer" ? "Volunteer panel" : "Staff panel"}</span>
           </div>
         )}
+        {/* Only a volunteer panel has a cog: a staff panel is already behind the shell or a staff device. */}
+        {device && view.qsys?.kind === "volunteer" && <QsysCogMenu key={key} view={view} home={device.home} views={device.views} />}
       </header>
+      {device?.away && <QsysReturnBanner key={key} home={device.home} />}
       {noCore && <NoCoreStrip settingsLink={settingsLink} />}
       <div className="relative min-h-0 flex-1">
         {/* Dimmed under the card, as the approved panel draws it. */}

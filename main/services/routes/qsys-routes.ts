@@ -23,10 +23,14 @@
 //                                      or the allowlist (code check-failed)
 //   GET  /api/qsys/panel-repairs       [{ viewId, name, from, to, why }]: panel blocks the last load of the views repaired
 //   GET  /api/qsys/write-log           { entries, saveError }
+//   GET  /api/qsys/pin                 { set }: whether a staff PIN is set; never the hash
+//   PUT  /api/qsys/pin                 { pin: "<4 digits>" | null } -> { set }; 400 for anything else
+//   POST /api/qsys/pin/check           { pin } -> { ok: true } | { ok: false, lockedForMs, notSet? }:
+//                                      5 wrong tries in a row from one address lock it for 60 s
 //
-// Not PIN-gated: the allowlist and its limits are open like every other
-// settings route (the PIN guards only a volunteer panel's way out). Every field
-// is checked here, and again by the writer.
+// Not PIN-gated: the allowlist, its limits and the PIN itself are open like every
+// other settings route (the PIN guards only a volunteer panel's way out to the
+// app). Every field is checked here, and again by the writer.
 
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
@@ -41,6 +45,7 @@ import { qsysWatch } from "../qsys/qsys-watch.js";
 import { qsysWriter, writeControl } from "../qsys/qsys-write.js";
 import { usableCid } from "../channel-reports.js";
 import { qsysWriteLog } from "../qsys/qsys-write-log.js";
+import { PIN_DIGITS, checkPin, isPin, pinState, setPin } from "../qsys/qsys-pin.js";
 import { type RouteCtx, error, json, readObjectBody, remoteAddressOf } from "./context.js";
 
 const MAX_DEVICE = 200;
@@ -218,6 +223,28 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "GET" && pathname === "/api/qsys/write-log") {
     json(res, await qsysWriteLog.list());
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/pin") {
+    json(res, await pinState());
+    return;
+  }
+
+  if (method === "PUT" && pathname === "/api/qsys/pin") {
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (body.pin !== null && !isPin(body.pin)) return error(res, `pin must be ${PIN_DIGITS} digits, or null to remove it`);
+    await setPin(body.pin, remoteOf(req));
+    json(res, await pinState());
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/qsys/pin/check") {
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (typeof body.pin !== "string" || body.pin.length > 16) return error(res, "pin must be text");
+    json(res, await checkPin(body.pin, remoteOf(req)));
     return;
   }
 }

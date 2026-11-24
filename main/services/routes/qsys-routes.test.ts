@@ -154,6 +154,23 @@ describe("/api/qsys", () => {
     assert.deepEqual((r.json as { ok: boolean; reason: string }).reason, "offline");
   });
 
+  test("the staff PIN: set over PUT, checked over POST, never answered as a hash; a bad body is refused", async () => {
+    const pin = (body: unknown) => callRoute(qsysRoutes, "/api/qsys/pin", { method: "PUT", body });
+    const check = (p: unknown) => callRoute(qsysRoutes, "/api/qsys/pin/check", { method: "POST", body: { pin: p } });
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin")).json, { set: false });
+    assert.deepEqual((await check("1234")).json, { ok: false, lockedForMs: 0, notSet: true }, "no PIN set opened the app");
+    for (const bad of ["123", "12345", 1234, "abcd", undefined]) assert.equal((await pin({ pin: bad })).status, 400, `set ${String(bad)}`);
+    const set = await quietly(() => pin({ pin: "2468" }));
+    assert.equal(set.status, 200);
+    assert.deepEqual(set.json, { set: true }, "the PUT answered more than whether a PIN is set");
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin")).json, { set: true });
+    assert.deepEqual((await check("2468")).json, { ok: true });
+    assert.deepEqual((await check("1357")).json, { ok: false, lockedForMs: 0 });
+    assert.equal((await check(2468)).status, 400);
+    assert.deepEqual((await quietly(() => pin({ pin: null }))).json, { set: false }, "the PIN could not be removed");
+    assert.deepEqual((await check("2468")).json, { ok: false, lockedForMs: 0, notSet: true });
+  });
+
   test("PUT /api/qsys/allowlist saves a good list and refuses a bad one whole, naming the entry", async () => {
     const ok = await quietly(() => put([GAIN, MUTE]));
     assert.equal(ok.status, 200);
