@@ -877,8 +877,7 @@ export class PhotoThemesService {
   }
 
   private async attempt(job: Job): Promise<void> {
-    const theme = this.book.themes.get(job.themeId);
-    if (!theme || this.expected.get(job.key) !== job.id) return this.settle(job, null);
+    if (!this.book.themes.has(job.themeId) || this.expected.get(job.key) !== job.id) return this.settle(job, null);
     const usable = this.connection.usable();
     if (!usable.ok) return this.fail(job, usable.reason);
     const apiKey = await this.connection.apiKey();
@@ -893,7 +892,12 @@ export class PhotoThemesService {
       console.warn(`[photo-theme] the photo of ${scrub(job.name)} could not be decoded: ${scrub(errorMessage(err))}`);
       return this.fail(job, "Their Planning Center photo could not be read as an image");
     }
-    job.prompt = theme.prompt;
+    // Checked again after the awaits, just before the request that bills: a person
+    // removed, a theme deleted or a job cancelled while the original was read is
+    // not sent. The prompt is the theme's as it stands now.
+    const current = this.book.themes.get(job.themeId);
+    if (!current || this.expected.get(job.key) !== job.id) return this.settle(job, null);
+    job.prompt = current.prompt;
     const result = await editImage({ apiKey, prompt: job.prompt, png, fetchImpl: this.deps?.fetchImpl });
     if (result.ok) {
       this.connection.recordSuccess();

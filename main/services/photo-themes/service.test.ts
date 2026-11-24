@@ -436,6 +436,53 @@ describe("a person's original photo, for Manage themes", () => {
 });
 
 describe("move, copy and remove", () => {
+  /** Hold every original's read until released: the window between an edit starting and its request. */
+  function holdOriginals() {
+    const load = srv.deps.loadOriginal!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reading = 0;
+    srv.deps.loadOriginal = async (url) => {
+      reading++;
+      await gate;
+      return load(url);
+    };
+    return {
+      reading: async () => {
+        while (reading === 0) await new Promise((r) => setTimeout(r, 5));
+      },
+      release: () => {
+        release();
+        srv.deps.loadOriginal = load;
+      },
+    };
+  }
+
+  it("a person removed while their original is being read is not sent to OpenAI", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    fake.requests.length = 0;
+    const held = holdOriginals();
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await held.reading();
+    await photoThemes.remove(theme.id, "1");
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 0, "nothing billed for somebody no longer in the theme");
+  });
+
+  it("a theme deleted while its originals are being read sends nothing", async () => {
+    const theme = await themed([person("1")]);
+    const held = holdOriginals();
+    await photoThemes.generate(PLAN, TYPE, "missing");
+    await held.reading();
+    await photoThemes.deleteTheme(theme.id);
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 0);
+  });
+
   it("an edit that lands while a remove of that person is still being written is not kept", async (t) => {
     const lines = captureConsole(t, "log");
     const theme = await themed([person("1")]);
