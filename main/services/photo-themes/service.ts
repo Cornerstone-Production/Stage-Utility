@@ -710,9 +710,7 @@ export class PhotoThemesService {
     if (!choice?.themeId) throw new PhotoThemeRefused("Pick a theme for this plan first", 409);
     const themeId = choice.themeId;
     const read = await this.deps!.planPeople(serviceTypeId, planId);
-    if (read.roster === "unavailable") {
-      throw new PhotoThemeRefused(`Could not read who is on this plan: ${read.reason ?? "Planning Center did not answer"}`, 502);
-    }
+    if (read.roster === "unavailable") throw rosterUnreadable(read);
     this.see(read.people);
     const theme = themeIn(this.book, themeId);
     const result: GenerateResultDTO = { queued: 0, reused: 0, skipped: [] };
@@ -769,6 +767,8 @@ export class PhotoThemesService {
     let serviceDate: string | null = null;
     if (from) {
       const read = await this.deps!.planPeople(from.serviceTypeId, from.planId);
+      // Not knowing who is on the plan is not knowing they are off it: said as what it is.
+      if (read.roster === "unavailable") throw rosterUnreadable(read);
       this.see(read.people);
       const p = read.people.find((x) => x.personId === personId);
       if (!p) throw new PhotoThemeRefused("That person is not on this plan", 404);
@@ -1148,6 +1148,11 @@ export class PhotoThemesService {
     this.resetState();
     if (this.deps) await this.start(this.deps, { sweep: false });
   }
+}
+
+/** A plan whose roster could not be read: a 502 naming why, never "not on this plan". */
+function rosterUnreadable(read: PlanPeopleRead): PhotoThemeRefused {
+  return new PhotoThemeRefused(`Could not read who is on this plan: ${read.reason ?? "Planning Center did not answer"}`, 502);
 }
 
 function themeIn(b: Book, id: string): Theme {

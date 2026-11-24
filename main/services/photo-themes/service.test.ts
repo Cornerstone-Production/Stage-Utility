@@ -134,6 +134,19 @@ describe("generating", () => {
     assert.equal(fake.edits(), 0);
   });
 
+  it("a Redo from a plan whose roster cannot be read says so, and sends nothing", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    fake.requests.length = 0;
+    srv.unreadable.set(PLAN, "Planning Center did not answer");
+    await assert.rejects(
+      () => photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE }),
+      (e: Error & { status?: number }) => e.status === 502 && /Could not read who is on this plan: Planning Center did not answer/.test(e.message),
+    );
+    assert.equal(fake.edits(), 0);
+  });
+
   it("records a refusal on the person, with the reason, and logs it", async (t) => {
     const lines = captureConsole(t, "log", "warn", "error");
     const theme = await themed([person("1")]);
