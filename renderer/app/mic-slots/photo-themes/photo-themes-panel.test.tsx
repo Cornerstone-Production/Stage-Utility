@@ -431,7 +431,7 @@ describe("without a working key", () => {
       const disabled = (name: string | RegExp) => (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
       assert.equal(disabled(/^Generate 1 for/), true, "Generate");
       assert.equal(disabled("Redo Alex R."), true, "Redo");
-      assert.equal(disabled("Redo all"), true, "Redo all");
+      assert.equal(disabled(/^Redo all/), true, "Redo all");
       assert.equal(screen.getByRole("link", { name: "Open Integrations" }).getAttribute("href"), "/settings/integrations", "says where to fix it");
 
       assert.equal(disabled("Approve Jordan P."), false, "Approve");
@@ -555,13 +555,31 @@ describe("what costs money", () => {
     });
   }
 
-  test("Redo all, from the prompt-changed banner, is Generate over everyone", async () => {
+  test("Redo all says how many it would bill, asks first, and sends nothing on Cancel", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
-    people = [person("9001", "Alex R.", "approved", { promptChanged: true }), person("9002", "Jordan P.", "ready")];
+    people = [
+      person("9001", "Alex R.", "approved", { promptChanged: true }),
+      person("9002", "Jordan P.", "ready"),
+      person("9004", "Dana K.", "approved", { promptChanged: true }),
+      person("9005", "Riley S.", "none"),
+    ];
     await mount();
     assert.match(document.querySelector("[data-prompt-changed]")?.textContent ?? "", /changed/);
-    await click(screen.getByRole("button", { name: "Redo all" }));
-    assert.deepEqual(writes().find((c) => c.path.endsWith("/generate"))!.body, { serviceTypeId: "100", mode: "all" });
+    const redoAll = screen.getByRole("button", { name: /^Redo all/ });
+    assert.equal(redoAll.textContent, "Redo all (3)", "Alex and Dana, made under the old prompt, and Riley, who has none: not Jordan");
+    await click(redoAll);
+    assert.deepEqual(writes().filter((c) => c.path.endsWith("/generate")), [], "one press only asks");
+    const box = screen.getByRole("group", { name: "Confirm redo all" });
+    assert.match(box.textContent ?? "", /Make 3 photos again for Christmas 2026\? Each is a new OpenAI edit, and is billed/);
+    await click(within(box).getByRole("button", { name: "Cancel" }));
+    assert.equal(screen.queryByRole("group", { name: "Confirm redo all" }) === null, true);
+    assert.deepEqual(writes().filter((c) => c.path.endsWith("/generate")), []);
+
+    await click(screen.getByRole("button", { name: /^Redo all/ }));
+    await click(within(screen.getByRole("group", { name: "Confirm redo all" })).getByRole("button", { name: "Redo 3" }));
+    const sent = writes().filter((c) => c.path.endsWith("/generate"));
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0]!.body, { serviceTypeId: "100", mode: "all" });
   });
 
   test("Keep these accepts the prompt without redoing anyone", async () => {

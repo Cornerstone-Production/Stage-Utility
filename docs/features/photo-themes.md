@@ -159,8 +159,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 A card with an approved photo has a **⋯** menu: **Move to theme…**, **Copy to theme…**
 and **Remove from theme…**, each confirmed in place, naming how many services it
 affects. Changing the prompt of a theme shows a notice on each service with somebody
-whose photo was made under the old one, with **Redo all** (those people again, and
-anyone still without a photo) and **Keep these** (everyone's, on every service).
+whose photo was made under the old one, with **Redo all (N)** (those people again,
+and anyone still without a photo; it says how many it will bill and asks first) and
+**Keep these** (everyone's, on every service).
 A prompt is saved when its box is left, or before any Generate or Redo; if the server
 refuses it, nothing is sent and the box goes back to the saved prompt.
 

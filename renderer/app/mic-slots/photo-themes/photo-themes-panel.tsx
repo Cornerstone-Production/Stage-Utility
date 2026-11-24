@@ -24,7 +24,7 @@ import { useInAppLink } from "../../../lib/use-search-param";
 import { useCardOps } from "./card-ops";
 import { ManageThemes } from "./manage-themes";
 import { STATES } from "./openai-wording";
-import { Num, ShowSwitch } from "./photo-bits";
+import { Num, ShowSwitch, useEscapeFirst } from "./photo-bits";
 import { PersonCard, type CardAction } from "./person-card";
 import { DeleteTheme, ThemeFacts, themeLabel } from "./theme-boxes";
 import { type PhotoPlan, type PhotoThemes, usePlanPeople } from "./use-photo-themes";
@@ -133,6 +133,7 @@ function PanelBody({
   const addedLater = list.some((p) => p.status !== "none");
   /** People on THIS service whose photo was made under an earlier prompt. Others' stay flagged on their own services. */
   const promptChangedHere = list.some((p) => p.promptChanged);
+  const [askRedoAll, setAskRedoAll] = useState(false);
 
   async function choose(themeId: string) {
     if (themeId === NEW_THEME) return setNewTheme({ name: "", prompt: "", error: null });
@@ -198,6 +199,8 @@ function PanelBody({
   }
 
   const toGenerate = roster?.toGenerate ?? 0;
+  /** What Redo all sends: those made under an earlier prompt, and anyone Generate would send. */
+  const redoAllCount = toGenerate + list.filter((p) => p.promptChanged && p.originalUrl).length;
   const generateLabel = generating ? "Generating…" : toGenerate === 0 ? `Everyone has a photo in ${theme ? themeLabel(theme) : "this theme"}` : `Generate ${toGenerate} for ${theme ? themeLabel(theme) : ""}`;
   // No key, or one OpenAI rejected, stops Generate and Redo; the rest of the sheet works without one.
   const trouble = conn && (!photos.canSend || STATES[conn.state].tone === "warn") ? conn : null;
@@ -293,13 +296,25 @@ function PanelBody({
             <div role="status" data-prompt-changed className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-warn-9/35 bg-warn-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">The prompt for {themeLabel(theme)} changed; existing approved photos stay until redone.</span>
               <span className="flex gap-1.5">
-                <Button variant="accent" size="small" disabled={planBusy("generate") || !photos.canSend} onClick={() => void generate("all")}>
-                  Redo all
+                <Button variant="accent" size="small" disabled={planBusy("generate") || !photos.canSend || redoAllCount === 0} onClick={() => setAskRedoAll(true)}>
+                  Redo all (<Num>{redoAllCount}</Num>)
                 </Button>
                 <Button variant="filled" size="small" disabled={photos.isBusy(`keep-prompt:${theme.id}`)} onClick={() => void photos.write(`keep-prompt:${theme.id}`, () => ipc("photoThemes:keepPrompt", { id: theme.id }))}>
                   Keep these
                 </Button>
               </span>
+              {askRedoAll && (
+                <RedoAllConfirm
+                  count={redoAllCount}
+                  themeName={themeLabel(theme)}
+                  busy={planBusy("generate")}
+                  onGo={() => {
+                    setAskRedoAll(false);
+                    void generate("all");
+                  }}
+                  onCancel={() => setAskRedoAll(false)}
+                />
+              )}
             </div>
           )}
 
@@ -380,6 +395,27 @@ function PanelBody({
 
       <ThemesBlock themes={themes} usedHere={theme?.id ?? null} photos={photos} onManage={onManage} />
     </>
+  );
+}
+
+/** Redo all bills for every photo it sends: it says how many, and waits for a yes. */
+function RedoAllConfirm({ count, themeName, busy, onGo, onCancel }: { count: number; themeName: string; busy: boolean; onGo: () => void; onCancel: () => void }) {
+  useEscapeFirst(onCancel);
+  return (
+    <div role="group" aria-label="Confirm redo all" className="flex w-full flex-col gap-1.5 border-t border-warn-9/35 pt-2">
+      <span>
+        Make <Num>{count}</Num> {count === 1 ? "photo" : "photos"} again for {themeName}? Each is a new OpenAI edit, and is billed. Approved photos stay on screens
+        until the new ones are approved.
+      </span>
+      <span className="flex flex-wrap gap-1.5">
+        <Button variant="accent" size="small" disabled={busy} onClick={onGo}>
+          Redo <Num>{count}</Num>
+        </Button>
+        <Button variant="filled" size="small" onClick={onCancel}>
+          Cancel
+        </Button>
+      </span>
+    </div>
   );
 }
 
