@@ -688,6 +688,18 @@ describe("a changed prompt", () => {
     assert.equal(flagged(theme.id), false);
   });
 
+  it("the prompt each photo was made under survives a restart", async () => {
+    await twoPlansThenNewPrompt();
+    await generated("all", PLAN);
+    await approveAllShown(photoThemes, PLAN);
+    await photoThemes.reloadForTests();
+    await photoThemes.connection.saveKey(KEY);
+    assert.deepEqual(await flaggedOn(PLAN), [], "redone under the new prompt, and read back so");
+    fake.requests.length = 0;
+    assert.deepEqual(await generated("all", PLAN), { queued: 0, reused: 2, skipped: [] });
+    assert.equal(fake.edits(), 0, "nobody paid for again after a restart");
+  });
+
   it("Keep these clears it for everyone, on every plan, and sends nothing", async () => {
     const theme = await twoPlansThenNewPrompt();
     fake.requests.length = 0;
