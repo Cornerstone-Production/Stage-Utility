@@ -29,7 +29,6 @@
 
 import { backoffMs } from "../backoff.js";
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
-import { LatencyWindow, type LatencyStats } from "./qsys-latency.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { addressKey, isMeterControl, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
@@ -125,9 +124,6 @@ export class QsysWatch {
 
   private running: Promise<void> | null = null;
   private dirty = false;
-
-  /** How long a value push that changed something took from arriving here to being broadcast. */
-  private readonly broadcastLatency = new LatencyWindow();
 
   constructor(
     private readonly source: WatchSource,
@@ -537,7 +533,6 @@ export class QsysWatch {
   /** Cache a push and broadcast what actually changed, on the channels of the
    *  panels that show it. Returns the keys it cached. */
   private ingest(id: GroupId, payload: unknown): string[] {
-    const arrived = performance.now();
     const changes = (payload as { Changes?: unknown } | null)?.Changes;
     const group = this.groups.get(id);
     const received: string[] = [];
@@ -560,14 +555,7 @@ export class QsysWatch {
       }
     }
     for (const [ch, list] of out) broadcast(ch, { changes: list });
-    // Only a push that changed something was broadcast; a repeat of what is cached is no sample.
-    if (out.size && id === "values") this.broadcastLatency.record(performance.now() - arrived);
     return received;
-  }
-
-  /** Change-to-broadcast time of value pushes, for the status. Meter pushes are not counted: they arrive at the meter rate. */
-  broadcastStats(): LatencyStats {
-    return this.broadcastLatency.stats();
   }
 
   private logSummary(): void {

@@ -92,7 +92,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     json(res, {
       ...qsysService.getStatus(),
       writable: qsysWatch.ready(),
-      latency: { write: qsysWriter.latencyStats(), broadcast: qsysWatch.broadcastStats() },
+      latency: { write: qsysWriter.latencyStats() },
     });
     return;
   }

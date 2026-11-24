@@ -90,6 +90,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
   private pushed: QrcStatus | null = null;
   private pushes = 0;
   private readonly catalogListeners: ((c: QsysCatalog) => void)[] = [];
+  private readonly disconnectListeners = new Set<() => void>();
 
   /** Stopped from outside, or never started: see stop(). */
   private off = true;
@@ -147,6 +148,13 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
 
   /** Drop the connection and everything read on it. Also how a failed connection ends. */
   protected override teardown(): void {
+    for (const cb of [...this.disconnectListeners]) {
+      try {
+        cb();
+      } catch (err) {
+        console.error(`[qsys] disconnect listener failed: ${scrub(errorMessage(err))}`);
+      }
+    }
     this.generation++;
     this.clearKeepalive();
     const client = this.client;
@@ -190,6 +198,12 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
 
   onCatalog(cb: (c: QsysCatalog) => void): void {
     this.catalogListeners.push(cb);
+  }
+
+  /** Call `cb` whenever the connection is torn down (lost, failed, stopped, reconfigured). Returns the function that stops listening. */
+  onDisconnect(cb: () => void): () => void {
+    this.disconnectListeners.add(cb);
+    return () => this.disconnectListeners.delete(cb);
   }
 
   /** Read every component and its controls. Concurrent callers share one read. */

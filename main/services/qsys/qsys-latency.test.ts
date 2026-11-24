@@ -66,6 +66,7 @@ const WRITE_P95_MS = 100;
 const CHANGE_MS = 250;
 
 let fake: InstanceType<typeof FakeQrcServer>;
+let fakePort = 0;
 let svc: InstanceType<typeof QsysService>;
 let watch: InstanceType<typeof QsysWatch>;
 let writer: InstanceType<typeof QsysWriter>;
@@ -109,7 +110,7 @@ beforeEach(async () => {
       ValueMax: 20,
     },
   ]);
-  const port = await fake.start();
+  const port = (fakePort = await fake.start());
   svc = new QsysService();
   subscriptionListeners = [];
   watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
@@ -210,10 +211,9 @@ describe("write latency", () => {
   );
 
   test(
-    "a change at the Core reaches qsys:values within 250 ms and is timed",
+    "a change at the Core reaches qsys:values within 250 ms",
     budget(async () => {
       valuePushes.length = 0;
-      const before = watch.broadcastStats().count;
       const t0 = performance.now();
       fake.setControl("Lobby_Mixer", "gain", -33);
       await until(
@@ -225,12 +225,6 @@ describe("write latency", () => {
       assert.ok(
         took < CHANGE_MS,
         `the change took ${took} ms to reach qsys:values`,
-      );
-      const b = watch.broadcastStats();
-      assert.equal(b.count, before + 1, "the change was not timed");
-      assert.ok(
-        b.p95 !== null && b.p95 < CHANGE_MS,
-        `broadcast p95 ${b.p95} ms`,
       );
     }),
   );
@@ -290,6 +284,71 @@ describe("the hourly line", () => {
           0,
         );
       } finally {
+        log.mock.restore();
+      }
+    }),
+  );
+});
+
+const lines = (log: { mock: { calls: { arguments: unknown[] }[] } }) =>
+  log.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("write p95"));
+
+async function reconnect(): Promise<void> {
+  svc.configure(
+    { host: "127.0.0.1", port: fakePort, user: "", enabled: true, volunteerMeterHz: 10, staffMeterHz: 20 },
+    null,
+  );
+  await until(() => svc.transport !== null, "reconnected");
+  await watch.recompute();
+  for (const cb of subscriptionListeners) cb();
+  await watch.recompute();
+  await until(() => watch.ready(), "ready again");
+}
+
+describe("the hourly timer across a disconnect", () => {
+  test(
+    "a disconnect clears the timer, and writes counted before it are reported by the next line",
+    budget(async () => {
+      const log = mock.method(console, "log", () => {});
+      try {
+        for (let i = 0; i < 3; i++) await write(-40 + i);
+        mock.timers.tick(LATENCY_LINE_INTERVAL_MS / 2);
+        svc.stop();
+        await reconnect();
+        await write(-30);
+        // The first timer was armed an hour before this tick; it must be gone.
+        mock.timers.tick(LATENCY_LINE_INTERVAL_MS / 2);
+        assert.deepEqual(lines(log), [], "the timer armed before the disconnect still fired");
+        mock.timers.tick(LATENCY_LINE_INTERVAL_MS / 2);
+        const got = lines(log);
+        assert.equal(got.length, 1);
+        assert.match(got[0], /\(4 writes\)$/, "the writes counted before the disconnect were dropped");
+      } finally {
+        log.mock.restore();
+      }
+    }),
+  );
+
+  test(
+    "a line that comes due while the Core is away keeps the count for the next one",
+    budget(async () => {
+      const log = mock.method(console, "log", () => {});
+      // A source with no disconnect hook: the timer is not cleared, so it fires with the Core away.
+      const source = { transport: null as unknown, core: null, getCatalog: () => null };
+      const w = new QsysWriter(source as never, watch);
+      try {
+        const note = (w as unknown as { noteConfirmed(ms: number): void }).noteConfirmed.bind(w);
+        for (let i = 0; i < 3; i++) note(5);
+        mock.timers.tick(LATENCY_LINE_INTERVAL_MS);
+        assert.deepEqual(lines(log), [], "a line while the Core was away");
+        source.transport = {};
+        note(5);
+        mock.timers.tick(LATENCY_LINE_INTERVAL_MS);
+        const got = lines(log);
+        assert.equal(got.length, 1);
+        assert.match(got[0], /\(4 writes\)$/, "the writes counted while away were discarded");
+      } finally {
+        w.dispose();
         log.mock.restore();
       }
     }),

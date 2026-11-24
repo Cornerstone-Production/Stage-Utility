@@ -1,9 +1,8 @@
 // qsys-latency.ts — a rolling window of durations, for the Q-SYS status.
 //
-// Two are kept (qsys-write.ts, qsys-watch.ts): how long the Core took to confirm a
-// write, and how long the server took to broadcast a change the Core pushed. The
-// window is a fixed ring, so memory is bounded however many writes there are, and
-// nothing here owns a timer.
+// One is kept (qsys-write.ts): how long the Core took to confirm a write. The window
+// is a fixed ring, so memory is bounded however many writes there are, and nothing
+// here owns a timer.
 
 /** Samples kept per window; the oldest is overwritten. */
 export const LATENCY_WINDOW = 500;

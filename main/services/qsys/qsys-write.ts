@@ -84,6 +84,8 @@ export interface WriteSource {
   /** Which Core the settings name; a release owed to one Core is never sent to another. */
   readonly core: string | null;
   getCatalog(): QsysCatalog | null;
+  /** Each time the connection is torn down; the hourly latency timer is cleared from here. Optional for stand-ins. */
+  onDisconnect?(cb: () => void): () => void;
 }
 
 /** What the writer needs from the watch. QsysWatch satisfies it. */
@@ -244,6 +246,7 @@ export class QsysWriter {
    */
   loadViews: () => Promise<View[]> = () => viewsStore.loadStrict();
   private readonly stopListening: () => void;
+  private readonly stopDisconnectListening: () => void;
   /** Send-to-reply time of each write the Core answered. */
   private readonly confirmLatency = new LatencyWindow();
   /** The hourly latency line's timer: armed by a write, so none runs while nothing is written. */
@@ -255,13 +258,14 @@ export class QsysWriter {
     private readonly now: () => number = Date.now,
   ) {
     this.stopListening = watch.onReady?.(() => void this.sendOwed()) ?? (() => {});
+    this.stopDisconnectListening = source.onDisconnect?.(() => this.clearLatencyTimer()) ?? (() => {});
   }
 
   /** Stop hearing readiness and forget every lease and owed release; for tests and shutdown. */
   dispose(): void {
     this.stopListening();
-    if (this.latencyTimer) clearTimeout(this.latencyTimer);
-    this.latencyTimer = null;
+    this.stopDisconnectListening();
+    this.clearLatencyTimer();
     this.leases.clear();
     for (const o of this.owed.values()) if (o.retry) clearTimeout(o.retry);
     this.owed.clear();
@@ -270,6 +274,12 @@ export class QsysWriter {
   /** Write confirm time (send to the Core's reply) over the last writes, for the status. */
   latencyStats(): LatencyStats {
     return this.confirmLatency.stats();
+  }
+
+  /** No timer is pending while the Core is away. Writes already counted stay counted; the next write arms it again and the line then reports them. */
+  private clearLatencyTimer(): void {
+    if (this.latencyTimer) clearTimeout(this.latencyTimer);
+    this.latencyTimer = null;
   }
 
   private noteConfirmed(ms: number): void {
@@ -282,8 +292,9 @@ export class QsysWriter {
   /** One line per hour: written only if the Core is connected. The timer exists only because a write armed it, so there were writes; the next write arms it again. */
   private reportLatency(): void {
     this.latencyTimer = null;
-    const writes = this.confirmLatency.takeSince();
+    // Counted writes are kept until a line reports them: not taken while the Core is away.
     if (!this.source.transport) return;
+    const writes = this.confirmLatency.takeSince();
     console.log(`[qsys] write p95 ${scrub(this.confirmLatency.stats().p95)} ms (${scrub(writes)} writes)`);
   }
 
