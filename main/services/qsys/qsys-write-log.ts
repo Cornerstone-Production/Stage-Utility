@@ -21,6 +21,7 @@
 import { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
+import type { WriteRefusal } from "./qsys-write.js";
 
 export interface WriteLogEntry {
   at: number;
@@ -30,7 +31,7 @@ export interface WriteLogEntry {
   remote?: string;
   component: string;
   control: string;
-  /** The Core's value before the write as the watch last read it, or null when no open panel watches it. */
+  /** The Core's value when the gesture started, as the watch last read it; null when nothing watched it. */
   from: unknown;
   /** The value sent (after clamping), or for a refusal the value asked for. */
   to: unknown;
@@ -43,8 +44,23 @@ export interface WriteLogEntry {
 
 /** The phrase list() answers while the file cannot be read or saved. */
 export const WRITE_LOG_SAVE_ERROR = "the write log could not be saved, so recent entries are in memory only; see /log";
-/** Refusals made before anything was sent to the Core: the only results that merge. */
-export const PRE_SEND_REFUSALS: ReadonlySet<string> = new Set(["offline", "not-allowed", "no-range", "bad-value"]);
+/**
+ * Whether each refusal is made before anything is sent to the Core. A Record, so
+ * a new reason cannot be added without saying which it is. Only these merge here,
+ * and only these have their [qsys] lines limited (QsysWriter).
+ */
+const BEFORE_SEND: Record<WriteRefusal, boolean> = {
+  "bad-value": true,
+  "core-error": false,
+  "no-range": true,
+  "not-allowed": true,
+  "not-in-design": true,
+  offline: true,
+  "read-only": true,
+};
+export const PRE_SEND_REFUSALS: ReadonlySet<string> = new Set(
+  (Object.keys(BEFORE_SEND) as WriteRefusal[]).filter((r) => BEFORE_SEND[r]),
+);
 /** How far back, in entries and in time, a refusal looks for one it repeats. */
 const REPEAT_LOOKBACK = 50;
 const REPEAT_WINDOW_MS = 60_000;

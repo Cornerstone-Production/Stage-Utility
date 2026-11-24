@@ -14,7 +14,7 @@ const { setNamedSubscriberCheck, subscriptionsChanged } = await import("../broad
 const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
-const { QsysWriter, REFUSAL_LINE_INTERVAL_MS } = await import("./qsys-write.js");
+const { QsysWriter, REFUSAL_LINE_INTERVAL_MS, GESTURE_TIMEOUT_MS, isWritable, unwritableReason } = await import("./qsys-write.js");
 const { qsysAllowlist, allowEntryFromCatalog } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog, WRITE_LOG_CAP } = await import("./qsys-write-log.js");
 type QsysSettings = import("./qsys-settings.js").QsysSettings;
@@ -35,6 +35,9 @@ const GAIN: AllowEntry = { component: "Lobby_Mixer", control: "gain", label: "Lo
 const MUTE: AllowEntry = { component: "Lobby_Mixer", control: "mute", label: "Lobby mute", min: null, max: null, confirm: "hold" };
 const LEVEL: AllowEntry = { component: "Zone 1", control: "level", label: "Zone level", min: null, max: null, confirm: "none" };
 const CHIME: AllowEntry = { component: "Paging", control: "chime", label: "Chime", min: null, max: null, confirm: "none" };
+/** Read-only on the Core, though allowlisted with a range. */
+const METER: AllowEntry = { component: "Zone 1", control: "meter", label: "Zone meter", min: -100, max: 0, confirm: "none" };
+const SIGN: AllowEntry = { component: "Sign", control: "message", label: "Sign text", min: null, max: null, confirm: "none" };
 /** On the allowlist, not in the design. */
 const GHOST: AllowEntry = { component: "Lobby_Mixer", control: "gone", label: "Gone", min: -10, max: 0, confirm: "none" };
 
@@ -68,13 +71,17 @@ beforeEach(async () => {
     { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   // A numeric control the Core reports no range for.
-  fake.components.set("Zone 1", [{ Name: "level", Type: "Float", Value: 3, String: "3", Position: 0.3, Direction: "Read/Write" }]);
+  fake.components.set("Zone 1", [
+    { Name: "level", Type: "Float", Value: 3, String: "3", Position: 0.3, Direction: "Read/Write" },
+    { Name: "meter", Type: "Float", Value: -40, String: "-40", Position: 0.4, Direction: "Read", ValueMin: -100, ValueMax: 0 },
+  ]);
+  fake.components.set("Sign", [{ Name: "message", Type: "Text", Value: "hello", String: "hello", Position: 0, Direction: "Read/Write" }]);
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
   port = await fake.start();
   svc = new QsysService();
   watch = new QsysWatch(svc);
   writer = new QsysWriter(svc, watch);
-  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST]);
+  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN]);
 });
 
 afterEach(async () => {
@@ -300,17 +307,76 @@ describe("writeControl", () => {
     assert.equal(sets().length, 1);
   });
 
-  test("an allowlisted control missing from the design is refused before anything is sent", async () => {
+  test("an allowlisted control missing from the design is a pre-send refusal: one line and one merged entry for a drag", async () => {
     await connect();
+    const timed = new QsysWriter(svc, watch, () => 7_000_000);
     const warn = capture("warn");
     try {
-      const r = await writer.write(req({ control: "gone", value: -5 }));
-      assert.equal(r.ok ? null : r.reason, "core-error");
-      assert.ok(!r.ok && /not in the Core's design/.test(r.message));
+      for (let i = 0; i < 10; i++) {
+        const r = await timed.write(req({ control: "gone", value: -5, final: false, remote: "2001:db8::77" }));
+        assert.equal(r.ok ? null : r.reason, "not-in-design");
+        assert.ok(!r.ok && /not in the Core's design/.test(r.message));
+      }
     } finally {
       warn.restore();
     }
     assert.equal(sets().length, 0);
+    assert.equal(warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-in-design)")).length, 1, "a drag on a missing control wrote a line per sample");
+    const mine = (await qsysWriteLog.list()).entries.filter((e) => e.remote === "2001:db8::77");
+    assert.deepEqual(mine.map((e) => [e.result, e.repeats]), [["not-in-design", 10]], "a drag on a missing control wrote an entry per sample");
+  });
+
+  test("a control the Core reports read-only is refused before anything is sent, allowlist or not", async () => {
+    await connect();
+    const warn = capture("warn");
+    try {
+      const r = await writer.write(req({ component: "Zone 1", control: "meter", value: -10 }));
+      assert.equal(r.ok ? null : r.reason, "read-only");
+      assert.ok(!r.ok && /read-only on the Core/.test(r.message));
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sets().length, 0, "a read-only control reached the Core");
+  });
+
+  test("isWritable: read-only never; numeric only with a range; boolean, trigger and text without one", () => {
+    const [gain, mute] = fake.components.get("Lobby_Mixer")!;
+    const [level, meter] = fake.components.get("Zone 1")!;
+    const [chime] = fake.components.get("Paging")!;
+    const [message] = fake.components.get("Sign")!;
+    const none = { min: null, max: null };
+    const range = { min: -100, max: 0 };
+    assert.deepEqual(
+      [
+        unwritableReason(gain, range),
+        unwritableReason(gain, none),
+        unwritableReason(level, none),
+        unwritableReason(meter, range),
+        unwritableReason(mute, none),
+        unwritableReason(chime, none),
+        unwritableReason(message, none),
+        unwritableReason({ ...gain, Direction: "Write" }, range),
+      ],
+      [null, "no-range", "no-range", "read-only", null, null, null, null],
+    );
+    assert.equal(isWritable(gain, range), true);
+    assert.equal(isWritable(meter, range), false);
+  });
+
+  test("a text control takes text up to 1024 characters, and nothing else", async () => {
+    await connect();
+    const ok = await writer.write(req({ component: "Sign", control: "message", value: "x".repeat(1024) }));
+    assert.ok(ok.ok, `1024 characters were refused: ${JSON.stringify(ok)}`);
+    const warn = capture("warn");
+    try {
+      const long = await writer.write(req({ component: "Sign", control: "message", value: "x".repeat(1025) }));
+      assert.equal(long.ok ? null : long.reason, "bad-value", "a text past the cap was sent");
+      const number = await writer.write(req({ component: "Sign", control: "message", value: 5 }));
+      assert.equal(number.ok ? null : number.reason, "bad-value", "a number was sent to a text control");
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sets().length, 1);
   });
 
   test("records one write-log entry per call with device and panel", async () => {
@@ -419,7 +485,7 @@ describe("review round 1", () => {
       clock += 1;
       await timed.write(req());
       assert.equal(offline().length, 2, "no line after a minute");
-      assert.match(offline()[1], /\(5 more like it not logged\)$/);
+      assert.match(offline()[1], / — still failing after 7 attempts \(1 min\)$/);
 
       // A new episode: the Core came back, a write landed, the Core went again.
       await connect();
@@ -560,26 +626,74 @@ describe("review round 2", () => {
     assert.equal(mine[0].repeats, 8);
   });
 
-  test("many addresses cannot clear the offline limiter", async () => {
+  test("a client cycling addresses cannot write a line per request, nor clear the offline limiter", async () => {
     const timed = new QsysWriter(svc, watch, () => 6_000_000);
     const warn = capture("warn");
     const offline = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (offline)")).length;
+    const refusedLines = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-allowed)")).length;
+    const remote = (i: number) => `2001:db8::${i.toString(16)}`;
     try {
       await timed.write(req());
       assert.equal(offline(), 1);
-      for (let i = 0; i < 300; i++) await timed.write(req({ control: "nope", remote: `10.9.${i >> 8}.${i & 255}` }));
+      for (let i = 0; i < 300; i++) await timed.write(req({ control: "nope", remote: remote(i) }));
       await timed.write(req());
-      assert.equal(offline(), 1, "key churn reset the offline limiter");
-      // Bounded by dropping the oldest: the newest address is still held, the first was dropped.
-      const refusedLines = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-allowed)")).length;
-      const n = refusedLines();
-      await timed.write(req({ control: "nope", remote: "10.9.1.43" })); // i = 299
-      assert.equal(refusedLines(), n, "the newest address was forgotten");
-      await timed.write(req({ control: "nope", remote: "10.9.0.0" })); // i = 0
-      assert.equal(refusedLines(), n + 1, "the limiter kept every address: it is unbounded");
+      assert.equal(offline(), 1, "address churn reset the offline limiter");
+      // Eight addresses get their own first line; past them they share one bucket.
+      assert.equal(refusedLines(), 9, "a client cycling addresses wrote a line per address");
+      await timed.write(req({ control: "nope", remote: remote(100) }));
+      assert.equal(refusedLines(), 9, "an address in the middle of the run was forgotten and spoke again");
     } finally {
       warn.restore();
     }
+  });
+
+  test("a gesture's write-log entry says the value the gesture started from, not the last sample", async () => {
+    await connect();
+    await openPanel();
+    fake.setControl("Lobby_Mixer", "gain", -30);
+    await settle();
+    const drag = { remote: "2001:db8::d:1", device: "2001:db8::d:1 Drag" };
+    for (const value of [-25, -20, -15]) {
+      assert.ok((await writer.write(req({ value, final: false, ...drag }))).ok);
+      await settle();
+    }
+    assert.equal(watch.current([GAIN]).get("Lobby_Mixer\u0000gain")?.Value, -15, "the drag's samples did not reach the cache");
+    await writer.write(req({ value: -10, ...drag }));
+    const mine = async () => (await qsysWriteLog.list()).entries.filter((e) => e.remote === drag.remote);
+    assert.deepEqual((await mine()).map((e) => [e.from, e.to]), [[-30, -10]], "the entry's from was a mid-drag sample");
+    await settle();
+    // The next touch is a new gesture.
+    await writer.write(req({ value: -5, ...drag }));
+    assert.deepEqual((await mine())[0].from, -10);
+  });
+
+  test("a gesture left open expires, and open gestures are bounded by dropping the oldest", async () => {
+    let clock = 8_000_000;
+    const timed = new QsysWriter(svc, watch, () => clock);
+    await connect();
+    await openPanel();
+    fake.setControl("Lobby_Mixer", "gain", -30);
+    await settle();
+    const remote = (i: number) => `2001:db8::b:${i.toString(16)}`;
+    const fromOf = async (r: string) => (await qsysWriteLog.list()).entries.find((e) => e.remote === r)?.from;
+
+    // 300 gestures opened at -30 (the cap is 256), then the Core moves to -5.
+    for (let i = 0; i < 300; i++) await timed.write(req({ value: -30, final: false, remote: remote(i) }));
+    fake.setControl("Lobby_Mixer", "gain", -5);
+    await settle();
+    await timed.write(req({ value: -5, remote: remote(100) }));
+    assert.equal(await fromOf(remote(100)), -30, "a gesture in the middle was forgotten");
+    await timed.write(req({ value: -5, remote: remote(299) }));
+    assert.equal(await fromOf(remote(299)), -30, "the newest gesture was forgotten");
+    await timed.write(req({ value: -5, remote: remote(0) }));
+    assert.equal(await fromOf(remote(0)), -5, "open gestures are unbounded: the oldest was kept");
+
+    await timed.write(req({ value: -5, final: false, remote: "2001:db8::c" }));
+    fake.setControl("Lobby_Mixer", "gain", -7);
+    await settle();
+    clock += GESTURE_TIMEOUT_MS;
+    await timed.write(req({ value: -5, remote: "2001:db8::c" }));
+    assert.equal(await fromOf("2001:db8::c"), -7, "a gesture abandoned past the timeout was still open");
   });
 });
 

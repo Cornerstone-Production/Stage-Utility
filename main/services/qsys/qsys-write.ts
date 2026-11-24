@@ -15,15 +15,17 @@
 // Every write goes as `Component.Set` with `ResponseValues: true`, and the
 // Core's answer is what the caller gets back. A read-back that differs from what
 // was sent is logged. A refusal is always a write-log entry; a write that landed
-// is one when it is its gesture's last (`final` not false). Refusals checked
-// before sending write their [qsys] line at a limited rate (RefusalLines).
+// is one when it is its gesture's last (`final` not false), and its `from` is the
+// value when the gesture started. Refusals checked before sending write their
+// [qsys] line at a limited rate (an OutageLog: see refusalLine).
 
 import { errorMessage } from "../errors.js";
+import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { addressKey } from "../../types/qsys.js";
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcControl } from "./qrc-types.js";
-import { isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
+import { type AllowEntry, isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
 import { PRE_SEND_REFUSALS, qsysWriteLog } from "./qsys-write-log.js";
@@ -50,7 +52,7 @@ export interface WriteRequest {
   final?: boolean;
 }
 
-export type WriteRefusal = "not-allowed" | "no-range" | "offline" | "bad-value" | "core-error";
+export type WriteRefusal = "not-allowed" | "not-in-design" | "read-only" | "no-range" | "offline" | "bad-value" | "core-error";
 
 export type WriteResult =
   | { ok: true; value: unknown; string: string; position?: number; clamped: boolean }
@@ -70,8 +72,10 @@ export interface WriteReadiness {
 
 /** A refusal line already written is not repeated for this long, unless its state changed. */
 export const REFUSAL_LINE_INTERVAL_MS = 60_000;
-/** Distinct refusal keys remembered before the memory is reset. */
-const MAX_REFUSAL_KEYS = 256;
+/** How long a gesture's starting value is kept waiting for its last write. */
+export const GESTURE_TIMEOUT_MS = 10_000;
+/** Open gestures remembered at once; past it the oldest is dropped. */
+const MAX_GESTURES = 256;
 
 /** The longest text value a write may carry. */
 const MAX_TEXT = 1024;
@@ -86,7 +90,7 @@ type Kind = "boolean" | "trigger" | "text" | "number";
  * strings the Core reports are on the spec's "verify in Emulate" list; the
  * value's own type backs them up.
  */
-function kindOf(c: QrcControl): Kind {
+export function kindOf(c: QrcControl): Kind {
   const type = String(c.Type ?? "");
   if (/^bool/i.test(type) || typeof c.Value === "boolean") return "boolean";
   if (/^trigger/i.test(type)) return "trigger";
@@ -94,41 +98,54 @@ function kindOf(c: QrcControl): Kind {
   return "number";
 }
 
-type Checked = { ok: true; send: number | boolean | string; clamped: boolean } | { ok: false; reason: WriteRefusal; message: string };
+/**
+ * Why `c` cannot be written under `entry` whatever the value, or null when it
+ * can: the Core reports it read-only, or it is numeric and the entry sets no
+ * range. The one rule for "is this writable"; the writer refuses on it before
+ * sending, and anything that asks the same question asks here.
+ */
+export function unwritableReason(c: QrcControl, entry: Pick<AllowEntry, "min" | "max">): "read-only" | "no-range" | null {
+  if (/^read$/i.test(String(c.Direction ?? "").trim())) return "read-only";
+  if (kindOf(c) === "number" && (entry.min === null || entry.max === null)) return "no-range";
+  return null;
+}
 
-function checkValue(kind: Kind, value: unknown, min: number | null, max: number | null, where: string): Checked {
-  switch (kind) {
-    case "boolean":
-      if (typeof value !== "boolean") return { ok: false, reason: "bad-value", message: `${where} takes true or false` };
-      return { ok: true, send: value, clamped: false };
-    case "trigger":
-      // QRC fires a trigger on any Set; 1 is what the reference shows.
-      if (value !== true && value !== 1) return { ok: false, reason: "bad-value", message: `${where} is a trigger; send true` };
-      return { ok: true, send: 1, clamped: false };
-    case "text":
-      if (typeof value !== "string" || value.length > MAX_TEXT) return { ok: false, reason: "bad-value", message: `${where} takes text of up to ${MAX_TEXT} characters` };
-      return { ok: true, send: value, clamped: false };
-    case "number": {
-      if (typeof value !== "number" || !Number.isFinite(value)) return { ok: false, reason: "bad-value", message: `${where} takes a finite number` };
-      if (min === null || max === null) return { ok: false, reason: "no-range", message: `${where} has no write range set on the allowlist` };
+export function isWritable(c: QrcControl, entry: Pick<AllowEntry, "min" | "max">): boolean {
+  return unwritableReason(c, entry) === null;
+}
+
+type Refused = Extract<WriteResult, { ok: false }>;
+type Checked = { ok: true; send: number | boolean | string; clamped: boolean } | Refused;
+const badValue = (message: string): Refused => ({ ok: false, reason: "bad-value", message });
+
+/** Per kind: what a value must be (min/max are set wherever a range is needed),
+ *  and whether a read-back is the value sent. */
+const KINDS: Record<Kind, { check(value: unknown, min: number, max: number, where: string): Checked; same(sent: unknown, got: unknown): boolean }> = {
+  boolean: {
+    check: (value, _min, _max, where) => (typeof value === "boolean" ? { ok: true, send: value, clamped: false } : badValue(`${where} takes true or false`)),
+    same: (sent, got) => sent === (got === true || got === 1),
+  },
+  trigger: {
+    // QRC fires a trigger on any Set; 1 is what the reference shows.
+    check: (value, _min, _max, where) => (value === true || value === 1 ? { ok: true, send: 1, clamped: false } : badValue(`${where} is a trigger; send true`)),
+    same: () => true,
+  },
+  text: {
+    check: (value, _min, _max, where) =>
+      typeof value === "string" && value.length <= MAX_TEXT
+        ? { ok: true, send: value, clamped: false }
+        : badValue(`${where} takes text of up to ${MAX_TEXT} characters`),
+    same: (sent, got) => got === sent,
+  },
+  number: {
+    check: (value, min, max, where) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return badValue(`${where} takes a finite number`);
       const send = Math.min(max, Math.max(min, value));
       return { ok: true, send, clamped: send !== value };
-    }
-  }
-}
-
-function sameValue(kind: Kind, sent: number | boolean | string, got: unknown): boolean {
-  switch (kind) {
-    case "trigger":
-      return true;
-    case "boolean":
-      return sent === (got === true || got === 1);
-    case "number":
-      return typeof got === "number" && Math.abs(got - (sent as number)) <= READBACK_TOLERANCE;
-    case "text":
-      return got === sent;
-  }
-}
+    },
+    same: (sent, got) => typeof got === "number" && Math.abs(got - (sent as number)) <= READBACK_TOLERANCE,
+  },
+};
 
 /** A value fit for the log: what the request carried, bounded. */
 function loggable(v: unknown): unknown {
@@ -141,63 +158,64 @@ function findControl(catalog: QsysCatalog, component: string, control: string): 
   return catalog.components.find((c) => c.name === component)?.controls.find((c) => c.Name === control);
 }
 
-/**
- * Refusals checked before anything is sent (offline, not-allowed, no-range,
- * bad-value) can arrive at drag rate, or from a client looping on a bad request.
- * Each kind writes its [qsys] line once, then again only when its state changes
- * (for offline: a different connection, or none) or a minute has passed, saying
- * how many it held back. A refusal from the Core itself is always written.
- */
-type Gate = { state: unknown; at: number; held: number };
+/** Refusal messages, by reason, for refusals unwritableReason gives. */
+const UNWRITABLE_MESSAGE: Record<"read-only" | "no-range", (where: string) => string> = {
+  "read-only": (where) => `${where} is read-only on the Core`,
+  "no-range": (where) => `${where} has no write range set on the allowlist`,
+};
 
-class RefusalLines {
-  /** Offline is one connection-wide state, kept apart so no other key can evict it. */
-  private offline: Gate | null = null;
-  /** Per reason and remote address, oldest first; past the cap the oldest is dropped, never the lot. */
-  private readonly byRemote = new Map<string, Gate>();
-
-  constructor(private readonly now: () => number) {}
-
-  forgetOffline(): void {
-    this.offline = null;
-  }
-
-  /** Null when this line is held back; otherwise how many like it were held back since the last. */
-  gateOffline(state: unknown): number | null {
-    const { gate, held } = this.pass(this.offline, state);
-    this.offline = gate;
-    return held;
-  }
-
-  gateRemote(key: string): number | null {
-    const last = this.byRemote.get(key);
-    const { gate, held } = this.pass(last ?? null, undefined);
-    // Re-inserted, so the map stays in order of last use.
-    this.byRemote.delete(key);
-    if (!last && this.byRemote.size >= MAX_REFUSAL_KEYS) this.byRemote.delete(this.byRemote.keys().next().value!);
-    this.byRemote.set(key, gate);
-    return held;
-  }
-
-  private pass(last: Gate | null, state: unknown): { gate: Gate; held: number | null } {
-    const t = this.now();
-    if (last && last.state === state && t - last.at < REFUSAL_LINE_INTERVAL_MS) {
-      last.held++;
-      return { gate: last, held: null };
-    }
-    return { gate: { state, at: t, held: 0 }, held: last?.held ?? 0 };
-  }
-}
+/** A gesture's starting value, waiting for the gesture's last write. */
+type Gesture = { from: unknown; at: number };
 
 export class QsysWriter {
-  private readonly lines: RefusalLines;
+  /**
+   * Refusals checked before anything is sent can arrive at drag rate, or from a
+   * client looping on a bad request. Keyed by reason, with the remote address as
+   * the kind: the first refusal of each remote is written, then one reminder a
+   * minute with the count; past eight remotes in a run they share one bucket, so
+   * a client cycling addresses cannot talk once per request. Offline is one
+   * connection-wide state: its kind is the connection, so a new connection (or
+   * none) is news, and readiness coming back ends the run. A refusal from the
+   * Core itself is always written.
+   */
+  private readonly refusals = new OutageLog(REFUSAL_LINE_INTERVAL_MS, REFUSAL_LINE_INTERVAL_MS);
+  /** An id per connection, for the offline line's kind. */
+  private readonly connections = new WeakMap<object, number>();
+  private nextConnection = 1;
+  /** Open gestures by remote, panel and address, oldest first. */
+  private readonly gestures = new Map<string, Gesture>();
 
   constructor(
     private readonly source: WriteSource,
     private readonly watch: WriteReadiness,
     private readonly now: () => number = Date.now,
-  ) {
-    this.lines = new RefusalLines(now);
+  ) {}
+
+  private connectionKind(t: QrcTransport | null): string {
+    if (!t) return "none";
+    let id = this.connections.get(t);
+    if (id === undefined) this.connections.set(t, (id = this.nextConnection++));
+    return `connection ${id}`;
+  }
+
+  /**
+   * The value `address` held when this gesture started. The first write of a
+   * gesture (no open one for the key, or one older than GESTURE_TIMEOUT_MS) reads
+   * it from the watch; a mid-gesture write keeps it; the last write takes it and
+   * closes the gesture. A refused mid-gesture write leaves it to expire.
+   */
+  private gestureFrom(key: string, final: boolean, read: () => unknown): unknown {
+    const t = this.now();
+    const open = this.gestures.get(key);
+    const gesture = open && t - open.at < GESTURE_TIMEOUT_MS ? open : { from: read(), at: t };
+    this.gestures.delete(key);
+    if (!final) {
+      gesture.at = t;
+      if (this.gestures.size >= MAX_GESTURES) this.gestures.delete(this.gestures.keys().next().value!);
+      // Re-inserted, so the map stays in order of last use.
+      this.gestures.set(key, gesture);
+    }
+    return gesture.from;
   }
 
   async write(req: WriteRequest): Promise<WriteResult> {
@@ -222,14 +240,10 @@ export class QsysWriter {
     };
     /** `detail` goes to /log only; the caller gets `message`. */
     const refuse = (reason: WriteRefusal, message: string, detail = message): Promise<WriteResult> => {
-      const held = !PRE_SEND_REFUSALS.has(reason)
-        ? 0
-        : reason === "offline"
-          ? this.lines.gateOffline(this.source.transport)
-          : this.lines.gateRemote(`${reason}\u0000${req.remote}`);
-      if (held !== null) {
-        console.warn(`[qsys] write refused (${scrub(reason)}): ${scrub(detail)}${scrub(held ? ` (${held} more like it not logged)` : "")}`);
-      }
+      const line = PRE_SEND_REFUSALS.has(reason)
+        ? this.refusals.fail(reason, reason === "offline" ? this.connectionKind(this.source.transport) : req.remote, this.now())
+        : { log: true, note: "" };
+      if (line.log) console.warn(`[qsys] write refused (${scrub(reason)}): ${scrub(detail)}${scrub(line.note)}`);
       return finish({ ok: false, reason, message }, reason);
     };
 
@@ -247,13 +261,17 @@ export class QsysWriter {
       return refuse("offline", `the Core is not connected, or its current values have not been read since it reconnected; ${where} was not written`);
     }
     // Readiness is back: the next offline refusal starts a new episode and is logged.
-    this.lines.forgetOffline();
+    this.refusals.forget("offline");
     const c = findControl(catalog, component, control);
-    if (!c) return refuse("core-error", `${where} is not in the Core's design`);
-    const kind = kindOf(c);
-    const checked = checkValue(kind, req.value, entry.min, entry.max, where);
+    if (!c) return refuse("not-in-design", `${where} is not in the Core's design`);
+    const unwritable = unwritableReason(c, entry);
+    if (unwritable) return refuse(unwritable, UNWRITABLE_MESSAGE[unwritable](where));
+    const kind = KINDS[kindOf(c)];
+    // A numeric control has a range here (unwritableReason); the others ignore it.
+    const checked = kind.check(req.value, entry.min ?? 0, entry.max ?? 0, where);
     if (!checked.ok) return refuse(checked.reason, checked.message);
-    from = this.watch.current([{ component, control }]).get(addressKey({ component, control }))?.Value ?? null;
+    const address = { component, control };
+    from = this.gestureFrom(`${req.remote}\u0000${req.panelId ?? ""}\u0000${addressKey(address)}`, final, () => this.watch.current([address]).get(addressKey(address))?.Value ?? null);
     to = checked.send;
     const sending = t.send("Component.Set", { Name: component, Controls: [{ Name: control, Value: checked.send }], ResponseValues: true });
 
@@ -272,8 +290,10 @@ export class QsysWriter {
       : undefined;
     if (!back || !("Value" in back)) return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);
 
+    // A write landed: a run of pre-send refusals that has been quiet for a minute is over.
+    for (const reason of PRE_SEND_REFUSALS) if (reason !== "offline") this.refusals.ok(reason, this.now());
     if (checked.clamped && final) console.log(`[qsys] write to ${scrub(where)} clamped from ${scrub(req.value)} to ${scrub(checked.send)}`);
-    const matched = sameValue(kind, checked.send, back.Value);
+    const matched = kind.same(checked.send, back.Value);
     if (!matched && final) console.warn(`[qsys] read-back mismatch on ${scrub(where)}: sent ${scrub(checked.send)}, the Core holds ${scrub(back.Value)}`);
     const result: WriteResult = {
       ok: true,
