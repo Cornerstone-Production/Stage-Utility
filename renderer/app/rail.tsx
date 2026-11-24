@@ -230,7 +230,7 @@ export function Rail({
           items.push({
             label: s.label || "Top, beside Home",
             onSelect: () =>
-              customize.apply(movePage(resolved, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
+              customize.apply((r) => movePage(r, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
           });
         }
       }

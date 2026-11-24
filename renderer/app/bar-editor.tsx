@@ -9,7 +9,7 @@
 // strip (in the context bar) and the tiles (in the tray) are in different parts
 // of the page and one drag spans them.
 
-import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useDraggable, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
@@ -23,7 +23,6 @@ import {
   DEFAULT_BAR_ORDER,
   hasMobileBar,
   isBarGap,
-  normalizeBarRows,
   phoneShowsEditedSet,
   visibleBarItems,
   type BarItem,
@@ -34,7 +33,9 @@ import { useBarFit } from "./bar-fit";
 import { BAR_STRIP_CLASS, BarStripRows, renderBarItem, type BarItemContext } from "./bar-strip";
 import { droppedOnBar, gapFromBoxes, type MeasuredRow } from "./bar-drop";
 import { dropPoint } from "./drag-geometry";
-import { setBarItems, type BarSet } from "./set-bar-items";
+import { barListIo, barRowsOf, saveBarSet, sameBarIds, type BarEditRow, type BarSet } from "./set-bar-items";
+import { useSavedList } from "./use-saved-list";
+import { toast } from "../components/ui";
 import { Caret, DRAGGABLE } from "./drag-parts";
 import { useResyncOn } from "../lib/use-resync-on";
 import { useStageState } from "../main/use-stage-state";
@@ -42,13 +43,6 @@ import { cn } from "../lib/cn";
 import { joinWithAnd } from "../lib/join-with-and";
 
 export const ALL_BAR_IDS = Object.keys(BAR_ITEMS) as BarItemId[];
-
-/** A row being edited. Spacers repeat, so a row needs an identity of its own:
- *  drags are addressed by key, and two rows sharing one swap with themselves. */
-export interface BarEditRow {
-  key: string;
-  id: BarRowId;
-}
 
 /** What a bar drag carries: a row already in the strip, or a tile from the tray. */
 export type BarDrag = { kind: "bar-chip"; key: string } | { kind: "bar-tile"; id: BarRowId };
@@ -122,39 +116,47 @@ export interface BarEditor {
 
 /** The provider's one Undo toast, shared by both tabs. */
 export interface UndoChannel {
-  offer: (said: string, undo: () => void) => void;
-  retire: () => void;
+  /** Retires the toast on screen and returns this change's ticket. */
+  retire: () => number;
+  /** Offers an Undo for the change that took `ticket`; not if a newer change has retired it since. */
+  offer: (said: string, undo: () => void, ticket: number) => void;
 }
 
-const sameIds = (rows: readonly BarEditRow[], ids: readonly BarRowId[]) =>
-  rows.length === ids.length && rows.every((r, i) => r.id === ids[i]);
+/** What an emptied strip is saved as: a gap, never nothing (an empty phone set means "follow the desktop"). */
+const EMPTIED: BarEditRow = { key: "emptied", id: BAR_SPACER };
+
+// Row keys, unique for the page's life. A counter, not crypto.randomUUID: that
+// is undefined outside a secure context and production is plain HTTP.
+let rowCounter = 0;
+const nextRowKey = () => `row${++rowCounter}`;
+
+const keyOfRows = (rows: readonly BarEditRow[]) => JSON.stringify(rows.map((r) => r.id));
 
 /**
  * The bar's editor state.
  *
- * `active` is "the Context bar tab is showing"; `opened` is "the mode is on",
- * which is when the set being edited is chosen (the device's own) and kept
- * through any change of tab.
+ * `opened` is "the mode is on", which is when the set being edited is chosen
+ * (the device's own) and kept through any change of tab.
+ *
+ * Each set is a list the server holds whole, saved one change at a time (see
+ * use-saved-list.ts), and the strip draws the list of the set being edited. An
+ * edit is a function of the rows it lands on, so one made while another is
+ * saving builds on that one, a refused one is dropped with the strip read back
+ * from the server, and a save for one set never touches what the other shows.
  */
 export function useBarEditor({
-  active,
   opened,
   startOn,
   undo,
 }: {
-  active: boolean;
   opened: boolean;
   startOn: BarSet;
   undo: UndoChannel;
 }): BarEditor {
   const queryClient = useQueryClient();
   const { state } = useStageState();
-  // Row keys, unique per editor session. A counter, not crypto.randomUUID: that
-  // is undefined outside a secure context and production is plain HTTP.
-  const counter = useRef(0);
-  const nextKey = () => `row${++counter.current}`;
+  const nextKey = nextRowKey;
   const barRef = useRef<HTMLDivElement | null>(null);
-  const [rows, setRows] = useState<BarEditRow[]>([]);
   const [dragging, setDragging] = useState<BarRowId | null>(null);
   const [editing, setEditing] = useState<BarSet>(startOn);
   // Held as the RESOLVED target rather than a gap index so rendering never has
@@ -166,57 +168,41 @@ export function useBarEditor({
   const [wasPlaceable, setWasPlaceable] = useState(false);
   /** The drag began on a chip in the bar, so letting go off the bar removes it. */
   const [fromChip, setFromChip] = useState(false);
-  /** Saves of ours not yet answered: a broadcast then may be our own echo. */
-  const [saving, setSaving] = useState(0);
 
-  const savedDesktop = state?.barItems;
-  const savedMobile = state?.barMobileItems;
+  // The lists as broadcast. Memoised on what they say, so a broadcast about
+  // something else mints no keys.
+  const desktopKey = state ? JSON.stringify(visibleBarItems(state.barItems)) : null;
+  const mobileKey = state ? JSON.stringify(hasMobileBar(state.barMobileItems) ? visibleBarItems(state.barMobileItems) : []) : null;
+  const desktopSaved = useMemo(
+    () => (desktopKey === null ? null : (JSON.parse(desktopKey) as BarRowId[]).map((id) => ({ key: nextKey(), id }))),
+    [desktopKey, nextKey],
+  );
+  const mobileSaved = useMemo(
+    () => (mobileKey === null ? null : (JSON.parse(mobileKey) as BarRowId[]).map((id) => ({ key: nextKey(), id }))),
+    [mobileKey, nextKey],
+  );
+  const desktopIo = useMemo(() => barListIo(queryClient, "desktop", nextKey), [queryClient, nextKey]);
+  const mobileIo = useMemo(() => barListIo(queryClient, "mobile", nextKey), [queryClient, nextKey]);
+  // Not mid-drag, where the rows measured at the start must stay.
+  const desktop = useSavedList({ io: desktopIo, saved: desktopSaved, keyOf: keyOfRows, hold: dragging !== null });
+  const mobile = useSavedList({ io: mobileIo, saved: mobileSaved, keyOf: keyOfRows, hold: dragging !== null });
+
   // An unset phone set FOLLOWS the desktop one. So the phone set opens showing
   // the desktop arrangement, which is what the phone is showing, rather than an
   // empty strip that would read as "you have no bar on a phone".
-  const inheriting = editing === "mobile" && !hasMobileBar(savedMobile);
-  const savedFor = (set: BarSet): readonly BarRowId[] =>
-    visibleBarItems(set === "mobile" && hasMobileBar(savedMobile) ? savedMobile : savedDesktop);
-  const saved = savedFor(editing);
-  const savedKey = JSON.stringify(saved);
-  const shownOnPhone = phoneShowsEditedSet(editing, savedMobile);
+  const inheriting = editing === "mobile" && mobile.list.length === 0;
+  const rows = editing === "mobile" && !inheriting ? mobile.list : desktop.list;
+  const shownOnPhone = phoneShowsEditedSet(editing, mobile.list.map((r) => r.id));
 
   // The set being edited is the device's own when the mode opens, and stays
   // whatever the operator then picks, across the Sidebar tab and back.
   useResyncOn([opened], () => {
     if (opened) setEditing(startOn);
   });
-  // The strip follows the saved arrangement when the tab opens, when the set
-  // changes, and when the saved set changes BY VALUE with no save of ours in
-  // flight: another browser's change is taken in, so our next drag does not
-  // overwrite it. Not mid-drag, where the rows measured at the start must stay;
-  // and not when the rows already match, so our own echo changes no keys.
-  useResyncOn([active, editing, savedKey, dragging === null], () => {
-    if (!active || saving > 0 || dragging !== null || sameIds(rows, saved)) return;
-    setRows(saved.map((id) => ({ key: nextKey(), id })));
-  });
 
   // The rows in the strip at the start of a drag, the dragged one marked.
   // Safe to cache precisely because nothing shifts mid-drag.
   const still = useRef<MeasuredRow[]>([]);
-
-  const latest = useRef({ editing, savedFor });
-  useEffect(() => {
-    latest.current = { editing, savedFor };
-  });
-  /** After a refusal, or an Undo for a set: repaint from what is saved, but only
-   *  when that set is the one on screen. */
-  function repaint(set: BarSet, ids?: readonly BarRowId[]) {
-    if (latest.current.editing !== set) return;
-    setRows((ids ?? latest.current.savedFor(set)).map((id) => ({ key: nextKey(), id })));
-  }
-
-  async function save(set: BarSet, items: string[]): Promise<boolean> {
-    setSaving((n) => n + 1);
-    const ok = await setBarItems(queryClient, set, items);
-    setSaving((n) => n - 1);
-    return ok;
-  }
 
   /**
    * Every change goes through here, so nothing reaches the server unnormalised
@@ -225,51 +211,65 @@ export function useBarEditor({
    * the desktop bar is what forks it, so there is no separate "give the phone
    * its own set" step to forget. A newer change retires any Undo on screen.
    *
-   * A REFUSED WRITE PUTS THE ROWS BACK, and this is the only place that can.
-   * `setBarItems` is optimistic, but its optimism does not reach here: it writes
-   * `["stage:getState"]` in React Query, and every bar surface reads
-   * `useStageState`, the independent SSE store, which live-wiring only ever
-   * pushes INTO the cache. So the rollback the shared helper performs is
-   * invisible on this screen. What is saved is what a refusal leaves in place.
+   * `make` is a function of the rows it lands on, and returns them unchanged for
+   * "nothing to do". A refusal is said in the server's words, and the strip goes
+   * back to what the server holds.
    */
-  async function commit(next: BarEditRow[], set: BarSet = editing) {
-    undo.retire();
-    if (set === editing) setRows(next);
-    if (!(await save(set, normalizeBarRows(next.map((r) => r.id))))) repaint(set);
+  async function change(set: BarSet, make: (cur: BarEditRow[]) => BarEditRow[]): Promise<{ ok: boolean; ticket: number }> {
+    const ticket = undo.retire();
+    // What a phone that follows the desktop bar forks from: the rows on screen now.
+    const forkFrom = set === "mobile" && inheriting ? desktop.list : null;
+    const result = await (set === "mobile" ? mobile : desktop).edit((l) => {
+      const cur = l.length === 0 && forkFrom ? forkFrom : l;
+      const next = make(cur);
+      if (next === cur) return l;
+      return next.length > 0 ? next : [EMPTIED];
+    });
+    if (!result.ok) toast.error(result.error);
+    return { ok: result.ok, ticket };
   }
 
   /** Hand the phone back to the desktop bar. The one way out of a fork, and the
    *  reason forking on first edit is safe rather than a trap. */
-  async function followDesktop() {
-    undo.retire();
-    repaint("mobile", visibleBarItems(savedDesktop));
-    if (!(await save("mobile", []))) repaint("mobile");
+  async function followDesktop(): Promise<{ ok: boolean; ticket: number }> {
+    const ticket = undo.retire();
+    const result = await mobile.request(async () => barRowsOf(await saveBarSet(queryClient, "mobile", []), "mobile", nextKey));
+    if (!result.ok) toast.error(result.error);
+    return { ok: result.ok, ticket };
   }
 
-  function add(id: BarRowId, at = rows.length) {
-    const next = [...rows];
-    next.splice(at, 0, { key: nextKey(), id });
-    void commit(next);
+  function add(id: BarRowId) {
+    const row = { key: nextKey(), id };
+    void change(editing, (cur) => [...cur, row]);
+  }
+
+  function remove(key: string) {
+    void change(editing, (cur) => (cur.some((r) => r.key === key) ? cur.filter((r) => r.key !== key) : cur));
   }
 
   /**
    * The default set, with an Undo that puts back exactly what this set was: its
    * own arrangement, or, for a phone that was following the desktop bar, the
-   * following. It repaints only if that set is still the one on screen.
+   * following. The Undo is offered once the change has saved.
    */
   function useDefault() {
     const set = editing;
     const wasFollowing = inheriting;
     const before = rows.map((r) => r.id);
-    void commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey(), id })), set);
-    undo.offer("Restored the default bar.", () => {
-      if (set === "mobile" && wasFollowing) {
-        repaint("mobile", visibleBarItems(savedDesktop));
-        void save("mobile", []).then((ok) => ok || repaint("mobile"));
-        return;
-      }
-      repaint(set, before);
-      void save(set, normalizeBarRows([...before])).then((ok) => ok || repaint(set));
+    const defaults = DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey(), id }));
+    void change(set, () => defaults).then(({ ok, ticket }) => {
+      if (!ok) return;
+      undo.offer(
+        "Restored the default bar.",
+        () => {
+          if (set === "mobile" && wasFollowing) void followDesktop();
+          else {
+            const restored = before.map((id) => ({ key: nextKey(), id }));
+            void change(set, () => restored);
+          }
+        },
+        ticket,
+      );
     });
   }
 
@@ -313,19 +313,21 @@ export function useBarEditor({
     setCaret(null);
     if (g === null) {
       // Not a place. A row dragged out of the bar goes; a tile flies home.
-      if (data.kind === "bar-chip") void commit(rows.filter((r) => r.key !== data.key));
+      if (data.kind === "bar-chip") remove(data.key);
       return;
     }
-    const staying = stayingKeys()
-      .map((k) => rows.find((r) => r.key === k))
-      .filter((r): r is BarEditRow => r !== undefined);
-    const moved = data.kind === "bar-tile" ? { key: nextKey(), id: data.id } : rows.find((r) => r.key === data.key);
-    if (!moved) return;
-    const next = [...staying];
-    next.splice(g, 0, moved);
-    // Let go where it was: nothing changed, nothing to save.
-    if (data.kind === "bar-chip" && sameIds(rows, next.map((r) => r.id))) return;
-    void commit(next);
+    const staying = stayingKeys();
+    const tile = data.kind === "bar-tile" ? { key: nextKey(), id: data.id } : null;
+    const drop = (cur: BarEditRow[]): BarEditRow[] => {
+      const moved = tile ?? cur.find((r) => r.key === (data as { key: string }).key);
+      if (!moved) return cur;
+      const next = staying.flatMap((k) => cur.find((r) => r.key === k) ?? []);
+      next.splice(g, 0, moved);
+      // Let go where it was: nothing changed, nothing to save.
+      return tile === null && sameBarIds(cur, next.map((r) => r.id)) ? cur : next;
+    };
+    if (drop(rows) === rows) return;
+    void change(editing, drop);
   }
 
   function onDragCancel() {
@@ -347,7 +349,7 @@ export function useBarEditor({
     removing: dragging !== null && fromChip && !wasPlaceable,
     barRef,
     add: (id) => add(id),
-    remove: (key) => void commit(rows.filter((r) => r.key !== key)),
+    remove,
     useDefault,
     followDesktop: () => void followDesktop(),
     onDragStart,

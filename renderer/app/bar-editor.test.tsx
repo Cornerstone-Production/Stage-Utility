@@ -46,7 +46,15 @@ class StubEventSource {
 type Bar = { barItems: string[]; barMobileItems: string[] };
 let state: Record<string, unknown> & Bar;
 let refuse = false;
+/** Answer a save with what it saved, as if another browser's save landed right after it. */
+let answerOnly = false;
 const saves: Record<string, unknown>[] = [];
+/** While set, the next save waits here before the server applies it: a slow link. */
+let hold: Promise<void> | null = null;
+let releaseHold: (() => void) | null = null;
+function holdNextSave(): void {
+  hold = new Promise<void>((r) => (releaseHold = r));
+}
 
 function emitState(): void {
   const frame = { data: JSON.stringify(state) };
@@ -64,7 +72,13 @@ const json = (status: number, value: unknown) => ({ ok: status < 400, status, js
   if (method === "POST" && path === "/api/bar-items") {
     const body = JSON.parse(init?.body ?? "{}") as { items?: string[]; mobileItems?: string[] };
     saves.push(body);
+    if (hold) {
+      const waiting = hold;
+      hold = null; // only this one waits
+      await waiting;
+    }
     if (refuse) return json(400, { error: "refused for the test" });
+    if (answerOnly) return json(200, { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems });
     state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
     emitState();
     return json(200, state);
@@ -89,9 +103,14 @@ after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   state = { views: [], outputs: [], appName: "Bar test app", sidebar: { sections: [], hidden: [] }, barItems: ["clock", "spacer", "live-timer"], barMobileItems: [] };
   refuse = false;
+  answerOnly = false;
+  hold = null;
+  releaseHold = null;
   saves.length = 0;
 });
 afterEach(() => {
+  // A save a failed test left waiting must not keep the run open.
+  releaseHold?.();
   cleanup();
   resetStageState();
   resetReplayCache();
@@ -318,6 +337,65 @@ describe("the bar editor, beyond one set and one browser", () => {
     state.barItems = ["spacer"];
     await mountInMode();
     await eventually(() => assert.ok(screen.getByText("Drag something in.")));
+  });
+});
+
+describe("saves that are still out when the operator moves on", () => {
+  /** The labels of the rows drawn in the strip, in order. */
+  const rowLabels = () => [...document.querySelectorAll("[data-row-key]")].map((n) => n.getAttribute("aria-label"));
+
+  test("switching to the phone set while a desktop save is out shows the phone's own set, and edits it", async () => {
+    state.barMobileItems = ["recording", "spacer"];
+    await mountInMode();
+    holdNextSave();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    await toPhone();
+    await act(async () => releaseHold!());
+    await eventually(() => assert.ok(chip("Recording"), "the phone's own set never reached the strip"));
+    assert.equal(chip("Clock"), null, `the phone strip still shows the desktop rows: ${JSON.stringify(rowLabels())}`);
+    // And the next phone edit is built on the phone's set, not on the desktop rows.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Recording" })));
+    await eventually(() => assert.equal(saves.length, 2));
+    assert.deepEqual(saves[1], { mobileItems: normalizeBarRows(["spacer"]) });
+  });
+
+  test("another browser's change that lands while a save is out is taken in once it settles", async () => {
+    await mountInMode();
+    answerOnly = true;
+    holdNextSave();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Recording" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    // The other browser saved after this one; its broadcast gets here before this answer does.
+    await act(async () => {
+      state = { ...state, barItems: ["clock", "spacer", "live-timer", "streaming"] };
+      emitState();
+    });
+    await act(async () => releaseHold!());
+    await eventually(() => assert.ok(chip("Streaming"), "the other browser's change was dropped"));
+    await eventually(() => assert.equal(chip("Recording"), null, "the strip kept an arrangement the server no longer holds"));
+  });
+
+  test("this save's own echo, arriving while a later edit is queued behind it, is not applied twice", async () => {
+    await mountInMode();
+    const spacers = () => rowLabels().filter((l) => l === "Space: drag to move").length;
+    const before = spacers();
+    holdNextSave();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    // The first save has taken, and its broadcast arrives while the second edit waits.
+    await act(async () => {
+      state = { ...state, barItems: saves[0].items as string[] };
+      emitState();
+    });
+    // The second save runs after the first answers, so let both finish inside the scope.
+    await act(async () => {
+      releaseHold!();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    assert.equal(saves.length, 2);
+    assert.equal(spacers(), before + 2, `${JSON.stringify(rowLabels())}`);
   });
 });
 

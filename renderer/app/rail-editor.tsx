@@ -34,7 +34,8 @@ import { Caret, DRAGGABLE } from "./drag-parts";
 import type { RailDrag } from "./rail-drop";
 import type { Destination } from "./destinations";
 import { setBranding } from "./set-branding";
-import { addSection, newSectionId, removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
+import { uid } from "../lib/uid";
+import { addSection, removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
 
 const X_BUTTON =
   "grid size-5 shrink-0 place-items-center rounded-full border border-line-strong bg-surface text-fg-muted " +
@@ -67,8 +68,8 @@ export function RailEditor({
   const [renaming, setRenaming] = useState<string | null>(null);
 
   function addNew() {
-    const id = newSectionId(resolved);
-    customize.apply(addSection(resolved, id));
+    const id = uid("s");
+    customize.apply((r) => addSection(r, id));
     setRenaming(id);
   }
 
@@ -86,7 +87,7 @@ export function RailEditor({
             onRename={() => setRenaming(section.id)}
             onRenamed={(label) => {
               setRenaming(null);
-              if (label !== null) customize.apply(renameSection(resolved, section.id, label));
+              if (label !== null) customize.apply((r) => renameSection(r, section.id, label));
             }}
           />
         ))}
@@ -121,7 +122,7 @@ function SectionEditor({
   /** The new name, or null when the rename was abandoned. */
   onRenamed: (label: string | null) => void;
 }) {
-  const { resolved, apply, drag, aim } = useCustomize();
+  const { apply, drag, aim } = useCustomize();
   // A phone has no hover, so its × buttons are always shown.
   const { isMobile: alwaysShowX } = useSidebarChrome();
   const litDz = aim.dz === section.id;
@@ -163,7 +164,7 @@ function SectionEditor({
             <button
               type="button"
               aria-label={`Remove section ${section.label}`}
-              onClick={() => apply(removeSection(resolved, section.id), removedSectionMessage(section), true)}
+              onClick={() => apply((r) => removeSection(r, section.id), removedSectionMessage(section), true)}
               {...NO_DRAG}
               className={cn(X_BUTTON, alwaysShowX ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
             >

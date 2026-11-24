@@ -52,6 +52,13 @@ let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sid
 let mode: "ok" | "refuse" | "hold" | "late" = "ok";
 let release: (() => void) | null = null;
 const saves: Sidebar[] = [];
+let consoleHides = 0;
+/** While set, the next save waits here before the server answers it: a slow link. */
+let hold: Promise<void> | null = null;
+let releaseHold: (() => void) | null = null;
+function holdNextSave(): void {
+  hold = new Promise<void>((r) => (releaseHold = r));
+}
 
 function emitState(): void {
   const frame = { data: JSON.stringify(state) };
@@ -69,9 +76,23 @@ const json = (status: number, value: unknown) => ({
   const path = String(input);
   const method = init?.method ?? "GET";
   if (method === "GET" && path.startsWith("/api/state")) return json(200, state);
+  if (method === "PATCH" && path.startsWith("/api/views/")) {
+    consoleHides += 1;
+    if (hold) {
+      const waiting = hold;
+      hold = null;
+      await waiting;
+    }
+    return json(200, state);
+  }
   if (method === "POST" && path === "/api/sidebar") {
     const body = JSON.parse(init?.body ?? "{}") as Sidebar;
     saves.push(body);
+    if (hold) {
+      const waiting = hold;
+      hold = null; // only this one waits
+      await waiting;
+    }
     if (mode === "refuse") return json(400, { error: "refused for the test" });
     if (mode === "hold") await new Promise<void>((r) => (release = r));
     // "late": answered, but the broadcast of it has not arrived yet.
@@ -99,9 +120,14 @@ beforeEach(() => {
   state = { views: VIEWS, outputs: [], appName: "Rail test app", sidebar: { sections: [], hidden: [] } };
   mode = "ok";
   release = null;
+  hold = null;
+  releaseHold = null;
   saves.length = 0;
+  consoleHides = 0;
 });
 afterEach(() => {
+  // A save a failed test left waiting must not keep the run open.
+  releaseHold?.();
   cleanup();
   resetStageState();
   resetReplayCache();
@@ -234,6 +260,51 @@ describe("the rail and its saved arrangement", () => {
     await act(async () => fireEvent.click(undos[undos.length - 1]));
     await eventually(() => assert.equal(saves.length, 3));
     assert.deepEqual(saves[2].hidden, ["baptisms"]);
+  });
+});
+
+describe("saves that are still out", () => {
+  test("in the mode, another browser's change that lands while a save is out is taken in once it settles", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    mode = "late"; // answered with this save's own arrangement, no echo
+    holdNextSave();
+    await act(async () => api!.hide("patch", "Patch"));
+    await eventually(() => assert.equal(saves.length, 1));
+    // The other browser saved after this one; its broadcast gets here before this answer does.
+    await act(async () => {
+      state = { ...state, sidebar: { sections: [], hidden: ["baptisms"] } };
+      emitState();
+    });
+    await act(async () => releaseHold!());
+    // The mode's rail is not `.bg-rail`, so read what it draws from the provider.
+    await eventually(() => assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "the other browser's hide was dropped, or this browser's kept"));
+  });
+
+  test("the Hid toast and its Undo wait for the save, and never appear for one the server refused", async () => {
+    await mount();
+    holdNextSave();
+    await act(async () => api!.hide("patch", "Patch held"));
+    await eventually(() => assert.equal(saves.length, 1));
+    assert.equal(screen.queryAllByText(/Hid Patch held/).length, 0, "Hid toast shown before the save answered");
+    await act(async () => releaseHold!());
+    await eventually(() => assert.ok(screen.queryAllByText(/Hid Patch held/).length > 0));
+
+    mode = "refuse";
+    await act(async () => api!.hide("baptisms", "Baptisms refused"));
+    await eventually(() => assert.equal(saves.length, 2));
+    await eventually(() => assert.ok(screen.queryAllByText("refused for the test").length > 0));
+    assert.equal(screen.queryAllByText(/Hid Baptisms refused/).length, 0, "Hid toast shown beside the refusal");
+  });
+
+  test("a console's Hid toast waits for its own save too", async () => {
+    await mount();
+    holdNextSave();
+    await act(async () => api!.hide("console:view-foh", "FOH held"));
+    await eventually(() => assert.equal(consoleHides, 1));
+    assert.equal(screen.queryAllByText(/Hid FOH held/).length, 0, "Hid toast shown before the save answered");
+    await act(async () => releaseHold!());
+    await eventually(() => assert.ok(screen.queryAllByText(/Hid FOH held/).length > 0));
   });
 });
 

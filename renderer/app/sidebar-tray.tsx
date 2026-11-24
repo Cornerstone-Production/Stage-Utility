@@ -28,7 +28,8 @@ import { useBarContext } from "./bar-strip";
 import { DRAGGABLE } from "./drag-parts";
 import type { BarSet } from "./set-bar-items";
 import type { RailDrag } from "./rail-drop";
-import { addSection, newSectionId, restorePage } from "./sidebar-edits";
+import { uid } from "../lib/uid";
+import { addSection, restorePage } from "./sidebar-edits";
 
 export function CustomizeTray({
   isMobile,
@@ -107,7 +108,7 @@ function SidebarTrayActions() {
       <Button
         variant="transparent"
         size="medium"
-        onClick={() => customize.apply(resolveSidebar(EMPTY_SIDEBAR, customize.consoles), "Restored the default sidebar.", true)}
+        onClick={() => customize.apply(() => resolveSidebar(EMPTY_SIDEBAR, customize.consoles), "Restored the default sidebar.", true)}
       >
         <RotateCcwIcon className="size-3.5" />
         Restore default sidebar
@@ -153,7 +154,7 @@ function SidebarTrayBody({ isMobile, collapsed }: { isMobile: boolean; collapsed
 
   function restore(id: string) {
     if (isConsoleId(id)) customize.setConsoleShown(id, true);
-    else customize.apply(restorePage(resolved, id));
+    else customize.apply((r) => restorePage(r, id));
   }
 
   return (
@@ -191,7 +192,7 @@ function SidebarTrayBody({ isMobile, collapsed }: { isMobile: boolean; collapsed
       <div className="mt-0.5 flex flex-wrap gap-1.5">
         <button
           type="button"
-          onClick={() => customize.apply(addSection(resolved, newSectionId(resolved)))}
+          onClick={() => customize.apply((r) => addSection(r, uid("s")))}
           className="flex h-[34px] items-center gap-2 rounded-lg border border-dashed border-line-strong bg-surface pr-3 pl-2.5 text-[13px] font-medium text-fg-muted hover:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <FolderPlusIcon className="size-4 text-fg-muted" />
