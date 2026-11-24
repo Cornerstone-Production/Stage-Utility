@@ -48,6 +48,8 @@ let state: Record<string, unknown> & Bar;
 let refuse = false;
 /** Answer a save with what it saved, as if another browser's save landed right after it. */
 let answerOnly = false;
+/** The Nth save (1-based) is answered but its broadcast is held back until the test sends it. */
+let lateEchoOf: number | null = null;
 const saves: Record<string, unknown>[] = [];
 /** While set, the next save waits here before the server applies it: a slow link. */
 let hold: Promise<void> | null = null;
@@ -78,6 +80,10 @@ const json = (status: number, value: unknown) => ({ ok: status < 400, status, js
       await waiting;
     }
     if (refuse) return json(400, { error: "refused for the test" });
+    if (lateEchoOf === saves.length) {
+      state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
+      return json(200, state);
+    }
     if (answerOnly) return json(200, { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems });
     state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
     emitState();
@@ -104,6 +110,7 @@ beforeEach(() => {
   state = { views: [], outputs: [], appName: "Bar test app", sidebar: { sections: [], hidden: [] }, barItems: ["clock", "spacer", "live-timer"], barMobileItems: [] };
   refuse = false;
   answerOnly = false;
+  lateEchoOf = null;
   hold = null;
   releaseHold = null;
   saves.length = 0;
@@ -389,6 +396,7 @@ describe("saves that are still out when the operator moves on", () => {
       state = { ...state, barItems: saves[0].items as string[] };
       emitState();
     });
+    assert.equal(spacers(), before + 2, `the echo was drawn under the edits still waiting: ${JSON.stringify(rowLabels())}`);
     // The second save runs after the first answers, so let both finish inside the scope.
     await act(async () => {
       releaseHold!();
@@ -396,6 +404,27 @@ describe("saves that are still out when the operator moves on", () => {
     });
     assert.equal(saves.length, 2);
     assert.equal(spacers(), before + 2, `${JSON.stringify(rowLabels())}`);
+  });
+});
+
+describe("an echo that arrives late", () => {
+  test("the older save's echo, arriving after the newer answer, does not draw the strip back", async () => {
+    await mountInMode();
+    const spaces = () => [...document.querySelectorAll("[data-row-key]")].filter((n) => n.getAttribute("aria-label") === "Space: drag to move").length;
+    const before = spaces();
+    lateEchoOf = 2;
+    holdNextSave();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    await act(async () => {
+      releaseHold!();
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    assert.equal(saves.length, 2);
+    // Both saved. The first's broadcast is what the page last heard; the second's is still on its way.
+    assert.equal(spaces(), before + 2, "the older echo drew the strip back over the newer answer");
+    await act(async () => emitState());
+    assert.equal(spaces(), before + 2);
   });
 });
 
