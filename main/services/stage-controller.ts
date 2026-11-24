@@ -2033,7 +2033,7 @@ export class StageController {
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue layout — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
