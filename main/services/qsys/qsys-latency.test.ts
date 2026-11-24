@@ -3,7 +3,8 @@
 // The real fake Core on localhost, measured in real time (performance.now, real
 // sockets): only setTimeout is mocked, to advance the hourly log line by hand.
 // The bounds are the spec's targets (p95 write confirm under
-// 100 ms; a Core change on qsys:values within 250 ms at the default rates), which
+// 100 ms; a Core change on qsys:values within 250 ms of the fake Core pushing it; that Core pushes at once, so
+// this does not exercise the AutoPoll or meter rates), which
 // are two to three orders of magnitude over what loopback takes, so a slow CI runner
 // has headroom and a real regression (a write that waits on a poll, a broadcast held
 // behind a timer) still fails. Every test carries its own budget so a hung wait
@@ -72,7 +73,7 @@ let watch: InstanceType<typeof QsysWatch>;
 let writer: InstanceType<typeof QsysWriter>;
 let subscriptionListeners: (() => void)[] = [];
 const named = new Set<string>();
-const valuePushes: number[] = [];
+const valuePushes: { at: number; payload: unknown }[] = [];
 
 // Captured before the mock below replaces it: the budget and the waits below are real time.
 const realSetTimeout = globalThis.setTimeout;
@@ -84,8 +85,8 @@ before(() => {
   mock.timers.enable({ apis: ["setTimeout"] });
   setNamedSubscriberCheck((ch) => named.has(ch));
 });
-addBroadcastListener((channel) => {
-  if (channel === QSYS_VALUES_CHANNEL) valuePushes.push(performance.now());
+addBroadcastListener((channel, payload) => {
+  if (channel === QSYS_VALUES_CHANNEL) valuePushes.push({ at: performance.now(), payload });
 });
 after(async () => {
   mock.timers.reset();
@@ -213,6 +214,8 @@ describe("write latency", () => {
   test(
     "a change at the Core reaches qsys:values within 250 ms",
     budget(async () => {
+      // Settle first: a late push from the initial read must not stand in for the change.
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
       valuePushes.length = 0;
       const t0 = performance.now();
       fake.setControl("Lobby_Mixer", "gain", -33);
@@ -221,7 +224,12 @@ describe("write latency", () => {
         "the change on qsys:values",
         CHANGE_MS * 4,
       );
-      const took = valuePushes[0] - t0;
+      assert.match(
+        JSON.stringify(valuePushes[0].payload),
+        /-33(?!\d)/,
+        "the first push after the change is not the change",
+      );
+      const took = valuePushes[0].at - t0;
       assert.ok(
         took < CHANGE_MS,
         `the change took ${took} ms to reach qsys:values`,

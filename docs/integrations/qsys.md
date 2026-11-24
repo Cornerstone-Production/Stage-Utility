@@ -511,7 +511,8 @@ the percentiles are `null`.
 |---|---|---|
 | `latency.write` | Time from sending a write to the Core's reply to it (the reply carries the value the Core now holds). A write the Core refused, or one lost to a dropped connection, is not timed. | 95th percentile under 100 ms |
 
-A change made at the Core reaching an open panel is held to 250 ms by a test, not
+A change made at the Core reaching `qsys:values` within 250 ms
+of the Core pushing it is held by a test against a fake Core, not
 reported: the figure a server could time for it (arrival to broadcast) is a
 synchronous loop and always reads about zero, and the Core's own poll interval (the
 AutoPoll rate) and the network are outside it.
