@@ -12,8 +12,6 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  MouseSensor,
-  TouchSensor,
   closestCenter,
   pointerWithin,
   useSensor,
@@ -26,6 +24,7 @@ import { Loader2Icon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { LeaveGuard } from "../../components/leave-guard";
+import { usePointerSensors } from "../drag-parts";
 import { Button, EmptyState, ErrorNote } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { usePageActions } from "../page-actions";
@@ -116,14 +115,8 @@ export function MicSlotsPage() {
     if (first) mic.select(first.id);
   }, [linkedBoard, mic]);
 
-  const sensors = useSensors(
-    // Mouse and touch separately: a single PointerSensor claims a touch gesture
-    // on touch-down, which stops the page scrolling on a phone. See the note in
-    // use-stage-settings.
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-    useSensor(KeyboardSensor),
-  );
+  // Mouse and touch as everywhere else (see usePointerSensors), plus the keyboard.
+  const sensors = useSensors(...usePointerSensors(), useSensor(KeyboardSensor));
 
   const dialogs: BoardDialogs = {
     copyFrom: setCopying,

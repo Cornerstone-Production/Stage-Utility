@@ -6,7 +6,7 @@
 // before I change it" means; it goes to the server as an import carrying the
 // board it came from.
 
-import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookmarkIcon, ChevronDownIcon, DownloadIcon, GripVerticalIcon, MoreHorizontalIcon, UploadIcon } from "lucide-react";
@@ -31,6 +31,7 @@ import { invoke as ipc } from "../../lib/api";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
+import { usePointerSensors } from "../drag-parts";
 import { QUERY_KEYS, useSlotPresets } from "../queries";
 import { downloadJson, fileSlug } from "./download";
 import { slotCount } from "./board-model";
@@ -188,8 +189,7 @@ export function SavedLayouts({
   const [name, setName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    ...usePointerSensors(),
     // Space on a row's grip lifts it, the arrows move it, Space drops it.
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
