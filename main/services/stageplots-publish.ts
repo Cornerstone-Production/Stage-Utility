@@ -260,8 +260,17 @@ interface SendOptions {
   required: readonly string[];
   /** The backgrounds the page holds under this secret already. */
   held: readonly string[];
-  /** The patch, read once by the action or republish this send is part of, so its fingerprint and its send agree. */
-  patch: PatchRead;
+  /** The venue as the page gets it, made once by the action or republish this send is part of, so what it records and what it sends agree. */
+  prepared: Prepared;
+}
+
+/** A venue as the page gets it, at one moment: each plot with its items resolved, the index, and the fingerprint of both. */
+interface Prepared {
+  plots: { plot: Plot; bg: Background | null; items: PublishedItem[]; unresolved: UnresolvedLink[] }[];
+  /** The index, as sent. */
+  index: string;
+  /** What tells a change to what is published from one to anything else. */
+  print: string;
 }
 
 type Sent = Extract<SendResult, { ok: true }>;
@@ -605,8 +614,8 @@ export class StagePlotsPublisher {
       const { doc, venue, target, client, host } = found;
       const queueFull = this.queueFull(doc, "Publish", venue.name);
       if (queueFull) return queueFull;
-      const patch = await this.readPatch();
-      const fresh = await this.sendFresh(client, target, doc, venue, [], patch);
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      const fresh = await this.sendFresh(client, target, doc, venue, [], prepared);
       if (!fresh.ok) {
         say("warn", [fresh.secret], `"${venue.name}" was not published: ${fresh.message}`);
         return { ok: false, status: fresh.status, error: hide(fresh.message, [fresh.secret]) };
@@ -624,7 +633,7 @@ export class StagePlotsPublisher {
         await this.takeBack(client, secret, target.origin, venue.name);
         return { ok: false, status: 404, error: "no such venue" };
       }
-      this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
+      this.attempted.set(venueId, prepared.print);
       say("log", [secret], `"${venue.name}" published to ${host}: ${plural(plotsOf(doc, venue).length, "plot")} and ${plural(r.held.length, "background")}${missingNote(r)}`);
       return { ok: true, venue: saved };
     });
@@ -662,8 +671,8 @@ export class StagePlotsPublisher {
       // that cannot.
       const queueFull = this.queueFull(doc, "Regenerate", venue.name);
       if (queueFull) return queueFull;
-      const patch = await this.readPatch();
-      const fresh = await this.sendFresh(client, target, doc, venue, pub.publishedImages, patch);
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      const fresh = await this.sendFresh(client, target, doc, venue, pub.publishedImages, prepared);
       const all = [fresh.secret, pub.secret];
       if (!fresh.ok) {
         const message = `The link was not changed: ${fresh.message}`;
@@ -687,7 +696,7 @@ export class StagePlotsPublisher {
         await this.takeBack(client, secret, target.origin, venue.name);
         return { ok: false, status: 404, error: "no such venue" };
       }
-      this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
+      this.attempted.set(venueId, prepared.print);
       const drained = await this.drainQueued(false);
       const old = !drained.ok
         ? `the old one stays queued: ${drained.message}`
@@ -775,14 +784,14 @@ export class StagePlotsPublisher {
       const pub = venue.publish!;
       const drained = await this.drainQueued(false);
       let result: PublishOutcome;
-      const patch = await this.readPatch();
-      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now", patch);
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now", prepared);
       else {
-        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [], patch });
+        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [], prepared });
         result = await this.finish(venueId, venue, r, host, [pub.secret], "published again");
         // As a republish: what the page took is not sent again on the next change; what it did not take is.
         const went = result.ok || (!r.ok && r.status === 400);
-        if (went) this.attempted.set(venueId, this.fingerprint(doc, venue, patch));
+        if (went) this.attempted.set(venueId, prepared.print);
         else this.attempted.delete(venueId);
         this.republished(venueId, went);
       }
@@ -816,8 +825,8 @@ export class StagePlotsPublisher {
     const venue = doc.venues.find((v) => v.id === venueId);
     const pub = venue?.publish;
     if (!venue || !pub) return;
-    const patch = await this.readPatch();
-    const print = this.fingerprint(doc, venue, patch);
+    const prepared = this.prepare(doc, venue, await this.readPatch());
+    const print = prepared.print;
     if (this.attempted.get(venueId) === print) return;
     const target = await this.deps.target();
     if (!target.ok) {
@@ -829,12 +838,12 @@ export class StagePlotsPublisher {
     }
     if (pub.origin !== target.origin) {
       // move() records what it sent once the new page has it all.
-      const moved = await this.move(venue, doc, target, "A change", patch);
+      const moved = await this.move(venue, doc, target, "A change", prepared);
       if (!moved.ok) this.attempted.delete(venueId);
       return this.republished(venueId, moved.ok);
     }
     const host = hostOf(target.origin);
-    const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages, patch });
+    const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages, prepared });
     // Nothing went and nothing changed: nothing to save. (A send the page did not take always has
     // something to send again: a key that failed is dropped from what was sent.)
     if (r.ok && r.sent === 0 && sameList(r.held, pub.publishedImages) && sameList(r.unpublished.map((u) => u.hash).sort(), pub.unpublishedImages) && r.warnings.length === 0) {
@@ -883,10 +892,10 @@ export class StagePlotsPublisher {
    * new link because the address changes anyway, and so one secret never lives on two pages.
    * When the new page will not take it, the venue stays where it was and says why.
    */
-  private async move(venue: Venue, doc: StagePlotsDoc, target: Target, why: string, patch: PatchRead): Promise<PublishOutcome> {
+  private async move(venue: Venue, doc: StagePlotsDoc, target: Target, why: string, prepared: Prepared): Promise<PublishOutcome> {
     const pub = venue.publish!;
     const host = hostOf(target.origin);
-    const fresh = await this.sendFresh(this.client(target), target, doc, venue, [], patch);
+    const fresh = await this.sendFresh(this.client(target), target, doc, venue, [], prepared);
     const all = [fresh.secret, pub.secret];
     if (!fresh.ok) {
       const message = `Not moved to ${host}: ${fresh.message} The link on ${hostOf(pub.origin)} stays as it is.`;
@@ -913,7 +922,7 @@ export class StagePlotsPublisher {
       await this.takeBack(this.client(target), fresh.secret, target.origin, venue.name);
       return { ok: false, status: 404, error: "no such venue" };
     }
-    this.attempted.set(venue.id, this.fingerprint(doc, venue, patch));
+    this.attempted.set(venue.id, prepared.print);
     say("log", all, `"${venue.name}" moved to ${host} under a new link (${why}); its old link on ${hostOf(pub.origin)} is queued for removal`);
     return { ok: true, venue: saved };
   }
@@ -1103,7 +1112,9 @@ export class StagePlotsPublisher {
       if (!venue.publish || venue.publish.origin === target.origin) continue;
       await this.serial(venue.id, async () => {
         const now = await this.venueNow(venue.id);
-        if (now?.publish && now.publish.origin !== target.origin) await this.move(now, await this.deps.store.get(), target, "the page address changed", await this.readPatch());
+        if (!now?.publish || now.publish.origin === target.origin) return;
+        const doc = await this.deps.store.get();
+        await this.move(now, doc, target, "the page address changed", this.prepare(doc, now, await this.readPatch()));
       }).catch((err: unknown) => this.venueFailed(venue, `Not moved to ${hostOf(target.origin)}: ${errorMessage(err)}`));
     }
   }
@@ -1213,11 +1224,11 @@ export class StagePlotsPublisher {
     doc: StagePlotsDoc,
     venue: Venue,
     required: readonly string[],
-    patch: PatchRead,
+    prepared: Prepared,
   ): Promise<{ ok: true; secret: string; r: Sent } | { ok: false; secret: string; status: 400 | 502; message: string }> {
     const secret = newPublishSecret();
     await this.queue([{ secret, origin: target.origin, since: this.at(), reason: "publishing" }]);
-    const r = await this.sendVenue(client, hostOf(target.origin), secret, doc, venue, { force: true, required, held: [], patch });
+    const r = await this.sendVenue(client, hostOf(target.origin), secret, doc, venue, { force: true, required, held: [], prepared });
     if (r.ok) return { ok: true, secret, r };
     if (r.sent > 0) await this.takeBack(client, secret, target.origin, venue.name);
     else await this.unqueue((e) => e.secret === secret && e.origin === target.origin);
@@ -1421,18 +1432,24 @@ export class StagePlotsPublisher {
     return doc.venues.find((v) => v.id === venueId) ?? null;
   }
 
-  /** What a republish is built from, to tell a change to what is published from one to anything else. */
-  private fingerprint(doc: StagePlotsDoc, venue: Venue, patch: PatchRead): string {
+  /**
+   * The venue as the page gets it, its linked points resolved against `patch` once for the
+   * fingerprint, the size check, the send and the log. The fingerprint is each plot as the page
+   * gets it (and nothing else of the patch) with its background whole, so a re-conversion counts
+   * as a change whether or not it is held, and a patch save that changes nothing published leaves
+   * it as it was.
+   */
+  private prepare(doc: StagePlotsDoc, venue: Venue, patch: PatchRead): Prepared {
     const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
     const plan = this.deps.plan();
-    // Each plot as the page gets it (linked points resolved against `patch`, and nothing else of
-    // the patch), and its background whole, so a re-conversion counts as a change whether or not
-    // it is held. A patch save that changes nothing published leaves this as it was.
-    const plots = plotsOf(doc, venue).map((p) => {
-      const bg = p.backgroundId ? (byId.get(p.backgroundId) ?? null) : null;
-      return [publishedPlot(p, bg, true, publishedItems(p.items, patch, patchContext(plan)).items), bg?.converted ?? null];
-    });
-    return docHash(JSON.stringify([publishedVenue(doc, venue, plan, this.deps.timeZone()), plots]));
+    const plots = plotsOf(doc, venue).map((plot) => ({
+      plot,
+      bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null,
+      ...publishedItems(plot.items, patch, patchContext(plan)),
+    }));
+    const index = publishedVenue(doc, venue, plan, this.deps.timeZone());
+    const print = docHash(JSON.stringify([index, plots.map(({ plot, bg, items }) => [publishedPlot(plot, bg, true, items), bg?.converted ?? null])]));
+    return { plots, index: JSON.stringify(index), print };
   }
 
   /**
@@ -1441,14 +1458,7 @@ export class StagePlotsPublisher {
    * refusal by name and not half a publish.
    */
   private async sendVenue(client: PushClient, host: string, secret: string, doc: StagePlotsDoc, venue: Venue, opts: SendOptions): Promise<SendResult> {
-    const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
-    const plan = this.deps.plan();
-    // Each plot's items as the page gets them, built once for the size check, the send and the log.
-    const plots = plotsOf(doc, venue).map((plot) => ({
-      plot,
-      bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null,
-      ...publishedItems(plot.items, opts.patch, patchContext(plan)),
-    }));
+    const { plots, index } = opts.prepared;
     for (const { plot, bg, items } of plots) {
       const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true, items)));
       if (bytes > PUBLISH_MAX_BODY_BYTES) {
@@ -1460,8 +1470,6 @@ export class StagePlotsPublisher {
         };
       }
     }
-    const index = JSON.stringify(publishedVenue(doc, venue, plan, this.deps.timeZone()));
-
     const sent = opts.force ? new Map<string, string>() : (this.sent.get(secret) ?? new Map<string, string>());
     this.sent.set(secret, sent);
     let count = 0;
