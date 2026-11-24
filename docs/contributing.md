@@ -230,7 +230,7 @@ everything since the last stable tag.
 - **Nothing is pushed directly to `beta` or `main`.** Every change — including a
   one-line fix — goes through a pull request off `beta`. Release automation is the
   exception: it commits the version bump and tag to those branches by design. A
-  ruleset enforces this, admitting only the maintainer and the release app (see
+  ruleset can enforce this, admitting only the maintainer and the release app (see
   [The release app](ops/distribution.md#the-release-app)).
 
 ## Running it locally

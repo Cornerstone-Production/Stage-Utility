@@ -167,12 +167,12 @@ compiled into `build/` by Vite. Nothing is compiled per platform.
 
 ## The release app
 
-`beta` and `main` take pushes and merges from the maintainer and one GitHub App,
-and from nobody else. A repository ruleset on both branches requires a pull request
-and restricts updates, and its bypass list names only those two. The workflow's own
-`GITHUB_TOKEN` cannot be put on that list, so the release job pushes the version-bump
-commit and the tag with a token minted from the app, in the step right before the
-push. The token is scoped to this repository and to contents, and is revoked when the
+`beta` and `main` are meant to take pushes and merges from the maintainer and one
+GitHub App, and from nobody else. A repository ruleset on both branches enforces that
+(step 5 below): it requires a pull request and restricts updates, and its bypass list
+names only those two. The workflow's own `GITHUB_TOKEN` cannot be put on that list, so
+the release job pushes the version-bump commit and the tag with a token minted from the
+app, in the step right before the push, which works with or without the ruleset. The token is scoped to this repository and to contents, and is revoked when the
 job ends. The job's own token is read-only for contents.
 
 The app's private key is a secret of the `release` environment, not of the
@@ -202,7 +202,7 @@ Setting it up, once:
    gh variable set RELEASE_APP_CLIENT_ID --repo Cornerstone-Production/Stage-Utility --body <client id>
    gh secret set RELEASE_APP_PRIVATE_KEY --env release --repo Cornerstone-Production/Stage-Utility < <app>.private-key.pem
    ```
-5. Add the ruleset on `refs/heads/beta` and `refs/heads/main`: require a pull request
+5. Add the ruleset (recommended; the release works without it) on `refs/heads/beta` and `refs/heads/main`: require a pull request
    (0 approvals), restrict updates, and bypass for the maintainer's account and the app.
 
 Without the variable or the secret, the release job fails at "Mint the release app

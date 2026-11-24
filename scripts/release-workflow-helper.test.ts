@@ -194,12 +194,12 @@ describe("the release itself is unchanged by the helper", () => {
     assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   });
 
-  // beta and main admit only the maintainer and the release app, and
-  // GITHUB_TOKEN cannot be put on that list: a push made with it is refused.
+  // Where beta and main have a ruleset it can admit the release app, and
+  // GITHUB_TOKEN cannot be put on its bypass list; the app's token works either way.
   it("pushes with the release app's token, minted just before the push, and the job's own token cannot write", () => {
     const steps = jobs["release"].steps ?? [];
     assert.deepEqual(jobs["release"].permissions, { contents: "read", statuses: "write" });
-    assert.equal(jobs["release"].environment, "release", "the app's key is an environment secret only beta and main can reach");
+    assert.equal(jobs["release"].environment, "release", "the app's key is an environment secret whose branch policy is beta and main");
     const mint = steps.findIndex((s) => s.id === "app-token");
     const push = steps.findIndex((s) => s.id === "push");
     assert.equal(mint, push - 1, "the token is minted in the step right before the push");

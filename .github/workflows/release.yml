@@ -166,13 +166,12 @@ jobs:
     runs-on: ubuntu-latest
     # The release app's private key is a secret of this environment, which only
     # beta and main may deploy to. As a repository secret, a workflow pushed to
-    # any branch could read it and push past the ruleset with it.
+    # any branch could read it and push to beta or main with it.
     environment: release
     permissions:
       # Read only: the version-bump commit and the tag are pushed with the
-      # release app's token (the step before the push), never this one, because
-      # beta and main admit only that app and the maintainer. A push with this
-      # token would be refused.
+      # release app's token (the step before the push), never this one: the
+      # app is the identity a branch ruleset can admit, and GITHUB_TOKEN is not.
       contents: read
       # To mark the version-bump commit with the `build` status the verify jobs
       # earned, so the release PR whose head it is shows a verified commit without
@@ -388,11 +387,12 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: scripts/sign-release-assets.sh --check
 
-      # beta and main admit pushes only from the maintainer and the release
-      # GitHub App; GITHUB_TOKEN cannot be put on a ruleset's bypass list. So the
-      # push takes a token minted here: this repository only, contents only, and
-      # revoked when the job ends. A missing RELEASE_APP_CLIENT_ID variable or
-      # RELEASE_APP_PRIVATE_KEY secret fails this step, before anything is pushed.
+      # Where beta and main have a ruleset, it admits the maintainer and the
+      # release GitHub App, and GITHUB_TOKEN cannot be put on a ruleset's bypass
+      # list. So the push takes a token minted here, which works with or without
+      # one: this repository only, contents only, and revoked when the job ends.
+      # A missing RELEASE_APP_CLIENT_ID variable or RELEASE_APP_PRIVATE_KEY secret
+      # fails this step, before anything is pushed.
       - name: Mint the release app token
         id: app-token
         if: steps.version.outputs.skip == 'false'
