@@ -795,8 +795,10 @@ export class StagePlotsPublisher {
     if (this.paused) return RESTORING;
     const drained = await this.drainQueued(false);
     if (!drained.ok) return { status: 503, error: drained.message };
-    const waiting = drained.left.filter((e) => e.origin !== drained.page).length;
-    return { removed: drained.removed, left: drained.left.length - waiting, waiting };
+    // A publish in flight is not an old link: the card does not show it, so it is not counted.
+    const old = drained.left.filter((e) => e.reason !== "publishing");
+    const waiting = old.filter((e) => e.origin !== drained.page).length;
+    return { removed: drained.removed, left: old.length - waiting, waiting };
   }
 
   /** A change: send what differs from what was last sent. Nothing at all when nothing published changed. */

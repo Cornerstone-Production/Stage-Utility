@@ -1642,6 +1642,15 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     return o.origin;
   };
 
+  test("Remove now does not count a publish in flight, which the card does not show, as a link left", async () => {
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: `${"F".repeat(42)}E`, origin: o.origin, since: "2026-11-13T10:00:00.000Z", reason: "publishing" }] }));
+    assert.deepEqual(await h.publisher.removePending(), { removed: 0, left: 0, waiting: 0 });
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [] }));
+  });
+
   test("a failed take-back leaves the secret queued, shown, and removed by Remove now once the page answers", async () => {
     const { stagePlotsView } = await import("./stageplots-files.js");
     const h = await harness(venueDoc(2, 2));
