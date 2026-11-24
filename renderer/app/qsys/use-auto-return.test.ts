@@ -5,7 +5,7 @@
 // and `?return=` are pinned in qsys-cog-menu.test.tsx, through the panel route.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, describe, test } from "node:test";
 
 import { compileWithReactCompiler } from "../../test-fixtures/react-compiler-hook.js";
 import { installDom, unmountAndTeardown } from "../../test-dom.js";
@@ -16,15 +16,14 @@ const teardown = installDom();
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
-const { useAutoReturn, formatCountdown, __setAutoReturnSecondForTests } = await import("./use-auto-return.js");
+const { useAutoReturn, formatCountdown } = await import("./use-auto-return.js");
+const { QsysTimingContext, QSYS_TIMING } = await import("./qsys-timing.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
 const SECOND = 5; // ms: a minute is 300 ms
-beforeEach(() => __setAutoReturnSecondForTests(SECOND));
 afterEach(() => {
   cleanup();
-  __setAutoReturnSecondForTests(null);
 });
 
 const wait = (ms: number) =>
@@ -49,7 +48,7 @@ async function open(homeSlug: string | null, minutes: number) {
   ];
   const r = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: ["/qsys/away"] }) });
   router = r as unknown as typeof router;
-  render(React.createElement(RouterProvider, { router: r }));
+  render(React.createElement(QsysTimingContext.Provider, { value: { ...QSYS_TIMING, secondMs: SECOND } }, React.createElement(RouterProvider, { router: r })));
   await wait(20);
 }
 

@@ -43,7 +43,7 @@ const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterP
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { QsysPanelRoute } = await import("./qsys-panel-route.js");
 const { HOME_HINT, NO_PIN_NOTE, WRONG_PIN_NOTE } = await import("./qsys-cog-menu.js");
-const { __setAutoReturnSecondForTests } = await import("./use-auto-return.js");
+const { QsysTimingContext, QSYS_TIMING } = await import("./qsys-timing.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests, __sseFallback } = await import("../../lib/api.js");
 const { __resetQsysPanelsForTests } = await import("../../main/qsys/use-qsys-values.js");
@@ -106,13 +106,15 @@ beforeEach(() => {
   __resetReplayCacheForTests();
   __resetQsysPanelsForTests();
   __sseFallback.noteStream(true);
-  __setAutoReturnSecondForTests(null);
+  secondMs = QSYS_TIMING.secondMs;
 });
 afterEach(() => {
   cleanup();
   resetStageState();
-  __setAutoReturnSecondForTests(null);
 });
+
+/** How long a countdown second is for the page `open` mounts next. */
+let secondMs = QSYS_TIMING.secondMs;
 
 const wait = (ms: number) =>
   act(async () => {
@@ -131,7 +133,13 @@ async function open(path: string) {
   ];
   const r = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: [path] }) });
   router = r as unknown as Router;
-  render(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router: r })));
+  render(
+    React.createElement(
+      QsysTimingContext.Provider,
+      { value: { ...QSYS_TIMING, secondMs } },
+      React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router: r })),
+    ),
+  );
   await wait(60);
 }
 
@@ -175,21 +183,22 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
     assert.deepEqual(where(), { path: "/qsys/lobby", search: { return: "zone-1" } });
     assert.deepEqual(server.checks, [], "a sibling asked for the PIN");
 
-    // Away on the lobby: home is still listed, marked, and the lobby's own siblings follow.
+    // Away on the lobby: the same list as at home, never the lobby's own siblings
+    // (the nursery): a cog takes a device no further than its home's list.
     fireEvent.click(cog()!);
     await wait(10);
-    assert.deepEqual(listed(), ["zone-1", "nursery"]);
+    assert.deepEqual(listed(), ["zone-1", "lobby", "booth"], "away, the cog listed another panel's siblings");
     assert.deepEqual(homeHinted(), ["zone-1"]);
-    fireEvent.click(q('[data-qsys-cog-panel="nursery"]')!);
+    fireEvent.click(q('[data-qsys-cog-panel="booth"]')!);
     await wait(60);
-    assert.deepEqual(where(), { path: "/qsys/nursery", search: { return: "zone-1" } }, "a second sibling forgot the way home");
+    assert.deepEqual(where(), { path: "/qsys/booth", search: { return: "zone-1" } }, "a second sibling forgot the way home");
 
     await openPad();
     assert.equal(q("[data-qsys-pin-pad]")?.dataset.qsysPinPad, "entry");
     await press("1357");
     assert.deepEqual(server.checks, ["1357"]);
     assert.equal(note(), WRONG_PIN_NOTE);
-    assert.equal(where().path, "/qsys/nursery", "a wrong PIN opened the app");
+    assert.equal(where().path, "/qsys/booth", "a wrong PIN opened the app");
     await press("2468");
     assert.equal(where().path, "/", "the right PIN did not open the app");
     assert.ok(q("[data-app-home]"));
@@ -232,6 +241,12 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
     server.checkAnswer = { status: 200, body: {} };
     await press("2468");
     assert.equal(where().path, "/qsys/zone-1", "an empty answer opened the app");
+    // Truthy is not yes: only `ok: true` opens.
+    for (const ok of ["yes", 1]) {
+      server.checkAnswer = { status: 200, body: { ok } };
+      await press("2468");
+      assert.equal(where().path, "/qsys/zone-1", `ok: ${JSON.stringify(ok)} opened the app`);
+    }
     server.checkAnswer = { status: 500, body: { error: "boom" } };
     await press("2468");
     assert.equal(where().path, "/qsys/zone-1");
@@ -244,6 +259,96 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
     assert.equal(cog() === null, true, "a staff panel has a cog");
   });
 
+  test("a staff panel a volunteer cog opened has the cog, and the way home, even with no countdown", async () => {
+    // Home never calls back (0 min), so there is no banner: the cog is the only way back.
+    server.views.push(panel("v-quiet", "Quiet", "volunteer", "quiet", ["booth"], 0));
+    await open("/qsys/booth?return=quiet");
+    assert.equal(q("[data-qsys-return]") === null, true);
+    assert.ok(cog(), "a device a cog took to a staff panel has no way back");
+    fireEvent.click(cog()!);
+    await wait(10);
+    assert.deepEqual(listed(), ["quiet", "booth"]);
+    assert.deepEqual(homeHinted(), ["quiet"]);
+    fireEvent.click(q('[data-qsys-cog-panel="quiet"]')!);
+    await wait(60);
+    assert.deepEqual(where(), { path: "/qsys/quiet", search: {} });
+  });
+
+  test("away, the countdown is the home panel's, whatever the open panel's own", async () => {
+    secondMs = 5; // a minute is 300 ms
+    // The booth's own return time is 30 minutes; home's is 1.
+    server.views = server.views.map((v) => ((v as { id: string }).id === "v-booth" ? panel("v-booth", "Booth", "staff", "booth", [], 30) : v));
+    await open("/qsys/booth?return=zone-1");
+    // Counting down from home's minute (a fast second here), not the booth's thirty.
+    assert.match(q("[data-qsys-return-countdown]")?.textContent ?? "", /^[01]:\d\d$/);
+    await wait(450);
+    assert.deepEqual(where(), { path: "/qsys/zone-1", search: {} }, "it did not go home on the home panel's time");
+  });
+
+  test("an old address (a panel renamed) opens the panel and puts the URL right, ?return with it", async () => {
+    server.views = server.views.map((v) => {
+      const id = (v as { id: string }).id;
+      if (id === "v-zone") return { ...panel("v-zone", "Zone 1", "volunteer", "zone-one", ["lobby", "booth"]), qsys: { kind: "volunteer", slug: "zone-one", siblings: ["lobby", "booth"], returnAfterMin: 1, aliases: ["zone-1"] } };
+      if (id === "v-lobby") return { ...panel("v-lobby", "Lobby", "volunteer", "front", ["nursery"]), qsys: { kind: "volunteer", slug: "front", siblings: ["nursery"], returnAfterMin: 1, aliases: ["lobby"] } };
+      return v;
+    });
+    await open("/qsys/lobby?return=zone-1");
+    assert.deepEqual(where(), { path: "/qsys/front", search: { return: "zone-one" } });
+    assert.ok(q('[data-qsys-panel="front"]'), "the renamed panel did not open");
+    assert.ok(q("[data-qsys-return]"), "the old home address lost the way home");
+  });
+
+  test("Escape closes the menu and puts focus back on the cog; the menu is modal and takes focus", async () => {
+    await open("/qsys/zone-1");
+    fireEvent.click(cog()!);
+    await wait(10);
+    const menu = q("[data-qsys-cog-menu]")!;
+    assert.equal(menu.getAttribute("aria-modal"), "true");
+    assert.equal(menu.contains(document.activeElement), true, "focus did not move into the menu");
+    // Tab from the last control goes round to the first, never out to the panel.
+    const items = [...menu.querySelectorAll("button")];
+    items.at(-1)!.focus();
+    fireEvent.keyDown(items.at(-1)!, { key: "Tab" });
+    assert.equal(document.activeElement === items[0], true, "Tab left the menu");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await wait(10);
+    assert.equal(q("[data-qsys-cog-menu]") === null, true, "Escape left the menu open");
+    assert.equal(document.activeElement === cog(), true, "focus did not go back to the cog");
+  });
+
+  test("Cancel while a right PIN is being checked opens nothing", async () => {
+    await open("/qsys/zone-1");
+    await openPad();
+    // The check answers late: Cancel lands first.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/qsys/pin/check") await gate;
+      return real(input, init);
+    }) as typeof fetch;
+    try {
+      for (const d of "246") fireEvent.click(key(d));
+      fireEvent.click(key("8"));
+      await wait(10);
+      fireEvent.click(key("Cancel"));
+      release();
+      await wait(80);
+    } finally {
+      globalThis.fetch = real;
+    }
+    assert.deepEqual(server.checks, ["2468"]);
+    assert.equal(where().path, "/qsys/zone-1", "a check answered after Cancel opened the app");
+  });
+
+  test("the lock countdown is set in the mono face", async () => {
+    await open("/qsys/zone-1");
+    await openPad();
+    server.checkAnswer = { status: 200, body: { ok: false, lockedForMs: 60_000 } };
+    await press("2468");
+    assert.equal(q("[data-qsys-pin-lock-countdown]")?.classList.contains("font-mono"), true);
+  });
+
   test("?return with an unknown slug is ignored: no banner, and this panel is home", async () => {
     await open("/qsys/lobby?return=no-such-panel");
     assert.equal(q("[data-qsys-return]") === null, true);
@@ -253,7 +358,7 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
   });
 
   test("opening a sibling adds ?return=<home>; after N minutes with no touch it navigates home", async () => {
-    __setAutoReturnSecondForTests(5); // a minute is 300 ms
+    secondMs = 5; // a minute is 300 ms
     await open("/qsys/zone-1");
     assert.equal(q("[data-qsys-return]") === null, true, "home counts down to itself");
     fireEvent.click(cog()!);
@@ -279,7 +384,7 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
   });
 
   test("returnAfterMin 0 never returns", async () => {
-    __setAutoReturnSecondForTests(5);
+    secondMs = 5;
     await open("/qsys/lobby?return=never-back");
     assert.equal(q("[data-qsys-return]") === null, true, "a banner counting down to a home that never calls back");
     await wait(450);

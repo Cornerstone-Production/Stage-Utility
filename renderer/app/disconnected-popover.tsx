@@ -17,10 +17,7 @@ import { ChevronRightIcon, PlugZapIcon } from "lucide-react";
 import { flashTarget } from "./flash";
 import { integrationFlashId } from "../components/integrations-panel";
 import { cn } from "../lib/cn";
-/** Where an integration's card lives. One route, so this is not a lookup.
- *  Typed as string, matching how the rail passes a destination path — the route
- *  union is generated and a bare literal does not satisfy it. */
-const INTEGRATIONS_ROUTE: string = "/settings/integrations";
+import { INTEGRATIONS_ROUTE } from "./legacy-hash";
 
 export function DisconnectedPopover({
   down,

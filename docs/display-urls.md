@@ -120,8 +120,9 @@ editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
 `/qsys/<slug>` is a [Q-SYS panel](integrations/qsys.md#panels) full screen, with none
 of the app's sidebar or header: the address an iPad opens and saves to its home
 screen. It draws its own header (the panel's name and the connection to the sound
-system), and an address no panel has says so rather than showing a blank page.
-`manage` is never a panel's slug. A volunteer panel's cog opens its sibling panels as
+system), and an address no panel has says so rather than showing a blank page. A
+panel's old address, from before its address was changed, still opens it and the
+page corrects the URL. `manage` is never a panel's slug. A volunteer panel's cog opens its sibling panels as
 `/qsys/<slug>?return=<home slug>`, which goes back to the home panel after a few
 minutes without a touch ([auto-return](integrations/qsys.md#auto-return)); save the
 address without `?return=` to the home screen.

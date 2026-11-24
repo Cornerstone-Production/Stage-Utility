@@ -168,8 +168,9 @@ export function Rail({
   // draw time, never in the sidebar's validation, which must give the same answer
   // whatever views the server holds.
   const qsysPanels = (state?.views ?? []).filter(isQsysPanel);
-  const qsysStatus = useQsysStatus();
-  const qsysShown = qsysPanels.length > 0 || qsysStatus?.configured === true;
+  const qsys = useQsysStatus();
+  // A read that failed shows the row: /qsys/manage is where it says so.
+  const qsysShown = qsysPanels.length > 0 || qsys.status?.configured === true || qsys.failed;
   const byId = destinationsById([...ALL_DESTINATIONS, ...consoles].filter((d) => d.id !== QSYS_ID || qsysShown));
   const customize = useCustomize();
   const resolved = useResolvedSidebar();

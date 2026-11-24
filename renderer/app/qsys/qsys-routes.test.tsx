@@ -49,7 +49,8 @@ const { render, cleanup, fireEvent, act, screen } = await import("@testing-libra
 const React = (await import("react")).default;
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
-const { QsysPanelRoute, OFFLINE_BODY, OFFLINE_TITLE, NO_CORE_TITLE, __setOfflineOverlayDelayForTests } = await import("./qsys-panel-route.js");
+const { QsysPanelRoute, OFFLINE_BODY, OFFLINE_TITLE, NO_CORE_TITLE } = await import("./qsys-panel-route.js");
+const { QsysTimingContext, QSYS_TIMING } = await import("./qsys-timing.js");
 const { QsysManageRoute, QsysManagePanelRoute } = await import("./qsys-manage-route.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests, __sseFallback } = await import("../../lib/api.js");
@@ -91,6 +92,9 @@ interface Server {
   repairs: unknown[];
   pinSet: boolean;
   pinPuts: unknown[];
+  dismissed: { url: string; body: unknown }[];
+  /** Reads answered 500. */
+  failReads: string[];
 }
 
 let server: Server;
@@ -113,6 +117,8 @@ function freshServer(): Server {
     repairs: [],
     pinSet: false,
     pinPuts: [],
+    dismissed: [],
+    failReads: [],
   };
 }
 
@@ -127,7 +133,12 @@ const ALLOW = {
 const CATALOG = { designCode: "d1", components: [{ name: MIX, type: "mixer", controls: [{ Name: "mute", Type: "Boolean" }, { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 }] }] };
 
 const f = stubFetchWithLog((url, init) => {
+  if (server.failReads.includes(url)) return reply(500, { error: "boom" });
   if (url.includes("/api/state")) return ok({ views: server.views, outputs: [], appName: "Stage Utility" });
+  if (url.endsWith("/qsys-inactive/dismiss")) {
+    server.dismissed.push({ url, body: JSON.parse(String(init?.body ?? "{}")) as unknown });
+    return ok({ views: server.views, outputs: [] });
+  }
   if (url.includes("/api/events/subscribe")) {
     server.subscribes.push((JSON.parse(String(init?.body ?? "{}")) as { channels: string[] }).channels);
     return ok({});
@@ -184,7 +195,6 @@ beforeEach(() => {
   __resetReplayCacheForTests();
   __resetQsysPanelsForTests();
   __sseFallback.noteStream(true);
-  __setOfflineOverlayDelayForTests(50, 150);
 });
 afterEach(() => {
   cleanup();
@@ -207,15 +217,20 @@ async function open(path: string) {
     createRoute({ getParentRoute: () => root, path: "/qsys/$slug", component: QsysPanelRoute }),
   ];
   const router = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: [path] }) });
+  routerRef = router as unknown as typeof routerRef;
   render(
     React.createElement(
-      QueryClientProvider,
-      { client },
-      React.createElement(RouterProvider, { router }),
+      QsysTimingContext.Provider,
+      // The offline card after 50 ms without the Core and 150 ms without the page's stream.
+      { value: { ...QSYS_TIMING, coreLostAfterMs: 50, pageLostAfterMs: 150 } },
+      React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router })),
     ),
   );
   await wait(60);
 }
+
+let routerRef: { state: { location: { pathname: string; search: Record<string, unknown> } } };
+const where = () => ({ path: routerRef.state.location.pathname, search: { ...routerRef.state.location.search } });
 
 const line = () => document.querySelector("[data-connection-line]")?.textContent ?? "";
 const muteButton = () => document.querySelector('[data-qsys-object="qsys-mute"] button') as HTMLElement;
@@ -232,7 +247,10 @@ describe("Q-SYS panel pages", () => {
       "qsys-objects.tsx",
       "qsys-panel-route.tsx",
       "qsys-paths.ts",
+      "qsys-timing.ts",
       "use-auto-return.ts",
+      "use-dismiss.ts",
+      "use-pin-set.ts",
       "use-qsys-status.ts",
       "use-qsys-values.ts",
     ]);
@@ -323,6 +341,12 @@ describe("Q-SYS panel pages", () => {
     __resetQsysPanelsForTests();
     await open("/qsys/booth");
     assert.equal(document.querySelector("[data-qsys-no-core] a")?.getAttribute("href"), "/settings/integrations", "a staff panel has the link");
+    cleanup();
+    __resetQsysPanelsForTests();
+    // A volunteer device whose cog took it to the staff panel: no way to settings.
+    await open("/qsys/booth?return=zone-1");
+    assert.ok(document.querySelector("[data-qsys-no-core]"));
+    assert.equal(document.querySelector("[data-qsys-no-core] a") !== null, false, "a volunteer device reached settings through a staff panel");
     cleanup();
     __resetQsysPanelsForTests();
     await open("/qsys/manage/zone-1");
@@ -418,25 +442,75 @@ describe("/qsys/manage", () => {
     assert.equal(screen.queryByText("Make it a panel") !== null, false, "Home was offered as a panel");
   });
 
-  test("an allowlist save carries the revision it read: over a list changed elsewhere it is refused, said, and Discard shows the new list", async () => {
+  test("a save over a list changed elsewhere is refused, shows what changed beside the edits, and Save waits until they are reviewed", async () => {
     await open("/qsys/manage");
     await wait(60);
     act(() => {
       fireEvent.change(screen.getByLabelText(`Max for ${MIX} gain`), { target: { value: "0" } });
       fireEvent.blur(screen.getByLabelText(`Max for ${MIX} gain`));
     });
-    // Another operator saves meanwhile.
+    // Another operator saves meanwhile: the gain's limits moved and a control was added.
+    server.allow = {
+      entries: [
+        { component: MIX, control: "gain", label: "", min: -50, max: 10, confirm: "none" },
+        { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
+        { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "hold" },
+      ],
+      invalid: null,
+      rev: "elsewhere",
+    };
+    const save = () => screen.getByText("Save the allowlist").closest("button") as HTMLButtonElement;
+    act(() => {
+      fireEvent.click(save());
+    });
+    await wait(40);
+    assert.equal(server.puts.length, 0, "the save overwrote someone else's list");
+    const box = () => document.querySelector("[data-qsys-allowlist-conflict]");
+    assert.match(box()?.textContent ?? "", /changed somewhere else/);
+    assert.deepEqual(
+      [...document.querySelectorAll("[data-qsys-allowlist-changes] li")].map((li) => li.textContent?.replace(/\s+/g, " ").trim()),
+      [`${MIX} gain limits, label or hold changed`, `${MIX} talk added`],
+    );
+    assert.match(document.querySelector("[data-qsys-allowlist-now]")?.textContent ?? "", /talk.*no limits, hold/);
+    // The edits stay where they were, beside the new list.
+    assert.equal((screen.getByLabelText(`Max for ${MIX} gain`) as HTMLInputElement).value, "0", "the edits were thrown away");
+    // A second press sends nothing: Save is off until the operator has looked.
+    assert.equal(save().disabled, true, "Save stayed on after a refused save");
+    act(() => {
+      fireEvent.click(save());
+    });
+    await wait(40);
+    assert.equal(server.puts.length, 0, "a second press saved the stale edits over the new list");
+    act(() => {
+      fireEvent.click(document.querySelector("[data-qsys-allowlist-reviewed]")!);
+    });
+    await wait(10);
+    assert.equal(save().disabled, false);
+    act(() => {
+      fireEvent.click(save());
+    });
+    await wait(40);
+    assert.equal(server.puts.length, 1, "the reviewed save did not go");
+    assert.equal(server.puts[0].rev, "elsewhere", "the reviewed save did not name the list it was reviewed against");
+  });
+
+  test("after a refused save, Discard my edits shows the list as it is now", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.change(screen.getByLabelText(`Max for ${MIX} gain`), { target: { value: "0" } });
+      fireEvent.blur(screen.getByLabelText(`Max for ${MIX} gain`));
+    });
     server.allow = { entries: [{ component: MIX, control: "gain", label: "", min: -50, max: 10, confirm: "none" }], invalid: null, rev: "elsewhere" };
     act(() => {
       fireEvent.click(screen.getByText("Save the allowlist"));
     });
     await wait(40);
-    assert.equal(server.puts.length, 0, "the save overwrote someone else's list");
-    assert.match(document.querySelector('section[aria-label="Allowlist"] [role="alert"]')?.textContent ?? "", /changed somewhere else/);
     act(() => {
-      fireEvent.click(screen.getByText("Discard"));
+      fireEvent.click(screen.getByText("Discard my edits"));
     });
     await wait(10);
+    assert.equal(document.querySelector("[data-qsys-allowlist-conflict]") === null, true);
     assert.equal((screen.getByLabelText(`Min for ${MIX} gain`) as HTMLInputElement).value, "-50");
   });
 
@@ -449,13 +523,67 @@ describe("/qsys/manage", () => {
     await wait(60);
     const box = document.querySelector("[data-qsys-kept-aside]")!;
     assert.match(box.textContent ?? "", /Lobby wall.*\/qsys\/lobby.*Make it a custom console first/);
-    assert.deepEqual([...box.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim()), ["Restore as panel"], "a display was offered a restore");
+    assert.deepEqual([...box.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim()), ["Dismiss", "Restore as panel", "Dismiss"], "a display was offered a restore");
     act(() => {
       fireEvent.click(screen.getByText("Restore as panel"));
     });
     await wait(40);
     assert.equal(server.patches.at(-1)?.url, "/api/views/v-spare");
     assert.deepEqual(server.patches.at(-1)?.body, { qsys: { kind: "staff", slug: "spare", siblings: [], returnAfterMin: 5 } });
+  });
+
+  test("restoring onto a view that is a panel now asks first, saying its settings go aside", async () => {
+    render(React.createElement(ConfirmHost));
+    const kept = { kind: "staff", slug: "old-zone", siblings: [], returnAfterMin: 5 };
+    server.views = [{ ...ZONE, qsysInactive: [kept] }, BOOTH];
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(screen.getByText("Restore as panel"));
+    });
+    await wait(40);
+    assert.equal(server.patches.length, 0, "it restored without asking");
+    assert.match(document.body.textContent ?? "", /is the panel at \/qsys\/zone-1 now\. Its settings are kept aside/);
+    act(() => {
+      fireEvent.click(screen.getByText("Restore"));
+    });
+    await wait(60);
+    assert.deepEqual(server.patches.at(-1)?.body, { qsys: kept });
+  });
+
+  test("Dismiss forgets kept-aside settings only once confirmed, and sends them whole", async () => {
+    render(React.createElement(ConfirmHost));
+    const odd = { kind: "guest", slug: "Foyer" };
+    server.views = [ZONE, BOOTH, { id: "v-spare", name: "Spare", kind: "custom", surface: "console", createdAt: NOW, layout: layoutWith(), qsysInactive: [odd] }];
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.click(document.querySelector("[data-qsys-dismiss]")!);
+    });
+    await wait(40);
+    assert.equal(server.posts.length, 0, "it dismissed without asking");
+    act(() => {
+      fireEvent.click([...document.querySelectorAll("button")].find((b) => b.textContent === "Dismiss" && !b.hasAttribute("data-qsys-dismiss"))!);
+    });
+    await wait(60);
+    assert.deepEqual(server.dismissed, [{ url: "/api/views/v-spare/qsys-inactive/dismiss", body: { entry: odd } }]);
+  });
+
+  test("a read that failed says so: the connection, and the load's repairs", async () => {
+    server.failReads = ["/api/qsys/status", "/api/qsys/panel-repairs"];
+    await open("/qsys/manage");
+    await wait(60);
+    assert.equal(document.querySelector("[data-qsys-connection]")?.getAttribute("data-qsys-connection"), "failed");
+    assert.match(document.querySelector("[data-qsys-connection]")?.textContent ?? "", /Couldn't read the Q-SYS connection; see \/log/);
+    assert.ok(document.querySelector("[data-qsys-repairs-failed]"), "a failed repairs read looked like no repairs");
+  });
+
+  test("/qsys/manage/<old address> leads to the renamed panel", async () => {
+    server.views = [{ ...ZONE, qsys: { ...block("volunteer", "zone-one"), aliases: ["zone-1"] } }, BOOTH];
+    await open("/qsys/manage/zone-1");
+    await wait(40);
+    assert.equal(where().path, "/qsys/manage/zone-one");
+    assert.ok(document.querySelector('[data-qsys-panel="zone-one"]'));
   });
 
   test("in the shell, a panel's header carries its address and kind", async () => {
@@ -602,6 +730,7 @@ describe("/qsys/manage", () => {
     act(() => {
       fireEvent.change(screen.getByLabelText("Address"), { target: { value: "zone-one" } });
     });
+    assert.match(document.querySelector("[data-qsys-old-address]")?.textContent ?? "", /\/qsys\/zone-1 keeps leading here/);
     act(() => {
       fireEvent.click(screen.getByText("Save"));
     });

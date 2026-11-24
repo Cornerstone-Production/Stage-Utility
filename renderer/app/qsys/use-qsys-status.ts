@@ -2,9 +2,9 @@
 // current by the qsys:status channel. One hook for /qsys/manage and the sidebar,
 // so they cannot disagree about whether a Core is set up.
 
-import { useEffect, useState } from "react";
-import { invoke, onNotification } from "../../lib/api";
-import { logReadFailure } from "../../lib/client-log";
+import { useEffect } from "react";
+import { onNotification } from "../../lib/api";
+import { useRead } from "../../lib/use-read";
 
 export type Status = {
   connected: boolean;
@@ -15,20 +15,10 @@ export type Status = {
   configured?: boolean;
 };
 
-/** The connection, read once and then followed on qsys:status. Null until known. */
-export function useQsysStatus(): Status | null {
-  const [status, setStatus] = useState<Status | null>(null);
-  useEffect(() => {
-    let live = true;
-    invoke<Status>("qsys:status").then(
-      (st) => live && setStatus((cur) => cur ?? st),
-      (err: unknown) => logReadFailure("qsys", "the Q-SYS connection", err),
-    );
-    const off = onNotification("qsys:status", (p) => live && setStatus(p as Status));
-    return () => {
-      live = false;
-      off();
-    };
-  }, []);
-  return status;
+/** The connection, read once and then followed on qsys:status: null until known,
+ *  and `failed` when the read failed and no push has come since. */
+export function useQsysStatus(): { status: Status | null; failed: boolean } {
+  const [read, put] = useRead<Status>("qsys:status", "qsys", "the Q-SYS connection");
+  useEffect(() => onNotification("qsys:status", (p) => put(p as Status)), [put]);
+  return { status: read.state === "ok" ? read.value : null, failed: read.state === "failed" };
 }

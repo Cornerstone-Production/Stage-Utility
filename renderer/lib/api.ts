@@ -721,6 +721,7 @@ export type IpcChannel =
   | "views:setCalendarFilters"
   | "views:setHideChrome"
   | "views:setQsys"
+  | "views:dismissQsysInactive"
   | "views:setKind"
   | "views:setLayout"
   | "views:setServiceCueLayout"
@@ -1493,6 +1494,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "views:setQsys": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { qsys: p.qsys });
+    }
+
+    case "views:dismissQsysInactive": {
+      const id = p.id as string;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/qsys-inactive/dismiss`, { entry: p.entry });
     }
 
     case "views:setHideChrome": {

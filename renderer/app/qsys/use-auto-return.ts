@@ -20,17 +20,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 
 import { qsysPanelPath } from "./qsys-paths";
+import { useQsysTiming } from "./qsys-timing";
 
 /** What counts as someone touching the screen. */
 const TOUCH_EVENTS = ["pointerdown", "pointermove", "touchstart", "wheel", "keydown"] as const;
-
-/** One second, as the countdown counts it. A test makes it a few milliseconds. */
-let secondMs = 1000;
-
-/** Test seam: how long a second of the countdown is. */
-export function __setAutoReturnSecondForTests(ms: number | null): void {
-  secondMs = ms ?? 1000;
-}
 
 /** `seconds` as m:ss. */
 export function formatCountdown(seconds: number): string {
@@ -45,6 +38,8 @@ export function formatCountdown(seconds: number): string {
  */
 export function useAutoReturn(homeSlug: string | null, minutes: number): { secondsLeft: number | null; goHome: () => void } {
   const router = useRouter();
+  // One second, as the countdown counts it. A test makes it a few milliseconds.
+  const { secondMs } = useQsysTiming();
   const active = homeSlug !== null && minutes > 0;
   // Starts full; the first tick, a second in, says what is left. Keyed by home and
   // minutes where it is drawn (qsys-panel-route.tsx), so a new count starts full.
@@ -84,7 +79,7 @@ export function useAutoReturn(homeSlug: string | null, minutes: number): { secon
       for (const e of TOUCH_EVENTS) window.removeEventListener(e, touch, { capture: true });
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [active, minutes, goHome]);
+  }, [active, minutes, goHome, secondMs]);
 
   return { secondsLeft: active ? secondsLeft : null, goHome };
 }

@@ -10,43 +10,47 @@
 // Every read here can fail on its own; each says so where its section is, and
 // on /log, rather than leaving a section that looks empty and clean.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
 import {
+  QSYS_KIND_TEXT,
   QSYS_RETURN_DEFAULT_MIN,
   QSYS_RETURN_MAX_MIN,
+  addressKey,
+  canBeQsysPanel,
   parseQsysPanelBlock,
   findPanelBySlug,
   isQsysPanel,
   isQsysSlug,
+  qsysSlugFromName,
   qsysSlugsOf,
   siblingsOf,
-  qsysSlugFromName,
   uniqueQsysSlug,
+  type AllowEntry,
   type PanelKind,
   type QsysAddress,
   type QsysPanelBlock,
+  type QsysSlugRepair,
 } from "@main/types/qsys";
 import type { View } from "@main/types/views";
-import { viewSurface, walkLayoutObjects } from "@main/types/views";
+import { walkLayoutObjects } from "@main/types/views";
 import { errorMessage } from "@main/services/errors";
-import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Switch, confirm } from "../../components/ui";
+import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Radio, RadioGroup, Switch, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
+import { useRead, type ReadState } from "../../lib/use-read";
 import { canEditInPlace } from "../../editor/can-edit";
 import { AppLink } from "../app-link";
 import { cn } from "../../lib/cn";
 import { ConsoleEditor, InPlaceEditFrame } from "../console-route";
+import { INTEGRATIONS_ROUTE } from "../legacy-hash";
 import { useStageSettings } from "../use-stage-settings";
-import { HOME_VIEW_ID } from "@main/services/home-view";
 import { QsysPanelNotFound, QsysPanelSurface } from "./qsys-panel-route";
 import { qsysManagePanelPath, qsysPanelPath } from "./qsys-paths";
+import { usePinSet } from "./use-pin-set";
 import { useQsysStatus, type Status } from "./use-qsys-status";
 
-const INTEGRATIONS_PATH = "/settings/integrations";
-
-type AllowEntry = { component: string; control: string; label: string; min: number | null; max: number | null; confirm: "none" | "hold" };
 type Problem = { panelId: string; objectId: string; address: QsysAddress; problem: "missing-component" | "missing-control" | "not-allowed" | "read-only" };
 
 /** What the binding check said: a list; not connected (503 `not-connected`); or could not run (503
@@ -60,19 +64,24 @@ const PROBLEM_TEXT: Record<Problem["problem"], string> = {
   "read-only": "read-only, or a number with no limits set",
 };
 
-const KIND_TEXT: Record<PanelKind, string> = { volunteer: "Volunteer panel", staff: "Staff panel" };
-
 // ── /qsys/manage/<slug> ──────────────────────────────────────────────────────
 
 /** One panel inside the shell, with in-place Edit like any console. */
 export function QsysManagePanelRoute() {
   const { slug = "" } = useParams({ strict: false }) as { slug?: string };
   const s = useStageSettings();
+  const router = useRouter();
   // Which panel is being edited, not a yes/no: moving to another panel is a param
   // change on this route, and a boolean would open it straight into the editor.
   const [editingFor, setEditingFor] = useState<string | null>(null);
+  // An address the panel had before a rename leads to it: the URL is put right.
+  const found = s.stageState ? findPanelBySlug(s.stageState.views ?? [], slug) : null;
+  const renamedTo = found?.qsys && found.qsys.slug !== slug ? found.qsys.slug : null;
+  useEffect(() => {
+    if (renamedTo !== null) void router.navigate({ to: qsysManagePanelPath(renamedTo), replace: true });
+  }, [router, renamedTo]);
   if (!s.stageState) return null;
-  const view = findPanelBySlug(s.stageState.views ?? [], slug);
+  const view = found;
   if (!view) {
     return (
       <div className="-mx-2 h-full max-sm:-mx-3">
@@ -102,21 +111,21 @@ export function QsysManageRoute() {
   const s = useStageSettings();
   const views = useMemo(() => s.stageState?.views ?? [], [s.stageState?.views]);
   const panels = useMemo(() => views.filter(isQsysPanel), [views]);
-  const status = useQsysStatus();
+  const { status, failed: statusFailed } = useQsysStatus();
   const [allow, allowTook] = useAllowlist();
   const bindings = useBindings(views, allow, status);
 
   return (
     <div className="flex flex-col gap-6 pb-8">
       <PanelsSection views={views} panels={panels} bindings={bindings} />
-      <ConnectionSection status={status} />
+      <ConnectionSection status={status} failed={statusFailed} />
       <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} />
       <BindingsSection bindings={bindings} views={views} />
       <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
         <PinSection />
       </Section>
       <Section title="Meter rates" hint="Volunteer panels' meters move at the volunteer rate and staff panels' at the staff rate. Both are set on the Q-SYS integration.">
-        <AppLink to={INTEGRATIONS_PATH} className="text-footnote font-medium text-accent hover:underline" data-qsys-rates>
+        <AppLink to={INTEGRATIONS_ROUTE} className="text-footnote font-medium text-accent hover:underline" data-qsys-rates>
           Meter rates on the Q-SYS integration
         </AppLink>
       </Section>
@@ -141,35 +150,21 @@ function Section({ title, hint, children, action }: { title: string; hint?: stri
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
-type AllowRead = { entries: AllowEntry[]; invalid: string | null; rev: string };
-type AllowState = { state: "loading" } | ({ state: "ok" } & AllowRead) | { state: "failed" };
+/** The allowlist as read: its entries, why a stored file is refused (absent once a
+ *  save has answered, which is valid by then), and its revision. */
+type AllowRead = { entries: AllowEntry[]; invalid?: string | null; rev: string };
+type AllowState = ReadState<AllowRead>;
 
 /** The allowlist as read, with its revision, and a way to put what a save or a fresh read answered in its place. */
-function useAllowlist(): [AllowState, (a: { entries: AllowEntry[]; rev: string; invalid?: string | null }) => void] {
-  const [allow, setAllow] = useState<AllowState>({ state: "loading" });
-  useEffect(() => {
-    let live = true;
-    invoke<AllowRead>("qsys:allowlist").then(
-      (a) => live && setAllow({ state: "ok", entries: a.entries, invalid: a.invalid ?? null, rev: a.rev }),
-      (err: unknown) => {
-        logReadFailure("qsys", "the allowlist for /qsys/manage", err);
-        if (live) setAllow({ state: "failed" });
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  // A save answers with the list it saved (valid by then) and its revision; a read, as it came.
-  const took = useCallback((a: { entries: AllowEntry[]; rev: string; invalid?: string | null }) => setAllow({ state: "ok", entries: a.entries, invalid: a.invalid ?? null, rev: a.rev }), []);
-  return [allow, took];
+function useAllowlist(): [AllowState, (a: AllowRead) => void] {
+  return useRead<AllowRead>("qsys:allowlist", "qsys", "the allowlist for /qsys/manage");
 }
 
 /** The binding check, read again whenever the views, the allowlist or the connection change. */
 function useBindings(views: View[], allow: AllowState, status: Status | null): Bindings {
   const [bindings, setBindings] = useState<Bindings>({ state: "loading" });
   const connected = status?.connected === true;
-  const allowKey = allow.state === "ok" ? JSON.stringify(allow.entries) : allow.state;
+  const allowKey = allow.state === "ok" ? JSON.stringify(allow.value.entries) : allow.state;
   // The check reads the views' layouts and panel blocks, nothing else: a stage
   // broadcast that rebuilds the list without changing those reads nothing again.
   const viewsKey = JSON.stringify(views.map((v) => [v.id, v.layoutRev ?? null, v.layout?.objects.length ?? 0, v.qsys?.slug ?? null]));
@@ -197,40 +192,25 @@ function useBindings(views: View[], allow: AllowState, status: Status | null): B
 
 // ── Panels ───────────────────────────────────────────────────────────────────
 
-type Repair = { viewId: string; name: string; from: string | null; to: string | null; why: "shared" | "not-a-console" | "malformed" };
-
 /** What a load did to one view's panel settings, in a sentence. */
-function repairText(r: Repair): string {
+function repairText(r: QsysSlugRepair): string {
   if (r.why === "shared") return `"${r.name}" shared /qsys/${r.from} with an earlier panel, so it opens at /qsys/${r.to} now`;
   if (r.why === "not-a-console") return `"${r.name}" had panel settings for /qsys/${r.from} but is not a custom console, so they were kept aside`;
   return `"${r.name}" had panel settings this app cannot read, so they were kept aside`;
 }
 
-/** Panel blocks the server repaired when it loaded the views (a restored backup with
- *  two panels at one address). Read once; empty when there were none. */
-function usePanelRepairs(): Repair[] {
-  const [repairs, setRepairs] = useState<Repair[]>([]);
-  useEffect(() => {
-    let live = true;
-    invoke<Repair[]>("qsys:panelRepairs").then(
-      (r) => live && setRepairs(Array.isArray(r) ? r : []),
-      (err: unknown) => logReadFailure("qsys", "the panel repairs for /qsys/manage", err),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  return repairs;
-}
 
 function PanelsSection({ views, panels, bindings }: { views: View[]; panels: View[]; bindings: Bindings }) {
   const [editing, setEditing] = useState<View | null>(null);
   const [creating, setCreating] = useState(false);
-  const repairs = usePanelRepairs();
+  // Panel blocks the server repaired when it loaded the views (a restored backup with
+  // two panels at one address). Read once. A failed read says so: it is not "none".
+  const [repairsRead] = useRead<QsysSlugRepair[]>("qsys:panelRepairs", "qsys", "the panel repairs for /qsys/manage");
+  const repairs = repairsRead.state === "ok" && Array.isArray(repairsRead.value) ? repairsRead.value : [];
   // Consoles with Q-SYS objects and no panel block: their objects work, as staff
   // panels, but they have no address of their own until they are made one.
   // Not Home: it has its own page, cannot be a panel, and draws no Q-SYS panel.
-  const unmade = views.filter((v) => v.id !== HOME_VIEW_ID && !isQsysPanel(v) && viewSurface(v) === "console" && v.kind === "custom" && hasQsysObjects(v));
+  const unmade = views.filter((v) => !isQsysPanel(v) && canBeQsysPanel(v) && hasQsysObjects(v));
   const gaps = panels.map((panel) => ({ panel, missing: siblingsOf(panel, views).missing })).filter((g) => g.missing.length > 0);
   const problemsOf = (id: string) => (bindings.state === "ok" ? bindings.problems.filter((p) => p.panelId === id).length : 0);
   return (
@@ -239,6 +219,11 @@ function PanelsSection({ views, panels, bindings }: { views: View[]; panels: Vie
       hint="Each panel opens full screen at its own address, for an iPad's home screen. Open one here to see it with the app around it and edit it in place."
       action={<Button size="small" onClick={() => setCreating(true)}>New panel</Button>}
     >
+      {repairsRead.state === "failed" && (
+        <Callout tone="warn" data-qsys-repairs-failed>
+          Couldn&rsquo;t read whether loading the saved views changed any panel&rsquo;s address; see /log.
+        </Callout>
+      )}
       {repairs.length > 0 && (
         <Callout tone="warn" data-qsys-repairs>
           When the saved views were loaded,{" "}
@@ -263,7 +248,7 @@ function PanelsSection({ views, panels, bindings }: { views: View[]; panels: Vie
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption1">
-                  <span className="text-fg-muted" data-kind>{KIND_TEXT[p.qsys!.kind]}</span>
+                  <span className="text-fg-muted" data-kind>{QSYS_KIND_TEXT[p.qsys!.kind]}</span>
                   {problemsOf(p.id) > 0 && (
                     <span className="text-warn-11" data-problems>
                       <span className="font-mono">{problemsOf(p.id)}</span> binding {problemsOf(p.id) === 1 ? "problem" : "problems"}
@@ -310,14 +295,24 @@ function PanelsSection({ views, panels, bindings }: { views: View[]; panels: Vie
 
 /**
  * Panel settings a load kept aside (View.qsysInactive): a block on a view that
- * could not be a panel, or one this app could not read. Nothing is lost; each can
- * be restored once the view can be a panel, or set up again.
+ * could not be a panel, or one this app could not read. Nothing is lost by the
+ * load; each can be restored once the view can be a panel (a panel's own settings
+ * then go aside in their place, never lost), set up again, or dismissed. Dismiss
+ * is the operator's choice, confirmed, and logged with the whole block.
  */
 function KeptAside({ views }: { views: View[] }) {
   const [message, setMessage] = useState<string | null>(null);
   const kept = views.flatMap((v) => (Array.isArray(v.qsysInactive) ? v.qsysInactive.map((raw, i) => ({ view: v, raw, i })) : []));
   if (kept.length === 0) return null;
   async function restore(view: View, block: QsysPanelBlock) {
+    if (view.qsys) {
+      const ok = await confirm({
+        title: `Restore ${qsysPanelPath(block.slug)} on "${view.name}"?`,
+        message: `"${view.name}" is the panel at ${qsysPanelPath(view.qsys.slug)} now. Its settings are kept aside here in place of these, so they can be restored in turn.`,
+        confirmLabel: "Restore",
+      });
+      if (!ok) return;
+    }
     setMessage(null);
     try {
       await invoke("views:setQsys", { id: view.id, qsys: block });
@@ -326,29 +321,49 @@ function KeptAside({ views }: { views: View[] }) {
       setMessage(errorMessage(err));
     }
   }
+  async function dismiss(view: View, raw: unknown) {
+    const ok = await confirm({
+      title: `Dismiss these settings on "${view.name}"?`,
+      message: "They are forgotten. The log keeps a copy of them, word for word.",
+      confirmLabel: "Dismiss",
+      destructive: true,
+    });
+    if (!ok) return;
+    setMessage(null);
+    try {
+      await invoke("views:dismissQsysInactive", { id: view.id, entry: raw });
+    } catch (err) {
+      logToServer("qsys", `dismissing kept-aside panel settings on ${view.id} was refused: ${errorMessage(err)}`);
+      setMessage(errorMessage(err));
+    }
+  }
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-line p-3" data-qsys-kept-aside>
       <p className="text-footnote text-fg-muted">Panel settings kept aside when the views were loaded. Nothing reads them as a panel until they are restored.</p>
       {kept.map(({ view, raw, i }) => {
         const parsed = parseQsysPanelBlock(raw);
-        const canBe = view.id !== HOME_VIEW_ID && view.kind === "custom" && viewSurface(view) === "console";
         const slug = (raw as { slug?: unknown } | null)?.slug;
         return (
           <div key={`${view.id}:${i}`} className="flex flex-wrap items-center justify-between gap-3 text-footnote">
             <span className="text-fg">
               {view.name} <span className="font-mono text-fg-muted">{typeof slug === "string" ? qsysPanelPath(slug) : "(no readable address)"}</span>
             </span>
-            {"block" in parsed && canBe ? (
-              <Button size="small" variant="transparent" onClick={() => void restore(view, parsed.block)}>
-                Restore as panel
+            <span className="flex flex-wrap items-center gap-2">
+              {"block" in parsed && canBeQsysPanel(view) ? (
+                <Button size="small" variant="transparent" onClick={() => void restore(view, parsed.block)}>
+                  Restore as panel
+                </Button>
+              ) : (
+                <span className="text-fg-muted">
+                  {"block" in parsed
+                    ? "Make it a custom console first, then restore it here."
+                    : `These settings cannot be read (${parsed.error}). Make it a panel again under its settings.`}
+                </span>
+              )}
+              <Button size="small" variant="transparent" onClick={() => void dismiss(view, raw)} data-qsys-dismiss>
+                Dismiss
               </Button>
-            ) : (
-              <span className="text-fg-muted">
-                {"block" in parsed
-                  ? "Make it a custom console first, then restore it here."
-                  : `These settings cannot be read (${parsed.error}). Make it a panel again under its settings.`}
-              </span>
-            )}
+            </span>
           </div>
         );
       })}
@@ -369,15 +384,17 @@ function KindChoice({ value, onChange }: { value: PanelKind; onChange: (k: Panel
   return (
     <fieldset className="flex flex-col gap-1.5">
       <legend className="mb-1 text-footnote font-medium text-fg">Who uses it</legend>
-      {(["volunteer", "staff"] as const).map((k) => (
-        <label key={k} className="flex min-h-11 cursor-pointer items-center gap-2 text-footnote text-fg">
-          <input type="radio" name="qsys-kind" value={k} checked={value === k} onChange={() => onChange(k)} className="size-4 accent-[var(--su-accent)]" />
-          <span>
-            {KIND_TEXT[k]}
-            <span className="text-fg-muted">{k === "volunteer" ? ": big targets, and a cog that opens the app only with the staff PIN" : ": dense, every control"}</span>
-          </span>
-        </label>
-      ))}
+      <RadioGroup value={value} onValueChange={(v: string) => onChange(v as PanelKind)} className="flex flex-col gap-1.5">
+        {(["volunteer", "staff"] as const).map((k) => (
+          <label key={k} className="flex min-h-11 cursor-pointer items-center gap-2 text-footnote text-fg">
+            <Radio value={k} aria-label={QSYS_KIND_TEXT[k]} />
+            <span>
+              {QSYS_KIND_TEXT[k]}
+              <span className="text-fg-muted">{k === "volunteer" ? ": big targets, and a cog that opens the app only with the staff PIN" : ": dense, every control"}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
     </fieldset>
   );
 }
@@ -485,6 +502,11 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
             <Input value={slug} onChange={(e) => setSlug(e.target.value)} aria-label="Address" className="font-mono" />
           </span>
           {!shapeOk && <span className="text-caption1 font-normal text-warn-11">Lowercase letters, digits and single hyphens, and not "manage".</span>}
+          {shapeOk && was && slug !== was.slug && (
+            <span className="text-caption1 font-normal text-fg-muted" data-qsys-old-address>
+              <span className="font-mono">{qsysPanelPath(was.slug)}</span> keeps leading here, and other panels&rsquo; cog menus follow the new address.
+            </span>
+          )}
         </label>
         <fieldset className="flex flex-col gap-0.5" data-qsys-siblings>
           <legend className="mb-1 text-footnote font-medium text-fg">In its cog menu</legend>
@@ -536,32 +558,19 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
  * network is the boundary.
  */
 function PinSection() {
-  const [set, setSet] = useState<boolean | null>(null);
-  const [readFailed, setReadFailed] = useState(false);
+  const [pinSet, putPinSet] = usePinSet();
+  const readFailed = pinSet.state === "failed";
+  const set = pinSet.state === "ok" ? pinSet.value.set === true : null;
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    invoke<{ set: boolean }>("qsys:pin").then(
-      (r) => live && setSet(r.set === true),
-      (err: unknown) => {
-        logReadFailure("qsys", "whether a staff PIN is set", err);
-        if (live) setReadFailed(true);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
 
   async function save(next: string | null) {
     setBusy(true);
     setMessage(null);
     try {
       const r = await invoke<{ set: boolean }>("qsys:setPin", { pin: next });
-      setSet(r.set === true);
+      putPinSet({ set: r.set === true });
       setPin("");
       setMessage({ tone: "ok", text: next === null ? "The staff PIN is removed." : "The staff PIN is set." });
     } catch (err) {
@@ -622,10 +631,11 @@ function PinSection() {
 
 // ── Connection ───────────────────────────────────────────────────────────────
 
-function ConnectionSection({ status }: { status: Status | null }) {
+function ConnectionSection({ status, failed }: { status: Status | null; failed: boolean }) {
   let text: string;
   let tone: "ok" | "warn" | "danger" = "warn";
-  if (!status) text = "Reading the connection…";
+  if (!status && failed) text = "Couldn't read the Q-SYS connection; see /log.";
+  else if (!status) text = "Reading the connection…";
   else if (status.configured === false) text = "No Q-SYS Core is set up. Panels stay editable, and their controls are disabled until one is.";
   else if (status.connected) {
     tone = "ok";
@@ -638,11 +648,11 @@ function ConnectionSection({ status }: { status: Status | null }) {
   return (
     <Section title="Connection">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
-        <span className="flex items-center gap-2 text-footnote text-fg" data-qsys-connection={status?.state ?? "unknown"}>
+        <span className="flex items-center gap-2 text-footnote text-fg" data-qsys-connection={status?.state ?? (failed ? "failed" : "unknown")}>
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${dot}`} />
           {text}
         </span>
-        <AppLink to={INTEGRATIONS_PATH} className="text-footnote font-medium text-accent hover:underline">
+        <AppLink to={INTEGRATIONS_ROUTE} className="text-footnote font-medium text-accent hover:underline">
           Q-SYS settings
         </AppLink>
       </div>
@@ -652,6 +662,28 @@ function ConnectionSection({ status }: { status: Status | null }) {
 
 // ── Allowlist ────────────────────────────────────────────────────────────────
 
+/** One way the stored list differs from the one an edit started from. */
+type Change = { key: string; what: "added" | "removed" | "changed"; entry: AllowEntry };
+
+/** What changed between `from` and `to`, by address: added, removed, or with other limits, label or hold. */
+function changesBetween(from: readonly AllowEntry[], to: readonly AllowEntry[]): Change[] {
+  const before = new Map(from.map((e) => [addressKey(e), e]));
+  const now = new Map(to.map((e) => [addressKey(e), e]));
+  const out: Change[] = [];
+  for (const [key, e] of now) {
+    const was = before.get(key);
+    if (!was) out.push({ key, what: "added", entry: e });
+    else if (JSON.stringify(was) !== JSON.stringify(e)) out.push({ key, what: "changed", entry: e });
+  }
+  for (const [key, e] of before) if (!now.has(key)) out.push({ key, what: "removed", entry: e });
+  return out;
+}
+
+const CHANGE_TEXT: Record<Change["what"], string> = { added: "added", removed: "removed", changed: "limits, label or hold changed" };
+
+/** A list's limits, as the review shows them. */
+const limitsText = (e: AllowEntry) => (e.min === null ? "no limits" : `${e.min} to ${e.max}`) + (e.confirm === "hold" ? ", hold" : "");
+
 function AllowlistSection({
   allow,
   took,
@@ -659,41 +691,56 @@ function AllowlistSection({
   connected,
 }: {
   allow: AllowState;
-  took: (a: { entries: AllowEntry[]; rev: string; invalid?: string | null }) => void;
+  took: (a: AllowRead) => void;
   panels: View[];
   connected: boolean;
 }) {
-  const [draft, setDraft] = useState<AllowEntry[] | null>(null);
+  /** The operator's edits, and the list (and revision) they were made on: a save
+   *  names that revision, so it can never land over a list nobody here has seen. */
+  const [draft, setDraft] = useState<{ entries: AllowEntry[]; base: AllowRead } | null>(null);
+  /** A save the server refused because the list had moved on: what moved. Save
+   *  stays off until the operator has reviewed it (ruling: never overwrite unseen). */
+  const [conflict, setConflict] = useState<{ changes: Change[] | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const saved = allow.state === "ok" ? allow.entries : [];
-  const entries = draft ?? saved;
+  const current = allow.state === "ok" ? allow.value : null;
+  const saved = current?.entries ?? [];
+  const entries = draft?.entries ?? saved;
   const dirty = draft !== null;
 
-  const edit = (i: number, change: Partial<AllowEntry>) => setDraft(entries.map((e, j) => (j === i ? { ...e, ...change } : e)));
+  const editTo = (next: AllowEntry[]) => setDraft({ entries: next, base: draft?.base ?? { entries: saved, rev: current?.rev ?? "" } });
+  const edit = (i: number, change: Partial<AllowEntry>) => editTo(entries.map((e, j) => (j === i ? { ...e, ...change } : e)));
+  const discard = () => {
+    setDraft(null);
+    setConflict(null);
+  };
 
   async function saveDraft() {
-    if (!draft) return;
+    if (!draft || conflict) return;
     setBusy(true);
     setMessage(null);
     try {
-      // A save replaces the whole list, so it names the revision this page read: the
-      // server refuses it (409 rev-changed) if anyone has saved since, in the same step
-      // as the save, and nobody's edit is overwritten unseen.
-      const r = await invoke<{ entries: AllowEntry[]; rev: string }>("qsys:setAllowlist", { entries: draft, rev: allow.state === "ok" ? allow.rev : undefined });
+      // A save replaces the whole list, so it names the revision the edits were made
+      // on: the server refuses it (409 rev-changed) if anyone has saved since, in the
+      // same step as the save, and nobody's edit is overwritten unseen.
+      const r = await invoke<{ entries: AllowEntry[]; rev: string }>("qsys:setAllowlist", { entries: draft.entries, rev: draft.base.rev || undefined });
       took(r);
       setDraft(null);
       setMessage({ tone: "ok", text: "Saved." });
     } catch (err) {
       if ((err as { code?: string }).code === "rev-changed") {
-        // Read it again: the edits stay, and the new list is what Discard shows.
-        logToServer("qsys", "an allowlist save was stopped: the list changed since the page read it");
+        // Read it again and show what moved beside the edits, which stay. Save waits
+        // for the operator to look.
+        logToServer("qsys", "an allowlist save was stopped: the list changed since the edits began; the page shows what changed");
         try {
-          took(await invoke<AllowRead>("qsys:allowlist"));
+          const fresh = await invoke<AllowRead>("qsys:allowlist");
+          took(fresh);
+          setConflict({ changes: changesBetween(draft.base.entries, fresh.entries) });
         } catch (readErr) {
           logReadFailure("qsys", "the allowlist for /qsys/manage", readErr);
+          setConflict({ changes: null });
         }
-        setMessage({ tone: "error", text: "The allowlist was changed somewhere else since this page read it, so nothing was saved. Discard to see it, then make your edits again." });
+        setMessage(null);
         return;
       }
       logToServer("qsys", `the allowlist save was refused: ${errorMessage(err)}`);
@@ -701,6 +748,13 @@ function AllowlistSection({
     } finally {
       setBusy(false);
     }
+  }
+
+  /** The operator has seen what changed: their edits now stand on the list as it is. */
+  function reviewed() {
+    if (!draft || !current) return;
+    setDraft({ entries: draft.entries, base: { entries: current.entries, rev: current.rev } });
+    setConflict(null);
   }
 
   /** Replace an invalid stored list, deliberately: the file is kept beside it on the server. */
@@ -716,7 +770,7 @@ function AllowlistSection({
     try {
       const r = await invoke<{ entries: AllowEntry[]; rev: string }>("qsys:setAllowlist", { entries: [], replaceInvalid: true });
       took(r);
-      setDraft(null);
+      discard();
     } catch (err) {
       logToServer("qsys", `replacing the invalid allowlist was refused: ${errorMessage(err)}`);
       setMessage({ tone: "error", text: errorMessage(err) });
@@ -747,9 +801,9 @@ function AllowlistSection({
       hint="The only controls any panel may change, each within its limits. A control's limits start at the Core's own range; tighten them here. Hold asks every object on that control to be held to confirm."
     >
       {allow.state === "failed" && <Callout tone="warn">The allowlist could not be read, so it is not shown. See /log.</Callout>}
-      {allow.state === "ok" && allow.invalid && (
+      {current?.invalid && (
         <div className="flex flex-col items-start gap-2">
-          <Callout tone="warn">{allow.invalid}</Callout>
+          <Callout tone="warn">{current.invalid}</Callout>
           <Button size="small" variant="transparent" disabled={busy} onClick={() => void startOver()}>
             Start a new, empty list
           </Button>
@@ -766,7 +820,7 @@ function AllowlistSection({
       )}
       {panels.length > 0 && !connected && <p className="text-caption1 text-fg-muted">Adding a panel's controls needs the Core connected: their limits come from it.</p>}
       {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls.</p>}
-      {allow.state === "ok" && entries.length === 0 && <p className="text-footnote text-fg-muted">Nothing is on the list, so no panel can change anything.</p>}
+      {current && entries.length === 0 && <p className="text-footnote text-fg-muted">Nothing is on the list, so no panel can change anything.</p>}
       {entries.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
           <table className="w-full text-footnote" data-qsys-allowlist>
@@ -795,7 +849,7 @@ function AllowlistSection({
                     <Switch aria-label={`Hold to confirm ${e.component} ${e.control}`} checked={e.confirm === "hold"} onCheckedChange={(on) => edit(i, { confirm: on ? "hold" : "none" })} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button size="small" variant="transparent" onClick={() => setDraft(entries.filter((_, j) => j !== i))} aria-label={`Remove ${e.component} ${e.control}`}>
+                    <Button size="small" variant="transparent" onClick={() => editTo(entries.filter((_, j) => j !== i))} aria-label={`Remove ${e.component} ${e.control}`}>
                       Remove
                     </Button>
                   </td>
@@ -805,10 +859,54 @@ function AllowlistSection({
           </table>
         </div>
       )}
+      {conflict && (
+        <div className="flex flex-col gap-3 rounded-xl border border-warn-9/40 p-3" role="alert" data-qsys-allowlist-conflict>
+          <p className="text-footnote text-fg">
+            The allowlist was changed somewhere else since you started editing, so nothing was saved. Your edits are above; the list as it is now is here.
+          </p>
+          {conflict.changes === null ? (
+            <p className="text-footnote text-warn-11">Couldn&rsquo;t read the list as it is now; see /log. Discard your edits to start again from it.</p>
+          ) : (
+            <>
+              <ul className="flex flex-col gap-0.5 text-footnote" data-qsys-allowlist-changes>
+                {conflict.changes.length === 0 && <li className="text-fg-muted">Nothing in it differs from what your edits started from.</li>}
+                {conflict.changes.map((c) => (
+                  <li key={`${c.what}:${c.key}`} className="text-fg">
+                    <span className="font-mono">{c.entry.component} {c.entry.control}</span> <span className="text-fg-muted">{CHANGE_TEXT[c.what]}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="overflow-x-auto rounded-lg border border-line" data-qsys-allowlist-now>
+                <table className="w-full text-caption1">
+                  <caption className="px-3 pt-2 text-left text-fg-muted">The list as it is now</caption>
+                  <tbody>
+                    {saved.map((e) => (
+                      <tr key={addressKey(e)} className="border-t border-line">
+                        <td className="px-3 py-1.5 font-mono text-fg">
+                          {e.component} <span className="text-fg-muted">{e.control}</span>
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-fg-muted">{limitsText(e)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button size="small" onClick={reviewed} disabled={conflict.changes === null} data-qsys-allowlist-reviewed>
+              Keep my edits over this list
+            </Button>
+            <Button size="small" variant="transparent" onClick={discard}>
+              Discard my edits
+            </Button>
+          </div>
+        </div>
+      )}
       {dirty && (
         <div className="flex gap-2">
-          <Button onClick={() => void saveDraft()} disabled={busy}>Save the allowlist</Button>
-          <Button variant="transparent" onClick={() => setDraft(null)} disabled={busy}>Discard</Button>
+          <Button onClick={() => void saveDraft()} disabled={busy || conflict !== null}>Save the allowlist</Button>
+          <Button variant="transparent" onClick={discard} disabled={busy}>Discard</Button>
         </div>
       )}
       {message && (

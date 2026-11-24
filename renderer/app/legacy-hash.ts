@@ -63,5 +63,9 @@ export function legacyHashRoute(hash: string): string | null {
   return (ROUTES as Record<string, string | undefined>)[id] ?? null;
 }
 
+/** Where an integration's card lives. Typed as string, matching how the rail passes
+ *  a destination path: the route union is generated and a bare literal does not satisfy it. */
+export const INTEGRATIONS_ROUTE: string = "/settings/integrations";
+
 /** Where bare `/settings` lands. */
-export const SETTINGS_INDEX_ROUTE = "/settings/integrations";
+export const SETTINGS_INDEX_ROUTE = INTEGRATIONS_ROUTE;

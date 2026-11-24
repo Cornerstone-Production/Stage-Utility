@@ -18,6 +18,12 @@
 // bridge exists in jsdom, which loads no stylesheet and measures every box as 0:
 // qsys-rail-row.test.tsx pins the timing, the state and the keys, and the
 // geometry was driven in a browser.
+//
+// Escape, a press elsewhere, and the window moving under it close the flyout
+// (use-dismiss.ts, shared with the cog menu; it says why this is not the app's
+// ContextMenu). A press on a flyout item never moves focus: Safari focuses nothing
+// on a mouse click, so focus leaving the row on that press would read as leaving
+// for nowhere and close the flyout before the click landed.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -29,6 +35,7 @@ import type { ContextMenuItem } from "../../components/ui/context-menu";
 import type { Destination } from "../destinations";
 import { RailRow } from "../rail-row";
 import { QSYS_MANAGE_PATH, qsysManagePanelPath, qsysManagedSlugOf } from "./qsys-paths";
+import { useDismiss } from "./use-dismiss";
 
 /** How long the pointer rests on the row before the flyout opens. */
 export const QSYS_FLYOUT_DELAY_MS = 500;
@@ -86,36 +93,18 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
     setPlace({ left: row.right, top });
   }, [flyout, panels.length]);
 
-  // Out of the way when the window moves under it or something else is pressed.
-  useEffect(() => {
-    if (!flyout) return;
-    const outside = (e: PointerEvent) => {
-      const t = e.target as Node | null;
-      if (t && (wrapper.current?.contains(t) || flyoutEl.current?.contains(t))) return;
-      setFlyout(false);
-    };
-    const away = () => setFlyout(false);
-    // Escape closes it whenever it is open, wherever focus is; focus that was in the
-    // row or the flyout goes back to the row.
-    const escape = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (wrapper.current?.contains(document.activeElement) || flyoutEl.current?.contains(document.activeElement)) {
+  // Out of the way when the window moves under it, something else is pressed, or
+  // Escape: then focus that was in the row or the flyout goes back to the row.
+  useDismiss(
+    flyout,
+    (by) => {
+      if (by === "escape" && (wrapper.current?.contains(document.activeElement) || flyoutEl.current?.contains(document.activeElement))) {
         wrapper.current?.querySelector("button")?.focus();
       }
       setFlyout(false);
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape, true);
-    window.addEventListener("resize", away);
-    // Capture: a scroll does not bubble, and the sidebar is the element that scrolls.
-    document.addEventListener("scroll", away, true);
-    return () => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("keydown", escape, true);
-      window.removeEventListener("resize", away);
-      document.removeEventListener("scroll", away, true);
-    };
-  }, [flyout]);
+    },
+    { inside: [wrapper, flyoutEl], moves: true },
+  );
 
   // Keyboard entry: the flyout has drawn, so there is an item to focus.
   useEffect(() => {
@@ -133,6 +122,7 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
   const items = panels.map((p) => ({
     key: p.id,
     label: p.name,
+    // The bare kind, lowercase, as the approved navigation board draws it here.
     kind: p.qsys!.kind,
     to: qsysManagePanelPath(p.qsys!.slug),
     current: p.qsys!.slug === currentSlug,
@@ -259,6 +249,8 @@ export function QsysRailRow({ panels, pathname, railed, d, menuItems, onNavigate
               aria-label="Q-SYS panels"
               data-qsys-flyout
               onKeyDown={onFlyoutKeyDown}
+              // A press here keeps focus where it is (see the header): the click lands.
+              onMouseDown={(e) => e.preventDefault()}
               className="fixed z-[90]"
               style={{ left: place?.left ?? 0, top: place?.top ?? 0, paddingLeft: BRIDGE, visibility: place ? "visible" : "hidden" }}
             >

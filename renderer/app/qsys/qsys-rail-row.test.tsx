@@ -14,28 +14,12 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
+import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installDom();
 
-const listeners = new Map<string, Set<(e: { data: string }) => void>>();
-class StubEventSource {
-  readyState = 1;
-  onopen: unknown = null;
-  onerror: unknown = null;
-  onmessage: unknown = null;
-  addEventListener(channel: string, handler: (e: { data: string }) => void): void {
-    let set = listeners.get(channel);
-    if (!set) listeners.set(channel, (set = new Set()));
-    set.add(handler);
-  }
-  removeEventListener(channel: string, handler: (e: { data: string }) => void): void {
-    listeners.get(channel)?.delete(handler);
-  }
-  close(): void {
-    this.readyState = 2;
-  }
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+(globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   observe(): void {}
   disconnect(): void {}
@@ -55,13 +39,11 @@ type Sidebar = { sections: { id: string; label: string; kind: string; members: s
 let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sidebar };
 let configured = false;
 
-const json = (status: number, value: unknown) => ({ ok: status < 400, status, json: async () => value, text: async () => JSON.stringify(value) });
-(globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
-  const path = String(input);
-  if (path.startsWith("/api/state")) return json(200, state);
-  if (path === "/api/qsys/status") return json(200, { connected: false, state: "offline", designName: null, isEmulator: null, configured });
-  return json(200, {});
-};
+const f = stubFetchWithLog((path) => {
+  if (path.startsWith("/api/state")) return ok(state);
+  if (path === "/api/qsys/status") return ok({ connected: false, state: "offline", designName: null, isEmulator: null, configured });
+  return ok({});
+});
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
@@ -76,7 +58,12 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib
 const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
 const { QSYS_FLYOUT_DELAY_MS } = await import("./qsys-rail-row.js");
 
-after(() => unmountAndTeardown(cleanup, teardown));
+after(async () => {
+  unmountAndTeardown(cleanup, teardown);
+  // A subscribe report still in flight lands on the stub, not the real fetch.
+  await new Promise((r) => setTimeout(r, 300));
+  f.restore();
+});
 beforeEach(() => {
   state = { views: [PLAIN, ...PANELS], outputs: [], appName: "Rail test app", sidebar: { sections: [], hidden: [] } };
   configured = false;
@@ -85,7 +72,6 @@ afterEach(() => {
   cleanup();
   resetStageState();
   resetReplayCache();
-  listeners.clear();
 });
 
 let where = (): string => "";
@@ -367,5 +353,65 @@ describe("the keyboard", () => {
     rowButton()!.focus();
     await act(async () => void fireEvent.keyDown(rowButton()!, { key: "Escape" }));
     assert.equal(flyout() === null, true);
+  });
+});
+
+describe("the flyout inside things that also close", () => {
+  test("at phone width, Escape on an open flyout closes it and leaves the drawer it is in open", async () => {
+    const { SplitView } = await import("../../components/ui/split-view.js");
+    const real = window.matchMedia;
+    // A phone: the sidebar is the app's real drawer (a Radix dialog, which closes on Escape too).
+    (window as unknown as { matchMedia: unknown }).matchMedia = (q: string) => ({
+      matches: /max-width/.test(q), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    });
+    try {
+      const root = createRootRoute({
+        component: () =>
+          React.createElement(
+            QueryClientProvider,
+            { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) },
+            React.createElement(
+              TooltipProvider,
+              null,
+              React.createElement(SplitView, {
+                sidebar: React.createElement(CustomizeProvider, null, React.createElement(Rail, { onToggleCollapsed() {}, dragging: false, onStartResize() {}, onResetWidth() {} })),
+                children: React.createElement("main", null, "content"),
+              }),
+            ),
+          ),
+      });
+      const r = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ["/"] }) });
+      render(React.createElement(RouterProvider, { router: r }));
+      await eventually(() => assert.ok(document.querySelector('[aria-label="Open navigation"]'), "no phone top bar"));
+      await act(async () => void fireEvent.click(document.querySelector('[aria-label="Open navigation"]')!));
+      const drawer = () => document.querySelector('[role="dialog"]');
+      await eventually(() => assert.ok(rowButton(), "the drawer has no Q-SYS row"));
+      rowButton()!.focus();
+      await act(async () => void fireEvent.keyDown(rowButton()!, { key: "ArrowRight" }));
+      await eventually(() => assert.ok(flyout(), "the flyout did not open"));
+      const first = flyout()!.querySelector<HTMLElement>("[role=menuitem]")!;
+      await act(async () => void fireEvent.keyDown(first, { key: "Escape" }));
+      await wait(20);
+      assert.equal(flyout() === null, true, "Escape left the flyout open");
+      assert.ok(drawer(), "Escape on the flyout also closed the drawer");
+      // With the flyout gone, Escape is the drawer's again.
+      await act(async () => void fireEvent.keyDown(rowButton()!, { key: "Escape" }));
+      await eventually(() => assert.equal(drawer() === null, true, "the drawer no longer closes on Escape"));
+    } finally {
+      (window as unknown as { matchMedia: unknown }).matchMedia = real;
+    }
+  });
+
+  test("pressing a flyout item does not move focus, so Safari's focusless click is not read as leaving", async () => {
+    await mount();
+    rowButton()!.focus();
+    await act(async () => void fireEvent.keyDown(rowButton()!, { key: "ArrowRight" }));
+    await eventually(() => assert.ok(flyout()));
+    const item = flyout()!.querySelector<HTMLElement>("[role=menuitem]")!;
+    // fireEvent answers false when a handler prevented the default: the focus change a press makes.
+    let pressed = true;
+    await act(async () => void (pressed = fireEvent.mouseDown(item)));
+    assert.equal(pressed, false, "a press on a flyout item moves focus, which Safari reads as focus leaving for nowhere");
+    assert.ok(flyout());
   });
 });
