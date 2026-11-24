@@ -1137,8 +1137,9 @@ export class StagePlotsPublisher {
     let venues: Venue[];
     try {
       venues = (await this.deps.store.get()).venues;
-    } catch {
-      // The store cannot be read: GET /api/stageplots answers that, which the card shows.
+    } catch (err) {
+      // The store cannot be read: GET /api/stageplots answers that, which the card shows; and the log says it here.
+      say("error", [], `the stage plots could not be read to put that on each venue's card: ${errorMessage(err)}`);
       return;
     }
     for (const venue of venues) if (venue.publish && (!old || venue.publish.origin === old.origin)) await this.venueFailed(venue, message);
