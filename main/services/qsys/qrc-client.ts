@@ -5,6 +5,7 @@
 // (WebSocket) transport can replace this class without touching callers.
 
 import net from "node:net";
+import { OutageLog } from "../repeat-log.js";
 import { scrub, scrubError } from "../scrub.js";
 
 export interface QrcTransport {
@@ -35,8 +36,6 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * costs one copy rather than one per piece.
  */
 export const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
-/** Unmatched reply ids already warned about; cleared when it reaches this size. */
-const MAX_WARNED_IDS = 256;
 
 /** A change-group push in reply form: `result: { Id, Changes: [...] }`. */
 function isChangeGroupResult(result: unknown): result is { Id: string; Changes: unknown[] } {
@@ -61,7 +60,9 @@ export class QrcClient implements QrcTransport {
   private readonly closeHandlers: ((err: Error | null) => void)[] = [];
   private closed = false;
   private closeError: Error | null = null;
-  private readonly warnedIds = new Set<string>();
+  /** Unmatched reply ids, by id: each is news once, then a reminder per 15 minutes;
+   *  past eight in a run they share one bucket, so a Core cycling ids cannot flood the log. */
+  private readonly unmatched = new OutageLog();
 
   private constructor(
     private readonly socket: net.Socket,
@@ -188,13 +189,9 @@ export class QrcClient implements QrcTransport {
       // notification form, so callers handle one shape.
       this.notify("ChangeGroup.Poll", msg.result);
     } else {
-      // Also what a reply arriving after its request timed out looks like. Once per
-      // id, so a Core repeating one id cannot flood the log.
-      const id = String(msg.id);
-      if (this.warnedIds.has(id)) return;
-      if (this.warnedIds.size >= MAX_WARNED_IDS) this.warnedIds.clear();
-      this.warnedIds.add(id);
-      console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})`);
+      // Also what a reply arriving after its request timed out looks like.
+      const d = this.unmatched.fail("unmatched", String(msg.id), Date.now());
+      if (d.log) console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})${scrub(d.note)}`);
     }
   }
 

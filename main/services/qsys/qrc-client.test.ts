@@ -221,6 +221,22 @@ test("an unmatched reply that is not a change-group push warns once per id", asy
   }
 });
 
+test("a Core cycling unmatched reply ids is bounded: eight ids speak, then one shared line", async () => {
+  const rawPort = await rawServer((s) => {
+    for (let id = 1000; id < 1300; id++) s.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: true })}\0`);
+    s.write(`${JSON.stringify({ jsonrpc: "2.0", method: "Done" })}\0`);
+  });
+  const c = await QrcClient.connect("127.0.0.1", rawPort);
+  clients.push(c);
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await new Promise<void>((resolve) => c.onNotification((m) => m === "Done" && resolve()));
+    assert.equal(warn.mock.calls.length, 9, "a Core cycling ids wrote a line per id");
+  } finally {
+    warn.mock.restore();
+  }
+});
+
 test("an error response rejects with QrcError carrying the code", async () => {
   const c = await connect();
   fake.failNext("Component.Set", 8);
