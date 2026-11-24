@@ -623,6 +623,47 @@ test("pointer: a tray chip dragged into the row lands where it was let go", asyn
   }
 });
 
+// A layout imported without its roles names a role id this install does not have. It draws
+// no column, so the drop index and the announcement count the drawn columns, and the ghost
+// keeps its slot in what is saved.
+const GHOSTED: ServiceCueLayout[] = [{ id: "l-audio", name: "Audio", order: 0, columnRoles: ["r-ghost", "r-audio", "r-band"] }];
+
+test("pointer: past a role this install lacks, a drop lands where it was let go and counts drawn roles", async () => {
+  const s = serviceCueServer({ layouts: GHOSTED, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    placeRects("l-audio");
+    try {
+      // Let go on Band's right half: after it.
+      const band = document.querySelector('[data-cols="l-audio"] [data-sort-id="r-band"]')!;
+      const r = band.getBoundingClientRect();
+      await carry(grip("the Audio column"), { x: r.right - 10, y: r.top + 15 });
+      await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-ghost", "r-band", "r-audio"], `saved unchanged: "${said()}"`));
+      await eventually(() => assert.match(said(), /Moved Audio to column 2 of 2 roles\./));
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+    }
+  } finally {
+    s.restore();
+  }
+});
+
+test("keyboard: past a role this install lacks, a column moves and the missing role keeps its slot", async () => {
+  const s = serviceCueServer({ layouts: GHOSTED, roles: ROLES, shown: ["sun"], types: TYPES });
+  try {
+    await mount();
+    await openCard("Audio");
+    const audio = grip("the Audio column");
+    audio.focus();
+    await press(audio, " ", "ArrowRight");
+    await press(grip("the Audio column"), " ");
+    await eventually(() => assert.deepEqual(s.layouts()[0].columnRoles, ["r-ghost", "r-band", "r-audio"]));
+  } finally {
+    s.restore();
+  }
+});
+
 test("pointer: a page that scrolls mid-drag does not move the drop off the pointer", async () => {
   // dnd-kit's delta counts how far its scrollable ancestors have scrolled since the drag
   // began, while the rects are read in the viewport. The page scrolls 300px under the

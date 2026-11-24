@@ -94,21 +94,40 @@ export function moveTo<T>(list: readonly T[], item: T, index: number): T[] {
   return out;
 }
 
-/** One change to a layout's Columns row. `index` counts role columns, the moved one left out. */
+/** One change to a layout's Columns row. `index` counts the role columns DRAWN (layoutRoles),
+ *  the moved one left out: what the operator sees and drops between. */
 export type ColumnChange =
   | { kind: "move-role"; roleId: string; index: number }
   | { kind: "add-role"; roleId: string; index?: number }
   | { kind: "remove-role"; roleId: string }
   | { kind: "set-fixed"; key: FixedKey; on: boolean };
 
+/**
+ * `cols` with its drawn ids put in `order`, every id no role has kept in its own slot.
+ *
+ * A layout can name a role this install does not have: an imported layout brings its
+ * columns, not its roles. Those ids draw nothing, so the operator's drop index counts
+ * the drawn columns only. Applied to the stored list as it stood, a drop after a ghost
+ * landed one place short (dragging A after B in [ghost, A, B] saved the same list) and
+ * was announced as a move.
+ */
+export function placeDrawn(cols: readonly string[], drawn: ReadonlySet<string>, order: readonly string[]): string[] {
+  const next = [...order];
+  const out = cols.map((id) => (drawn.has(id) ? next.shift() : id)).filter((id): id is string => id !== undefined);
+  return [...out, ...next];
+}
+
 /** The patch a Columns change makes to the layout as it is when the change saves. */
-export function columnPatch(l: ServiceCueLayout, c: ColumnChange): Partial<ServiceCueLayout> {
+export function columnPatch(l: ServiceCueLayout, c: ColumnChange, roles: readonly CategoryRole[]): Partial<ServiceCueLayout> {
   const cols = l.columnRoles ?? [];
+  const drawn = new Set(layoutRoles(l, roles).map((r) => r.id));
+  const shown = cols.filter((id) => drawn.has(id));
   switch (c.kind) {
     case "move-role":
-      return { columnRoles: moveTo(cols, c.roleId, c.index) };
-    case "add-role":
-      return { columnRoles: moveTo(cols, c.roleId, c.index ?? cols.length) };
+    case "add-role": {
+      const order = moveTo(shown, c.roleId, c.index ?? shown.length);
+      return { columnRoles: placeDrawn(cols.filter((id) => id !== c.roleId), drawn, order) };
+    }
     case "remove-role":
       // A layout must not keep tinting rows by a role it no longer shows.
       return { columnRoles: cols.filter((id) => id !== c.roleId), ...(l.accentRole === c.roleId ? { accentRole: null } : {}) };
