@@ -213,10 +213,10 @@ async function readBodyOrSay(c: RouteCtx, refused: string): Promise<Record<strin
   try {
     body = await readObjectBody(c.req, c.res);
   } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] ${refused}: ${scrub(err.message)}`);
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] ${scrub(refused)}: ${scrub(err.message)}`);
     throw err;
   }
-  if (!body) console.warn(`[stageplots] ${refused}: the body is not a JSON object`);
+  if (!body) console.warn(`[stageplots] ${scrub(refused)}: the body is not a JSON object`);
   return body;
 }
 
