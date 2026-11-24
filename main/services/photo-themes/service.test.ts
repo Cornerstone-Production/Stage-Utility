@@ -394,6 +394,17 @@ describe("an approval approves only what was shown", () => {
     assert.equal(photoThemes.shownPhotos(PLAN).size, 0);
   });
 
+  it("Approve all for one plan does not approve an edit made for another, whatever file it is sent", async () => {
+    const theme = await themed([person("1")]);
+    srv.rosters.set(PLAN_2, [person("1")]);
+    await photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2026-12-31T16:00:00Z", themeId: theme.id });
+    await generated();
+    // Person 1's edit was made for PLAN; a caller names it under PLAN_2.
+    const shown = [{ personId: "1", file: shownFile(photoThemes, theme.id, "1") }];
+    await assert.rejects(photoThemes.approveAll(PLAN_2, shown), (e: Error & { status?: number }) => e.status === 409);
+    assert.equal(statusOf(theme.id, "1"), "ready");
+  });
+
   it("Approve all with nothing left as it was shown is refused, not a silent success", async () => {
     const theme = await themed([person("1")]);
     await generated();
