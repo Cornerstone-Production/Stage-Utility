@@ -174,7 +174,8 @@ export interface PlanPeopleDTO {
   roster: "live" | "plan" | "unavailable";
   reason?: string;
   people: PlanPersonDTO[];
-  /** How many a Generate would send to OpenAI: those with no photo in the theme, or whose last one failed. */
+  /** How many a Generate would send to OpenAI: people with a usable Planning Center photo, no approved
+   *  photo, and none being made or waiting for review. */
   toGenerate: number;
   /** How many Redo all (a Generate with `mode: "all"`) would send. */
   toRedoAll: number;

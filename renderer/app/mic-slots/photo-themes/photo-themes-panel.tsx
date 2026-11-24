@@ -5,7 +5,8 @@
 // belong to no service (Manage themes).
 //
 // Nothing here spends money except two buttons, Generate and Redo (and Redo all,
-// which is Generate over everyone). Each is a press, each is refused while it is
+// which is Generate with mode all: those made under an earlier prompt, and anyone
+// Generate would send). Each is a press, each is refused while it is
 // in flight, and each first saves a prompt that was typed and not yet kept: a
 // billed edit made from text the operator can no longer see on the server would
 // be the worst way to find out the save was refused.
