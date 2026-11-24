@@ -66,9 +66,9 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
 
   const stateQ = useQuery({ queryKey: photoStateKey, queryFn: () => ipc<PhotoThemesDTO>("photoThemes:getState") });
 
-  // The channel is a position. The last frame seen is kept for the next, and the
-  // latest for the progress line.
-  const [frame, setFrame] = useState<PhotoThemesChanged | null>(null);
+  // The channel is a position: the last frame seen is kept, in the effect, to
+  // read the next one against. Not in state: nothing draws a frame, and a
+  // state copy re-rendered the whole Mic slots page on every one.
   useEffect(() => {
     let last: PhotoThemesChanged | null = null;
     return onNotification(PHOTO_THEMES_CHANNEL, (payload, replayed) => {
@@ -77,7 +77,6 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
       // A replay is the cached last frame: it says where the count stands, and a
       // later frame still compares against it.
       last = next;
-      setFrame(next);
       if (!reading.reread) return;
       if (reading.why === "missed" || reading.why === "restart") {
         console.info(`[photo-themes] a photo-themes:changed frame was missed (${reading.why}); reading the themes again`);
@@ -168,7 +167,7 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
     [write, reread],
   );
 
-  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, canSend, timeZone, reread, write, savePrompt, isBusy };
+  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, choice, theme, hasApproved, canSend, timeZone, reread, write, savePrompt, isBusy };
 }
 
 export type PhotoThemes = ReturnType<typeof usePhotoThemes>;
