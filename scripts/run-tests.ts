@@ -22,9 +22,17 @@ const TEST_PATTERNS = [
   "publish/servicecue/src/**/*.test.ts",
 ];
 
+/**
+ * The longest one test may run. A test awaiting something that never comes (a
+ * write's answer held by a mutation, a stub that never resolves) fails with a
+ * name and a reason instead of hanging the suite, and CI, with no output. Far
+ * above any real test; a later --test-timeout in the extra arguments wins.
+ */
+const TEST_TIMEOUT_MS = 120_000;
+
 const result = spawnSync(
   process.execPath,
-  ["--import", "tsx", "--test", ...process.argv.slice(2), ...TEST_PATTERNS],
+  ["--import", "tsx", "--test", `--test-timeout=${TEST_TIMEOUT_MS}`, ...process.argv.slice(2), ...TEST_PATTERNS],
   { stdio: "inherit" },
 );
 if (result.error) {
