@@ -20,6 +20,7 @@ import {
   type PublishedItem,
 } from "../types/stageplots.js";
 import { isRecord } from "./is-record.js";
+import { readSheetShape } from "./patch-shape.js";
 import { resolvePatch } from "./patch-resolve.js";
 
 /** The patch as read: the file, or that it could not be read (a 503, a damaged patch.json). */
@@ -111,41 +112,18 @@ function readDevice(d: Record<string, unknown>): PatchDevice {
   };
 }
 
-type Overrides = PatchSheet["variants"][number]["overrides"];
-
-/** A set of overrides, keeping only the entries that are objects: resolvePatch reads fields off each. Not a map: none. */
-function readOverrides(v: unknown): Overrides {
-  return isRecord(v) ? (Object.fromEntries(Object.entries(v).filter(([, ov]) => isRecord(ov))) as Overrides) : {};
-}
-
-/** Plan id to its entry, keeping only entries that are objects, each with its tweaks read as overrides. */
-function readByPlan(v: unknown): PatchSheet["assignments"]["byPlan"] {
-  if (!isRecord(v)) return {};
-  return Object.fromEntries(
-    Object.entries(v)
-      .filter((e): e is [string, Record<string, unknown>] => isRecord(e[1]))
-      .map(([planId, entry]) => [planId, { ...(typeof entry.variantId === "string" ? { variantId: entry.variantId } : {}), ...(entry.tweaks !== undefined ? { tweaks: readOverrides(entry.tweaks) } : {}) }]),
-  ) as PatchSheet["assignments"]["byPlan"];
-}
-
+/** A sheet as stage plots reads it: its structure by patch-shape.ts (the reader /api/patch and patch.json are held to), its devices read field by field. */
 function readSheet(s: Record<string, unknown>): PatchSheet {
-  const assignments = isRecord(s.assignments) ? s.assignments : {};
+  const shape = readSheetShape(s);
   return {
     id: asText(s.id),
     name: asText(s.name),
     kind: asText(s.kind) as PatchSheet["kind"],
-    devices: asList(s.devices).filter(isRecord).map(readDevice),
+    devices: shape.devices.map((d) => readDevice(d as unknown as Record<string, unknown>)),
     // Endpoints are left as they are: channelsThrough reads each field defensively.
-    endpoints: asList(s.endpoints).filter(isRecord) as unknown as PatchEndpoint[],
-    variants: asList(s.variants)
-      .filter(isRecord)
-      .map((v) => ({ id: asText(v.id), name: asText(v.name), overrides: readOverrides(v.overrides) })),
-    assignments: {
-      byServiceType: isRecord(assignments.byServiceType)
-        ? (Object.fromEntries(Object.entries(assignments.byServiceType).filter(([, id]) => typeof id === "string")) as PatchSheet["assignments"]["byServiceType"])
-        : {},
-      byPlan: readByPlan(assignments.byPlan),
-    },
+    endpoints: shape.endpoints,
+    variants: shape.variants.map((v) => ({ id: asText(v.id), name: asText(v.name), overrides: v.overrides })),
+    assignments: { byServiceType: shape.assignments.byServiceType, byPlan: shape.assignments.byPlan },
   };
 }
 
