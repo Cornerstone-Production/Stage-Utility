@@ -28,19 +28,11 @@ import { errorMessage } from "../errors.js";
 import { isRecord } from "../is-record.js";
 import { asObject, checked } from "../restore-check.js";
 import { hasControlChars, scrub } from "../scrub.js";
-import { addressKey } from "../../types/qsys.js";
+import { WriteQueue } from "../write-queue.js";
+import { addressKey, type AllowEntry } from "../../types/qsys.js";
 import type { QrcControl } from "./qrc-types.js";
 
-export interface AllowEntry {
-  component: string;
-  control: string;
-  label: string;
-  /** The value limits enforced on a numeric write; both null when no range is set. */
-  min: number | null;
-  max: number | null;
-  /** `hold`: every object bound to it asks for hold-to-confirm. */
-  confirm: "none" | "hold";
-}
+export type { AllowEntry };
 
 /** What an allowlist file says it is. */
 export const ALLOWLIST_FILE_FORMAT = "stage-utility-qsys-allowlist";
@@ -197,49 +189,48 @@ function revOf(data: { entries: AllowEntry[] }): string {
 }
 
 /** One change to the list at a time, read to save: the revision check holds across it. */
-let chain: Promise<unknown> = Promise.resolve();
-function serial<T>(fn: () => Promise<T>): Promise<T> {
-  const run = chain.then(fn, fn);
-  chain = run.catch(() => {});
-  return run;
+const queue = new WriteQueue();
+
+/** How a save or an import may go: over an invalid stored file, and only over a revision. */
+export interface ChangeOptions {
+  replaceInvalid?: boolean;
+  expectRev?: string;
 }
 
 /**
- * Validate with `parse` and save. A refusal is logged and rethrown, having saved
- * nothing. Over an invalid stored file it is refused unless `replaceInvalid`,
- * and then that file is copied beside first; a copy that fails refuses the save.
- * With `expectRev`, refused (AllowlistRevChanged) unless the stored list is still
- * at that revision, checked in the same serial step as the save.
+ * Validate with `parse` and save, in the queue. A refusal is logged and rethrown,
+ * having saved nothing. Over an invalid stored file it is refused unless
+ * `replaceInvalid`, and then that file is copied beside first; a copy that fails
+ * refuses the save. With `expectRev`, refused (AllowlistRevChanged) unless the
+ * stored list is still at that revision, checked in the same step as the save.
  */
-function accept(how: "save" | "import", parse: () => AllowEntry[], replaceInvalid: boolean, expectRev?: string): Promise<Saved> {
-  return serial(() => acceptNow(how, parse, replaceInvalid, expectRev));
-}
-
-async function acceptNow(how: "save" | "import", parse: () => AllowEntry[], replaceInvalid: boolean, expectRev?: string): Promise<Saved> {
-  try {
-    const entries = parse();
-    const current = await store.load();
-    if (expectRev !== undefined && expectRev !== revOf(current)) {
-      throw new AllowlistRevChanged("the allowlist was changed since this list was read; read it again and make the change on that");
-    }
-    const reason = invalidReason.get(current);
-    if (reason !== undefined) {
-      if (!replaceInvalid) {
-        throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Send replaceInvalid: true to replace it; the invalid file is kept beside it`);
+function accept(how: "save" | "import", parse: () => AllowEntry[], { replaceInvalid = false, expectRev }: ChangeOptions): Promise<Saved> {
+  return queue.enqueue(async () => {
+    try {
+      const entries = parse();
+      const current = await store.load();
+      if (expectRev !== undefined && expectRev !== revOf(current)) {
+        throw new AllowlistRevChanged("the allowlist was changed since this list was read; read it again and make the change on that");
       }
-      const dir = getUserDataPath();
-      const kept = `${FILE}.invalid-${Date.now()}`;
-      await fs.copyFile(path.join(dir, FILE), path.join(dir, kept), fs.constants.COPYFILE_EXCL);
-      console.log(`[qsys] kept the invalid allowlist as ${scrub(kept)} before replacing it`);
+      const reason = invalidReason.get(current);
+      if (reason !== undefined) {
+        if (!replaceInvalid) {
+          throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Send replaceInvalid: true to replace it; the invalid file is kept beside it`);
+        }
+        const dir = getUserDataPath();
+        const kept = `${FILE}.invalid-${Date.now()}`;
+        await fs.copyFile(path.join(dir, FILE), path.join(dir, kept), fs.constants.COPYFILE_EXCL);
+        console.log(`[qsys] kept the invalid allowlist as ${scrub(kept)} before replacing it`);
+      }
+      await store.save({ entries });
+      console.log(`[qsys] allowlist ${scrub(how === "save" ? "saved" : "imported")}: ${scrub(entries.length)} entries`);
+      // The revision of what was saved, read inside the step: the one a page sends next.
+      return { entries, rev: revOf(await store.load()) };
+    } catch (err) {
+      console.warn(`[qsys] allowlist ${scrub(how)} refused: ${scrub(errorMessage(err))}`);
+      throw err;
     }
-    await store.save({ entries });
-    console.log(`[qsys] allowlist ${scrub(how === "save" ? "saved" : "imported")}: ${scrub(entries.length)} entries`);
-    // The revision of what was saved, read inside the step: the one a page sends next.
-    return { entries, rev: revOf(await store.load()) };
-  } catch (err) {
-    console.warn(`[qsys] allowlist ${scrub(how)} refused: ${scrub(errorMessage(err))}`);
-    throw err;
-  }
+  });
 }
 
 
@@ -291,22 +282,13 @@ export const qsysAllowlist = {
   },
 
   /**
-   * Replace the whole list. Throws AllowlistRefused, having saved nothing, when
-   * any entry breaks a rule, and AllowlistStoredInvalid over an invalid stored
-   * file unless `replaceInvalid`.
+   * Replace the whole list; answers it as saved, and its revision. Throws
+   * AllowlistRefused, having saved nothing, when any entry breaks a rule,
+   * AllowlistStoredInvalid over an invalid stored file unless `replaceInvalid`, and
+   * AllowlistRevChanged when `expectRev` is not the stored list's revision.
    */
-  async replace(raw: unknown, { replaceInvalid = false }: { replaceInvalid?: boolean } = {}): Promise<AllowEntry[]> {
-    return (await accept("save", () => parseAllowEntries(raw), replaceInvalid)).entries;
-  },
-
-  /** replace(), and the saved list's revision; with `expectRev`, only over that revision (AllowlistRevChanged). */
-  saveChecked(raw: unknown, { replaceInvalid = false, expectRev }: { replaceInvalid?: boolean; expectRev?: string } = {}): Promise<Saved> {
-    return accept("save", () => parseAllowEntries(raw), replaceInvalid, expectRev);
-  },
-
-  /** importFile(), and the saved list's revision. */
-  importChecked(raw: unknown, { replaceInvalid = false, expectRev }: { replaceInvalid?: boolean; expectRev?: string } = {}): Promise<Saved> {
-    return accept("import", () => parseAllowlistFile(raw), replaceInvalid, expectRev);
+  replace(raw: unknown, opts: ChangeOptions = {}): Promise<Saved> {
+    return accept("save", () => parseAllowEntries(raw), opts);
   },
 
   /**
@@ -317,7 +299,7 @@ export const qsysAllowlist = {
    * (AllowlistRefused); either saves nothing. Returns the list and what was added.
    */
   addMissing(candidates: AllowEntry[]): Promise<Saved & { added: AllowEntry[] }> {
-    return serial(() => addMissingNow(candidates));
+    return queue.enqueue(() => addMissingNow(candidates));
   },
 
   /** Told after every save that landed (a save, an import, a restore). */
@@ -329,8 +311,8 @@ export const qsysAllowlist = {
     return { format: ALLOWLIST_FILE_FORMAT, version: ALLOWLIST_FILE_VERSION, entries: await this.list() };
   },
 
-  /** Replace the list from an allowlist file. A malformed file is refused whole and the old list kept; over an invalid stored file, as replace(). */
-  async importFile(raw: unknown, { replaceInvalid = false } = {}): Promise<AllowEntry[]> {
-    return (await accept("import", () => parseAllowlistFile(raw), replaceInvalid)).entries;
+  /** Replace the list from an allowlist file. A malformed file is refused whole and the old list kept; otherwise as replace(). */
+  importFile(raw: unknown, opts: ChangeOptions = {}): Promise<Saved> {
+    return accept("import", () => parseAllowlistFile(raw), opts);
   },
 };

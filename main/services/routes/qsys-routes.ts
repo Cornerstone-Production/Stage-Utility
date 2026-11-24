@@ -24,7 +24,7 @@
 //   GET  /api/qsys/panel-repairs       [{ viewId, name, from, to, why }]: panel blocks the last load of the views repaired
 //   GET  /api/qsys/write-log           { entries, saveError }
 //   GET  /api/qsys/pin                 { set }: whether a staff PIN is set; never the hash
-//   PUT  /api/qsys/pin                 { pin: "<4 digits>" | null } -> { set }; 400 for anything else
+//   PUT  /api/qsys/pin                 { pin: "<4 digits>" | null } -> { set }; 400 for anything else; 500 when it could not be saved
 //   POST /api/qsys/pin/check           { pin } -> { ok: true } | { ok: false, lockedForMs, notSet? }:
 //                                      5 wrong tries in a row from one address lock it for 60 s
 //
@@ -35,7 +35,7 @@
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
-import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type Saved, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
+import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type ChangeOptions, type Saved, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
 import { viewsStore } from "../views-store.js";
 import { qsysSlugRepairs } from "../qsys/qsys-slug-repair.js";
 import { isReadOnlyDirection } from "../../types/qsys.js";
@@ -64,7 +64,15 @@ export function deviceOf(req: http.IncomingMessage): string {
   return oneLine(`${remoteOf(req)} ${agent}`).trim().slice(0, MAX_DEVICE);
 }
 
-async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: { replaceInvalid: boolean; expectRev?: string }) => Promise<Saved>): Promise<void> {
+/** Answer a change to the allowlist that the store refused, as its status says; rethrow anything else. */
+function answerAllowlistRefusal(res: http.ServerResponse, err: unknown): void {
+  if (err instanceof AllowlistRevChanged) return error(res, err.message, 409, "rev-changed");
+  if (err instanceof AllowlistStoredInvalid) return error(res, err.message, 409);
+  if (err instanceof AllowlistRefused) return error(res, err.message);
+  throw err;
+}
+
+async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: ChangeOptions) => Promise<Saved>): Promise<void> {
   const body = await readObjectBody(c.req, c.res);
   if (!body) return;
   if (body.replaceInvalid !== undefined && typeof body.replaceInvalid !== "boolean") return error(c.res, "replaceInvalid must be true or false");
@@ -72,10 +80,7 @@ async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknow
   try {
     json(c.res, await change(body, { replaceInvalid: body.replaceInvalid === true, ...(typeof body.rev === "string" ? { expectRev: body.rev } : {}) }));
   } catch (err) {
-    if (err instanceof AllowlistRevChanged) return error(c.res, err.message, 409, "rev-changed");
-    if (err instanceof AllowlistStoredInvalid) return error(c.res, err.message, 409);
-    if (!(err instanceof AllowlistRefused)) throw err;
-    error(c.res, err.message);
+    answerAllowlistRefusal(c.res, err);
   }
 }
 
@@ -113,7 +118,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "PUT" && pathname === "/api/qsys/allowlist") {
-    return allowlistChange(c, (body, opts) => qsysAllowlist.saveChecked(body.entries, opts));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.replace(body.entries, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/export") {
@@ -122,7 +127,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/import") {
-    return allowlistChange(c, (body, opts) => qsysAllowlist.importChecked(body, opts));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.importFile(body, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/add-panel") {
@@ -146,9 +151,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, { ...(await qsysAllowlist.addMissing(candidates)), skipped });
     } catch (err) {
-      if (err instanceof AllowlistStoredInvalid) return error(res, err.message, 409);
-      if (!(err instanceof AllowlistRefused)) throw err;
-      error(res, err.message);
+      answerAllowlistRefusal(res, err);
     }
     return;
   }
@@ -235,7 +238,13 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     const body = await readObjectBody(req, res);
     if (!body) return;
     if (body.pin !== null && !isPin(body.pin)) return error(res, `pin must be ${PIN_DIGITS} digits, or null to remove it`);
-    await setPin(body.pin, remoteOf(req));
+    try {
+      await setPin(body.pin, remoteOf(req));
+    } catch (err) {
+      // The reason (a disk error) goes to /log; the page gets a sentence it can show.
+      console.warn(`[qsys] the staff PIN could not be saved: ${scrub(errorMessage(err))}`);
+      return error(res, "the staff PIN could not be saved, so it is unchanged; see /log", 500);
+    }
     json(res, await pinState());
     return;
   }

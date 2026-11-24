@@ -309,12 +309,20 @@ header. Staff panels and panels inside the app have none. The cog opens a menu:
 - **Open Stage Utility**, with a lock and "PIN": asks for the 4-digit staff PIN. The
   server checks it; the right PIN opens the app at `/`, and unlocks nothing else.
   Five wrong tries in a row from one device (its network address) lock that device
-  out for a minute, the right PIN included, and the pad counts the minute down.
+  out for a minute, the right PIN included, and the pad counts the minute down. A
+  locked device's tries are refused before anything is checked, so a flood of them
+  costs the server nothing. The server remembers up to 1000 devices with wrong
+  tries or a lock; past that, a new device takes the place of one whose lock is
+  over or whose tries are 15 minutes old, and when there is none it is told to wait
+  a minute. A count part way to a lock is never reset to make room.
   With no PIN set the pad says "No staff PIN is set. Set one on /qsys/manage
   first." and never opens the app.
 
-The PIN is set on `/qsys/manage` and stored on the server as a salted scrypt hash in
-`qsys-pin.json`, which a config backup carries. It keeps curious taps out; it is not
+The PIN is set on `/qsys/manage` and stored on the server as a salted scrypt hash,
+with the scrypt cost it was made with, in `qsys-pin.json`, which a config backup
+carries. A hash stored without a cost (by an earlier build) is read at Node's default
+cost. A file this build cannot read is read as no PIN set, and logged; it is kept
+until a PIN is saved. It keeps curious taps out; it is not
 security. `/qsys/manage`, the allowlist and the PIN itself are open to anyone who can
 reach the server, so restrict the server's port to staff and panel devices (a
 firewall rule, or a VLAN the panels share with the server).
@@ -532,6 +540,9 @@ Look at `/log` and filter for `[qsys]`.
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
 | `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
 | `staff PIN set by <address>`, `staff PIN removed by <address>; …` | The staff PIN was set, changed or removed from `/qsys/manage` (or `PUT /api/qsys/pin`). |
+| `the staff PIN could not be saved: <reason>` | The server could not write `qsys-pin.json` (a full or read-only disk); the PIN is unchanged and `PUT /api/qsys/pin` answered `500`. The page sends the same words, with the page's reason, when it was refused. |
+| `qsys-pin.json holds a staff PIN this build cannot read; volunteer panels cannot open Stage Utility until a PIN is set on /qsys/manage` | The stored PIN has a shape or scrypt cost this build will not run (a hand edit, or a newer build's file). It is read as no PIN; the file is kept until a PIN is saved. |
+| `PIN check from <address> refused: 1000 other clients are part way to a lock or locked; it can try again in 60 s` | The server is remembering as many devices with wrong tries as it will, so a new device was told to wait. Many addresses guessing at once; at most one line a minute. |
 | `PIN locked for <address> after 5 wrong tries; it can try again in 60 s` | A device sent five wrong PINs in a row. It cannot open the app for a minute. Repeated lines from one address mean someone is guessing. |
 | `the staff PIN could not be checked: <reason>`, `could not read whether a staff PIN is set: <reason>` | A panel's PIN pad could not reach the server (sent from the page). It said so on the pad, not "wrong PIN". |
 | `Q-SYS panel "<name>" address /qsys/<a> was taken here; imported as /qsys/<b>` | An imported panel's address clashed and took a suffix. Tagged `[view-import]`. |

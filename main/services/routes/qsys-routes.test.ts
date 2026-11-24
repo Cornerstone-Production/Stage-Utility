@@ -467,4 +467,44 @@ describe("/api/qsys", () => {
     assert.deepEqual(both.map((r) => r.status).sort(), [200, 409], "both saves over one revision landed");
   });
 
+  test("POST /api/qsys/allowlist/import with the revision it read imports; over a revision since moved it is refused 409 and imports nothing", async () => {
+    await quietly(() => put([GAIN]));
+    const read = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string };
+    const file = (await callRoute(qsysRoutes, "/api/qsys/allowlist/export", { method: "POST" })).json as Record<string, unknown>;
+    const ok = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, entries: [GAIN, MUTE], rev: read.rev } }));
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const after = ok.json as { rev: string; entries: AllowEntry[] };
+    assert.deepEqual(after.entries, [GAIN, MUTE]);
+    assert.equal(((await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string }).rev, after.rev, "the import answered a revision GET does not");
+    const stale = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, entries: [], rev: read.rev } }));
+    assert.equal(stale.status, 409);
+    assert.equal((stale.json as { code?: string }).code, "rev-changed");
+    assert.deepEqual(await listed(), [GAIN, MUTE], "a stale import went through");
+    const bad = await callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, rev: 7 } });
+    assert.equal(bad.status, 400, "a rev that is not text was taken");
+  });
+
+  test("PUT /api/qsys/pin answers a save that failed as its own 500, says so on /log, and leaves the PIN as it was", async () => {
+    const pin = (body: unknown) => callRoute(qsysRoutes, "/api/qsys/pin", { method: "PUT", body });
+    await quietly(() => pin({ pin: "1357" }));
+    // The file's place taken by a directory: the store's rename over it fails.
+    const file = path.join(TMP, "qsys-pin.json");
+    await fs.rm(file, { force: true });
+    await fs.mkdir(path.join(file, "blocker"), { recursive: true });
+    const warned: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => void warned.push(a.join(" ")));
+    let r;
+    try {
+      r = await pin({ pin: "2468" });
+    } finally {
+      warn.mock.restore();
+      await fs.rm(file, { recursive: true, force: true });
+    }
+    assert.equal(r.status, 500, JSON.stringify(r.json));
+    assert.equal((r.json as { error: string }).error, "the staff PIN could not be saved, so it is unchanged; see /log");
+    assert.ok(warned.some((w) => w.startsWith("[qsys] the staff PIN could not be saved: ")), warned.join("\n"));
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin/check", { method: "POST", body: { pin: "1357" } })).json, { ok: true }, "the old PIN stopped opening");
+    await quietly(() => pin({ pin: null }));
+  });
+
 });
