@@ -27,7 +27,7 @@ import { setAvatarGeometry, withoutAvatarGeometry } from "../avatar-geometry.js"
 import { broadcast, channelHasSubscribers } from "../broadcaster.js";
 import { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
-import { imageDir, listImages, readImage, saveImageBytes } from "../image-files.js";
+import { contentName, imageDir, listImages, readImage, saveImageBytes, storedImageProblem } from "../image-files.js";
 import { checked } from "../restore-check.js";
 import { scrub, scrubError } from "../scrub.js";
 import { loadSharp } from "../sharp-load.js";
@@ -187,11 +187,10 @@ async function toPng(bytes: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-/** An edit's bytes as a type the store keeps, by their magic. */
+/** An edit's bytes as a type the store keeps: the one whose content check they
+ *  pass, the same check saveImageBytes makes before it writes them. */
 function editExtension(bytes: Buffer): "webp" | "png" | null {
-  if (bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
-  if (bytes[0] === 0x89 && bytes.subarray(1, 4).toString("latin1") === "PNG") return "png";
-  return null;
+  return (["webp", "png"] as const).find((ext) => storedImageProblem(contentName(bytes, ext), bytes, { checkContent: true }) === null) ?? null;
 }
 
 export class PhotoThemesService {

@@ -134,6 +134,14 @@ describe("generating", () => {
     assert.equal(fake.edits(), 0);
   });
 
+  it("an answer that only starts like a PNG fails the person with the reason, not a record that cannot be saved", async () => {
+    const theme = await themed([person("1")]);
+    fake.edit = () => ({ status: 200, body: { data: [{ b64_json: Buffer.from("\x89PNG but not one", "latin1").toString("base64") }] } });
+    await generated();
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    assert.equal(photoThemes.state().themes[0]!.people[0]!.pending?.reason, "OpenAI answered with something that is not an image");
+  });
+
   it("counts for the Generate button only the people a Generate would send", async () => {
     await themed([person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }, { personId: "3", name: "Person 3", photoUrl: null }]);
     assert.equal((await photoThemes.planPeople(PLAN, TYPE)).toGenerate, 1);
