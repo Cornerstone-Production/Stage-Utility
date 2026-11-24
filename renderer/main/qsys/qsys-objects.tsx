@@ -18,9 +18,9 @@
 // catalog). The Core's Position follows its own taper, which the page does not
 // know, so a thumb drawn from it would jump at release when the read-back lands.
 
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import type { QsysAddress, QsysBinding, QsysDensity } from "@main/types/qsys";
+import { kindOf, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
@@ -38,6 +38,7 @@ import {
   useQsysWriteState,
   useQsysWrite,
   type QsysControlInfo,
+  type QsysPanelState,
   type QsysState,
 } from "./use-qsys-values";
 
@@ -52,8 +53,6 @@ export const FLASH_MS = 600;
 const AMBER_AT = 0.74;
 const RED_AT = 0.86;
 
-const ADDR = (b: QsysBinding | null | undefined): QsysAddress | null => (b ? { component: b.component, control: b.control } : null);
-
 /** A Core value read as on or off. Q-SYS reports booleans as true/false or 1/0. */
 export function truthy(v: unknown): boolean {
   if (typeof v === "boolean") return v;
@@ -62,8 +61,12 @@ export function truthy(v: unknown): boolean {
   return false;
 }
 
-/** The catalog's Type decides; only before the catalog is read does the value's own type. */
-const isBooleanControl = (info: QsysControlInfo, value: unknown) => (info.type ? /^bool/i.test(info.type) : typeof value === "boolean");
+/**
+ * A Boolean, by the rule the writer and the editor use (kindOf). The catalog's
+ * Type decides once read; only before that does the value's own type. Not both:
+ * a trigger's read-back can be `true`, and a trigger lit by it would stay lit.
+ */
+const isBooleanControl = (info: QsysControlInfo, value: unknown) => kindOf(info.type ? { Type: info.type } : { Value: value }) === "boolean";
 
 /** "-12.0", "+3.5", "0.0": a level as the readout shows it, in Plex Mono. */
 export function formatDb(v: unknown): string {
@@ -76,9 +79,9 @@ const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontVariantNumeric
 
 /** The Core lit this from its own value or its indicator; null when it reports no state. */
 function useLit(b: QsysBinding | null | undefined): boolean | null {
-  const own = useQsysValue(ADDR(b));
-  const indicator = useQsysValue(b?.indicator ? ADDR(b.indicator) : null);
-  const info = useQsysControl(ADDR(b));
+  const own = useQsysValue(b ?? null);
+  const indicator = useQsysValue(b?.indicator ?? null);
+  const info = useQsysControl(b ?? null);
   if (b?.indicator) return indicator.state === "unavailable" ? null : truthy(indicator.value);
   if (own.state === "unavailable") return null;
   return isBooleanControl(info, own.value) ? truthy(own.value) : null;
@@ -176,6 +179,9 @@ const BUTTON: CSSProperties = {
   boxSizing: "border-box",
   touchAction: "manipulation",
 };
+
+/** A press held down: no pan, no text selection, no iOS callout may take the pointer. */
+const HELD: CSSProperties = { touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
 
 function litStyle(lit: boolean): CSSProperties {
   return {
@@ -291,6 +297,18 @@ function PressButton({
     release();
   };
 
+  // Going disabled mid-press (the allowlist re-read drops it, the panel stops being
+  // live) ends the press: a disabled button hears no keyup, and a browser need not
+  // blur it, so a key-held momentary would otherwise stay pressed, and renewed, for good.
+  const endOnDisable = useEffectEvent(() => {
+    if (!owner.current) return;
+    gesture.current?.cancel();
+    end(owner.current);
+  });
+  useEffect(() => {
+    if (disabled) endOnDisable();
+  }, [disabled]);
+
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (disabled || (!hold && !onRelease)) return;
     const el = e.currentTarget;
@@ -332,6 +350,9 @@ function PressButton({
       }}
       style={{
         ...BUTTON,
+        // A press that lasts (a hold, a momentary) must not be taken by a pan: the
+        // browser would cancel the pointer, and end the press, with the finger down.
+        ...(hold || onRelease ? HELD : {}),
         ...litStyle(lit),
         position: "relative",
         overflow: "hidden",
@@ -369,21 +390,93 @@ interface LeasedPress {
   retry: ReturnType<typeof setTimeout> | null;
   /** The press's own write has answered: from then on, "not held" means the lease is gone. */
   wrote: boolean;
+  /** The server refused the press (no-lease among the reasons): nothing was sent, nothing to release. */
+  refused: boolean;
   /** When the server last said it holds the lease (at first, the press). */
   heldAt: number;
 }
 
 /**
+ * A momentary's lease, renewed while the press is held: the server lets go of the
+ * control itself if the renewals stop (qsys-leases.ts). Renewed while the press
+ * is held, nothing broke and the panel is live; only this press's release, a
+ * break, the panel going offline, a refused press, or the server saying (after
+ * the press answered) that it holds no lease stops it. A renewal with no answer is
+ * retried while the lease still has time.
+ */
+function useLeasedPress(binding: QsysAddress) {
+  const panel = useQsysPanelContext();
+  const { epoch } = useQsysPanelState();
+  const renewing = useRef<LeasedPress | null>(null);
+  const last = useRef<LeasedPress | null>(null);
+  const stop = () => {
+    const p = renewing.current;
+    if (!p) return;
+    if (p.interval) clearInterval(p.interval);
+    if (p.retry) clearTimeout(p.retry);
+    renewing.current = null;
+  };
+  useEffect(() => stop, []);
+  // A break stops the renewals; the server's lease then lapses and it releases the control.
+  useEffect(() => stop(), [epoch]);
+
+  return {
+    /** A press is being sent now: renew its lease until it ends. */
+    start(): LeasedPress | null {
+      if (!panel) return null;
+      stop();
+      const at = panel.epoch;
+      const press: LeasedPress = { interval: null, retry: null, wrote: false, refused: false, heldAt: Date.now() };
+      const renew = () => {
+        if (renewing.current !== press) return;
+        if (panel.epoch !== at || !panel.live) return stop();
+        // Before the press has answered, "not held" only means the lease is not taken yet.
+        const afterWrite = press.wrote;
+        void panel.renewLease(binding).then((answer) => {
+          // Released, or pressed again since: this answer is about a press that is over.
+          if (renewing.current !== press) return;
+          if (answer === "held") press.heldAt = Date.now();
+          else if (answer === "not-held") {
+            if (afterWrite) stop();
+          } else if (!press.retry && Date.now() - press.heldAt < LEASE_EXPIRE_MS - RENEW_RETRY_MS) {
+            press.retry = setTimeout(() => {
+              press.retry = null;
+              renew();
+            }, RENEW_RETRY_MS);
+          }
+        });
+      };
+      press.interval = setInterval(renew, LEASE_RENEW_MS);
+      renewing.current = last.current = press;
+      return press;
+    },
+    /** The press's own write answered. Refused, there is no lease to renew. */
+    answered(press: LeasedPress, ok: boolean): void {
+      press.wrote = true;
+      press.refused = !ok;
+      if (!ok && renewing.current === press) stop();
+    },
+    /** The press ended. False when the last press is known refused: it sent nothing, so there is nothing to release. */
+    release(): boolean {
+      stop();
+      return !last.current?.refused;
+    },
+  };
+}
+
+/**
  * One trigger, preset or option: lit from the Core, flashed on a confirmed write
- * when it has no state. Bound to a Boolean and `momentary`, it is true while
- * pressed and false on release.
+ * when it has no state. A button saved as `momentary` is true while pressed and
+ * false on release, decided from that saved press alone (never from the catalog,
+ * which may not be read yet): its press asks for a lease, and the server refuses a
+ * press it cannot hold (`no-lease`), leaving the button unlit.
  */
 function TriggerButton({
   binding,
   label,
   interactive,
   hold,
-  momentary,
+  momentary = false,
   style,
   muted,
 }: {
@@ -395,33 +488,15 @@ function TriggerButton({
   style?: CSSProperties;
   muted?: boolean;
 }) {
-  const v = useQsysValue(ADDR(binding));
-  const info = useQsysControl(ADDR(binding));
-  const writeState = useQsysWriteState(ADDR(binding));
+  const v = useQsysValue(binding);
+  const info = useQsysControl(binding);
+  const writeState = useQsysWriteState(binding);
   const lit = useLit(binding);
   const [flash, doFlash] = useFlash();
   const write = useQsysWrite();
   const boolean = isBooleanControl(info, v.value);
   const canInput = interactive && writeState === "live";
-  const isMomentary = !!momentary && boolean;
-  const panel = useQsysPanelContext();
-  const { epoch } = useQsysPanelState();
-
-  // A momentary's press is leased: the server lets go of the control itself if the
-  // renewals stop (qsys-leases.ts). Renewed while the press is held and nothing broke;
-  // only this press's release, a break, or the server saying (after the press
-  // answered) that it holds no lease stops it. A renewal with no answer is retried.
-  const renewing = useRef<LeasedPress | null>(null);
-  const stopRenewing = () => {
-    const p = renewing.current;
-    if (!p) return;
-    if (p.interval) clearInterval(p.interval);
-    if (p.retry) clearTimeout(p.retry);
-    renewing.current = null;
-  };
-  useEffect(() => stopRenewing, []);
-  // A break stops the renewals; the server's lease then lapses and it releases the control.
-  useEffect(() => stopRenewing(), [epoch]);
+  const leased = useLeasedPress(binding);
 
   return (
     <PressButton
@@ -431,45 +506,17 @@ function TriggerButton({
       label={label}
       holdLabel={holdWords(label)}
       onFire={() => {
-        let p: LeasedPress | null = null;
-        if (isMomentary && panel) {
-          stopRenewing();
-          const at = panel.epoch;
-          const a = ADDR(binding)!;
-          const press: LeasedPress = { interval: null, retry: null, wrote: false, heldAt: Date.now() };
-          const renew = () => {
-            if (renewing.current !== press) return;
-            if (panel.epoch !== at) return stopRenewing();
-            // Before the press has answered, "not held" only means the lease is not taken yet.
-            const afterWrite = press.wrote;
-            void panel.renewLease(a).then((answer) => {
-              // Released, or pressed again since: this answer is about a press that is over.
-              if (renewing.current !== press) return;
-              if (answer === "held") press.heldAt = Date.now();
-              else if (answer === "not-held") {
-                if (afterWrite) stopRenewing();
-              } else if (!press.retry && Date.now() - press.heldAt < LEASE_EXPIRE_MS - RENEW_RETRY_MS) {
-                press.retry = setTimeout(() => {
-                  press.retry = null;
-                  renew();
-                }, RENEW_RETRY_MS);
-              }
-            });
-          };
-          press.interval = setInterval(renew, LEASE_RENEW_MS);
-          renewing.current = p = press;
-        }
-        void write(ADDR(binding)!, true, { final: true, lease: isMomentary }).then((r) => {
-          if (p) p.wrote = true;
+        const press = momentary ? leased.start() : null;
+        void write(binding, true, { final: true, lease: momentary }).then((r) => {
+          if (press) leased.answered(press, r.ok);
           // A pure trigger reports no state: show the confirmed write as a flash, never as lit.
-          if (r.ok && !isMomentary && (lit === null || !boolean)) doFlash();
+          if (r.ok && !momentary && (lit === null || !boolean)) doFlash();
         });
       }}
       onRelease={
-        isMomentary
+        momentary
           ? () => {
-              stopRenewing();
-              void write(ADDR(binding)!, false, { final: true });
+              if (leased.release()) void write(binding, false, { final: true });
             }
           : undefined
       }
@@ -499,13 +546,34 @@ interface FaderProps {
   readout?: "above" | "below";
 }
 
-function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, muted = false, meters = [], density = "standard", readout = "above" }: FaderProps) {
+/**
+ * A fader's input: the drag, the steps, and the value the finger holds on screen.
+ *
+ * A drag is relative (touching the track moves nothing; only movement does),
+ * writes at most once per DRAG_COALESCE_MS, and always sends its last value as
+ * the final write. The thumb holds the finger's value until that final write has
+ * answered, then shows the Core's. A break (the stream dropped, the page hid, the
+ * Core went away) ends a drag in progress and lets go of the finger's value, even
+ * with a release still out. A refusal snaps the thumb back to the Core's value.
+ */
+function useFaderDrag({
+  addr,
+  core,
+  scale,
+  writable,
+  vertical,
+  stepDb,
+}: {
+  addr: QsysAddress | null;
+  /** The Core's value, when it is a number. */
+  core: number | null;
+  scale: FaderScale | null;
+  writable: boolean;
+  vertical: boolean;
+  stepDb: number;
+}) {
   const panel = useQsysPanelContext();
   const { epoch } = useQsysPanelState();
-  const addr = ADDR(binding);
-  const v = useQsysValue(addr);
-  const info = useQsysControl(addr);
-  const writeState = useQsysWriteState(addr, true);
   const write = useQsysWrite();
   const track = useRef<HTMLDivElement | null>(null);
   const [local, setLocal] = useState<number | null>(null);
@@ -523,9 +591,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     };
   }, []);
 
-  // A break (the stream dropped, the page hid, the Core went away) ends a drag in
-  // progress and lets go of the finger's value, even with a release still out: the
-  // fader shows the Core's value once the panel is read again.
+  // A break lets go of the finger's value: the fader shows the Core's once the panel is read again.
   const [seenEpoch, setSeenEpoch] = useState(epoch);
   if (epoch !== seenEpoch) {
     setSeenEpoch(epoch);
@@ -541,21 +607,9 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     pendingFinals.current = 0;
   }, [epoch]);
 
-  const dense = density === "dense";
-  const range = info.range;
-  // The fader's own scale (fader-scale.ts): linear in dB from -60 (or the allowlist's
-  // minimum) to the allowlist's maximum, the Core's minimum at the bottom stop.
-  const scale = faderScale(range, info.limits);
   const norm = (x: number) => (scale ? travelOf(scale, x) : 0);
-  const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
-
   // What is on screen: the finger's value while a gesture is open, else the Core's.
-  const shown = local ?? (typeof v.value === "number" ? v.value : null);
-  const level = shown === null ? (v.position ?? 0) : scale ? norm(shown) : (v.position ?? 0);
-  // The allowlist's limit is the top of travel; marked there when it stops short of the Core's own.
-  const limitAt = scale && range && scale.top < range.max ? 1 : null;
-  const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
-  const offline = v.state === "offline";
+  const shown = local ?? core;
 
   const snapBack = () => {
     drag.current?.gesture.cancel();
@@ -579,7 +633,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     const startNorm = norm(startValue);
     const s = scale!;
     const startAt = vertical ? e.clientY : e.clientX;
-    const epoch = panel.epoch;
+    const at = panel.epoch;
     // Relative: touching the track does not move the value. Only movement does.
     const gesture = bindGesture(e.currentTarget, e.pointerId, {
       move: (ev) => {
@@ -615,7 +669,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
         });
       },
     });
-    drag.current = { epoch, gesture, moved: false, last: startValue };
+    drag.current = { epoch: at, gesture, moved: false, last: startValue };
   };
 
   /** A step from the value on screen: the -/+ buttons and the arrow keys. */
@@ -625,6 +679,39 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     if (next === shown) return;
     void write(addr!, Math.round(next * 100) / 100, { final: true });
   };
+
+  return { track, shown, norm, onPointerDown, step };
+}
+
+/** The arrow keys a slider steps on, and which way. */
+const ARROW_STEP: Record<string, 1 | -1> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
+
+function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, muted = false, meters = [], density = "standard", readout = "above" }: FaderProps) {
+  const addr = binding;
+  const v = useQsysValue(addr);
+  const info = useQsysControl(addr);
+  const writeState = useQsysWriteState(addr, true);
+
+  const dense = density === "dense";
+  const range = info.range;
+  // The fader's own scale (fader-scale.ts): linear in dB from -60 (or the allowlist's
+  // minimum) to the allowlist's maximum, the Core's minimum at the bottom stop.
+  const scale = faderScale(range, info.limits);
+  const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
+  const { track, shown, norm, onPointerDown, step } = useFaderDrag({
+    addr,
+    core: typeof v.value === "number" ? v.value : null,
+    scale,
+    writable,
+    vertical,
+    stepDb,
+  });
+
+  const level = shown === null ? (v.position ?? 0) : scale ? norm(shown) : (v.position ?? 0);
+  // The allowlist's limit is the top of travel; marked there when it stops short of the Core's own.
+  const limitAt = scale && range && scale.top < range.max ? 1 : null;
+  const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
+  const offline = v.state === "offline";
 
   // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
   const thumbAlong = dense ? 24 : 40;
@@ -649,7 +736,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
       tabIndex={writable ? 0 : -1}
       onPointerDown={onPointerDown}
       onKeyDown={(e) => {
-        const dir = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1 : e.key === "ArrowDown" || e.key === "ArrowLeft" ? -1 : 0;
+        const dir = ARROW_STEP[e.key];
         if (!dir) return;
         e.preventDefault();
         step(dir);
@@ -768,11 +855,18 @@ function bandColour(level: number): string {
   return level > RED_AT ? "var(--color-danger-9)" : level > AMBER_AT ? "var(--color-warn-9)" : "var(--color-ok-9)";
 }
 
-/** A meter bar, drawn by the panel's animation loop straight into the element. */
+/**
+ * A meter bar, drawn by the panel's animation loop straight into the element. A
+ * frame sets only what changed: the bar's scale (a transform, so no layout), and
+ * its colour only when it crosses into another band. On a Pi with a full staff
+ * panel this loop is most of the page's work.
+ */
 function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: QsysBinding; vertical: boolean; thin?: boolean; scale?: FaderScale | null }) {
   const panel = useQsysPanelContext();
   const { component, control } = binding;
   const bar = useRef<HTMLDivElement | null>(null);
+  /** What the element shows now. */
+  const drawn = useRef<{ level: number; band: string } | null>(null);
   // The scale's numbers, not the object: a new object each render would resubscribe the sink.
   const bottom = scale?.bottom;
   const floor = scale?.floor;
@@ -780,12 +874,17 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
   useEffect(() => {
     if (!panel) return;
     const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top } : null;
+    drawn.current = null;
     return panel.addMeterSink({ component, control }, (r) => meterLevel(r, on), {
       draw: (level) => {
         const el = bar.current;
         if (!el) return;
-        el.style[vertical ? "height" : "width"] = `${level * 100}%`;
-        el.style.background = bandColour(level);
+        const was = drawn.current;
+        if (was?.level === level) return;
+        el.style.transform = `${vertical ? "scaleY" : "scaleX"}(${level})`;
+        const band = bandColour(level);
+        if (was?.band !== band) el.style.background = band;
+        drawn.current = { level, band };
       },
     });
   }, [panel, component, control, bottom, floor, top, vertical]);
@@ -802,7 +901,7 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
         ...(vertical ? { width: thin ? 5 : 6, alignSelf: "stretch" } : { height: thin ? 5 : 6, alignSelf: "stretch" }),
       }}
     >
-      <div ref={bar} style={{ position: "absolute", ...(vertical ? { left: 0, right: 0, bottom: 0, height: 0 } : { top: 0, bottom: 0, left: 0, width: 0 }) }} />
+      <div data-meter-bar ref={bar} style={{ position: "absolute", inset: 0, transformOrigin: vertical ? "bottom" : "left", transform: vertical ? "scaleY(0)" : "scaleX(0)", willChange: "transform" }} />
     </div>
   );
 }
@@ -831,7 +930,7 @@ function MeterNumber({ binding, unit }: { binding: QsysBinding; unit?: string })
 // ── The objects ─────────────────────────────────────────────────────────────
 
 function FaderObject({ c, interactive, ts }: { c: Of<"qsys-fader">; interactive: boolean; ts: CSSProperties }) {
-  const state = useQsysWriteState(ADDR(c.binding), true);
+  const state = useQsysWriteState(c.binding, true);
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ padding: "0.3em" }}>
       <Fader
@@ -849,8 +948,8 @@ function FaderObject({ c, interactive, ts }: { c: Of<"qsys-fader">; interactive:
 }
 
 function MeterObject({ c, ts }: { c: Of<"qsys-meter">; ts: CSSProperties }) {
-  const a = useQsysValue(ADDR(c.binding));
-  const b = useQsysValue(ADDR(c.binding2));
+  const a = useQsysValue(c.binding ?? null);
+  const b = useQsysValue(c.binding2 ?? null);
   const state = c.binding2 ? combine(a.state, b.state) : a.state;
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ padding: "0.3em", justifyContent: "center", gap: 6 }}>
@@ -872,7 +971,7 @@ function MeterObject({ c, ts }: { c: Of<"qsys-meter">; ts: CSSProperties }) {
  * for a screen reader, and in the strip's readout ("mute").
  */
 function MuteButton({ binding, interactive, dense = false }: { binding: QsysBinding | null; interactive: boolean; dense?: boolean }) {
-  const addr = ADDR(binding);
+  const addr = binding;
   const v = useQsysValue(addr);
   const writeState = useQsysWriteState(addr);
   const write = useQsysWrite();
@@ -917,7 +1016,7 @@ function MuteButton({ binding, interactive, dense = false }: { binding: QsysBind
 }
 
 function MuteObject({ c, interactive, ts }: { c: Of<"qsys-mute">; interactive: boolean; ts: CSSProperties }) {
-  const state = useQsysWriteState(ADDR(c.binding));
+  const state = useQsysWriteState(c.binding ?? null);
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ alignItems: "center", justifyContent: "center" }}>
       <MuteButton binding={c.binding} interactive={interactive} />
@@ -926,7 +1025,7 @@ function MuteObject({ c, interactive, ts }: { c: Of<"qsys-mute">; interactive: b
 }
 
 function ButtonObject({ c, interactive, ts }: { c: Of<"qsys-button">; interactive: boolean; ts: CSSProperties }) {
-  const state = useQsysWriteState(ADDR(c.binding));
+  const state = useQsysWriteState(c.binding ?? null);
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ alignItems: "stretch", justifyContent: "stretch" }}>
       {c.binding && (
@@ -937,13 +1036,14 @@ function ButtonObject({ c, interactive, ts }: { c: Of<"qsys-button">; interactiv
   );
 }
 
-function SwitchTrack({ on, disabled, onPress, label }: { on: boolean; disabled: boolean; onPress: () => void; label: string }) {
+/** `name` is what a screen reader calls it: never empty (the label, else the control). */
+function SwitchTrack({ on, disabled, onPress, name }: { on: boolean; disabled: boolean; onPress: () => void; name: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      aria-label={label || undefined}
+      aria-label={name}
       disabled={disabled}
       onClick={onPress}
       style={{
@@ -977,38 +1077,39 @@ function SwitchTrack({ on, disabled, onPress, label }: { on: boolean; disabled: 
 
 function SwitchObject({ c, interactive, ts }: { c: Of<"qsys-switch">; interactive: boolean; ts: CSSProperties }) {
   const write = useQsysWrite();
-  const own = useQsysValue(ADDR(c.binding));
-  const ownState = useQsysWriteState(ADDR(c.binding));
-  const pairState = useQsysStates([ADDR(c.onBinding), ADDR(c.offBinding)], true);
+  const own = useQsysValue(c.binding ?? null);
+  const ownState = useQsysWriteState(c.binding ?? null);
+  const pairState = useQsysStates([c.onBinding ?? null, c.offBinding ?? null], true);
   const pairLit = useLit(c.onBinding);
   const label = <span style={{ fontSize: "0.6em", fontWeight: 500 }}>{c.label}</span>;
+  // The editor's label, else the control it switches: a switch is never announced as just "switch".
+  const name = c.label.trim() || (c.binding ?? c.onBinding)?.control || "Switch";
 
   if (c.binding) {
     const on = own.state !== "unavailable" && truthy(own.value);
     const canInput = interactive && ownState === "live";
     return (
       <Frame type={c.type} state={ownState} ts={ts} style={{ alignItems: "center", gap: "0.5em", padding: "0.3em" }}>
-        <SwitchTrack on={on} disabled={!canInput} label={c.label} onPress={() => canInput && void write(ADDR(c.binding)!, !on, { final: true })} />
+        <SwitchTrack on={on} disabled={!canInput} name={name} onPress={() => canInput && void write(c.binding!, !on, { final: true })} />
         {label}
       </Frame>
     );
   }
   if (c.onBinding && c.offBinding) {
-    const state = pairState;
     if (pairLit !== null) {
       // The Core reports which way it is (an indicator on the On trigger): one switch.
       const target = pairLit ? c.offBinding : c.onBinding;
-      const canInput = interactive && state === "live";
+      const canInput = interactive && pairState === "live";
       return (
-        <Frame type={c.type} state={state} ts={ts} style={{ alignItems: "center", gap: "0.5em", padding: "0.3em" }}>
-          <SwitchTrack on={pairLit} disabled={!canInput} label={c.label} onPress={() => canInput && void write(ADDR(target)!, true, { final: true })} />
+        <Frame type={c.type} state={pairState} ts={ts} style={{ alignItems: "center", gap: "0.5em", padding: "0.3em" }}>
+          <SwitchTrack on={pairLit} disabled={!canInput} name={name} onPress={() => canInput && void write(target, true, { final: true })} />
           {label}
         </Frame>
       );
     }
     // No readable state: two triggers, neither lit, each flashing when the Core confirms it.
     return (
-      <Frame type={c.type} state={state} ts={ts} style={{ alignItems: "center", gap: "0.4em", padding: "0.3em" }}>
+      <Frame type={c.type} state={pairState} ts={ts} style={{ alignItems: "center", gap: "0.4em", padding: "0.3em" }}>
         {label}
         <TriggerButton binding={c.onBinding} label={c.onLabel?.trim() || "On"} interactive={interactive} />
         <TriggerButton binding={c.offBinding} label={c.offLabel?.trim() || "Off"} interactive={interactive} />
@@ -1023,7 +1124,7 @@ function SwitchObject({ c, interactive, ts }: { c: Of<"qsys-switch">; interactiv
 }
 
 function PresetsObject({ c, interactive, ts }: { c: Of<"qsys-presets">; interactive: boolean; ts: CSSProperties }) {
-  const state = useQsysStates([...c.items.map((i) => i.binding), ...(c.previous ? [c.previous] : [])].map(ADDR), true);
+  const state = useQsysStates([...c.items.map((i) => i.binding), ...(c.previous ? [c.previous] : [])], true);
   return (
     <Frame type={c.type} state={state} ts={ts} bound={c.items.length > 0} style={{ padding: "0.3em" }}>
       {c.items.length > 0 && (
@@ -1071,13 +1172,13 @@ function SelectorRow({ label, selected, disabled, onPick, children }: { label: s
 }
 
 function SelectorItem({ item, interactive }: { item: { label: string; binding: QsysBinding }; interactive: boolean }) {
-  const addr = ADDR(item.binding);
-  const v = useQsysValue(addr);
-  const info = useQsysControl(addr);
+  const addr = item.binding;
+  // Read-only on the Core, or off the allowlist: Unavailable, as every other writing object.
+  const writeState = useQsysWriteState(addr);
   const lit = useLit(item.binding);
   const [flash, doFlash] = useFlash();
   const write = useQsysWrite();
-  const canInput = interactive && v.state === "live" && info.allowed;
+  const canInput = interactive && writeState === "live";
   return (
     <SelectorRow
       label={item.label}
@@ -1094,12 +1195,12 @@ function SelectorItem({ item, interactive }: { item: { label: string; binding: Q
 }
 
 function SelectorObject({ c, interactive, ts }: { c: Of<"qsys-selector">; interactive: boolean; ts: CSSProperties }) {
-  const addr = ADDR(c.binding);
+  const addr = c.binding ?? null;
   const v = useQsysValue(addr);
   const info = useQsysControl(addr);
   const write = useQsysWrite();
   const items = c.items;
-  const state = useQsysStates(items.length ? items.map((i) => ADDR(i.binding)) : [addr], true);
+  const state = useQsysStates(items.length ? items.map((i) => i.binding) : [addr], true);
   const canInput = interactive && state === "live";
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding || items.length > 0} style={{ flexDirection: "column", gap: 8, padding: "0.3em" }}>
@@ -1125,12 +1226,13 @@ function SelectorObject({ c, interactive, ts }: { c: Of<"qsys-selector">; intera
 }
 
 function LabelObject({ c, ts }: { c: Of<"qsys-label">; ts: CSSProperties }) {
-  const v = useQsysValue(ADDR(c.binding));
-  // The editor's text wins when set; otherwise the Core's.
-  const text = c.text.trim() ? c.text : v.string;
-  const state = c.text.trim() ? (c.binding ? v.state : "live") : v.state;
+  const v = useQsysValue(c.binding ?? null);
+  // The editor's text wins when set; otherwise the Core's. Set text is never Unavailable.
+  const hasText = c.text.trim() !== "";
+  const text = hasText ? c.text : v.string;
+  const state = hasText && v.state === "unavailable" ? "live" : v.state;
   return (
-    <Frame type={c.type} state={state === "unavailable" && c.text.trim() ? "live" : state} ts={ts} bound={!!c.binding || !!c.text.trim()} style={{ alignItems: "center", padding: "0 0.3em" }}>
+    <Frame type={c.type} state={state} ts={ts} bound={!!c.binding || hasText} style={{ alignItems: "center", padding: "0 0.3em" }}>
       <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text || (c.binding ? "–" : "Label")}</span>
     </Frame>
   );
@@ -1143,13 +1245,13 @@ function LabelObject({ c, ts }: { c: Of<"qsys-label">; ts: CSSProperties }) {
  */
 function StripObject({ c, interactive, ts }: { c: Of<"qsys-strip">; interactive: boolean; ts: CSSProperties }) {
   const dense = c.density === "dense";
-  const name = useQsysValue(ADDR(c.name));
-  const mute = useQsysValue(ADDR(c.mute));
+  const name = useQsysValue(c.name);
+  const mute = useQsysValue(c.mute);
   const muted = mute.state !== "unavailable" && truthy(mute.value);
-  const gainState = useQsysWriteState(ADDR(c.gain), true);
-  const muteState = useQsysWriteState(ADDR(c.mute));
+  const gainState = useQsysWriteState(c.gain, true);
+  const muteState = useQsysWriteState(c.mute);
   const meters = [c.meter, c.meter2].filter((m): m is QsysBinding => !!m);
-  const meterState = useQsysStates(meters.map(ADDR));
+  const meterState = useQsysStates(meters);
   // What it has decides its state: a meters-only strip is a meter, read and drawn.
   const parts: QsysState[] = [...(c.gain ? [gainState] : []), ...(c.mute ? [muteState] : []), ...(meters.length ? [meterState] : [])];
   const state = parts.length ? combine(...parts) : "unavailable";
@@ -1197,14 +1299,16 @@ function StripObject({ c, interactive, ts }: { c: Of<"qsys-strip">; interactive:
   );
 }
 
+/** What the Connection status object shows for each state: its dot and its words. */
+const CONNECTION_LOOK: Record<QsysPanelState["connection"], { colour: string; text: string }> = {
+  connected: { colour: "var(--color-ok-9)", text: "Connected" },
+  reconnecting: { colour: "var(--color-warn-9)", text: "Reconnecting… controls held" },
+  offline: { colour: "var(--color-danger-9)", text: "Offline" },
+};
+
 function StatusObject({ ts }: { ts: CSSProperties }) {
   const conn = useQsysPanelState().connection;
-  const [colour, text] =
-    conn === "connected"
-      ? ["var(--color-ok-9)", "Connected"]
-      : conn === "reconnecting"
-        ? ["var(--color-warn-9)", "Reconnecting… controls held"]
-        : ["var(--color-danger-9)", "Offline"];
+  const { colour, text } = CONNECTION_LOOK[conn];
   return (
     <Frame type="qsys-status" state={conn === "connected" ? "live" : "offline"} ts={ts} dims={false} style={{ alignItems: "center", gap: 8, padding: "0 0.3em" }}>
       <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: colour, flex: "0 0 auto" }} />

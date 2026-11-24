@@ -13,7 +13,16 @@
 //
 // Bars are written straight to their elements through `MeterSink`, never
 // through React state: twenty strips at twenty samples a second would otherwise
-// re-render the panel four hundred times a second.
+// re-render the panel four hundred times a second. The sink sets a transform
+// (compositor-only, no layout) and the colour only when its band changes, so a
+// frame on a Pi costs no layout or repaint of the panel.
+//
+// A loop, not a CSS transition on the bar: the tween lasts one MEASURED sample
+// interval, which the page is never told, and a stale meter jumps instead of
+// sweeping. A fixed transition would trail a 10 Hz meter by a sample or cut a
+// 20 Hz one short, and would sweep up from a height left over from before a
+// hide. The browser already pauses this loop on a hidden page (rAF), as it would
+// a transition.
 
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 

@@ -27,13 +27,17 @@
 //   breaks; a gesture in progress ends when it moves.
 // - Nothing is lit from the page's own last write. A write's read-back is the
 //   Core's answer and is shown as such; a refusal shows the Core's value again.
+//   On a staff panel a refusal also says why, in a toast; a volunteer panel just
+//   shows the Core's value.
 
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { WriteResult } from "@main/services/qsys/qsys-write";
-import { addressKey, isReadOnlyDirection, type PanelKind, type QsysAddress } from "@main/types/qsys";
+import { addressKey, choicesOf, isReadOnlyDirection, type PanelKind, type QsysAddress } from "@main/types/qsys";
+import { toast } from "../../components/ui/toast";
 import { getStreamStatus, invoke, onNotification, onStreamStatusChange, streamClientId, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
+import { rangeOf } from "./fader-scale";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
 export type { WriteResult };
@@ -100,7 +104,12 @@ const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 8_000;
 
 type Change = { Component?: unknown; Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown };
-type ValuesAnswer = { ready: boolean; values: { component: string; control: string; value: unknown; string: string; position?: number }[] };
+type ValuesAnswer = {
+  ready: boolean;
+  values: { component: string; control: string; value: unknown; string: string; position?: number }[];
+  /** When the Core's catalog was last read; the status push carries the same stamp. */
+  catalogAt?: unknown;
+};
 type AllowAnswer = { entries: { component: string; control: string; min: number | null; max: number | null; confirm: "none" | "hold" }[] };
 type CatalogAnswer = {
   designCode: string;
@@ -450,6 +459,8 @@ export class QsysPanel {
       // Once per run of failures, not once per retry.
       if (!this.failing) logToServer("qsys", `panel ${this.id}: its values could not be read (${String(values.reason)}); retrying`);
       this.failing = true;
+      // A break like any other: input closes, and a press or drag in progress ends.
+      this.breakOff();
       this.hydrated = false;
       this.ready = false;
       this.scheduleRetry();
@@ -458,6 +469,9 @@ export class QsysPanel {
 
     this.missing = false;
     this.failing = false;
+    // The catalog's stamp as of this read, so the first status push after it can
+    // tell a new catalog from the one this page already has.
+    if (this.catalogAt === undefined && values.value.catalogAt !== undefined) this.catalogAt = values.value.catalogAt;
     this.readings = new Map(values.value.values.map((v) => [addressKey(v), readingOf({ Value: v.value, String: v.string, Position: v.position })]));
     // A push that arrived while the read was on its way is newer than the read's answer.
     this.hydratedAt = ++this.stamp;
@@ -483,11 +497,10 @@ export class QsysPanel {
     const info = new Map<string, Omit<QsysControlInfo, "allowed" | "limits" | "hold">>();
     for (const comp of c.components) {
       for (const ctl of comp.controls) {
-        const ranged = Number.isFinite(ctl.ValueMin) && Number.isFinite(ctl.ValueMax) && ctl.ValueMin! < ctl.ValueMax!;
         info.set(addressKey({ component: comp.name, control: ctl.Name }), {
           type: String(ctl.Type ?? ""),
-          range: ranged ? { min: ctl.ValueMin!, max: ctl.ValueMax! } : null,
-          choices: Array.isArray(ctl.Choices) ? ctl.Choices.filter((x): x is string => typeof x === "string") : null,
+          range: rangeOf(ctl),
+          choices: choicesOf(ctl),
           writable: !isReadOnlyDirection(ctl.Direction),
         });
       }
@@ -682,6 +695,7 @@ export class QsysPanel {
       })
       .then((result) => {
         lane.inFlight = false;
+        if (!result.ok) this.sayRefused(result);
         if (held.final) {
           if (result.ok) this.adoptReadBack(a, result, sentAt);
           lane.echoes = [];
@@ -698,6 +712,18 @@ export class QsysPanel {
         }
         this.pump(a, lane);
       });
+  }
+
+  /**
+   * A write the server refused (or that never reached it): on a staff panel a
+   * toast says why, as the spec asks; a volunteer panel only shows the Core's
+   * value again. A write the page never sent (a break) is not news: the status
+   * object already says the panel is offline. One toast per message at a time.
+   */
+  private sayRefused(result: Extract<WriteResult, { ok: false }>): void {
+    if (this.kind !== "staff") return;
+    const m = result.message.trim();
+    toast.error(m ? m[0]!.toUpperCase() + m.slice(1) : "The sound system refused that change.");
   }
 
   /**

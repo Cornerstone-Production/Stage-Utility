@@ -27,6 +27,12 @@ export interface FaderScale {
   top: number;
 }
 
+/** A catalog control's own range: finite, min under max; null when it reports none. The one rule for "has a range". */
+export function rangeOf(c: { ValueMin?: unknown; ValueMax?: unknown }): { min: number; max: number } | null {
+  const { ValueMin: min, ValueMax: max } = c;
+  return typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && min < max ? { min, max } : null;
+}
+
 /** The scale for a control's Core range and its allowlist limits; null without a usable range. */
 export function faderScale(range: { min: number; max: number } | null, limits: { min: number | null; max: number | null }): FaderScale | null {
   if (!range) return null;

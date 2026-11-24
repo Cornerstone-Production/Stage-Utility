@@ -21,9 +21,9 @@ const babel = createRequire(require.resolve("@rolldown/plugin-babel"))("@babel/c
 };
 const COMPILER = require.resolve("babel-plugin-react-compiler");
 
-/** Modules whose URL `match` accepts are compiled; returns how many have been so far. */
-export function compileWithReactCompiler(match: (url: string) => boolean): () => number {
-  let compiled = 0;
+/** Modules whose URL `match` accepts are compiled; returns the file names of those compiled so far, sorted. */
+export function compileWithReactCompiler(match: (url: string) => boolean): () => string[] {
+  const compiled: string[] = [];
   registerHooks({
     load(url, context, nextLoad) {
       const loaded = nextLoad(url, context);
@@ -38,9 +38,9 @@ export function compileWithReactCompiler(match: (url: string) => boolean): () =>
         sourceType: "module",
       });
       if (!out?.code) throw new Error(`the React Compiler produced nothing for ${url}`);
-      compiled++;
+      compiled.push(new URL(url).pathname.split("/").pop()!);
       return { ...loaded, source: out.code };
     },
   });
-  return () => compiled;
+  return () => [...compiled].sort();
 }

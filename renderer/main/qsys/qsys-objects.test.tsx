@@ -19,7 +19,7 @@
 // browser: a built panel once drew every control offline for good.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import { compileWithReactCompiler } from "../../test-fixtures/react-compiler-hook.js";
 import { installDom, unmountAndTeardown } from "../../test-dom.js";
@@ -37,6 +37,7 @@ const { makeRenderCtx } = await import("../test-render-ctx.js");
 const { __resetReplayCacheForTests, __sseFallback, __setSubscribedDeadlineForTests } = await import("../../lib/api.js");
 const { __resetQsysPanelsForTests, DRAG_COALESCE_MS, QsysPanel } = await import("./use-qsys-values.js");
 const { FLASH_MS, HOLD_MS } = await import("./qsys-objects.js");
+const await_toast = await import("../../components/ui/toast.js");
 type LayoutObjectConfig = import("@main/types/views").LayoutObjectConfig;
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -115,6 +116,12 @@ interface Server {
   renewFails: number;
   /** When set, a renewal's answer waits for this to be called, and says what `leaseHeld` is then. */
   holdRenewals: ((release: () => void) => void) | null;
+  /** The allowlist a read answers. */
+  allow: typeof ALLOW;
+  /** How many values reads fail (a 500) before one answers. */
+  valuesFails: number;
+  /** The catalog stamp a values read carries; absent, as an older server sends it. */
+  catalogAt?: number;
 }
 
 let server: Server;
@@ -139,6 +146,8 @@ function freshServer(): Server {
     renewCids: [],
     renewFails: 0,
     holdRenewals: null,
+    allow: ALLOW,
+    valuesFails: 0,
   };
 }
 
@@ -154,11 +163,16 @@ const f = stubFetchWithLog((url, init) => {
   }
   if (url.startsWith("/api/qsys/values")) {
     server.reads++;
+    if (server.valuesFails > 0) {
+      server.valuesFails--;
+      return { ok: false, status: 500, statusText: "Error", json: async () => ({ error: "disk" }), text: async () => "" };
+    }
     // Answered with the values as they are when it is ANSWERED, as the server's would be.
     const answer = () =>
       ok({
         ready: server.ready,
         values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })),
+        ...(server.catalogAt !== undefined ? { catalogAt: server.catalogAt } : {}),
       });
     const hold = server.holdReads;
     if (hold) return new Promise((resolve) => hold(() => resolve(answer())));
@@ -178,7 +192,7 @@ const f = stubFetchWithLog((url, init) => {
   if (url === "/api/qsys/status") return ok({ connected: server.coreState === "connected", state: server.coreState });
   if (url === "/api/qsys/allowlist") {
     if (server.allowFails) return { ok: false, status: 500, statusText: "Error", json: async () => ({ error: "disk" }), text: async () => "" };
-    return ok(ALLOW);
+    return ok(server.allow);
   }
   if (url === "/api/qsys/catalog") {
     if (server.catalogFails > 0) {
@@ -233,6 +247,9 @@ async function mount(configs: LayoutObjectConfig[], { interactive = true, view =
 
 const FADER: LayoutObjectConfig = { type: "qsys-fader", binding: b("gain"), orientation: "vertical", showDb: true, steps: false, stepDb: 3 };
 
+/** How full a meter bar is drawn, in percent: the scale its frame set. */
+const drawnPct = (el: HTMLElement) => 100 * parseFloat(/scale[XY]\(([^)]+)\)/.exec(el.style.transform)?.[1] ?? "NaN");
+
 const q = (type: string, sel = "") => document.querySelector(`[data-qsys-object="${type}"] ${sel}`.trim()) as HTMLElement;
 const dbText = () => q("qsys-fader", "[data-db]").textContent;
 
@@ -274,7 +291,12 @@ const EVERY: LayoutObjectConfig[] = [
 
 describe("Q-SYS objects", () => {
   test("the objects and their store run through the React Compiler here", () => {
-    assert.ok(compiled() >= 3, `the compiler ran over ${compiled()} module(s); expected the objects, the store and the tween`);
+    assert.deepEqual(compiled(), [
+      "fader-scale.ts",
+      "meter-tween.ts",
+      "qsys-objects.tsx",
+      "use-qsys-values.ts",
+    ]);
   });
 
   test("every Q-SYS object type is covered here", async () => {
@@ -579,36 +601,77 @@ describe("Q-SYS objects", () => {
   // it gave the bottom 40 dB of the bar to levels nobody listens to.
   test("a standalone meter draws on a -60..+12 dB window", async () => {
     await mount([{ type: "qsys-meter", binding: b("meter"), form: "bar" }]);
-    const bar = q("qsys-meter", "[data-meter] > div");
-    assert.ok(Math.abs(parseFloat(bar.style.height) - 41.667) < 0.01, `hydrated at -30 dB drew ${bar.style.height}`);
+    const bar = q("qsys-meter", "[data-meter-bar]");
+    assert.ok(Math.abs(drawnPct(bar) - 41.667) < 0.01, `hydrated at -30 dB drew ${bar.style.transform}`);
     push("qsys:meters:staff", [{ control: "meter", value: 6 }]);
     await wait(150);
-    assert.ok(Math.abs(parseFloat(bar.style.height) - 91.667) < 0.01, `+6 dB drew ${bar.style.height}`);
+    assert.ok(Math.abs(drawnPct(bar) - 91.667) < 0.01, `+6 dB drew ${bar.style.transform}`);
     push("qsys:meters:staff", [{ control: "meter", value: 20 }]);
     await wait(250);
-    assert.ok(parseFloat(bar.style.height) > 99.9, `above the top is the top, drew ${bar.style.height}`);
+    assert.ok(drawnPct(bar) > 99.9, `above the top is the top, drew ${bar.style.transform}`);
     push("qsys:meters:staff", [{ control: "meter", value: -80 }]);
     await wait(250);
-    assert.ok(parseFloat(bar.style.height) < 0.5, `below the floor is empty, drew ${bar.style.height}`);
+    assert.ok(drawnPct(bar) < 0.5, `below the floor is empty, drew ${bar.style.transform}`);
+  });
+
+  // On a Pi the meter loop is most of a staff panel's work: a frame must not set what
+  // did not change. The scale is a transform (no layout; jsdom cannot see layout cost,
+  // so what is pinned is which properties a frame writes, and how often).
+  test("a meter frame sets only its scale, and its colour only when it crosses into another band", async () => {
+    await mount([{ type: "qsys-meter", binding: b("meter"), form: "bar" }]);
+    const bar = q("qsys-meter", "[data-meter-bar]");
+    const writes = { transform: 0, background: 0, height: 0 };
+    for (const prop of Object.keys(writes) as (keyof typeof writes)[]) {
+      let p: object | null = bar.style;
+      let real: PropertyDescriptor | undefined;
+      while (p && !(real = Object.getOwnPropertyDescriptor(p, prop))) p = Object.getPrototypeOf(p);
+      Object.defineProperty(bar.style, prop, {
+        configurable: true,
+        get() {
+          return real!.get!.call(this);
+        },
+        set(v) {
+          writes[prop]++;
+          real!.set!.call(this, v);
+        },
+      });
+    }
+    for (const value of [-29, -28, -27, -26, -25]) {
+      push("qsys:meters:staff", [{ control: "meter", value }]);
+      await wait(60);
+    }
+    assert.ok(writes.transform >= 5, `the bar was drawn ${writes.transform} times`);
+    assert.equal(writes.background, 0, "a frame inside one colour band set the colour");
+    assert.equal(writes.height, 0, "a frame set a layout property");
+    push("qsys:meters:staff", [{ control: "meter", value: 10 }]);
+    await wait(250);
+    assert.ok(writes.background >= 1 && writes.background <= 2, `crossing from green to red set the colour ${writes.background} times`);
+    // A sample after a pause jumps (meter-tween.ts) and is drawn at once, tween or not:
+    // at the level already on screen, that draw writes nothing.
+    await wait(700);
+    const frames = writes.transform;
+    push("qsys:meters:staff", [{ control: "meter", value: 10 }]);
+    await wait(60);
+    assert.equal(writes.transform, frames, "a sample at the level already drawn drew again");
   });
 
   test("a strip's meter uses its fader's scale", async () => {
     // gain is allowlisted -100..0 on a -100..+20 control: the fader's travel is -60..0.
     await mount([{ type: "qsys-strip", name: null, label: "Lead", gain: b("gain"), mute: null, meter: b("meter") }]);
-    const bar = q("qsys-strip", "[data-meter] > div");
-    assert.ok(Math.abs(parseFloat(bar.style.height) - 50) < 0.01, `-30 dB on a -60..0 fader drew ${bar.style.height}`);
+    const bar = q("qsys-strip", "[data-meter-bar]");
+    assert.ok(Math.abs(drawnPct(bar) - 50) < 0.01, `-30 dB on a -60..0 fader drew ${bar.style.transform}`);
     push("qsys:meters:staff", [{ control: "meter", value: -80 }]);
     await wait(250);
-    assert.ok(parseFloat(bar.style.height) < 0.5, `below the fader's floor is -inf, drew ${bar.style.height}`);
+    assert.ok(drawnPct(bar) < 0.5, `below the fader's floor is -inf, drew ${bar.style.transform}`);
     push("qsys:meters:staff", [{ control: "meter", value: 6 }]);
     await wait(250);
-    assert.ok(parseFloat(bar.style.height) > 99, `above the fader's top is the top, drew ${bar.style.height}`);
+    assert.ok(drawnPct(bar) > 99, `above the fader's top is the top, drew ${bar.style.transform}`);
   });
 
   test("a meters-only strip has no fader to follow and uses the standalone window", async () => {
     await mount([{ type: "qsys-strip", name: null, label: "Room", gain: null, mute: null, meter: b("meter") }]);
-    const bar = q("qsys-strip", "[data-meter] > div");
-    assert.ok(Math.abs(parseFloat(bar.style.height) - 41.667) < 0.01, `drew ${bar.style.height}`);
+    const bar = q("qsys-strip", "[data-meter-bar]");
+    assert.ok(Math.abs(drawnPct(bar) - 41.667) < 0.01, `drew ${bar.style.transform}`);
   });
 });
 
@@ -1321,5 +1384,164 @@ describe("review round 4: a held momentary keeps renewing until its own release"
     await wait(1_150);
     assert.ok(server.renewals > before, "press 1's late answer stopped press 2's renewals");
     up(34);
+  });
+});
+
+describe("part 3 review: momentaries, refusals and what a break ends", () => {
+  const { toast } = await_toast;
+
+  test("a momentary is decided from its saved press: with the catalog not read and the Core reporting 0/1, it still asks for a lease and releases", async () => {
+    server.catalogFails = 99;
+    server.values.talk = 0;
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 30 });
+    });
+    await wait(20);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 30 }));
+    });
+    await wait(20);
+    assert.deepEqual(
+      server.writes.map((w) => [w.body.value, w.body.lease ?? null]),
+      [
+        [true, true],
+        [false, null],
+      ],
+      "a momentary drawn before the catalog was read pressed with no lease, or never let go",
+    );
+  });
+
+  test("a press the server refuses (no-lease) leaves the button unlit, stops renewing, sends no release, and a staff panel says why", async () => {
+    const said: string[] = [];
+    const m = mock.method(toast, "error", (msg: string) => void said.push(msg));
+    try {
+      server.answer = (body) =>
+        body.lease
+          ? { ok: false, reason: "no-lease", message: "Lobby_Mixer/talk was not pressed: panel v1 has no momentary button on it, so the server will not hold it on" }
+          : { ok: true, value: body.value, string: String(body.value), clamped: false };
+      await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
+      const btn = q("qsys-button", "button");
+      act(() => {
+        fireEvent.pointerDown(btn, { pointerId: 31 });
+      });
+      await wait(1_150);
+      assert.equal(server.renewals, 0, "a refused press went on renewing a lease it never had");
+      assert.equal(btn.getAttribute("aria-pressed"), "false", "the refused press was drawn on");
+      act(() => {
+        window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 31 }));
+      });
+      await wait(20);
+      assert.deepEqual(server.writes.map((w) => w.body.value), [true], "a release was sent for a press that never landed");
+      assert.deepEqual(said, ["Lobby_Mixer/talk was not pressed: panel v1 has no momentary button on it, so the server will not hold it on"]);
+    } finally {
+      m.mock.restore();
+    }
+  });
+
+  test("a volunteer panel snaps back without a toast; a write the page never sent says nothing on either", async () => {
+    const said: string[] = [];
+    const m = mock.method(toast, "error", (msg: string) => void said.push(msg));
+    const volunteer = new QsysPanel("v1", "volunteer");
+    const staff = new QsysPanel("v2", "staff");
+    volunteer.acquire();
+    staff.acquire();
+    try {
+      await wait(30);
+      server.answer = () => ({ ok: false, reason: "not-allowed", message: "Lobby_Mixer/gain is not on the allowlist" });
+      assert.equal((await volunteer.write(b("gain"), -10)).ok, false);
+      assert.deepEqual(said, [], "a volunteer panel toasted a refusal");
+      assert.equal((await staff.write(b("gain"), -10)).ok, false);
+      assert.deepEqual(said, ["Lobby_Mixer/gain is not on the allowlist"], "a staff panel did not say why (positive control)");
+      stream(false);
+      assert.equal((await staff.write(b("gain"), -10)).ok, false);
+      assert.equal(said.length, 1, "a write the page never sent was toasted");
+    } finally {
+      stream(true);
+      volunteer.release();
+      staff.release();
+      m.mock.restore();
+    }
+  });
+
+  test("a key-held momentary ends when its button goes disabled: the renewals stop, and the next press is a fresh one", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
+    const btn = q("qsys-button", "button") as HTMLButtonElement;
+    // Not focused: jsdom blurs a focused button that goes disabled, and a real browser
+    // need not, so focus would let the blur handler end the press and hide the case.
+    act(() => {
+      fireEvent.keyDown(btn, { key: " " });
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true]);
+    // The Core is re-read and not ready: the panel stops being live with no break, so the button just goes disabled.
+    server.ready = false;
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected" }));
+    await wait(40);
+    assert.equal(btn.disabled, true, "precondition: the button went disabled");
+    const atDisable = server.renewals;
+    await wait(2_200);
+    assert.equal(server.renewals, atDisable, "a disabled key-held momentary went on renewing its lease");
+    server.ready = true;
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected" }));
+    await wait(40);
+    assert.equal(btn.disabled, false, "precondition: live again");
+    act(() => {
+      fireEvent.keyUp(btn, { key: " " });
+    });
+    act(() => {
+      fireEvent.keyDown(btn, { key: " " });
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true, true], "the next press was swallowed as part of the first");
+    act(() => {
+      fireEvent.keyUp(btn, { key: " " });
+    });
+    await wait(20);
+  });
+
+  test("a hold or a momentary button is not a pan: touch-action none; a plain trigger keeps the browser's tap handling", async () => {
+    await mount([
+      { type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" },
+      { type: "qsys-mute", binding: b("mute") },
+    ]);
+    assert.equal(q("qsys-button", "button").style.touchAction, "none");
+    assert.equal((document.querySelector("[data-mute]") as HTMLElement).style.touchAction, "manipulation");
+  });
+
+  test("a switch with no label is still named, after its control", async () => {
+    await mount([{ type: "qsys-switch", binding: b("mute"), label: "" }]);
+    assert.equal(q("qsys-switch", '[role="switch"]').getAttribute("aria-label"), "mute");
+  });
+
+  test("the first status push after mount can close input for a catalog change, from the stamp the values read carried", async () => {
+    server.catalogAt = 1;
+    await mount([FADER]);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    let release: () => void = () => {};
+    server.holdReads = (r) => (release = r);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 2 }));
+    assert.equal(q("qsys-fader").dataset.state, "offline", "the first push of a new catalog left input open on the old one");
+    server.holdReads = null;
+    release();
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "live", "the read after it opens it again (positive control)");
+  });
+
+  test("a failed values read is a break: a drag in progress ends and the fader shows the Core's value", async () => {
+    await mount([FADER]);
+    const track = q("qsys-fader", "[data-fader]");
+    down(track, 100);
+    move(60);
+    await wait(60);
+    assert.notEqual(dbText(), "-20.0", "precondition: the finger moved the fader");
+    server.valuesFails = 1;
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected" }));
+    await wait(40);
+    assert.equal(dbText(), "-20.0", "the finger's value outlived a failed read");
+    up(60);
+    await wait(60);
+    assert.ok(!server.writes.some((w) => w.body.final === true), "a drag from before the failed read sent its release");
   });
 });
