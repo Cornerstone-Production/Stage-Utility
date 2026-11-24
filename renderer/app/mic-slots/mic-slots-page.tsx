@@ -95,8 +95,8 @@ export function MicSlotsPage() {
       : null;
   const photos = usePhotoThemes(photoPlan);
   const [photoOpen, setPhotoOpen] = useState(false);
-  const photoReason = themePhotosReason({ hasServiceType: !!mic.serviceTypeId, hasPlan: mic.hasPlan, side: mic.side, connection: photos.state?.connection });
-  // Off (a Default, a key removed) closes it, and it stays closed when the reason clears:
+  const photoReason = themePhotosReason({ hasServiceType: !!mic.serviceTypeId, hasPlan: mic.hasPlan, side: mic.side });
+  // Off (a Default) closes it, and it stays closed when the reason clears:
   // it never lingers over a page it cannot act on, or reopens unasked.
   if (photoReason && photoOpen) setPhotoOpen(false);
   const photoPanel = photoOpen && !photoReason && photoPlan !== null ? photoPlan : null;

@@ -8,7 +8,6 @@ import { useState } from "react";
 import { Button, ButtonGroup, MENU_ITEM, menuContent } from "../../components/ui";
 import { PlanSwitcher } from "../../settings/sections/plan-switcher";
 import { namedType } from "../../settings/sections/slots-target-pill";
-import { useInAppLink } from "../../lib/use-search-param";
 import { CopyFromDialog } from "./board-dialogs";
 import { ShowSwitch } from "./photo-themes/photo-bits";
 import type { ThemePhotosReason } from "./photo-themes/theme-photos-reason";
@@ -142,7 +141,6 @@ export function TopBar({
 
 /** Why Theme photos is off, in words, under the bar: a tooltip needs a hover and a phone has none. */
 export function ThemePhotosReasonLine({ reason, mic }: { reason: ThemePhotosReason; mic: MicSlots }) {
-  const goInApp = useInAppLink();
   return (
     <p
       id="theme-photos-reason"
@@ -152,11 +150,6 @@ export function ThemePhotosReasonLine({ reason, mic }: { reason: ThemePhotosReas
     >
       <SparklesIcon className="size-3.5 flex-none" aria-hidden />
       <span>Theme photos is off. {reason.why}.</span>
-      {reason.fix === "integrations" && (
-        <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className="font-semibold text-accent underline">
-          Open Integrations
-        </a>
-      )}
       {reason.fix === "plan" && (
         <button type="button" className="font-semibold text-accent underline" onClick={() => void mic.setSide("plan")}>
           Switch to this plan

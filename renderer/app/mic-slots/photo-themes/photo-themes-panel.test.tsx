@@ -414,6 +414,34 @@ describe("Move, Copy and Remove", () => {
   });
 });
 
+describe("without a working key", () => {
+  for (const state of ["not-connected", "invalid-key"] as const) {
+    test(`${state}: Generate, Redo and Redo all wait for a key; the switch, Approve, Approve all and Remove do not`, async () => {
+      connection = { method: state === "not-connected" ? null : "api-key", hint: state === "not-connected" ? null : "sk-…3f2a", state, reason: null, checkedAt: null };
+      themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+      people = [person("9001", "Alex R.", "approved"), person("9002", "Jordan P.", "ready"), person("9004", "Dana K.", "none")];
+      await mount();
+      const disabled = (name: string | RegExp) => (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+      assert.equal(disabled(/^Generate 1 for/), true, "Generate");
+      assert.equal(disabled("Redo Alex R."), true, "Redo");
+      assert.equal(disabled("Redo all"), true, "Redo all");
+      assert.equal(screen.getByRole("link", { name: "Open Integrations" }).getAttribute("href"), "/settings/integrations", "says where to fix it");
+
+      assert.equal(disabled("Approve Jordan P."), false, "Approve");
+      assert.equal(disabled(/Approve all ready/), false, "Approve all");
+      assert.equal(disabled("Keep these"), false, "Keep these");
+      const sw = screen.getByRole("group", { name: /Photos shown on screens/ });
+      choice = { ...choice!, show: "original" };
+      await click(within(sw).getByRole("button", { name: "Original" }));
+      assert.ok(writes().some((c) => c.method === "PATCH" && (c.body as { show?: string }).show === "original"), "the switch still sends");
+      await openMenu(screen.getByRole("button", { name: "More for Alex R." }));
+      await choose(screen.getByRole("menuitem", { name: "Remove from theme…" }));
+      await click(within(screen.getByRole("group", { name: "Confirm remove" })).getByRole("button", { name: "Remove" }));
+      assert.ok(writes().some((c) => c.method === "DELETE" && c.path.endsWith("/people/9001")), "Remove still sends");
+    });
+  }
+});
+
 describe("what costs money", () => {
   test("mounting, choosing a theme, switching and frames never send a generate or a redo", async () => {
     await mount();

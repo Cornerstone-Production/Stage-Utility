@@ -124,8 +124,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 2. **Open a plan on Mic slots** and choose **<plan> only**. **Theme photos**, beside
    the **⋯** menu, opens the sheet: at the right of the boards on a wide screen, over
    the bottom of the page on a phone. It is off, with the reason on hover and in a
-   line under the bar, on a Default (*Theme photos is per service: pick a plan*) and
-   without a working key (*Connect OpenAI in Integrations*).
+   line under the bar, on a Default (*Theme photos is per service: pick a plan*).
+   Without a working key it still opens: Generate and Redo wait for one, with a
+   link to Integrations, and the switch, Approve, Remove and Delete work as ever.
 3. **Pick a theme**, or **New theme…** (a name and a prompt). Photos the theme
    already has for people on this service arrive approved, marked *From <date>*.
 4. **Generate N for <theme>** sends only the people without a photo in it. Each

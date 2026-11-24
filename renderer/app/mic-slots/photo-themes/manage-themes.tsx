@@ -173,6 +173,7 @@ function ThemeDetail({
                 context={{}}
                 editedCaption="Themed"
                 busy={busy(p)}
+                canRedo={photos.canSend}
                 onAction={(a) => void act(p, a)}
                 onMenu={(kind) => ops.open(theme, p.personId, kind)}
                 hasOtherTheme={ops.hasOtherTheme(theme)}

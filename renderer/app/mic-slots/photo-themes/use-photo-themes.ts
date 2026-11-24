@@ -91,6 +91,8 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
   const theme: ThemeDTO | null = useMemo(() => (choice?.themeId ? (state?.themes.find((t) => t.id === choice.themeId) ?? null) : null), [state, choice]);
   /** The plan uses a theme that has an approved photo: the Original | Themed switch is worth showing. */
   const hasApproved = !!theme?.people.some((p) => p.approved);
+  /** Generate and Redo can be sent: a key is saved and OpenAI has not rejected it. Nothing else waits for one. */
+  const canSend = connectionWorks(state?.connection);
 
   // One write at a time per kind of billing action.
   const inFlight = useRef(new Set<string>());
@@ -162,7 +164,7 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
     [write, reread],
   );
 
-  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, reread, write, savePrompt, isBusy };
+  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, canSend, reread, write, savePrompt, isBusy };
 }
 
 export type PhotoThemes = ReturnType<typeof usePhotoThemes>;

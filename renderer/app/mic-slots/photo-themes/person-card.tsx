@@ -100,6 +100,8 @@ export interface PersonCardProps {
   context: CardContext;
   /** Which of Redo / Approve / Keep are being sent now. */
   busy: ReadonlySet<CardAction>;
+  /** Redo can be sent: OpenAI is connected. Approve and Keep call nobody, and never wait for it. */
+  canRedo: boolean;
   onAction: (action: CardAction) => void;
   /** Whether the Move / Copy / Remove menu is offered, and what picking one does. */
   onMenu: (kind: MenuKind) => void;
@@ -110,7 +112,7 @@ export interface PersonCardProps {
   editedCaption?: string;
 }
 
-export function PersonCard({ person, theme, original, context, busy, onAction, onMenu, hasOtherTheme, confirm, editedCaption }: PersonCardProps) {
+export function PersonCard({ person, theme, original, context, busy, canRedo, onAction, onMenu, hasOtherTheme, confirm, editedCaption }: PersonCardProps) {
   const view = cardView(person, context);
   const [menuOpen, setMenuOpen] = useState(false);
   const name = person.name;
@@ -171,7 +173,11 @@ export function PersonCard({ person, theme, original, context, busy, onAction, o
       {view.actions.length > 0 && (
         <div className="mt-auto flex gap-1.5">
           {view.actions.includes("redo") && (
-            <Button variant="filled" size="small" className="flex-1" disabled={busy.has("redo")} aria-label={`Redo ${name}`} onClick={() => onAction("redo")}>
+            <Button variant="filled" size="small" className="flex-1" disabled={busy.has("redo") || !canRedo}
+              tooltip={canRedo ? "" : "Connect OpenAI in Integrations to redo"}
+              aria-label={`Redo ${name}`}
+              onClick={() => onAction("redo")}
+            >
               <RotateCcwIcon className="size-3.5" />
               Redo
             </Button>

@@ -194,7 +194,8 @@ function PanelBody({
 
   const toGenerate = roster?.toGenerate ?? 0;
   const generateLabel = generating ? "Generating…" : toGenerate === 0 ? `Everyone has a photo in ${theme ? themeLabel(theme) : "this theme"}` : `Generate ${toGenerate} for ${theme ? themeLabel(theme) : ""}`;
-  const trouble = conn && STATES[conn.state].tone === "warn" ? conn : null;
+  // No key, or one OpenAI rejected, stops Generate and Redo; the rest of the sheet works without one.
+  const trouble = conn && (!photos.canSend || STATES[conn.state].tone === "warn") ? conn : null;
 
   return (
     <>
@@ -287,7 +288,7 @@ function PanelBody({
             <div role="status" data-prompt-changed className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-warn-9/35 bg-warn-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">The prompt for {themeLabel(theme)} changed; existing approved photos stay until redone.</span>
               <span className="flex gap-1.5">
-                <Button variant="accent" size="small" disabled={planBusy("generate")} onClick={() => void generate("all")}>
+                <Button variant="accent" size="small" disabled={planBusy("generate") || !photos.canSend} onClick={() => void generate("all")}>
                   Redo all
                 </Button>
                 <Button variant="filled" size="small" disabled={photos.isBusy(`keep-prompt:${theme.id}`)} onClick={() => void photos.write(`keep-prompt:${theme.id}`, () => ipc("photoThemes:keepPrompt", { id: theme.id }))}>
@@ -313,7 +314,7 @@ function PanelBody({
           )}
 
           <div className="flex flex-col items-start gap-2">
-            <Button variant="accent" size="medium" disabled={generating || toGenerate === 0 || planBusy("generate") || people.isLoading} onClick={() => void generate("missing")} data-generate>
+            <Button variant="accent" size="medium" disabled={generating || toGenerate === 0 || planBusy("generate") || people.isLoading || !photos.canSend} onClick={() => void generate("missing")} data-generate>
               <SparklesIcon className="size-4" />
               {generateLabel}
             </Button>
@@ -353,6 +354,7 @@ function PanelBody({
                     original={p.originalUrl}
                     context={{ planId: plan.planId, noOriginal: !p.originalUrl, addedLater }}
                     busy={busyActions(photos, theme.id, p.personId)}
+                    canRedo={photos.canSend}
                     onAction={(a) => void act(p, a)}
                     onMenu={(kind) => ops.open(theme, p.personId, kind)}
                     hasOtherTheme={ops.hasOtherTheme(theme)}
