@@ -1,24 +1,35 @@
 // qsys.ts — shapes shared by the Q-SYS server code and the panels that read it.
 
-import type { LayoutObject, LayoutObjectConfig, View } from "./views.js";
+import { walkLayoutObjects, type LayoutObject, type LayoutObjectConfig, type View } from "./views.js";
+
+/** The objects of panel `panelId` (a View), containers' children included; none when there is no such view. */
+function panelObjects(views: View[], panelId: string | null): LayoutObject[] {
+  const view = panelId ? views.find((v) => v.id === panelId) : undefined;
+  const out: LayoutObject[] = [];
+  walkLayoutObjects(view?.layout?.objects ?? [], (o) => out.push(o));
+  return out;
+}
+
+const bindsTo = (b: QsysAddress | null | undefined, a: QsysAddress): boolean => !!b && b.component === a.component && b.control === a.control;
 
 /**
  * Whether panel `panelId` has a momentary button on `a`: a Q-SYS button bound to
  * it, anywhere in its layout, whose saved `press` is "momentary" (absent is a
- * trigger). The server checks the Boolean itself. It takes a momentary lease only
- * where this holds, so a client claiming a lease on a latching control (a toggle,
- * a mute), or on a button saved as a trigger, is not given one.
+ * trigger). The server takes a momentary lease only where this holds, and refuses
+ * a press that asks for one anywhere else (`no-lease`), so a client cannot hold a
+ * latching control (a toggle, a mute), or a button saved as a trigger, on a lease.
  */
 export function panelHasMomentary(views: View[], panelId: string | null, a: QsysAddress): boolean {
-  const view = panelId ? views.find((v) => v.id === panelId) : undefined;
-  if (!view) return false;
-  const walk = (objects: LayoutObject[]): boolean =>
-    objects.some(
-      (o) =>
-        (o.config.type === "qsys-button" && o.config.press === "momentary" && o.config.binding?.component === a.component && o.config.binding.control === a.control) ||
-        (o.children ? walk(o.children) : false),
-    );
-  return walk(view.layout?.objects ?? []);
+  return panelObjects(views, panelId).some((o) => o.config.type === "qsys-button" && o.config.press === "momentary" && bindsTo(o.config.binding, a));
+}
+
+/**
+ * Whether panel `panelId` has a selector whose choice list is `a`. Only such a
+ * write is held to the choices the Core lists: a mute or a switch on a Boolean
+ * that also reports choices writes true and false as any Boolean does.
+ */
+export function panelHasSelectorOn(views: View[], panelId: string | null, a: QsysAddress): boolean {
+  return panelObjects(views, panelId).some((o) => o.config.type === "qsys-selector" && bindsTo(o.config.binding, a));
 }
 
 /** One control on the Core: a component's Code Name and the control's name. */
@@ -79,18 +90,20 @@ export function kindOf(c: QsysControlFacts): QsysControlKind {
 /**
  * Why `c` cannot be written under an allowlist entry whatever the value, or null
  * when it can: the Core reports it read-only, or it is numeric and the entry sets
- * no range (unless it reports its choices). The one rule for "is this writable"; the writer refuses on it before
- * sending, and anything that asks the same question asks here.
+ * no range. `viaChoices`: the writer is a selector picking from the choices the
+ * control reports, which bound it instead of a range (a numeric-typed combo box
+ * needs none then; a fader on the same control still does). The one rule for "is
+ * this writable"; the writer refuses on it before sending, and anything that asks
+ * the same question asks here.
  */
-export function unwritableReason(c: QsysControlFacts, entry: { min: number | null; max: number | null }): "read-only" | "no-range" | null {
+export function unwritableReason(c: QsysControlFacts, entry: { min: number | null; max: number | null }, viaChoices = false): "read-only" | "no-range" | null {
   if (isReadOnlyDirection(c.Direction)) return "read-only";
-  // A control that lists its choices is bound by them, not by a range: a numeric-typed combo box needs none.
-  if (kindOf(c) === "number" && !choicesOf(c) && (entry.min === null || entry.max === null)) return "no-range";
+  if (kindOf(c) === "number" && !(viaChoices && choicesOf(c)) && (entry.min === null || entry.max === null)) return "no-range";
   return null;
 }
 
-export function isWritable(c: QsysControlFacts, entry: { min: number | null; max: number | null }): boolean {
-  return unwritableReason(c, entry) === null;
+export function isWritable(c: QsysControlFacts, entry: { min: number | null; max: number | null }, viaChoices = false): boolean {
+  return unwritableReason(c, entry, viaChoices) === null;
 }
 
 /**
@@ -113,51 +126,64 @@ export function parseAddressKey(k: string): QsysAddress {
   return { component: k.slice(0, i), control: k.slice(i + 1) };
 }
 
-const own = (b: QsysBinding | null | undefined): QsysAddress[] => {
-  if (!b) return [];
-  const out: QsysAddress[] = [{ component: b.component, control: b.control }];
-  if (b.indicator) out.push({ component: b.indicator.component, control: b.indicator.control });
-  return out;
+/** A binding's own control, without its indicator: what is read or written. */
+export const addressOf = (b: QsysAddress): QsysAddress => ({ component: b.component, control: b.control });
+
+/** Whether an object writes a binding's control, or only reads it. An indicator is always only read. */
+export type QsysSlotRole = "write" | "read";
+export type QsysSlot = {
+  binding: QsysBinding | null | undefined;
+  role: QsysSlotRole;
+  /** A selector's choice list: written with one of the choices the Core reports, so bound by them rather than a range. */
+  viaChoices?: true;
 };
+
+const slots = (role: QsysSlotRole, ...bindings: (QsysBinding | null | undefined)[]): QsysSlot[] => bindings.map((binding) => ({ binding, role }));
+
+/**
+ * Each binding a layout object holds, in field order, and whether the object
+ * writes it. The one table of what each Q-SYS object binds: the watch's addresses
+ * (qsysAddressesOf) and the binding check both read it, so a binding cannot be
+ * watched but not checked, or the reverse. Not a Q-SYS object: none.
+ */
+export function slotsOf(config: LayoutObjectConfig): QsysSlot[] {
+  switch (config.type) {
+    case "qsys-fader":
+    case "qsys-mute":
+    case "qsys-button":
+      return slots("write", config.binding);
+    case "qsys-label":
+      return slots("read", config.binding);
+    case "qsys-meter":
+      return slots("read", config.binding, config.binding2);
+    case "qsys-switch":
+      return slots("write", config.binding, config.onBinding, config.offBinding);
+    case "qsys-presets":
+      return slots("write", ...config.items.map((i) => i.binding), config.previous);
+    case "qsys-selector":
+      return [{ binding: config.binding, role: "write", viaChoices: true }, ...slots("write", ...config.items.map((i) => i.binding))];
+    case "qsys-strip":
+      return [...slots("read", config.name), ...slots("write", config.gain, config.mute), ...slots("read", config.meter, config.meter2)];
+    default:
+      return [];
+  }
+}
 
 /** Every control a layout object reads, in field order with a binding's indicator
  *  right after it, each address once. Null and absent bindings read nothing, and an
  *  object that is not a Q-SYS object reads nothing. The panel list and the watch set
  *  are built from this, so a binding an object holds but this misses is never watched. */
 export function qsysAddressesOf(config: LayoutObjectConfig): QsysAddress[] {
-  let bindings: (QsysBinding | null | undefined)[];
-  switch (config.type) {
-    case "qsys-fader":
-    case "qsys-mute":
-    case "qsys-button":
-    case "qsys-label":
-      bindings = [config.binding];
-      break;
-    case "qsys-meter":
-      bindings = [config.binding, config.binding2];
-      break;
-    case "qsys-switch":
-      bindings = [config.binding, config.onBinding, config.offBinding];
-      break;
-    case "qsys-presets":
-      bindings = [...config.items.map((i) => i.binding), config.previous];
-      break;
-    case "qsys-selector":
-      bindings = [config.binding, ...config.items.map((i) => i.binding)];
-      break;
-    case "qsys-strip":
-      bindings = [config.name, config.gain, config.mute, config.meter, config.meter2];
-      break;
-    default:
-      return [];
-  }
   const seen = new Set<string>();
   const out: QsysAddress[] = [];
-  for (const addr of bindings.flatMap(own)) {
-    const k = addressKey(addr);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(addr);
+  for (const { binding } of slotsOf(config)) {
+    if (!binding) continue;
+    for (const addr of binding.indicator ? [addressOf(binding), addressOf(binding.indicator)] : [addressOf(binding)]) {
+      const k = addressKey(addr);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(addr);
+    }
   }
   return out;
 }

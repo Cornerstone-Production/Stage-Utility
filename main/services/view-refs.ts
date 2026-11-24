@@ -5,26 +5,12 @@
 // Import uses the same walk for its rebind list, so what the review screen
 // promises and what import does cannot drift apart.
 
-import type { View, LayoutObject } from "../types/views.js";
+import { walkLayoutObjects, type View } from "../types/views.js";
 import type { ViewRefs, UnresolvableRef } from "../types/view-bundle.js";
 import { gridBoardId, viewBoardId } from "./slot-boards.js";
 
-/**
- * Walk an object tree, parent before children. Containers nest arbitrarily deep.
- *
- * Exported because the remapper needs the same traversal, and this repository
- * already carries several hand-rolled copies of it. Two more would have been
- * two more places for a container's children to get forgotten.
- */
-export function walkLayoutObjects(
-  objects: readonly LayoutObject[],
-  visit: (o: LayoutObject) => void,
-): void {
-  for (const o of objects) {
-    visit(o);
-    if (o.children?.length) walkLayoutObjects(o.children, visit);
-  }
-}
+// The walk lives beside the type, so the page shares it; re-exported for the services that import it from here.
+export { walkLayoutObjects };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 

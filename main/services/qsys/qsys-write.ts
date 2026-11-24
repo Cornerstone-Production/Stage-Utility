@@ -19,12 +19,13 @@
 // value when the gesture started. Refusals checked before sending write their
 // [qsys] line at a limited rate (an OutageLog: see refusalLine).
 
-import { addStreamClosedListener } from "../broadcaster.js";
+import { addStreamClosedListener, connectionOf } from "../broadcaster.js";
 import { viewsStore } from "../views-store.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey, choicesOf, isWritable, kindOf, panelHasMomentary, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
+import { addressKey, choicesOf, isWritable, kindOf, panelHasMomentary, panelHasSelectorOn, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
+import type { View } from "../../types/views.js";
 
 // The rules live in types/qsys.ts so the editor shares them; re-exported for the server.
 export { isWritable, kindOf, unwritableReason };
@@ -59,7 +60,9 @@ export interface WriteRequest {
   /**
    * A momentary press (true to a Boolean) that the page will renew while held.
    * When it lands, the server holds a lease and releases the control itself if
-   * the renewals stop or `cid`'s event stream closes (qsys-leases.ts).
+   * the renewals stop or the connection `cid` pressed on closes (qsys-leases.ts).
+   * A press that asks for a lease it cannot have (no momentary button for it on
+   * the panel, or the saved views unreadable) is refused `no-lease`, unsent.
    */
   lease?: boolean;
   /** The pressing page's event-stream client id, so its stream closing ends the lease. */
@@ -99,7 +102,7 @@ const MAX_GESTURES = 256;
 
 /** The longest text value a write may carry. */
 const MAX_TEXT = 1024;
-/** Tries at settling one owed release (a failed read, a failed send) before it is given up, logged. */
+/** Tries at settling one owed release (a failed read, a failed send) before it is given up, logged. The Core being offline is not a try. */
 export const OWED_MAX_ATTEMPTS = 5;
 /** On a live connection a failed try is retried after this, doubling each time. */
 export const OWED_RETRY_MS = 500;
@@ -186,7 +189,7 @@ interface ReleaseToken {
 interface Owed {
   lease: Lease;
   token: ReleaseToken;
-  /** Tries that ended without settling it (an unreadable control, a failed send). */
+  /** Tries that ended without settling it (an unreadable control, a failed send); the Core being away is not one. */
   attempts: number;
   /** One settle at a time per entry. */
   settling: boolean;
@@ -229,14 +232,13 @@ export class QsysWriter {
   private readonly lastSend = new Map<string, number>();
   private sendSeq = 0;
   /**
-   * Whether `panelId` has a momentary button on the address: only then does a
-   * press take a lease (main/types/qsys.ts panelHasMomentary). Read from the
-   * saved views; a stand-in for tests.
+   * The saved views, for what a write's panel holds: whether it has a momentary
+   * button on the control (only then does a press take a lease) and whether it
+   * has a selector on it (only then is the write held to the Core's choices).
+   * Strict: an unreadable views file throws rather than reading as no panels,
+   * and the decision that needed it refuses. Replaceable for tests.
    */
-  momentaryCheck: (panelId: string | null, a: { component: string; control: string }) => Promise<boolean> = async (panelId, a) =>
-    panelHasMomentary(await viewsStore.load(), panelId, a);
-  /** Lease asks already logged as refused, so a client repeating one is one line. */
-  private readonly leaseRefusals = new Set<string>();
+  loadViews: () => Promise<View[]> = () => viewsStore.loadStrict();
   private readonly stopListening: () => void;
 
   constructor(
@@ -341,6 +343,16 @@ export class QsysWriter {
     if (this.watch.ready()) this.retryLater(k, o);
   }
 
+  /**
+   * The Core went away (or is being re-read) while an owed release was being
+   * settled. Not a failed try: a Core that drops again and again must not use up
+   * a release's tries and leave the control on. It stays owed and waits for
+   * readiness (onReady), or is tried again shortly if readiness is already back.
+   */
+  private waitForCore(k: string, o: Owed): void {
+    if (this.owed.get(k) === o && this.watch.ready()) this.retryLater(k, o);
+  }
+
   /** Writes are possible again: settle each owed release. */
   async sendOwed(): Promise<void> {
     for (const k of [...this.owed.keys()]) await this.settle(k);
@@ -366,7 +378,10 @@ export class QsysWriter {
       try {
         on = await this.isOn(o.lease);
       } catch (err) {
-        if (this.owed.get(k) === o) this.failedTry(k, o, `could not read it (${errorMessage(err)})`);
+        if (this.owed.get(k) !== o) return;
+        // The connection went away under the read: not a failed try (see waitForCore).
+        if (!this.source.transport) return this.waitForCore(k, o);
+        this.failedTry(k, o, `could not read it (${errorMessage(err)})`);
         return;
       }
       // Another write to the control while it was read settles it: nothing is owed.
@@ -387,6 +402,7 @@ export class QsysWriter {
         // Re-owed only if nothing else has been sent to it since its own try.
         if (!this.stillOurs(k, o.token)) return;
         this.owed.set(k, o);
+        if (result.reason === "offline") return this.waitForCore(k, o);
         this.failedTry(k, o, `the send failed (${result.reason})`);
         return;
       }
@@ -490,10 +506,12 @@ export class QsysWriter {
     if (!isAddressPart(component) || !isAddressPart(control)) return refuse("not-allowed", "that is not a control address");
     const where = `${component}/${control}`;
     // The one await before the send. Everything after it, through the send, is synchronous.
-    const [entry, momentary] = await Promise.all([
+    const [entry, views] = await Promise.all([
       qsysAllowlist.lookup(component, control),
-      // A views read that fails is answered below as a refusal, never a rejection here.
-      req.lease ? this.momentaryCheck(req.panelId, { component, control }).catch((err: unknown) => new Error(errorMessage(err))) : Promise.resolve(false),
+      // What the panel holds: read only for a write from a panel, or one asking for a
+      // lease. Cached by the store. A failed read is answered below where it matters,
+      // never a rejection here.
+      req.lease || req.panelId !== null ? this.loadViews().catch((err: unknown) => new Error(errorMessage(err))) : Promise.resolve([] as View[]),
     ]);
     if (!entry) return refuse("not-allowed", `${where} is not on the allowlist`);
 
@@ -508,21 +526,36 @@ export class QsysWriter {
     this.refusals.forget("offline");
     const c = findControl(catalog, component, control);
     if (!c) return refuse("not-in-design", `${where} is not in the Core's design`);
-    const unwritable = unwritableReason(c, entry);
-    if (unwritable) return refuse(unwritable, UNWRITABLE_MESSAGE[unwritable](where));
-    // A control that lists its choices takes one of them, whatever its Type says.
+    const address = { component, control };
+    const k = addressKey(address);
+    // A control that lists its choices is held to them only for a selector on the
+    // panel (a mute on a Boolean that also lists choices writes true and false). If
+    // the views cannot be read to say, the choices hold, the stricter rule, except
+    // on a Boolean, which stays true or false (a momentary's release among them).
     const choices = choicesOf(c);
-    const kind = choices ? choiceKind(choices) : KINDS[kindOf(c)];
+    const viaChoices = choices !== null && (views instanceof Error ? kindOf(c) !== "boolean" : panelHasSelectorOn(views, req.panelId, address));
+    const unwritable = unwritableReason(c, entry, viaChoices);
+    if (unwritable) return refuse(unwritable, UNWRITABLE_MESSAGE[unwritable](where));
+    const kind = viaChoices ? choiceKind(choices) : KINDS[kindOf(c)];
     // A numeric control has a range here (unwritableReason); the others ignore it.
     const checked = kind.check(req.value, entry.min ?? 0, entry.max ?? 0, where);
     if (!checked.ok) return refuse(checked.reason, checked.message);
-    const address = { component, control };
-    const k = addressKey(address);
-    // A momentary press whose panel could not be read cannot be leased, so it is not
-    // sent: on, with nothing to turn it off if the page goes away, is the one outcome
-    // a momentary must not have.
-    if (req.lease && checked.send === true && momentary instanceof Error) {
-      return refuse("no-lease", `${where} was not pressed: the server could not read the saved views to hold its release`, `${where} was not pressed: the saved views could not be read to tell whether panel ${req.panelId ?? "(none)"} has a momentary on it (${momentary.message})`);
+    // A press that asks for a lease turns a Boolean on: it goes only with the lease
+    // that turns it off again if the page goes away. On with nothing to release it
+    // is the one outcome a momentary must not have. (A trigger fires and holds no
+    // state, so it needs none.)
+    const takesLease = !!req.lease && checked.send === true;
+    if (takesLease) {
+      if (views instanceof Error) {
+        return refuse(
+          "no-lease",
+          `${where} was not pressed: the server could not read the saved views to hold its release`,
+          `${where} was not pressed: the saved views could not be read to tell whether panel ${req.panelId ?? "(none)"} has a momentary on it (${views.message})`,
+        );
+      }
+      if (!panelHasMomentary(views, req.panelId, address)) {
+        return refuse("no-lease", `${where} was not pressed: panel ${req.panelId ?? "(none)"} has no momentary button on it, so the server will not hold it on`);
+      }
     }
     // A server release goes only if nothing has been sent to the control since it was
     // decided, and an owed one only while it is still owed: checked here, next to the
@@ -537,26 +570,19 @@ export class QsysWriter {
     this.leases.cancel(address);
     if (this.owed.get(k)?.retry) clearTimeout(this.owed.get(k)!.retry!);
     this.owed.delete(k);
-    // A lease only for a momentary button on the asking panel, on a Boolean.
-    const takesLease = !!req.lease && checked.send === true && momentary === true;
-    if (req.lease && !takesLease) {
-      const k = `${req.panelId ?? ""}\u0000${addressKey(address)}`;
-      if (!this.leaseRefusals.has(k)) {
-        if (this.leaseRefusals.size >= MAX_GESTURES) this.leaseRefusals.clear();
-        this.leaseRefusals.add(k);
-        console.warn(`[qsys] lease asked for ${scrub(where)} by panel ${scrub(req.panelId ?? "(none)")}, which has no momentary button on it; written without one`);
-      }
-    }
     const seq = ++this.sendSeq;
     this.lastSend.set(k, seq);
     if (release) release.seq = seq;
     const designCode = catalog.designCode;
     const core = this.source.core;
+    // The connection the press was made on, taken now: only that connection closing
+    // releases it, never a late close of one this page has already replaced.
+    const connection = takesLease && req.cid ? connectionOf(req.cid) : null;
     // A press takes its lease when it lands, unless another write was sent to the
     // control after it: that write ended the press, and a lease now would release it.
     const lease = (): void => {
       if (takesLease && this.lastSend.get(k) === seq) {
-        this.leases.hold({ component, control, cid: req.cid ?? null, panelId: req.panelId, device: req.device, remote: req.remote, designCode, core });
+        this.leases.hold({ component, control, cid: req.cid ?? null, connection, panelId: req.panelId, device: req.device, remote: req.remote, designCode, core });
       }
     };
     const sending = t.send("Component.Set", { Name: component, Controls: [{ Name: control, Value: checked.send }], ResponseValues: true });
@@ -599,8 +625,8 @@ export class QsysWriter {
 }
 
 export const qsysWriter = new QsysWriter(qsysService, qsysWatch);
-// A pressing page's stream closing releases its momentaries.
-addStreamClosedListener((cid) => qsysWriter.leases.streamClosed(cid));
+// A pressing page's connection closing releases the momentaries pressed on it.
+addStreamClosedListener((cid, connection) => qsysWriter.leases.streamClosed(cid, connection));
 
 /** Write one control, checked against the allowlist and the connection. See QsysWriter. */
 export function writeControl(req: WriteRequest): Promise<WriteResult> {

@@ -127,7 +127,10 @@ describe("checkBindings", () => {
   });
 });
 
-describe("the check's slots and the watch's addresses agree", () => {
+// One table (slotsOf, main/types/qsys.ts) drives both the watch's addresses and the
+// check, so they cannot disagree. What is left to hold is the table itself: every
+// binding field of every type, with whether the object writes it.
+describe("slotsOf: every binding of every Q-SYS object, and its role", () => {
   const A = (n: string) => bind("C", n);
   const B = (n: string) => ({ ...A(n), indicator: bind("I", n) });
   // A Record over every qsys-* type: a new type that is not listed here does not compile.
@@ -160,14 +163,23 @@ describe("the check's slots and the watch's addresses agree", () => {
     ]);
   });
 
-  for (const [type, config] of Object.entries(FULL)) {
-    test(`${type}: the bindings the check walks are the addresses the watch reads`, async () => {
-      const { slotsOf } = await import("./qsys-bindings.js");
-      const { qsysAddressesOf } = await import("../../types/qsys.js");
-      const walked = slotsOf(config).flatMap(({ binding }) =>
-        binding ? [addressKey(binding), ...(binding.indicator ? [addressKey(binding.indicator)] : [])] : [],
-      );
-      assert.deepEqual([...new Set(walked)].sort(), qsysAddressesOf(config).map(addressKey).sort());
+  const ROLES: Record<QsysType, string[]> = {
+    "qsys-fader": ["C/a write"],
+    "qsys-meter": ["C/a read", "C/b read"],
+    "qsys-mute": ["C/a write"],
+    "qsys-button": ["C/a write"],
+    "qsys-switch": ["C/a write", "C/b write", "C/c write"],
+    "qsys-presets": ["C/a write", "C/b write", "C/c write"],
+    "qsys-selector": ["C/a write", "C/b write", "C/c write"],
+    "qsys-label": ["C/a read"],
+    "qsys-strip": ["C/a read", "C/b write", "C/c write", "C/d read", "C/e read"],
+    "qsys-status": [],
+  };
+  for (const [type, config] of Object.entries(FULL) as [QsysType, LayoutObjectConfig][]) {
+    test(`${type}: its bindings and roles, exactly`, async () => {
+      const { slotsOf } = await import("../../types/qsys.js");
+      const got = slotsOf(config).flatMap(({ binding, role }) => (binding ? [`${binding.component}/${binding.control} ${role}`] : []));
+      assert.deepEqual(got.sort(), ROLES[type]);
     });
   }
 });
@@ -183,6 +195,15 @@ describe("panelsFromViews", () => {
 });
 
 describe("QsysBindings", () => {
+  /** The report, or the reason there is none ("not-connected", "check-failed"). */
+  const answer = (b: InstanceType<typeof QsysBindings>) => {
+    const a = b.current();
+    return "report" in a ? a.report : a.error;
+  };
+  const problems = (b: InstanceType<typeof QsysBindings>) => {
+    const a = answer(b);
+    return typeof a === "string" ? a : a.map((r) => r.problem);
+  };
   function harness() {
     let views: View[] = [];
     let entries: AllowEntry[] = [];
@@ -251,12 +272,12 @@ describe("QsysBindings", () => {
       await h.b.refresh();
       assert.deepEqual(h.set.at(-1), [{ id: "p1", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] }]);
       const startedWith = h.set.length;
-      assert.deepEqual(h.b.current()?.map((r) => r.problem), ["not-allowed"]);
+      assert.deepEqual(problems(h.b), ["not-allowed"]);
 
       h.setEntries([entry("Lobby_Mixer", "gain")]);
       h.on.allow();
       await h.b.refresh();
-      assert.deepEqual(h.b.current(), [], "an allowlist save did not rerun the check");
+      assert.deepEqual(answer(h.b), [], "an allowlist save did not rerun the check");
 
       h.setViews([view("p2", obj("f", fader(bind("Lobby_Mixer", "mute"))))]);
       h.on.views();
@@ -266,7 +287,7 @@ describe("QsysBindings", () => {
       h.setCatalog({ ...CATALOG, components: [] });
       h.on.catalog();
       await h.b.refresh();
-      assert.deepEqual(h.b.current()?.map((r) => r.problem), ["missing-component"], "a catalog read did not rerun the check");
+      assert.deepEqual(problems(h.b), ["missing-component"], "a catalog read did not rerun the check");
       assert.ok(h.set.length > startedWith);
     } finally {
       cap.restore();
@@ -279,7 +300,7 @@ describe("QsysBindings", () => {
     h.setViews([view("p1", obj("x", { type: "container" } as LayoutObjectConfig))]);
     await h.b.refresh();
     assert.deepEqual(h.set.at(-1), []);
-    assert.equal(h.b.current(), null, "no Core: null, so the route can say 503 rather than [] for all clear");
+    assert.equal(answer(h.b), "not-connected", "no Core: no report, so the route can say 503 rather than [] for all clear");
   });
 
   test("a report from an earlier connection is not served, and a reconnect says its problems again", async () => {
@@ -288,20 +309,21 @@ describe("QsysBindings", () => {
     try {
       h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
       await h.b.refresh();
-      assert.equal(h.b.current()?.length, 1);
+      assert.equal(problems(h.b).length, 1);
       h.setCatalog(null);
-      assert.equal(h.b.current(), null, "a stale report outlived the connection");
-      await h.b.refresh();
-      assert.equal(cap.out.length, 1);
-      h.setCatalog(CATALOG);
+      assert.equal(answer(h.b), "not-connected", "a stale report outlived the connection");
+      // Nothing runs the check while the Core is away: the reconnect's catalog read is what does.
+      h.setCatalog({ ...CATALOG });
       await h.b.refresh();
       assert.equal(cap.out.length, 2, "the new connection did not say the problem again");
+      await h.b.refresh();
+      assert.equal(cap.out.length, 2, "the same catalog said the problem twice");
     } finally {
       cap.restore();
     }
   });
 
-  test("an unreadable views file keeps the last report and never says every binding resolves", async () => {
+  test("an unreadable views file serves no report (not the last one, not an empty one) and never says every binding resolves", async () => {
     const cap = lines();
     try {
       let broken = false;
@@ -318,9 +340,13 @@ describe("QsysBindings", () => {
         setPanels: () => {},
       });
       await b.refresh();
+      assert.equal(problems(b).length, 1);
       broken = true;
       await b.refresh();
-      assert.equal(b.current()?.length, 1);
+      assert.equal(answer(b), "check-failed", "a report was served for a check that could not run");
+      broken = false;
+      await b.refresh();
+      assert.equal(problems(b).length, 1, "a good run did not bring the report back");
       assert.ok(!cap.out.some((l) => l.includes("every binding resolves")), cap.out.join(" | "));
       assert.ok(cap.out.some((l) => l.startsWith("[qsys] binding check could not run")));
     } finally {
@@ -335,7 +361,7 @@ describe("QsysBindings", () => {
     h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
     const run = h.b.refresh();
     await h.b.settled();
-    assert.equal(h.b.current()?.length, 1, "settled() returned before the run finished");
+    assert.equal(problems(h.b).length, 1, "settled() returned before the run finished");
     await run;
     const n = h.set.length;
     await h.b.settled();
@@ -359,6 +385,7 @@ describe("QsysBindings", () => {
       await b.refresh();
       assert.equal(cap.out.length, 1);
       assert.match(cap.out[0], /^\[qsys\] binding check could not run: /);
+      assert.equal(answer(b), "check-failed", "a check that never ran served a report");
     } finally {
       cap.restore();
     }
@@ -421,6 +448,9 @@ describe("two writers converge", () => {
     await settle();
 
     const writer = new QsysWriter(svc, watch);
+    // Not the real views store: reading it here would cache it, and "the real views
+    // store" below needs it unread.
+    writer.loadViews = async () => [];
     const wrote = await writer.write({ component: "Lobby_Mixer", control: "gain", value: -5, panelId: "p", device: "ipad", remote: "192.0.2.10" });
     assert.equal(wrote.ok, true);
     await settle();

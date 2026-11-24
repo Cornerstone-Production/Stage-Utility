@@ -88,22 +88,34 @@ export function channelSubscriberCount(channel: string): number {
  * and a producer starts or stops itself from there. See cue-live.ts.
  */
 /**
- * A client's event stream closed (a stream's connection ended, or a poll client
- * expired), by its cid. For state a page holds only while connected: a Q-SYS
- * momentary pressed on it is released (qsys-leases.ts).
+ * A client's connection closed (an event stream ended, or a poll client
+ * expired): its cid, and which connection it was (the identity connectionOf
+ * handed out). For state a page holds only while connected: a Q-SYS momentary
+ * pressed on that connection is released (qsys-leases.ts). A cid outlives its
+ * connections, so a listener matches the connection, not the cid alone.
  */
-const streamClosedListeners: ((cid: string) => void)[] = [];
-export function addStreamClosedListener(cb: (cid: string) => void): void {
+const streamClosedListeners: ((cid: string, connection: object) => void)[] = [];
+export function addStreamClosedListener(cb: (cid: string, connection: object) => void): void {
   streamClosedListeners.push(cb);
 }
-export function streamClosed(cid: string): void {
+export function streamClosed(cid: string, connection: object): void {
   for (const cb of streamClosedListeners) {
     try {
-      cb(cid);
+      cb(cid, connection);
     } catch (err) {
       console.error("[broadcaster] stream-closed listener error:", err);
     }
   }
+}
+
+/** The transport's answer to "which connection carries this cid now". */
+let connectionLookup: (cid: string) => object | null = () => null;
+export function setConnectionLookup(fn: (cid: string) => object | null): void {
+  connectionLookup = fn;
+}
+/** The newest open connection carrying `cid` (a stream, or a poll client), or null. Its identity is what streamClosed later names. */
+export function connectionOf(cid: string): object | null {
+  return connectionLookup(cid);
 }
 
 const subscriptionListeners: (() => void)[] = [];

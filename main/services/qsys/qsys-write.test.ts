@@ -10,7 +10,7 @@ import { after, afterEach, before, beforeEach, describe, mock, test } from "node
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-qsys-write-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { setNamedSubscriberCheck } = await import("../broadcaster.js");
+const { setConnectionLookup, setNamedSubscriberCheck } = await import("../broadcaster.js");
 const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
@@ -21,6 +21,16 @@ type QsysSettings = import("./qsys-settings.js").QsysSettings;
 type AllowEntry = import("./qsys-allowlist-store.js").AllowEntry;
 type WriteRequest = import("./qsys-write.js").WriteRequest;
 type QsysCatalog = import("./qsys-service.js").QsysCatalog;
+type View = import("../../types/views.js").View;
+
+/** Saved views in which panel-a (every req's panel) has a momentary button on the mute. */
+const MOMENTARY_VIEWS = [
+  {
+    id: "panel-a",
+    layout: { objects: [{ id: "talk", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false, press: "momentary" } }] },
+  },
+] as unknown as View[];
+const withMomentary = async (): Promise<View[]> => MOMENTARY_VIEWS;
 
 let fake: InstanceType<typeof FakeQrcServer>;
 let port: number;
@@ -394,11 +404,17 @@ describe("writeControl", () => {
     assert.equal(isWritable(meter, range), false);
   });
 
-  test("a control that lists its choices takes one of them, with no allowlist range even when its Type is numeric", async () => {
+  /** Saved views in which panel-a has a selector choosing from `a`'s choice list. */
+  const selectorOn = (component: string, control: string) => async (): Promise<View[]> =>
+    [{ id: "panel-a", layout: { objects: [{ id: "sel", config: { type: "qsys-selector", binding: { component, control }, items: [] } }] } }] as unknown as View[];
+
+  test("a selector's write to a control that lists its choices takes one of them, with no allowlist range even when its Type is numeric", async () => {
+    writer.loadViews = selectorOn("Router", "source");
     await connect();
     const [source] = fake.components.get("Router")!;
-    assert.equal(unwritableReason(source, { min: null, max: null }), null, "a Choices control needs no range");
-    assert.equal(unwritableReason({ ...source, Choices: undefined }, { min: null, max: null }), "no-range", "the same control without Choices does");
+    assert.equal(unwritableReason(source, { min: null, max: null }, true), null, "a selector on a Choices control needs no range");
+    assert.equal(unwritableReason(source, { min: null, max: null }), "no-range", "anything else on it does");
+    assert.equal(unwritableReason({ ...source, Choices: undefined }, { min: null, max: null }, true), "no-range", "the same control without Choices does");
     const ok = await writer.write(req({ component: "Router", control: "source", value: "Laptop" }));
     assert.ok(ok.ok, `a listed choice was refused: ${JSON.stringify(ok)}`);
     const warn = capture("warn");
@@ -411,6 +427,42 @@ describe("writeControl", () => {
       warn.restore();
     }
     assert.deepEqual(sets().map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0]!.Value), ["Laptop"], "only the listed choice reached the Core");
+  });
+
+  test("choices hold only a selector's write: a Boolean or a text that lists them is written as its own kind by anything else", async () => {
+    fake.components.set("Hall", [
+      { Name: "power", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write", Choices: ["false", "true"] } as never,
+      { Name: "caption", Type: "Text", Value: "A", String: "A", Position: 0, Direction: "Read/Write", Choices: ["A", "B"] } as never,
+    ]);
+    const POWER: AllowEntry = { component: "Hall", control: "power", label: "Power", min: null, max: null, confirm: "none" };
+    const CAPTION: AllowEntry = { component: "Hall", control: "caption", label: "Caption", min: null, max: null, confirm: "none" };
+    await qsysAllowlist.replace([POWER, CAPTION, SOURCE]);
+    writer.loadViews = async () => [];
+    await connect();
+    const warn = capture("warn");
+    try {
+      // A switch or a mute on the Boolean: true and false, as any Boolean.
+      assert.equal((await writer.write(req({ component: "Hall", control: "power", value: true }))).ok, true, "a Boolean with choices refused true");
+      // Text from something that is not a selector: text.
+      assert.equal((await writer.write(req({ component: "Hall", control: "caption", value: "Doors open" }))).ok, true, "a text with choices refused plain text");
+      // A numeric control with choices and no range, written by anything but a selector: no range, refused.
+      const rangeless = await writer.write(req({ component: "Router", control: "source", value: "Laptop" }));
+      assert.equal(rangeless.ok ? null : rangeless.reason, "no-range");
+      // A selector on the text: held to its choices.
+      writer.loadViews = selectorOn("Hall", "caption");
+      const off = await writer.write(req({ component: "Hall", control: "caption", value: "Doors open" }));
+      assert.equal(off.ok ? null : off.reason, "bad-value", "a selector wrote text that is not one of the choices");
+      assert.equal((await writer.write(req({ component: "Hall", control: "caption", value: "B" }))).ok, true);
+      // The views unreadable: choices hold (the stricter rule), except on a Boolean, which stays true or false.
+      writer.loadViews = async () => {
+        throw new Error("views unreadable");
+      };
+      const unread = await writer.write(req({ component: "Hall", control: "caption", value: "Doors open" }));
+      assert.equal(unread.ok ? null : unread.reason, "bad-value");
+      assert.equal((await writer.write(req({ component: "Hall", control: "power", value: false }))).ok, true, "a Boolean's write waited on the views");
+    } finally {
+      warn.restore();
+    }
   });
 
   test("a text control takes text up to 1024 characters, and nothing else", async () => {
@@ -771,7 +823,7 @@ const { LEASE_EXPIRE_MS, LEASE_RENEW_MS } = await import("./qsys-leases.js");
 describe("momentary leases", () => {
   // The panel has a momentary button on the control (panelHasMomentary, read from views).
   beforeEach(() => {
-    writer.momentaryCheck = async () => true;
+    writer.loadViews = withMomentary;
   });
   const press = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
   const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
@@ -804,16 +856,25 @@ describe("momentary leases", () => {
     }
   });
 
-  test("the pressing page's stream closing releases at once", async () => {
-    await connect();
-    await press();
-    writer.leases.streamClosed("someone-else");
-    await settle();
-    assert.deepEqual(muteSets(), [true], "another page's stream released it");
-    writer.leases.streamClosed("page-1");
-    await until(() => muteSets().length === 2, "the release");
-    await settle();
-    assert.equal((await qsysWriteLog.list()).entries[0].cause, "stream closed");
+  test("the connection the press was made on closing releases at once; no other connection's close does", async () => {
+    // page-1 has reconnected: its old stream is still open on the server, and its new one is the newest.
+    const oldStream = {};
+    const newStream = {};
+    setConnectionLookup((cid) => (cid === "page-1" ? newStream : null));
+    try {
+      await connect();
+      await press();
+      writer.leases.streamClosed("someone-else", newStream);
+      writer.leases.streamClosed("page-1", oldStream);
+      await settle();
+      assert.deepEqual(muteSets(), [true], "a late close of the page's replaced stream, or another page's, released it");
+      writer.leases.streamClosed("page-1", newStream);
+      await until(() => muteSets().length === 2, "the release");
+      await settle();
+      assert.equal((await qsysWriteLog.list()).entries[0].cause, "stream closed");
+    } finally {
+      setConnectionLookup(() => null);
+    }
   });
 
   test("the page's release ends the lease: nothing more is written", async () => {
@@ -844,7 +905,7 @@ describe("owed releases and who may take a lease", () => {
   const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
   const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
   beforeEach(() => {
-    writer.momentaryCheck = async () => true;
+    writer.loadViews = withMomentary;
   });
 
   /** Press, lose the Core, let the lease lapse while it is away: the release is owed. */
@@ -902,7 +963,7 @@ describe("owed releases and who may take a lease", () => {
     // This writer hears readiness only when the test says, so the other write lands first.
     let ready: () => void = () => {};
     const held = new QsysWriter(svc, { ready: () => watch.ready(), current: (a) => watch.current(a), onReady: (cb) => ((ready = cb), () => {}) });
-    held.momentaryCheck = async () => true;
+    held.loadViews = withMomentary;
     const warn = capture("warn");
     try {
       await connect();
@@ -942,24 +1003,33 @@ describe("owed releases and who may take a lease", () => {
     assert.equal(writer.leases.has(MUTE_ADDR), true, "a press that may have landed has no lease to release it");
   });
 
-  test("a lease is taken only for a momentary button on the asking panel, and the refusal is one line", async () => {
-    writer.momentaryCheck = async () => false;
+  test("a press asking for a lease on a panel with no momentary button for it is refused no-lease, unsent, and the refusal is one line", async () => {
+    writer.loadViews = async () => [];
     await connect();
     const warn = capture("warn");
+    // Its own address: a refusal repeating from one address merges into that address's
+    // earlier write-log entry, and later tests read the newest entry.
+    const stranger = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1", device: "198.51.100.9 Other/1" }));
+    let r;
     try {
-      assert.equal((await press()).ok, true, "the write itself goes through");
-      await press();
+      r = await stranger();
+      await stranger();
     } finally {
       warn.restore();
     }
+    assert.equal(r.ok ? null : r.reason, "no-lease");
+    assert.deepEqual(muteSets(), [], "a press the server will not hold on was sent");
     assert.equal(writer.leases.has(MUTE_ADDR), false);
-    assert.equal(warn.lines.filter((l) => /lease asked for Lobby_Mixer\/mute by panel panel-a/.test(l)).length, 1);
+    assert.equal(warn.lines.filter((l) => /write refused \(no-lease\): Lobby_Mixer\/mute was not pressed: panel panel-a has no momentary button/.test(l)).length, 1, warn.lines.join("\n"));
+    // A trigger fires and holds nothing: a lease asked on one is not needed, and it goes.
+    assert.equal((await writer.write(req({ component: "Paging", control: "chime", value: true, lease: true, cid: "page-1" }))).ok, true);
   });
 
-  test("a renewal counts only from the pressing page's stream", async () => {
+  test("a renewal counts only from the pressing page's stream, and only from its address", async () => {
     await connect();
     await press();
     assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-2"), false, "another page behind the same address renewed it");
+    assert.equal(writer.leases.renew(MUTE_ADDR, "198.51.100.7", "page-1"), false, "another address naming the pressing page's cid renewed it");
     assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-1"), true);
   });
 });
@@ -970,7 +1040,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
   const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
   const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
   beforeEach(() => {
-    writer.momentaryCheck = async () => true;
+    writer.loadViews = withMomentary;
   });
 
   /** Holds the next `n` allowlist reads until each is let go, in order. */
@@ -994,7 +1064,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
   function cuedWriter() {
     const cue = { ready: () => {} };
     const w = new QsysWriter(svc, { ready: () => watch.ready(), current: (a) => watch.current(a), onReady: (cb) => ((cue.ready = cb), () => {}) });
-    w.momentaryCheck = async () => true;
+    w.loadViews = withMomentary;
     return { w, cue };
   }
 
@@ -1020,8 +1090,9 @@ describe("review round 4: a server release never lands after a fresh press", () 
     try {
       await owedThenBack(w);
       // The fresh press waits on its views read; the owed release on its allowlist reads.
-      let views: () => void = () => {};
-      w.momentaryCheck = () => new Promise<boolean>((r) => (views = () => r(true)));
+      const viewReads: (() => void)[] = [];
+      const views = () => viewReads.splice(0).forEach((r) => r());
+      w.loadViews = () => new Promise<View[]>((r) => viewReads.push(() => r(MOMENTARY_VIEWS)));
       const fresh = press(w);
       gate.holdNext(2);
       cue.ready();
@@ -1084,7 +1155,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
   });
 
   test("a press whose saved views cannot be read is refused cleanly, with a line, and nothing is sent", async () => {
-    writer.momentaryCheck = async () => {
+    writer.loadViews = async () => {
       throw new Error("disk unreadable");
     };
     await connect();
@@ -1178,6 +1249,55 @@ describe("review round 4: a server release never lands after a fresh press", () 
     assert.ok(warn.lines.some((l) => new RegExp(`owed release of Lobby_Mixer/mute dropped: could not read it .*, ${OWED_MAX_ATTEMPTS} times`).test(l)), warn.lines.join("\n"));
   });
 
+  // Two places a settle meets the Core gone: reading whether the control is still on
+  // (asked of the Core directly when the watch does not hold it), and the send.
+  for (const where of ["the read", "the send"] as const) {
+    test(`the Core going away at ${where} while an owed release is settled does not use up its tries`, async () => {
+      // A source whose connection reads as gone for the next `away` looks, as when the
+      // Core drops mid-settle and is back by the next try.
+      let away = 0;
+      const source = {
+        get transport() {
+          if (away > 0) {
+            away--;
+            return null;
+          }
+          return svc.transport;
+        },
+        get core() {
+          return svc.core;
+        },
+        getCatalog: () => svc.getCatalog(),
+      };
+      const cue = { ready: () => {} };
+      // At "the send", the watch holds the control as on, so the read needs no connection.
+      const current = (a: { component: string; control: string }[]) =>
+        where === "the send" ? new Map([[`${MUTE_ADDR.component}\u0000${MUTE_ADDR.control}`, { Value: true }]]) : watch.current(a);
+      const w = new QsysWriter(source, { ready: () => watch.ready(), current, onReady: (cb) => ((cue.ready = cb), () => {}) });
+      w.loadViews = withMomentary;
+      const warn = capture("warn");
+      try {
+        await owedThenBack(w);
+        const tries = OWED_MAX_ATTEMPTS + 2;
+        away = tries * (where === "the read" ? 2 : 1);
+        cue.ready();
+        for (let i = 0; away > 0; i++) {
+          await settle();
+          assert.equal(w.owes(MUTE_ADDR), true, `an offline settle (${i + 1} so far) used up the owed release's tries`);
+          mock.timers.tick(OWED_RETRY_MS);
+        }
+        await until(() => !w.owes(MUTE_ADDR), "the owed release, once the Core stayed");
+        await settle();
+      } finally {
+        warn.restore();
+        w.dispose();
+      }
+      assert.deepEqual(muteSets(), [true, false]);
+      assert.equal(coreMute(), false, "the release was dropped while the Core kept dropping");
+      assert.ok(!warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped/.test(l)), warn.lines.join("\n"));
+    });
+  }
+
   test("a release refused offline just as readiness returns is tried again shortly, not left for the next reconnect", async () => {
     // Readiness answers false once (the release's own check) and is back by the
     // time the release is made owed; onReady has already fired, so it never comes.
@@ -1187,7 +1307,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       current: (a) => watch.current(a),
       onReady: () => () => {},
     });
-    w.momentaryCheck = async () => true;
+    w.loadViews = withMomentary;
     const warn = capture("warn");
     try {
       await connect();

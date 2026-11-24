@@ -13,8 +13,9 @@
 //   POST /api/qsys/write               { component, control, value, panelId?, final?, lease?, cid? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   POST /api/qsys/lease               { component, control, cid? } -> { held }: renew a held momentary
-//   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
-//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not connected
+//   GET  /api/qsys/values?panel=<id>   { ready, values, catalogAt }: the panel's values as last read; 404 unknown panel
+//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not
+//                                      connected, or while the check cannot read the views or the allowlist
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -153,16 +154,18 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       string: v.String,
       position: v.Position,
     }));
-    json(res, { ready: qsysWatch.ready(), values });
+    // catalogAt: the stamp the status push carries, so a page can tell from its first push whether the catalog is new.
+    json(res, { ready: qsysWatch.ready(), values, catalogAt: qsysService.getStatus().catalogAt });
     return;
   }
 
   if (method === "GET" && pathname === "/api/qsys/bindings") {
     // Read only: the check reruns when the views, the allowlist or the catalog change.
     await qsysBindings.settled();
-    const report = qsysBindings.current();
-    if (!report) return error(res, "the Q-SYS Core is not connected", 503);
-    json(res, report);
+    const answer = qsysBindings.current();
+    if ("report" in answer) return json(res, answer.report);
+    // Never an empty report in place of a check that could not run: empty means every binding resolves.
+    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503);
     return;
   }
 

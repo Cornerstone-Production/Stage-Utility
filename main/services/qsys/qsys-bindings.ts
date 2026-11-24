@@ -20,8 +20,8 @@
 
 import { scrub } from "../scrub.js";
 import { viewsStore } from "../views-store.js";
-import type { LayoutObject, LayoutObjectConfig, View } from "../../types/views.js";
-import { addressKey, qsysAddressesOf, type QsysAddress, type QsysBinding } from "../../types/qsys.js";
+import { walkLayoutObjects, type LayoutObject, type View } from "../../types/views.js";
+import { addressKey, addressOf, qsysAddressesOf, slotsOf, type QsysAddress, type QsysSlotRole } from "../../types/qsys.js";
 import { qsysAllowlist, type AllowEntry } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch, type WatchPanel } from "./qsys-watch.js";
@@ -31,53 +31,13 @@ export type BindingProblem = "missing-component" | "missing-control" | "not-allo
 
 export type BindingReport = { panelId: string; objectId: string; address: QsysAddress; problem: BindingProblem }[];
 
-type Role = "write" | "read";
-type Slot = { binding: QsysBinding | null | undefined; role: Role };
-
-/** Each binding an object holds, and whether the object writes it. Indicators are always read. */
-export function slotsOf(config: LayoutObjectConfig): Slot[] {
-  switch (config.type) {
-    case "qsys-fader":
-    case "qsys-mute":
-    case "qsys-button":
-      return [{ binding: config.binding, role: "write" }];
-    case "qsys-label":
-      return [{ binding: config.binding, role: "read" }];
-    case "qsys-meter":
-      return [
-        { binding: config.binding, role: "read" },
-        { binding: config.binding2, role: "read" },
-      ];
-    case "qsys-switch":
-      return [config.binding, config.onBinding, config.offBinding].map((binding) => ({ binding, role: "write" }));
-    case "qsys-presets":
-      return [...config.items.map((i) => i.binding), config.previous].map((binding) => ({ binding, role: "write" }));
-    case "qsys-selector":
-      return [config.binding, ...config.items.map((i) => i.binding)].map((binding) => ({ binding, role: "write" }));
-    case "qsys-strip":
-      return [
-        { binding: config.name, role: "read" },
-        { binding: config.gain, role: "write" },
-        { binding: config.mute, role: "write" },
-        { binding: config.meter, role: "read" },
-        { binding: config.meter2, role: "read" },
-      ];
-    default:
-      return [];
-  }
-}
-
-/** Every object in a layout, containers' children included. */
-function* walk(objects: LayoutObject[]): Generator<LayoutObject> {
-  for (const o of objects) {
-    yield o;
-    if (o.children) yield* walk(o.children);
-  }
-}
-
 /** The Q-SYS objects of a view, each with the addresses it reads. Empty for a view with none. */
 export function qsysObjectsOf(view: View): LayoutObject[] {
-  return [...walk(view.layout?.objects ?? [])].filter((o) => qsysAddressesOf(o.config).length > 0);
+  const out: LayoutObject[] = [];
+  walkLayoutObjects(view.layout?.objects ?? [], (o) => {
+    if (qsysAddressesOf(o.config).length > 0) out.push(o);
+  });
+  return out;
 }
 
 /** The watch's panel list: every view with Q-SYS objects, its addresses once each. */
@@ -104,9 +64,9 @@ export function panelsFromViews(views: View[]): WatchPanel[] {
  *  (unwritableReason): a control it would refuse whatever the value is not writable
  *  here either. A number with no range set is reported as read-only too, since it
  *  is, until the allowlist gives it one. */
-function writeProblem(entry: AllowEntry | undefined, control: QsysCatalog["components"][number]["controls"][number]): BindingProblem | null {
+function writeProblem(entry: AllowEntry | undefined, control: QsysCatalog["components"][number]["controls"][number], viaChoices: boolean): BindingProblem | null {
   if (!entry) return "not-allowed";
-  return unwritableReason(control, entry) === null ? null : "read-only";
+  return unwritableReason(control, entry, viaChoices) === null ? null : "read-only";
 }
 
 /**
@@ -122,13 +82,14 @@ export function checkBindings(views: View[], catalog: QsysCatalog | null, allow:
   for (const view of views) {
     for (const object of qsysObjectsOf(view)) {
       const seen = new Set<string>();
-      for (const { binding, role } of slotsOf(object.config)) {
+      for (const { binding, role, viaChoices = false } of slotsOf(object.config)) {
         if (!binding) continue;
         // The binding's own address is read or written; its indicator is only ever read.
-        const targets: { address: QsysAddress; role: Role }[] = [{ address: { component: binding.component, control: binding.control }, role }];
-        if (binding.indicator) targets.push({ address: { component: binding.indicator.component, control: binding.indicator.control }, role: "read" });
-        for (const { address, role: r } of targets) {
-          const problem = problemOf(components, allow, address, r);
+        const targets: { address: QsysAddress; role: QsysSlotRole; viaChoices: boolean }[] = [{ address: addressOf(binding), role, viaChoices }];
+        if (binding.indicator) targets.push({ address: addressOf(binding.indicator), role: "read", viaChoices: false });
+        for (const t of targets) {
+          const { address } = t;
+          const problem = problemOf(components, allow, t);
           if (!problem) continue;
           const key = `${addressKey(address)}\u0000${problem}`;
           if (seen.has(key)) continue;
@@ -144,14 +105,13 @@ export function checkBindings(views: View[], catalog: QsysCatalog | null, allow:
 function problemOf(
   components: Map<string, Map<string, QsysCatalog["components"][number]["controls"][number]>>,
   allow: Map<string, AllowEntry>,
-  address: QsysAddress,
-  role: Role,
+  { address, role, viaChoices }: { address: QsysAddress; role: QsysSlotRole; viaChoices: boolean },
 ): BindingProblem | null {
   const controls = components.get(address.component);
   if (!controls) return "missing-component";
   const control = controls.get(address.control);
   if (!control) return "missing-control";
-  return role === "write" ? writeProblem(allow.get(addressKey(address)), control) : null;
+  return role === "write" ? writeProblem(allow.get(addressKey(address)), control, viaChoices) : null;
 }
 
 const lineOf = (r: BindingReport[number]): string =>
@@ -168,10 +128,17 @@ export interface BindingSources {
   setPanels(panels: WatchPanel[]): void;
 }
 
+/** What GET /api/qsys/bindings answers: the report, or why there is none. */
+export type BindingAnswer = { report: BindingReport } | { error: "not-connected" | "check-failed" };
+
 /** Keeps the watch's panels and the binding report current. One per process. */
 export class QsysBindings {
   private report: BindingReport = [];
+  /** The last run could not read the views or the allowlist (or none has run): there is no report to serve. */
+  private failed = true;
   private logged = new Set<string>();
+  /** The catalog the logged lines were said against: a new one (a reconnect, a redeploy) says them again. */
+  private loggedFor: QsysCatalog | null = null;
   private running: Promise<void> | null = null;
   private dirty = false;
   private started = false;
@@ -189,9 +156,15 @@ export class QsysBindings {
     again();
   }
 
-  /** The last report, or null while the Core is not connected (a report from an earlier connection is not served). */
-  current(): BindingReport | null {
-    return this.src.getCatalog() ? this.report : null;
+  /**
+   * The last report. Never a report from an earlier connection, and never an
+   * empty one standing in for a check that could not run: an empty report means
+   * every binding resolves.
+   */
+  current(): BindingAnswer {
+    if (!this.src.getCatalog()) return { error: "not-connected" };
+    if (this.failed) return { error: "check-failed" };
+    return { report: this.report };
   }
 
   /** Resolves once any run in flight, and any queued behind it, has finished. Starts nothing and changes nothing. */
@@ -215,23 +188,30 @@ export class QsysBindings {
         const [views, entries] = await Promise.all([this.src.loadViews(), this.src.loadAllow()]);
         this.src.setPanels(panelsFromViews(views));
         const catalog = this.src.getCatalog();
-        // No catalog, nothing to check against: drop the old connection's report, so a
-        // reconnect says its problems again, and say nothing.
+        this.failed = false;
+        // No catalog, nothing to check against, and nothing said.
         if (!catalog) {
           this.report = [];
-          this.logged = new Set();
           continue;
         }
         this.report = checkBindings(views, catalog, new Map(entries.map((e) => [addressKey(e), e])));
-        this.say();
+        this.say(catalog);
       } catch (err) {
-        // A failed read of views or the allowlist leaves the last report standing, and says why.
+        // No report rather than a stale one: the route answers 503 with the reason
+        // until a run succeeds. The watch keeps the panels it last had.
+        this.failed = true;
+        this.report = [];
         console.warn(`[qsys] binding check could not run: ${scrub(err instanceof Error ? err.message : err)}`);
       }
     }
   }
 
-  private say(): void {
+  private say(catalog: QsysCatalog): void {
+    // A new catalog is a new connection or a new design: every problem is said again.
+    if (catalog !== this.loggedFor) {
+      this.logged = new Set();
+      this.loggedFor = catalog;
+    }
     const now = new Map(this.report.map((r) => [lineOf(r), r]));
     for (const line of now.keys()) if (!this.logged.has(line)) console.warn(scrub(line));
     if (this.logged.size > 0 && now.size === 0) console.log("[qsys] binding check: every binding resolves");

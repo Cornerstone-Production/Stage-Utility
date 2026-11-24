@@ -1327,6 +1327,21 @@ export interface LayoutObject {
   children?: LayoutObject[];
 }
 
+/**
+ * Walk an object tree, parent before children. Containers nest arbitrarily deep.
+ *
+ * The one traversal: this repository carried several hand-rolled copies of it,
+ * and each was a place for a container's children to get forgotten. Here, beside
+ * the type, so the page and the server share it without the page importing
+ * server code (main/services/view-refs.ts re-exports it).
+ */
+export function walkLayoutObjects(objects: readonly LayoutObject[], visit: (o: LayoutObject) => void): void {
+  for (const o of objects) {
+    visit(o);
+    if (o.children?.length) walkLayoutObjects(o.children, visit);
+  }
+}
+
 export interface LayoutDTO {
   /** Schema version — bump when the shape changes so old layouts can migrate. */
   version: 1;

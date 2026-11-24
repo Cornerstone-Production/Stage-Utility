@@ -7,8 +7,12 @@
 // queued or replayed. So a press that lands takes a lease. The page renews it
 // about every LEASE_RENEW_MS while the finger stays down; the server writes the
 // release itself when no renewal arrives within LEASE_EXPIRE_MS, or at once when
-// the pressing page's event stream closes. A release from the page, or any other
-// write to the control, ends the lease without a write.
+// the connection the press was made on closes: the event stream (or poll client)
+// that carried the page's cid at the moment it pressed. A page's cid outlives its
+// connections, and the server can learn of a dead one late, so a close is matched
+// to the connection, never to the cid alone: the old socket of a page that has
+// already reconnected and pressed again releases nothing. A release from the
+// page, or any other write to the control, ends the lease without a write.
 //
 // One lease per control: a second press takes it over. The release goes through
 // the writer like any write, with every allowlist, type and range check, and is
@@ -27,6 +31,8 @@ export type ReleaseCause = LeaseEnd | "lease owed";
 export interface Lease extends QsysAddress {
   /** The pressing page's event-stream client id; null when it sent none. */
   cid: string | null;
+  /** The connection carrying `cid` when it pressed (broadcaster.ts connectionOf); null when there was none. */
+  connection: object | null;
   panelId: string | null;
   device: string;
   remote: string;
@@ -76,9 +82,9 @@ export class QsysLeases {
     this.held.delete(k);
   }
 
-  /** The event stream of `cid` closed: release every momentary it holds. */
-  streamClosed(cid: string): void {
-    for (const [k, lease] of [...this.held]) if (lease.cid === cid) this.end(k, "stream closed");
+  /** `connection`, carrying `cid`, closed: release every momentary pressed on it, and only those. */
+  streamClosed(cid: string, connection: object): void {
+    for (const [k, lease] of [...this.held]) if (lease.cid === cid && lease.connection === connection) this.end(k, "stream closed");
   }
 
   has(a: QsysAddress): boolean {
