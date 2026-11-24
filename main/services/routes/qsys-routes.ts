@@ -5,10 +5,11 @@
 //   GET  /api/qsys/status              the connection, plus `writable`: connected and re-read
 //   GET  /api/qsys/catalog             { designCode, components }; 503 while not connected
 //   POST /api/qsys/catalog/refresh     reads the catalog again; 503 while not connected, 502 on failure
-//   GET  /api/qsys/allowlist           { entries }
-//   PUT  /api/qsys/allowlist           { entries } -> { entries }; 400 naming the first broken entry
+//   GET  /api/qsys/allowlist           { entries, invalid }: invalid says why a stored file is refused, else null
+//   PUT  /api/qsys/allowlist           { entries, replaceInvalid? } -> { entries }; 400 naming the first broken
+//                                      entry; 409 over an invalid stored file unless replaceInvalid is true
 //   POST /api/qsys/allowlist/export    the allowlist file
-//   POST /api/qsys/allowlist/import    an allowlist file -> { entries }; 400 keeps the old list
+//   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
 //   POST /api/qsys/write               { component, control, value, panelId?, final? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
@@ -20,40 +21,38 @@
 
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
-import { scrub } from "../scrub.js";
-import { addressKey } from "../../types/qsys.js";
-import { AllowlistRefused, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
+import { oneLine, scrub } from "../scrub.js";
+import { AllowlistRefused, AllowlistStoredInvalid, isLine, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
 import { qsysService } from "../qsys/qsys-service.js";
 import { qsysWatch } from "../qsys/qsys-watch.js";
 import { writeControl } from "../qsys/qsys-write.js";
 import { qsysWriteLog } from "../qsys/qsys-write-log.js";
-import { type RouteCtx, error, json, readObjectBody } from "./context.js";
+import { type RouteCtx, error, json, readObjectBody, remoteAddressOf } from "./context.js";
 
 const MAX_DEVICE = 200;
 /** A write body is a few hundred bytes; anything past this is answered 413. */
 export const MAX_WRITE_BODY_BYTES = 16 * 1024;
 const MAX_PANEL_ID = 200;
-// eslint-disable-next-line no-control-regex -- matching control characters is the point
-const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-const CONTROL_CHARS = new RegExp(CONTROL_CHAR.source, "g");
 
-/** The request's remote address, bounded; "unknown" without a socket. */
+/** The request's remote address, bounded, on one line. */
 export function remoteOf(req: http.IncomingMessage): string {
-  return String(req.socket?.remoteAddress ?? "unknown").replace(CONTROL_CHARS, " ").slice(0, 64);
+  return oneLine(remoteAddressOf(req)).slice(0, 64);
 }
 
 /** Who sent a write, for the write log: the address and user agent, one bounded line. */
 export function deviceOf(req: http.IncomingMessage): string {
   const agent = String(req.headers["user-agent"] ?? "");
-  return `${remoteOf(req)} ${agent}`.replace(CONTROL_CHARS, " ").trim().slice(0, MAX_DEVICE);
+  return oneLine(`${remoteOf(req)} ${agent}`).trim().slice(0, MAX_DEVICE);
 }
 
-async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>) => Promise<unknown>): Promise<void> {
+async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: { replaceInvalid: boolean }) => Promise<unknown>): Promise<void> {
   const body = await readObjectBody(c.req, c.res);
   if (!body) return;
+  if (body.replaceInvalid !== undefined && typeof body.replaceInvalid !== "boolean") return error(c.res, "replaceInvalid must be true or false");
   try {
-    json(c.res, { entries: await change(body) });
+    json(c.res, { entries: await change(body, { replaceInvalid: body.replaceInvalid === true }) });
   } catch (err) {
+    if (err instanceof AllowlistStoredInvalid) return error(c.res, err.message, 409);
     if (!(err instanceof AllowlistRefused)) throw err;
     error(c.res, err.message);
   }
@@ -88,12 +87,12 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "GET" && pathname === "/api/qsys/allowlist") {
-    json(res, { entries: await qsysAllowlist.list() });
+    json(res, await qsysAllowlist.state());
     return;
   }
 
   if (method === "PUT" && pathname === "/api/qsys/allowlist") {
-    return allowlistChange(c, (body) => qsysAllowlist.replace(body.entries));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.replace(body.entries, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/export") {
@@ -102,7 +101,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/import") {
-    return allowlistChange(c, (body) => qsysAllowlist.importFile(body));
+    return allowlistChange(c, (body, opts) => qsysAllowlist.importFile(body, opts));
   }
 
   if (method === "POST" && pathname === "/api/qsys/write") {
@@ -114,7 +113,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     if (typeof value !== "number" && typeof value !== "boolean" && typeof value !== "string") {
       return error(res, "value must be a number, true or false, or text");
     }
-    if (panelId !== null && (typeof panelId !== "string" || panelId.length > MAX_PANEL_ID || CONTROL_CHAR.test(panelId))) {
+    if (panelId !== null && !isLine(panelId, MAX_PANEL_ID)) {
       return error(res, `panelId must be null or text of up to ${MAX_PANEL_ID} characters on one line`);
     }
     if (final !== undefined && typeof final !== "boolean") return error(res, "final must be true or false");
@@ -127,15 +126,14 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     if (!panel) return error(res, "panel is required");
     const addresses = qsysWatch.panelAddresses(panel);
     if (!addresses) return error(res, "no Q-SYS panel has that id", 404);
-    const read = qsysWatch.current(addresses);
-    const seen = new Set<string>();
-    const values = addresses.flatMap((a) => {
-      const k = addressKey(a);
-      const v = read.get(k);
-      if (!v || seen.has(k)) return [];
-      seen.add(k);
-      return [{ component: a.component, control: a.control, value: v.Value, string: v.String, position: v.Position }];
-    });
+    // current() is keyed by address, so a control on a panel twice is one value.
+    const values = [...qsysWatch.current(addresses).values()].map((v) => ({
+      component: v.Component,
+      control: v.Name,
+      value: v.Value,
+      string: v.String,
+      position: v.Position,
+    }));
     json(res, { ready: qsysWatch.ready(), values });
     return;
   }

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { scrub } from "./scrub.js";
+import { hasControlChars, oneLine, scrub } from "./scrub.js";
 
 // Control characters are written as escapes throughout. A test file containing
 // literal ones is treated as binary by git and cannot be reviewed.
@@ -87,4 +87,14 @@ test("a circular object does not throw", () => {
 test("numbers and booleans render as themselves", () => {
   assert.equal(scrub(42), "42");
   assert.equal(scrub(true), "true");
+});
+
+test("hasControlChars answers the same every time, and oneLine keeps a value on one line", () => {
+  // A global regex's test() is stateful: the second call on the same text would answer false.
+  for (let i = 0; i < 3; i++) {
+    assert.equal(hasControlChars("a\u0000b"), true, `call ${i + 1} let a NUL through`);
+    assert.equal(hasControlChars("a b"), true);
+  }
+  assert.equal(hasControlChars("Lobby_Mixer gain"), false);
+  assert.equal(oneLine("a\nb\u0007c"), "a b c");
 });

@@ -18,7 +18,7 @@
 // client spinning the buffer, which is what the rate limit is for.
 
 import { scrub } from "../scrub.js";
-import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, error, json, readBodyOrEmpty, remoteAddressOf } from "./context.js";
 
 /** A tag the log page can filter on: the same shape the server's own tags have.
  *  Bounded, so a client cannot write a 4KB `[…]` prefix. */
@@ -56,7 +56,7 @@ const seen = new Map<string, { count: number; until: number }>();
  * shares one bucket, which is the safe direction to be wrong in.
  */
 function clientKey(c: RouteCtx): string {
-  return c.req.socket?.remoteAddress ?? "unknown";
+  return remoteAddressOf(c.req);
 }
 
 /**

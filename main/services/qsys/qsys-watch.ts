@@ -130,13 +130,9 @@ export class QsysWatch {
     onSubscriptions(() => this.kick());
   }
 
-  /** Every panel that could be open, with the addresses its objects read (each once). */
+  /** Every panel that could be open, with the addresses its objects read. */
   setPanels(panels: WatchPanel[]): void {
-    this.panels = panels.map((p) => ({
-      id: p.id,
-      kind: p.kind,
-      addresses: [...new Map(p.addresses.map((a) => [addressKey(a), { component: a.component, control: a.control }])).values()],
-    }));
+    this.panels = panels.map((p) => ({ id: p.id, kind: p.kind, addresses: [...p.addresses] }));
     this.kick();
   }
 
@@ -166,8 +162,9 @@ export class QsysWatch {
 
   /**
    * The cached values of these addresses, read on the live connection and the
-   * current design. An address with no value yet is absent: this is the
-   * per-address "have we read it" answer, for hydration.
+   * current design, keyed by addressKey (so an address listed twice is one
+   * entry). An address with no value yet is absent: this is the per-address
+   * "have we read it" answer, for hydration.
    */
   current(addresses: QsysAddress[]): Map<string, QrcChange> {
     this.sync();

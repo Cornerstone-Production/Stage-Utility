@@ -102,10 +102,13 @@ describe("/api/qsys", () => {
     assert.ok(ROUTE_MODULES.includes(qsysRoutes));
   });
 
-  test("an allowlist file the validator would refuse is enforced as empty, and said", async () => {
+  test("an allowlist file the validator would refuse is enforced as empty, said, and never silently overwritten", async () => {
+    const file = path.join(TMP, "qsys-allowlist.json");
     const warn = mock.method(console, "warn", () => {});
     try {
-      assert.deepEqual(await listed(), []);
+      const got = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { entries: AllowEntry[]; invalid: string | null };
+      assert.deepEqual(got.entries, []);
+      assert.match(got.invalid ?? "", /not valid \(entry 1: min must not be above max\)/, "GET did not say the stored file is invalid");
       const r = await write({ component: "Lobby_Mixer", control: "gain", value: -5 });
       assert.equal((r.json as { reason: string }).reason, "not-allowed");
       assert.ok(
@@ -115,7 +118,27 @@ describe("/api/qsys", () => {
     } finally {
       warn.mock.restore();
     }
-    assert.match(await fs.readFile(path.join(TMP, "qsys-allowlist.json"), "utf8"), /"min":5/, "the file was rewritten on read");
+    assert.match(await fs.readFile(file, "utf8"), /"min":5/, "the file was rewritten on read");
+
+    // A save or an import that does not say it replaces the invalid file is refused, and the file kept.
+    const plain = await quietly(() => put([MUTE]));
+    assert.equal(plain.status, 409, "a save overwrote the invalid file without being told to");
+    assert.match((plain.json as { error: string }).error, /replaceInvalid/);
+    const exported = { format: "stage-utility-qsys-allowlist", version: 1, entries: [MUTE] };
+    const imported = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: exported }));
+    assert.equal(imported.status, 409, "an import overwrote the invalid file without being told to");
+    assert.match(await fs.readFile(file, "utf8"), /"min":5/, "a refused save changed the file");
+    assert.deepEqual(await listed(), [], "a refused save made something writable");
+    assert.equal((await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [MUTE], replaceInvalid: "yes" } }))).status, 400);
+
+    // Saying so replaces it, and the invalid file is kept beside it, never deleted.
+    const replaced = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [MUTE], replaceInvalid: true } }));
+    assert.equal(replaced.status, 200);
+    const kept = (await fs.readdir(TMP)).filter((f) => f.startsWith("qsys-allowlist.json.invalid-"));
+    assert.equal(kept.length, 1, `the invalid file was not kept beside: ${kept.join(", ")}`);
+    assert.match(await fs.readFile(path.join(TMP, kept[0]), "utf8"), /"min":5/);
+    const after = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { entries: AllowEntry[]; invalid: string | null };
+    assert.deepEqual(after, { entries: [MUTE], invalid: null });
   });
 
   test("with no Core: status is not writable, the catalog is 503, and a write is refused offline", async () => {

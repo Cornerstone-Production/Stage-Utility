@@ -27,6 +27,22 @@
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
+/** The same set, for a yes/no test. Its own regex: `test()` on a global one is
+ *  stateful (lastIndex), and would pass every other string through. */
+const HAS_CONTROL = new RegExp(CONTROL.source);
+
+/** Whether `text` holds a character a log line would have to escape. For
+ *  validating a name or a label that must stay one plain line. */
+export function hasControlChars(text: string): boolean {
+  return HAS_CONTROL.test(text);
+}
+
+/** `text` with every such character turned into a space: for a value kept on
+ *  one line but not escaped (a user agent in a stored record). */
+export function oneLine(text: string): string {
+  return text.replace(CONTROL, " ");
+}
+
 const NAMED: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
