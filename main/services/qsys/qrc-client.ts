@@ -5,7 +5,6 @@
 // (WebSocket) transport can replace this class without touching callers.
 
 import net from "node:net";
-import { toError } from "../errors.js";
 import { scrub, scrubError } from "../scrub.js";
 
 export interface QrcTransport {
@@ -26,7 +25,16 @@ export class QrcError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const MAX_BUFFER_BYTES = 1024 * 1024;
+/**
+ * The most one message may run to while the client waits for its NUL. A limit on a
+ * single message, not on the stream: every reply arrives in TCP-sized pieces, so a
+ * large one is unterminated until its last piece lands. Component.GetControls on a
+ * big matrix mixer (a few hundred bytes per control, three controls per crosspoint)
+ * runs to several MB, so this sits far above any real design and only stops a peer
+ * that never terminates. Pieces are kept as a list and joined once, so a large reply
+ * costs one copy rather than one per piece.
+ */
+export const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 
 interface Pending {
   method: string;
@@ -37,7 +45,9 @@ interface Pending {
 
 export class QrcClient implements QrcTransport {
   private nextId = 1;
-  private buffer: Buffer = Buffer.alloc(0);
+  /** The unterminated message so far, as received. */
+  private partial: Buffer[] = [];
+  private partialBytes = 0;
   private readonly pending = new Map<number, Pending>();
   private readonly notificationHandlers: ((method: string, params: unknown) => void)[] = [];
   private readonly closeHandlers: ((err: Error | null) => void)[] = [];
@@ -120,18 +130,28 @@ export class QrcClient implements QrcTransport {
   }
 
   private onData(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
+    if (this.socket.destroyed) return;
+    let start = 0;
     let nul: number;
-    while ((nul = this.buffer.indexOf(0)) !== -1) {
-      const text = this.buffer.subarray(0, nul).toString("utf8");
-      this.buffer = this.buffer.subarray(nul + 1);
-      if (text) this.dispatch(text);
+    while ((nul = chunk.indexOf(0, start)) !== -1) {
+      const tail = chunk.subarray(start, nul);
+      // Bytes, not text, until the message is whole: a multi-byte character can
+      // be split across two pieces.
+      const message = this.partial.length > 0 ? Buffer.concat([...this.partial, tail]) : tail;
+      this.partial = [];
+      this.partialBytes = 0;
+      start = nul + 1;
+      if (message.length > 0) this.dispatch(message.toString("utf8"));
     }
-    // Measured after complete messages are drained: this bounds an unterminated
-    // message growing without limit, not a single large complete one.
-    if (this.buffer.length > MAX_BUFFER_BYTES) {
-      console.warn(`[qsys] QRC receive buffer passed ${MAX_BUFFER_BYTES} bytes without a terminator, dropping the connection`);
-      this.closeError ??= new Error("QRC receive buffer limit exceeded");
+    if (start === chunk.length) return;
+    const rest = chunk.subarray(start);
+    this.partial.push(rest);
+    this.partialBytes += rest.length;
+    if (this.partialBytes > MAX_MESSAGE_BYTES) {
+      console.warn(`[qsys] a QRC message passed ${MAX_MESSAGE_BYTES} bytes without a terminator, dropping the connection`);
+      this.closeError ??= new Error(`QRC message passed the ${MAX_MESSAGE_BYTES}-byte receive limit`);
+      this.partial = [];
+      this.partialBytes = 0;
       this.socket.destroy();
     }
   }
@@ -147,8 +167,9 @@ export class QrcClient implements QrcTransport {
     if (typeof msg.id === "number" && this.pending.has(msg.id)) {
       const { error } = msg;
       this.settle(msg.id, (p) => {
-        if (error) p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number.isFinite(Number(error.code)) ? Number(error.code) : -1));
-        else p.resolve(msg.result);
+        if (!error) return p.resolve(msg.result);
+        const code = Number(error.code);
+        p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number.isFinite(code) ? code : -1));
       });
     } else if (typeof msg.method === "string" && msg.id === undefined) {
       for (const cb of this.notificationHandlers) {
@@ -168,7 +189,7 @@ export class QrcClient implements QrcTransport {
     if (this.closed) return;
     this.closed = true;
     const reason = this.closeError ?? new Error("QRC connection closed");
-    for (const id of [...this.pending.keys()]) this.settle(id, (p) => p.reject(toError(reason)));
+    for (const id of [...this.pending.keys()]) this.settle(id, (p) => p.reject(reason));
     for (const cb of this.closeHandlers) {
       try {
         cb(this.closeError);

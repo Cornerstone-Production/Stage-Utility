@@ -80,3 +80,7 @@ Look at `/log` and filter for `[qsys]`.
 | `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
 | `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
 | `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
+| `a QRC message passed <n> bytes without a terminator, dropping the connection` | One message from the Core ran past 32 MiB without ending. Real designs stay far under that; the service reconnects, and if this repeats, the address is probably not a Q-SYS Core. |
+| `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. |
+| `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
+| `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |

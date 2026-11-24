@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import net from "node:net";
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, mock, test } from "node:test";
 import { FakeQrcServer } from "./fake-qrc-server.js";
-import { QrcClient, QrcError } from "./qrc-client.js";
+import { MAX_MESSAGE_BYTES, QrcClient, QrcError } from "./qrc-client.js";
 
 let fake: FakeQrcServer;
 let port: number;
@@ -183,7 +183,9 @@ test("socket close rejects every pending send and fires onClose", async () => {
   await assert.rejects(c.send("NoOp"));
 });
 
-test("a send with no reply rejects after timeoutMs", async () => {
+// A timeout of its own, so a send that never settles fails here by name rather
+// than hanging the file until the runner kills it.
+test("a send with no reply rejects after timeoutMs", { timeout: 10_000 }, async () => {
   const c = await connect(200);
   fake.holdReplies = true;
   const t0 = Date.now();
@@ -191,16 +193,64 @@ test("a send with no reply rejects after timeoutMs", async () => {
   assert.ok(Date.now() - t0 >= 180);
 });
 
-test("a receive buffer over 1 MB drops the socket", async () => {
+/** Write `data` in 64 KB pieces, as a Core's reply arrives over TCP. */
+function writeInPieces(s: net.Socket, data: Buffer): void {
+  for (let at = 0; at < data.length; at += 64 * 1024) s.write(data.subarray(at, at + 64 * 1024));
+}
+
+test("one reply far over 1 MB, arriving in pieces, parses", { timeout: 20_000 }, async () => {
+  // A large design's Component.GetControls: unterminated until its last piece lands.
+  const big = "x".repeat(3 * 1024 * 1024);
   const p = await rawServer((s) => {
-    s.on("data", () => s.write(Buffer.alloc(1024 * 1024 + 10, 0x61)));
+    s.on("data", () => writeInPieces(s, Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: big })}\0`)));
+  });
+  const c = await QrcClient.connect("127.0.0.1", p);
+  clients.push(c);
+  const got = (await c.send("Component.GetControls")) as string;
+  assert.equal(got.length, big.length, "a reply over 1 MB was cut off or dropped");
+});
+
+test("one message past the receive limit with no terminator drops the socket", { timeout: 20_000 }, async () => {
+  const p = await rawServer((s) => {
+    s.on("data", () => writeInPieces(s, Buffer.alloc(MAX_MESSAGE_BYTES + 1, 0x61)));
   });
   const c = await QrcClient.connect("127.0.0.1", p);
   const closed = new Promise<Error | null>((resolve) => c.onClose(resolve));
-  const pending = c.send("NoOp");
-  await assert.rejects(pending, /buffer/);
-  const err = await closed;
-  assert.ok(err instanceof Error);
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await assert.rejects(c.send("NoOp"), /receive limit/);
+    const err = await closed;
+    assert.match(err?.message ?? "", /receive limit/);
+    assert.ok(warn.mock.calls.some((call) => String(call.arguments[0]).startsWith("[qsys] a QRC message passed")));
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("a throwing notification handler neither stops the next one nor escapes the socket", async () => {
+  const p = await rawServer((s) => {
+    s.write(`${JSON.stringify({ jsonrpc: "2.0", method: "EngineStatus", params: { DesignCode: "d" } })}\0`);
+    s.on("data", () => s.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: true })}\0`));
+  });
+  const warn = mock.method(console, "warn", () => {});
+  const uncaught: unknown[] = [];
+  const onUncaught = (err: unknown) => uncaught.push(err);
+  process.on("uncaughtException", onUncaught);
+  try {
+    const c = await QrcClient.connect("127.0.0.1", p);
+    clients.push(c);
+    c.onNotification(() => {
+      throw new Error("boom");
+    });
+    const second = new Promise<string>((resolve) => c.onNotification((method) => resolve(method)));
+    assert.equal(await second, "EngineStatus");
+    assert.equal(await c.send("NoOp"), true, "the client stopped serving after a handler threw");
+    assert.deepEqual(uncaught, []);
+    assert.ok(warn.mock.calls.some((call) => String(call.arguments[0]).includes("notification handler for EngineStatus threw")));
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    warn.mock.restore();
+  }
 });
 
 test("connect rejects when nothing listens", async () => {
