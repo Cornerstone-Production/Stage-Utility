@@ -37,6 +37,8 @@ import { logToServer } from "../../lib/client-log";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
 export type { WriteResult };
+/** What a lease renewal heard: the lease is held, the server holds none, or no answer came. */
+export type RenewAnswer = "held" | "not-held" | "failed";
 
 /** "live": a Core value, input accepted. "offline": the Core or this page's stream is
  *  not there, or the panel has not been read since it came back. "unavailable": no
@@ -699,14 +701,15 @@ export class QsysPanel {
   }
 
   /**
-   * Renew a held momentary's lease (see main/services/qsys/qsys-leases.ts). Only
-   * while the press is still held and nothing broke; a failure is the server's to
-   * notice (the lease lapses and it releases the control), so it is not retried.
+   * Renew a held momentary's lease (see main/services/qsys/qsys-leases.ts), while
+   * the press is still held and nothing broke. "not-held" is the server saying it
+   * holds no such lease; "failed" is a renewal that did not get an answer (the
+   * network, a 500), which says nothing about the lease.
    */
-  renewLease(a: QsysAddress): Promise<boolean> {
+  renewLease(a: QsysAddress): Promise<RenewAnswer> {
     return invoke<{ held?: unknown }>("qsys:lease", { component: a.component, control: a.control, cid: streamClientId() }).then(
-      (r) => r.held === true,
-      () => false,
+      (r): RenewAnswer => (r.held === true ? "held" : "not-held"),
+      (): RenewAnswer => "failed",
     );
   }
 

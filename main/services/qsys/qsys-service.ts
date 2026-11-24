@@ -130,6 +130,12 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     return this.wrapped;
   }
 
+  /** Which Core the settings name (host and port), connected or not; null when none is set. */
+  get core(): string | null {
+    const s = this.settings;
+    return s?.host ? `${s.host}:${s.port}` : null;
+  }
+
   /** The configured meter rates. A change reconfigures (and so reconnects) the service. */
   get meterRates(): QsysMeterRates {
     return {

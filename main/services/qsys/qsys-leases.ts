@@ -30,6 +30,9 @@ export interface Lease extends QsysAddress {
   panelId: string | null;
   device: string;
   remote: string;
+  /** The design and the Core the press landed on: a release owed to them is not sent to another. */
+  designCode: string;
+  core: string | null;
 }
 
 interface Held extends Lease {

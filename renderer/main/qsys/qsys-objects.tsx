@@ -23,7 +23,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import type { QsysAddress, QsysBinding, QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
-import { LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
+import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
 import { atBottom, faderScale, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
 import {
   DRAG_COALESCE_MS,
@@ -360,6 +360,19 @@ function PressButton({
 /** The kit's words while a hold runs: "Keep holding to save…". */
 const holdWords = (label: string) => `Keep holding to ${label.trim().toLowerCase() || "confirm"}…`;
 
+/** A renewal that got no answer is tried again this soon, while the lease has time left. */
+const RENEW_RETRY_MS = 300;
+
+/** A momentary press being renewed. */
+interface LeasedPress {
+  interval: ReturnType<typeof setInterval> | null;
+  retry: ReturnType<typeof setTimeout> | null;
+  /** The press's own write has answered: from then on, "not held" means the lease is gone. */
+  wrote: boolean;
+  /** When the server last said it holds the lease (at first, the press). */
+  heldAt: number;
+}
+
 /**
  * One trigger, preset or option: lit from the Core, flashed on a confirmed write
  * when it has no state. Bound to a Boolean and `momentary`, it is true while
@@ -395,11 +408,16 @@ function TriggerButton({
   const { epoch } = useQsysPanelState();
 
   // A momentary's press is leased: the server lets go of the control itself if the
-  // renewals stop (qsys-leases.ts). Renewed while the press is held and nothing broke.
-  const renewal = useRef<ReturnType<typeof setInterval> | null>(null);
+  // renewals stop (qsys-leases.ts). Renewed while the press is held and nothing broke;
+  // only this press's release, a break, or the server saying (after the press
+  // answered) that it holds no lease stops it. A renewal with no answer is retried.
+  const renewing = useRef<LeasedPress | null>(null);
   const stopRenewing = () => {
-    if (renewal.current) clearInterval(renewal.current);
-    renewal.current = null;
+    const p = renewing.current;
+    if (!p) return;
+    if (p.interval) clearInterval(p.interval);
+    if (p.retry) clearTimeout(p.retry);
+    renewing.current = null;
   };
   useEffect(() => stopRenewing, []);
   // A break stops the renewals; the server's lease then lapses and it releases the control.
@@ -413,19 +431,36 @@ function TriggerButton({
       label={label}
       holdLabel={holdWords(label)}
       onFire={() => {
+        let p: LeasedPress | null = null;
         if (isMomentary && panel) {
-          const at = panel.epoch;
           stopRenewing();
-          renewal.current = setInterval(() => {
-            if (panel.epoch !== at) stopRenewing();
-            else
-              void panel.renewLease(ADDR(binding)!).then((held) => {
-                // No lease to renew (the press was refused, or the lease ended): stop asking.
-                if (!held && panel.epoch === at) stopRenewing();
-              });
-          }, LEASE_RENEW_MS);
+          const at = panel.epoch;
+          const a = ADDR(binding)!;
+          const press: LeasedPress = { interval: null, retry: null, wrote: false, heldAt: Date.now() };
+          const renew = () => {
+            if (renewing.current !== press) return;
+            if (panel.epoch !== at) return stopRenewing();
+            // Before the press has answered, "not held" only means the lease is not taken yet.
+            const afterWrite = press.wrote;
+            void panel.renewLease(a).then((answer) => {
+              // Released, or pressed again since: this answer is about a press that is over.
+              if (renewing.current !== press) return;
+              if (answer === "held") press.heldAt = Date.now();
+              else if (answer === "not-held") {
+                if (afterWrite) stopRenewing();
+              } else if (!press.retry && Date.now() - press.heldAt < LEASE_EXPIRE_MS - RENEW_RETRY_MS) {
+                press.retry = setTimeout(() => {
+                  press.retry = null;
+                  renew();
+                }, RENEW_RETRY_MS);
+              }
+            });
+          };
+          press.interval = setInterval(renew, LEASE_RENEW_MS);
+          renewing.current = p = press;
         }
         void write(ADDR(binding)!, true, { final: true, lease: isMomentary }).then((r) => {
+          if (p) p.wrote = true;
           // A pure trigger reports no state: show the confirmed write as a flash, never as lit.
           if (r.ok && !isMomentary && (lit === null || !boolean)) doFlash();
         });

@@ -108,6 +108,10 @@ interface Server {
   /** What a renewal answers. */
   leaseHeld: boolean;
   renewCids: unknown[];
+  /** How many renewals fail (a 500) before one answers. */
+  renewFails: number;
+  /** When set, a renewal's answer waits for this to be called, and says what `leaseHeld` is then. */
+  holdRenewals: ((release: () => void) => void) | null;
 }
 
 let server: Server;
@@ -130,6 +134,8 @@ function freshServer(): Server {
     renewals: 0,
     leaseHeld: true,
     renewCids: [],
+    renewFails: 0,
+    holdRenewals: null,
   };
 }
 
@@ -158,6 +164,12 @@ const f = stubFetchWithLog((url, init) => {
   if (url === "/api/qsys/lease") {
     server.renewals++;
     server.renewCids.push((JSON.parse(String(init?.body ?? "{}")) as { cid?: unknown }).cid);
+    if (server.renewFails > 0) {
+      server.renewFails--;
+      return { ok: false, status: 500, statusText: "Error", json: async () => ({ error: "busy" }), text: async () => "" };
+    }
+    const hold = server.holdRenewals;
+    if (hold) return new Promise((resolve) => hold(() => resolve(ok({ held: server.leaseHeld }))));
     return ok({ held: server.leaseHeld });
   }
   if (url === "/api/qsys/status") return ok({ connected: server.coreState === "connected", state: server.coreState });
@@ -1235,5 +1247,66 @@ describe("review round 3", () => {
     act(() => {
       window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 21 }));
     });
+  });
+});
+
+describe("review round 4: a held momentary keeps renewing until its own release", () => {
+  const talk = () => mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
+  const down = (pointerId: number) =>
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId });
+    });
+  const up = (pointerId: number) =>
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId }));
+    });
+
+  test("a renewal that gets no answer is tried again shortly, and the renewals go on", async () => {
+    await talk();
+    server.renewFails = 1;
+    down(31);
+    // The retry is due at 1.3 s and the next tick at 2 s: 1.65 s sits between them.
+    await wait(1_650);
+    assert.ok(server.renewals >= 2, `a failed renewal was not retried before the next tick (${server.renewals} renewals by 1.65 s)`);
+    await wait(700);
+    assert.ok(server.renewals >= 3, `one failed renewal stopped the renewals (${server.renewals} by 2.35 s)`);
+    up(31);
+  });
+
+  test("a renewal answered before the press's own write has answered does not end the hold", async () => {
+    await talk();
+    let answer: () => void = () => {};
+    server.holdWrites = (r) => (answer = r);
+    server.leaseHeld = false; // the press has not landed, so no lease yet
+    down(32);
+    await wait(1_150);
+    assert.equal(server.renewals, 1);
+    server.leaseHeld = true;
+    server.holdWrites = null;
+    answer();
+    await wait(1_000);
+    assert.ok(server.renewals >= 2, `an early "not held" ended the renewals of a press still on its way (${server.renewals})`);
+    up(32);
+  });
+
+  test("a stale \"not held\" from the previous press does not stop the next press's renewals", async () => {
+    await talk();
+    let answer: () => void = () => {};
+    server.holdRenewals = (r) => (answer = r);
+    down(33);
+    await wait(1_150);
+    assert.equal(server.renewals, 1, "press 1's renewal");
+    up(33);
+    server.holdRenewals = null;
+    down(34);
+    await wait(20);
+    server.leaseHeld = false; // press 1's lease ended with its release
+    answer();
+    await wait(20);
+    server.leaseHeld = true;
+    const before = server.renewals;
+    await wait(1_150);
+    assert.ok(server.renewals > before, "press 1's late answer stopped press 2's renewals");
+    up(34);
   });
 });

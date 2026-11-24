@@ -217,8 +217,6 @@ export class QsysWatch {
     if (failure) throw failure;
   }
 
-  /** Adopt the service's current transport. A different one means the old groups
-   *  died with the old connection: forget them, and every value read on it. */
   /**
    * Call `cb` each time writes become possible again: after a connect, a
    * reconnect or a new design, once every rebuilt group's resent values have
@@ -244,6 +242,8 @@ export class QsysWatch {
     }
   }
 
+  /** Adopt the service's current transport. A different one means the old groups
+   *  died with the old connection: forget them, and every value read on it. */
   private sync(): void {
     const t = this.source.transport;
     if (t === this.transport) return;

@@ -191,8 +191,8 @@ on the same rule.
 Each entry holds when, the panel id the client sent, the device (its address and
 user agent), the control, the value before, the value sent (after clamping) and the
 result: `ok`, `clamped`, `mismatch`, or the reason it was refused (`not-allowed`,
-`not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `core-error`). The
-value before is the Core's value when the gesture started (its first write from that
+`not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `no-lease`,
+`core-error`). The value before is the Core's value when the gesture started (its first write from that
 address, panel and control, within 10 seconds of the next), as Stage Utility last read
 it; it is empty when nothing watches the control. A
 successful write goes to the write log, not `/log`.
@@ -223,14 +223,31 @@ so two pages behind one address cannot keep each other's press on.
 The server takes a lease only for a momentary button: the panel the press came
 from must have a Q-SYS button on that control, and the control must be a Boolean.
 A lease asked for anything else (a toggle, a mute) is not taken; the write goes
-through as an ordinary one, and `/log` says so once.
+through as an ordinary one, and `/log` says so once. A press whose panel cannot be
+checked because the saved views cannot be read is refused (`no-lease`) and nothing
+is sent: a momentary left on with nothing to turn it off is the outcome the lease
+exists to prevent.
+
+A renewal that gets no answer (a network blip, a server error) is tried again a
+few hundred milliseconds later, for as long as the 2-second lease has time left;
+the page stops renewing only when its own finger lets go, the connection breaks,
+or the server answers that it holds no lease once the press itself has answered.
 
 If the Core is away when the server's release is due (a drop that also stopped the
 page's renewals is the usual reason), the release is owed rather than lost. When
 writes are possible again (the Core reconnected and its values have been read
 again), the server reads the control and sends the release only if the Core still
-reports it on; any other write to the control first cancels it. A press whose write
-was cut off mid-send (it may have landed) takes its lease all the same.
+reports it on. A release whose send the Core refused, or that was cut off, on a
+connection that is still up is owed the same way and tried again within a second
+or so. An owed release is dropped, with a line, when the Core it was owed to is no
+longer the one configured, the design has changed, the control has left the design
+or the allowlist, or after five tries that could not read the control or send.
+
+A release the server decided to send never lands after a newer write: if anything
+else (a fresh press from any page) reaches the control first, the release is not
+sent. A press whose write was cut off mid-send (it may have landed) takes its lease
+all the same, but a press whose answer arrives after another write was sent to the
+control takes none.
 
 The server's release is a write like any other, with every allowlist, type and
 range check, and its own write-log entry: device `server (lease expired)`,
@@ -260,11 +277,16 @@ Look at `/log` and filter for `[qsys]`.
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
 | `momentary <component>/<control> released by the server: <why>` | A momentary's page stopped renewing its press, or its event stream closed, and the server turned the control off itself. The write log has the entry. |
-| `the server's release of <component>/<control> could not be sent (<reason>); it is owed, …` | The Core was away when a momentary's release was due. It is sent once writes are possible again, if the Core still reports the control on. |
+| `the server's release of <component>/<control> could not be sent (<reason>); it is owed, …` | The Core was away when a momentary's release was due (`offline`), or refused it or dropped mid-send (`core-error`). It is sent once writes are possible again (within a second or so if the connection is still up), if the Core still reports the control on. |
+| `the server's release of <component>/<control> failed (<reason>), and another write to it has been sent since; nothing is owed` | The server's release could not be sent, but a newer write (a fresh press) has reached the control since, so nothing is kept to send later. |
 | `sending the owed release of <component>/<control>: the Core still reports it on` / `owed release of <component>/<control> not sent: the Core reports it off` | The Core is back and the owed release was settled, one way or the other. |
+| `release of <component>/<control> was not sent: another write to it came first` / `owed release of <component>/<control> not sent: another write to it came first` | A press (or any write) reached the control before the server's release did, so the release was not sent and the newer write stands. |
+| `owed release of <component>/<control> not settled: <why>; trying again` | An owed release could not be read or sent this time. It is tried again shortly while the Core is connected, else when it reconnects. |
+| `owed release of <component>/<control> dropped: <why>; it may still be on at the Core` | An owed release was given up: the Core or its design changed, the control left the design or the allowlist, or five tries failed. Check the control at the Core. |
 | `the server's release of <component>/<control> was refused (<reason>); it may still be on at the Core` | The server could not write a momentary's release and will not retry (the control taken off the allowlist, or out of the design). Check the control at the Core. |
+| `write refused (no-lease): <component>/<control> was not pressed: the saved views could not be read …` | A momentary press arrived while the saved views could not be read, so the server could not hold its release and sent nothing. See the views store's own line for the cause. |
 | `lease asked for <component>/<control> by panel <id>, which has no momentary button on it; written without one` | A client asked for a lease on a control its panel has no momentary button for. The write went through as an ordinary one. |
-| `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
+| `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `no-lease`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
 | `allowlist saved: <n> entries`, `allowlist imported: <n> entries` | The allowlist was replaced. |

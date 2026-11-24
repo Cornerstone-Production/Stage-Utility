@@ -14,7 +14,7 @@ const { setNamedSubscriberCheck } = await import("../broadcaster.js");
 const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
-const { QsysWriter, REFUSAL_LINE_INTERVAL_MS, GESTURE_TIMEOUT_MS, isWritable, unwritableReason } = await import("./qsys-write.js");
+const { QsysWriter, REFUSAL_LINE_INTERVAL_MS, GESTURE_TIMEOUT_MS, OWED_MAX_ATTEMPTS, OWED_RETRY_MS, isWritable, unwritableReason } = await import("./qsys-write.js");
 const { qsysAllowlist, allowEntryFromCatalog } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog, WRITE_LOG_CAP } = await import("./qsys-write-log.js");
 type QsysSettings = import("./qsys-settings.js").QsysSettings;
@@ -91,6 +91,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  writer.dispose();
   svc.stop();
   await fake.stop();
 });
@@ -530,7 +531,7 @@ describe("review round 1", () => {
   test("an offline refusal line is written again when the connection changes, though no write landed between", async () => {
     const t1 = { send: async () => undefined, onNotification: () => {}, close: () => {} };
     const t2 = { ...t1 };
-    const source: { transport: typeof t1 | null; getCatalog: () => QsysCatalog | null } = { transport: null, getCatalog: () => null };
+    const source: { transport: typeof t1 | null; core: null; getCatalog: () => QsysCatalog | null } = { transport: null, core: null, getCatalog: () => null };
     const notReady = { ready: () => false, current: () => new Map() };
     const timed = new QsysWriter(source, notReady, () => 5_000_000);
     const warn = capture("warn");
@@ -576,7 +577,7 @@ describe("review round 1", () => {
 
   test("a live transport with no catalog yet refuses offline, not core-error", async () => {
     let sent = 0;
-    const source = { transport: { send: async () => void sent++, onNotification: () => {}, close: () => {} }, getCatalog: (): QsysCatalog | null => null };
+    const source = { transport: { send: async () => void sent++, onNotification: () => {}, close: () => {} }, core: null, getCatalog: (): QsysCatalog | null => null };
     const always = { ready: () => true, current: () => new Map() };
     const warn = capture("warn");
     try {
@@ -592,6 +593,7 @@ describe("review round 1", () => {
     const catalog: QsysCatalog = { designCode: "d", components: [{ name: "Lobby_Mixer", type: "mixer", controls: fake.components.get("Lobby_Mixer")! }] };
     const source = {
       transport: { send: () => Promise.reject(new Error("connect ECONNRESET 192.0.2.50:1710")), onNotification: () => {}, close: () => {} },
+      core: null,
       getCatalog: () => catalog,
     };
     const always = { ready: () => true, current: () => new Map() };
@@ -613,7 +615,7 @@ describe("review round 2", () => {
   test("core-errors after a send never merge: each keeps its own entry and value", async () => {
     // A Core whose reply carries no read-back: every write takes the "may have landed" path.
     const catalog: QsysCatalog = { designCode: "d", components: [{ name: "Lobby_Mixer", type: "mixer", controls: fake.components.get("Lobby_Mixer")! }] };
-    const source = { transport: { send: async () => true, onNotification: () => {}, close: () => {} }, getCatalog: () => catalog };
+    const source = { transport: { send: async () => true, onNotification: () => {}, close: () => {} }, core: null, getCatalog: () => catalog };
     const always = { ready: () => true, current: () => new Map() };
     const timed = new QsysWriter(source, always, () => 3_000_000);
     const warn = capture("warn");
@@ -937,5 +939,268 @@ describe("owed releases and who may take a lease", () => {
     await press();
     assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-2"), false, "another page behind the same address renewed it");
     assert.equal(writer.leases.renew(MUTE_ADDR, "192.0.2.10", "page-1"), true);
+  });
+});
+
+describe("review round 4: a server release never lands after a fresh press", () => {
+  const MUTE_ADDR = { component: "Lobby_Mixer", control: "mute" };
+  const press = (w = writer) => w.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
+  beforeEach(() => {
+    writer.momentaryCheck = async () => true;
+  });
+
+  /** Holds the next `n` allowlist reads until each is let go, in order. */
+  function gateLookups() {
+    const real = qsysAllowlist.lookup.bind(qsysAllowlist);
+    const held: (() => void)[] = [];
+    let holding = 0;
+    const m = mock.method(qsysAllowlist, "lookup", (component: string, control: string) => {
+      if (holding <= 0) return real(component, control);
+      holding--;
+      return new Promise((resolve) => held.push(() => resolve(real(component, control))));
+    });
+    return {
+      holdNext: (n = 1) => void (holding += n),
+      held,
+      restore: () => m.mock.restore(),
+    };
+  }
+
+  /** A writer that hears readiness only when the test calls `ready()`. */
+  function cuedWriter() {
+    const cue = { ready: () => {} };
+    const w = new QsysWriter(svc, { ready: () => watch.ready(), current: (a) => watch.current(a), onReady: (cb) => ((cue.ready = cb), () => {}) });
+    w.momentaryCheck = async () => true;
+    return { w, cue };
+  }
+
+  /** Press on `w`, lose the Core, let the lease lapse while it is away, reconnect: the release is owed and the Core re-read. */
+  async function owedThenBack(w = writer, before: () => unknown = () => {}): Promise<void> {
+    await connect();
+    await openPanel();
+    assert.equal((await press(w)).ok, true);
+    await fake.dropClients();
+    await until(() => svc.transport === null, "disconnect");
+    mock.timers.tick(LEASE_EXPIRE_MS);
+    await until(() => w.owes(MUTE_ADDR), "the release owed");
+    await before();
+    mock.timers.tick(3_000);
+    await until(() => svc.transport !== null && watch.ready(), "reconnected and re-read");
+  }
+
+  test("a fresh press that reaches the Core while the owed release waits is not turned off by it, and keeps its lease", async () => {
+    const { w, cue } = cuedWriter();
+    const warn = capture("warn");
+    const log = capture("log");
+    const gate = gateLookups();
+    try {
+      await owedThenBack(w);
+      // The fresh press waits on its views read; the owed release on its allowlist reads.
+      let views: () => void = () => {};
+      w.momentaryCheck = () => new Promise<boolean>((r) => (views = () => r(true)));
+      const fresh = press(w);
+      gate.holdNext(2);
+      cue.ready();
+      await until(() => gate.held.length === 1, "the owed release's allowlist check");
+      gate.held.shift()!();
+      await until(() => gate.held.length === 1, "the owed release's write, parked before its send");
+      views();
+      assert.equal((await fresh).ok, true);
+      gate.held.shift()!();
+      await settle();
+      assert.deepEqual(muteSets(), [true, true], "the owed release turned off a press made after it");
+      assert.equal(coreMute(), true);
+      assert.equal(w.leases.has(MUTE_ADDR), true, "the fresh press lost its lease to the owed release");
+      assert.equal(w.owes(MUTE_ADDR), false);
+    } finally {
+      gate.restore();
+      warn.restore();
+      log.restore();
+      w.dispose();
+    }
+    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/mute not sent: another write to it came first/.test(l)), log.lines.join("\n"));
+  });
+
+  test("a press sent while a lapsed lease's release waits is not turned off by that release", async () => {
+    await connect();
+    assert.equal((await press()).ok, true);
+    const warn = capture("warn");
+    const log = capture("log");
+    const gate = gateLookups();
+    try {
+      gate.holdNext(1);
+      mock.timers.tick(LEASE_EXPIRE_MS); // the release is decided, and parks on its allowlist read
+      await until(() => gate.held.length === 1, "the release parked");
+      assert.equal((await press()).ok, true);
+      gate.held.shift()!();
+      await settle();
+    } finally {
+      gate.restore();
+      warn.restore();
+      log.restore();
+    }
+    assert.deepEqual(muteSets(), [true, true], "the lapsed press's release turned off the press after it");
+    assert.equal(coreMute(), true);
+    assert.equal(writer.leases.has(MUTE_ADDR), true, "the second press lost its lease");
+    assert.ok(log.lines.some((l) => /release of Lobby_Mixer\/mute was not sent: another write to it came first/.test(l)), log.lines.join("\n"));
+  });
+
+  test("a press whose answer lands after a later write was sent to the control takes no lease", async () => {
+    await connect();
+    fake.holdReplies = true;
+    const pressing = press();
+    await until(() => muteSets().length === 1, "the press sent");
+    const releasing = writer.write(req({ control: "mute", value: false }));
+    await until(() => muteSets().length === 2, "the release sent");
+    fake.holdReplies = false;
+    fake.releaseHeld();
+    await pressing;
+    await releasing;
+    assert.equal(writer.leases.has(MUTE_ADDR), false, "a press already released took a lease, so the server would release it again");
+  });
+
+  test("a press whose saved views cannot be read is refused cleanly, with a line, and nothing is sent", async () => {
+    writer.momentaryCheck = async () => {
+      throw new Error("disk unreadable");
+    };
+    await connect();
+    const warn = capture("warn");
+    let r;
+    try {
+      r = await press();
+    } finally {
+      warn.restore();
+    }
+    assert.equal(r.ok ? null : r.reason, "no-lease");
+    assert.deepEqual(muteSets(), [], "an unleasable momentary was pressed on");
+    assert.ok(warn.lines.some((l) => /write refused \(no-lease\): Lobby_Mixer\/mute was not pressed: the saved views could not be read .*disk unreadable/.test(l)), warn.lines.join("\n"));
+    assert.equal((await qsysWriteLog.list()).entries[0].result, "no-lease");
+    // A release (false) needs no lease and still goes.
+    assert.equal((await writer.write(req({ control: "mute", value: false, lease: true }))).ok, true);
+  });
+
+  test("an owed release is dropped, with a line, when the Core comes back with another design", async () => {
+    const warn = capture("warn");
+    try {
+      await owedThenBack(writer, () => void (fake.status.DesignCode = "design-2"));
+      await until(() => !writer.owes(MUTE_ADDR), "settled");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(muteSets(), [true], "a release owed under one design was sent under another");
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the Core's design has changed/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("an owed release is dropped, with a line, when the integration is pointed at another Core", async () => {
+    const other = new FakeQrcServer();
+    other.components = new Map([...fake.components].map(([k, v]) => [k, v.map((c) => ({ ...c }))]));
+    other.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value = true;
+    const otherPort = await other.start();
+    const warn = capture("warn");
+    try {
+      await connect();
+      await openPanel();
+      assert.equal((await press()).ok, true);
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => writer.owes(MUTE_ADDR), "the release owed");
+      svc.configure({ ...settings(), port: otherPort }, null);
+      await until(() => svc.transport !== null && watch.ready(), "connected to the other Core");
+      await until(() => !writer.owes(MUTE_ADDR), "settled");
+      await settle();
+    } finally {
+      warn.restore();
+      svc.stop();
+      await other.stop();
+    }
+    assert.equal(other.received.filter((r) => r.method === "Component.Set").length, 0, "a release owed to one Core was sent to another");
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the Core it was owed to is no longer the one configured/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("an owed release is dropped, with a line, when its control left the allowlist", async () => {
+    const warn = capture("warn");
+    try {
+      await owedThenBack(writer, () => qsysAllowlist.replace([GAIN, LEVEL]));
+      await until(() => !writer.owes(MUTE_ADDR), "settled");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(muteSets(), [true]);
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the control is no longer on the allowlist/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("an owed release whose control cannot be read is tried a bounded number of times, then dropped with a line", async () => {
+    const { w, cue } = cuedWriter();
+    const warn = capture("warn");
+    try {
+      await owedThenBack(w);
+      for (let i = 0; i < OWED_MAX_ATTEMPTS + 2; i++) fake.failNext("Component.GetControls", 8);
+      cue.ready();
+      for (let i = 1; i < OWED_MAX_ATTEMPTS; i++) {
+        await until(() => fake.received.filter((r) => r.method === "Component.GetControls").length >= i, `read ${i}`);
+        await settle();
+        assert.equal(w.owes(MUTE_ADDR), true, `given up after ${i} unreadable tries`);
+        mock.timers.tick(OWED_RETRY_MS * 2 ** (i - 1));
+      }
+      await until(() => !w.owes(MUTE_ADDR), "given up");
+    } finally {
+      warn.restore();
+      w.dispose();
+    }
+    assert.deepEqual(muteSets(), [true]);
+    assert.ok(warn.lines.some((l) => new RegExp(`owed release of Lobby_Mixer/mute dropped: could not read it .*, ${OWED_MAX_ATTEMPTS} times`).test(l)), warn.lines.join("\n"));
+  });
+
+  test("a release refused offline just as readiness returns is tried again shortly, not left for the next reconnect", async () => {
+    // Readiness answers false once (the release's own check) and is back by the
+    // time the release is made owed; onReady has already fired, so it never comes.
+    let falseOnce = false;
+    const w = new QsysWriter(svc, {
+      ready: () => (falseOnce ? ((falseOnce = false), false) : watch.ready()),
+      current: (a) => watch.current(a),
+      onReady: () => () => {},
+    });
+    w.momentaryCheck = async () => true;
+    const warn = capture("warn");
+    try {
+      await connect();
+      assert.equal((await press(w)).ok, true);
+      falseOnce = true;
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => w.owes(MUTE_ADDR), "owed after an offline refusal");
+      mock.timers.tick(OWED_RETRY_MS);
+      await until(() => !w.owes(MUTE_ADDR), "the retry");
+      await settle();
+      assert.deepEqual(muteSets(), [true, false]);
+      assert.equal(coreMute(), false, "the owed release waited for a reconnect that may be days away");
+    } finally {
+      warn.restore();
+      w.dispose();
+    }
+  });
+
+  test("a release the Core refuses on a live connection is tried again shortly, not at the next reconnect", async () => {
+    await connect();
+    assert.equal((await press()).ok, true);
+    const warn = capture("warn");
+    try {
+      fake.failNext("Component.Set", 8);
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => writer.owes(MUTE_ADDR), "owed after the Core refused it");
+      assert.equal(coreMute(), true);
+      mock.timers.tick(OWED_RETRY_MS);
+      await until(() => !writer.owes(MUTE_ADDR), "the retry");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(muteSets(), [true, false, false]);
+    assert.equal(coreMute(), false, "the refused release was never tried again on the live connection");
+    assert.equal((await qsysWriteLog.list()).entries[0].cause, "lease owed");
   });
 });

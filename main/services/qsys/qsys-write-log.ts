@@ -54,6 +54,7 @@ export const WRITE_LOG_SAVE_ERROR = "the write log could not be saved, so recent
 const BEFORE_SEND: Record<WriteRefusal, boolean> = {
   "bad-value": true,
   "core-error": false,
+  "no-lease": true,
   "no-range": true,
   "not-allowed": true,
   "not-in-design": true,
