@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import net from "node:net";
 import { after, afterEach, before, beforeEach, mock, test } from "node:test";
 import { FakeQrcServer } from "./fake-qrc-server.js";
 import { QsysService } from "./qsys-service.js";
@@ -39,7 +40,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   svc.stop();
-    await fake.stop();
+  await fake.stop();
 });
 
 /** The fake pushes EngineStatus only on accept; reach into it to push a change. */
@@ -66,6 +67,7 @@ test("connects, logs on when a user is set, reads status and the catalog", async
   await until(() => svc.getStatus().connected && svc.getCatalog() !== null, "connected + catalog");
   const status = svc.getStatus();
   assert.equal(status.state, "connected");
+  assert.ok(!JSON.stringify(status).includes("pw"), "the status payload carries the password");
   assert.equal(status.designName, "Test Design");
   assert.equal(status.isEmulator, true);
   assert.ok(status.catalogAt !== null);
@@ -78,7 +80,7 @@ test("connects, logs on when a user is set, reads status and the catalog", async
 });
 
 test("sends NoOp after 30 s of silence", async () => {
-    svc.configure(settings(), null);
+  svc.configure(settings(), null);
   await until(() => svc.getStatus().connected, "connected");
   assert.ok(!fake.received.some((r) => r.method === "NoOp"));
   mock.timers.tick(29_000);
@@ -89,7 +91,7 @@ test("sends NoOp after 30 s of silence", async () => {
 });
 
 test("a send through the transport resets the silence timer", async () => {
-    svc.configure(settings(), null);
+  svc.configure(settings(), null);
   await until(() => svc.getStatus().connected, "connected");
   mock.timers.tick(20_000);
   await svc.transport!.send("StatusGet");
@@ -104,7 +106,7 @@ test("logon failure (code 10) reports error and schedules a reconnect, no catalo
   fake.requireLogon = { User: "op", Password: "pw" };
   const states: string[] = [];
   svc.setConnectionListener((s) => states.push(s));
-    svc.configure(settings({ user: "op" }), "wrong");
+  svc.configure(settings({ user: "op" }), "wrong");
   await until(() => states.includes("error"), "error report");
   assert.equal(svc.getCatalog(), null);
   assert.equal(svc.getStatus().connected, false);
@@ -150,6 +152,7 @@ test("socket drop reports reconnecting then reconnects with backoff", async () =
   await until(() => svc.getStatus().state === "reconnecting", "reconnecting");
   assert.equal(svc.getStatus().connected, false);
   assert.equal(svc.transport, null);
+  assert.equal(svc.getCatalog(), null, "the catalog does not outlive its connection");
   mock.timers.tick(3_000);
   await until(() => svc.getStatus().state === "connected", "reconnected");
 });
@@ -174,8 +177,59 @@ test("test() never stores the password and reports component count", async () =>
   assert.equal(svc.getStatus().state, "offline");
   assert.equal(svc.transport, null);
   assert.equal(svc.getCatalog(), null);
-  assert.ok(!JSON.stringify(svc).includes("pw"), "the password is not held on the instance");
+  assert.ok(!JSON.stringify(svc).includes("pw"), "test() did not leave the password on the instance");
   const bad = await svc.test(settings({ user: "op" }), "nope");
   assert.equal(bad.ok, false);
   if (!bad.ok) assert.ok(!bad.error.includes("nope"));
+});
+
+test("configure() twice back to back leaves exactly one connection", async () => {
+  svc.configure(settings(), null);
+  svc.configure(settings(), null);
+  await until(() => svc.getStatus().connected, "connected");
+  // The superseded dial's socket is closed, not leaked.
+  await until(() => fake["sessions"].size === 1, "one live session");
+  await settle();
+  assert.equal(fake["sessions"].size, 1);
+});
+
+test("stop() during a dial that then fails reports and logs nothing", async () => {
+  // A port nothing listens on: the dial is refused after stop() has landed.
+  const probe = net.createServer();
+  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+  const deadPort = (probe.address() as net.AddressInfo).port;
+  await new Promise<void>((r) => probe.close(() => r()));
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    const states: string[] = [];
+    svc.setConnectionListener((s) => states.push(s));
+    svc.configure(settings({ port: deadPort }), null);
+    svc.stop();
+    await settle();
+    assert.deepEqual(states, [], "a dial that failed after stop() reported a state");
+    assert.equal(svc.getStatus().state, "offline");
+    assert.equal(warn.mock.calls.length, 0, "a dial that failed after stop() logged");
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("the transport stays closed to other code until the catalog has been read", async () => {
+  fake.holdReplies = true;
+  svc.configure(settings(), null);
+  await until(() => fake.received.some((r) => r.method === "StatusGet"), "StatusGet sent");
+  await settle();
+  assert.equal(svc.transport, null, "transport was exposed before the connect sequence finished");
+  assert.equal(svc.getCatalog(), null);
+  assert.equal(svc.getStatus().connected, false);
+});
+
+test("an error the Core answered with is not reported as unreachable", async () => {
+  fake.failNext("Component.GetComponents", 7);
+  const messages: (string | null)[] = [];
+  svc.setConnectionListener((_s, m) => messages.push(m));
+  svc.configure(settings(), null);
+  await until(() => messages.length > 0, "a report");
+  assert.match(messages[0] ?? "", /answered with an error/);
+  assert.doesNotMatch(messages[0] ?? "", /Can't reach/);
 });

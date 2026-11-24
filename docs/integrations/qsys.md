@@ -16,6 +16,10 @@ reads the design's components and controls.
   or a Core restart), the catalog is read again.
 - The integration never calls a method that changes the design.
 
+`/log` shows the decisions, tagged `[qsys]`: `connected to <design> (<n> components,
+emulator=<bool>)`, `logon refused`, `connection lost: <reason>` and `design changed,
+refreshing catalog`.
+
 Status broadcasts on the `qsys:status` SSE channel: connected, reconnecting or
 offline, the design name, whether the Core is an emulator, and when the catalog
 was last read.
