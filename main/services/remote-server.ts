@@ -20,6 +20,7 @@ import {
   setNamedSubscriberCheck,
   setSubscriberCheck,
   setSubscriberCount,
+  streamClosed,
   subscriptionsChanged,
 } from "./broadcaster.js";
 import { EventPollHub, serializePollResponse, type PollFrame } from "./event-poll.js";
@@ -401,7 +402,10 @@ const eventPoll = new EventPollHub({
   // A cid's reported channel filter outlives its stream, so drop it with the
   // client the way the stream's close handler does — otherwise every panel that
   // ever polled leaves an entry behind for the life of the process.
-  onExpire: (cid) => channelReports.release(cid, POLL_CLAIM),
+  onExpire: (cid) => {
+    channelReports.release(cid, POLL_CLAIM);
+    streamClosed(cid);
+  },
 });
 
 // Currently-connected Companion-module clients (SSE streams opened with the
@@ -1223,7 +1227,10 @@ export class RemoteServer {
       req.on("close", () => {
         sseClients.delete(res);
         console.log(`[events] stream client closed (${sseClients.size} streams)`);
-        if (cid) channelReports.release(cid, res);
+        if (cid) {
+          channelReports.release(cid, res);
+          streamClosed(cid);
+        }
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);

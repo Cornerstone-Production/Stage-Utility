@@ -23,6 +23,8 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import type { QsysAddress, QsysBinding, QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
+import { LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
+import { atBottom, faderScale, stepFrom, TICK_MARKS_DB, travelOf, valueAt } from "./fader-scale";
 import {
   DRAG_COALESCE_MS,
   QsysPanelContext,
@@ -231,6 +233,9 @@ function PressButton({
   const gesture = useRef<GestureHandle | null>(null);
   /** The press that fired and has not been released: its epoch. */
   const fired = useRef<number | null>(null);
+  /** What is pressing it now. One press at a time: a second finger, or a key while a
+   *  finger is down, is ignored, so it cannot restart the hold or end the first press. */
+  const owner = useRef<"pointer" | "key" | null>(null);
   const bar = useRef<HTMLDivElement | null>(null);
 
   const clearHold = () => {
@@ -267,13 +272,15 @@ function PressButton({
     fired.current = null;
     if (at !== null && onRelease && panel && panel.epoch === at) onRelease();
   };
-  const begin = () => {
-    if (disabled || !panel) return;
+  /** Start a press by `by`; false when one is already in progress. */
+  const begin = (by: "pointer" | "key"): boolean => {
+    if (disabled || !panel || owner.current) return false;
+    owner.current = by;
     const at = panel.epoch;
     if (!hold) {
       // Only a momentary acts on the press itself; a plain trigger fires on click.
       if (onRelease) fire(at);
-      return;
+      return true;
     }
     setHoldEpoch(at);
     timer.current = setTimeout(() => {
@@ -281,8 +288,12 @@ function PressButton({
       setHoldEpoch(null);
       fire(at);
     }, HOLD_MS);
+    return true;
   };
-  const end = () => {
+  /** End the press `by` started; a different source's end is ignored. */
+  const end = (by: "pointer" | "key") => {
+    if (owner.current !== by) return;
+    owner.current = null;
     gesture.current = null;
     clearHold();
     setHoldEpoch(null);
@@ -292,17 +303,17 @@ function PressButton({
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (disabled || (!hold && !onRelease)) return;
     const el = e.currentTarget;
-    begin();
+    if (!begin("pointer")) return;
     gesture.current = bindGesture(el, e.pointerId, {
       // Sliding off the button lets go of it, as lifting the finger does.
       move: (ev) => {
         const r = el.getBoundingClientRect();
         if (r.width > 0 && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom)) {
           gesture.current?.cancel();
-          end();
+          end("pointer");
         }
       },
-      end,
+      end: () => end("pointer"),
     });
   };
   const isKey = (key: string) => key === " " || key === "Enter";
@@ -316,13 +327,15 @@ function PressButton({
       onKeyDown={(e) => {
         if (!isKey(e.key) || e.repeat || (!hold && !onRelease)) return;
         e.preventDefault();
-        begin();
+        begin("key");
       }}
       onKeyUp={(e) => {
         if (!isKey(e.key) || (!hold && !onRelease)) return;
         e.preventDefault();
-        end();
+        end("key");
       }}
+      // Focus leaving mid-press means its keyup never comes here: let go now.
+      onBlur={() => end("key")}
       onClick={() => {
         if (!hold && !onRelease && !disabled && panel) fire(panel.epoch);
       }}
@@ -387,6 +400,20 @@ function TriggerButton({
   const boolean = isBooleanControl(info, v.value);
   const canInput = interactive && writeState === "live";
   const isMomentary = !!momentary && boolean;
+  const panel = useQsysPanelContext();
+  const { epoch } = useQsysPanelState();
+
+  // A momentary's press is leased: the server lets go of the control itself if the
+  // renewals stop (qsys-leases.ts). Renewed while the press is held and nothing broke.
+  const renewal = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopRenewing = () => {
+    if (renewal.current) clearInterval(renewal.current);
+    renewal.current = null;
+  };
+  useEffect(() => stopRenewing, []);
+  // A break stops the renewals; the server's lease then lapses and it releases the control.
+  useEffect(() => stopRenewing(), [epoch]);
+
   return (
     <PressButton
       hold={!!hold || info.hold}
@@ -395,12 +422,27 @@ function TriggerButton({
       label={label}
       holdLabel={holdWords(label)}
       onFire={() => {
-        void write(ADDR(binding)!, true, { final: true }).then((r) => {
+        if (isMomentary && panel) {
+          const at = panel.epoch;
+          stopRenewing();
+          renewal.current = setInterval(() => {
+            if (panel.epoch !== at) stopRenewing();
+            else void panel.renewLease(ADDR(binding)!);
+          }, LEASE_RENEW_MS);
+        }
+        void write(ADDR(binding)!, true, { final: true, lease: isMomentary }).then((r) => {
           // A pure trigger reports no state: show the confirmed write as a flash, never as lit.
           if (r.ok && !isMomentary && (lit === null || !boolean)) doFlash();
         });
       }}
-      onRelease={isMomentary ? () => void write(ADDR(binding)!, false, { final: true }) : undefined}
+      onRelease={
+        isMomentary
+          ? () => {
+              stopRenewing();
+              void write(ADDR(binding)!, false, { final: true });
+            }
+          : undefined
+      }
       style={{ ...(muted && lit !== true && !flash ? { color: "var(--color-fg-muted)", borderColor: "var(--color-line-strong)" } : {}), ...style }}
     />
   );
@@ -408,8 +450,6 @@ function TriggerButton({
 
 // ── Fader ───────────────────────────────────────────────────────────────────
 
-/** The staff strip's scale (Staff.dc.html), each mark drawn where its level is. */
-const TICKS_DB = [12, 0, -12, -24, -60];
 
 interface FaderProps {
   binding: QsysBinding | null;
@@ -442,6 +482,8 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   const drag = useRef<{ epoch: number; gesture: GestureHandle; moved: boolean; last: number } | null>(null);
   /** Releases whose final write has not answered: the thumb holds the finger's value until they have. */
   const pendingFinals = useRef(0);
+  /** Bumped by a break: a release answered after it no longer speaks for the thumb. */
+  const finalGen = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -452,28 +494,37 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   }, []);
 
   // A break (the stream dropped, the page hid, the Core went away) ends a drag in
-  // progress, and the fader shows the Core's value once the panel is read again.
+  // progress and lets go of the finger's value, even with a release still out: the
+  // fader shows the Core's value once the panel is read again.
+  const [seenEpoch, setSeenEpoch] = useState(epoch);
+  if (epoch !== seenEpoch) {
+    setSeenEpoch(epoch);
+    setLocal(null);
+  }
   useEffect(() => {
     const d = drag.current;
     if (d && epoch !== d.epoch) {
       d.gesture.cancel();
       drag.current = null;
-      setLocal(null);
     }
+    finalGen.current++;
+    pendingFinals.current = 0;
   }, [epoch]);
 
   const dense = density === "dense";
   const range = info.range;
-  const lo = range ? Math.max(range.min, info.limits.min ?? range.min) : 0;
-  const hi = range ? Math.min(range.max, info.limits.max ?? range.max) : 0;
-  const norm = (x: number) => (range ? clamp01((x - range.min) / (range.max - range.min)) : 0);
-  const writable = interactive && writeState === "live" && typeof v.value === "number";
+  // The fader's own scale (fader-scale.ts): linear in dB from -60 (or the allowlist's
+  // minimum) to the allowlist's maximum, the Core's minimum at the bottom stop.
+  const scale = faderScale(range, info.limits);
+  const norm = (x: number) => (scale ? travelOf(scale, x) : 0);
+  const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
 
   // What is on screen: the finger's value while a gesture is open, else the Core's.
   const shown = local ?? (typeof v.value === "number" ? v.value : null);
-  const level = shown === null ? (v.position ?? 0) : range ? norm(shown) : (v.position ?? 0);
-  const limitAt = range && hi < range.max ? norm(hi) : null;
-  const atLimit = range !== null && shown !== null && limitAt !== null && shown >= hi - 1e-6;
+  const level = shown === null ? (v.position ?? 0) : scale ? norm(shown) : (v.position ?? 0);
+  // The allowlist's limit is the top of travel; marked there when it stops short of the Core's own.
+  const limitAt = scale && range && scale.top < range.max ? 1 : null;
+  const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
   const offline = v.state === "offline";
 
   const snapBack = () => {
@@ -496,6 +547,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     // touch in that moment must not jump back to the old value.
     const startValue = shown;
     const startNorm = norm(startValue);
+    const s = scale!;
     const startAt = vertical ? e.clientY : e.clientX;
     const epoch = panel.epoch;
     // Relative: touching the track does not move the value. Only movement does.
@@ -504,8 +556,8 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
         const d = drag.current;
         if (!d || panel.epoch !== d.epoch) return;
         const moved = vertical ? startAt - ev.clientY : ev.clientX - startAt;
-        const n = Math.min(norm(hi), Math.max(norm(lo), startNorm + moved / length));
-        const next = Math.round((range!.min + n * (range!.max - range!.min)) * 100) / 100;
+        const n = Math.min(1, Math.max(0, startNorm + moved / length));
+        const next = Math.round(valueAt(s, n) * 100) / 100;
         if (next === d.last) return;
         d.moved = true;
         d.last = next;
@@ -524,7 +576,9 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
         }
         // The release always sends the last value, marked final.
         pendingFinals.current++;
+        const gen = finalGen.current;
         void write(addr!, d.last, { final: true }).then(() => {
+          if (gen !== finalGen.current) return; // a break came first: the thumb is the Core's again
           pendingFinals.current--;
           // A landed write's read-back is already in the panel; a refusal shows the Core's value.
           if (mounted.current && drag.current === null && pendingFinals.current === 0) setLocal(null);
@@ -536,8 +590,8 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
 
   /** A step from the value on screen: the -/+ buttons and the arrow keys. */
   const step = (dir: 1 | -1) => {
-    if (!writable || shown === null || drag.current) return;
-    const next = Math.min(hi, Math.max(lo, shown + dir * (stepDb > 0 ? stepDb : 1)));
+    if (!writable || shown === null || drag.current || !scale) return;
+    const next = stepFrom(scale, shown, dir, stepDb > 0 ? stepDb : 1);
     if (next === shown) return;
     void write(addr!, Math.round(next * 100) / 100, { final: true });
   };
@@ -557,10 +611,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
       role="slider"
       aria-label={name}
       aria-orientation={vertical ? "vertical" : "horizontal"}
-      aria-valuemin={range ? lo : undefined}
-      aria-valuemax={range ? hi : undefined}
+      aria-valuemin={scale ? scale.bottom : undefined}
+      aria-valuemax={scale ? scale.top : undefined}
       aria-valuenow={shown ?? undefined}
-      aria-valuetext={shown === null ? undefined : `${formatDb(shown)} dB`}
+      aria-valuetext={shown === null ? undefined : scale && atBottom(scale, shown) ? "-inf dB" : `${formatDb(shown)} dB`}
       aria-disabled={writable ? undefined : true}
       tabIndex={writable ? 0 : -1}
       onPointerDown={onPointerDown}
@@ -579,9 +633,9 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
         cursor: writable ? "grab" : "default",
       }}
     >
-      {dense && vertical && range && (
+      {dense && vertical && scale && (
         <div aria-hidden style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "1.8em", ...MONO, fontSize: 9, color: "var(--color-fg-subtle)" }}>
-          {TICKS_DB.filter((t) => t >= range.min && t <= range.max).map((t) => (
+          {TICK_MARKS_DB.filter((t) => t >= scale.floor && t <= scale.top).map((t) => (
             <span key={t} data-tick style={{ position: "absolute", left: 0, top: `calc(${along(norm(t))} + ${thumbAlong / 2}px)`, transform: "translateY(-50%)" }}>
               {t > 0 ? `+${t}` : t}
             </span>
@@ -646,7 +700,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   const meterBars = meters.filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical={vertical} thin={dense} />);
   const db = showDb && (
     <span data-db style={{ ...MONO, fontSize: dense ? 12 : "0.5em", color: atLimit ? "var(--color-warn-9)" : "var(--color-fg-muted)", minHeight: "1.2em" }}>
-      {muted ? (dense ? "mute" : "Muted") : formatDb(shown)}
+      {muted ? (dense ? "mute" : "Muted") : shown !== null && scale && atBottom(scale, shown) ? "-inf" : formatDb(shown)}
     </span>
   );
 

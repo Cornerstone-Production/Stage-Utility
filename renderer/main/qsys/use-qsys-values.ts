@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } f
 
 import type { WriteResult } from "@main/services/qsys/qsys-write";
 import { addressKey, isReadOnlyDirection, type PanelKind, type QsysAddress } from "@main/types/qsys";
-import { getStreamStatus, invoke, onNotification, onStreamStatusChange, whenSubscribed } from "../../lib/api";
+import { getStreamStatus, invoke, onNotification, onStreamStatusChange, streamClientId, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
@@ -120,6 +120,8 @@ interface Held {
   final: boolean;
   epoch: number;
   waiters: ((r: WriteResult) => void)[];
+  /** A momentary press: the server holds a lease the page renews (renewLease). */
+  lease: boolean;
 }
 
 /** The Core's echo of a value this page sent: equal, within its float precision. */
@@ -154,6 +156,8 @@ export class QsysPanel {
   /** Bumped by every break; a resync whose acknowledgement belongs to an older one is ignored. */
   private syncGen = 0;
   private ackedGen = -1;
+  /** Bumped when the Core announces a new catalog: a read sent before it may carry the old one. */
+  private catalogGen = 0;
   private allowFailing = false;
   private lastReadAt = 0;
   private ready = false;
@@ -367,8 +371,13 @@ export class QsysPanel {
   private resync(): void {
     this.hydrated = false;
     const gen = ++this.syncGen;
-    void whenSubscribed().then(() => {
+    void whenSubscribed().then((acked) => {
       if (gen !== this.syncGen || this.refs === 0) return;
+      if (!acked) {
+        // Read anyway: a panel must not stay closed for ever. Said, because a change made
+        // before the server took this page's channels may be missed until it changes again.
+        logToServer("qsys", `panel ${this.id}: the server did not acknowledge this page's channels in time; reading anyway`);
+      }
       this.ackedGen = gen;
       this.hydrate();
     });
@@ -397,6 +406,7 @@ export class QsysPanel {
     // Only a read sent after the acknowledgement may open input (see `hydrated`).
     const opens = this.ackedGen === this.syncGen;
     const gen = this.syncGen;
+    const catalogGen = this.catalogGen;
     this.lastReadAt = Date.now();
     const [values, allow] = await Promise.allSettled([
       invoke<ValuesAnswer>("qsys:panelValues", { panel: this.id }),
@@ -421,7 +431,9 @@ export class QsysPanel {
       if (!this.allowFailing) logToServer("qsys", `panel ${this.id}: the allowlist could not be read (${String(allow.reason)})`);
       this.allowFailing = true;
     }
-    if (catalog.status === "fulfilled" && catalog.value) {
+    // A new catalog announced while this read was out: what it read may be the old one.
+    const catalogCurrent = catalogGen === this.catalogGen;
+    if (catalog.status === "fulfilled" && catalog.value && catalogCurrent) {
       this.readCatalog(catalog.value);
       this.catalogFailing = false;
     }
@@ -449,7 +461,7 @@ export class QsysPanel {
     this.hydratedAt = ++this.stamp;
     for (const c of this.buffered ?? []) this.store(c);
     // A break during the read: what it read stays on screen, but it opens nothing.
-    if (opens && gen === this.syncGen) this.hydrated = true;
+    if (opens && gen === this.syncGen && catalogCurrent) this.hydrated = true;
     this.ready = values.value.ready === true;
     const catalogFailed = catalog.status === "rejected";
     if (catalogFailed) {
@@ -547,6 +559,7 @@ export class QsysPanel {
       // A new catalog (a redeploy, a Core reboot): ranges, types and choices may all
       // have changed. Close input until it is read again.
       if (known) {
+        this.catalogGen++;
         this.breakOff();
         this.hydrated = false;
         this.bump();
@@ -615,7 +628,7 @@ export class QsysPanel {
    * soon as the one before it has answered. Refused here, unsent, when the panel
    * is not live; discarded, unsent, when a break comes while it waits.
    */
-  write(a: QsysAddress, value: number | boolean | string, opts: { final?: boolean; coalesceMs?: number } = {}): Promise<WriteResult> {
+  write(a: QsysAddress, value: number | boolean | string, opts: { final?: boolean; coalesceMs?: number; lease?: boolean } = {}): Promise<WriteResult> {
     const final = opts.final !== false;
     if (!this.live) return Promise.resolve(notSent("the sound system is offline or still being read; nothing was sent"));
     const k = addressKey(a);
@@ -624,7 +637,7 @@ export class QsysPanel {
     lane.coalesceMs = opts.coalesceMs ?? DRAG_COALESCE_MS;
     return new Promise<WriteResult>((resolve) => {
       const waiters = [...(lane.held?.waiters ?? []), resolve];
-      lane.held = { value, final, epoch: this.epoch, waiters };
+      lane.held = { value, final, epoch: this.epoch, waiters, lease: opts.lease === true };
       this.pump(a, lane);
     });
   }
@@ -652,7 +665,14 @@ export class QsysPanel {
     lane.lastSentAt = Date.now();
     const sentAt = this.stamp;
     if (!held.final) lane.echoes.push(held.value);
-    const body = { component: a.component, control: a.control, value: held.value, panelId: this.id, final: held.final };
+    const body = {
+      component: a.component,
+      control: a.control,
+      value: held.value,
+      panelId: this.id,
+      final: held.final,
+      ...(held.lease ? { lease: true, cid: streamClientId() } : {}),
+    };
     void invoke<WriteResult>("qsys:write", body)
       .catch((err: unknown): WriteResult => {
         logToServer("qsys", `panel ${this.id}: a write to ${a.component}/${a.control} did not reach the server (${String(err)})`);
@@ -676,6 +696,18 @@ export class QsysPanel {
         }
         this.pump(a, lane);
       });
+  }
+
+  /**
+   * Renew a held momentary's lease (see main/services/qsys/qsys-leases.ts). Only
+   * while the press is still held and nothing broke; a failure is the server's to
+   * notice (the lease lapses and it releases the control), so it is not retried.
+   */
+  renewLease(a: QsysAddress): Promise<boolean> {
+    return invoke<{ held?: unknown }>("qsys:lease", { component: a.component, control: a.control }).then(
+      (r) => r.held === true,
+      () => false,
+    );
   }
 
   /**
@@ -776,7 +808,7 @@ const refuseAll = (): Promise<WriteResult> => Promise.resolve(notSent("this obje
  * The write function for this panel. Call it only from a pointer gesture: that
  * is the rule that keeps a page from sending its own state back to the Core.
  */
-export function useQsysWrite(): (a: QsysAddress, value: number | boolean | string, opts?: { coalesceMs?: number; final?: boolean }) => Promise<WriteResult> {
+export function useQsysWrite(): (a: QsysAddress, value: number | boolean | string, opts?: { coalesceMs?: number; final?: boolean; lease?: boolean }) => Promise<WriteResult> {
   const panel = useContext(QsysPanelContext);
   return useMemo(() => (panel ? (a, value, opts) => panel.write(a, value, opts) : refuseAll), [panel]);
 }

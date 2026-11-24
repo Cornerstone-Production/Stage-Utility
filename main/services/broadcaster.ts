@@ -87,6 +87,25 @@ export function channelSubscriberCount(channel: string): number {
  * `subscriptionsChanged` whenever its set of clients or their filters moves,
  * and a producer starts or stops itself from there. See cue-live.ts.
  */
+/**
+ * A client's event stream closed (a stream's connection ended, or a poll client
+ * expired), by its cid. For state a page holds only while connected: a Q-SYS
+ * momentary pressed on it is released (qsys-leases.ts).
+ */
+const streamClosedListeners: ((cid: string) => void)[] = [];
+export function addStreamClosedListener(cb: (cid: string) => void): void {
+  streamClosedListeners.push(cb);
+}
+export function streamClosed(cid: string): void {
+  for (const cb of streamClosedListeners) {
+    try {
+      cb(cid);
+    } catch (err) {
+      console.error("[broadcaster] stream-closed listener error:", err);
+    }
+  }
+}
+
 const subscriptionListeners: (() => void)[] = [];
 export function addSubscriptionListener(cb: () => void): void {
   subscriptionListeners.push(cb);

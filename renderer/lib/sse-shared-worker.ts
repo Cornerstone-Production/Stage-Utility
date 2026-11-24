@@ -271,6 +271,9 @@ ctx.onconnect = (e: MessageEvent) => {
     }
   };
   port.start();
+  // Which client id the shared stream carries: a page that holds something only while
+  // connected (a Q-SYS momentary's lease) names it, so the stream closing ends it.
+  port.postMessage({ type: "cid", cid });
   port.postMessage({ type: "stream", delivering: streamDelivering });
   ensureEs();
   report();

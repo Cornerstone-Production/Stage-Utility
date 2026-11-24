@@ -19,6 +19,7 @@
 // value when the gesture started. Refusals checked before sending write their
 // [qsys] line at a limited rate (an OutageLog: see refusalLine).
 
+import { addStreamClosedListener } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
@@ -28,6 +29,7 @@ import type { QrcControl } from "./qrc-types.js";
 import { type AllowEntry, isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
+import { QsysLeases, type Lease, type LeaseEnd } from "./qsys-leases.js";
 import { PRE_SEND_REFUSALS, qsysWriteLog } from "./qsys-write-log.js";
 
 export interface WriteRequest {
@@ -50,6 +52,16 @@ export interface WriteRequest {
    * absent) records it. A refusal is always recorded.
    */
   final?: boolean;
+  /**
+   * A momentary press (true to a Boolean) that the page will renew while held.
+   * When it lands, the server holds a lease and releases the control itself if
+   * the renewals stop or `cid`'s event stream closes (qsys-leases.ts).
+   */
+  lease?: boolean;
+  /** The pressing page's event-stream client id, so its stream closing ends the lease. */
+  cid?: string | null;
+  /** Why the server wrote this itself (a lease ending); in the write log. */
+  cause?: LeaseEnd;
 }
 
 export type WriteRefusal = "not-allowed" | "not-in-design" | "read-only" | "no-range" | "offline" | "bad-value" | "core-error";
@@ -185,11 +197,32 @@ export class QsysWriter {
   /** Open gestures by remote, panel and address, oldest first. */
   private readonly gestures = new Map<string, Gesture>();
 
+  /** Momentary presses the server will release if the page cannot. */
+  readonly leases = new QsysLeases((lease, why) => void this.releaseLease(lease, why));
+
   constructor(
     private readonly source: WriteSource,
     private readonly watch: WriteReadiness,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /** Write a lapsed momentary's release, through every check, as its own write-log entry. */
+  private async releaseLease(lease: Lease, why: LeaseEnd): Promise<void> {
+    const where = `${lease.component}/${lease.control}`;
+    const because = why === "lease expired" ? "no renewal from the pressing page" : "the pressing page's event stream closed";
+    console.warn(`[qsys] momentary ${scrub(where)} released by the server: ${scrub(because)}`);
+    const result = await this.write({
+      component: lease.component,
+      control: lease.control,
+      value: false,
+      panelId: lease.panelId,
+      device: `server (${why})`,
+      remote: lease.remote,
+      final: true,
+      cause: why,
+    });
+    if (!result.ok) console.warn(`[qsys] the server's release of ${scrub(where)} was refused (${scrub(result.reason)}); it may still be on at the Core`);
+  }
 
   private connectionKind(t: QrcTransport | null): string {
     if (!t) return "none";
@@ -235,6 +268,7 @@ export class QsysWriter {
         from,
         to,
         result: logAs,
+        ...(req.cause ? { cause: req.cause } : {}),
       });
       return result;
     };
@@ -273,6 +307,9 @@ export class QsysWriter {
     const address = { component, control };
     from = this.gestureFrom(`${req.remote}\u0000${req.panelId ?? ""}\u0000${addressKey(address)}`, final, () => this.watch.current([address]).get(addressKey(address))?.Value ?? null);
     to = checked.send;
+    // Any write to a held momentary ends its lease: the page's release, or someone's.
+    // A press that takes a lease starts a new one once it lands (below).
+    this.leases.cancel(address);
     const sending = t.send("Component.Set", { Name: component, Controls: [{ Name: control, Value: checked.send }], ResponseValues: true });
 
     let reply: unknown;
@@ -302,11 +339,16 @@ export class QsysWriter {
       clamped: checked.clamped,
     };
     if (typeof back.Position === "number") result.position = back.Position;
+    if (req.lease && checked.send === true) {
+      this.leases.hold({ component, control, cid: req.cid ?? null, panelId: req.panelId, device: req.device, remote: req.remote });
+    }
     return finish(result, !matched ? "mismatch" : checked.clamped ? "clamped" : "ok");
   }
 }
 
 export const qsysWriter = new QsysWriter(qsysService, qsysWatch);
+// A pressing page's stream closing releases its momentaries.
+addStreamClosedListener((cid) => qsysWriter.leases.streamClosed(cid));
 
 /** Write one control, checked against the allowlist and the connection. See QsysWriter. */
 export function writeControl(req: WriteRequest): Promise<WriteResult> {

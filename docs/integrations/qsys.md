@@ -174,6 +174,23 @@ address is the request's own, not its user agent, which a client can change at w
 A write that reached the Core, including a `core-error` that may have landed, always
 keeps its own entry and value.
 
+## Momentary buttons
+
+A button bound to a Boolean control is a momentary: on while pressed, off on
+release. The release is the page's to send, and a page that cannot send it (an iPad
+asleep mid-press, a dropped connection, a closed tab) never sends it later. So the
+press is sent with `lease: true` and the page's event-stream id, and when it lands
+the server holds a lease on the control. While the button stays down the page
+renews it about once a second (`POST /api/qsys/lease`). The server writes the
+release itself when no renewal arrives for 2 seconds, or at once when the pressing
+page's event stream closes. The page's own release, or any other write to the
+control, ends the lease with no extra write. One lease per control: a second press
+takes it over.
+
+The server's release is a write like any other, with every allowlist, type and
+range check, and its own write-log entry: device `server (lease expired)` or
+`server (stream closed)`, and `cause` saying which.
+
 ## What it never does
 
 It never calls a method that changes the design: no components are added, no designs
@@ -197,6 +214,8 @@ Look at `/log` and filter for `[qsys]`.
 | `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. Each id is logged once, then every 15 minutes with a count; past eight ids they share one line. |
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
+| `momentary <component>/<control> released by the server: <why>` | A momentary's page stopped renewing its press, or its event stream closed, and the server turned the control off itself. The write log has the entry. |
+| `the server's release of <component>/<control> was refused (<reason>); it may still be on at the Core` | The server could not write a lapsed momentary's release (the Core offline, the control taken off the allowlist). Check the control at the Core. |
 | `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |

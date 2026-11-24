@@ -244,6 +244,31 @@ describe("/api/qsys", () => {
     await assert.rejects(write(big), (err: unknown) => err instanceof BodyTooLargeError);
   });
 
+  test("a momentary press over the route takes a lease; renewals over /api/qsys/lease hold it; its stream closing releases it", async () => {
+    const { streamClosed } = await import("../broadcaster.js");
+    const { qsysWriter } = await import("../qsys/qsys-write.js");
+    for (const [what, body] of [
+      ["lease not boolean", { component: "Lobby_Mixer", control: "mute", value: true, lease: "yes" }],
+      ["cid a number", { component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: 5 }],
+    ] as const) {
+      assert.equal((await quietly(() => write(body))).status, 400, `${what} was not a 400`);
+    }
+    const mute = () => fake.received.filter((r) => r.method === "Component.Set" && (r.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").length;
+    const before = mute();
+    const press = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9" }));
+    assert.equal((press.json as { ok: boolean }).ok, true);
+    const renew = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute" } });
+    assert.deepEqual(renew.json, { held: true });
+    const other = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "gain" } });
+    assert.deepEqual(other.json, { held: false });
+    // The server's own wiring: a closed stream reaches the writer's leases.
+    await quietly(async () => {
+      streamClosed("page-9");
+      await until(() => mute() === before + 2, "the server's release");
+    });
+    assert.equal(qsysWriter.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+  });
+
   test("the write log serves only entries with the shape one is written with", async () => {
     const { entries } = (await callRoute(qsysRoutes, "/api/qsys/write-log")).json as { entries: { device: string }[] };
     assert.equal(entries.filter((e) => e.device === "seed").length, 1);

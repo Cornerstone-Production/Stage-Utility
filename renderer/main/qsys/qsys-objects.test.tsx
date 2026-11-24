@@ -34,7 +34,7 @@ const { render, cleanup, fireEvent, act } = await import("@testing-library/react
 const React = await import("react");
 const { ObjectContent } = await import("../layout-renderer.js");
 const { makeRenderCtx } = await import("../test-render-ctx.js");
-const { __resetReplayCacheForTests, __sseFallback } = await import("../../lib/api.js");
+const { __resetReplayCacheForTests, __sseFallback, __setSubscribedDeadlineForTests } = await import("../../lib/api.js");
 const { __resetQsysPanelsForTests, DRAG_COALESCE_MS, QsysPanel } = await import("./use-qsys-values.js");
 const { FLASH_MS, HOLD_MS } = await import("./qsys-objects.js");
 type LayoutObjectConfig = import("@main/types/views").LayoutObjectConfig;
@@ -104,6 +104,7 @@ interface Server {
   writes: { body: Record<string, unknown>; at: number }[];
   reads: number;
   subscribes: string[][];
+  renewals: number;
 }
 
 let server: Server;
@@ -123,6 +124,7 @@ function freshServer(): Server {
     writes: [],
     reads: 0,
     subscribes: [],
+    renewals: 0,
   };
 }
 
@@ -147,6 +149,10 @@ const f = stubFetchWithLog((url, init) => {
     const hold = server.holdReads;
     if (hold) return new Promise((resolve) => hold(() => resolve(answer())));
     return answer();
+  }
+  if (url === "/api/qsys/lease") {
+    server.renewals++;
+    return ok({ held: true });
   }
   if (url === "/api/qsys/status") return ok({ connected: server.coreState === "connected", state: server.coreState });
   if (url === "/api/qsys/allowlist") {
@@ -279,11 +285,11 @@ describe("Q-SYS objects", () => {
     assert.equal(server.writes.length, 0, "a tap sent its own value back");
 
     down(fader, 190);
-    move(170); // 20 px up of 200 over a 120 dB range: +12 dB from where it was
-    assert.equal(dbText(), "-8.0");
+    move(170); // 20 px up of 200 over the fader's -60..0 dB: +6 dB from where it was
+    assert.equal(dbText(), "-14.0");
     up(170);
     await wait(30);
-    assert.deepEqual(server.writes.at(-1)!.body.value, -8);
+    assert.deepEqual(server.writes.at(-1)!.body.value, -14);
   });
 
   test("fader drag sends at most one write per 40 ms and always sends the release value", async () => {
@@ -309,7 +315,7 @@ describe("Q-SYS objects", () => {
     }
     const last = sent.at(-1)!;
     assert.equal(last.final, true, "the release is marked final");
-    assert.equal(last.value, -8, "the release carries where the finger stopped (20 px = +12 dB)");
+    assert.equal(last.value, -14, "the release carries where the finger stopped (20 px = +6 dB)");
     assert.equal(sent.filter((w) => w.final === true).length, 1);
     assert.equal(sent.at(-1)!.panelId, "v1");
   });
@@ -320,7 +326,7 @@ describe("Q-SYS objects", () => {
     const fader = q("qsys-fader", "[data-fader]");
     down(fader, 100);
     move(80);
-    assert.equal(dbText(), "-8.0", "moved under the finger at once");
+    assert.equal(dbText(), "-14.0", "moved under the finger at once");
     await wait(30);
     assert.equal(dbText(), "-20.0", "back to the Core's value after the refusal");
     const before = server.writes.length;
@@ -505,19 +511,19 @@ describe("Q-SYS objects", () => {
     down(fader, 100);
     move(80);
     await wait(10);
-    assert.equal(dbText(), "-8.0");
+    assert.equal(dbText(), "-14.0");
     const sent = server.writes.length;
-    server.values.gain = -14; // somebody else moved it meanwhile
+    server.values.gain = -11; // somebody else moved it meanwhile
     stream(false);
     assert.equal(dbText(), "-20.0", "the drag ended and shows the last Core value");
     stream(true);
     await wait(40);
-    assert.equal(dbText(), "-14.0", "the Core's value once read again");
+    assert.equal(dbText(), "-11.0", "the Core's value once read again");
     move(40);
     up(40);
     await wait(40);
     assert.equal(server.writes.length, sent, "the ended drag wrote again");
-    assert.equal(dbText(), "-14.0");
+    assert.equal(dbText(), "-11.0");
   });
 
   test("a fader stops at the allowlist's limit and says so", async () => {
@@ -698,7 +704,7 @@ describe("the panel store against the Core", () => {
     up(80); // the release: final -8, held unanswered
     await wait(5);
     push("qsys:values", [{ control: "gain", value: -30 }]); // someone else moved it meanwhile
-    release(); // the release's read-back (-8) arrives after the push
+    release(); // the release's read-back (-14) arrives after the push
     await wait(20);
     assert.equal(dbText(), "-30.0", "the page sat on its own value over the newer Core one");
   });
@@ -766,17 +772,17 @@ describe("review fixes", () => {
     move(80); // -8 on screen
     up(80); // the release's final write is not answered yet
     await wait(10);
-    assert.equal(dbText(), "-8.0", "the thumb stays where the finger left it");
+    assert.equal(dbText(), "-14.0", "the thumb stays where the finger left it");
     down(fader, 100); // a second touch while the Core has not answered
-    move(99); // one pixel: 0.6 dB
+    move(99); // one pixel: 0.3 dB
     up(99);
     for (const r of releases.splice(0)) r();
     await wait(20);
     for (const r of releases.splice(0)) r();
     await wait(20);
     const values = server.writes.map((w) => w.body.value);
-    assert.ok(!values.some((v) => typeof v === "number" && v < -15), `the second touch jumped back toward -20: ${JSON.stringify(values)}`);
-    assert.equal(values.at(-1), -7.4);
+    assert.ok(!values.some((v) => typeof v === "number" && v < -17), `the second touch jumped back toward -20: ${JSON.stringify(values)}`);
+    assert.equal(values.at(-1), -13.7);
   });
 
   test("hiding the page mid-hold ends it; nothing writes, and input waits for a fresh read on show", async () => {
@@ -944,7 +950,7 @@ describe("review fixes", () => {
 
   test("a dense strip has the staff tick scale and an M mute", async () => {
     await mount([{ type: "qsys-strip", name: null, label: "Mic 1", gain: b("gain"), mute: b("mute"), meter: b("meter"), meter2: b("meter"), density: "dense" }]);
-    assert.deepEqual([...document.querySelectorAll("[data-tick]")].map((t) => t.textContent), ["+12", "0", "-12", "-24", "-60"]);
+    assert.deepEqual([...document.querySelectorAll("[data-tick]")].map((t) => t.textContent), ["0", "-12", "-24", "-36", "-48", "-60"], "the -60..0 dB scale, a mark every 12 dB");
     const mute = q("qsys-strip", "[data-mute]");
     assert.equal(mute.textContent, "M");
     assert.equal(mute.getAttribute("aria-label"), "Mute");
@@ -957,17 +963,17 @@ describe("review fixes", () => {
     server.holdWrites = (r) => releases.push(r);
     const fader = q("qsys-fader", "[data-fader]");
     down(fader, 100);
-    move(90); // -14, sent
+    move(90); // -17, sent
     await wait(5);
     releases.shift()!();
     await wait(5);
     move(80);
     up(80); // final -8, unanswered
     await wait(10);
-    push("qsys:values", [{ control: "gain", value: -14 }]); // the Core's poll still shows the drag value
+    push("qsys:values", [{ control: "gain", value: -17 }]); // the Core's poll still shows the drag value
     for (const r of releases.splice(0)) r();
     await wait(20);
-    assert.equal(dbText(), "-8.0", "the echo of the page's own drag write beat the release's read-back");
+    assert.equal(dbText(), "-14.0", "the echo of the page's own drag write beat the release's read-back");
   });
 
   test("a refusal from the Core mid-drag ends the drag: one refused write, not one per sample", async () => {
@@ -1013,5 +1019,152 @@ describe("review fixes", () => {
     assert.equal(q("qsys-fader").dataset.state, "live");
     assert.ok(server.subscribes.at(-1)?.includes("qsys:watch:v1"));
     assert.equal(server.writes.length, 0);
+  });
+});
+
+describe("review round 2", () => {
+  test("a second finger on a hold button neither restarts the hold nor lets the first one's timer write", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 3 });
+      fireEvent.pointerDown(btn, { pointerId: 4 });
+    });
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 3 }));
+    });
+    await wait(HOLD_MS + 80);
+    assert.equal(server.writes.length, 0, "a hold let go of at once still wrote");
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 4 }));
+    });
+  });
+
+  test("a second press on a momentary does not release it while the first is held", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 5 });
+    });
+    act(() => {
+      fireEvent.keyDown(btn, { key: " " });
+      fireEvent.keyUp(btn, { key: " " });
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true], "the key's press and release acted on the finger's press");
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 5 }));
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true, false]);
+  });
+
+  test("focus leaving mid-press lets go: a hold does not complete, a momentary is released", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }, { type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    const [hold, talk] = [...document.querySelectorAll('[data-qsys-object="qsys-button"] button')] as HTMLElement[];
+    act(() => {
+      fireEvent.keyDown(hold, { key: "Enter" });
+      fireEvent.blur(hold);
+    });
+    await wait(HOLD_MS + 60);
+    assert.equal(server.writes.length, 0, "a hold whose key was never let go here still wrote");
+    act(() => {
+      fireEvent.keyDown(talk, { key: " " });
+    });
+    await wait(20);
+    act(() => {
+      fireEvent.blur(talk);
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true, false]);
+  });
+
+  test("a catalog announced while a read is out: that read opens nothing; the read after it does", async () => {
+    await mount([FADER]);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 1 }));
+    await wait(40);
+    const releases: (() => void)[] = [];
+    server.holdReads = (r) => releases.push(r);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 1 })); // a read goes out
+    await wait(10);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 2 })); // redeployed meanwhile
+    releases.shift()!(); // the read sent before the new catalog answers
+    await wait(30);
+    assert.equal(q("qsys-fader").dataset.state, "offline", "a read from before the new catalog reopened input");
+    server.holdReads = null;
+    for (const r of releases.splice(0)) r();
+    await wait(60);
+    assert.equal(q("qsys-fader").dataset.state, "live", "the read after the announcement opens it (positive control)");
+  });
+
+  test("a server that never acknowledges the channels does not hold the panel shut, and /log is told", async () => {
+    __setSubscribedDeadlineForTests(100);
+    let release: () => void = () => {};
+    server.holdSubscribes = (r) => (release = r);
+    const before = f.logs.filter((l) => l.tag === "qsys" && /acknowledge/.test(l.message)).length;
+    try {
+      await mount([FADER]);
+      assert.equal(q("qsys-fader").dataset.state, "offline");
+      await wait(200);
+      assert.equal(q("qsys-fader").dataset.state, "live", "the panel stayed shut waiting for an acknowledgement");
+      assert.equal(f.logs.filter((l) => l.tag === "qsys" && /acknowledge/.test(l.message)).length - before, 1);
+    } finally {
+      __setSubscribedDeadlineForTests(null);
+      server.holdSubscribes = null;
+      release();
+    }
+  });
+
+  test("a break with a release still out shows the Core's value after the re-read, not the finger's", async () => {
+    await mount([FADER]);
+    const releases: (() => void)[] = [];
+    server.holdWrites = (r) => releases.push(r);
+    down(q("qsys-fader", "[data-fader]"), 100);
+    move(80);
+    await wait(5);
+    releases.shift()!();
+    up(80); // the release's final write stays out
+    await wait(5);
+    server.values.gain = -25; // the Core, as read again after the break
+    stream(false);
+    stream(true);
+    await wait(60);
+    assert.equal(dbText(), "-25.0", "the finger's value outlived the break");
+    server.holdWrites = null;
+    for (const r of releases.splice(0)) r();
+    await wait(20);
+    assert.equal(dbText(), "-25.0", "the late answer put the finger's value back");
+  });
+
+  test("a momentary press asks for a lease, renews it while held, and stops renewing on release or a break", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 6 });
+    });
+    await wait(1_150);
+    assert.equal(server.writes[0].body.lease, true);
+    assert.equal(typeof server.writes[0].body.cid, "string", "the press names its stream");
+    assert.ok(server.renewals >= 1, "no renewal while held");
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 6 }));
+    });
+    const after = server.renewals;
+    await wait(1_150);
+    assert.equal(server.renewals, after, "renewed after the release");
+    assert.equal(server.writes[1].body.lease, undefined, "the release took a lease");
+
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 7 });
+    });
+    await wait(20);
+    stream(false); // a break mid-press: the renewals stop, so the server's lease lapses
+    const atBreak = server.renewals;
+    await wait(1_150);
+    assert.equal(server.renewals, atBreak, "renewed across a break");
+    stream(true);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 7 }));
+    });
   });
 });

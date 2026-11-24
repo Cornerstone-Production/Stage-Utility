@@ -741,3 +741,71 @@ describe("allowEntryFromCatalog", () => {
     assert.equal(e.max, null);
   });
 });
+
+const { LEASE_EXPIRE_MS, LEASE_RENEW_MS } = await import("./qsys-leases.js");
+
+describe("momentary leases", () => {
+  const press = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+
+  test("renewals keep a press on; without them the server releases it at 2 s, as its own logged write", async () => {
+    await connect();
+    const warn = capture("warn");
+    try {
+      assert.equal((await press()).ok, true);
+      for (let i = 0; i < 4; i++) {
+        mock.timers.tick(LEASE_RENEW_MS);
+        assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "192.0.2.10"), true);
+      }
+      await settle();
+      assert.deepEqual(muteSets(), [true], "released while renewals kept coming");
+      mock.timers.tick(LEASE_EXPIRE_MS - 1);
+      await settle();
+      assert.deepEqual(muteSets(), [true], "released before 2 s without a renewal");
+      mock.timers.tick(1);
+      await until(() => muteSets().length === 2, "the server's release");
+      assert.deepEqual(muteSets(), [true, false]);
+      await settle();
+      const entry = (await qsysWriteLog.list()).entries[0];
+      assert.equal(entry.cause, "lease expired");
+      assert.equal(entry.device, "server (lease expired)");
+      assert.equal(entry.to, false);
+      assert.ok(warn.lines.some((l) => /\[qsys\] momentary Lobby_Mixer\/mute released by the server/.test(l)), warn.lines.join("\n"));
+    } finally {
+      warn.restore();
+    }
+  });
+
+  test("the pressing page's stream closing releases at once", async () => {
+    await connect();
+    await press();
+    writer.leases.streamClosed("someone-else");
+    await settle();
+    assert.deepEqual(muteSets(), [true], "another page's stream released it");
+    writer.leases.streamClosed("page-1");
+    await until(() => muteSets().length === 2, "the release");
+    await settle();
+    assert.equal((await qsysWriteLog.list()).entries[0].cause, "stream closed");
+  });
+
+  test("the page's release ends the lease: nothing more is written", async () => {
+    await connect();
+    await press();
+    await writer.write(req({ control: "mute", value: false }));
+    mock.timers.tick(LEASE_EXPIRE_MS * 3);
+    await settle();
+    assert.deepEqual(muteSets(), [true, false]);
+    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+  });
+
+  test("a renewal from another address does not keep it on; a press that is refused takes no lease", async () => {
+    await connect();
+    await press();
+    assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "198.51.100.7"), false);
+    writer.leases.clear();
+    await qsysAllowlist.replace([GAIN, LEVEL]); // mute off the allowlist
+    const r = await press();
+    assert.equal(r.ok, false);
+    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+  });
+});

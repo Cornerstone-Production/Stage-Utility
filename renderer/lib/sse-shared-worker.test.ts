@@ -56,14 +56,14 @@ class FakeUpstreamEventSource {
 
 /** One tab's half of the MessageChannel `ctx.onconnect` receives. */
 function fakePort() {
-  // Channel frames only; the stream's own up/down notes are `all`, read by the
-  // test that is about them.
+  // Channel frames only; the stream's own up/down notes and its client id are in
+  // `all`, read by the tests that are about them.
   const posted: Record<string, unknown>[] = [];
   const all: Record<string, unknown>[] = [];
   const port = {
     postMessage: (m: Record<string, unknown>) => {
       all.push(m);
-      if (m.type !== "stream") posted.push(m);
+      if (m.type !== "stream" && m.type !== "cid") posted.push(m);
     },
     start: () => {},
     onmessage: null as null | ((e: { data: unknown }) => void),
@@ -84,6 +84,8 @@ test("a tab's ack is answered only by a report that started after it asked, once
     const tab = fakePort();
     onconnect({ ports: [tab.port] });
     const acks = () => tab.all.filter((m) => m.type === "subscribed").map((m) => m.ack);
+    // The tab is told the shared stream's client id, which a momentary's lease names.
+    assert.equal(typeof tab.all.find((m) => m.type === "cid")?.cid, "string");
     tab.port.onmessage!({ data: { type: "subscribe", channels: ["qsys:watch:x"] } }); // report 1 goes out
     tab.port.onmessage!({ data: { type: "subscribe", channels: ["qsys:watch:x"], ack: 7 } }); // asks while 1 is out
     await held.settle();

@@ -37,6 +37,8 @@ export interface WriteLogEntry {
   to: unknown;
   /** `ok`, `clamped`, `mismatch`, or the refusal's reason. */
   result: string;
+  /** For a write the server made itself (a momentary's lease ending): why. */
+  cause?: string;
   /** For a refusal that repeated: how many times in all, and when the last was. */
   repeats?: number;
   lastAt?: number;
@@ -79,7 +81,8 @@ function isEntry(v: unknown): v is WriteLogEntry {
     (e.remote === undefined || typeof e.remote === "string") &&
     typeof e.component === "string" &&
     typeof e.control === "string" &&
-    typeof e.result === "string"
+    typeof e.result === "string" &&
+    (e.cause === undefined || typeof e.cause === "string")
   );
 }
 
