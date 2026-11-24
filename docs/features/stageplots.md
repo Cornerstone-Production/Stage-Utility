@@ -294,7 +294,8 @@ selected item.
   the empty plot for **Paste here**, **Add here** (every palette item, placed where
   you clicked), **Undo**, **Redo** and **Fit the whole plot**. Arrange moves an item
   within its layer only: a zone brought to the front stays under the shapes and
-  gear (see [Item types](#item-types)).
+  gear (see [Item types](#item-types)). A callout moves past other text but never
+  past another callout, so it keeps its number.
 - **Copy and paste** use the editor's own clipboard, not the system's: a copy
   pastes into any plot, in any venue, in this browser, in another tab of it too.
   Each paste of one copy lands a little further down and right than the last; the
