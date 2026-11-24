@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import type { QsysAddress, QsysBinding } from "@main/types/qsys";
+import type { QsysAddress, QsysBinding, QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import {
@@ -194,8 +194,13 @@ function litStyle(lit: boolean): CSSProperties {
 }
 
 /**
- * A button that fires a trigger, or holds to confirm first. `onFire` runs only
- * after a tap, or after the full hold; letting go early sends nothing.
+ * A press: a trigger fired on a tap, or after the full hold when `hold`; with
+ * `onRelease`, a momentary, whose release is the gesture's second write.
+ *
+ * Nothing here outlives a break. A hide, a drop or the Core going away (a new
+ * panel epoch) ends a hold in progress, and a hold or a release whose press
+ * started before the break never writes: the panel is read again first, and only
+ * a fresh press writes after that.
  */
 function PressButton({
   hold,
@@ -204,8 +209,8 @@ function PressButton({
   label,
   holdLabel,
   onFire,
+  onRelease,
   style,
-  testId,
 }: {
   hold: boolean;
   disabled: boolean;
@@ -213,25 +218,36 @@ function PressButton({
   label: ReactNode;
   holdLabel: string;
   onFire: () => void;
+  /** A momentary: called when the press that fired ends, if nothing broke meanwhile. */
+  onRelease?: () => void;
   style?: CSSProperties;
-  testId?: string;
 }) {
-  const [holding, setHolding] = useState(false);
+  const panel = useQsysPanelContext();
+  const { epoch } = useQsysPanelState();
+  // The epoch the hold in progress began in; holding only while it is still current.
+  const [holdEpoch, setHoldEpoch] = useState<number | null>(null);
+  const holding = holdEpoch !== null && holdEpoch === epoch && !disabled;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gesture = useRef<GestureHandle | null>(null);
+  /** The press that fired and has not been released: its epoch. */
+  const fired = useRef<number | null>(null);
   const bar = useRef<HTMLDivElement | null>(null);
-  const stop = () => {
+
+  const clearHold = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-    setHolding(false);
   };
   useEffect(
     () => () => {
       gesture.current?.cancel();
-      if (timer.current) clearTimeout(timer.current);
+      clearHold();
     },
     [],
   );
+  // A break, or going disabled, ends the hold: its timer never completes into a write.
+  useEffect(() => {
+    if (!holding) clearHold();
+  }, [holding]);
   useEffect(() => {
     // The fill grows over the hold. Web Animations, so the length is the hold itself
     // rather than a motion token: it is a countdown, not an ornament.
@@ -239,49 +255,76 @@ function PressButton({
       bar.current.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: HOLD_MS, easing: "linear", fill: "forwards" });
     }
   }, [holding]);
-  // Going offline mid-hold ends the hold: it never completes into a write later.
-  const [wasDisabled, setWasDisabled] = useState(disabled);
-  if (disabled !== wasDisabled) {
-    setWasDisabled(disabled);
-    if (disabled) setHolding(false);
-  }
-  useEffect(() => {
-    if (!disabled) return;
-    gesture.current?.cancel();
-    gesture.current = null;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-  }, [disabled]);
 
-  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!hold || disabled) return;
-    const el = e.currentTarget;
-    setHolding(true);
+  const fire = (at: number) => {
+    // Only if nothing broke since the press began.
+    if (!panel || panel.epoch !== at) return;
+    fired.current = at;
+    onFire();
+  };
+  const release = () => {
+    const at = fired.current;
+    fired.current = null;
+    if (at !== null && onRelease && panel && panel.epoch === at) onRelease();
+  };
+  const begin = () => {
+    if (disabled || !panel) return;
+    const at = panel.epoch;
+    if (!hold) {
+      // Only a momentary acts on the press itself; a plain trigger fires on click.
+      if (onRelease) fire(at);
+      return;
+    }
+    setHoldEpoch(at);
     timer.current = setTimeout(() => {
       timer.current = null;
-      gesture.current?.cancel();
-      gesture.current = null;
-      setHolding(false);
-      onFire();
+      setHoldEpoch(null);
+      fire(at);
     }, HOLD_MS);
+  };
+  const end = () => {
+    gesture.current = null;
+    clearHold();
+    setHoldEpoch(null);
+    release();
+  };
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (disabled || (!hold && !onRelease)) return;
+    const el = e.currentTarget;
+    begin();
     gesture.current = bindGesture(el, e.pointerId, {
-      move: () => {},
-      end: () => {
-        gesture.current = null;
-        stop();
+      // Sliding off the button lets go of it, as lifting the finger does.
+      move: (ev) => {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom)) {
+          gesture.current?.cancel();
+          end();
+        }
       },
+      end,
     });
   };
+  const isKey = (key: string) => key === " " || key === "Enter";
   return (
     <button
       type="button"
-      data-testid={testId}
       aria-pressed={lit}
       disabled={disabled}
       data-holding={holding || undefined}
       onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        if (!isKey(e.key) || e.repeat || (!hold && !onRelease)) return;
+        e.preventDefault();
+        begin();
+      }}
+      onKeyUp={(e) => {
+        if (!isKey(e.key) || (!hold && !onRelease)) return;
+        e.preventDefault();
+        end();
+      }}
       onClick={() => {
-        if (!hold && !disabled) onFire();
+        if (!hold && !onRelease && !disabled && panel) fire(panel.epoch);
       }}
       style={{
         ...BUTTON,
@@ -310,12 +353,20 @@ function PressButton({
   );
 }
 
-/** One trigger, preset or option: lit from the Core, flashed on a confirmed write when it has no state. */
+/** The kit's words while a hold runs: "Keep holding to save…". */
+const holdWords = (label: string) => `Keep holding to ${label.trim().toLowerCase() || "confirm"}…`;
+
+/**
+ * One trigger, preset or option: lit from the Core, flashed on a confirmed write
+ * when it has no state. Bound to a Boolean and `momentary`, it is true while
+ * pressed and false on release.
+ */
 function TriggerButton({
   binding,
   label,
   interactive,
   hold,
+  momentary,
   style,
   muted,
 }: {
@@ -323,30 +374,33 @@ function TriggerButton({
   label: string;
   interactive: boolean;
   hold?: boolean;
+  momentary?: boolean;
   style?: CSSProperties;
   muted?: boolean;
 }) {
   const v = useQsysValue(ADDR(binding));
   const info = useQsysControl(ADDR(binding));
+  const writeState = useQsysWriteState(ADDR(binding));
   const lit = useLit(binding);
   const [flash, doFlash] = useFlash();
   const write = useQsysWrite();
   const boolean = isBooleanControl(info, v.value);
-  const canInput = interactive && v.state === "live" && info.allowed;
+  const canInput = interactive && writeState === "live";
+  const isMomentary = !!momentary && boolean;
   return (
     <PressButton
       hold={!!hold || info.hold}
       disabled={!canInput}
       lit={lit === true || flash}
       label={label}
-      holdLabel="Keep holding…"
+      holdLabel={holdWords(label)}
       onFire={() => {
-        if (!canInput) return;
         void write(ADDR(binding)!, true, { final: true }).then((r) => {
           // A pure trigger reports no state: show the confirmed write as a flash, never as lit.
-          if (r.ok && (lit === null || !boolean)) doFlash();
+          if (r.ok && !isMomentary && (lit === null || !boolean)) doFlash();
         });
       }}
+      onRelease={isMomentary ? () => void write(ADDR(binding)!, false, { final: true }) : undefined}
       style={{ ...(muted && lit !== true && !flash ? { color: "var(--color-fg-muted)", borderColor: "var(--color-line-strong)" } : {}), ...style }}
     />
   );
@@ -354,28 +408,40 @@ function TriggerButton({
 
 // ── Fader ───────────────────────────────────────────────────────────────────
 
+/** The staff strip's scale (Staff.dc.html), each mark drawn where its level is. */
+const TICKS_DB = [12, 0, -12, -24, -60];
+
 interface FaderProps {
   binding: QsysBinding | null;
   vertical: boolean;
   showDb: boolean;
   steps: boolean;
+  /** One step of the -/+ buttons and the arrow keys, in dB. */
   stepDb: number;
   interactive: boolean;
+  /** What a screen reader calls it. */
+  name: string;
   /** Drawn as the strip's mute does: a muted channel's fill and thumb go quiet. */
   muted?: boolean;
   meters?: (QsysBinding | null | undefined)[];
+  density?: QsysDensity;
+  /** Where the dB readout sits: above the track (Main) or below it (Staff). */
+  readout?: "above" | "below";
 }
 
-function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = false, meters = [] }: FaderProps) {
+function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, muted = false, meters = [], density = "standard", readout = "above" }: FaderProps) {
   const panel = useQsysPanelContext();
   const { epoch } = useQsysPanelState();
   const addr = ADDR(binding);
   const v = useQsysValue(addr);
   const info = useQsysControl(addr);
+  const writeState = useQsysWriteState(addr, true);
   const write = useQsysWrite();
   const track = useRef<HTMLDivElement | null>(null);
   const [local, setLocal] = useState<number | null>(null);
   const drag = useRef<{ epoch: number; gesture: GestureHandle; moved: boolean; last: number } | null>(null);
+  /** Releases whose final write has not answered: the thumb holds the finger's value until they have. */
+  const pendingFinals = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -396,17 +462,19 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
     }
   }, [epoch]);
 
+  const dense = density === "dense";
   const range = info.range;
   const lo = range ? Math.max(range.min, info.limits.min ?? range.min) : 0;
   const hi = range ? Math.min(range.max, info.limits.max ?? range.max) : 0;
   const norm = (x: number) => (range ? clamp01((x - range.min) / (range.max - range.min)) : 0);
-  const writable =
-    interactive && v.state === "live" && info.allowed && !!range && info.limits.min !== null && info.limits.max !== null && typeof v.value === "number";
+  const writable = interactive && writeState === "live" && typeof v.value === "number";
 
+  // What is on screen: the finger's value while a gesture is open, else the Core's.
   const shown = local ?? (typeof v.value === "number" ? v.value : null);
   const level = shown === null ? (v.position ?? 0) : range ? norm(shown) : (v.position ?? 0);
   const limitAt = range && hi < range.max ? norm(hi) : null;
   const atLimit = range !== null && shown !== null && limitAt !== null && shown >= hi - 1e-6;
+  const offline = v.state === "offline";
 
   const snapBack = () => {
     drag.current?.gesture.cancel();
@@ -415,7 +483,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!writable || !panel || drag.current) return;
+    if (!writable || !panel || drag.current || shown === null) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const el = track.current;
     if (!el) return;
@@ -423,7 +491,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
     const length = vertical ? rect.height : rect.width;
     // jsdom lays nothing out; a real browser always has a length here.
     if (!(length > 0)) return;
-    const startValue = v.value as number;
+    // From the value on screen, not the Core's last report: after a release the
+    // thumb stays where the finger left it until the Core answers, and a second
+    // touch in that moment must not jump back to the old value.
+    const startValue = shown;
     const startNorm = norm(startValue);
     const startAt = vertical ? e.clientY : e.clientX;
     const epoch = panel.epoch;
@@ -448,36 +519,57 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
         drag.current = null;
         if (!d || !d.moved || panel.epoch !== d.epoch) {
           // A tap writes nothing: sending the value it already shows would be the page's own state.
-          if (mounted.current) setLocal(null);
+          if (mounted.current && pendingFinals.current === 0) setLocal(null);
           return;
         }
         // The release always sends the last value, marked final.
+        pendingFinals.current++;
         void write(addr!, d.last, { final: true }).then(() => {
+          pendingFinals.current--;
           // A landed write's read-back is already in the panel; a refusal shows the Core's value.
-          if (mounted.current && drag.current === null) setLocal(null);
+          if (mounted.current && drag.current === null && pendingFinals.current === 0) setLocal(null);
         });
       },
     });
     drag.current = { epoch, gesture, moved: false, last: startValue };
   };
 
+  /** A step from the value on screen: the -/+ buttons and the arrow keys. */
   const step = (dir: 1 | -1) => {
-    if (!writable) return;
-    const next = Math.min(hi, Math.max(lo, (v.value as number) + dir * stepDb));
+    if (!writable || shown === null || drag.current) return;
+    const next = Math.min(hi, Math.max(lo, shown + dir * (stepDb > 0 ? stepDb : 1)));
+    if (next === shown) return;
     void write(addr!, Math.round(next * 100) / 100, { final: true });
   };
 
-  const thumbLong = "10%";
-  const thumbCross = "70%";
-  const along = (n: number) => `calc((100% - ${thumbLong}) * ${1 - n})`;
-  const fill = muted ? "var(--color-fg-subtle)" : "var(--color-accent)";
+  // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
+  const thumbAlong = dense ? 24 : 40;
+  const thumbAcross = dense ? 28 : 48;
+  const trackWidth = dense ? 4 : 8;
+  const along = (n: number) => `calc((100% - ${thumbAlong}px) * ${1 - n})`;
+  const fill = offline || muted ? "var(--color-fg-subtle)" : "var(--color-accent)";
 
   const faderBody = (
     <div
       ref={track}
       data-fader
       data-at-limit={atLimit || undefined}
+      role="slider"
+      aria-label={name}
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+      aria-valuemin={range ? lo : undefined}
+      aria-valuemax={range ? hi : undefined}
+      aria-valuenow={shown ?? undefined}
+      aria-valuetext={shown === null ? undefined : `${formatDb(shown)} dB`}
+      aria-disabled={writable ? undefined : true}
+      tabIndex={writable ? 0 : -1}
       onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        const dir = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1 : e.key === "ArrowDown" || e.key === "ArrowLeft" ? -1 : 0;
+        if (!dir) return;
+        e.preventDefault();
+        step(dir);
+      }}
       style={{
         position: "relative",
         flex: "1 1 auto",
@@ -487,21 +579,32 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
         cursor: writable ? "grab" : "default",
       }}
     >
+      {dense && vertical && range && (
+        <div aria-hidden style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "1.8em", ...MONO, fontSize: 9, color: "var(--color-fg-subtle)" }}>
+          {TICKS_DB.filter((t) => t >= range.min && t <= range.max).map((t) => (
+            <span key={t} data-tick style={{ position: "absolute", left: 0, top: `calc(${along(norm(t))} + ${thumbAlong / 2}px)`, transform: "translateY(-50%)" }}>
+              {t > 0 ? `+${t}` : t}
+            </span>
+          ))}
+        </div>
+      )}
       {/* the track and its fill */}
       <div
         style={{
           position: "absolute",
-          borderRadius: 4,
+          borderRadius: trackWidth / 2,
           background: "var(--color-fill-active)",
           overflow: "hidden",
-          ...(vertical ? { left: "calc(50% - 4px)", width: 8, top: 0, bottom: 0 } : { top: "calc(50% - 4px)", height: 8, left: 0, right: 0 }),
+          ...(vertical
+            ? { left: `calc(50% - ${trackWidth / 2}px)`, width: trackWidth, top: 0, bottom: 0 }
+            : { top: `calc(50% - ${trackWidth / 2}px)`, height: trackWidth, left: 0, right: 0 }),
         }}
       >
         <div
           style={{
             position: "absolute",
             background: fill,
-            opacity: muted ? 0.5 : 1,
+            opacity: muted && !offline ? 0.5 : 1,
             ...(vertical ? { left: 0, right: 0, bottom: 0, height: `${level * 100}%` } : { top: 0, bottom: 0, left: 0, width: `${level * 100}%` }),
           }}
         />
@@ -514,45 +617,49 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, muted = 
             position: "absolute",
             background: atLimit ? "var(--color-warn-9)" : "var(--color-line-strong)",
             ...(vertical
-              ? { height: 2, left: "15%", right: "15%", top: `calc(${along(limitAt)} + ${thumbLong} / 2)` }
-              : { width: 2, top: "15%", bottom: "15%", right: `calc(${along(limitAt)} + ${thumbLong} / 2)` }),
+              ? { height: 2, left: "15%", right: "15%", top: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }
+              : { width: 2, top: "15%", bottom: "15%", right: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }),
           }}
         />
       )}
       {/* No value from the Core at all: no thumb, rather than one parked at the bottom. */}
-      {shown !== null && <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          borderRadius: 10,
-          // Opaque: the fill and the limit line must not show through the thumb.
-          background: muted ? "var(--color-surface-raised)" : "var(--color-fg-strong)",
-          border: "1px solid var(--color-line-strong)",
-          boxShadow: atLimit ? "0 0 0 2px var(--color-warn-9)" : undefined,
-          pointerEvents: "none",
-          ...(vertical
-            ? { height: thumbLong, left: `calc((100% - ${thumbCross}) / 2)`, width: thumbCross, top: along(level) }
-            : { width: thumbLong, top: `calc((100% - ${thumbCross}) / 2)`, height: thumbCross, right: along(level) }),
-        }}
-      />}
+      {shown !== null && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            borderRadius: dense ? 6 : 10,
+            // Opaque: the fill and the limit line must not show through the thumb.
+            background: offline ? "var(--color-fg-subtle)" : muted ? "var(--color-surface-raised)" : "var(--color-fg-strong)",
+            border: "1px solid var(--color-line-strong)",
+            boxShadow: atLimit ? "0 0 0 2px var(--color-warn-9)" : dense ? undefined : "var(--su-shadow-1)",
+            pointerEvents: "none",
+            ...(vertical
+              ? { height: thumbAlong, width: `min(${thumbAcross}px, 100%)`, left: `calc((100% - min(${thumbAcross}px, 100%)) / 2)`, top: along(level) }
+              : { width: thumbAlong, height: `min(${thumbAcross}px, 100%)`, top: `calc((100% - min(${thumbAcross}px, 100%)) / 2)`, right: along(level) }),
+          }}
+        />
+      )}
     </div>
   );
 
-  const meterBars = meters.filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical={vertical} />);
+  const meterBars = meters.filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical={vertical} thin={dense} />);
+  const db = showDb && (
+    <span data-db style={{ ...MONO, fontSize: dense ? 12 : "0.5em", color: atLimit ? "var(--color-warn-9)" : "var(--color-fg-muted)", minHeight: "1.2em" }}>
+      {muted ? (dense ? "mute" : "Muted") : formatDb(shown)}
+    </span>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: vertical ? "column" : "row", alignItems: "center", gap: "0.3em", flex: "1 1 auto", minHeight: 0, minWidth: 0, width: vertical ? "100%" : undefined }}>
-      {showDb && (
-        <span data-db style={{ ...MONO, fontSize: "0.5em", color: atLimit ? "var(--color-warn-9)" : "var(--color-fg-muted)", minHeight: "1.2em" }}>
-          {muted ? "Muted" : formatDb(shown)}
-        </span>
-      )}
+      {readout === "above" && db}
       {steps && <StepButton label="+" onPress={() => step(1)} disabled={!writable} />}
-      <div style={{ display: "flex", flexDirection: vertical ? "row" : "column", gap: 4, flex: "1 1 auto", alignSelf: "stretch", minHeight: 0, minWidth: 0, justifyContent: "center" }}>
+      <div style={{ display: "flex", flexDirection: vertical ? "row" : "column", gap: dense ? 2 : 4, flex: "1 1 auto", alignSelf: "stretch", minHeight: 0, minWidth: 0, justifyContent: "center" }}>
         {faderBody}
         {meterBars}
       </div>
       {steps && <StepButton label="−" onPress={() => step(-1)} disabled={!writable} />}
+      {readout === "below" && db}
     </div>
   );
 }
@@ -578,7 +685,7 @@ function bandColour(level: number): string {
 }
 
 /** A meter bar, drawn by the panel's animation loop straight into the element. */
-function MeterBar({ binding, vertical }: { binding: QsysBinding; vertical: boolean }) {
+function MeterBar({ binding, vertical, thin = false }: { binding: QsysBinding; vertical: boolean; thin?: boolean }) {
   const panel = useQsysPanelContext();
   const { component, control } = binding;
   const info = useQsysControl(ADDR(binding));
@@ -603,10 +710,11 @@ function MeterBar({ binding, vertical }: { binding: QsysBinding; vertical: boole
       style={{
         position: "relative",
         flex: "0 0 auto",
-        borderRadius: 3,
+        // Main draws 6 px meters, Staff 5 px.
+        borderRadius: thin ? 0 : 3,
         background: "var(--color-fill-active)",
         overflow: "hidden",
-        ...(vertical ? { width: 6, alignSelf: "stretch" } : { height: 6, alignSelf: "stretch" }),
+        ...(vertical ? { width: thin ? 5 : 6, alignSelf: "stretch" } : { height: thin ? 5 : 6, alignSelf: "stretch" }),
       }}
     >
       <div ref={bar} style={{ position: "absolute", ...(vertical ? { left: 0, right: 0, bottom: 0, height: 0 } : { top: 0, bottom: 0, left: 0, width: 0 }) }} />
@@ -641,7 +749,16 @@ function FaderObject({ c, interactive, ts }: { c: Of<"qsys-fader">; interactive:
   const state = useQsysWriteState(ADDR(c.binding), true);
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ padding: "0.3em" }}>
-      <Fader binding={c.binding} vertical={c.orientation !== "horizontal"} showDb={c.showDb} steps={c.steps} stepDb={c.stepDb} interactive={interactive} />
+      <Fader
+        binding={c.binding}
+        vertical={c.orientation !== "horizontal"}
+        showDb={c.showDb}
+        steps={c.steps}
+        stepDb={c.stepDb}
+        interactive={interactive}
+        name={c.binding ? `${c.binding.component} ${c.binding.control}` : "Fader"}
+        density={c.density}
+      />
     </Frame>
   );
 }
@@ -664,33 +781,52 @@ function MeterObject({ c, ts }: { c: Of<"qsys-meter">; ts: CSSProperties }) {
   );
 }
 
-function MuteButton({ binding, interactive }: { binding: QsysBinding | null; interactive: boolean }) {
+/**
+ * Mute, as Kit and Main draw it: 48 px high, 84 wide, "Mute" / "Muted". Dense is
+ * Staff's 64 x 36 "M", inside a 44 px tall hit area; its state is still in words
+ * for a screen reader, and in the strip's readout ("mute").
+ */
+function MuteButton({ binding, interactive, dense = false }: { binding: QsysBinding | null; interactive: boolean; dense?: boolean }) {
   const addr = ADDR(binding);
   const v = useQsysValue(addr);
-  const info = useQsysControl(addr);
+  const writeState = useQsysWriteState(addr);
   const write = useQsysWrite();
   const muted = v.state !== "unavailable" && truthy(v.value);
-  const canInput = interactive && v.state === "live" && info.allowed;
+  const canInput = interactive && writeState === "live";
+  const look: CSSProperties = {
+    borderRadius: dense ? 8 : 12,
+    fontWeight: dense ? 600 : 500,
+    border: `1px solid ${muted ? "var(--color-danger-9)" : "var(--color-line-strong)"}`,
+    background: muted ? "var(--color-danger-9)" : "transparent",
+    color: muted ? "var(--color-on-accent)" : dense ? "var(--color-fg-muted)" : "var(--color-fg)",
+  };
   return (
     <button
       type="button"
       data-mute
       aria-pressed={muted}
+      aria-label={dense ? (muted ? "Muted" : "Mute") : undefined}
       disabled={!canInput}
       onClick={() => {
         // The new state is the Core's state flipped; shown only once the Core says so.
         if (canInput) void write(addr!, !muted, { final: true });
       }}
-      style={{
-        ...BUTTON,
-        fontWeight: 500,
-        border: `1px solid ${muted ? "var(--color-danger-9)" : "var(--color-line-strong)"}`,
-        background: muted ? "var(--color-danger-9)" : "transparent",
-        color: muted ? "var(--color-on-accent)" : "var(--color-fg)",
-      }}
+      style={
+        dense
+          ? { ...BUTTON, padding: 0, border: 0, background: "transparent", minHeight: 44, width: 64, display: "flex", alignItems: "center", justifyContent: "center" }
+          : { ...BUTTON, ...look, minHeight: 48, minWidth: 84 }
+      }
     >
-      {/* Words, not only a colour. */}
-      {muted ? "Muted" : "Mute"}
+      {dense ? (
+        <span aria-hidden style={{ ...look, width: 64, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, boxSizing: "border-box" }}>
+          M
+        </span>
+      ) : muted ? (
+        // Words, not only a colour.
+        "Muted"
+      ) : (
+        "Mute"
+      )}
     </button>
   );
 }
@@ -708,7 +844,10 @@ function ButtonObject({ c, interactive, ts }: { c: Of<"qsys-button">; interactiv
   const state = useQsysWriteState(ADDR(c.binding));
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ alignItems: "stretch", justifyContent: "stretch" }}>
-      {c.binding && <TriggerButton binding={c.binding} label={c.label || c.binding.control} interactive={interactive} hold={c.hold} style={{ flex: 1 }} />}
+      {c.binding && (
+        // A Boolean control is a momentary: on while pressed, off on release.
+        <TriggerButton binding={c.binding} label={c.label || c.binding.control} interactive={interactive} hold={c.hold} momentary style={{ flex: 1 }} />
+      )}
     </Frame>
   );
 }
@@ -786,8 +925,8 @@ function SwitchObject({ c, interactive, ts }: { c: Of<"qsys-switch">; interactiv
     return (
       <Frame type={c.type} state={state} ts={ts} style={{ alignItems: "center", gap: "0.4em", padding: "0.3em" }}>
         {label}
-        <TriggerButton binding={c.onBinding} label="On" interactive={interactive} />
-        <TriggerButton binding={c.offBinding} label="Off" interactive={interactive} />
+        <TriggerButton binding={c.onBinding} label={c.onLabel?.trim() || "On"} interactive={interactive} />
+        <TriggerButton binding={c.offBinding} label={c.offLabel?.trim() || "Off"} interactive={interactive} />
       </Frame>
     );
   }
@@ -912,23 +1051,63 @@ function LabelObject({ c, ts }: { c: Of<"qsys-label">; ts: CSSProperties }) {
   );
 }
 
+/**
+ * A channel strip. Standard is Main direction A's 92 px strip (name, dB, fader with
+ * its meter beside it, Mute); dense is Staff's 80 px strip (12 px name, a dB tick
+ * scale, a 4 px track, two 5 px meters, the readout under the fader, an "M").
+ */
 function StripObject({ c, interactive, ts }: { c: Of<"qsys-strip">; interactive: boolean; ts: CSSProperties }) {
+  const dense = c.density === "dense";
   const name = useQsysValue(ADDR(c.name));
   const mute = useQsysValue(ADDR(c.mute));
   const muted = mute.state !== "unavailable" && truthy(mute.value);
   const gainState = useQsysWriteState(ADDR(c.gain), true);
   const muteState = useQsysWriteState(ADDR(c.mute));
-  const state = combine(...[c.gain && gainState, c.mute && muteState].filter((s): s is QsysState => !!s), c.gain || c.mute ? "live" : "unavailable");
+  const meters = [c.meter, c.meter2].filter((m): m is QsysBinding => !!m);
+  const meterState = useQsysStates(meters.map(ADDR));
+  // What it has decides its state: a meters-only strip is a meter, read and drawn.
+  const parts: QsysState[] = [...(c.gain ? [gainState] : []), ...(c.mute ? [muteState] : []), ...(meters.length ? [meterState] : [])];
+  const state = parts.length ? combine(...parts) : "unavailable";
   const title = c.label.trim() || name.string || "–";
   return (
-    <Frame type={c.type} state={state} ts={ts} bound={!!(c.gain || c.mute || c.meter || c.meter2)} style={{ flexDirection: "column", alignItems: "center", gap: "0.3em", padding: "0.3em" }}>
-      <div style={{ fontSize: "0.6em", fontWeight: 500, textAlign: "center", lineHeight: 1.25, minHeight: "2.5em" }}>{title}</div>
+    <Frame
+      type={c.type}
+      state={state}
+      ts={ts}
+      bound={parts.length > 0}
+      style={{ flexDirection: "column", alignItems: "center", gap: dense ? 5 : "0.3em", padding: dense ? 4 : "0.3em" }}
+    >
+      <div
+        style={
+          dense
+            ? { fontSize: 12, fontWeight: 500, textAlign: "center", lineHeight: 1.2, minHeight: 30 }
+            : { fontSize: "0.6em", fontWeight: 500, textAlign: "center", lineHeight: 1.25, minHeight: "2.5em" }
+        }
+      >
+        {title}
+      </div>
       {c.gain ? (
-        <Fader binding={c.gain} vertical showDb steps={false} stepDb={0} interactive={interactive} muted={muted} meters={[c.meter, c.meter2]} />
+        <Fader
+          binding={c.gain}
+          vertical
+          showDb
+          steps={false}
+          stepDb={1}
+          interactive={interactive}
+          name={`${title} level`}
+          muted={muted}
+          meters={meters}
+          density={c.density}
+          readout={dense ? "below" : "above"}
+        />
       ) : (
-        <div style={{ flex: 1, display: "flex", gap: 4 }}>{[c.meter, c.meter2].filter((m): m is QsysBinding => !!m).map((m, i) => <MeterBar key={i} binding={m} vertical />)}</div>
+        <div style={{ flex: 1, display: "flex", gap: dense ? 2 : 4, alignSelf: "center" }}>
+          {meters.map((m, i) => (
+            <MeterBar key={i} binding={m} vertical thin={dense} />
+          ))}
+        </div>
       )}
-      {c.mute && <MuteButton binding={c.mute} interactive={interactive} />}
+      {c.mute && <MuteButton binding={c.mute} interactive={interactive} dense={dense} />}
     </Frame>
   );
 }

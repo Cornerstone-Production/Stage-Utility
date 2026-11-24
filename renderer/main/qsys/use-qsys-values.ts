@@ -17,9 +17,11 @@
 //   waking and receiving values send nothing. Only a fresh pointer gesture
 //   writes (useQsysWrite).
 // - Input waits for the Core's current state. On mount, on every stream
-//   reconnect, on waking, and whenever the Core comes back, the store reads the
-//   panel again, and until that read lands every object is "offline": greyed
-//   and deaf.
+//   reconnect and on waking, the store waits for the server to acknowledge this
+//   page's channels (api.ts whenSubscribed) and then reads the panel; until that
+//   read lands every object is "offline": greyed and deaf. Hidden is not live.
+//   A new catalog (the Core rebooted or was redeployed) closes input until it
+//   has been read too.
 // - A write still waiting to go when the stream drops, the page is hidden or
 //   the Core goes away is discarded, never sent later. The `epoch` counts those
 //   breaks; a gesture in progress ends when it moves.
@@ -29,8 +31,8 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { WriteResult } from "@main/services/qsys/qsys-write";
-import { addressKey, type PanelKind, type QsysAddress } from "@main/types/qsys";
-import { getStreamStatus, invoke, onNotification, onStreamStatusChange } from "../../lib/api";
+import { addressKey, isReadOnlyDirection, type PanelKind, type QsysAddress } from "@main/types/qsys";
+import { getStreamStatus, invoke, onNotification, onStreamStatusChange, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
@@ -59,6 +61,8 @@ export interface QsysControlInfo {
   range: { min: number; max: number } | null;
   /** The choices a combo box offers, when the Core lists them. */
   choices: string[] | null;
+  /** False when the Core reports the control read-only (Direction "Read"). */
+  writable: boolean;
   /** On the allowlist: writable at all. */
   allowed: boolean;
   /** The allowlist's write limits; null where there are none. */
@@ -89,14 +93,6 @@ const QSYS_STATUS_CHANNEL = "qsys:status";
 
 /** The release of a drag always writes; in between, at most one write this often. */
 export const DRAG_COALESCE_MS = 40;
-/**
- * The panel is read once more this long after mount. The page's subscribe report
- * (naming `qsys:values` and the watch channel) is debounced 200 ms and then
- * POSTed; until it lands, a client whose stream already carries a channel filter
- * is not sent `qsys:values`, so a change made between the first read and the
- * report would be in neither.
- */
-const SECOND_READ_MS = 600;
 /** Not ready yet (the Core reconnecting): read again after this, doubling to the cap. */
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 8_000;
@@ -104,7 +100,10 @@ const RETRY_MAX_MS = 8_000;
 type Change = { Component?: unknown; Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown };
 type ValuesAnswer = { ready: boolean; values: { component: string; control: string; value: unknown; string: string; position?: number }[] };
 type AllowAnswer = { entries: { component: string; control: string; min: number | null; max: number | null; confirm: "none" | "hold" }[] };
-type CatalogAnswer = { designCode: string; components: { name: string; controls: { Name: string; Type: string; ValueMin?: number; ValueMax?: number; Choices?: unknown }[] }[] };
+type CatalogAnswer = {
+  designCode: string;
+  components: { name: string; controls: { Name: string; Type: string; Direction?: string; ValueMin?: number; ValueMax?: number; Choices?: unknown }[] }[];
+};
 type StatusPush = { connected?: unknown; state?: unknown; catalogAt?: unknown };
 
 /** A write that never left this page, said in the same shape as the server's refusals. */
@@ -123,6 +122,10 @@ interface Held {
   waiters: ((r: WriteResult) => void)[];
 }
 
+/** The Core's echo of a value this page sent: equal, within its float precision. */
+const sameValue = (a: unknown, b: unknown): boolean =>
+  typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 0.01 : a === b;
+
 /** One control's writes: one in flight at a time, so they land in the order they were made. */
 interface Lane {
   inFlight: boolean;
@@ -130,6 +133,9 @@ interface Lane {
   timer: ReturnType<typeof setTimeout> | null;
   lastSentAt: number;
   coalesceMs: number;
+  /** Values this gesture's drag writes sent: a push carrying one is the Core's echo
+   *  of the page's own write, not news, so it does not outrank the release's read-back. */
+  echoes: unknown[];
 }
 
 export class QsysPanel {
@@ -139,8 +145,17 @@ export class QsysPanel {
   private catalogAt: unknown = undefined;
   private catalogRead = false;
 
-  /** A hydration has landed since the last break. */
+  /**
+   * A read has landed since the last break that started AFTER the server
+   * acknowledged this page's channels (see `resync`). Input waits for it: a read
+   * sent before the acknowledgement can miss a change that no push carries.
+   */
   private hydrated = false;
+  /** Bumped by every break; a resync whose acknowledgement belongs to an older one is ignored. */
+  private syncGen = 0;
+  private ackedGen = -1;
+  private allowFailing = false;
+  private lastReadAt = 0;
   private ready = false;
   /** The server has no panel with this id. */
   private missing = false;
@@ -157,7 +172,6 @@ export class QsysPanel {
   /** The last read failed; the next failure is not logged again. */
   private failing = false;
   private catalogFailing = false;
-  private secondRead: ReturnType<typeof setTimeout> | null = null;
   /** Counts every change to the readings, so a write's read-back can tell whether
    *  anything newer from the Core landed while it was on its way. */
   private stamp = 0;
@@ -200,19 +214,17 @@ export class QsysPanel {
       () => document.removeEventListener("visibilitychange", onVisibility),
     ];
     this.streamUp = getStreamStatus().up;
+    // Read at once so the panel draws, and again once the server has this page's
+    // channels; input opens on the second.
     this.hydrate();
-    this.secondRead = setTimeout(() => {
-      this.secondRead = null;
-      this.hydrate();
-    }, SECOND_READ_MS);
+    this.resync();
   }
 
   release(): void {
     if (--this.refs > 0) return;
     for (const off of this.offs.splice(0)) off();
     this.clearRetry();
-    if (this.secondRead) clearTimeout(this.secondRead);
-    this.secondRead = null;
+    this.syncGen++;
     this.breakOff();
     this.meters.dispose();
     this.hydrated = false;
@@ -260,7 +272,7 @@ export class QsysPanel {
     const state = this.value(a).state;
     if (state !== "live") return state;
     const c = this.control(a);
-    if (!c.allowed) return "unavailable";
+    if (!c.allowed || !c.writable) return "unavailable";
     if (numeric && (!c.range || c.limits.min === null || c.limits.max === null)) return "unavailable";
     return "live";
   }
@@ -301,7 +313,7 @@ export class QsysPanel {
 
   control(a: QsysAddress | null): QsysControlInfo {
     const k = a ? addressKey(a) : "";
-    const base = this.info.get(k) ?? { type: "", range: null, choices: null };
+    const base = this.info.get(k) ?? { type: "", range: null, choices: null, writable: true };
     const entry = this.allow?.get(k);
     return {
       ...base,
@@ -347,6 +359,21 @@ export class QsysPanel {
 
   // ── Hydration ─────────────────────────────────────────────────────────────
 
+  /**
+   * Input closes until the server has acknowledged this page's channels and a
+   * read sent after that has landed. On mount, on every stream reconnect, and on
+   * waking: each is a moment the server may not have this page's filter.
+   */
+  private resync(): void {
+    this.hydrated = false;
+    const gen = ++this.syncGen;
+    void whenSubscribed().then(() => {
+      if (gen !== this.syncGen || this.refs === 0) return;
+      this.ackedGen = gen;
+      this.hydrate();
+    });
+  }
+
   /** Read the panel again. Input stays off until the answer lands. */
   hydrate(): void {
     if (this.hydrating) {
@@ -367,6 +394,10 @@ export class QsysPanel {
   }
 
   private async readPanel(): Promise<void> {
+    // Only a read sent after the acknowledgement may open input (see `hydrated`).
+    const opens = this.ackedGen === this.syncGen;
+    const gen = this.syncGen;
+    this.lastReadAt = Date.now();
     const [values, allow] = await Promise.allSettled([
       invoke<ValuesAnswer>("qsys:panelValues", { panel: this.id }),
       invoke<AllowAnswer>("qsys:allowlist"),
@@ -383,9 +414,12 @@ export class QsysPanel {
 
     if (allow.status === "fulfilled") {
       this.allow = new Map(allow.value.entries.map((e) => [addressKey(e), e]));
+      this.allowFailing = false;
     } else {
       // Without it nothing on the page counts as writable; the server would refuse anyway.
-      logToServer("qsys", `panel ${this.id}: the allowlist could not be read (${String(allow.reason)})`);
+      // Once per run of failures.
+      if (!this.allowFailing) logToServer("qsys", `panel ${this.id}: the allowlist could not be read (${String(allow.reason)})`);
+      this.allowFailing = true;
     }
     if (catalog.status === "fulfilled" && catalog.value) {
       this.readCatalog(catalog.value);
@@ -414,7 +448,8 @@ export class QsysPanel {
     // A push that arrived while the read was on its way is newer than the read's answer.
     this.hydratedAt = ++this.stamp;
     for (const c of this.buffered ?? []) this.store(c);
-    this.hydrated = true;
+    // A break during the read: what it read stays on screen, but it opens nothing.
+    if (opens && gen === this.syncGen) this.hydrated = true;
     this.ready = values.value.ready === true;
     const catalogFailed = catalog.status === "rejected";
     if (catalogFailed) {
@@ -439,6 +474,7 @@ export class QsysPanel {
           type: String(ctl.Type ?? ""),
           range: ranged ? { min: ctl.ValueMin!, max: ctl.ValueMax! } : null,
           choices: Array.isArray(ctl.Choices) ? ctl.Choices.filter((x): x is string => typeof x === "string") : null,
+          writable: !isReadOnlyDirection(ctl.Direction),
         });
       }
     }
@@ -471,7 +507,9 @@ export class QsysPanel {
   private store(c: Change): string {
     const k = addressKey({ component: c.Component as string, control: c.Name as string });
     this.readings.set(k, readingOf(c));
-    this.touched.set(k, ++this.stamp);
+    // An echo of this page's own drag write is not newer than its release's read-back.
+    const echo = this.lanes.get(k)?.echoes.some((v) => sameValue(v, c.Value));
+    if (!echo) this.touched.set(k, ++this.stamp);
     return k;
   }
 
@@ -480,8 +518,9 @@ export class QsysPanel {
     if (changes.length === 0) return;
     if (this.buffered) this.buffered.push(...changes);
     for (const c of changes) this.store(c);
-    // Values arriving while not ready: the Core is back and re-read; ask whether writes are open.
-    if (!this.ready && this.hydrated) this.hydrate();
+    // Values arriving while not ready: the Core is back and re-read; ask whether writes
+    // are open. At most once a second: values can flow while the server is not ready.
+    if (!this.ready && this.hydrated && !this.hydrating && Date.now() - this.lastReadAt >= RETRY_FIRST_MS) this.hydrate();
     this.bump();
   }
 
@@ -502,8 +541,16 @@ export class QsysPanel {
     if (replayed || !p) return;
     this.noteCoreState(p.state);
     if (p.catalogAt !== this.catalogAt) {
+      const known = this.catalogAt !== undefined;
       this.catalogAt = p.catalogAt;
       this.catalogRead = false;
+      // A new catalog (a redeploy, a Core reboot): ranges, types and choices may all
+      // have changed. Close input until it is read again.
+      if (known) {
+        this.breakOff();
+        this.hydrated = false;
+        this.bump();
+      }
     }
     if (p.connected === true) {
       this.hydrate();
@@ -519,24 +566,31 @@ export class QsysPanel {
     if (up === this.streamUp) return;
     this.streamUp = up;
     if (!up) {
+      this.syncGen++;
       this.breakOff();
       this.hydrated = false;
     } else {
-      this.hydrate();
+      // The Core may have rebooted or been redeployed while this page could not hear.
+      this.catalogRead = false;
+      this.resync();
     }
     this.bump();
   }
 
+  /** Hidden (an iPad sleeping, a tab switched away): not live. Gestures end, holds
+   *  cancel, waiting writes are dropped, and nothing opens again until a fresh read. */
   private onHidden(): void {
     this.meters.pause();
+    this.syncGen++;
     this.breakOff();
+    this.hydrated = false;
     this.bump();
   }
 
-  /** Woken: read again before accepting input; the stream may have died unnoticed. */
+  /** Woken: read again, catalog too, before accepting input; the stream may have died unnoticed. */
   private onVisible(): void {
-    this.hydrated = false;
-    this.hydrate();
+    this.catalogRead = false;
+    this.resync();
     this.bump();
   }
 
@@ -546,6 +600,7 @@ export class QsysPanel {
     for (const lane of this.lanes.values()) {
       if (lane.timer) clearTimeout(lane.timer);
       lane.timer = null;
+      lane.echoes = [];
       const held = lane.held;
       lane.held = null;
       for (const w of held?.waiters ?? []) w(notSent("the connection dropped; this change was not sent"));
@@ -565,7 +620,7 @@ export class QsysPanel {
     if (!this.live) return Promise.resolve(notSent("the sound system is offline or still being read; nothing was sent"));
     const k = addressKey(a);
     let lane = this.lanes.get(k);
-    if (!lane) this.lanes.set(k, (lane = { inFlight: false, held: null, timer: null, lastSentAt: -Infinity, coalesceMs: DRAG_COALESCE_MS }));
+    if (!lane) this.lanes.set(k, (lane = { inFlight: false, held: null, timer: null, lastSentAt: -Infinity, coalesceMs: DRAG_COALESCE_MS, echoes: [] }));
     lane.coalesceMs = opts.coalesceMs ?? DRAG_COALESCE_MS;
     return new Promise<WriteResult>((resolve) => {
       const waiters = [...(lane.held?.waiters ?? []), resolve];
@@ -596,6 +651,7 @@ export class QsysPanel {
     lane.inFlight = true;
     lane.lastSentAt = Date.now();
     const sentAt = this.stamp;
+    if (!held.final) lane.echoes.push(held.value);
     const body = { component: a.component, control: a.control, value: held.value, panelId: this.id, final: held.final };
     void invoke<WriteResult>("qsys:write", body)
       .catch((err: unknown): WriteResult => {
@@ -604,10 +660,14 @@ export class QsysPanel {
       })
       .then((result) => {
         lane.inFlight = false;
-        if (result.ok && held.final) this.adoptReadBack(a, result, sentAt);
+        if (held.final) {
+          if (result.ok) this.adoptReadBack(a, result, sentAt);
+          lane.echoes = [];
+        }
         for (const w of held.waiters) w(result);
         // A refusal ends the gesture: the drag values queued behind it are not sent.
         const next = lane.held;
+        if (!result.ok) lane.echoes = [];
         if (!result.ok && next && !next.final) {
           lane.held = null;
           if (lane.timer) clearTimeout(lane.timer);
@@ -677,7 +737,7 @@ export function useQsysPanelContext(): QsysPanel | null {
 }
 
 const UNAVAILABLE: QsysValue = { value: null, string: "", position: null, state: "unavailable" };
-const NO_CONTROL: QsysControlInfo = { type: "", range: null, choices: null, allowed: false, limits: { min: null, max: null }, hold: false };
+const NO_CONTROL: QsysControlInfo = { type: "", range: null, choices: null, writable: false, allowed: false, limits: { min: null, max: null }, hold: false };
 const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0 };
 
 /** One control's value as the Core last reported it, and whether input is open. */

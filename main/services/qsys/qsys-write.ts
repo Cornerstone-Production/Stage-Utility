@@ -22,7 +22,7 @@
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey } from "../../types/qsys.js";
+import { addressKey, isReadOnlyDirection } from "../../types/qsys.js";
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcControl } from "./qrc-types.js";
 import { type AllowEntry, isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
@@ -105,7 +105,7 @@ export function kindOf(c: QrcControl): Kind {
  * sending, and anything that asks the same question asks here.
  */
 export function unwritableReason(c: QrcControl, entry: Pick<AllowEntry, "min" | "max">): "read-only" | "no-range" | null {
-  if (/^read$/i.test(String(c.Direction ?? "").trim())) return "read-only";
+  if (isReadOnlyDirection(c.Direction)) return "read-only";
   if (kindOf(c) === "number" && (entry.min === null || entry.max === null)) return "no-range";
   return null;
 }

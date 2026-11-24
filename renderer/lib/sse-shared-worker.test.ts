@@ -71,6 +71,34 @@ function fakePort() {
   return { port, posted, all };
 }
 
+// First in the file: the worker's reporter is module state, and a later test that
+// leaves a held report in flight would hold this one's reports back.
+test("a tab's ack is answered only by a report that started after it asked, once the server took it", async () => {
+  await import("./sse-shared-worker.js");
+  const held = heldFetch();
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: unknown }).fetch = held.fetch;
+  try {
+    const onconnect = (globalThis as unknown as { self: { onconnect: (e: { ports: unknown[] }) => void } }).self
+      .onconnect;
+    const tab = fakePort();
+    onconnect({ ports: [tab.port] });
+    const acks = () => tab.all.filter((m) => m.type === "subscribed").map((m) => m.ack);
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["qsys:watch:x"] } }); // report 1 goes out
+    tab.port.onmessage!({ data: { type: "subscribe", channels: ["qsys:watch:x"], ack: 7 } }); // asks while 1 is out
+    await held.settle();
+    held.outstanding[0].respond(); // report 1: started before the ask, answers nothing
+    await held.settle();
+    assert.deepEqual(acks(), [], "a report sent before the tab asked answered it");
+    assert.equal(held.outstanding.length, 1, "the trailing report went out (positive control)");
+    held.outstanding[0].respond();
+    await held.settle();
+    assert.deepEqual(acks(), [7]);
+  } finally {
+    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+  }
+});
+
 test("a live push carries no replay flag; a late subscriber's replay does", async () => {
   await import("./sse-shared-worker.js");
   // The module sets `self.onconnect` — `self` is jsdom's window (installDom
@@ -202,6 +230,7 @@ test("the worker's subscribe report can time out", async () => {
     (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
   }
 });
+
 
 // Whether the shared stream is delivering, told to every tab: a Screens-card
 // preview draws *Not live* from it, so a frozen frame does not pass for live

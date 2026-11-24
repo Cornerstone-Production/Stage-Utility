@@ -11,7 +11,7 @@
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
 import type { Rotation } from "./output-format.js";
-import type { QsysBinding } from "./qsys.js";
+import type { QsysBinding, QsysDensity } from "./qsys.js";
 
 export type ViewKind =
   | "slots"
@@ -658,6 +658,8 @@ export type LayoutObjectConfig =
       showDb: boolean;
       steps: boolean;
       stepDb: number;
+      // "dense": the staff panel's narrow strip, with a dB tick scale. Absent is standard.
+      density?: QsysDensity;
     }
   | { type: "qsys-meter"; binding: QsysBinding | null; binding2?: QsysBinding | null; form: "bar" | "number"; unit?: string }
   | { type: "qsys-mute"; binding: QsysBinding | null }
@@ -669,6 +671,9 @@ export type LayoutObjectConfig =
       onBinding?: QsysBinding | null;
       offBinding?: QsysBinding | null;
       label: string;
+      // The words on a trigger pair with no readable state ("Open" / "Closed"). Absent: On / Off.
+      onLabel?: string;
+      offLabel?: string;
     }
   | { type: "qsys-presets"; items: { label: string; binding: QsysBinding }[]; previous?: QsysBinding | null }
   // binding is the control holding the choice list; items are fixed alternatives.
@@ -682,6 +687,7 @@ export type LayoutObjectConfig =
       mute: QsysBinding | null;
       meter: QsysBinding | null;
       meter2?: QsysBinding | null;
+      density?: QsysDensity;
     }
   | { type: "qsys-status" }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by

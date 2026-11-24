@@ -148,18 +148,32 @@ function replayTo(port: MessagePort, channels: Iterable<string>): void {
 // burst lets a stale report land last and drop channels added after it.
 const reporter = createSubscribeReporter(
   union,
-  (channels) =>
-    fetch("/api/events/subscribe", {
+  (channels) => {
+    // Tabs waiting to hear that the server has their channels (api.ts whenSubscribed):
+    // answered by this report, which starts after they asked.
+    const answering = awaitingAck.splice(0);
+    return fetch("/api/events/subscribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cid, channels }),
       // Without it, a request that hangs holds back every later report.
       signal: AbortSignal.timeout(SUBSCRIBE_REPORT_TIMEOUT_MS),
-    }),
+    }).then((res) => {
+      if (!res.ok) throw new Error(`subscribe answered ${res.status}`);
+      for (const a of answering) a.port.postMessage({ type: "subscribed", ack: a.ack });
+      return res;
+    }, (err: unknown) => {
+      awaitingAck.push(...answering);
+      throw err;
+    });
+  },
   // Filtering is an optimization — a failed report just means the old filter (or
   // send-all) stays until the next report.
   (err) => console.warn("[sse-worker] subscribe report failed", err),
 );
+
+/** Tabs waiting for a report to be acknowledged, with the token each sent. */
+const awaitingAck: { port: MessagePort; ack: unknown }[] = [];
 
 function report(): void {
   ensureEs();
@@ -209,11 +223,12 @@ ctx.onconnect = (e: MessageEvent) => {
   const port = e.ports[0];
   portChannels.set(port, new Set());
   port.onmessage = (ev: MessageEvent) => {
-    const m = ev.data as { type?: string; channels?: string[] };
+    const m = ev.data as { type?: string; channels?: string[]; ack?: unknown };
     if (m.type === "subscribe") {
       const wanted = new Set(m.channels ?? []);
       const previous = portChannels.get(port) ?? new Set<string>();
       portChannels.set(port, wanted);
+      if (m.ack !== undefined) awaitingAck.push({ port, ack: m.ack });
       report();
       // Only what this port did not already have, so a re-subscribe (which happens
       // on every mount and unmount) does not re-deliver state it is already showing.
@@ -251,6 +266,7 @@ ctx.onconnect = (e: MessageEvent) => {
     } else if (m.type === "bye") {
       // Best-effort cleanup when a tab unloads (ports have no reliable close event).
       portChannels.delete(port);
+      for (let i = awaitingAck.length - 1; i >= 0; i--) if (awaitingAck[i].port === port) awaitingAck.splice(i, 1);
       report();
     }
   };

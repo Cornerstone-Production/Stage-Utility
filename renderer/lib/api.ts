@@ -2142,9 +2142,70 @@ let reportTimer: ReturnType<typeof setTimeout> | null = null;
 // last would drop channels added after it. See subscribe-reporter.ts.
 const subscribeReporter = createSubscribeReporter(
   () => [...new Set([...directHandlers.keys(), ...sseListeners.map((l) => l.channel)])],
-  (channels) => post("/api/events/subscribe", { cid: CLIENT_ID, channels }),
+  (channels) => {
+    // Every waiter registered before this report started is answered by it.
+    const answering = [...subscribedWaiters];
+    subscribedWaiters.clear();
+    return post("/api/events/subscribe", { cid: CLIENT_ID, channels }).then(
+      (r) => {
+        for (const w of answering) w();
+        return r;
+      },
+      (err: unknown) => {
+        // Not acknowledged: the next report answers them, or their own deadline does.
+        for (const w of answering) subscribedWaiters.add(w);
+        throw err;
+      },
+    );
+  },
   (err) => console.warn("[sse] subscribe report failed", err),
 );
+
+// ── Has the server been told? ───────────────────────────────────────────────
+// A channel this page subscribes to reaches the server in a report (above, or the
+// shared worker's), and until that report lands a client whose stream already
+// carries a filter is not sent that channel. A read meant to pair with a push
+// stream (read, then follow the pushes) must start AFTER the report, or a change
+// in between is in neither. That is what this answers.
+const subscribedWaiters = new Set<() => void>();
+const workerAckWaiters = new Map<number, () => void>();
+let nextAckToken = 1;
+/** Give up waiting for an acknowledgement after this, and let the caller go on. */
+const SUBSCRIBED_DEADLINE_MS = 5_000;
+
+/**
+ * Resolves once the server has acknowledged a channel report sent after this
+ * call, so it includes every channel subscribed to by now. Sends that report at
+ * once rather than after the usual 200 ms batching. Resolves anyway after
+ * SUBSCRIBED_DEADLINE_MS (a server that cannot take the report cannot serve the
+ * read either), and at once on the public page, which reports nothing.
+ */
+export function whenSubscribed(): Promise<void> {
+  if (isPublicMode()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      subscribedWaiters.delete(finish);
+      for (const [t, w] of workerAckWaiters) if (w === finish) workerAckWaiters.delete(t);
+      resolve();
+    };
+    const deadline = setTimeout(() => {
+      console.warn("[sse] channel report not acknowledged in time; going on without it");
+      finish();
+    }, SUBSCRIBED_DEADLINE_MS);
+    if (sharedSse && sseWorker) {
+      const token = nextAckToken++;
+      workerAckWaiters.set(token, finish);
+      sseWorker.port.postMessage({ type: "subscribe", channels: [...workerHandlers.keys()], ack: token });
+      return;
+    }
+    subscribedWaiters.add(finish);
+    subscribeReporter.report();
+  });
+}
 function reportChannels(): void {
   // The public page writes nothing to the Worker.
   if (isPublicMode()) return;
@@ -2358,6 +2419,13 @@ function ensureWorker(): boolean {
       if (msg.type === "stream") {
         // Whether the worker's stream is delivering: what every tab on it sees.
         noteStream(msg.delivering === true);
+        return;
+      }
+      if (msg.type === "subscribed") {
+        // The worker's report carrying this tab's channels was acknowledged.
+        const token = (msg as { ack?: unknown }).ack;
+        const waiter = typeof token === "number" ? workerAckWaiters.get(token) : undefined;
+        if (waiter) waiter();
         return;
       }
       if (msg.type === "pong") {

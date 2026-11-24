@@ -9,8 +9,21 @@ export type QsysAddress = { component: string; control: string };
  *  separate control that says whether it is lit (a snapshot Match, an LED). */
 export type QsysBinding = QsysAddress & { indicator?: QsysAddress | null };
 
+/** How tightly a fader or channel strip is drawn: standard (the volunteer panel's
+ *  92 px strip) or dense (the staff panel's 80 px strip with a dB tick scale). */
+export type QsysDensity = "standard" | "dense";
+
 /** A volunteer panel's meters poll at the volunteer rate, a staff panel's at the staff rate. */
 export type PanelKind = "volunteer" | "staff";
+
+/**
+ * A control the Core reports as read-only (QRC `Direction: "Read"`). The one rule
+ * for it: the writer refuses such a control before sending, and a panel draws an
+ * object that writes it as Unavailable.
+ */
+export function isReadOnlyDirection(direction: unknown): boolean {
+  return /^read$/i.test(String(direction ?? "").trim());
+}
 
 /** A map key for an address. NUL cannot appear in a Code Name or a control name. */
 export function addressKey(a: QsysAddress): string {

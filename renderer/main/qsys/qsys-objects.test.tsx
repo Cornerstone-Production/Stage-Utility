@@ -66,6 +66,9 @@ const CATALOG = {
         { Name: "gain_free", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute_free", Type: "Boolean" },
         { Name: "load_free", Type: "Trigger" },
+        // A momentary (Boolean on a button), and a level the Core says is read-only.
+        { Name: "talk", Type: "Boolean" },
+        { Name: "level_ro", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
       ],
     },
   ],
@@ -77,6 +80,8 @@ const ALLOW = {
     { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "load_1", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "save", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "level_ro", label: "", min: -100, max: 20, confirm: "none" },
   ],
 };
 
@@ -87,6 +92,12 @@ interface Server {
   /** When set, a write's answer waits for this to be called. */
   holdWrites: ((release: () => void) => void) | null;
   coreState: "connected" | "reconnecting" | "offline";
+  /** When set, a subscribe report's answer waits for this to be called. */
+  holdSubscribes: ((release: () => void) => void) | null;
+  /** When set, a values read's answer waits for this to be called. */
+  holdReads: ((release: () => void) => void) | null;
+  allowFails: boolean;
+  catalog: typeof CATALOG;
   values: Record<string, unknown>;
   /** What a write answers; the default lands it as sent. */
   answer: (body: Record<string, unknown>) => unknown;
@@ -103,7 +114,11 @@ function freshServer(): Server {
     catalogFails: 0,
     holdWrites: null,
     coreState: "connected",
-    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0 },
+    holdSubscribes: null,
+    holdReads: null,
+    allowFails: false,
+    catalog: CATALOG,
+    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0, talk: false, level_ro: -5 },
     answer: (body) => ({ ok: true, value: body.value, string: String(body.value), clamped: false }),
     writes: [],
     reads: 0,
@@ -117,23 +132,33 @@ function freshServer(): Server {
 const f = stubFetchWithLog((url, init) => {
   if (url.includes("/api/events/subscribe")) {
     server.subscribes.push((JSON.parse(String(init?.body ?? "{}")) as { channels: string[] }).channels);
+    const hold = server.holdSubscribes;
+    if (hold) return new Promise((resolve) => hold(() => resolve(ok({}))));
     return ok({});
   }
   if (url.startsWith("/api/qsys/values")) {
     server.reads++;
-    return ok({
-      ready: server.ready,
-      values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })),
-    });
+    // Answered with the values as they are when it is ANSWERED, as the server's would be.
+    const answer = () =>
+      ok({
+        ready: server.ready,
+        values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })),
+      });
+    const hold = server.holdReads;
+    if (hold) return new Promise((resolve) => hold(() => resolve(answer())));
+    return answer();
   }
   if (url === "/api/qsys/status") return ok({ connected: server.coreState === "connected", state: server.coreState });
-  if (url === "/api/qsys/allowlist") return ok(ALLOW);
+  if (url === "/api/qsys/allowlist") {
+    if (server.allowFails) return { ok: false, status: 500, statusText: "Error", json: async () => ({ error: "disk" }), text: async () => "" };
+    return ok(ALLOW);
+  }
   if (url === "/api/qsys/catalog") {
     if (server.catalogFails > 0) {
       server.catalogFails--;
       return { ok: false, status: 503, statusText: "Error", json: async () => ({ error: "not connected" }), text: async () => "" };
     }
-    return ok(CATALOG);
+    return ok(server.catalog);
   }
   if (url === "/api/qsys/write") {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
@@ -383,7 +408,7 @@ describe("Q-SYS objects", () => {
     act(() => {
       fireEvent.pointerDown(btn, { pointerId: 3 });
     });
-    assert.equal(btn.textContent, "Keep holding…");
+    assert.equal(btn.textContent, "Keep holding to save…", "the kit's words");
     await wait(HOLD_MS / 2);
     act(() => {
       window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 3 }));
@@ -687,11 +712,306 @@ describe("the panel store against the Core", () => {
     assert.equal(f.logs.filter((l) => l.tag === "qsys" && /catalog/.test(l.message)).length, 1, "the failure reached /log once");
   });
 
-  test("a change made while the subscribe report is on its way is still read", async () => {
+  test("input opens only on a read sent after the server acknowledged the page's channels", async () => {
+    let release: () => void = () => {};
+    server.holdSubscribes = (r) => (release = r);
     await mount([FADER]);
-    assert.equal(dbText(), "-20.0");
+    assert.ok(server.reads >= 1, "the panel was read at once, to draw (positive control)");
+    assert.equal(q("qsys-fader").dataset.state, "offline", "input open before the server had the page's channels");
     server.values.gain = -3; // changed on the Core; no push reaches a page not yet subscribed
-    await wait(700);
-    assert.equal(dbText(), "-3.0");
+    server.holdSubscribes = null;
+    release();
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    assert.equal(dbText(), "-3.0", "the change made before the acknowledgement was read");
+  });
+
+  test("after a reconnect, input waits for the acknowledgement and the read after it", async () => {
+    await mount([FADER]);
+    let release: () => void = () => {};
+    server.holdSubscribes = (r) => (release = r);
+    stream(false);
+    stream(true);
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "offline", "open before the server had the channels again");
+    server.values.gain = -11;
+    server.holdSubscribes = null;
+    release();
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    assert.equal(dbText(), "-11.0");
+  });
+});
+
+function hide() {
+  Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+  act(() => {
+    document.dispatchEvent(new window.Event("visibilitychange"));
+  });
+}
+function show() {
+  Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+  act(() => {
+    document.dispatchEvent(new window.Event("visibilitychange"));
+  });
+}
+
+describe("review fixes", () => {
+  test("a second touch starts from the value on screen, not the Core's last report", async () => {
+    await mount([FADER]);
+    const releases: (() => void)[] = [];
+    server.holdWrites = (r) => releases.push(r);
+    const fader = q("qsys-fader", "[data-fader]");
+    down(fader, 100);
+    move(80); // -8 on screen
+    up(80); // the release's final write is not answered yet
+    await wait(10);
+    assert.equal(dbText(), "-8.0", "the thumb stays where the finger left it");
+    down(fader, 100); // a second touch while the Core has not answered
+    move(99); // one pixel: 0.6 dB
+    up(99);
+    for (const r of releases.splice(0)) r();
+    await wait(20);
+    for (const r of releases.splice(0)) r();
+    await wait(20);
+    const values = server.writes.map((w) => w.body.value);
+    assert.ok(!values.some((v) => typeof v === "number" && v < -15), `the second touch jumped back toward -20: ${JSON.stringify(values)}`);
+    assert.equal(values.at(-1), -7.4);
+  });
+
+  test("hiding the page mid-hold ends it; nothing writes, and input waits for a fresh read on show", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }, FADER]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 7 });
+    });
+    hide();
+    assert.equal(q("qsys-fader").dataset.state, "offline", "a hidden panel is not live");
+    await wait(HOLD_MS + 100); // the hold's time passes while hidden (an iPad asleep)
+    let release: () => void = () => {};
+    server.holdSubscribes = (r) => (release = r);
+    show();
+    await wait(30);
+    assert.equal(q("qsys-fader").dataset.state, "offline", "input opened on show before the fresh read");
+    server.holdSubscribes = null;
+    release();
+    await wait(40);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 7 }));
+    });
+    assert.equal(server.writes.length, 0, "the hold begun before the hide wrote");
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 8 });
+    });
+    await wait(HOLD_MS + 60);
+    assert.equal(server.writes.length, 1, "a fresh hold after the read writes (positive control)");
+  });
+
+  test("a hold across a quick hide and show writes nothing, even once the panel is read again", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }, FADER]);
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 12 });
+    });
+    await wait(50);
+    hide();
+    show();
+    await wait(60);
+    assert.equal(q("qsys-fader").dataset.state, "live", "read again well inside the hold (positive control)");
+    await wait(HOLD_MS);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 12 }));
+    });
+    assert.equal(server.writes.length, 0, "a hold begun before the hide completed after it");
+  });
+
+  test("a hold goes to keyboard: Space held for the full hold writes, let go early does not", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.keyDown(btn, { key: " " });
+    });
+    await wait(HOLD_MS / 2);
+    act(() => {
+      fireEvent.keyUp(btn, { key: " " });
+    });
+    await wait(HOLD_MS);
+    assert.equal(server.writes.length, 0);
+    act(() => {
+      fireEvent.keyDown(btn, { key: " " });
+    });
+    await wait(HOLD_MS + 60);
+    act(() => {
+      fireEvent.keyUp(btn, { key: " " });
+    });
+    assert.equal(server.writes.length, 1);
+  });
+
+  test("sliding off a hold button lets go of it", async () => {
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }]);
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 9, clientX: 50, clientY: 50 });
+    });
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointermove", { pointerId: 9, clientX: 500, clientY: 50 }));
+    });
+    await wait(HOLD_MS + 60);
+    assert.equal(server.writes.length, 0);
+  });
+
+  test("a Boolean on a button is a momentary: true on press, false on release", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 10 });
+    });
+    await wait(20);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 10 }));
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true, false]);
+  });
+
+  test("a momentary pressed across a drop does not send its release after it", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    act(() => {
+      fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 11 });
+    });
+    await wait(20);
+    stream(false);
+    stream(true);
+    await wait(40);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 11 }));
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [true], "a release from before the drop was sent after it");
+  });
+
+  test("a write object on a control the Core reports read-only is Unavailable", async () => {
+    await mount([{ ...(FADER as object), binding: b("level_ro") } as LayoutObjectConfig, { type: "qsys-meter", binding: b("level_ro"), form: "number" }]);
+    assert.equal(q("qsys-fader").dataset.state, "unavailable");
+    assert.equal(q("qsys-meter").dataset.state, "live", "reading it is fine (positive control)");
+  });
+
+  test("a catalog changed while the page could not hear is read again on reconnect", async () => {
+    await mount([FADER]);
+    assert.equal(q("qsys-fader", "[data-fader]").getAttribute("aria-valuemin"), "-100");
+    server.catalog = {
+      ...CATALOG,
+      components: [{ ...CATALOG.components[0], controls: CATALOG.components[0].controls.map((c) => (c.Name === "gain" ? { ...c, ValueMin: -60, ValueMax: 12 } : c)) }],
+    };
+    stream(false);
+    stream(true);
+    await wait(60);
+    assert.equal(q("qsys-fader", "[data-fader]").getAttribute("aria-valuemin"), "-60", "the old range survived the reconnect");
+  });
+
+  test("a new catalog announced while live closes input until it is read", async () => {
+    await mount([FADER]);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 1 }));
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    let release: () => void = () => {};
+    server.holdReads = (r) => (release = r);
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected", catalogAt: 2 }));
+    assert.equal(q("qsys-fader").dataset.state, "offline", "open against the old catalog");
+    server.holdReads = null;
+    release();
+    await wait(40);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+  });
+
+  test("the fader is a slider: its value is announced, and the arrow keys step it", async () => {
+    await mount([FADER]);
+    const slider = q("qsys-fader", "[role=slider]");
+    assert.equal(slider.getAttribute("aria-valuenow"), "-20");
+    assert.equal(slider.getAttribute("aria-valuetext"), "-20.0 dB");
+    assert.equal(slider.getAttribute("aria-valuemax"), "0");
+    act(() => {
+      fireEvent.keyDown(slider, { key: "ArrowUp" });
+    });
+    await wait(20);
+    assert.deepEqual(server.writes.map((w) => [w.body.value, w.body.final]), [[-17, true]], "one step of stepDb, final");
+  });
+
+  test("a meters-only strip draws its meters", async () => {
+    await mount([{ type: "qsys-strip", name: null, label: "Room", gain: null, mute: null, meter: b("meter") }]);
+    assert.equal(q("qsys-strip").dataset.state, "live");
+    assert.ok(q("qsys-strip", "[data-meter]"), "no meter drawn");
+  });
+
+  test("a dense strip has the staff tick scale and an M mute", async () => {
+    await mount([{ type: "qsys-strip", name: null, label: "Mic 1", gain: b("gain"), mute: b("mute"), meter: b("meter"), meter2: b("meter"), density: "dense" }]);
+    assert.deepEqual([...document.querySelectorAll("[data-tick]")].map((t) => t.textContent), ["+12", "0", "-12", "-24", "-60"]);
+    const mute = q("qsys-strip", "[data-mute]");
+    assert.equal(mute.textContent, "M");
+    assert.equal(mute.getAttribute("aria-label"), "Mute");
+    assert.equal(document.querySelectorAll('[data-qsys-object="qsys-strip"] [data-meter]').length, 2);
+  });
+
+  test("a release's read-back is not undone by the Core echoing a drag value", async () => {
+    await mount([FADER]);
+    const releases: (() => void)[] = [];
+    server.holdWrites = (r) => releases.push(r);
+    const fader = q("qsys-fader", "[data-fader]");
+    down(fader, 100);
+    move(90); // -14, sent
+    await wait(5);
+    releases.shift()!();
+    await wait(5);
+    move(80);
+    up(80); // final -8, unanswered
+    await wait(10);
+    push("qsys:values", [{ control: "gain", value: -14 }]); // the Core's poll still shows the drag value
+    for (const r of releases.splice(0)) r();
+    await wait(20);
+    assert.equal(dbText(), "-8.0", "the echo of the page's own drag write beat the release's read-back");
+  });
+
+  test("a refusal from the Core mid-drag ends the drag: one refused write, not one per sample", async () => {
+    server.answer = (body) => (body.final === false ? { ok: false, reason: "core-error", message: "the Core refused" } : { ok: true, value: body.value, string: "", clamped: false });
+    await mount([FADER]);
+    down(q("qsys-fader", "[data-fader]"), 100);
+    for (let y = 99; y > 60; y--) {
+      move(y);
+      await wait(3);
+    }
+    up(60);
+    await wait(60);
+    assert.equal(server.writes.length, 1, `${server.writes.length} writes reached the server`);
+  });
+
+  test("an allowlist that cannot be read is logged once per run", async () => {
+    server.allowFails = true;
+    server.ready = false; // keeps the panel re-reading
+    const before = f.logs.filter((l) => /allowlist/.test(l.message)).length;
+    await mount([FADER]);
+    await wait(1_200);
+    assert.ok(server.reads >= 3, "it read again (positive control)");
+    assert.equal(f.logs.filter((l) => /allowlist/.test(l.message)).length - before, 1);
+  });
+
+  test("values flowing while the server is not ready do not re-read back to back", async () => {
+    await mount([FADER]);
+    server.ready = false;
+    act(() => FakeEventSource.last!.push("qsys:status", { connected: true, state: "connected" }));
+    await wait(30);
+    const reads = server.reads;
+    for (let i = 0; i < 10; i++) {
+      push("qsys:values", [{ control: "gain", value: -20 + i }]);
+      await wait(5);
+    }
+    assert.ok(server.reads - reads <= 1, `${server.reads - reads} reads for ten pushes`);
+  });
+
+  test("under StrictMode the panel watches once, goes live and writes nothing", async () => {
+    const ctx = makeRenderCtx({ interactive: true, embedChain: ["v1"] });
+    render(React.createElement(React.StrictMode, null, React.createElement(ObjectContent as never, { o: obj(FADER), ctx })));
+    await wait(250);
+    assert.equal(q("qsys-fader").dataset.state, "live");
+    assert.ok(server.subscribes.at(-1)?.includes("qsys:watch:v1"));
+    assert.equal(server.writes.length, 0);
   });
 });
