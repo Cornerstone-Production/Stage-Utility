@@ -160,7 +160,7 @@ describe("/stageplots/manage: Edit", () => {
     await settle();
     const bar = screen.getByRole("banner", { name: "App bar" });
     const edit = within(bar).getByRole("link", { name: "Edit" });
-    assert.equal(edit.getAttribute("href"), "/stageplots/edit?venue=v-main&plot=p-alt", "the address names the plan's plot (the default here)");
+    assert.equal(edit.getAttribute("href"), "/stageplots/edit?venue=v-main&plot=p-std", "the address names another plot than the click opens: a new tab opens the wrong one");
     await act(async () => void fireEvent.click(edit));
     for (let i = 0; i < 3; i++) await settle();
     assert.equal(router.state.location.pathname, "/stageplots/edit", "Edit did not open the editor in the app");

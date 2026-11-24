@@ -27,7 +27,7 @@
 // a tap lists the patch channels through it for the followed plan; while the
 // patch cannot be read it shows its last name and colour and lists its inputs.
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useParams } from "@tanstack/react-router";
 import { PencilIcon, TriangleAlertIcon } from "lucide-react";
 
@@ -270,23 +270,19 @@ export function StagePlotsPage({ venueId, manage = false }: { venueId?: string; 
     // goTo changes every render; the address only needs to follow the venue shown.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownSegment, venueId, base]);
-  // The app bar's Edit opens the editor on the venue shown and the plot on screen: the plan's in
-  // its address, and at the click the tab on screen (onScreen), which a pick may have changed.
+  // The app bar's Edit opens the editor on the venue shown and the plot on screen (VenuePlots
+  // reports it): its address and its click alike, so a new tab opens what a click would.
   const editorLink = useEditorLink();
-  const goInApp = useInAppLink();
-  const onScreen = useRef<string | null>(null);
+  const [onScreen, setOnScreen] = useState<string | null>(null);
   const planPlot = doc && shownVenue ? (resolvePlot(doc, shownVenue.id, plan.resolvedPlanId).plot?.id ?? null) : null;
-  const editSearch: Record<string, string> = shownVenue ? { [VENUE_PARAM]: shownVenue.id, ...(planPlot ? { [PLOT_PARAM]: planPlot } : {}) } : {};
+  // One render after a venue change can still hold the last venue's plot: only this venue's counts.
+  const screenPlot = shownVenue && onScreen && shownVenue.plotIds.includes(onScreen) ? onScreen : planPlot;
+  const editSearch: Record<string, string> = shownVenue ? { [VENUE_PARAM]: shownVenue.id, ...(screenPlot ? { [PLOT_PARAM]: screenPlot } : {}) } : {};
   const editSearchKey = JSON.stringify(editSearch);
   usePageActions(
     manage ? (
       <Button asChild variant="filled" size="small">
-        <a
-          href={editorLink(editSearch).href}
-          onClick={(e) => goInApp(e, { to: "/stageplots/edit", search: editSearch[VENUE_PARAM] && onScreen.current ? { ...editSearch, [PLOT_PARAM]: onScreen.current } : editSearch })}
-        >
-          Edit
-        </a>
+        <a {...editorLink(editSearch)}>Edit</a>
       </Button>
     ) : null,
     [manage, editSearchKey],
@@ -316,9 +312,7 @@ export function StagePlotsPage({ venueId, manage = false }: { venueId?: string; 
           plan={plan}
           channelsOf={channelsOf}
           manage={manage}
-          onShown={(plotId) => {
-            onScreen.current = plotId;
-          }}
+          onShown={setOnScreen}
           onBack={() => {
             remember(null);
             setOpen({ kind: "list" });
