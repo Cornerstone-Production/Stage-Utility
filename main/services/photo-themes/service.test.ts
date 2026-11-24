@@ -688,6 +688,18 @@ describe("a changed prompt", () => {
     assert.equal(flagged(theme.id), false);
   });
 
+  it("Redo all's count is what Redo all sends: not someone whose photo is not on Planning Center", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    // Person 2's photo has moved off Planning Center since it was made.
+    srv.rosters.set(PLAN, [person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }]);
+    const read = await photoThemes.planPeople(PLAN, TYPE);
+    assert.deepEqual(read.people.filter((p) => p.promptChanged).map((p) => p.personId), ["1", "2"]);
+    assert.equal(read.toRedoAll, 1);
+    const r = await generated("all", PLAN);
+    assert.equal(r.queued, read.toRedoAll, "the count and the send agree");
+    assert.equal(statusOf(theme.id, "2"), "stale", "not sent: their approved photo stands, made from the photo they had");
+  });
+
   it("the prompt each photo was made under survives a restart", async () => {
     await twoPlansThenNewPrompt();
     await generated("all", PLAN);

@@ -154,6 +154,8 @@ beforeEach(() => {
         ...roster,
         people: people.map((p) => ({ ...p, originalUrl: p.personId === "9003" ? null : `https://avatars.example/${p.personId}` })),
         toGenerate: people.filter((p) => p.personId !== "9003" && (p.status === "none" || p.status === "failed")).length,
+        // The server's count for Redo all; the panel shows it as it is.
+        toRedoAll: people.filter((p) => p.personId !== "9003" && (p.promptChanged || p.status === "none" || p.status === "failed")).length,
       };
     }
     return { ok: status < 400, status, statusText: "x", json: async () => out, text: async () => JSON.stringify(out) } as unknown as Response;

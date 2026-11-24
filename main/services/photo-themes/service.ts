@@ -385,8 +385,9 @@ export class PhotoThemesService {
       roster: read.roster,
       ...(read.reason ? { reason: read.reason } : {}),
       people,
-      // The people a Generate would send: the same test generate() applies, so the button's count is what it bills.
-      toGenerate: theme ? people.filter((p) => p.originalUrl && isAllowedPhotoUrl(p.originalUrl) && !p.approved && (p.status === "none" || p.status === "failed")).length : 0,
+      // What a press would send, by the rule generate() applies: the buttons' counts are what they bill.
+      toGenerate: theme ? read.people.filter((p) => this.wouldSend(theme, p, "missing") === "send").length : 0,
+      toRedoAll: theme ? read.people.filter((p) => this.wouldSend(theme, p, "all") === "send").length : 0,
     };
   }
 
@@ -721,24 +722,10 @@ export class PhotoThemesService {
     const result: GenerateResultDTO = { queued: 0, reused: 0, skipped: [] };
     const toSend: PlanPerson[] = [];
     for (const p of read.people) {
-      const entry = theme.people.get(p.personId);
-      // Redo all sends again only a photo made under an earlier prompt.
-      const keep = entry && !(mode === "all" && madeUnderEarlierPrompt(theme, entry));
-      if (this.expected.has(jobKey(themeId, p.personId))) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Already being made" });
-      } else if (keep && entry.approved) {
-        // On screen already: reused at no cost, whatever a later Redo did.
-        // A failed Redo is tried again only by Redo.
-        result.reused++;
-      } else if (keep && entry.pending?.status === "ready") {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Made, waiting for review" });
-      } else if (!p.photoUrl) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "No Planning Center photo" });
-      } else if (!isAllowedPhotoUrl(p.photoUrl)) {
-        result.skipped.push({ personId: p.personId, name: p.name, reason: "Their photo is not on Planning Center" });
-      } else {
-        toSend.push(p);
-      }
+      const what = this.wouldSend(theme, p, mode);
+      if (what === "send") toSend.push(p);
+      else if (what === "reused") result.reused++;
+      else result.skipped.push({ personId: p.personId, name: p.name, reason: what.skip });
     }
     const runId = this.nextRunId++;
     const run: Run = { label: `plan ${planId}`, themeName: theme.name, made: 0, failed: 0, reused: result.reused, skipped: 0, outstanding: 0 };
@@ -758,6 +745,24 @@ export class PhotoThemesService {
     this.changedNow();
     this.pump();
     return result;
+  }
+
+  /**
+   * What a Generate in `mode` does with one person on the plan: send them, reuse
+   * their approved photo, or skip them and why. The one rule: Generate applies it,
+   * and the plan read counts it for the buttons, so a count is what a press sends.
+   */
+  private wouldSend(theme: Theme, p: PlanPerson, mode: "missing" | "all"): "send" | "reused" | { skip: string } {
+    const entry = theme.people.get(p.personId);
+    // Redo all sends again only a photo made under an earlier prompt.
+    const keep = entry && !(mode === "all" && madeUnderEarlierPrompt(theme, entry));
+    if (this.expected.has(jobKey(theme.id, p.personId))) return { skip: "Already being made" };
+    // On screen already: reused at no cost, whatever a later Redo did. A failed Redo is tried again only by Redo.
+    if (keep && entry.approved) return "reused";
+    if (keep && entry.pending?.status === "ready") return { skip: "Made, waiting for review" };
+    if (!p.photoUrl) return { skip: "No Planning Center photo" };
+    if (!isAllowedPhotoUrl(p.photoUrl)) return { skip: "Their photo is not on Planning Center" };
+    return "send";
   }
 
   /** Make one person's photo again. Their approved photo stays on screens until the new one is approved. */

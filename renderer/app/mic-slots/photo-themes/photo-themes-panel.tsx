@@ -199,8 +199,8 @@ function PanelBody({
   }
 
   const toGenerate = roster?.toGenerate ?? 0;
-  /** What Redo all sends: those made under an earlier prompt, and anyone Generate would send. */
-  const redoAllCount = toGenerate + list.filter((p) => p.promptChanged && p.originalUrl).length;
+  /** What Redo all sends, as the server counts it: those made under an earlier prompt, and anyone Generate would send. */
+  const redoAllCount = roster?.toRedoAll ?? 0;
   const generateLabel = generating ? "Generating…" : toGenerate === 0 ? `Everyone has a photo in ${theme ? themeLabel(theme) : "this theme"}` : `Generate ${toGenerate} for ${theme ? themeLabel(theme) : ""}`;
   // No key, or one OpenAI rejected, stops Generate and Redo; the rest of the sheet works without one.
   const trouble = conn && (!photos.canSend || STATES[conn.state].tone === "warn") ? conn : null;

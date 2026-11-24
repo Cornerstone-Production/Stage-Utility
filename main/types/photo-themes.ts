@@ -184,6 +184,8 @@ export interface PlanPeopleDTO {
   people: PlanPersonDTO[];
   /** How many a Generate would send to OpenAI: those with no photo in the theme, or whose last one failed. */
   toGenerate: number;
+  /** How many Redo all (a Generate with `mode: "all"`) would send. */
+  toRedoAll: number;
 }
 
 /**
