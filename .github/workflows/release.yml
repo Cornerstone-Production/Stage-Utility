@@ -656,6 +656,11 @@ jobs:
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # RELEASE_SIGNING_KEY is a secret of this environment, so only beta and main
+    # can read it. `published` is only true once the release job, which names the
+    # same environment, has pushed the tag, so a run on another branch never
+    # reaches this job and the environment's branch policy cannot refuse it.
+    environment: release
     permissions:
       contents: read
     steps:
@@ -793,6 +798,10 @@ jobs:
     # once the tag is on the remote, so this never builds for a stand-down.
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    # STAGE_TAP_TOKEN is a secret of this environment, so only beta and main can
+    # read it. Same reasoning as the sign job: `published` is only true on a
+    # branch the release job's environment admitted.
+    environment: release
     permissions:
       contents: write
     steps:

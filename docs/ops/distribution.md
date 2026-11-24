@@ -177,10 +177,13 @@ job ends. The job's own token is read-only for contents.
 
 The app's private key is a secret of the `release` environment, not of the
 repository, and only `beta` and `main` may deploy to that environment. A workflow
-pushed to any other branch cannot read the key, and so cannot use it to push past the
-ruleset. The release job is the only job that names the environment. That branch
-limit is the whole of the protection: an environment the workflow creates on its
-first run has none, so create it, limited, before the first release that uses it.
+pushed to any other branch cannot read the key, and so cannot use it to push to
+`beta` or `main`. The release, sign and artifacts jobs name the environment: they hold
+the key, the update-signing key (`RELEASE_SIGNING_KEY`) and the Homebrew tap token
+(`STAGE_TAP_TOKEN`), which can live in it too. An environment secret overrides a
+repository secret of the same name. The branch limit is the whole of the environment's
+protection: an environment the workflow creates on its first run has none, so create
+it, limited, before the first release that uses it.
 
 Unlike `GITHUB_TOKEN`, a push made with the app's token starts workflows. The bump
 commit's `[skip ci]` keeps it from starting Release, CodeQL and the secret scan a

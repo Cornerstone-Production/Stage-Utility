@@ -42,7 +42,7 @@ interface Job {
   environment?: string;
   steps?: Step[];
 }
-const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
+const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { on?: { push?: { branches?: string[] } }; jobs: Record<string, Job> };
 const jobs = doc.jobs;
 const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
@@ -408,5 +408,26 @@ describe("the failure status", () => {
     const job = jobs["verify-failed"];
     assert.deepEqual(needsOf(job).sort(), ["verify-checks", "verify-tests"]);
     assert.equal(job.if, "${{ failure() && (needs.verify-checks.result == 'failure' || needs.verify-tests.result == 'failure') }}");
+  });
+});
+
+describe("the release secrets live in the release environment", () => {
+  const SECRETS = /secrets\.(RELEASE_SIGNING_KEY|STAGE_TAP_TOKEN|RELEASE_APP_PRIVATE_KEY)\b/;
+
+  it("every job that reads one names the environment, and no other job does", () => {
+    const readers = Object.entries(jobs).filter(([, j]) => SECRETS.test(JSON.stringify(j))).map(([name]) => name).sort();
+    const named = Object.entries(jobs).filter(([, j]) => j.environment === "release").map(([name]) => name).sort();
+    assert.deepEqual(readers, ["artifacts", "release", "sign"]);
+    assert.deepEqual(named, readers);
+  });
+
+  // The environment's branch policy is beta and main. A run elsewhere (workflow_dispatch from
+  // another branch) is refused at the release job, and `published` stays false.
+  it("sign and artifacts run only after the release job, which published a tag, so the branch policy cannot refuse a legitimate run", () => {
+    assert.deepEqual(doc.on?.push?.branches, ["beta", "main"]);
+    for (const name of ["sign", "artifacts"]) {
+      assert.ok(needsOf(jobs[name]).includes("release"), `${name} does not wait for release`);
+      assert.ok((jobs[name].if ?? "").includes("needs.release.outputs.published == 'true'"), `${name} can run without a published tag`);
+    }
   });
 });
