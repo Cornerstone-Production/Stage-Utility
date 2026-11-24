@@ -31,7 +31,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useParams } from "@tanstack/react-router";
 import { PencilIcon, TriangleAlertIcon } from "lucide-react";
 
-import type { PlotOverride, StagePlotsView, Venue } from "@main/types/stageplots";
+import type { PlotOverride, StagePlotsView, VenueView } from "@main/types/stageplots";
 import { plural } from "@main/services/plural";
 import { resolvePlot } from "@main/services/stageplots-doc";
 import { resolvePlots, tapChannels, type LinkResolution } from "@main/services/stageplots-patch-link";
@@ -80,7 +80,7 @@ function UnreachableNotice() {
   );
 }
 
-function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: Venue; plan: FollowedPlan; onOpen: () => void }) {
+function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: VenueView; plan: FollowedPlan; onOpen: () => void }) {
   const plots = plotsOf(doc, venue);
   const resolved = resolvePlot(doc, venue.id, plan.resolvedPlanId);
   const shown = resolved.plot ?? plots[0];
@@ -106,7 +106,7 @@ function VenueCard({ doc, venue, plan, onOpen }: { doc: StagePlotsView; venue: V
   );
 }
 
-function VenueList({ doc, plan, onOpen, manage }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (venue: Venue) => void; manage: boolean }) {
+function VenueList({ doc, plan, onOpen, manage }: { doc: StagePlotsView; plan: FollowedPlan; onOpen: (venue: VenueView) => void; manage: boolean }) {
   if (doc.venues.length === 0) {
     return manage ? (
       <EmptyState
@@ -147,7 +147,7 @@ function VenuePage({
   manage,
 }: {
   doc: StagePlotsView;
-  venue: Venue;
+  venue: VenueView;
   plan: FollowedPlan;
   onBack: () => void;
   channelsOf: ChannelsOf;
@@ -214,7 +214,7 @@ function VenuePage({
 type Open = { kind: "auto" } | { kind: "list" } | { kind: "venue"; id: string };
 
 /** The venue to show, or null for the list. */
-export function openVenue(doc: StagePlotsView, open: Open): Venue | null {
+export function openVenue(doc: StagePlotsView, open: Open): VenueView | null {
   if (open.kind === "venue") return doc.venues.find((v) => v.id === open.id) ?? openVenue(doc, { kind: "auto" });
   if (open.kind === "list") return null;
   const home = doc.venues.filter((v) => v.kind === "home");

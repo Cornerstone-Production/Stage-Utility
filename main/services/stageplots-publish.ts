@@ -45,9 +45,10 @@
 // the patch cannot be read it goes out unlinked, with its last name and colour and no channels.
 //
 // THE SECRET IS NEVER LOGGED, never in an error sent back, never in a stored error: every
-// sentence goes through `say` or `errorAt`, which hide it. It is in the store, which a LAN
-// browser reads to show the link (pending ones never leave the server), and in config backups
-// (see the restore rule in stageplots-doc.ts).
+// sentence goes through `say` or `errorAt`, which hide it. It is in the store and in config
+// backups (see the restore rule in stageplots-doc.ts). A browser gets it only from
+// GET /api/stageplots/venues/:id/link, the editor's Publish card: the document and its
+// broadcast leave it out (venueView), and pending ones never leave the server.
 
 import { randomBytes } from "node:crypto";
 

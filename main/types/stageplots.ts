@@ -60,6 +60,18 @@ export interface VenuePublish {
   listed: boolean;
 }
 
+/** A venue's publish state as a browser sees it: never the secret. The manage page reads the
+ *  link itself through GET /api/stageplots/venues/:id/link (VenueLink). */
+export type VenuePublishView = Omit<VenuePublish, "secret">;
+
+/** A venue as GET /api/stageplots, every stageplots:updated frame and every route answer carry it. */
+export type VenueView = Omit<Venue, "publish"> & { publish?: VenuePublishView };
+
+/** GET /api/stageplots/venues/:id/link: the venue's public link, or null while it is not published. The one answer with a secret in it. */
+export interface VenueLink {
+  url: string | null;
+}
+
 /** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
  *  before its first request, so a secret is never sent anywhere the store does not know of. */
 export const PENDING_REASONS = ["address changed", "not taken back", "publishing", "regenerated", "restored over", "unpublished", "venue deleted"] as const;
@@ -243,9 +255,9 @@ export interface StagePlotsDoc {
   pendingRemovals: PendingRemoval[];
 }
 
-/** GET /api/stageplots, and every stageplots:updated frame. */
+/** GET /api/stageplots, and every stageplots:updated frame. No secret: the crew's /stageplots reads it too. */
 export interface StagePlotsView {
-  venues: Venue[];
+  venues: VenueView[];
   backgrounds: BackgroundView[];
   plots: Plot[];
   overrides: PlotOverride[];

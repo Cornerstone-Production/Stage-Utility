@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import type { BackgroundView, Plot, PlotDraft, StagePlotsView } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotDraft, StagePlotsDoc, StagePlotsView } from "@main/types/stageplots";
 
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@main/services/stageplots-store";
@@ -194,7 +194,8 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     // The server's own reading of the body and its own rule, never a canned answer.
     const change = readOverrideChange(body);
     if ("problem" in change) return { status: 400, json: { error: change.problem } };
-    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] }, change);
+    // The fake document has no published venue, so no secret is missing from it.
+    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] } as StagePlotsDoc, change);
     if ("problem" in next) return { status: next.status, json: { error: next.problem } };
     DOC.overrides = next.doc.overrides;
     return { status: 200, json: DOC };

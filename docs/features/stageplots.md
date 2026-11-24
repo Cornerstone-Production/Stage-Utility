@@ -586,7 +586,9 @@ more than a working plot (hundreds of items with long input lists). A background
 is listed as not yet published, with that reason.
 
 The secret is in `stageplots.json` and so in config backups: anyone holding a backup can
-open the venue's link. A restore merges the backup's links with the live ones so that none
+open the venue's link. It never reaches a browser with the document: `GET /api/stageplots`
+and `stageplots:updated`, which the crew's `/stageplots` reads, leave it out, and the
+Publish card reads the link on its own. A restore merges the backup's links with the live ones so that none
 is left live and unknown here and none that was revoked comes back: a link both hold stays
 published; another server's links stay with it, unless this box replaces that server; and
 every live link the restore does not keep is queued as an [old link](#old-links) and

@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { XIcon } from "lucide-react";
 
-import type { StagePlotsView, Venue } from "@main/types/stageplots";
+import type { StagePlotsView, VenueView } from "@main/types/stageplots";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { plotsOf } from "../../main/stageplots/doc-helpers";
@@ -46,7 +46,7 @@ export function ThisWeekCard({
   save,
 }: {
   doc: StagePlotsView;
-  venue: Venue;
+  venue: VenueView;
   plan: CurrentPlan;
   /** A plan's name: its date, with the time where two plans share a day. */
   nameOf: (p: { planId: string; planDate?: string | null }) => string;

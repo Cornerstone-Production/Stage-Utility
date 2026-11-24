@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
-import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotDraft, type PlotItem, type StagePlotsView, type Venue } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotDraft, type PlotItem, type StagePlotsView, type VenueView } from "@main/types/stageplots";
 
 import { LeaveGuard } from "../../components/leave-guard";
 import { Button } from "../../components/ui/button";
@@ -93,7 +93,7 @@ function PlotEditor({
   patch,
 }: {
   doc: StagePlotsView;
-  venue: Venue;
+  venue: VenueView;
   plot: Plot;
   save: Save;
   draft: EditorState;
@@ -474,7 +474,7 @@ function EditorBody({
   onDraftNote,
 }: {
   doc: StagePlotsView;
-  venue: Venue | null;
+  venue: VenueView | null;
   plots: Plot[];
   plot: Plot | null;
   header: ReactNode;
