@@ -402,3 +402,11 @@ describe("the gate is not run twice for one tree", () => {
     );
   });
 });
+
+describe("the failure status", () => {
+  it("is written only when a verify job failed, not whenever an ancestor job (already-verified, say) errored", () => {
+    const job = jobs["verify-failed"];
+    assert.deepEqual(needsOf(job).sort(), ["verify-checks", "verify-tests"]);
+    assert.equal(job.if, "${{ failure() && (needs.verify-checks.result == 'failure' || needs.verify-tests.result == 'failure') }}");
+  });
+});

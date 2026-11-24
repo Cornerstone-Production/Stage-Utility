@@ -133,7 +133,11 @@ jobs:
   # needs them, does not run at all then.
   verify-failed:
     needs: [verify-checks, verify-tests]
-    if: ${{ failure() }}
+    # failure() alone is true when any job this one depends on, directly or not,
+    # failed. already-verified is such an ancestor, and an error there is not a
+    # failed gate: it must not mark the commit failed. Only a verify job's own
+    # result counts.
+    if: ${{ failure() && (needs.verify-checks.result == 'failure' || needs.verify-tests.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
       statuses: write # the failure `build` status, and nothing else
