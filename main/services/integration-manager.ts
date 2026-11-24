@@ -45,7 +45,7 @@ import {
 } from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
 import { qsysService } from "./qsys/qsys-service.js";
-import { QSYS_MAX_HZ, QSYS_MIN_HZ, splitQsysConfig } from "./qsys/qsys-settings-config.js";
+import { QSYS_MAX_HZ, QSYS_MIN_HZ, splitQsysConfig, withQsysRates } from "./qsys/qsys-settings-config.js";
 import { qsysTestMessage } from "./qsys/qsys-test-message.js";
 import { qsysSettingsStore, type QsysSettings } from "./qsys/qsys-settings-store.js";
 import { smaartService } from "./smaart-service.js";
@@ -1389,10 +1389,10 @@ class IntegrationManager {
       // deep-merge on load (deliberately — it keeps migrations honest), so an older
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
-      const savedConfig = {
-        ...(savedConfigs[descriptor.id] ?? {}),
-        ...(descriptor.id === "qsys" ? qsysRates : {}),
-      };
+      const savedConfig =
+        descriptor.id === "qsys"
+          ? withQsysRates(savedConfigs[descriptor.id] ?? {}, qsysRates)
+          : (savedConfigs[descriptor.id] ?? {});
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
@@ -1796,11 +1796,21 @@ class IntegrationManager {
     // config it replaced because the address check below does. Reading either
     // off a second load() is the other half of the same race.
     const { before, merged } = await settingsStore.swapIntegrationConfig(id, nonSecretConfig);
-    if (qsysSplit && Object.keys(qsysSplit.rates).length > 0) {
-      const saved = await qsysSettingsStore.saveRates({ ...(await qsysSettingsStore.loadRates()), ...qsysSplit.rates });
-      console.log(
-        `[qsys] meter rates set: volunteer ${scrub(saved.volunteerMeterHz)}/s, staff ${scrub(saved.staffMeterHz)}/s`,
-      );
+    if (qsysSplit) {
+      // Names only, never the value: it is whatever the client sent.
+      for (const key of qsysSplit.ignored) {
+        console.warn(`[qsys] ignoring a non-numeric ${scrub(key)}; the stored rate is unchanged`);
+      }
+      if (Object.keys(qsysSplit.rates).length > 0) {
+        const before = await qsysSettingsStore.loadRates();
+        const saved = await qsysSettingsStore.saveRates({ ...before, ...qsysSplit.rates });
+        // The dialog posts both rates on every save; say so only when one moved.
+        if (saved.volunteerMeterHz !== before.volunteerMeterHz || saved.staffMeterHz !== before.staffMeterHz) {
+          console.log(
+            `[qsys] meter rates set: volunteer ${scrub(saved.volunteerMeterHz)}/s, staff ${scrub(saved.staffMeterHz)}/s`,
+          );
+        }
+      }
     }
 
     // A stored credential goes only where it was entered for. The form posts an
@@ -1867,7 +1877,7 @@ class IntegrationManager {
     }
 
     // Rebuild masked config for state.
-    const visible = id === "qsys" ? { ...merged, ...(await qsysSettingsStore.loadRates()) } : merged;
+    const visible = id === "qsys" ? withQsysRates(merged, await qsysSettingsStore.loadRates()) : merged;
     this.states.set(id, { ...state, config: maskSecrets(id, visible, await secretsStore.getSecrets(id)) });
 
     // Side-effects for specific integrations.
@@ -2057,7 +2067,11 @@ class IntegrationManager {
         }
         const secrets = await secretsStore.getSecrets("qsys");
         const result = await qsysService.test(await this.qsysSettings(host, port), secrets.password ?? null);
-        return this.reportTest("qsys", qsysTestMessage(result));
+        const said = qsysTestMessage(result);
+        // The row's badge already says "Connected", so it gets the message without it.
+        this.setConnectionState("qsys", said.ok ? "connected" : "error", said.rowMessage);
+        this.broadcastStates();
+        return { ok: said.ok, message: said.message };
       }
 
       if (id === "obs") {

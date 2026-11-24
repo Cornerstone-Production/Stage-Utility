@@ -6,7 +6,7 @@
 // safespace-marker-writes.test.ts, for the same reason (init() cannot run here).
 
 import assert from "node:assert/strict";
-import { describe, test, beforeEach } from "node:test";
+import { describe, test, beforeEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -64,6 +64,36 @@ describe("saving the Q-SYS card", () => {
     await save({ host: "10.0.0.5", volunteerMeterHz: 17 });
     await save({ host: "10.0.0.6" });
     assert.equal((await qsysSettingsStore.loadRates()).volunteerMeterHz, 17);
+  });
+});
+
+/** The [qsys] lines a save writes, via console.log and console.warn. */
+async function linesFrom(config: Record<string, unknown>): Promise<string[]> {
+  const log = mock.method(console, "log", () => {});
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await save(config);
+    return [...log.mock.calls, ...warn.mock.calls].map((c) => String(c.arguments[0])).filter((l) => l.startsWith("[qsys]"));
+  } finally {
+    log.mock.restore();
+    warn.mock.restore();
+  }
+}
+
+describe("what a Q-SYS save says on /log", () => {
+  test("a rate that changed is logged", async () => {
+    const lines = await linesFrom({ host: "h", volunteerMeterHz: 15, staffMeterHz: 20 });
+    assert.deepEqual(lines, ["[qsys] meter rates set: volunteer 15/s, staff 20/s"]);
+  });
+
+  test("the dialog's every-save post of unchanged rates is silent", async () => {
+    assert.deepEqual(await linesFrom({ host: "h", volunteerMeterHz: 10, staffMeterHz: 20 }), []);
+  });
+
+  test("a rate that is not a number is named, never its value, and the stored rate stays", async () => {
+    const lines = await linesFrom({ host: "h", volunteerMeterHz: "fast-secret" });
+    assert.deepEqual(lines, ["[qsys] ignoring a non-numeric volunteerMeterHz; the stored rate is unchanged"]);
+    assert.equal((await qsysSettingsStore.loadRates()).volunteerMeterHz, 10);
   });
 });
 

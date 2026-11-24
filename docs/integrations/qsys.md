@@ -34,7 +34,7 @@ was last read.
    Designer on every component whose controls this integration should reach, then
    deploy. If a component is missing from the catalog, check this first.
 3. **Access Control.** If the Core has Access Control on, create a user for this
-   app (a Core Manager user with the access the design needs) and enter its name
+   app (a Core Manager Administrator user) and enter its name
    and password below. With Access Control off, leave both blank.
 
 ### In Stage
@@ -62,8 +62,7 @@ status reports `emulator` so it is not mistaken for a live Core.
 
 ## What it never does
 
-It reads the design and sets controls. It never calls a method that changes the
-design: no components are added, no designs loaded, no Core settings changed.
+It reads the design. It never calls a method that changes the design: no components are added, no designs loaded, no Core settings changed.
 
 ## Troubleshooting
 
@@ -77,4 +76,5 @@ Look at `/log` and filter for `[qsys]`.
 | `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
 | `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
 | `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
-| `meter rates set: volunteer <n>/s, staff <n>/s` | The meter rates were saved. |
+| `meter rates set: volunteer <n>/s, staff <n>/s` | A meter rate was changed. |
+| `ignoring a non-numeric <rate>; the stored rate is unchanged` | A save carried a meter rate that was not a number. |

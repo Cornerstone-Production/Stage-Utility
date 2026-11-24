@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { qsysTestMessage } from "./qsys-test-message.js";
-import { QSYS_MAX_HZ, QSYS_MIN_HZ, clampRate, splitQsysConfig } from "./qsys-settings-config.js";
+import { QSYS_MAX_HZ, QSYS_MIN_HZ, clampRate, splitQsysConfig, withQsysRates } from "./qsys-settings-config.js";
 
 const status = { State: "Active" as const, DesignName: "Lobby Design", DesignCode: "c1", IsRedundant: false, IsEmulator: false };
 
@@ -9,16 +9,18 @@ test("a successful test says which design it reached and how many components it 
   assert.deepEqual(qsysTestMessage({ ok: true, status, components: 12 }), {
     ok: true,
     message: "Connected to Lobby Design — 12 component(s)",
+    rowMessage: "Lobby Design — 12 component(s)",
   });
 });
 
 test("an emulator is named as one", () => {
   const r = qsysTestMessage({ ok: true, status: { ...status, IsEmulator: true }, components: 1 });
   assert.equal(r.message, "Connected to Lobby Design (emulator) — 1 component(s)");
+  assert.equal(r.rowMessage, "Lobby Design (emulator) — 1 component(s)");
 });
 
 test("a failed test carries the reason, not a success", () => {
-  assert.deepEqual(qsysTestMessage({ ok: false, error: "connection refused" }), { ok: false, message: "connection refused" });
+  assert.deepEqual(qsysTestMessage({ ok: false, error: "connection refused" }), { ok: false, message: "connection refused", rowMessage: "connection refused" });
 });
 
 test("a meter rate is a whole number per second between 1 and 30", () => {
@@ -57,6 +59,20 @@ test("a body with no rate leaves the stored rates alone", () => {
 
 test("a rate that is not a number is dropped rather than stored as the default", () => {
   // The caller would otherwise overwrite an operator's 15 with 10 on a malformed body.
-  const { rates } = splitQsysConfig({ volunteerMeterHz: "fast", staffMeterHz: "" });
+  const { rates, ignored } = splitQsysConfig({ volunteerMeterHz: "fast", staffMeterHz: "" });
   assert.deepEqual(rates, {});
+  assert.deepEqual(ignored, ["volunteerMeterHz", "staffMeterHz"], "the dropped rates were not named for the log");
+});
+
+test("a body with good rates ignores nothing", () => {
+  assert.deepEqual(splitQsysConfig({ volunteerMeterHz: 12, host: "h" }).ignored, []);
+});
+
+test("the stored rates are laid over the saved connection fields, and win", () => {
+  // What init() and setConfig() both build a card's config from.
+  assert.deepEqual(
+    withQsysRates({ host: "h", volunteerMeterHz: 99 }, { volunteerMeterHz: 12, staffMeterHz: 18 }),
+    { host: "h", volunteerMeterHz: 12, staffMeterHz: 18 },
+  );
+  assert.deepEqual(withQsysRates({}, { volunteerMeterHz: 10, staffMeterHz: 20 }), { volunteerMeterHz: 10, staffMeterHz: 20 });
 });
