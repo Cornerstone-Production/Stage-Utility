@@ -69,7 +69,9 @@ const CATALOG = {
         // A momentary (Boolean on a button), and a level the Core says is read-only.
         { Name: "talk", Type: "Boolean" },
         { Name: "level_ro", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
-      ],
+        // Numeric-typed, but it lists its choices; allowlisted with no range.
+        { Name: "src", Type: "Float", Choices: ["Mic", "Laptop"] },
+      ] as { Name: string; Type: string; ValueMin?: number; ValueMax?: number; Direction?: string; Choices?: string[] }[],
     },
   ],
 };
@@ -82,6 +84,7 @@ const ALLOW = {
     { component: MIX, control: "save", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "level_ro", label: "", min: -100, max: 20, confirm: "none" },
+    { component: MIX, control: "src", label: "", min: null, max: null, confirm: "none" },
   ],
 };
 
@@ -126,7 +129,7 @@ function freshServer(): Server {
     holdReads: null,
     allowFails: false,
     catalog: CATALOG,
-    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0, talk: false, level_ro: -5 },
+    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0, talk: false, level_ro: -5, src: "Mic" },
     answer: (body) => ({ ok: true, value: body.value, string: String(body.value), clamped: false }),
     writes: [],
     reads: 0,
@@ -1003,6 +1006,16 @@ describe("review fixes", () => {
     });
     await wait(20);
     assert.deepEqual(server.writes.map((w) => [w.body.value, w.body.final]), [[-17, true]], "one step of stepDb, final");
+  });
+
+  test("a choice-list selector on a numeric-typed control with Choices is live without an allowlist range, and writes the choice", async () => {
+    await mount([{ type: "qsys-selector", binding: b("src"), items: [] }]);
+    assert.equal(q("qsys-selector").dataset.state, "live");
+    const laptop = [...document.querySelectorAll('[data-qsys-object="qsys-selector"] [role="radio"]')].find((n) => n.textContent === "Laptop") as HTMLElement;
+    assert.ok(laptop, "no Laptop option");
+    fireEvent.click(laptop);
+    await wait(30);
+    assert.deepEqual(server.writes.map((w) => w.body.value), ["Laptop"]);
   });
 
   test("a meters-only strip draws its meters", async () => {

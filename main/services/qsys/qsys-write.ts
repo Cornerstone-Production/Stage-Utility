@@ -24,7 +24,7 @@ import { viewsStore } from "../views-store.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey, isWritable, kindOf, panelHasMomentary, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
+import { addressKey, choicesOf, isWritable, kindOf, panelHasMomentary, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
 
 // The rules live in types/qsys.ts so the editor shares them; re-exported for the server.
 export { isWritable, kindOf, unwritableReason };
@@ -141,6 +141,15 @@ const KINDS: Record<Kind, { check(value: unknown, min: number, max: number, wher
     same: (sent, got) => typeof got === "number" && Math.abs(got - (sent as number)) <= READBACK_TOLERANCE,
   },
 };
+
+/** The rules for a control that reports its choices: a text that is one of them, sent as it is. */
+function choiceKind(choices: string[]): (typeof KINDS)[Kind] {
+  return {
+    check: (value, _min, _max, where) =>
+      typeof value === "string" && choices.includes(value) ? { ok: true, send: value, clamped: false } : badValue(`${where} takes one of the choices the Core lists`),
+    same: (sent, got) => got === sent || String(got) === sent,
+  };
+}
 
 /** A value fit for the log: what the request carried, bounded. */
 function loggable(v: unknown): unknown {
@@ -501,7 +510,9 @@ export class QsysWriter {
     if (!c) return refuse("not-in-design", `${where} is not in the Core's design`);
     const unwritable = unwritableReason(c, entry);
     if (unwritable) return refuse(unwritable, UNWRITABLE_MESSAGE[unwritable](where));
-    const kind = KINDS[kindOf(c)];
+    // A control that lists its choices takes one of them, whatever its Type says.
+    const choices = choicesOf(c);
+    const kind = choices ? choiceKind(choices) : KINDS[kindOf(c)];
     // A numeric control has a range here (unwritableReason); the others ignore it.
     const checked = kind.check(req.value, entry.min ?? 0, entry.max ?? 0, where);
     if (!checked.ok) return refuse(checked.reason, checked.message);

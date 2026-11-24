@@ -13,7 +13,7 @@ import { ArrowDownIcon, ArrowUpIcon, Trash2Icon } from "lucide-react";
 import type { QsysAddress, QsysBinding } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { Button } from "../components/ui";
-import { isWritable, kindOf } from "@main/types/qsys";
+import { isWritable } from "@main/types/qsys";
 import { allowKey, fitsKind, hasChoices, loadQsysCore, QsysCoreBrowser, type CatalogComponent, type CatalogControl, type QsysBrowseKind, type QsysCoreLoad } from "./qsys-core-browser";
 import { channelLabel, channelsOf, matchStrip, problemWords, type Eligibility, type StripChannel, type StripSlot } from "./qsys-strip";
 import { Row, RowNumber, RowSwitch, RowText, RowToggle, Section } from "./inspector-rows";
@@ -321,7 +321,8 @@ function eligibilityOver(comp: CatalogComponent, load: Extract<QsysCoreLoad, { s
       if (!isWritable(ctl, entry)) return "not-writable";
       return fitsKind(slot === "gain" ? "gain" : "boolean", comp.type, ctl) ? "ok" : "wrong-kind";
     }
-    return (slot === "name" ? kindOf(ctl) === "text" : kindOf(ctl) === "number") ? "ok" : "wrong-kind";
+    // The same rule as the field's own Core browser, so the fill never offers what the field would not list.
+    return fitsKind(slot === "name" ? "string" : "meter", comp.type, ctl) ? "ok" : "wrong-kind";
   };
 }
 

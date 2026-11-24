@@ -49,6 +49,15 @@ export interface QsysControlFacts {
   Type?: unknown;
   Value?: unknown;
   Direction?: unknown;
+  /** A combo box's list, when the Core reports one. */
+  Choices?: unknown;
+}
+
+/** The choices a control reports (text, non-empty), or null. Choices bound what may be written to it. */
+export function choicesOf(c: QsysControlFacts): string[] | null {
+  if (!Array.isArray(c.Choices)) return null;
+  const list = c.Choices.filter((x): x is string => typeof x === "string");
+  return list.length > 0 ? list : null;
 }
 
 export type QsysControlKind = "boolean" | "trigger" | "text" | "number";
@@ -70,12 +79,13 @@ export function kindOf(c: QsysControlFacts): QsysControlKind {
 /**
  * Why `c` cannot be written under an allowlist entry whatever the value, or null
  * when it can: the Core reports it read-only, or it is numeric and the entry sets
- * no range. The one rule for "is this writable"; the writer refuses on it before
+ * no range (unless it reports its choices). The one rule for "is this writable"; the writer refuses on it before
  * sending, and anything that asks the same question asks here.
  */
 export function unwritableReason(c: QsysControlFacts, entry: { min: number | null; max: number | null }): "read-only" | "no-range" | null {
   if (isReadOnlyDirection(c.Direction)) return "read-only";
-  if (kindOf(c) === "number" && (entry.min === null || entry.max === null)) return "no-range";
+  // A control that lists its choices is bound by them, not by a range: a numeric-typed combo box needs none.
+  if (kindOf(c) === "number" && !choicesOf(c) && (entry.min === null || entry.max === null)) return "no-range";
   return null;
 }
 

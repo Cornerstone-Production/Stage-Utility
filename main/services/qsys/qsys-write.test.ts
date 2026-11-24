@@ -42,6 +42,8 @@ const LEVEL: AllowEntry = { component: "Zone 1", control: "level", label: "Zone 
 const CHIME: AllowEntry = { component: "Paging", control: "chime", label: "Chime", min: null, max: null, confirm: "none" };
 /** Read-only on the Core, though allowlisted with a range. */
 const METER: AllowEntry = { component: "Zone 1", control: "meter", label: "Zone meter", min: -100, max: 0, confirm: "none" };
+/** Numeric-typed on the Core, but it lists its choices; allowlisted with no range. */
+const SOURCE: AllowEntry = { component: "Router", control: "source", label: "Source", min: null, max: null, confirm: "none" };
 const SIGN: AllowEntry = { component: "Sign", control: "message", label: "Sign text", min: null, max: null, confirm: "none" };
 /** On the allowlist, not in the design. */
 const GHOST: AllowEntry = { component: "Lobby_Mixer", control: "gone", label: "Gone", min: -10, max: 0, confirm: "none" };
@@ -81,13 +83,14 @@ beforeEach(async () => {
     { Name: "meter", Type: "Float", Value: -40, String: "-40", Position: 0.4, Direction: "Read", ValueMin: -100, ValueMax: 0 },
   ]);
   fake.components.set("Sign", [{ Name: "message", Type: "Text", Value: "hello", String: "hello", Position: 0, Direction: "Read/Write" }]);
+  fake.components.set("Router", [{ Name: "source", Type: "Float", Value: 0, String: "Mic", Position: 0, Direction: "Read/Write", Choices: ["Mic", "Laptop"] } as never]);
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
   port = await fake.start();
   svc = new QsysService();
   subscriptionListeners = [];
   watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
   writer = new QsysWriter(svc, watch);
-  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN]);
+  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN, SOURCE]);
 });
 
 afterEach(async () => {
@@ -389,6 +392,25 @@ describe("writeControl", () => {
     );
     assert.equal(isWritable(gain, range), true);
     assert.equal(isWritable(meter, range), false);
+  });
+
+  test("a control that lists its choices takes one of them, with no allowlist range even when its Type is numeric", async () => {
+    await connect();
+    const [source] = fake.components.get("Router")!;
+    assert.equal(unwritableReason(source, { min: null, max: null }), null, "a Choices control needs no range");
+    assert.equal(unwritableReason({ ...source, Choices: undefined }, { min: null, max: null }), "no-range", "the same control without Choices does");
+    const ok = await writer.write(req({ component: "Router", control: "source", value: "Laptop" }));
+    assert.ok(ok.ok, `a listed choice was refused: ${JSON.stringify(ok)}`);
+    const warn = capture("warn");
+    try {
+      for (const value of ["Phone", 1, true]) {
+        const r = await writer.write(req({ component: "Router", control: "source", value }));
+        assert.equal(r.ok ? null : r.reason, "bad-value", `${String(value)} was not one of the choices`);
+      }
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(sets().map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0]!.Value), ["Laptop"], "only the listed choice reached the Core");
   });
 
   test("a text control takes text up to 1024 characters, and nothing else", async () => {

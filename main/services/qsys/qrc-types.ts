@@ -18,6 +18,8 @@ export interface QrcControl {
   /** Present on float controls only. */
   ValueMin?: number;
   ValueMax?: number;
+  /** A combo box's list of choices, when the Core reports one. */
+  Choices?: string[];
 }
 
 export interface QrcStatus {

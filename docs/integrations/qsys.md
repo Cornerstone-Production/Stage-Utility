@@ -130,10 +130,10 @@ What is offered depends on the field:
 | Field | Offered |
 |---|---|
 | Fader and strip level | Numeric controls with a range on the Core, not meters |
-| Mute, switch, momentary button, **Lit by** | On and off controls |
+| Mute, switch, momentary button (**Control type** Momentary), **Lit by** | On and off controls |
 | Trigger button, switch pair, preset, selector button, Previous | Triggers |
-| Selector choice list | Controls with a list of choices (when the Core reports one) |
-| Meter, strip meter | Meter controls (a meter component, or a name or type starting `meter`) |
+| Selector choice list | Controls that list their choices. The field is offered only when the Core reports one |
+| Meter, strip meter | Meter controls (a control, component or type whose name starts `meter`) |
 | Label text, strip name | Text controls |
 
 A field that **writes** is offered only controls that are on the allowlist and that the
@@ -143,9 +143,38 @@ adds a row only once a control is chosen. A binding made in the browser is an ad
 (component and control); a **Lit by** control is a second address that says whether
 the object is on, such as a snapshot's match.
 
+A control that lists its choices is written by choice, not by range: the writer accepts
+only a value that is one of the Core's reported choices, and such a control needs no
+allowlist range even when its Core Type is numeric.
+
 With no Core connected the browser says so and lists nothing; an existing binding
 stays shown and can be cleared. A read that fails for any other reason is logged to
 `/log` as a `[qsys]` line and the browser says it could not read.
+
+## Channel strips
+
+A strip's fields are bound one by one, or in one step: **Bind a channel** in its
+inspector reads the Core, then you pick a component and a channel. The strip's name,
+level, mute, meter and second meter fill from the controls named for that channel:
+
+| Field | Names tried (`N` the channel, `SIDE` input or output) |
+|---|---|
+| Level | `gain_N`, `SIDE_gain_N`, `SIDE_N_gain` |
+| Mute | `mute_N`, `SIDE_mute_N`, `SIDE_N_mute` |
+| Meter | `meter_N`, `meter_N_1`, `meter_SIDE_N` |
+| Second meter | `meter_N_2` |
+| Name | `label_N`, `name_N`, `text_display_N`, `SIDE_N_label`, `SIDE_N_name` |
+
+Level and mute fill only with an allowlisted, writable control; the others by the same
+rule the field's own Core browser uses. A field with no match stays empty and the
+inspector says why (not on the allowlist, read-only or no write limits, no control
+found). Any field can be changed afterwards.
+
+**Break apart** replaces the strip with a label, a fader (its meters beside it) and a
+mute in the strip's footprint, each keeping its binding and the density. A part the
+strip had nothing for is left out. The parts keep the strip's look; the label's text is
+sized to read on one line across the strip, and the strip's aspect and pixel limits are
+not copied, since no part has the strip's proportions. One undo restores the strip.
 
 ## Binding check
 
@@ -207,8 +236,8 @@ keeps its own entry and value.
 
 ## Momentary buttons
 
-A button set to Momentary in the editor (which then binds it to a Boolean
-control) is a momentary: on while pressed, off on release. A button set to Trigger
+A button whose **Control type** is Momentary (saved on the button as `press`; absent is a
+Trigger), bound to a Boolean control, is a momentary: on while pressed, off on release. A button set to Trigger
 fires once, and a Boolean on a switch or a mute is a toggle; neither is a momentary. The release is the page's to send, and a page that cannot send it (an iPad
 asleep mid-press, a dropped connection, a closed tab) never sends it later. So the
 press is sent with `lease: true` and the page's event-stream id, and when it lands
@@ -221,7 +250,8 @@ takes it over. Renewals count only from the address and event stream that presse
 so two pages behind one address cannot keep each other's press on.
 
 The server takes a lease only for a momentary button: the panel the press came
-from must have a Q-SYS button on that control, and the control must be a Boolean.
+from must have a Q-SYS button saved as Momentary on that control, and the control must
+be a Boolean.
 A lease asked for anything else (a toggle, a mute) is not taken; the write goes
 through as an ordinary one, and `/log` says so once. A press whose panel cannot be
 checked because the saved views cannot be read is refused (`no-lease`) and nothing

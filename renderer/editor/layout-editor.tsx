@@ -1827,7 +1827,7 @@ export function LayoutEditor({
   function breakApartIds(id: string) {
     const o = findById(objects, id);
     if (!o || o.config.type !== "qsys-strip" || isLockedInTree(objects, id)) return;
-    const parts = breakApartStrip(o, uid);
+    const parts = breakApartStrip(o, uid, canvas.width / canvas.height);
     if (parts.length === 0) return;
     pushHistory();
     setObjects((prev) => replaceById(prev, id, parts));

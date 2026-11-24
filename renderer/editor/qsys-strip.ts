@@ -26,7 +26,9 @@ export interface StripChannel {
  * The control names a slot is looked for under, per channel. `{s}` is the side
  * (input or output) and `{n}` the channel number. A sided template is tried before
  * an unsided one; a template with `{s}` is skipped for a channel that has no side.
- * One slot after another, one template per line, each slot's lines sorted.
+ * A meter name must also be one the Core browser's meter rule accepts (it starts
+ * with "meter", as meter_N and meter_output_N do), so the one-step fill and the
+ * Meter field offer the same controls. One slot after another, one template per line, each slot's lines sorted.
  */
 export const STRIP_TEMPLATES: { slot: StripSlot; template: string }[] = [
   { slot: "gain", template: "gain_{n}" },
@@ -35,9 +37,7 @@ export const STRIP_TEMPLATES: { slot: StripSlot; template: string }[] = [
   { slot: "meter", template: "meter_{n}" },
   { slot: "meter", template: "meter_{n}_1" },
   { slot: "meter", template: "meter_{s}_{n}" },
-  { slot: "meter", template: "{s}_{n}_meter" },
   { slot: "meter2", template: "meter_{n}_2" },
-  { slot: "meter2", template: "{s}_{n}_meter_2" },
   { slot: "mute", template: "mute_{n}" },
   { slot: "mute", template: "{s}_mute_{n}" },
   { slot: "mute", template: "{s}_{n}_mute" },
@@ -153,10 +153,19 @@ export function replaceById(tree: LayoutObject[], id: string, replacement: Layou
  * its meter or meters beside it, mute underneath. Every binding and the density
  * carry over; a part the strip had nothing for is left out. The style is the strip's.
  */
-export function breakApartStrip(o: LayoutObject, newId: () => string): LayoutObject[] {
+export function breakApartStrip(o: LayoutObject, newId: () => string, canvasAspect = 16 / 9): LayoutObject[] {
   const c = o.config as Strip;
+  // Per part. keepAspect, minPx and maxPx describe the strip's proportions, which no part
+  // has, so none gets them; anchor pins an edge of the whole strip, which every part still
+  // shares, so each keeps it. The label draws its text at the object's own font size (the
+  // strip drew its title at 0.6 of it), so it is sized to read on one line across the
+  // strip's width, about ten characters at 0.7 em each plus the label's padding, with room to spare
+  // for a canvas shown at a different shape; the others scale from theirs. A longer name still ends in an ellipsis.
+  const { keepAspect: _a, minPx: _b, maxPx: _c, ...shared } = o;
+  const stripFont = o.style?.fontSize ?? 0.05;
+  const labelFont = Math.max(0.012, Math.min(stripFont * 0.6, (o.w * canvasAspect) / 9));
   const part = (config: LayoutObjectConfig, x: number, y: number, w: number, h: number): LayoutObject => ({
-    ...o,
+    ...shared,
     id: newId(),
     children: undefined,
     x: o.x + o.w * x,
@@ -170,9 +179,12 @@ export function breakApartStrip(o: LayoutObject, newId: () => string): LayoutObj
   const top = hasName ? 0.12 : 0;
   const bottom = hasMute ? 0.12 : 0;
   const bodyH = 1 - top - bottom;
-  const meters = !!c.meter;
+  const meters = !!(c.meter || c.meter2);
   const out: LayoutObject[] = [];
-  if (hasName) out.push(part({ type: "qsys-label", binding: c.name, text: c.label }, 0, 0, 1, top));
+  if (hasName) {
+    const label = part({ type: "qsys-label", binding: c.name, text: c.label }, 0, 0, 1, top);
+    out.push({ ...label, style: { ...o.style, fontSize: labelFont } });
+  }
   if (c.gain) {
     out.push(
       part(
@@ -185,7 +197,7 @@ export function breakApartStrip(o: LayoutObject, newId: () => string): LayoutObj
     );
   }
   if (meters) {
-    out.push(part({ type: "qsys-meter", binding: c.meter, ...(c.meter2 ? { binding2: c.meter2 } : {}), form: "bar" }, c.gain ? 0.7 : 0, top, c.gain ? 0.3 : 1, bodyH));
+    out.push(part({ type: "qsys-meter", binding: c.meter ?? c.meter2 ?? null, ...(c.meter && c.meter2 ? { binding2: c.meter2 } : {}), form: "bar" }, c.gain ? 0.7 : 0, top, c.gain ? 0.3 : 1, bodyH));
   }
   if (hasMute) out.push(part({ type: "qsys-mute", binding: c.mute as QsysBinding }, 0, 1 - bottom, 1, bottom));
   return out;
