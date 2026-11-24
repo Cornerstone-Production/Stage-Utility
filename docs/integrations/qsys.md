@@ -71,9 +71,9 @@ Every write is checked by the server, never by the browser.
 | Field | Meaning |
 |---|---|
 | component, control | The control's address: the component's Code Name and the control's name. |
-| label | Shown in the editor's picker. Up to 120 characters. |
+| label | A name for the control. Up to 120 characters on one line. |
 | min, max | The value range a numeric write may reach, in the control's own units (dB for a gain). Both set, or both empty. |
-| confirm | `none`, or `hold`: every object bound to the control asks for hold-to-confirm. |
+| confirm | `none` or `hold`. Stored with the entry and exported with it; nothing in this release reads it yet. |
 
 - A control added from the catalog starts with the Core's own range (`ValueMin` and
   `ValueMax`), so by default a web fader reaches exactly as far as a UCI fader. Set a

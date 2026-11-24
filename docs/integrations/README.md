@@ -15,7 +15,7 @@ countdown, so the app needs it.
 | [ProPresenter](propresenter.md) | Current/next slide, section, thumbnails |
 | [ProdCom](prodcom.md) | Live production transcription strip |
 | [Smaart](smaart.md) | FOH SPL meters (Smaart v8) |
-| [Q-SYS](qsys.md) | Connection to a Q-SYS Core: status and its component and control catalog |
+| [Q-SYS](qsys.md) | Connection to a Q-SYS Core: status, its component and control catalog, and checked writes to allowlisted controls |
 | [Wireless](wireless.md) | Wireless mic RF/battery/charger status |
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
