@@ -717,6 +717,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   const thumbAlong = dense ? 24 : 40;
   const thumbAcross = dense ? 28 : 48;
   const trackWidth = dense ? 4 : 8;
+  const limitAcross = dense ? 20 : 32;
   const along = (n: number) => `calc((100% - ${thumbAlong}px) * ${1 - n})`;
   const fill = offline || muted ? "var(--color-fg-subtle)" : "var(--color-accent)";
 
@@ -787,9 +788,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
           style={{
             position: "absolute",
             background: atLimit ? "var(--color-warn-9)" : "var(--color-line-strong)",
+            // Across the track, as Main draws it: 32 px centred on it (20 px on a dense strip).
             ...(vertical
-              ? { height: 2, left: "15%", right: "15%", top: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }
-              : { width: 2, top: "15%", bottom: "15%", right: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }),
+              ? { height: 2, width: limitAcross, left: `calc(50% - ${limitAcross / 2}px)`, top: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }
+              : { width: 2, height: limitAcross, top: `calc(50% - ${limitAcross / 2}px)`, right: `calc(${along(limitAt)} + ${thumbAlong / 2}px)` }),
           }}
         />
       )}
@@ -1160,7 +1162,8 @@ function SelectorRow({ label, selected, disabled, onPick, children }: { label: s
         fontWeight: selected ? 600 : 400,
       }}
     >
-      <span style={{ flexGrow: 1 }}>{label}</span>
+      {/* The check sits right after the words, as the kit and Main draw it. */}
+      <span>{label}</span>
       {selected && (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M5 12l5 5L20 7" />
