@@ -14,11 +14,10 @@ import { Button, ErrorNote, Select, SelectContent, SelectGroup, SelectItem, Sele
 import { cn } from "../../lib/cn";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
+import { norm } from "../../main/role-resolve";
 import { Grip, LiftedList, useCarried, useLifted, type DragItem } from "./servicecue-drag";
 import { NameField } from "./servicecue-layout-card";
 import { ambiguousCategories, listOf, unassignedByType, unassignedDistinct } from "./servicecue-layouts-model";
-
-const norm = (s: string) => s.trim().toLowerCase();
 
 /** The note categories the page has read, and what it could not. */
 export interface CategorySource {

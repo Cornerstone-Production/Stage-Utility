@@ -8,7 +8,7 @@ import { describe, test } from "node:test";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { insertIndex, stackIndex, type Rect } from "./servicecue-drag.js";
-import { columnPatch, copyName, duplicateLayout, moveTo, noticeText, placeDrawn, reorderLayouts, trayItems } from "./servicecue-layouts-model.js";
+import { columnPatch, copyName, duplicateLayout, moveTo, noticeText, placeDrawn, reorderLayouts, trayItems, unassignedByType } from "./servicecue-layouts-model.js";
 
 const box = (left: number, top: number, w = 80, h = 30): Rect => ({ left, top, right: left + w, bottom: top + h });
 
@@ -123,5 +123,21 @@ describe("the notice's words", () => {
     const t = noticeText([{ typeName: "Sunday", cats: ["Graphics", "Lyrics", "Props"] }, { typeName: "Youth", cats: ["Games"] }]);
     assert.equal(t.lead, "Graphics, Lyrics and Props from Sunday, and Games from Youth are in no role");
     assert.equal(t.still, "They still appear under All columns.");
+  });
+});
+
+// What the page and Home's row call "in no role" is what All columns draws a column for
+// (unassignedCategoryRoles): one per name whatever its case, and none for a blank name.
+describe("categories in no role", () => {
+  const roles: CategoryRole[] = [{ id: "r", name: "Band", members: ["Band"] }];
+
+  test("names that differ only in case are one, as All columns draws one column for them", () => {
+    const cats = new Map([["t1", ["Audio", "audio", "band", "Vocals"]]]);
+    assert.deepEqual(unassignedByType(roles, ["t1"], cats), [{ typeId: "t1", cats: ["Audio", "Vocals"] }]);
+  });
+
+  test("a blank name is not a category in no role", () => {
+    const cats = new Map([["t1", ["  ", "Audio"]]]);
+    assert.deepEqual(unassignedByType(roles, ["t1"], cats), [{ typeId: "t1", cats: ["Audio"] }]);
   });
 });

@@ -9,6 +9,7 @@
 import { layoutNameKey } from "@main/services/servicecue-slug";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
+import { norm, unassignedCategoryRoles } from "../../main/role-resolve";
 import { freeLayoutName } from "./servicecue-layout-names";
 
 /** The columns a layout stores as a show flag, each with a fixed place in the row. */
@@ -40,8 +41,6 @@ export const FOOTER = [{ key: "showTotalTime", label: "Total time" }] as const s
 export type ToggleKey = (typeof UNDER_TITLE)[number]["key"] | (typeof FOOTER)[number]["key"];
 
 export const toggleOn = (l: ServiceCueLayout, key: ToggleKey): boolean => l[key] !== false;
-
-const norm = (s: string) => s.trim().toLowerCase();
 
 /** Layouts in the landing page's order. */
 export const byOrder = <T extends { order: number }>(list: readonly T[]): T[] => [...list].sort((a, b) => a.order - b.order);
@@ -239,15 +238,16 @@ export function deleteRoleBody(role: CategoryRole, layouts: readonly ServiceCueL
   return out;
 }
 
-/** Categories on `typeIds`, in each type's order, that no role claims; types with none left out. */
+/** Categories on `typeIds`, in each type's order, that no role claims; types with none left out.
+ *  The columns All columns draws for each type (unassignedCategoryRoles): spellings that differ
+ *  only in case are one, and a blank name is none. */
 export function unassignedByType(
   roles: readonly CategoryRole[],
   typeIds: readonly string[],
   catsByType: ReadonlyMap<string, readonly string[]>,
 ): { typeId: string; cats: string[] }[] {
-  const claimed = new Set(roles.flatMap((r) => r.members.map(norm)));
   return typeIds
-    .map((typeId) => ({ typeId, cats: (catsByType.get(typeId) ?? []).filter((c) => !claimed.has(norm(c))) }))
+    .map((typeId) => ({ typeId, cats: unassignedCategoryRoles(roles, catsByType.get(typeId) ?? []).map((r) => r.name) }))
     .filter((g) => g.cats.length > 0);
 }
 
@@ -290,8 +290,3 @@ export function ambiguousCategories(roles: readonly CategoryRole[]): { name: str
   return [...byKey.values()].filter((e) => e.roles.length > 1);
 }
 
-/** Does a role have a member among these categories? A role with none draws no column. */
-export function roleApplies(role: CategoryRole, cats: readonly string[]): boolean {
-  const have = new Set(cats.map(norm));
-  return role.members.some((m) => have.has(norm(m)));
-}
