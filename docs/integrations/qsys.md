@@ -82,8 +82,9 @@ import; there is no page for it yet. Every write is checked by the server.
 - A value outside the range is clamped to it, and the clamp is logged.
 - Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
   with `true`.
-- A text control takes any text up to 1024 characters. It is not checked against
-  the control's choices: allowlist a text control only if any text is safe to send.
+- A text control takes any text up to 1024 characters. Only a selector's choice
+  list is checked against the control's choices (below); anything else may send
+  any text, so allowlist a text control only if any text is safe to send.
 - A value of the wrong type is refused (`bad-value`): text or `true` to a gain, a
   number to a mute or a text control, a number that is not finite.
 - A control the Core reports as read-only (direction `Read`, as a meter) is refused
@@ -143,9 +144,13 @@ adds a row only once a control is chosen. A binding made in the browser is an ad
 (component and control); a **Lit by** control is a second address that says whether
 the object is on, such as a snapshot's match.
 
-A control that lists its choices is written by choice, not by range: the writer accepts
-only a value that is one of the Core's reported choices, and such a control needs no
-allowlist range even when its Core Type is numeric.
+A selector's choice list is written by choice, not by range: for a write from a
+panel with a selector on that control, the writer accepts only a value that is one of
+the Core's reported choices, and such a control needs no allowlist range even when its
+Core Type is numeric. Any other object on a control that also lists choices writes it
+as its own kind: a mute or a switch on a Boolean sends true and false, and a fader on
+a numeric control still needs a range. While the saved views cannot be read the
+choices hold for anything but a Boolean.
 
 With no Core connected the browser says so and lists nothing; an existing binding
 stays shown and can be cleared. A read that fails for any other reason is logged to
@@ -199,9 +204,11 @@ Each problem is one `[qsys] binding: <view>/<object> <problem> (<component>/<con
 line on `/log`, written when the problem first appears and not again while it
 stands; a line says when every problem has been fixed. The report is at
 `GET /api/qsys/bindings`, which answers `503` while the Core is not connected (there
-is nothing to compare with), and `[]` only when every binding resolves. A config
-restore restarts the server, which reads the restored views and allowlist and
-checks them afresh. An unreadable views file stops the check, and says so.
+is nothing to compare with) or while the check cannot read the views or the
+allowlist, and `[]` only when every binding resolves. A reconnect, or a new design,
+says every standing problem again. A config restore restarts the server, which reads
+the restored views and allowlist and checks them afresh. An unreadable views file
+stops the check, and says so.
 
 The same step gives the watch its panels: every View with Q-SYS objects, and the
 controls its objects read. When two people move one fader, the last write wins, and
@@ -238,30 +245,41 @@ keeps its own entry and value.
 
 A button whose **Control type** is Momentary (saved on the button as `press`; absent is a
 Trigger), bound to a Boolean control, is a momentary: on while pressed, off on release. A button set to Trigger
-fires once, and a Boolean on a switch or a mute is a toggle; neither is a momentary. The release is the page's to send, and a page that cannot send it (an iPad
+fires once, and a Boolean on a switch or a mute is a toggle; neither is a momentary.
+The page decides a momentary from the saved press alone, never from what the Core
+reports, so a button drawn before the Core's control list has been read is still a
+momentary. The release is the page's to send, and a page that cannot send it (an iPad
 asleep mid-press, a dropped connection, a closed tab) never sends it later. So the
 press is sent with `lease: true` and the page's event-stream id, and when it lands
 the server holds a lease on the control. While the button stays down the page
 renews it about once a second (`POST /api/qsys/lease`). The server writes the
-release itself when no renewal arrives for 2 seconds, or at once when the pressing
-page's event stream closes. The page's own release, or any other write to the
-control, ends the lease with no extra write. One lease per control: a second press
-takes it over. Renewals count only from the address and event stream that pressed,
-so two pages behind one address cannot keep each other's press on.
+release itself when no renewal arrives for 2 seconds, or at once when the
+connection the press was made on closes: the event stream, or polling client,
+carrying the page's id when it pressed. A page keeps its id across reconnects, and
+the server can learn that an old connection died some time after the page has
+opened a new one, so only that connection's close counts: a late close of one the
+page has already replaced releases nothing. The page's own release, or any other
+write to the control, ends the lease with no extra write. One lease per control: a
+second press takes it over. Renewals count only from the address and event stream
+that pressed, so two pages behind one address cannot keep each other's press on.
 
 The server takes a lease only for a momentary button: the panel the press came
-from must have a Q-SYS button saved as Momentary on that control, and the control must
-be a Boolean.
-A lease asked for anything else (a toggle, a mute) is not taken; the write goes
-through as an ordinary one, and `/log` says so once. A press whose panel cannot be
-checked because the saved views cannot be read is refused (`no-lease`) and nothing
-is sent: a momentary left on with nothing to turn it off is the outcome the lease
-exists to prevent.
+from must have a Q-SYS button saved as Momentary on that control, read from the
+saved views. A press that asks for a lease it cannot have is refused (`no-lease`)
+and nothing is sent: the panel has no such button on the control, or the saved
+views cannot be read to tell. A momentary left on with nothing to turn it off is
+the outcome the lease exists to prevent. The button stays unlit, the page stops
+renewing and sends no release, and on a staff panel a toast says why. A lease
+asked on a trigger needs none: a trigger fires and holds nothing on.
 
 A renewal that gets no answer (a network blip, a server error) is tried again a
 few hundred milliseconds later, for as long as the 2-second lease has time left;
-the page stops renewing only when its own finger lets go, the connection breaks,
-or the server answers that it holds no lease once the press itself has answered.
+the page stops renewing when its own finger lets go, the connection breaks, the
+panel stops being live, the button can no longer be pressed (a key held down on a
+button that goes Unavailable is let go), the press is refused, or the server
+answers that it holds no lease once the press itself has answered. A momentary or
+hold-to-confirm button does not let the browser take a touch for a scroll, so a
+small slide of the finger does not end the press.
 
 If the Core is away when the server's release is due (a drop that also stopped the
 page's renewals is the usual reason), the release is owed rather than lost. When
@@ -271,7 +289,9 @@ reports it on. A release whose send the Core refused, or that was cut off, on a
 connection that is still up is owed the same way and tried again within a second
 or so. An owed release is dropped, with a line, when the Core it was owed to is no
 longer the one configured, the design has changed, the control has left the design
-or the allowlist, or after five tries that could not read the control or send.
+or the allowlist, or after five tries that could not read the control or send. The
+Core going away again while it is being settled is not one of those tries: the
+release waits for the Core to come back, however often it drops.
 
 A release the server decided to send never lands after a newer write: if anything
 else (a fresh press from any page) reaches the control first, the release is not
@@ -306,16 +326,16 @@ Look at `/log` and filter for `[qsys]`.
 | `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. Each id is logged once, then every 15 minutes with a count; past eight ids they share one line. |
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
-| `momentary <component>/<control> released by the server: <why>` | A momentary's page stopped renewing its press, or its event stream closed, and the server turned the control off itself. The write log has the entry. |
+| `momentary <component>/<control> released by the server: <why>` | A momentary's page stopped renewing its press (`no renewal from the pressing page`), or the connection it pressed on closed (`the pressing page's event stream closed`), and the server turned the control off itself. The write log has the entry. |
 | `the server's release of <component>/<control> could not be sent (<reason>); it is owed, …` | The Core was away when a momentary's release was due (`offline`), or refused it or dropped mid-send (`core-error`). It is sent once writes are possible again (within a second or so if the connection is still up), if the Core still reports the control on. |
 | `the server's release of <component>/<control> failed (<reason>), and another write to it has been sent since; nothing is owed` | The server's release could not be sent, but a newer write (a fresh press) has reached the control since, so nothing is kept to send later. |
 | `sending the owed release of <component>/<control>: the Core still reports it on` / `owed release of <component>/<control> not sent: the Core reports it off` | The Core is back and the owed release was settled, one way or the other. |
 | `release of <component>/<control> was not sent: another write to it came first` / `owed release of <component>/<control> not sent: another write to it came first` | A press (or any write) reached the control before the server's release did, so the release was not sent and the newer write stands. |
-| `owed release of <component>/<control> not settled: <why>; trying again` | An owed release could not be read or sent this time. It is tried again shortly while the Core is connected, else when it reconnects. |
+| `owed release of <component>/<control> not settled: <why>; trying again` | An owed release could not be read or sent this time. It is tried again shortly while the Core is connected, else when it reconnects. The Core being offline is not a failed try and writes no line. |
 | `owed release of <component>/<control> dropped: <why>; it may still be on at the Core` | An owed release was given up: the Core or its design changed, the control left the design or the allowlist, or five tries failed. Check the control at the Core. |
 | `the server's release of <component>/<control> was refused (<reason>); it may still be on at the Core` | The server could not write a momentary's release and will not retry (the control taken off the allowlist, or out of the design). Check the control at the Core. |
 | `write refused (no-lease): <component>/<control> was not pressed: the saved views could not be read …` | A momentary press arrived while the saved views could not be read, so the server could not hold its release and sent nothing. See the views store's own line for the cause. |
-| `lease asked for <component>/<control> by panel <id>, which has no momentary button on it; written without one` | A client asked for a lease on a control its panel has no momentary button for. The write went through as an ordinary one. |
+| `write refused (no-lease): <component>/<control> was not pressed: panel <id> has no momentary button on it, so the server will not hold it on` | A press asked for a lease on a control its panel has no momentary button for (the panel was edited since the page loaded, or a client other than a panel asked). Nothing was sent. Reload the panel; if it persists, check the button's Control type in the editor. |
 | `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `no-lease`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
@@ -330,8 +350,9 @@ Look at `/log` and filter for `[qsys]`.
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
-| `binding check could not run: <reason>` | The views or the allowlist could not be read. The last report stands until a check runs. |
+| `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` until a check runs again, never an empty (all clear) list. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
+| `ready listener failed: <reason>` | A bug in this app's handling of writes becoming possible again (where an owed release is sent). Writes carry on; report the line. |
 
 The lines below are about watching the controls open panels read.
 
@@ -343,4 +364,16 @@ The lines below are about watching the controls open panels read.
 | `<component>/<control> is on panel <id> but not in the Core's design; not watched` | A panel names a control the design lacks. |
 | `the Core would not watch <component> (<controls>): <reason>; not watched` | The Core refused to report these controls. The rest are watched and writes carry on. |
 | `the Core has not resent the values of <groups> <n> s after Invalidate; asking again, and writes wait` | After a reconnect the Core has not sent the current values; writes stay refused until it does. It is asked again after 10 s, then 20 s, doubling to 5 minutes, one line each time. |
-|
+
+These lines come from a panel page or the editor, sent to `/log` with the page's
+address.
+
+| Line or message | Meaning |
+|---|---|
+| `panel <id>: the server did not acknowledge this page's channels in time; reading anyway` | The page could not confirm the server is sending it this panel's changes before it read the panel. Its controls open anyway; a change made in that moment shows only once it changes again. A slow or overloaded server; if it repeats, check `[events]` lines. |
+| `panel <id> is not a Q-SYS panel on the server; its objects show Unavailable` | The page asked for a view the server has no Q-SYS objects for: the view was deleted, or its Q-SYS objects removed, since the page loaded. Reload the page. |
+| `panel <id>: its values could not be read (<reason>); retrying` | The page's read of its controls failed. Its controls stay greyed, and a press or drag in progress ends, until a read lands; it retries after 1 s, doubling to 8 s. Logged once per run of failures. |
+| `panel <id>: the Core's catalog could not be read (<reason>); faders stay Unavailable until it is; retrying` | Without the Core's control list no fader has a range. Usually the Core dropping as the page loaded; it retries. |
+| `panel <id>: the allowlist could not be read (<reason>)` | Without it nothing on the page counts as writable, so writing objects read Unavailable. Logged once per run of failures. See the server's allowlist lines. |
+| `panel <id>: a write to <component>/<control> did not reach the server (<reason>)` | The page's write request failed on the network or the server; nothing was written. A staff panel also says so in a toast. |
+| `could not read the Core's catalog for the control browser: <reason>`, `could not read the allowlist for the control browser: <reason>` | The editor's control browser (or Bind a channel) could not read what it offers; it says so in place of the list. |
