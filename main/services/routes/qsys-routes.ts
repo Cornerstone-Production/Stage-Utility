@@ -9,7 +9,8 @@
 //   PUT  /api/qsys/allowlist           { entries } -> { entries }; 400 naming the first broken entry
 //   POST /api/qsys/allowlist/export    the allowlist file
 //   POST /api/qsys/allowlist/import    an allowlist file -> { entries }; 400 keeps the old list
-//   POST /api/qsys/write               { component, control, value, panelId? } -> WriteResult
+//   POST /api/qsys/write               { component, control, value, panelId?, final? } -> WriteResult;
+//                                      body capped at 16 KB (413)
 //   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
@@ -29,6 +30,8 @@ import { qsysWriteLog } from "../qsys/qsys-write-log.js";
 import { type RouteCtx, error, json, readObjectBody } from "./context.js";
 
 const MAX_DEVICE = 200;
+/** A write body is a few hundred bytes; anything past this is answered 413. */
+export const MAX_WRITE_BODY_BYTES = 16 * 1024;
 const MAX_PANEL_ID = 200;
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
@@ -57,7 +60,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   if (!pathname.startsWith("/api/qsys/")) return;
 
   if (method === "GET" && pathname === "/api/qsys/status") {
-    json(res, { ...qsysService.getStatus(), writable: !!qsysService.transport && qsysWatch.ready() });
+    json(res, { ...qsysService.getStatus(), writable: qsysWatch.ready() });
     return;
   }
 
@@ -73,8 +76,9 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await qsysService.refreshCatalog());
     } catch (err) {
+      // The reason can name the Core's address: /log gets it, the page a fixed phrase.
       console.warn(`[qsys] catalog refresh failed: ${scrub(errorMessage(err))}`);
-      error(res, errorMessage(err), 502);
+      error(res, "the catalog could not be read from the Core; see /log", 502);
     }
     return;
   }
@@ -98,9 +102,9 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/qsys/write") {
-    const body = await readObjectBody(req, res);
+    const body = await readObjectBody(req, res, MAX_WRITE_BODY_BYTES);
     if (!body) return;
-    const { component, control, value } = body;
+    const { component, control, value, final } = body;
     const panelId = body.panelId ?? null;
     if (typeof component !== "string" || typeof control !== "string") return error(res, "component and control must be text");
     if (typeof value !== "number" && typeof value !== "boolean" && typeof value !== "string") {
@@ -109,7 +113,8 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     if (panelId !== null && (typeof panelId !== "string" || panelId.length > MAX_PANEL_ID || CONTROL_CHAR.test(panelId))) {
       return error(res, `panelId must be null or text of up to ${MAX_PANEL_ID} characters on one line`);
     }
-    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req) }));
+    if (final !== undefined && typeof final !== "boolean") return error(res, "final must be true or false");
+    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req), final }));
     return;
   }
 
@@ -127,7 +132,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       seen.add(k);
       return [{ component: a.component, control: a.control, value: v.Value, string: v.String, position: v.Position }];
     });
-    json(res, { ready: !!qsysService.transport && qsysWatch.ready(), values });
+    json(res, { ready: qsysWatch.ready(), values });
     return;
   }
 

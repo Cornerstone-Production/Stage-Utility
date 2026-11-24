@@ -18,6 +18,18 @@ await fs.writeFile(
   path.join(TMP, "qsys-allowlist.json"),
   JSON.stringify({ entries: [{ component: "Lobby_Mixer", control: "gain", label: "x", min: 5, max: 0, confirm: "none" }] }),
 );
+// A write log with one good entry among things no write ever wrote.
+await fs.writeFile(
+  path.join(TMP, "qsys-write-log.json"),
+  JSON.stringify([
+    { at: 1, panelId: null, device: "seed", component: "Lobby_Mixer", control: "gain", from: null, to: -1, result: "ok" },
+    { at: "yesterday", panelId: null, device: "junk", component: "c", control: "n", from: null, to: 1, result: "ok" },
+    null,
+    "a line of text",
+    { at: 2, panelId: 7, device: "junk", component: "c", control: "n", from: null, to: 1, result: "ok" },
+    [1, 2],
+  ]),
+);
 
 const { qsysRoutes } = await import("./qsys-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -27,6 +39,8 @@ const { FakeQrcServer } = await import("../qsys/fake-qrc-server.js");
 const { qsysService } = await import("../qsys/qsys-service.js");
 const { qsysWatch, watchChannel } = await import("../qsys/qsys-watch.js");
 const { qsysWriteLog } = await import("../qsys/qsys-write-log.js");
+const { MAX_WRITE_BODY_BYTES } = await import("./qsys-routes.js");
+const { BodyTooLargeError } = await import("./context.js");
 type AllowEntry = import("../qsys/qsys-allowlist-store.js").AllowEntry;
 
 const fake = new FakeQrcServer();
@@ -192,6 +206,38 @@ describe("/api/qsys", () => {
       callRoute(qsysRoutes, "/api/qsys/write", { method: "POST", raw: '{"component":"Lobby_Mixer","control":"gain","value":1e999}' }),
     );
     assert.deepEqual((inf.json as { reason: string }).reason, "bad-value");
+  });
+
+  test("final must be true or false; a body past 16 KB is refused 413", async () => {
+    const bad = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5, final: "no" }));
+    assert.equal(bad.status, 400);
+    assert.match((bad.json as { error: string }).error, /final/);
+    const ok = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5, final: false }));
+    assert.equal(ok.status, 200);
+    assert.equal(MAX_WRITE_BODY_BYTES, 16 * 1024);
+    const big = { component: "Lobby_Mixer", control: "gain", value: "x".repeat(MAX_WRITE_BODY_BYTES) };
+    await assert.rejects(write(big), (err: unknown) => err instanceof BodyTooLargeError);
+  });
+
+  test("the write log serves only entries with the shape one is written with", async () => {
+    const { entries } = (await callRoute(qsysRoutes, "/api/qsys/write-log")).json as { entries: { device: string }[] };
+    assert.equal(entries.filter((e) => e.device === "seed").length, 1);
+    assert.ok(!entries.some((e) => !e || e.device === "junk"), "an entry of the wrong shape was served");
+  });
+
+  test("a failed catalog refresh tells the page a fixed phrase and /log the reason", async () => {
+    await quietly(connect);
+    fake.failNext("StatusGet", 7);
+    const warn = mock.method(console, "warn", () => {});
+    let r;
+    try {
+      r = await callRoute(qsysRoutes, "/api/qsys/catalog/refresh", { method: "POST" });
+      assert.ok(warn.mock.calls.some((c) => String(c.arguments[0]).includes("forced failure of StatusGet")), "the reason did not reach /log");
+    } finally {
+      warn.mock.restore();
+    }
+    assert.equal(r.status, 502);
+    assert.deepEqual(r.json, { error: "the catalog could not be read from the Core; see /log" });
   });
 
   test("status, catalog and refresh answer from the live connection", async () => {

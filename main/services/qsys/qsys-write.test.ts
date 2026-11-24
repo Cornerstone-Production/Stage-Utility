@@ -14,12 +14,13 @@ const { setNamedSubscriberCheck, subscriptionsChanged } = await import("../broad
 const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
-const { QsysWriter } = await import("./qsys-write.js");
+const { QsysWriter, REFUSAL_LINE_INTERVAL_MS } = await import("./qsys-write.js");
 const { qsysAllowlist, allowEntryFromCatalog } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog, WRITE_LOG_CAP } = await import("./qsys-write-log.js");
 type QsysSettings = import("./qsys-settings.js").QsysSettings;
 type AllowEntry = import("./qsys-allowlist-store.js").AllowEntry;
 type WriteRequest = import("./qsys-write.js").WriteRequest;
+type QsysCatalog = import("./qsys-service.js").QsysCatalog;
 
 let fake: InstanceType<typeof FakeQrcServer>;
 let port: number;
@@ -352,6 +353,164 @@ describe("writeControl", () => {
     const onDisk = JSON.parse(await fs.readFile(path.join(TMP, "qsys-write-log.json"), "utf8")) as { at: number }[];
     assert.equal(onDisk.length, WRITE_LOG_CAP);
     assert.equal(onDisk[0].at, WRITE_LOG_CAP + 4);
+  });
+});
+
+describe("review round 1", () => {
+  const newest = async () => (await qsysWriteLog.list()).entries[0];
+
+  test("a mid-gesture write that lands leaves no entry and no clamp line; the gesture's last write and every refusal do", async () => {
+    await connect();
+    // The log is at its cap by now, so count this test's own device.
+    const drags = async () => (await qsysWriteLog.list()).entries.filter((e) => e.device === "198.51.100.1 Drag").length;
+    const log = capture("log");
+    const warn = capture("warn");
+    try {
+      for (const value of [-50, 4, 9]) {
+        const r = await writer.write(req({ value, final: false, device: "198.51.100.1 Drag" }));
+        assert.ok(r.ok);
+      }
+      assert.equal(await drags(), 0, "a mid-gesture write was logged");
+      assert.ok(!log.lines.some((l) => l.includes("clamped")), "a mid-gesture clamp reached /log");
+      assert.equal(sets().length, 3, "a mid-gesture write was not sent");
+
+      const refused = await writer.write(req({ control: "nope", final: false, device: "198.51.100.1 Drag" }));
+      assert.ok(!refused.ok);
+      assert.equal((await newest()).result, "not-allowed", "a mid-gesture refusal was not logged");
+
+      await writer.write(req({ value: 9, final: true, device: "198.51.100.1 Drag" }));
+      assert.equal((await newest()).result, "clamped");
+      assert.ok(log.lines.some((l) => l.includes("clamped from 9 to 0")));
+      await writer.write(req({ value: -3, device: "198.51.100.1 Drag" }));
+      assert.equal((await newest()).to, -3, "a write with no final flag was not logged");
+    } finally {
+      log.restore();
+      warn.restore();
+    }
+  });
+
+  test("a mid-gesture read-back mismatch is not logged; the final one is", async () => {
+    await connect();
+    fake.coerceSet = (_c, _n, v) => (typeof v === "number" ? v - 3 : v);
+    const warn = capture("warn");
+    try {
+      await writer.write(req({ value: -20, final: false }));
+      assert.equal(warn.lines.length, 0, warn.lines.join(" | "));
+      await writer.write(req({ value: -20, final: true }));
+      assert.equal(warn.lines.filter((l) => l.includes("read-back mismatch")).length, 1);
+    } finally {
+      warn.restore();
+    }
+  });
+
+  test("offline refusal lines: once per state, again after a minute or a new episode, with what was held back", async () => {
+    let clock = 1_000_000;
+    const timed = new QsysWriter(svc, watch, () => clock);
+    const warn = capture("warn");
+    const offline = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (offline)"));
+    try {
+      for (let i = 0; i < 5; i++) assert.equal(((await timed.write(req())) as { reason?: string }).reason, "offline");
+      assert.equal(offline().length, 1, "every offline refusal wrote a line");
+      clock += REFUSAL_LINE_INTERVAL_MS - 1;
+      await timed.write(req());
+      assert.equal(offline().length, 1);
+      clock += 1;
+      await timed.write(req());
+      assert.equal(offline().length, 2, "no line after a minute");
+      assert.match(offline()[1], /\(5 more like it not logged\)$/);
+
+      // A new episode: the Core came back, a write landed, the Core went again.
+      await connect();
+      await openPanel();
+      assert.ok((await timed.write(req({ value: -12 }))).ok);
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      await timed.write(req());
+      assert.equal(offline().length, 3, "a new offline episode inside the minute was not logged");
+    } finally {
+      warn.restore();
+    }
+  });
+
+  test("an offline refusal line is written again when the connection changes, though no write landed between", async () => {
+    const t1 = { send: async () => undefined, onNotification: () => {}, close: () => {} };
+    const t2 = { ...t1 };
+    const source: { transport: typeof t1 | null; getCatalog: () => QsysCatalog | null } = { transport: null, getCatalog: () => null };
+    const notReady = { ready: () => false, current: () => new Map() };
+    const timed = new QsysWriter(source, notReady, () => 5_000_000);
+    const warn = capture("warn");
+    try {
+      await timed.write(req());
+      await timed.write(req());
+      source.transport = t1; // reconnected, values not read yet
+      await timed.write(req());
+      await timed.write(req());
+      source.transport = t2; // dropped and reconnected again
+      await timed.write(req());
+    } finally {
+      warn.restore();
+    }
+    assert.equal(warn.lines.filter((l) => l.startsWith("[qsys] write refused (offline)")).length, 3);
+  });
+
+  test("a client looping on a refused write: one line per device a minute, one write-log entry counting the repeats", async () => {
+    let clock = 2_000_000;
+    const timed = new QsysWriter(svc, watch, () => clock);
+    await connect();
+    // The log may already be at its cap, so count this test's own devices.
+    const mine = async () => (await qsysWriteLog.list()).entries.filter((e) => e.device.startsWith("203.0.113."));
+    const warn = capture("warn");
+    try {
+      for (let i = 0; i < 10; i++) await timed.write(req({ control: "nope", device: "203.0.113.9 Loop" }));
+      await timed.write(req({ control: "nope", device: "203.0.113.10 Other" }));
+      const lines = () => warn.lines.filter((l) => l.startsWith("[qsys] write refused (not-allowed)"));
+      assert.equal(lines().length, 2, "one line per device");
+      const entries = await mine();
+      assert.equal(entries.length, 2, "repeated refusals pushed entries out");
+      const loop = entries.find((e) => e.device === "203.0.113.9 Loop")!;
+      assert.equal(loop.repeats, 10);
+      assert.equal(loop.lastAt, clock);
+      clock += 60_001;
+      await timed.write(req({ control: "nope", device: "203.0.113.9 Loop" }));
+      assert.equal((await mine()).length, 3, "a repeat after the window joined an old entry");
+      assert.equal(lines().length, 3);
+    } finally {
+      warn.restore();
+    }
+  });
+
+  test("a live transport with no catalog yet refuses offline, not core-error", async () => {
+    let sent = 0;
+    const source = { transport: { send: async () => void sent++, onNotification: () => {}, close: () => {} }, getCatalog: (): QsysCatalog | null => null };
+    const always = { ready: () => true, current: () => new Map() };
+    const warn = capture("warn");
+    try {
+      const r = await new QsysWriter(source, always).write(req());
+      assert.equal(r.ok ? null : r.reason, "offline");
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sent, 0);
+  });
+
+  test("a dropped connection mid-write tells the page a fixed phrase and /log the reason", async () => {
+    const catalog: QsysCatalog = { designCode: "d", components: [{ name: "Lobby_Mixer", type: "mixer", controls: fake.components.get("Lobby_Mixer")! }] };
+    const source = {
+      transport: { send: () => Promise.reject(new Error("connect ECONNRESET 192.0.2.50:1710")), onNotification: () => {}, close: () => {} },
+      getCatalog: () => catalog,
+    };
+    const always = { ready: () => true, current: () => new Map() };
+    const warn = capture("warn");
+    let r;
+    try {
+      r = await new QsysWriter(source, always).write(req());
+    } finally {
+      warn.restore();
+    }
+    assert.ok(!r.ok);
+    assert.equal(r.reason, "core-error");
+    assert.ok(!r.message.includes("192.0.2.50"), `the Core's address reached the page: ${r.message}`);
+    assert.ok(warn.lines.some((l) => l.includes("192.0.2.50:1710")), "the reason did not reach /log");
   });
 });
 

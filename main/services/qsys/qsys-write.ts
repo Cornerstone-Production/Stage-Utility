@@ -14,7 +14,9 @@
 //
 // Every write goes as `Component.Set` with `ResponseValues: true`, and the
 // Core's answer is what the caller gets back. A read-back that differs from what
-// was sent is logged. Every call, refused or not, is one write-log entry.
+// was sent is logged. A refusal is always a write-log entry; a write that landed
+// is one when it is its gesture's last (`final` not false). Refusals checked
+// before sending write their [qsys] line at a limited rate (RefusalLines).
 
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
@@ -33,6 +35,13 @@ export interface WriteRequest {
   panelId: string | null;
   /** Who asked: the request's address and user agent. */
   device: string;
+  /**
+   * False for a write in the middle of a gesture (a fader drag). Such a write is
+   * checked and sent like any other, but when it succeeds it leaves no write-log
+   * entry and no clamp or mismatch line: the gesture's last write (final true or
+   * absent) records it. A refusal is always recorded.
+   */
+  final?: boolean;
 }
 
 export type WriteRefusal = "not-allowed" | "no-range" | "offline" | "bad-value" | "core-error";
@@ -52,6 +61,11 @@ export interface WriteReadiness {
   ready(): boolean;
   current(addresses: { component: string; control: string }[]): Map<string, { Value: unknown }>;
 }
+
+/** A refusal line already written is not repeated for this long, unless its state changed. */
+export const REFUSAL_LINE_INTERVAL_MS = 60_000;
+/** Distinct refusal keys remembered before the memory is reset. */
+const MAX_REFUSAL_KEYS = 256;
 
 /** The longest text value a write may carry. */
 const MAX_TEXT = 1024;
@@ -117,23 +131,63 @@ function loggable(v: unknown): unknown {
   return null;
 }
 
-function findControl(catalog: QsysCatalog | null, component: string, control: string): QrcControl | undefined {
-  return catalog?.components.find((c) => c.name === component)?.controls.find((c) => c.Name === control);
+function findControl(catalog: QsysCatalog, component: string, control: string): QrcControl | undefined {
+  return catalog.components.find((c) => c.name === component)?.controls.find((c) => c.Name === control);
 }
 
+/**
+ * Refusals checked before anything is sent (offline, not-allowed, no-range,
+ * bad-value) can arrive at drag rate, or from a client looping on a bad request.
+ * Each kind writes its [qsys] line once, then again only when its state changes
+ * (for offline: a different connection, or none) or a minute has passed, saying
+ * how many it held back. A refusal from the Core itself is always written.
+ */
+class RefusalLines {
+  private readonly seen = new Map<string, { state: unknown; at: number; held: number }>();
+
+  constructor(private readonly now: () => number) {}
+
+  forget(key: string): void {
+    this.seen.delete(key);
+  }
+
+  /** Null when this line is held back; otherwise how many like it were held back since the last. */
+  gate(key: string, state: unknown): number | null {
+    const t = this.now();
+    const last = this.seen.get(key);
+    if (last && last.state === state && t - last.at < REFUSAL_LINE_INTERVAL_MS) {
+      last.held++;
+      return null;
+    }
+    if (!last && this.seen.size >= MAX_REFUSAL_KEYS) this.seen.clear();
+    this.seen.set(key, { state, at: t, held: 0 });
+    return last?.held ?? 0;
+  }
+}
+
+/** Refused before the Core was asked: these are rate-limited. */
+const PRECHECK: ReadonlySet<WriteRefusal> = new Set(["offline", "not-allowed", "no-range", "bad-value"]);
+
 export class QsysWriter {
+  private readonly lines: RefusalLines;
+
   constructor(
     private readonly source: WriteSource,
     private readonly watch: WriteReadiness,
-  ) {}
+    private readonly now: () => number = Date.now,
+  ) {
+    this.lines = new RefusalLines(now);
+  }
 
   async write(req: WriteRequest): Promise<WriteResult> {
     const { component, control } = req;
     let from: unknown = null;
     let to: unknown = loggable(req.value);
+    const final = req.final !== false;
     const finish = async (result: WriteResult, logAs: string): Promise<WriteResult> => {
+      if (result.ok && !final) return result;
       await qsysWriteLog.add({
-        at: Date.now(),
+        at: this.now(),
         panelId: req.panelId,
         device: req.device,
         component: isAddressPart(component) ? component : "",
@@ -144,8 +198,16 @@ export class QsysWriter {
       });
       return result;
     };
-    const refuse = (reason: WriteRefusal, message: string): Promise<WriteResult> => {
-      console.warn(`[qsys] write refused (${scrub(reason)}): ${scrub(message)}`);
+    /** `detail` goes to /log only; the caller gets `message`. */
+    const refuse = (reason: WriteRefusal, message: string, detail = message): Promise<WriteResult> => {
+      const held = !PRECHECK.has(reason)
+        ? 0
+        : reason === "offline"
+          ? this.lines.gate("offline", this.source.transport)
+          : this.lines.gate(`${reason}\u0000${req.device}`, undefined);
+      if (held !== null) {
+        console.warn(`[qsys] write refused (${scrub(reason)}): ${scrub(detail)}${scrub(held ? ` (${held} more like it not logged)` : "")}`);
+      }
       return finish({ ok: false, reason, message }, reason);
     };
 
@@ -155,9 +217,16 @@ export class QsysWriter {
     const entry = await qsysAllowlist.lookup(component, control);
     if (!entry) return refuse("not-allowed", `${where} is not on the allowlist`);
 
+    // ready() is the one answer to "may anything be written now" (it is false with
+    // no transport); `t` is read for the send, in the same synchronous stretch.
     const t = this.source.transport;
-    if (!t || !this.watch.ready()) return refuse("offline", `the Core is not connected, or its current values have not been read since it reconnected; ${where} was not written`);
-    const c = findControl(this.source.getCatalog(), component, control);
+    const catalog = this.source.getCatalog();
+    if (!this.watch.ready() || !t || !catalog) {
+      return refuse("offline", `the Core is not connected, or its current values have not been read since it reconnected; ${where} was not written`);
+    }
+    // Readiness is back: the next offline refusal starts a new episode and is logged.
+    this.lines.forget("offline");
+    const c = findControl(catalog, component, control);
     if (!c) return refuse("core-error", `${where} is not in the Core's design`);
     const kind = kindOf(c);
     const checked = checkValue(kind, req.value, entry.min, entry.max, where);
@@ -171,7 +240,9 @@ export class QsysWriter {
       reply = await sending;
     } catch (err) {
       if (err instanceof QrcError) return refuse("core-error", `the Core refused the write to ${where}: ${err.message}`);
-      return refuse("core-error", `the write to ${where} did not complete, so it may or may not have landed: ${errorMessage(err)}`);
+      // The reason (a socket error can name the Core's address) goes to /log, not to the page.
+      const message = `the connection to the Core dropped during the write to ${where}, so it may or may not have landed`;
+      return refuse("core-error", message, `${message}: ${errorMessage(err)}`);
     }
     const controls = (reply as { Controls?: unknown } | null)?.Controls;
     const back = Array.isArray(controls)
@@ -179,9 +250,9 @@ export class QsysWriter {
       : undefined;
     if (!back || !("Value" in back)) return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);
 
-    if (checked.clamped) console.log(`[qsys] write to ${scrub(where)} clamped from ${scrub(req.value)} to ${scrub(checked.send)}`);
+    if (checked.clamped && final) console.log(`[qsys] write to ${scrub(where)} clamped from ${scrub(req.value)} to ${scrub(checked.send)}`);
     const matched = sameValue(kind, checked.send, back.Value);
-    if (!matched) console.warn(`[qsys] read-back mismatch on ${scrub(where)}: sent ${scrub(checked.send)}, the Core holds ${scrub(back.Value)}`);
+    if (!matched && final) console.warn(`[qsys] read-back mismatch on ${scrub(where)}: sent ${scrub(checked.send)}, the Core holds ${scrub(back.Value)}`);
     const result: WriteResult = {
       ok: true,
       value: back.Value,

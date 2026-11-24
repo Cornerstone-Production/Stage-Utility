@@ -81,7 +81,10 @@ Every write is checked by the server, never by the browser.
 - A numeric control the Core reports no range for is added with none, and is not
   writable until a range is set.
 - A value outside the range is clamped to it, and the clamp is logged.
-- Booleans (mute, switch) and triggers (buttons) carry no range.
+- Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
+  with `true`.
+- A text control takes any text up to 1024 characters. It is not checked against
+  the control's choices: allowlist a text control only if any text is safe to send.
 - A value of the wrong type is refused: text or `true` to a gain, a number to a mute,
   a number that is not finite.
 - A write is refused while the Core is offline or reconnecting, and after a
@@ -103,13 +106,21 @@ the server can change them. Restrict the server's port to staff and panel device
 
 ## Write log
 
-Every write call, refused or not, is one entry in a rolling log of the last 2000
-(`qsys-write-log.json`, not carried by a config backup): when, the panel, the device
+Every write gesture is one entry in a rolling log of the last 2000
+(`qsys-write-log.json`, not carried by a config backup). A drag sends many writes; the
+ones it marks as not its last (`final: false`) are checked and sent but recorded only
+if refused, and the last is recorded with the value it landed on. A clamp or a
+read-back mismatch is logged to `/log` on the same rule. Each entry holds when, the panel, the device
 (its address and user agent), the control, the value before (as the open panels last
 read it, or empty when no open panel watches it), the value sent (after clamping) and
 the result: `ok`, `clamped`, `mismatch`, or the reason it was refused (`not-allowed`,
 `no-range`, `offline`, `bad-value`, `core-error`). A successful write goes to the
 write log, not `/log`.
+
+A refusal that repeats one already recorded (the same device, panel, control and
+reason, within a minute of the last) is counted on that entry (`repeats`, `lastAt`)
+rather than added, so a client looping on a refused write cannot push real entries
+out of the log.
 
 ## What it never does
 
@@ -134,7 +145,7 @@ Look at `/log` and filter for `[qsys]`.
 | `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. |
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
-| `write refused (<reason>): <why>` | A write was refused before it reached the Core (`not-allowed`, `no-range`, `offline`, `bad-value`), or the Core refused it or did not answer (`core-error`). The write log has the device and panel. |
+| `write refused (<reason>): <why>` | A write was refused before it reached the Core (`not-allowed`, `no-range`, `offline`, `bad-value`), or the Core refused it or the connection dropped (`core-error`). The write log has the device and panel. A refusal checked before sending is logged once, then again after a minute (or, for `offline`, when the connection changes), with `(<n> more like it not logged)`; `not-allowed`, `no-range` and `bad-value` count per device. `core-error` is logged every time. |
 | `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
 | `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
 | `allowlist saved: <n> entries`, `allowlist imported: <n> entries` | The allowlist was replaced. |
