@@ -374,12 +374,19 @@ describe("which menu opens", () => {
   }
   const menuTexts = () => screen.queryAllByRole("menu").map((m) => text(m));
 
-  test("a long-press on a console's glyph opens its icon menu and nothing else", async () => {
+  // A failed assertion prints the values it compared, and a jsdom element prints the
+  // whole page: an element compared with null took over a minute to fail. So these
+  // compare what an element says, never the element. The timeout is for the rest.
+  test("a long-press on a console's glyph opens its icon menu and nothing else", { timeout: 15_000 }, async () => {
     await mount();
     const glyph = document.querySelector<HTMLElement>("[data-rail-glyph]");
     assert.ok(glyph, "no console glyph in the rail");
-    await longPress(glyph.firstElementChild ?? glyph, 1);
-    assert.equal(screen.queryByText("Hide “FOH”"), null, "the row's menu opened over the glyph's");
+    const target = glyph.firstElementChild ?? glyph;
+    fireEvent.pointerDown(target, { pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    // Held until the glyph's own menu, the icon picker, has opened.
+    await eventually(() => assert.ok(screen.queryAllByRole("dialog").length > 0, "the icon picker never opened"));
+    fireEvent.pointerUp(target, { pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    assert.equal(screen.queryByText("Hide “FOH”") !== null, false, "the row's menu opened over the glyph's");
     // The glyph's own menu is the icon picker, a dialog. The rail's menu (Customize)
     // opening beside it is the second menu the press must not open.
     assert.deepEqual(menuTexts(), [], "a menu opened beside the icon picker");

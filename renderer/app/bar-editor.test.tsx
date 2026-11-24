@@ -360,7 +360,7 @@ describe("saves that are still out when the operator moves on", () => {
     await toPhone();
     await act(async () => releaseHold!());
     await eventually(() => assert.ok(chip("Recording"), "the phone's own set never reached the strip"));
-    assert.equal(chip("Clock"), null, `the phone strip still shows the desktop rows: ${JSON.stringify(rowLabels())}`);
+    assert.equal(chip("Clock") !== null, false, `the phone strip still shows the desktop rows: ${JSON.stringify(rowLabels())}`);
     // And the next phone edit is built on the phone's set, not on the desktop rows.
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Recording" })));
     await eventually(() => assert.equal(saves.length, 2));
@@ -380,7 +380,7 @@ describe("saves that are still out when the operator moves on", () => {
     });
     await act(async () => releaseHold!());
     await eventually(() => assert.ok(chip("Streaming"), "the other browser's change was dropped"));
-    await eventually(() => assert.equal(chip("Recording"), null, "the strip kept an arrangement the server no longer holds"));
+    await eventually(() => assert.equal(chip("Recording") !== null, false, "the strip kept an arrangement the server no longer holds"));
   });
 
   test("this save's own echo, arriving while a later edit is queued behind it, is not applied twice", async () => {
