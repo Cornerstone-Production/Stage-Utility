@@ -86,6 +86,7 @@ const GOOD: Record<string, unknown> = {
     plans: [{ planId: "2001", serviceTypeId: "100", sortDate: "2026-12-24T16:00:00Z", themeId: "th-0123456789ab", show: "themed" }],
   },
   "presets.json": [{ id: "p1", name: "Sunday", slots: [] }],
+  "qsys-allowlist.json": { entries: [{ component: "Lobby_Mixer", control: "gain", label: "Lobby", min: -100, max: 0, confirm: "none" }] },
   "rosstalk-settings.json": { simulate: true },
   "rosstalk-targets.json": [{ id: "rt1", name: "Carbonite", enabled: false, config: { port: 7788, family: "carbonite" } }],
   "saved-colors.json": ["#ff0000"],
@@ -176,6 +177,10 @@ const BAD: Record<string, { value: unknown; says: string }> = {
     says: "show",
   },
   "presets.json": { value: [{ id: "p1", name: "   ", slots: [] }], says: "no name" },
+  "qsys-allowlist.json": {
+    value: { entries: [{ component: "Lobby_Mixer", control: "gain", label: "Lobby", min: 0, max: -100, confirm: "none" }] },
+    says: "min must not be above max",
+  },
   "rosstalk-settings.json": { value: { simulate: 1 }, says: "simulate" },
   "rosstalk-targets.json": { value: [{ id: "rt1", name: 5, enabled: false, config: {} }], says: "name" },
   "saved-colors.json": { value: ["#ff0000", 42], says: "list of text" },

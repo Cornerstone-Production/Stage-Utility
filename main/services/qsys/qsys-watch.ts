@@ -145,6 +145,12 @@ export class QsysWatch {
     return this.running;
   }
 
+  /** The addresses panel `id` reads, or null when no registered panel has that id. */
+  panelAddresses(id: string): QsysAddress[] | null {
+    const p = this.panels.find((x) => x.id === id);
+    return p ? [...p.addresses] : null;
+  }
+
   /**
    * The cached values of these addresses, read on the live connection and the
    * current design. An address with no value yet is absent: this is the

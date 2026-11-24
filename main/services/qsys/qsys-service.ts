@@ -2,8 +2,8 @@
 //
 // Owns what QrcClient deliberately does not: Logon, the 30 s keepalive, status,
 // reconnect with backoff, and the component/control catalog. `transport`,
-// `getCatalog`, `onCatalog` and `refreshCatalog` are the seam the Q-SYS panels of
-// a later release build on; nothing in this release calls them outside tests.
+// `getCatalog`, `onCatalog` and `refreshCatalog` are the seam the watch
+// (qsys-watch.ts), checked writes (qsys-write.ts) and the /api/qsys routes build on.
 // Nothing here ever calls a method that changes the design.
 
 import { errorMessage } from "../errors.js";

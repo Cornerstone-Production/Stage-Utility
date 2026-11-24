@@ -1,0 +1,201 @@
+// The Q-SYS routes, driven through the real handler, the real service and watch
+// singletons (pointed at the fake Core) and a temporary data directory.
+//
+// `device` here is "unknown <user agent>": the route harness has no socket, so the
+// address half is only exercised against a running server.
+
+import assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { after, before, describe, mock, test } from "node:test";
+
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-qsys-routes-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+
+const { qsysRoutes } = await import("./qsys-routes.js");
+const { callRoute } = await import("./route-harness.js");
+const { ROUTE_MODULES } = await import("../remote-server.js");
+const { setNamedSubscriberCheck, subscriptionsChanged } = await import("../broadcaster.js");
+const { FakeQrcServer } = await import("../qsys/fake-qrc-server.js");
+const { qsysService } = await import("../qsys/qsys-service.js");
+const { qsysWatch, watchChannel } = await import("../qsys/qsys-watch.js");
+const { qsysWriteLog } = await import("../qsys/qsys-write-log.js");
+type AllowEntry = import("../qsys/qsys-allowlist-store.js").AllowEntry;
+
+const fake = new FakeQrcServer();
+fake.components.set("Lobby_Mixer", [
+  { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+  { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+]);
+const named = new Set<string>();
+let port = 0;
+
+before(async () => {
+  port = await fake.start();
+  setNamedSubscriberCheck((ch) => named.has(ch));
+});
+after(async () => {
+  qsysService.stop();
+  setNamedSubscriberCheck(() => false);
+  await fake.stop();
+  await qsysWriteLog.whenIdle();
+  await fs.rm(TMP, { recursive: true, force: true });
+});
+
+async function until(cond: () => boolean, what: string): Promise<void> {
+  for (let i = 0; i < 200000; i++) {
+    if (cond()) return;
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+async function connect(): Promise<void> {
+  qsysService.configure({ host: "127.0.0.1", port, user: "", enabled: true, volunteerMeterHz: 10, staffMeterHz: 20 }, null);
+  await until(() => qsysService.transport !== null, "connected");
+  await qsysWatch.recompute();
+}
+
+/** Quiet the [qsys] lines a refusal is meant to write. */
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const warn = mock.method(console, "warn", () => {});
+  const log = mock.method(console, "log", () => {});
+  try {
+    return await fn();
+  } finally {
+    warn.mock.restore();
+    log.mock.restore();
+  }
+}
+
+const GAIN: AllowEntry = { component: "Lobby_Mixer", control: "gain", label: "Lobby gain", min: -100, max: 0, confirm: "none" };
+const MUTE: AllowEntry = { component: "Lobby_Mixer", control: "mute", label: "Lobby mute", min: null, max: null, confirm: "hold" };
+
+const put = (entries: unknown) => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries } });
+const listed = async () => ((await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { entries: AllowEntry[] }).entries;
+const write = (body: unknown, headers: Record<string, string> = {}) =>
+  callRoute(qsysRoutes, "/api/qsys/write", { method: "POST", body, headers });
+
+describe("/api/qsys", () => {
+  test("is dispatched by the server", () => {
+    assert.ok(ROUTE_MODULES.includes(qsysRoutes));
+  });
+
+  test("with no Core: status is not writable, the catalog is 503, and a write is refused offline", async () => {
+    const status = (await callRoute(qsysRoutes, "/api/qsys/status")).json as { state: string; writable: boolean };
+    assert.equal(status.state, "offline");
+    assert.equal(status.writable, false);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog")).status, 503);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog/refresh", { method: "POST" })).status, 503);
+    await quietly(() => put([GAIN]));
+    const r = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5 }));
+    assert.equal(r.status, 200);
+    assert.deepEqual((r.json as { ok: boolean; reason: string }).reason, "offline");
+  });
+
+  test("PUT /api/qsys/allowlist saves a good list and refuses a bad one whole, naming the entry", async () => {
+    const ok = await quietly(() => put([GAIN, MUTE]));
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await listed(), [GAIN, MUTE]);
+    const bad = await quietly(() => put([GAIN, { ...MUTE, confirm: "maybe" }]));
+    assert.equal(bad.status, 400);
+    assert.match((bad.json as { error: string }).error, /entry 2: confirm/);
+    assert.deepEqual(await listed(), [GAIN, MUTE], "a refused save changed the list");
+    assert.equal((await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", raw: "[" }))).status, 400);
+  });
+
+  test("allowlist import rejects malformed entries and keeps the old list", async () => {
+    await quietly(() => put([GAIN]));
+    const exported = (await callRoute(qsysRoutes, "/api/qsys/allowlist/export", { method: "POST" })).json as Record<string, unknown>;
+    assert.deepEqual(exported, { format: "stage-utility-qsys-allowlist", version: 1, entries: [GAIN] });
+
+    const malformed: [string, unknown, RegExp][] = [
+      ["no format marker", { entries: [MUTE] }, /not a Q-SYS allowlist file/],
+      ["a later version", { ...exported, version: 2, entries: [MUTE] }, /version 2/],
+      ["entries not a list", { ...exported, entries: { MUTE } }, /entries must be a list/],
+      ["min above max", { ...exported, entries: [MUTE, { ...GAIN, min: 5, max: -5 }] }, /entry 2: min must not be above max/],
+      ["half a range", { ...exported, entries: [{ ...GAIN, max: null }] }, /both be set or both be null/],
+      ["a non-finite limit", { ...exported, entries: [{ ...GAIN, min: "-100" }] }, /entry 1: min must be a number/],
+      ["a control character in an address", { ...exported, entries: [{ ...GAIN, component: "Lobby\u0000Mixer" }] }, /entry 1: component/],
+      ["a duplicate address", { ...exported, entries: [GAIN, { ...GAIN, label: "again" }] }, /listed twice/],
+      ["a missing label", { ...exported, entries: [{ ...GAIN, label: undefined }] }, /label/],
+    ];
+    for (const [what, file, says] of malformed) {
+      const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: file }));
+      assert.equal(r.status, 400, `${what} was not refused`);
+      assert.match((r.json as { error: string }).error, says, what);
+      assert.deepEqual(await listed(), [GAIN], `${what} changed the list`);
+    }
+
+    const good = await quietly(() =>
+      callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...exported, entries: [MUTE, GAIN] } }),
+    );
+    assert.equal(good.status, 200);
+    assert.deepEqual(await listed(), [MUTE, GAIN]);
+  });
+
+  test("POST /api/qsys/write validates the body and returns WriteResult", async () => {
+    await quietly(() => put([GAIN, MUTE]));
+    const refusals: [string, unknown][] = [
+      ["component not text", { component: 5, control: "gain", value: 1 }],
+      ["no control", { component: "Lobby_Mixer", value: 1 }],
+      ["value an object", { component: "Lobby_Mixer", control: "gain", value: { v: 1 } }],
+      ["value missing", { component: "Lobby_Mixer", control: "gain" }],
+      ["panelId a number", { component: "Lobby_Mixer", control: "gain", value: 1, panelId: 7 }],
+      ["panelId with a newline", { component: "Lobby_Mixer", control: "gain", value: 1, panelId: "a\nb" }],
+      ["a list", [1]],
+    ];
+    for (const [what, body] of refusals) {
+      const r = await quietly(() => write(body));
+      assert.equal(r.status, 400, `${what} was not a 400`);
+    }
+    assert.equal(fake.received.filter((r) => r.method === "Component.Set").length, 0);
+
+    await quietly(connect);
+    const ok = await quietly(() =>
+      write({ component: "Lobby_Mixer", control: "gain", value: 12, panelId: "panel-a" }, { "user-agent": "Pad\r\n[qsys] forged" }),
+    );
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.json, { ok: true, value: 0, string: "0dB", position: 100 / 120, clamped: true });
+    const { entries } = (await callRoute(qsysRoutes, "/api/qsys/write-log")).json as { entries: { device: string; panelId: string; result: string }[] };
+    assert.equal(entries[0].device, "unknown Pad  [qsys] forged", "the user agent reached the write log with its line breaks");
+    assert.equal(entries[0].panelId, "panel-a");
+    assert.equal(entries[0].result, "clamped");
+
+    const notAllowed = await quietly(() => write({ component: "Lobby_Mixer", control: "other", value: 1 }));
+    assert.deepEqual((notAllowed.json as { reason: string }).reason, "not-allowed");
+    // 1e999 is valid JSON and parses to Infinity: the writer, not JSON, refuses it.
+    const inf = await quietly(() =>
+      callRoute(qsysRoutes, "/api/qsys/write", { method: "POST", raw: '{"component":"Lobby_Mixer","control":"gain","value":1e999}' }),
+    );
+    assert.deepEqual((inf.json as { reason: string }).reason, "bad-value");
+  });
+
+  test("status, catalog and refresh answer from the live connection", async () => {
+    await quietly(connect);
+    const status = (await callRoute(qsysRoutes, "/api/qsys/status")).json as { state: string; writable: boolean };
+    assert.equal(status.state, "connected");
+    assert.equal(status.writable, true);
+    const catalog = (await callRoute(qsysRoutes, "/api/qsys/catalog")).json as { components: { name: string }[] };
+    assert.deepEqual(catalog.components.map((c) => c.name), ["Lobby_Mixer"]);
+    const refreshed = await quietly(() => callRoute(qsysRoutes, "/api/qsys/catalog/refresh", { method: "POST" }));
+    assert.equal(refreshed.status, 200);
+  });
+
+  test("GET /api/qsys/values hydrates a registered panel from the watch, and 404s an unknown one", async () => {
+    await quietly(connect);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/values")).status, 400);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/values?panel=nope")).status, 404);
+    qsysWatch.setPanels([
+      { id: "panel-v", kind: "staff", addresses: [{ component: "Lobby_Mixer", control: "mute" }, { component: "Lobby_Mixer", control: "mute" }] },
+    ]);
+    named.add(watchChannel("panel-v"));
+    subscriptionsChanged();
+    await quietly(() => qsysWatch.recompute());
+    await until(() => qsysWatch.current([{ component: "Lobby_Mixer", control: "mute" }]).size === 1, "mute read");
+    const r = (await callRoute(qsysRoutes, "/api/qsys/values?panel=panel-v")).json as { ready: boolean; values: unknown[] };
+    assert.equal(r.ready, true);
+    assert.deepEqual(r.values, [{ component: "Lobby_Mixer", control: "mute", value: false, string: "false", position: 0 }]);
+  });
+});

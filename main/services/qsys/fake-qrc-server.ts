@@ -45,6 +45,11 @@ export class FakeQrcServer {
    * ("notify"). Which one a Core sends is unverified, so the client takes both.
    */
   autoPollForm: "notify" | "reply" = "notify";
+  /**
+   * When set, Component.Set lands what this returns instead of the value asked for:
+   * a Core that limits or quantizes a write, so its read-back differs.
+   */
+  coerceSet: ((component: string, name: string, value: number | boolean | string) => number | boolean | string) | null = null;
   /** The most change groups any one connection has held at once. */
   maxGroups = 0;
   private held: { session: Session; text: string }[] = [];
@@ -283,7 +288,7 @@ export class FakeQrcServer {
       if (!control) return this.fail(session, id, 8, "Unknown control");
       targets.push(control);
     }
-    requested.forEach((r, i) => this.apply(targets[i], r.Value));
+    requested.forEach((r, i) => this.apply(targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value));
     this.reply(
       session,
       id,
