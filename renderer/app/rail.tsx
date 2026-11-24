@@ -28,7 +28,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
-import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
 import { plural } from "@main/services/plural";
 import { buildLabel } from "../lib/build-label";
@@ -364,6 +364,9 @@ export function Rail({
           onPointerDown={(e) => {
             onStartResize(e);
             resizeTrigger.onPointerDown(e);
+            // The press is this handle's: the rail around it must not time the same
+            // finger into its own menu as well.
+            if (e.pointerType !== "mouse") e.stopPropagation();
           }}
           onPointerMove={resizeTrigger.onPointerMove}
           onPointerUp={resizeTrigger.onPointerUp}
@@ -419,9 +422,8 @@ function RailRow({
   ariaLabel?: string;
   menuItems: () => ContextMenuItem[];
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const trigger = useContextMenuTrigger((point) => setMenu({ ...point, items: menuItems() }));
-  const onGlyph = (e: React.SyntheticEvent) => e.target instanceof Element && e.target.closest("[data-rail-glyph]") !== null;
+  const { menu, open, close } = useContextMenuState();
+  const trigger = useContextMenuTrigger((point) => open(point, menuItems()));
   return (
     <>
       <SidebarListItem
@@ -436,7 +438,11 @@ function RailRow({
           trigger.onContextMenu(e);
         }}
         onPointerDown={(e) => {
-          if (!onGlyph(e)) trigger.onPointerDown(e);
+          trigger.onPointerDown(e);
+          // The press is this row's: the rail around it must not time the same finger
+          // into its own menu as well. A console's glyph stops its press before it
+          // gets here, so the glyph's icon menu is the only one it opens.
+          if (e.pointerType !== "mouse") e.stopPropagation();
         }}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}
@@ -444,7 +450,7 @@ function RailRow({
         onClickCapture={trigger.onClickCapture}
         style={trigger.style}
       />
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
     </>
   );
 }

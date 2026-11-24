@@ -130,7 +130,11 @@ export function ConsoleRailIcon({
           e.stopPropagation();
           trigger.onContextMenu(e);
         }}
-        onPointerDown={trigger.onPointerDown}
+        onPointerDown={(e) => {
+          trigger.onPointerDown(e);
+          // The glyph has the press: neither the row's menu nor the rail's may open on it.
+          if (e.pointerType !== "mouse") e.stopPropagation();
+        }}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}
         onPointerCancel={trigger.onPointerCancel}

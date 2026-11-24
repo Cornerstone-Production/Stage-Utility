@@ -270,14 +270,61 @@ describe("which menu opens", () => {
     assert.match(text(menus[0]), /Hide “Patch”/);
   });
 
-  test("a long-press on a console's glyph opens its icon menu and not the row's", async () => {
+  /** A touch held past the long-press delay on `target`, then lifted. */
+  async function longPress(target: Element, pointerId: number): Promise<void> {
+    fireEvent.pointerDown(target, { pointerId, pointerType: "touch", clientX: 10, clientY: 10 });
+    await act(async () => new Promise((r) => setTimeout(r, 700)));
+    fireEvent.pointerUp(target, { pointerId, pointerType: "touch", clientX: 10, clientY: 10 });
+  }
+  const menuTexts = () => screen.queryAllByRole("menu").map((m) => text(m));
+
+  test("a long-press on a console's glyph opens its icon menu and nothing else", async () => {
     await mount();
     const glyph = document.querySelector<HTMLElement>("[data-rail-glyph]");
     assert.ok(glyph, "no console glyph in the rail");
-    const target = glyph.firstElementChild ?? glyph;
-    fireEvent.pointerDown(target, { pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
-    await act(async () => new Promise((r) => setTimeout(r, 700)));
-    fireEvent.pointerUp(target, { pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    await longPress(glyph.firstElementChild ?? glyph, 1);
     assert.equal(screen.queryByText("Hide “FOH”"), null, "the row's menu opened over the glyph's");
+    // The glyph's own menu is the icon picker, a dialog. The rail's menu (Customize)
+    // opening beside it is the second menu the press must not open.
+    assert.deepEqual(menuTexts(), [], "a menu opened beside the icon picker");
+    assert.deepEqual(screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label")), ["FOH icon"]);
+  });
+
+  test("a long-press on a page row's icon opens the row's menu once", async () => {
+    await mount();
+    const icon = screen.getByRole("button", { name: "Patch" }).querySelector("svg");
+    assert.ok(icon, "no icon in the Patch row");
+    await longPress(icon, 2);
+    const menus = menuTexts();
+    assert.equal(menus.length, 1, `${menus.length} menus opened: ${JSON.stringify(menus)}`);
+    assert.match(menus[0], /Hide “Patch”/);
+  });
+
+  test("a long-press on a page row's label opens the row's menu once", async () => {
+    await mount();
+    const label = [...screen.getByRole("button", { name: "Patch" }).querySelectorAll("span")].find((s) => s.textContent === "Patch");
+    assert.ok(label, "no label in the Patch row");
+    await longPress(label, 3);
+    const menus = menuTexts();
+    assert.equal(menus.length, 1, `${menus.length} menus opened: ${JSON.stringify(menus)}`);
+    assert.match(menus[0], /Hide “Patch”/);
+  });
+
+  test("a long-press on the resize handle opens Reset sidebar width once", async () => {
+    await mount();
+    await longPress(screen.getByRole("separator", { name: "Resize sidebar" }), 4);
+    const menus = menuTexts();
+    assert.equal(menus.length, 1, `${menus.length} menus opened: ${JSON.stringify(menus)}`);
+    assert.match(menus[0], /Reset sidebar width/);
+  });
+
+  test("a long-press on the rail's own space still opens the rail's menu", async () => {
+    await mount();
+    const rail = document.querySelector(".bg-rail");
+    assert.ok(rail, "no rail");
+    await longPress(rail, 5);
+    const menus = menuTexts();
+    assert.equal(menus.length, 1, `${menus.length} menus opened: ${JSON.stringify(menus)}`);
+    assert.match(menus[0], /Customize sidebar/);
   });
 });
