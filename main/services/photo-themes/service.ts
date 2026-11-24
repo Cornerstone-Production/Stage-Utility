@@ -521,7 +521,7 @@ export class PhotoThemesService {
     let plans = 0;
     let photos = 0;
     let name = "";
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       const t = themeIn(b, id);
       name = t.name;
       photos = [...t.people.values()].filter((p) => p.approved).length;
@@ -532,7 +532,7 @@ export class PhotoThemesService {
         }
       }
       b.themes.delete(id);
-      this.cancelTheme(id);
+      afterSave(() => this.cancelTheme(id));
     });
     console.log(
       `[photo-theme] theme "${scrub(name)}" deleted with ${scrub(photos)} approved photo(s); ${scrub(plans)} plan(s) back to their original photos`,
@@ -665,13 +665,13 @@ export class PhotoThemesService {
     if (kind === "move" && this.expected.has(jobKey(themeId, personId))) {
       throw new PhotoThemeRefused("Their photo in this theme is still being made", 409);
     }
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       const from = themeIn(b, themeId);
       const target = themeIn(b, to);
       const src = from.people.get(personId);
       // Checked again here: a remove queued ahead of this write may have taken it.
       if (!src?.approved) throw new PhotoThemeRefused("They have no approved photo in this theme to " + kind, 409);
-      this.cancel(jobKey(to, personId));
+      afterSave(() => this.cancel(jobKey(to, personId)));
       // Put there on purpose: it stands for the target's prompt, not the one it was made under.
       target.people.set(personId, { personId, name: src.name, approved: { ...src.approved, prompt: promptKey(target.prompt) } });
       if (kind === "move") from.people.delete(personId);
@@ -681,9 +681,9 @@ export class PhotoThemesService {
   /** Take a person out of a theme: every plan using it shows their original again. */
   async remove(themeId: string, personId: string): Promise<void> {
     this.entry(themeId, personId);
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       themeIn(b, themeId).people.delete(personId);
-      this.cancel(jobKey(themeId, personId));
+      afterSave(() => this.cancel(jobKey(themeId, personId)));
     });
   }
 
@@ -998,16 +998,22 @@ export class PhotoThemesService {
   /**
    * Change the book. The change is made on a copy, saved, and only then becomes
    * the book: a failed save changes nothing and throws.
+   *
+   * `afterSave` holds what must happen only once the change is the book, such as
+   * dropping a queued or running edit for a person it removed: a failed save
+   * leaves the person, so their edit must still land. It runs in the same turn
+   * of the write queue, so no job's commit queued behind can slip in between.
    */
-  private async mutate(fn: (b: Book, saved: string[]) => void | Promise<void>): Promise<void> {
+  private async mutate(fn: (b: Book, saved: string[], afterSave: (then: () => void) => void) => void | Promise<void>): Promise<void> {
     await this.writes.enqueue(async () => {
       if (this.unusable) throw new PhotoThemeRefused(`Theme photos are off: ${this.unusable}`, 503);
       if (this.paused) throw new PhotoThemeRefused("A config restore is landing; try again in a moment", 503);
       const before = referencedFiles(this.book);
       const saved: string[] = [];
+      const then: (() => void)[] = [];
       try {
         const next = cloneBook(this.book);
-        await fn(next, saved);
+        await fn(next, saved, (f) => then.push(f));
         // Held to the rules a load applies before it is written: a value that
         // saved and was then refused at the next start would switch the whole
         // feature off. This way only the change that carried it fails.
@@ -1016,6 +1022,7 @@ export class PhotoThemesService {
         await store.save(file);
         this.book = next;
         this.shownCache.clear();
+        for (const f of then) f();
       } finally {
         // Only what this change let go of (or saved and did not keep): never
         // "everything the book does not name", which on a book read empty
@@ -1093,11 +1100,11 @@ export class PhotoThemesService {
     // Decided again inside the write, on the book as it is then: a theme chosen
     // for a later service while this waited its turn is no longer due.
     let found = glance;
-    await this.mutate((b) => {
+    await this.mutate((b, _saved, afterSave) => {
       found = due(b);
       for (const e of found.expired) {
         b.themes.get(e.id)?.people.clear();
-        this.cancelTheme(e.id);
+        afterSave(() => this.cancelTheme(e.id));
       }
       for (const p of found.oldPlans) b.plans.delete(p.planId);
     });

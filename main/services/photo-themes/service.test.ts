@@ -407,6 +407,32 @@ describe("a person's original photo, for Manage themes", () => {
 });
 
 describe("move, copy and remove", () => {
+  it("a remove whose save fails leaves the person's edit in flight to land, paid for and kept", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const base = fake.edit;
+    fake.edit = async () => {
+      await gate;
+      return { status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("redo")]).toString("base64") }] } };
+    };
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    while (fake.edits() === 0) await new Promise((r) => setTimeout(r, 5));
+    // The data directory refuses the write: the remove fails, and the book keeps them.
+    await fs.chmod(TMP, 0o555);
+    try {
+      await assert.rejects(photoThemes.remove(theme.id, "1"));
+    } finally {
+      await fs.chmod(TMP, 0o755);
+    }
+    release();
+    await photoThemes.idle();
+    fake.edit = base;
+    assert.equal(statusOf(theme.id, "1"), "ready", "the redo they are still in the theme for is kept");
+  });
+
   it("copy shares the file, move takes it out, remove drops it when nothing else holds it", async () => {
     const a = await themed([person("1")]);
     const b = await photoThemes.createTheme({ name: "Easter 2027", prompt: "Spring" });
