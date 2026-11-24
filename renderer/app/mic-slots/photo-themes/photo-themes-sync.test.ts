@@ -8,7 +8,14 @@ import type { PhotoThemesChanged } from "@main/types/photo-themes";
 
 import { readFrame } from "./photo-themes-sync.js";
 
-const frame = (seq: number, epoch = "e1"): PhotoThemesChanged => ({ epoch, seq, running: 0, queued: 0, active: [] });
+const frame = (seq: number, epoch = "e1"): PhotoThemesChanged => ({
+  epoch,
+  seq,
+  running: 0,
+  queued: 0,
+  active: [],
+  connection: { method: "api-key", hint: "sk-…3f2a", state: "connected", reason: null, checkedAt: null },
+});
 
 describe("readFrame", () => {
   test("a replayed frame reads nothing: it is the cache from before this page read", () => {

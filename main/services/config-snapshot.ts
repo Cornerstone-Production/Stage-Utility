@@ -228,14 +228,32 @@ const ORIGINALS: FileKind = {
 };
 
 /**
- * What to say when a snapshot's images and originals, base64'd as they travel,
- * pass what POST /api/config/import reads (MAX_CONFIG_BODY_BYTES): restoring
- * that backup from a downloaded file would be refused. Null when it fits.
+ * What to say when a snapshot, as the file it downloads as, passes what POST
+ * /api/config/import reads (MAX_CONFIG_BODY_BYTES): restoring that backup from a
+ * downloaded file would be refused. Null when it fits.
  */
-export function restoreCeilingNote(base64Bytes: number): string | null {
-  if (base64Bytes <= MAX_CONFIG_BODY_BYTES) return null;
+export function restoreCeilingNote(fileBytes: number): string | null {
+  if (fileBytes <= MAX_CONFIG_BODY_BYTES) return null;
   const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `this backup carries ${mb(base64Bytes)} of uploaded images and originals as it travels, past the ${mb(MAX_CONFIG_BODY_BYTES)} a downloaded backup can restore: restoring it from the file will be refused (a saved snapshot recalled on this server is not limited)`;
+  return `this backup carries ${mb(fileBytes)} of uploaded images and originals with its settings as it travels, past the ${mb(MAX_CONFIG_BODY_BYTES)} a downloaded backup can restore: restoring it from the file will be refused (a saved snapshot recalled on this server is not limited)`;
+}
+
+/**
+ * The bytes a snapshot takes as the file /api/config/export writes (JSON.stringify
+ * with two-space indent), without building that string: the images and originals
+ * can be tens of megabytes, and the export builds it once already. Their base64 is
+ * ASCII, so its length is its size; each entry adds its key, quotes, colon and
+ * indent. Exact up to that per-entry framing, a few bytes each.
+ */
+function snapshotFileBytes(snapshot: ConfigSnapshot): number {
+  const { images, originals, ...rest } = snapshot;
+  let bytes = Buffer.byteLength(JSON.stringify(rest, null, 2), "utf8");
+  for (const group of [images, originals]) {
+    if (!group) continue;
+    bytes += 20; // the group's own key, braces and indent
+    for (const [key, b64] of Object.entries(group)) bytes += b64.length + Buffer.byteLength(JSON.stringify(key), "utf8") + 10;
+  }
+  return bytes;
 }
 
 const SNAPSHOT_KIND = "stage-utility-config";
@@ -620,6 +638,9 @@ async function pauseBackgroundWriters(): Promise<() => void> {
     // Holds its queue's results and its retention sweep: a finished edit or a
     // sweep must not write over the restored photo themes.
     ["theme photos", () => import("./photo-themes/service.js").then((m) => m.photoThemes.pause())],
+    // Holds every write to the screen bindings: a probe or heartbeat would write the
+    // store's cached, pre-restore bindings back over the restored kiosk-devices.json.
+    ["the screen bindings", () => import("./kiosk-devices-store.js").then((m) => m.pauseBindingWrites())],
   ] as const;
   const settled = await Promise.allSettled(writers.map(([, pause]) => pause()));
   const undos = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
@@ -702,9 +723,7 @@ class ConfigSnapshotService {
     }
     const images = await this.readFiles(IMAGE_SOURCES);
     const originals = await this.readFiles(ORIGINAL_SOURCES);
-    const note = restoreCeilingNote(Object.values({ ...images, ...originals }).reduce((n, b64) => n + b64.length, 0));
-    if (note) console.warn(`[config-snapshot] ${note}`);
-    return {
+    const snapshot: ConfigSnapshot = {
       ...(Object.keys(images).length ? { images } : {}),
       ...(Object.keys(originals).length ? { originals } : {}),
       kind: SNAPSHOT_KIND,
@@ -714,6 +733,11 @@ class ConfigSnapshotService {
       ...(name ? { name } : {}),
       files,
     };
+    // The whole file counts, the config files' JSON included: counting the images and
+    // originals alone said nothing about a backup they left just under the ceiling.
+    const note = restoreCeilingNote(snapshotFileBytes(snapshot));
+    if (note) console.warn(`[config-snapshot] ${note}`);
+    return snapshot;
   }
 
   /** Validate a bundle is a snapshot we can apply. Throws on mismatch. */

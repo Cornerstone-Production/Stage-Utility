@@ -44,6 +44,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   showQr: false,
   kioskDiscovery: false,
   serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
+  rolloverHeld: null,
   autoUpdateMachines: true,
   allowedServiceTypeIds: [],
   planSwitcherMode: "upcoming",

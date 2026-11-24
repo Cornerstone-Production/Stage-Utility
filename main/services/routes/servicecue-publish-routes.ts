@@ -289,7 +289,8 @@ async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> 
       refuse(`The page was updated a moment ago. Try again in ${outcome.retryAfterSec} seconds.`, 429, "too-soon", { retryAfterSec: outcome.retryAfterSec });
       return;
     case "failed":
-      refuse(`The page could not be updated: ${outcome.message}. It is unchanged.`, 502, "failed");
+      // Unsure: the upload got no answer and the page could not be read to tell, so it may have taken it.
+      refuse(`The page could not be updated: ${outcome.message}. ${outcome.unsure ? "Whether the page took it is not known." : "It is unchanged."}`, 502, "failed");
       return;
   }
 }

@@ -643,7 +643,10 @@ found by both.
   be sent.
 - A server older than this check answers it too, and also lists the server that
   sent it as a screen not set up yet, for 90 seconds at a time; while it is
-  flagged, the 60-second re-check keeps it listed.
+  flagged, the 60-second re-check keeps it listed. That cannot be shaped away: an
+  older server answers a probe bound to its own id from the same branch that lists
+  it, so a check it would not list is one it would not answer, and an older server
+  sharing the id would go unfound.
 
 ## Discovery
 

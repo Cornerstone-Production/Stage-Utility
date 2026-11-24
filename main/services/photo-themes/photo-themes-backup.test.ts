@@ -15,7 +15,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { photoThemes, PHOTO_THEME_IMAGE_DIR } = await import("./service.js");
 const { configSnapshot } = await import("../config-snapshot.js");
-const { fakeServer, pcoPhoto, startFakeOpenAi } = await import("./photo-themes-harness.js");
+const { approveShown, fakeServer, pcoPhoto, startFakeOpenAi } = await import("./photo-themes-harness.js");
 
 const KEY = "sk-proj-BACKUPKEY0123456789abcdefgh";
 let fake: Awaited<ReturnType<typeof startFakeOpenAi>>;
@@ -39,7 +39,7 @@ it("round-trips the themes and their photos through a backup", async () => {
   await photoThemes.choosePlan("2001", { serviceTypeId: "100", sortDate: "2026-12-24T16:00:00Z", themeId: theme.id });
   await photoThemes.generate("2001", "100", "missing");
   await photoThemes.idle();
-  await photoThemes.approve(theme.id, "1001");
+  await approveShown(photoThemes, theme.id, "1001");
   const before = photoThemes.state();
   const [file] = await fs.readdir(path.join(TMP, PHOTO_THEME_IMAGE_DIR));
   const bytes = await fs.readFile(path.join(TMP, PHOTO_THEME_IMAGE_DIR, file!));

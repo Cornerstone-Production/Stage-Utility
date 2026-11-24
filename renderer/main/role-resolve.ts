@@ -1,6 +1,7 @@
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
-const norm = (s: string) => s.trim().toLowerCase();
+/** How a category or member name is compared everywhere: trimmed, any case. */
+export const norm = (s: string) => s.trim().toLowerCase();
 
 /**
  * The text for a role on one item: the non-empty members joined in the role's order.
@@ -24,7 +25,7 @@ export function resolveRole(role: CategoryRole, notesByCategory: Record<string, 
 /** Whether this service type defines any of the role's members. A role that matches
  *  none is HIDDEN rather than rendered as an empty column — that empty column is the
  *  bug this replaces. */
-export function roleAppliesTo(role: CategoryRole, categories: string[]): boolean {
+export function roleAppliesTo(role: CategoryRole, categories: readonly string[]): boolean {
   const have = new Set(categories.map(norm));
   return role.members.some((m) => have.has(norm(m)));
 }
@@ -40,7 +41,7 @@ export const UNASSIGNED_ID_PREFIX = "category:";
  * the length of a render, so All columns shows a category before anyone has made a role
  * for it.
  */
-export function unassignedCategoryRoles(roles: CategoryRole[], categories: string[]): CategoryRole[] {
+export function unassignedCategoryRoles(roles: readonly CategoryRole[], categories: readonly string[]): CategoryRole[] {
   const claimed = new Set(roles.flatMap((r) => r.members.map(norm)));
   const found = new Map<string, string>();
   for (const c of categories) {

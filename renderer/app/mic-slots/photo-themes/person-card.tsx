@@ -12,7 +12,7 @@ import type { ThemeDTO, ThemePersonDTO } from "@main/types/photo-themes";
 import { Button, MENU_ITEM, MENU_ITEM_DANGER, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, menuContent } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
 import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, useEscapeFirst, type ChipTone } from "./photo-bits";
-import { serviceDay } from "./photo-format";
+import { planLabel } from "../../../settings/sections/slots-target-pill";
 
 export type CardAction = "redo" | "approve" | "keep";
 
@@ -31,6 +31,8 @@ export interface CardContext {
   noOriginal?: boolean;
   /** Others on this plan already have a photo and this person has none: they were added after the last run. */
   addedLater?: boolean;
+  /** The app's zone, for the day a photo's plan falls on. */
+  timeZone: string;
 }
 
 /** What a card says for a person's status. Pure, so each wording is one place. */
@@ -54,7 +56,9 @@ export function cardView(p: ThemePersonDTO, ctx: CardContext): CardView {
         border: null,
       };
     case "approved": {
-      const from = p.approved?.fromPlanId && p.approved.fromPlanId !== ctx.planId ? serviceDay(p.approved.fromDate) : ctx.planId ? null : serviceDay(p.approved?.fromDate);
+      // `fromDate` is the plan's sort date, an instant: named on the app's calendar.
+      const fromDay = p.approved?.fromDate ? planLabel(p.approved.fromDate, null, ctx.timeZone) : null;
+      const from = p.approved?.fromPlanId && p.approved.fromPlanId !== ctx.planId ? fromDay : ctx.planId ? null : fromDay;
       return {
         chip: { tone: "ok", label: "Approved", check: true },
         note: from ? `From ${from}` : null,
@@ -100,6 +104,8 @@ export interface PersonCardProps {
   context: CardContext;
   /** Which of Redo / Approve / Keep are being sent now. */
   busy: ReadonlySet<CardAction>;
+  /** Redo can be sent: OpenAI is connected. Approve and Keep call nobody, and never wait for it. */
+  canRedo: boolean;
   onAction: (action: CardAction) => void;
   /** Whether the Move / Copy / Remove menu is offered, and what picking one does. */
   onMenu: (kind: MenuKind) => void;
@@ -110,7 +116,7 @@ export interface PersonCardProps {
   editedCaption?: string;
 }
 
-export function PersonCard({ person, theme, original, context, busy, onAction, onMenu, hasOtherTheme, confirm, editedCaption }: PersonCardProps) {
+export function PersonCard({ person, theme, original, context, busy, canRedo, onAction, onMenu, hasOtherTheme, confirm, editedCaption }: PersonCardProps) {
   const view = cardView(person, context);
   const [menuOpen, setMenuOpen] = useState(false);
   const name = person.name;
@@ -171,7 +177,11 @@ export function PersonCard({ person, theme, original, context, busy, onAction, o
       {view.actions.length > 0 && (
         <div className="mt-auto flex gap-1.5">
           {view.actions.includes("redo") && (
-            <Button variant="filled" size="small" className="flex-1" disabled={busy.has("redo")} aria-label={`Redo ${name}`} onClick={() => onAction("redo")}>
+            <Button variant="filled" size="small" className="flex-1" disabled={busy.has("redo") || !canRedo}
+              tooltip={canRedo ? "" : "Connect OpenAI in Integrations to redo"}
+              aria-label={`Redo ${name}`}
+              onClick={() => onAction("redo")}
+            >
               <RotateCcwIcon className="size-3.5" />
               Redo
             </Button>

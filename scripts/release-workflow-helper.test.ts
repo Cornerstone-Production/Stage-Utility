@@ -42,7 +42,7 @@ interface Job {
   environment?: string;
   steps?: Step[];
 }
-const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
+const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { on?: { push?: { branches?: string[] } }; jobs: Record<string, Job> };
 const jobs = doc.jobs;
 const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
@@ -145,6 +145,17 @@ describe("the helper job is gated on the build script being in the tree", () => 
     const key = String(cache.with?.["key"]);
     for (const part of ["${{ matrix.arch }}", "helper/macos/cef.json", "helper/macos/build-tools.txt", "helper/macos/CEFHost/**"]) assert.ok(key.includes(part), `the key does not depend on ${part}`);
     const steps = helper.steps ?? [];
+    // ninja does not notice a new compiler, so objects built by another Xcode must not be restored.
+    const toolchain = steps.find((s) => s.id === "toolchain");
+    assert.match(toolchain?.run ?? "", /xcodebuild -version/, "the toolchain step does not read the Xcode version");
+    const selectXcode = steps.findIndex((s) => s.uses?.endsWith("/.github/actions/select-xcode"));
+    assert.ok(selectXcode >= 0, "the helper job does not select Xcode");
+    assert.ok(selectXcode < steps.indexOf(toolchain!), "the version is read before Xcode is selected");
+    assert.ok(steps.indexOf(toolchain!) < steps.indexOf(cache), "the version is read before the cache is restored");
+    const xcode = "${{ steps.toolchain.outputs.xcode }}";
+    assert.ok(key.includes(xcode), "the key does not depend on the Xcode version");
+    assert.ok(String(cache.with?.["restore-keys"]).includes(xcode), "restore-keys can restore objects built by another Xcode");
+    assert.ok(steps.indexOf(cache) < steps.findIndex((s) => s.run?.includes("build-app.sh")), "restored before the build");
     assert.ok(steps.indexOf(cache) < steps.findIndex((s) => s.run?.includes("build-app.sh")), "restored before the build");
   });
 });
@@ -183,12 +194,12 @@ describe("the release itself is unchanged by the helper", () => {
     assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   });
 
-  // beta and main admit only the maintainer and the release app, and
-  // GITHUB_TOKEN cannot be put on that list: a push made with it is refused.
+  // Where beta and main have a ruleset it can admit the release app, and
+  // GITHUB_TOKEN cannot be put on its bypass list; the app's token works either way.
   it("pushes with the release app's token, minted just before the push, and the job's own token cannot write", () => {
     const steps = jobs["release"].steps ?? [];
     assert.deepEqual(jobs["release"].permissions, { contents: "read", statuses: "write" });
-    assert.equal(jobs["release"].environment, "release", "the app's key is an environment secret only beta and main can reach");
+    assert.equal(jobs["release"].environment, "release", "the app's key is an environment secret whose branch policy is beta and main");
     const mint = steps.findIndex((s) => s.id === "app-token");
     const push = steps.findIndex((s) => s.id === "push");
     assert.equal(mint, push - 1, "the token is minted in the step right before the push");
@@ -400,5 +411,34 @@ describe("the gate is not run twice for one tree", () => {
       jobs["release"].if,
       "${{ !cancelled() && (needs.already-verified.outputs.verified == 'true' || (needs.verify-checks.result == 'success' && needs.verify-tests.result == 'success')) }}",
     );
+  });
+});
+
+describe("the failure status", () => {
+  it("is written only when a verify job failed, not whenever an ancestor job (already-verified, say) errored", () => {
+    const job = jobs["verify-failed"];
+    assert.deepEqual(needsOf(job).sort(), ["verify-checks", "verify-tests"]);
+    assert.equal(job.if, "${{ failure() && (needs.verify-checks.result == 'failure' || needs.verify-tests.result == 'failure') }}");
+  });
+});
+
+describe("the release secrets live in the release environment", () => {
+  const SECRETS = /secrets\.(RELEASE_SIGNING_KEY|STAGE_TAP_TOKEN|RELEASE_APP_PRIVATE_KEY)\b/;
+
+  it("every job that reads one names the environment, and no other job does", () => {
+    const readers = Object.entries(jobs).filter(([, j]) => SECRETS.test(JSON.stringify(j))).map(([name]) => name).sort();
+    const named = Object.entries(jobs).filter(([, j]) => j.environment === "release").map(([name]) => name).sort();
+    assert.deepEqual(readers, ["artifacts", "release", "sign"]);
+    assert.deepEqual(named, readers);
+  });
+
+  // The environment's branch policy is beta and main. A run elsewhere (workflow_dispatch from
+  // another branch) is refused at the release job, and `published` stays false.
+  it("sign and artifacts run only after the release job, which published a tag, so the branch policy cannot refuse a legitimate run", () => {
+    assert.deepEqual(doc.on?.push?.branches, ["beta", "main"]);
+    for (const name of ["sign", "artifacts"]) {
+      assert.ok(needsOf(jobs[name]).includes("release"), `${name} does not wait for release`);
+      assert.ok((jobs[name].if ?? "").includes("needs.release.outputs.published == 'true'"), `${name} can run without a published tag`);
+    }
   });
 });

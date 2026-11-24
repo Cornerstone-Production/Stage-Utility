@@ -210,6 +210,12 @@ function usePublishQuery(pollMs: number) {
  */
 export function usePublishSummary(pollMs = POLL_MS): string {
   const { data, error } = usePublishQuery(pollMs);
+  // Said on /log as the card says it (one line per streak), not only as "Couldn't load".
+  const { fail, clear } = useFailedReads<"publish">("servicecue");
+  useEffect(() => {
+    if (error) fail("publish", "the ServiceCue public link status", error);
+    else clear("publish");
+  }, [error, fail, clear]);
   if (data) return pill[viewOf(data)].word;
   return error ? "Couldn't load" : "Loading…";
 }
