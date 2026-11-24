@@ -66,8 +66,11 @@ export function RailEditor({
   const { resolved, aim, listRef } = customize;
   const [renaming, setRenaming] = useState<string | null>(null);
 
-  function addNew() {
-    setRenaming(customize.addSection());
+  /** The name field opens on the new section once it has saved: a refused one is
+   *  not there to name. */
+  async function addNew() {
+    const id = await customize.addSection();
+    if (id) setRenaming(id);
   }
 
   return (
@@ -91,7 +94,7 @@ export function RailEditor({
         <button
           type="button"
           data-rail-add
-          onClick={addNew}
+          onClick={() => void addNew()}
           className="mt-3.5 flex h-8 items-center gap-2 rounded-lg border border-dashed border-line-strong px-2.5 text-[12.5px] font-medium text-fg-muted transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <PlusIcon className="size-3.5" />

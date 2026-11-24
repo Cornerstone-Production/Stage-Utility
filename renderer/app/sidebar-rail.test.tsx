@@ -48,8 +48,8 @@ const VIEWS = [
 
 type Sidebar = { sections: { id: string; label: string; kind: string; members: string[] }[]; hidden: string[] };
 let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sidebar };
-/** What a POST /api/sidebar does: take it, refuse it, or wait to be told. */
-let mode: "ok" | "refuse" | "hold" | "late" = "ok";
+/** What a POST /api/sidebar does: take it, refuse it (or only this one), or wait to be told. */
+let mode: "ok" | "refuse" | "refuse-once" | "hold" | "late" = "ok";
 let release: (() => void) | null = null;
 const saves: Sidebar[] = [];
 let consoleHides = 0;
@@ -93,7 +93,10 @@ const json = (status: number, value: unknown) => ({
       hold = null; // only this one waits
       await waiting;
     }
-    if (mode === "refuse") return json(400, { error: "refused for the test" });
+    if (mode === "refuse" || mode === "refuse-once") {
+      if (mode === "refuse-once") mode = "ok";
+      return json(400, { error: "refused for the test" });
+    }
     if (mode === "hold") await new Promise<void>((r) => (release = r));
     // "late": answered, but the broadcast of it has not arrived yet.
     if (mode === "late") return json(200, { ...state, sidebar: body });
@@ -285,15 +288,17 @@ describe("saves that are still out", () => {
     await mount();
     await act(async () => api!.open("sidebar"));
     holdNextSave();
-    let id = "";
+    let added: Promise<string | null> = Promise.resolve(null);
     await act(async () => {
-      id = api!.addSection();
+      added = api!.addSection();
     });
     await eventually(() => assert.equal(saves.length, 1));
+    const id = saves[0].sections.at(-1)!.id;
     // Drawn while the save is out: the id the save carries, not another one made on a redraw.
     assert.ok(api!.resolved.sections.some((s) => s.id === id), "the drawn section is not the one that was asked for");
     assert.ok(saves[0].sections.some((s) => s.id === id), "the saved section is not the one that was drawn");
     await act(async () => releaseHold!());
+    assert.equal(await added, id, "addSection did not answer with the section it added");
     await eventually(() => assert.ok(api!.resolved.sections.some((s) => s.id === id)));
   });
 
@@ -321,6 +326,70 @@ describe("saves that are still out", () => {
     assert.equal(screen.queryAllByText(/Hid FOH held/).length, 0, "Hid toast shown before the save answered");
     await act(async () => releaseHold!());
     await eventually(() => assert.ok(screen.queryAllByText(/Hid FOH held/).length > 0));
+  });
+});
+
+describe("what a change lands on", () => {
+  // A change is applied when its turn to save comes, to what the server holds then,
+  // which is not what was drawn when it was clicked if an earlier change was refused.
+  // What it says, what its Undo puts back, and what it builds on follow the former.
+
+  test("an Undo puts back what the change was applied to, not an earlier change the server refused", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    holdNextSave();
+    mode = "refuse-once";
+    await act(async () => api!.hide("patch", "Patch"));
+    await eventually(() => assert.equal(saves.length, 1));
+    // Clicked while Hide Patch is still drawn; the server refuses Patch and saves this.
+    await act(async () => api!.hide("baptisms", "Baptisms"));
+    await act(async () => releaseHold!());
+    await eventually(() => assert.equal(saves.length, 2));
+    await eventually(() => assert.deepEqual(state.sidebar.hidden, ["baptisms"]));
+    const undo = await eventually(() => {
+      const u = screen.getAllByRole("button", { name: "Undo" }).filter((b) => text(b.parentElement).includes("Hid Baptisms"));
+      assert.ok(u.length > 0, "no Undo for Hid Baptisms");
+      return u[u.length - 1];
+    });
+    await act(async () => fireEvent.click(undo));
+    await eventually(() => assert.equal(saves.length, 3));
+    assert.deepEqual(saves[2].hidden, [], "Undo of Hid Baptisms put back a Hide the server had refused");
+  });
+
+  test("a change that an earlier refusal left nothing to do says nothing and offers no Undo", async () => {
+    const { removeSection } = await import("./sidebar-edits.js");
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    mode = "refuse";
+    holdNextSave();
+    await act(async () => {
+      void api!.addSection();
+    });
+    await eventually(() => assert.equal(saves.length, 1));
+    const id = saves[0].sections.at(-1)!.id;
+    // Removed while the add is still out; the add is then refused, so there is nothing to remove.
+    let removed: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      removed = Promise.resolve(api!.apply((r) => removeSection(r, id), "Removed the new section.", true));
+    });
+    await act(async () => {
+      releaseHold!();
+      await removed;
+    });
+    await eventually(() => assert.ok(screen.queryAllByText("refused for the test").length > 0));
+    assert.equal(saves.length, 1, "the no-op was saved");
+    assert.equal(screen.queryAllByText("Removed the new section.").length, 0, "a change that changed nothing was announced");
+  });
+
+  test("a new section the server refuses gives no id to name", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    mode = "refuse";
+    let added: Promise<string | null> = Promise.resolve("never asked");
+    await act(async () => {
+      added = api!.addSection();
+    });
+    assert.equal(await added, null, "a refused section was handed back to be renamed");
   });
 });
 

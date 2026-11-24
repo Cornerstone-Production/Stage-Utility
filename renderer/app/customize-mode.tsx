@@ -140,39 +140,47 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     undoToast.current = id;
   }, []);
 
-  /** Save a change, saying the server's words if it is refused. Whether it saved. */
+  /** Save a change, saying the server's words if it is refused. How it went. */
   const save = useCallback(
-    async (change: (arrangement: SidebarArrangement) => SidebarArrangement | null): Promise<boolean> => {
+    async (change: (arrangement: SidebarArrangement) => SidebarArrangement | null) => {
       const result = await edit((l) => {
         const next = change(l[0] ?? EMPTY_SIDEBAR);
         return next ? [next] : l;
       });
       if (!result.ok) toast.error(result.error);
-      return result.ok;
+      return result;
     },
     [edit],
   );
 
+  /** Make a change; whether it saved one. */
   const apply = useCallback(
-    async (change: (r: ResolvedSidebar) => ResolvedSidebar | null, said?: string, undoable = false) => {
+    async (change: (r: ResolvedSidebar) => ResolvedSidebar | null, said?: string, undoable = false): Promise<boolean> => {
       // A rule refused it: nothing to save, nothing to say.
-      if (!change(resolved)) return;
+      if (!change(resolved)) return false;
       const ticket = retireUndo();
-      const before = toSavedSidebar(resolved, consoles);
-      const saved = await save((arrangement) => {
+      const result = await save((arrangement) => {
         const next = change(resolveSidebar(arrangement, consolesRef.current));
         return next ? toSavedSidebar(next, consolesRef.current) : null;
       });
-      // Said once it has saved: not for a change the server refused.
-      if (!saved || !said) return;
+      // Said once it has saved, and only for a change that changed something: not
+      // for one the server refused, nor for one an earlier refusal left nothing
+      // to do.
+      if (!result.ok || !result.changed) return false;
+      if (!said) return true;
+      // Undo puts back what this change was applied to, as the server held it.
+      // Not what was drawn at the click, which may have held an earlier change
+      // the server then refused.
+      const before = result.before[0] ?? EMPTY_SIDEBAR;
       if (undoable) {
         offerUndo(said, () => {
           retireUndo();
           void save(() => before);
         }, ticket);
       } else toast.info(said);
+      return true;
     },
-    [consoles, offerUndo, resolved, retireUndo, save],
+    [offerUndo, resolved, retireUndo, save],
   );
 
   const setConsoleShown = useCallback(
@@ -203,14 +211,13 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     [apply, setConsoleShown],
   );
 
-  /** A new, empty section at the end; its id. The id is made here, once: a change is
-   *  run again for every redraw and for the save, and an id made inside it would be a
-   *  different section each time, so a rename or a drop on the drawn one would miss
-   *  the saved one. */
-  const addNewSection = useCallback(() => {
+  /** A new, empty section at the end; its id once it has saved, or null if it did
+   *  not. The id is made here, once: a change is run again for every redraw and for
+   *  the save, and an id made inside it would be a different section each time, so a
+   *  rename or a drop on the drawn one would miss the saved one. */
+  const addNewSection = useCallback(async () => {
     const id = uid("s");
-    void apply((r) => addSection(r, id));
-    return id;
+    return (await apply((r) => addSection(r, id))) ? id : null;
   }, [apply]);
 
   const [tab, setTab] = useState<CustomizeTab>("sidebar");

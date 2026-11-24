@@ -35,6 +35,8 @@ import { droppedOnBar, gapFromBoxes, type MeasuredRow } from "./bar-drop";
 import { dropPoint } from "./drag-geometry";
 import { barListIo, barRowsOf, saveBarSet, sameBarIds, type BarEditRow, type BarSet } from "./set-bar-items";
 import { useSavedList } from "./use-saved-list";
+import type { ListStepResult } from "../lib/use-list-saves";
+import { useLatestRef } from "../lib/use-latest-ref";
 import { toast } from "../components/ui";
 import { Caret, DRAGGABLE } from "./drag-parts";
 import { useResyncOn } from "../lib/use-resync-on";
@@ -186,6 +188,8 @@ export function useBarEditor({
   // Not mid-drag, where the rows measured at the start must stay.
   const desktop = useSavedList({ io: desktopIo, saved: desktopSaved, keyOf: keyOfRows, hold: dragging !== null });
   const mobile = useSavedList({ io: mobileIo, saved: mobileSaved, keyOf: keyOfRows, hold: dragging !== null });
+  // What a phone that follows the desktop bar forks from, read when the edit lands.
+  const desktopRows = useLatestRef(desktop.list);
 
   // An unset phone set FOLLOWS the desktop one. So the phone set opens showing
   // the desktop arrangement, which is what the phone is showing, rather than an
@@ -214,28 +218,30 @@ export function useBarEditor({
    * `make` is a function of the rows it lands on, and returns them unchanged for
    * "nothing to do". A refusal is said in the server's words, and the strip goes
    * back to what the server holds.
+   *
+   * Whether the phone is following is read when the edit lands, not when it was
+   * clicked: an empty phone set is following, so it forks from the desktop rows
+   * then. An edit queued behind a fork the server refused lands on a phone that is
+   * following again, and must fork too, not build a set from nothing.
    */
-  async function change(set: BarSet, make: (cur: BarEditRow[]) => BarEditRow[]): Promise<{ ok: boolean; ticket: number }> {
+  async function change(set: BarSet, make: (cur: BarEditRow[]) => BarEditRow[]): Promise<{ result: ListStepResult<BarEditRow>; ticket: number }> {
     const ticket = undo.retire();
-    // What a phone that follows the desktop bar forks from: the rows on screen now.
-    const forkFrom = set === "mobile" && inheriting ? desktop.list : null;
     const result = await (set === "mobile" ? mobile : desktop).edit((l) => {
-      const cur = l.length === 0 && forkFrom ? forkFrom : l;
+      const cur = set === "mobile" && l.length === 0 ? desktopRows.current : l;
       const next = make(cur);
       if (next === cur) return l;
       return next.length > 0 ? next : [EMPTIED];
     });
     if (!result.ok) toast.error(result.error);
-    return { ok: result.ok, ticket };
+    return { result, ticket };
   }
 
   /** Hand the phone back to the desktop bar. The one way out of a fork, and the
    *  reason forking on first edit is safe rather than a trap. */
-  async function followDesktop(): Promise<{ ok: boolean; ticket: number }> {
-    const ticket = undo.retire();
+  async function followDesktop(): Promise<void> {
+    undo.retire();
     const result = await mobile.request(async () => barRowsOf(await saveBarSet(queryClient, "mobile", []), "mobile", nextKey));
     if (!result.ok) toast.error(result.error);
-    return { ok: result.ok, ticket };
   }
 
   function add(id: BarRowId) {
@@ -248,21 +254,21 @@ export function useBarEditor({
   }
 
   /**
-   * The default set, with an Undo that puts back exactly what this set was: its
-   * own arrangement, or, for a phone that was following the desktop bar, the
-   * following. The Undo is offered once the change has saved.
+   * The default set, with an Undo that puts back exactly what this set was when
+   * the change landed: its own arrangement, or, for a phone that was following
+   * the desktop bar (an empty set), the following. The Undo is offered once the
+   * change has saved.
    */
   function useDefault() {
     const set = editing;
-    const wasFollowing = inheriting;
-    const before = rows.map((r) => r.id);
     const defaults = DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey(), id }));
-    void change(set, () => defaults).then(({ ok, ticket }) => {
-      if (!ok) return;
+    void change(set, () => defaults).then(({ result, ticket }) => {
+      if (!result.ok || !result.changed) return;
+      const before = result.before.map((r) => r.id);
       undo.offer(
         "Restored the default bar.",
         () => {
-          if (set === "mobile" && wasFollowing) void followDesktop();
+          if (set === "mobile" && before.length === 0) void followDesktop();
           else {
             const restored = before.map((id) => ({ key: nextKey(), id }));
             void change(set, () => restored);

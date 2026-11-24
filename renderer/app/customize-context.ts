@@ -42,8 +42,8 @@ export interface CustomizeValue {
    * ever puts back the change it was offered for.
    */
   apply: (change: (r: ResolvedSidebar) => ResolvedSidebar | null, said?: string, undoable?: boolean) => void;
-  /** Add an empty section at the end, and return its id. */
-  addSection: () => string;
+  /** Add an empty section at the end; its id once saved, or null if it was not. */
+  addSection: () => Promise<string | null>;
   /** List a console in the sidebar, or take it out, through its own switch. */
   setConsoleShown: (id: string, shown: boolean, said?: string) => void;
   /** Hide a page or a console, saying so with an Undo. Advanced says why not. */
@@ -73,7 +73,7 @@ export const CustomizeContext = createContext<CustomizeValue>({
   draft: null,
   consoles: EMPTY_CONSOLES,
   apply: noop,
-  addSection: () => "",
+  addSection: async () => null,
   setConsoleShown: noop,
   hide: noop,
   drag: null,

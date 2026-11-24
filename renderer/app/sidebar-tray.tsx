@@ -191,7 +191,7 @@ function SidebarTrayBody({ isMobile, collapsed }: { isMobile: boolean; collapsed
       <div className="mt-0.5 flex flex-wrap gap-1.5">
         <button
           type="button"
-          onClick={() => customize.addSection()}
+          onClick={() => void customize.addSection()}
           className="flex h-[34px] items-center gap-2 rounded-lg border border-dashed border-line-strong bg-surface pr-3 pl-2.5 text-[13px] font-medium text-fg-muted hover:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <FolderPlusIcon className="size-4 text-fg-muted" />

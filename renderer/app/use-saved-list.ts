@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useListSaves, type ListEdit, type ListIo, type ListSaveResult } from "../lib/use-list-saves";
+import { useListSaves, type ListEdit, type ListIo, type ListSaveResult, type ListStepResult } from "../lib/use-list-saves";
 
 /** How many answers are remembered to tell an echo from another browser's change. */
 const REMEMBERED_ANSWERS = 16;
@@ -30,8 +30,8 @@ const REMEMBERED_ANSWERS = 16;
 export interface SavedList<T> {
   /** What to draw: the server's last answer with the waiting edits applied. Empty until the first broadcast is taken in. */
   list: T[];
-  /** Queue an edit; resolves once it has been saved or refused. */
-  edit: (e: ListEdit<T>) => Promise<ListSaveResult>;
+  /** Queue an edit; resolves once it has been saved or refused, with what it changed and what it was applied to. */
+  edit: (e: ListEdit<T>) => Promise<ListStepResult<T>>;
   /** Queue a request that answers with the whole list; resolves once it has answered or failed. */
   request: (r: () => Promise<T[]>) => Promise<ListSaveResult>;
 }
@@ -61,12 +61,12 @@ export function useSavedList<T>({
     };
     return { save: async (l) => remember(await io.save(l)), read: async () => remember(await io.read()) };
   }, [io, keyOf]);
-  const { list, adopt, edit: queueEdit, request: queueRequest } = useListSaves(remembering);
+  const { list, adopt, editTracked: queueEdit, request: queueRequest } = useListSaves(remembering);
 
   // Edits queued or out. A state, so that the render in which the queue empties
   // is the one whose effect looks at the broadcast again.
   const [waiting, setWaiting] = useState(0);
-  const track = useCallback(async (run: () => Promise<ListSaveResult>): Promise<ListSaveResult> => {
+  const track = useCallback(async <R,>(run: () => Promise<R>): Promise<R> => {
     setWaiting((n) => n + 1);
     try {
       return await run();

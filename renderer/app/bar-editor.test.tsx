@@ -46,6 +46,8 @@ class StubEventSource {
 type Bar = { barItems: string[]; barMobileItems: string[] };
 let state: Record<string, unknown> & Bar;
 let refuse = false;
+/** Refuse the next save only. */
+let refuseOnce = false;
 /** Answer a save with what it saved, as if another browser's save landed right after it. */
 let answerOnly = false;
 /** The Nth save (1-based) is answered but its broadcast is held back until the test sends it. */
@@ -79,7 +81,10 @@ const json = (status: number, value: unknown) => ({ ok: status < 400, status, js
       hold = null; // only this one waits
       await waiting;
     }
-    if (refuse) return json(400, { error: "refused for the test" });
+    if (refuse || refuseOnce) {
+      refuseOnce = false;
+      return json(400, { error: "refused for the test" });
+    }
     if (lateEchoOf === saves.length) {
       state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
       return json(200, state);
@@ -109,6 +114,7 @@ after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   state = { views: [], outputs: [], appName: "Bar test app", sidebar: { sections: [], hidden: [] }, barItems: ["clock", "spacer", "live-timer"], barMobileItems: [] };
   refuse = false;
+  refuseOnce = false;
   answerOnly = false;
   lateEchoOf = null;
   hold = null;
@@ -425,6 +431,59 @@ describe("an echo that arrives late", () => {
     assert.equal(spaces(), before + 2, "the older echo drew the strip back over the newer answer");
     await act(async () => emitState());
     assert.equal(spaces(), before + 2);
+  });
+});
+
+describe("what a change lands on", () => {
+  // A change is applied when its turn to save comes, to what the server holds then,
+  // which is not what was drawn when it was clicked if an earlier change was refused.
+  // What it says, what its Undo puts back, and what it builds on follow the former.
+
+  test("an edit queued behind a phone fork the server refused forks from the desktop bar as well", async () => {
+    state.barMobileItems = [];
+    await mountInMode();
+    await toPhone();
+    await eventually(() => assert.ok(chip("Clock")));
+    holdNextSave();
+    refuseOnce = true;
+    // Forks the following phone from the desktop bar; the server will refuse it.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Clock" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Recording" })));
+    // The refusal reads the bar back before the next save runs: let both finish inside the scope.
+    await act(async () => {
+      releaseHold!();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await eventually(() => assert.equal(saves.length, 2));
+    assert.deepEqual(
+      saves[1],
+      { mobileItems: normalizeBarRows(["clock", "spacer", "live-timer", "recording"]) },
+      "the second edit built a phone set from nothing, not from the desktop bar the phone was showing",
+    );
+  });
+
+  test("the default set's Undo puts back what it replaced, not an earlier change the server refused", async () => {
+    await mountInMode();
+    holdNextSave();
+    refuseOnce = true;
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Clock" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    // Clicked while the removal is still drawn; the server refuses it and saves this.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Use the default set/ })));
+    await act(async () => {
+      releaseHold!();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await eventually(() => assert.equal(saves.length, 2));
+    const undo = await eventually(() => {
+      const u = screen.getAllByRole("button", { name: "Undo" }).filter((b) => (b.parentElement?.textContent ?? "").includes("Restored the default bar"));
+      assert.ok(u.length > 0, "no Undo for the default set");
+      return u[u.length - 1];
+    });
+    await act(async () => fireEvent.click(undo));
+    await eventually(() => assert.equal(saves.length, 3));
+    assert.deepEqual(saves[2], { items: normalizeBarRows(["clock", "spacer", "live-timer"]) }, "Undo put back a removal the server had refused");
   });
 });
 
