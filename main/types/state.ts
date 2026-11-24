@@ -12,6 +12,25 @@ import type { ServerIdentity } from "./kiosk.js";
 import type { PlanSwitcherMode } from "./pco.js";
 import type { SidebarArrangement } from "../services/sidebar-arrangement.js";
 
+/**
+ * A count of the saves of each list a browser edits in place and the server also
+ * broadcasts: the sidebar arrangement, and the context bar's two sets (one count
+ * for both). The answer to a save and its broadcast carry the same numbers, so a
+ * browser holding the answer to its own save can tell that save's echo, however
+ * late, from another browser's later change, which carries a higher number. By
+ * value the two can be the same list.
+ *
+ * Counted per server run, not stored: a stored count would go back with a restored
+ * backup, and a browser holding a higher one would then refuse every change until
+ * the count caught up. `boot` is new on every start, and a different `boot` is
+ * always newer.
+ */
+export interface ListRevisions {
+  boot: string;
+  sidebar: number;
+  bar: number;
+}
+
 export interface StageState {
   serviceTypeId: string | null;
   serviceTypeName: string | null;
@@ -39,6 +58,9 @@ export interface StageState {
   /** How the sidebar is arranged. Empty sections = the default; see
    *  sidebar-arrangement.ts, which draws it. */
   sidebar: SidebarArrangement;
+  /** Which save of the sidebar and of the context bar this state carries. See
+   *  ListRevisions. */
+  listRevisions: ListRevisions;
   /** Colours the operator has kept, newest first. Global, like the bar: the same
    *  person mixes a colour on a laptop and reaches for it on a tablet. */
   savedColors: string[];

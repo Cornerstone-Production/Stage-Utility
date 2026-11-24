@@ -454,6 +454,7 @@ export class StageController {
     barItems: [],
     barMobileItems: [],
     sidebar: { sections: [], hidden: [] },
+    listRevisions: { boot: randomUUID(), sidebar: 0, bar: 0 },
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
@@ -5341,7 +5342,10 @@ export class StageController {
    */
   async setBarItems(next: { items?: string[]; mobileItems?: string[] }): Promise<StageState> {
     const saved = await barConfigStore.set(next);
-    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems };
+    // Counted where the state changes, after the write, so the answer and the
+    // broadcast carry the number in the order the saves landed.
+    const listRevisions = { ...this.state.listRevisions, bar: this.state.listRevisions.bar + 1 };
+    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems, listRevisions };
     console.log(
       `[stage-controller] setBarItems desktop=${scrub(saved.items.length)} mobile=${scrub(
         saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length,
@@ -5361,7 +5365,9 @@ export class StageController {
     const consoles = sidebarConsolesOf(this.state.views);
     const { arrangement, dropped } = keepKnownConsoles(next, consoles);
     const saved = await sidebarConfigStore.set(arrangement);
-    this.state = { ...this.state, sidebar: saved };
+    // Counted where the state changes, as setBarItems does.
+    const listRevisions = { ...this.state.listRevisions, sidebar: this.state.listRevisions.sidebar + 1 };
+    this.state = { ...this.state, sidebar: saved, listRevisions };
     // A save is the moment a dropped id leaves the file, so the ids reported
     // before it are forgotten, which also keeps this set from growing for ever.
     this.sidebarDropsReported.clear();

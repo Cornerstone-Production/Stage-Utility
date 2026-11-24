@@ -10,7 +10,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { invoke } from "../lib/api";
-import type { ListIo } from "../lib/use-list-saves";
+import { revisionOf, type Revised, type SavedListIo } from "./use-saved-list";
 import { hasMobileBar, normalizeBarRows, visibleBarItems, type BarRowId } from "./bar-items";
 
 /** Which of the two sets a save is for. */
@@ -58,17 +58,22 @@ export async function saveBarSet(queryClient: QueryClient, set: BarSet, items: s
  * the answer keeps the rows' own keys when it says the same thing, so a save
  * that took as asked redraws nothing.
  */
-export function barListIo(queryClient: QueryClient, set: BarSet, nextKey: () => string): ListIo<BarEditRow> {
+export function barListIo(queryClient: QueryClient, set: BarSet, nextKey: () => string): SavedListIo<BarEditRow> {
   return {
     save: async (list) => {
       const next = await saveBarSet(queryClient, set, normalizeBarRows(list.map((r) => r.id)));
       const answered = barRowsOf(next, set, nextKey);
-      return sameBarIds(list, answered.map((r) => r.id)) ? list : answered;
+      return { list: sameBarIds(list, answered.map((r) => r.id)) ? list : answered, revision: revisionOf(next, "bar") };
     },
     read: async () => {
       const next = await invoke<StageState>("stage:getState");
       queryClient.setQueryData(["stage:getState"], next);
-      return barRowsOf(next, set, nextKey);
+      return barAnswerOf(next, set, nextKey);
     },
   };
+}
+
+/** A state as the answer for one set: its rows and the bar's revision. */
+export function barAnswerOf(state: StageState, set: BarSet, nextKey: () => string): Revised<BarEditRow> {
+  return { list: barRowsOf(state, set, nextKey), revision: revisionOf(state, "bar") };
 }

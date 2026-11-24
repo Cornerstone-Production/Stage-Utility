@@ -16,7 +16,8 @@
 // arrangement it lands on, one save is out at a time, the draft is the server's
 // last answer with the changes still waiting applied, and a refusal drops its
 // change and reads the arrangement back. Another browser's change is taken in
-// when nothing of ours is waiting; our own echo is not.
+// when nothing of ours is waiting; our own echo is not, told apart by the
+// server's count of saves rather than by what the arrangement says.
 
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DndContext, DragOverlay, type DragEndEvent, type DragMoveEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
@@ -40,7 +41,7 @@ import { useStageState } from "../main/use-stage-state";
 import { dropPoint } from "./drag-geometry";
 import { CustomizeContext, useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
 import { sidebarListIo } from "./set-sidebar";
-import { useSavedList } from "./use-saved-list";
+import { revisionOf, useSavedList } from "./use-saved-list";
 import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
 import { addSection, hidePage } from "./sidebar-edits";
 import { uid } from "../lib/uid";
@@ -106,7 +107,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const savedKey = state ? JSON.stringify(state.sidebar ?? EMPTY_SIDEBAR) : null;
   const savedList = useMemo(() => (savedKey === null ? null : [JSON.parse(savedKey) as SidebarArrangement]), [savedKey]);
   const io = useMemo(() => sidebarListIo(queryClient), [queryClient]);
-  const { list, edit } = useSavedList({ io, saved: savedList, keyOf: keyOfArrangement });
+  const { list, edit } = useSavedList({ io, saved: savedList, revision: revisionOf(state, "sidebar"), keyOf: keyOfArrangement });
   // The draft is held while the mode is on, and outside it for as long as the
   // broadcast of our last save has not arrived: dropped sooner, the rail would
   // flicker back to the arrangement before it.

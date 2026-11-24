@@ -47,17 +47,36 @@ const VIEWS = [
 ];
 
 type Sidebar = { sections: { id: string; label: string; kind: string; members: string[] }[]; hidden: string[] };
-let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sidebar };
+type Revisions = { boot: string; sidebar: number; bar: number };
+let state: { views: unknown[]; outputs: unknown[]; appName: string; sidebar: Sidebar; listRevisions: Revisions };
 /** What a POST /api/sidebar does: take it, refuse it (or only this one), or wait to be told. */
 let mode: "ok" | "refuse" | "refuse-once" | "hold" | "late" = "ok";
 let release: (() => void) | null = null;
 const saves: Sidebar[] = [];
 let consoleHides = 0;
-/** While set, the next save waits here before the server answers it: a slow link. */
+/** While set, the next save waits here: a slow link. */
 let hold: Promise<void> | null = null;
 let releaseHold: (() => void) | null = null;
-function holdNextSave(): void {
+/** Where it waits: before the server saves it ("request"), or after, before the answer gets back ("answer"). */
+let holdAt: "request" | "answer" = "request";
+function holdNextSave(at: "request" | "answer" = "request"): void {
+  holdAt = at;
   hold = new Promise<void>((r) => (releaseHold = r));
+}
+
+/**
+ * The server saving an arrangement: the one place its count of saves goes up, as
+ * setSidebar does. Every save, ours or another browser's, goes through here, so
+ * no test can hand out an order the server could not.
+ */
+function serverSaves(sidebar: Sidebar): typeof state {
+  state = { ...state, sidebar, listRevisions: { ...state.listRevisions, sidebar: state.listRevisions.sidebar + 1 } };
+  return state;
+}
+/** Another browser's save, and its broadcast. */
+function otherBrowserSaves(sidebar: Sidebar): void {
+  serverSaves(sidebar);
+  emitState();
 }
 
 function emitState(): void {
@@ -88,21 +107,20 @@ const json = (status: number, value: unknown) => ({
   if (method === "POST" && path === "/api/sidebar") {
     const body = JSON.parse(init?.body ?? "{}") as Sidebar;
     saves.push(body);
-    if (hold) {
-      const waiting = hold;
-      hold = null; // only this one waits
-      await waiting;
-    }
+    const waiting = hold;
+    hold = null; // only this one waits
+    if (waiting && holdAt === "request") await waiting;
     if (mode === "refuse" || mode === "refuse-once") {
       if (mode === "refuse-once") mode = "ok";
+      if (waiting && holdAt === "answer") await waiting;
       return json(400, { error: "refused for the test" });
     }
     if (mode === "hold") await new Promise<void>((r) => (release = r));
-    // "late": answered, but the broadcast of it has not arrived yet.
-    if (mode === "late") return json(200, { ...state, sidebar: body });
-    state = { ...state, sidebar: body };
-    emitState();
-    return json(200, state);
+    const answered = serverSaves(body);
+    // "late": saved and answered, but the broadcast of it has not arrived yet.
+    if (mode !== "late") emitState();
+    if (waiting && holdAt === "answer") await waiting;
+    return json(200, answered);
   }
   return json(200, {});
 };
@@ -120,10 +138,17 @@ const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
-  state = { views: VIEWS, outputs: [], appName: "Rail test app", sidebar: { sections: [], hidden: [] } };
+  state = {
+    views: VIEWS,
+    outputs: [],
+    appName: "Rail test app",
+    sidebar: { sections: [], hidden: [] },
+    listRevisions: { boot: "boot-1", sidebar: 0, bar: 0 },
+  };
   mode = "ok";
   release = null;
   hold = null;
+  holdAt = "request";
   releaseHold = null;
   saves.length = 0;
   consoleHides = 0;
@@ -229,10 +254,8 @@ describe("the rail and its saved arrangement", () => {
       emitState();
     });
     assert.equal(at(c, "Patch"), -1, "the hide flickered back on an unrelated broadcast");
-    await act(async () => {
-      state = { ...state, sidebar: saves[0] };
-      emitState();
-    });
+    // The echo: the server already holds this save.
+    await act(async () => emitState());
     assert.equal(at(c, "Patch"), -1);
   });
 
@@ -240,10 +263,7 @@ describe("the rail and its saved arrangement", () => {
     await mount();
     await act(async () => api!.open("sidebar"));
     // Another browser hides Baptisms.
-    await act(async () => {
-      state = { ...state, sidebar: { sections: [], hidden: ["baptisms"] } };
-      emitState();
-    });
+    await act(async () => otherBrowserSaves({ sections: [], hidden: ["baptisms"] }));
     await act(async () => api!.hide("patch", "Patch"));
     await eventually(() => assert.equal(saves.length, 1));
     assert.deepEqual([...saves[0].hidden].sort(), ["baptisms", "patch"], "this browser's save undid the other's hide");
@@ -271,14 +291,11 @@ describe("saves that are still out", () => {
     await mount();
     await act(async () => api!.open("sidebar"));
     mode = "late"; // answered with this save's own arrangement, no echo
-    holdNextSave();
+    holdNextSave("answer"); // saved at once; the answer is what is slow
     await act(async () => api!.hide("patch", "Patch"));
     await eventually(() => assert.equal(saves.length, 1));
     // The other browser saved after this one; its broadcast gets here before this answer does.
-    await act(async () => {
-      state = { ...state, sidebar: { sections: [], hidden: ["baptisms"] } };
-      emitState();
-    });
+    await act(async () => otherBrowserSaves({ sections: [], hidden: ["baptisms"] }));
     await act(async () => releaseHold!());
     // The mode's rail is not `.bg-rail`, so read what it draws from the provider.
     await eventually(() => assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "the other browser's hide was dropped, or this browser's kept"));
@@ -326,6 +343,62 @@ describe("saves that are still out", () => {
     assert.equal(screen.queryAllByText(/Hid FOH held/).length, 0, "Hid toast shown before the save answered");
     await act(async () => releaseHold!());
     await eventually(() => assert.ok(screen.queryAllByText(/Hid FOH held/).length > 0));
+  });
+});
+
+describe("whose save is newer", () => {
+  // The server counts its saves (StageState.listRevisions), and the answer to a save
+  // and its broadcast carry the same count. These are the orders that cannot be told
+  // apart by what the arrangement says.
+
+  test("another browser's save that landed before ours, broadcast while ours was out, is not drawn over ours", async () => {
+    await mount();
+    await act(async () => api!.open("sidebar"));
+    mode = "late"; // our echo has not arrived when the answer does
+    holdNextSave(); // the request is slow: the server has not saved ours yet
+    await act(async () => api!.hide("patch", "Patch"));
+    await eventually(() => assert.equal(saves.length, 1));
+    // Another browser's save lands first, and its broadcast arrives while ours is out.
+    await act(async () => otherBrowserSaves({ sections: [], hidden: ["baptisms"] }));
+    // Ours lands after it, built on what it was clicked on: the server holds ours.
+    await act(async () => releaseHold!());
+    await eventually(() => assert.deepEqual(state.sidebar.hidden, ["patch"]));
+    await eventually(() =>
+      assert.deepEqual(api!.resolved.hiddenPages, ["patch"], "the older broadcast was drawn over the answer to our newer save"),
+    );
+    // A change made now builds on what the server holds, and does not undo our Hide.
+    mode = "ok";
+    await act(async () => api!.hide("history", "History"));
+    await eventually(() => assert.equal(saves.length, 2));
+    assert.deepEqual([...saves[1].hidden].sort(), ["history", "patch"], "the next save undid our Hide Patch");
+  });
+
+  test("another browser putting the arrangement back while our save is out is taken in", async () => {
+    const before = state.sidebar;
+    await mount();
+    holdNextSave("answer"); // saved and broadcast at once; the answer is slow
+    await act(async () => api!.hide("patch", "Patch"));
+    await eventually(() => assert.equal(saves.length, 1));
+    // Another browser puts it straight back: the same arrangement we last had.
+    await act(async () => otherBrowserSaves(before));
+    await act(async () => releaseHold!());
+    await eventually(() => assert.deepEqual(api!.resolved.hiddenPages, [], "the other browser's change was dropped"));
+    assert.equal(api!.draft, null, "a draft is still held over what the server holds");
+    assert.ok(at(document.body as HTMLElement, "Patch") >= 0, "the rail still hides Patch");
+  });
+
+  test("a restarted server's changes are taken in, though its count starts again", async () => {
+    await mount();
+    await act(async () => api!.hide("patch", "Patch"));
+    await eventually(() => assert.equal(saves.length, 1));
+    await eventually(() => assert.deepEqual(api!.resolved.hiddenPages, ["patch"]));
+    // The server restarts (or a backup is restored): a new boot, counting from 0
+    // again, below the answer this browser holds.
+    state = { ...state, listRevisions: { boot: "boot-2", sidebar: 0, bar: 0 } };
+    await act(async () => otherBrowserSaves({ sections: [], hidden: ["baptisms"] }));
+    await eventually(() =>
+      assert.deepEqual(api!.resolved.hiddenPages, ["baptisms"], "a change on the restarted server was taken for an old echo"),
+    );
   });
 });
 

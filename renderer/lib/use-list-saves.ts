@@ -58,12 +58,15 @@ export function useListSaves<T>(io: ListIo<T>): {
   editTracked: (e: ListEdit<T>) => Promise<ListStepResult<T>>;
   /** Queue a request that answers with the whole list; resolves once it has answered or failed. */
   request: (r: () => Promise<T[]>) => Promise<ListSaveResult>;
+  /** Steps queued or out. A state, so the render in which the queue empties is a render. */
+  pending: number;
 } {
   // Written only from handlers and from the save loop, never during render.
   const base = useRef<T[]>([]);
   const queue = useRef<{ step: Step<T>; done: (r: ListStepResult<T>) => void }[]>([]);
   const saving = useRef(false);
   const [list, setList] = useState<T[]>([]);
+  const [pending, setPending] = useState(0);
 
   const redraw = useCallback(() => {
     // An edit that throws is drawn as no change; its failure is returned when its turn
@@ -119,6 +122,7 @@ export function useListSaves<T>(io: ListIo<T>): {
         const result = await saveOne(head.step);
         queue.current.shift();
         redraw();
+        setPending(queue.current.length);
         head.done(result);
       }
     } finally {
@@ -129,6 +133,7 @@ export function useListSaves<T>(io: ListIo<T>): {
   const enqueue = useCallback((step: Step<T>) => new Promise<ListStepResult<T>>((done) => {
     queue.current.push({ step, done });
     redraw();
+    setPending(queue.current.length);
     void drain();
   }), [drain, redraw]);
 
@@ -136,5 +141,5 @@ export function useListSaves<T>(io: ListIo<T>): {
   const edit = useCallback((e: ListEdit<T>) => editTracked(e).then(said), [editTracked]);
   const request = useCallback((r: () => Promise<T[]>) => enqueue({ request: r }).then(said), [enqueue]);
 
-  return { list, adopt, edit, editTracked, request };
+  return { list, adopt, edit, editTracked, request, pending };
 }

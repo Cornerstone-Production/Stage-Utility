@@ -33,8 +33,8 @@ import { useBarFit } from "./bar-fit";
 import { BAR_STRIP_CLASS, BarStripRows, renderBarItem, type BarItemContext } from "./bar-strip";
 import { droppedOnBar, gapFromBoxes, type MeasuredRow } from "./bar-drop";
 import { dropPoint } from "./drag-geometry";
-import { barListIo, barRowsOf, saveBarSet, sameBarIds, type BarEditRow, type BarSet } from "./set-bar-items";
-import { useSavedList } from "./use-saved-list";
+import { barAnswerOf, barListIo, saveBarSet, sameBarIds, type BarEditRow, type BarSet } from "./set-bar-items";
+import { revisionOf, useSavedList } from "./use-saved-list";
 import type { ListStepResult } from "../lib/use-list-saves";
 import { useLatestRef } from "../lib/use-latest-ref";
 import { toast } from "../components/ui";
@@ -185,9 +185,11 @@ export function useBarEditor({
   );
   const desktopIo = useMemo(() => barListIo(queryClient, "desktop", nextKey), [queryClient, nextKey]);
   const mobileIo = useMemo(() => barListIo(queryClient, "mobile", nextKey), [queryClient, nextKey]);
-  // Not mid-drag, where the rows measured at the start must stay.
-  const desktop = useSavedList({ io: desktopIo, saved: desktopSaved, keyOf: keyOfRows, hold: dragging !== null });
-  const mobile = useSavedList({ io: mobileIo, saved: mobileSaved, keyOf: keyOfRows, hold: dragging !== null });
+  // Not mid-drag, where the rows measured at the start must stay. One count for
+  // both sets: a save of either is a save of the bar.
+  const revision = revisionOf(state, "bar");
+  const desktop = useSavedList({ io: desktopIo, saved: desktopSaved, revision, keyOf: keyOfRows, hold: dragging !== null });
+  const mobile = useSavedList({ io: mobileIo, saved: mobileSaved, revision, keyOf: keyOfRows, hold: dragging !== null });
   // What a phone that follows the desktop bar forks from, read when the edit lands.
   const desktopRows = useLatestRef(desktop.list);
 
@@ -240,7 +242,7 @@ export function useBarEditor({
    *  reason forking on first edit is safe rather than a trap. */
   async function followDesktop(): Promise<void> {
     undo.retire();
-    const result = await mobile.request(async () => barRowsOf(await saveBarSet(queryClient, "mobile", []), "mobile", nextKey));
+    const result = await mobile.request(async () => barAnswerOf(await saveBarSet(queryClient, "mobile", []), "mobile", nextKey));
     if (!result.ok) toast.error(result.error);
   }
 

@@ -44,20 +44,39 @@ class StubEventSource {
 
 
 type Bar = { barItems: string[]; barMobileItems: string[] };
-let state: Record<string, unknown> & Bar;
+type Revisions = { boot: string; sidebar: number; bar: number };
+let state: Record<string, unknown> & Bar & { listRevisions: Revisions };
 let refuse = false;
 /** Refuse the next save only. */
 let refuseOnce = false;
-/** Answer a save with what it saved, as if another browser's save landed right after it. */
+/** Answer every save without broadcasting it: its echo is late. */
 let answerOnly = false;
 /** The Nth save (1-based) is answered but its broadcast is held back until the test sends it. */
 let lateEchoOf: number | null = null;
 const saves: Record<string, unknown>[] = [];
-/** While set, the next save waits here before the server applies it: a slow link. */
+/** While set, the next save waits here: a slow link. */
 let hold: Promise<void> | null = null;
 let releaseHold: (() => void) | null = null;
-function holdNextSave(): void {
+/** Where it waits: before the server saves it ("request"), or after, before the answer gets back ("answer"). */
+let holdAt: "request" | "answer" = "request";
+function holdNextSave(at: "request" | "answer" = "request"): void {
+  holdAt = at;
   hold = new Promise<void>((r) => (releaseHold = r));
+}
+
+/**
+ * The server saving the bar: the one place its count of saves goes up, as
+ * setBarItems does. Every save, ours or another browser's, goes through here, so
+ * no test can hand out an order the server could not.
+ */
+function serverSaves(next: Partial<Bar>): typeof state {
+  state = { ...state, ...next, listRevisions: { ...state.listRevisions, bar: state.listRevisions.bar + 1 } };
+  return state;
+}
+/** Another browser's save, and its broadcast. */
+function otherBrowserSaves(next: Partial<Bar>): void {
+  serverSaves(next);
+  emitState();
 }
 
 function emitState(): void {
@@ -76,23 +95,19 @@ const json = (status: number, value: unknown) => ({ ok: status < 400, status, js
   if (method === "POST" && path === "/api/bar-items") {
     const body = JSON.parse(init?.body ?? "{}") as { items?: string[]; mobileItems?: string[] };
     saves.push(body);
-    if (hold) {
-      const waiting = hold;
-      hold = null; // only this one waits
-      await waiting;
-    }
+    const nth = saves.length;
+    const waiting = hold;
+    hold = null; // only this one waits
+    if (waiting && holdAt === "request") await waiting;
     if (refuse || refuseOnce) {
       refuseOnce = false;
+      if (waiting && holdAt === "answer") await waiting;
       return json(400, { error: "refused for the test" });
     }
-    if (lateEchoOf === saves.length) {
-      state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
-      return json(200, state);
-    }
-    if (answerOnly) return json(200, { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems });
-    state = { ...state, barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems };
-    emitState();
-    return json(200, state);
+    const answered = serverSaves({ barItems: body.items ?? state.barItems, barMobileItems: body.mobileItems ?? state.barMobileItems });
+    if (!answerOnly && lateEchoOf !== nth) emitState();
+    if (waiting && holdAt === "answer") await waiting;
+    return json(200, answered);
   }
   return json(200, {});
 };
@@ -112,12 +127,21 @@ const { narrowWarning } = await import("./bar-editor.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
-  state = { views: [], outputs: [], appName: "Bar test app", sidebar: { sections: [], hidden: [] }, barItems: ["clock", "spacer", "live-timer"], barMobileItems: [] };
+  state = {
+    views: [],
+    outputs: [],
+    appName: "Bar test app",
+    sidebar: { sections: [], hidden: [] },
+    barItems: ["clock", "spacer", "live-timer"],
+    barMobileItems: [],
+    listRevisions: { boot: "boot-1", sidebar: 0, bar: 0 },
+  };
   refuse = false;
   refuseOnce = false;
   answerOnly = false;
   lateEchoOf = null;
   hold = null;
+  holdAt = "request";
   releaseHold = null;
   saves.length = 0;
 });
@@ -308,10 +332,7 @@ describe("the bar editor, beyond one set and one browser", () => {
 
   test("another browser's change is taken in, and kept by the next save", async () => {
     await mountInMode();
-    await act(async () => {
-      state = { ...state, barItems: ["clock", "spacer", "live-timer", "recording"] };
-      emitState();
-    });
+    await act(async () => otherBrowserSaves({ barItems: ["clock", "spacer", "live-timer", "recording"] }));
     await eventually(() => assert.ok(chip("Recording"), "the other browser's change never reached the strip"));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
     await eventually(() => assert.equal(saves.length, 1));
@@ -376,14 +397,11 @@ describe("saves that are still out when the operator moves on", () => {
   test("another browser's change that lands while a save is out is taken in once it settles", async () => {
     await mountInMode();
     answerOnly = true;
-    holdNextSave();
+    holdNextSave("answer"); // saved at once; the answer is what is slow
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Recording" })));
     await eventually(() => assert.equal(saves.length, 1));
     // The other browser saved after this one; its broadcast gets here before this answer does.
-    await act(async () => {
-      state = { ...state, barItems: ["clock", "spacer", "live-timer", "streaming"] };
-      emitState();
-    });
+    await act(async () => otherBrowserSaves({ barItems: ["clock", "spacer", "live-timer", "streaming"] }));
     await act(async () => releaseHold!());
     await eventually(() => assert.ok(chip("Streaming"), "the other browser's change was dropped"));
     await eventually(() => assert.equal(chip("Recording") !== null, false, "the strip kept an arrangement the server no longer holds"));
@@ -393,15 +411,12 @@ describe("saves that are still out when the operator moves on", () => {
     await mountInMode();
     const spacers = () => rowLabels().filter((l) => l === "Space: drag to move").length;
     const before = spacers();
-    holdNextSave();
+    holdNextSave("answer"); // saved and broadcast at once; the answer is slow
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
     await eventually(() => assert.equal(saves.length, 1));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
-    // The first save has taken, and its broadcast arrives while the second edit waits.
-    await act(async () => {
-      state = { ...state, barItems: saves[0].items as string[] };
-      emitState();
-    });
+    // The first save has taken, and its broadcast arrives (again) while the second edit waits.
+    await act(async () => emitState());
     assert.equal(spacers(), before + 2, `the echo was drawn under the edits still waiting: ${JSON.stringify(rowLabels())}`);
     // The second save runs after the first answers, so let both finish inside the scope.
     await act(async () => {
@@ -431,6 +446,30 @@ describe("an echo that arrives late", () => {
     assert.equal(spaces(), before + 2, "the older echo drew the strip back over the newer answer");
     await act(async () => emitState());
     assert.equal(spaces(), before + 2);
+  });
+});
+
+describe("whose save is newer", () => {
+  const spaces = () => [...document.querySelectorAll("[data-row-key]")].filter((n) => n.getAttribute("aria-label") === "Space: drag to move").length;
+
+  test("a Space added and taken off while the first save is out, then one added by another browser, shows theirs", async () => {
+    await mountInMode();
+    const start = spaces();
+    holdNextSave();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Space" })));
+    await eventually(() => assert.equal(saves.length, 1));
+    const remove = screen.getAllByRole("button", { name: "Remove Space" });
+    await act(async () => fireEvent.click(remove[remove.length - 1]));
+    // The second save runs after the first answers: let both finish inside the scope.
+    await act(async () => {
+      releaseHold!();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await eventually(() => assert.equal(saves.length, 2));
+    await eventually(() => assert.equal(spaces(), start));
+    // Another browser adds a Space: the same list our first save made, but newer than our last.
+    await act(async () => otherBrowserSaves({ barItems: [...state.barItems, "space"] }));
+    await eventually(() => assert.equal(spaces(), start + 1, "another browser's Space never reached the strip"));
   });
 });
 
