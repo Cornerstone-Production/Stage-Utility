@@ -81,7 +81,14 @@ export function startKioskResponder(opts: ResponderOptions): void {
   }
 
   /** One duplicate-id check, out on every target. Null when it went out anywhere:
-   *  one interface refusing is not the check failing. */
+   *  one interface refusing is not the check failing.
+   *
+   *  A server older than the check takes it for a screen bound to its id, and lists
+   *  "Stage Utility server" under Not set up yet while it is answered. That is not
+   *  shaped away on purpose: such a server answers a probe bound to its own id from
+   *  the same branch of decideProbe that lists it (rule 3), so a check it would not
+   *  list is one it would not answer, and an older server sharing this id would go
+   *  unfound. docs/kiosk-devices.md says so. */
   async function sendCheck(): Promise<string | null> {
     if (broadcastRefused) return `broadcast refused (${broadcastRefused})`;
     const targets = opts.probeTo

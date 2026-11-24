@@ -3582,9 +3582,12 @@ export class StageController {
    * keeps the id a box has, and here that id is the copy. Refused while no other
    * server is heard with it, because every screen bound here refers to the id and
    * changing it without cause would orphan the lot. The screens both servers have
-   * set up stay with the other one, which keeps the old id; the ones set up only
-   * here are told "not set up" by it, and are answered as claimed here, so they
-   * follow the new id on their own. Nothing restarts.
+   * set up stay with the other one, which keeps the old id. The ones set up only
+   * here still probe bound to the old id, which this server now ignores (rule 1 in
+   * decideProbe), so they move only once the other server answers them "not set
+   * up" (its rule 3) and they probe again unbound, when this server answers them
+   * as claimed. If the other server is off, nothing answers them until it is back,
+   * or until they are set up here again. Nothing restarts.
    */
   async newServerId(): Promise<StageState> {
     const before = this.state.serverIdentity;
