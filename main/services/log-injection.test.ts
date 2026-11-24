@@ -373,6 +373,7 @@ const NOT_SCANNED = new Map<string, string>([
   ["propresenter-service.ts", DEVICE],
   ["pvp-service.ts", DEVICE],
   ["qsys/qrc-client.ts", DEVICE],
+  ["qsys/qsys-service.ts", DEVICE],
   ["reaper-service.ts", DEVICE],
   ["reconcile-records.ts", UNAUDITED],
   // Its one line is a fixed sentence naming a test hook; no value reaches it.

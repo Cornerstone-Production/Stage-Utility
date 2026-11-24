@@ -15,6 +15,7 @@ countdown, so the app needs it.
 | [ProPresenter](propresenter.md) | Current/next slide, section, thumbnails |
 | [ProdCom](prodcom.md) | Live production transcription strip |
 | [Smaart](smaart.md) | FOH SPL meters (Smaart v8) |
+| [Q-SYS](qsys.md) | Connection to a Q-SYS Core: status and its component and control catalog |
 | [Wireless](wireless.md) | Wireless mic RF/battery/charger status |
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
@@ -67,7 +68,7 @@ A box upgrading from a build that kept a credential in `settings.json` moves it
 into the secret store on the next start, and says how many it moved on `/log`.
 
 A credential is only sent to the address it was entered for. ProdCom's API key and
-the OBS, Smaart and ProVideoPlayer passwords go to the host and port on the card.
+the OBS, Smaart, Q-SYS and ProVideoPlayer passwords go to the host and port on the card.
 A save that changes where one would go, or turns ProVideoPlayer's HTTPS off, clears
 it unless the same save types it again; so does a config restore that would send
 one somewhere new. The dialog says so, and `/log` records

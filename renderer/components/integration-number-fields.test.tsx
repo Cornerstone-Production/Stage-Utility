@@ -80,16 +80,16 @@ const seeded: Seeded[] = INTEGRATION_DESCRIPTOR_FIXTURE.flatMap((d) => {
 const where = (s: Seeded) => `${s.id}.${s.key}`;
 
 describe("what a number field starts out holding", () => {
-  test("there are exactly thirteen of them", () => {
-    // EXACT, not a floor. A fourteenth number field is a field nobody has
+  test("there are exactly fourteen of them", () => {
+    // EXACT, not a floor. A fifteenth number field is a field nobody has
     // decided the unset behaviour of, and the whole point of this file is that
     // the decision is made per field rather than defaulted into. Update this
     // number in the same change that adds the field, having read the rest of
     // this file first.
     assert.equal(
       seeded.length,
-      13,
-      `the app ships ${seeded.length} number fields, not 13: ${seeded.map(where).join(", ")}`,
+      14,
+      `the app ships ${seeded.length} number fields, not 14: ${seeded.map(where).join(", ")}`,
     );
   });
 
@@ -200,7 +200,7 @@ describe("which number fields say blank is a setting", () => {
     assert.deepEqual(bad.map((f) => `${f.at}=${f.shown}`), [], "a number field reached the input as 0");
   });
 
-  test("all ten fields with no unsetHint are still handed 0 for an empty value", () => {
+  test("all eleven fields with no unsetHint are still handed 0 for an empty value", () => {
     // The opt-in, at the render site. Without the `unsetHint` test in
     // numberFieldValue this would blank every number field in the app whose
     // value happened to be missing.
@@ -212,8 +212,8 @@ describe("which number fields say blank is a setting", () => {
     const plain = fields.filter((f) => f.field.unsetHint == null);
     assert.equal(
       plain.length,
-      10,
-      `${plain.length} number fields declare no unsetHint, not 10: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
+      11,
+      `${plain.length} number fields declare no unsetHint, not 11: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
     );
     for (const f of plain) {
       const at = `${f.id}.${f.field.key}`;

@@ -102,7 +102,7 @@ export function integrationFlashId(id: string): string {
 const CATEGORY_ORDER = [
   ["planning-center", "prodcom"], // Service & plan
   ["propresenter"], // Presentation
-  ["smaart"], // Audio
+  ["smaart", "qsys"], // Audio
   ["sensource"], // People
   ["wireless"], // Wireless
   ["resi", "youtube", "video"], // Streaming

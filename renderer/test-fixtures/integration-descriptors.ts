@@ -215,6 +215,39 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
     ]
   },
   {
+    "id": "qsys",
+    "kind": "control",
+    "label": "Q-SYS",
+    "description": "Connects to a Q-SYS Core so layouts can show and control its faders, mutes, meters and snapshots.",
+    "docs": "qsys",
+    "configSchema": [
+      {
+        "key": "host",
+        "label": "Core Host",
+        "type": "text",
+        "placeholder": "192.168.1.50"
+      },
+      {
+        "key": "port",
+        "label": "QRC Port",
+        "type": "number",
+        "default": 1710
+      },
+      {
+        "key": "user",
+        "label": "User",
+        "type": "text",
+        "help": "Only if the Core requires a QRC logon. Leave blank otherwise."
+      },
+      {
+        "key": "password",
+        "label": "Password",
+        "type": "password",
+        "help": "Only if a user is set."
+      }
+    ]
+  },
+  {
     "id": "obs",
     "kind": "control",
     "label": "OBS Studio",

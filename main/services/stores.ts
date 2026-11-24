@@ -29,6 +29,7 @@ import "./messages-store.js";
 import "./messaging-store.js";
 import "./osc-store.js";
 import "./patch-store.js";
+import "./qsys/qsys-settings-store.js";
 import "./photo-themes/service.js";
 import "./presets-store.js";
 import "./rosstalk-store.js";

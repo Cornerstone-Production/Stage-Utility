@@ -89,6 +89,7 @@ describe("the form's password fields and the encrypted store agree", () => {
       "planning-center.secret",
       "prodcom.apiKey",
       "pvp.token",
+      "qsys.password",
       "resi.password",
       "sensource.apiToken",
       "sensource.clientSecret",

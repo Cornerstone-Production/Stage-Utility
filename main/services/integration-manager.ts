@@ -40,9 +40,12 @@ import {
   positiveConfigNumber,
   prodcomTarget,
   pvpTarget,
+  qsysTarget,
   smaartTarget,
 } from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
+import { qsysService } from "./qsys/qsys-service.js";
+import { qsysSettingsStore, type QsysSettings } from "./qsys/qsys-settings-store.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
@@ -357,6 +360,28 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
     },
+  ],
+};
+
+// Q-SYS integration — QRC (JSON-RPC over TCP, default port 1710) to a Core, for
+// the Q-SYS panels. Reads the design's components and controls; writes only
+// controls the operator has put on the allowlist.
+const QSYS_DESCRIPTOR: IntegrationDescriptor = {
+  id: "qsys",
+  kind: "control",
+  label: "Q-SYS",
+  description: "Connects to a Q-SYS Core so layouts can show and control its faders, mutes, meters and snapshots.",
+  docs: "qsys",
+  configSchema: [
+    { key: "host", label: "Core Host", type: "text", placeholder: "192.168.1.50" },
+    { key: "port", label: "QRC Port", type: "number", default: 1710 },
+    {
+      key: "user",
+      label: "User",
+      type: "text",
+      help: "Only if the Core requires a QRC logon. Leave blank otherwise.",
+    },
+    { key: "password", label: "Password", type: "password", help: "Only if a user is set." },
   ],
 };
 
@@ -763,6 +788,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PROPRESENTER_DESCRIPTOR,
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
+  QSYS_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
   PVP_DESCRIPTOR,
@@ -1040,6 +1066,7 @@ const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
   ["propresenter", []],
   ["prodcom", ["apiKey"]],
   ["smaart", ["password"]],
+  ["qsys", ["password"]],
   ["obs", ["password"]],
   ["pvp", ["token"]],
   ["reaper", []],
@@ -1372,6 +1399,8 @@ class IntegrationManager {
     void this.applyProdcom();
     // Start the Smaart SPL connection if enabled + configured.
     await this.applySmaart();
+    // Start the Q-SYS Core connection if enabled + configured.
+    await this.applyQsys();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
@@ -1601,6 +1630,7 @@ class IntegrationManager {
       propresenter: () => this.applyPropresenter(),
       prodcom: () => this.applyProdcom(),
       smaart: () => this.applySmaart(),
+      qsys: () => this.applyQsys(),
       obs: () => this.applyObs(),
       pvp: () => this.applyPvp(),
       reaper: () => this.applyReaper(),
@@ -1984,6 +2014,24 @@ class IntegrationManager {
         return this.reportTest("smaart", await smaartService.test(host, port, secrets.password ?? null));
       }
 
+      if (id === "qsys") {
+        const { host, port } = this.getQsysTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("qsys");
+        const result = await qsysService.test(await this.qsysSettings(host, port), secrets.password ?? null);
+        return this.reportTest(
+          "qsys",
+          result.ok
+            ? {
+                ok: true,
+                message: `Connected to ${result.status.DesignName}${result.status.IsEmulator ? " (emulator)" : ""} — ${result.components} component(s)`,
+              }
+            : { ok: false, message: result.error },
+        );
+      }
+
       if (id === "obs") {
         const { host, port } = this.getObsTarget();
         if (!host || !port) {
@@ -2204,6 +2252,37 @@ class IntegrationManager {
       return {
         connecting: `Connecting ${host}:${port}`,
         start: () => smaartService.configure(host, port, secrets.password ?? null),
+      };
+    });
+  }
+
+  /** The Core's standard QRC port is the default when only a host is given. */
+  private getQsysTarget(): { host: string | null; port: number | null } {
+    return qsysTarget(this.configOf("qsys"));
+  }
+
+  /** Connection fields from the integration's config, meter rates from the Q-SYS store. */
+  private async qsysSettings(host: string, port: number): Promise<QsysSettings> {
+    const user = this.configOf("qsys").user;
+    return {
+      host,
+      port,
+      user: typeof user === "string" ? user : "",
+      enabled: this.states.get("qsys")?.enabled ?? false,
+      ...(await qsysSettingsStore.loadRates()),
+    };
+  }
+
+  /** Start/stop the Q-SYS Core connection to match enabled + configured state. */
+  private async applyQsys(): Promise<void> {
+    await this.applyService("qsys", qsysService, async () => {
+      const { host, port } = this.getQsysTarget();
+      if (!host || !port) return null;
+      const secrets = await secretsStore.getSecrets("qsys");
+      const settings = await this.qsysSettings(host, port);
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => qsysService.configure(settings, secrets.password ?? null),
       };
     });
   }

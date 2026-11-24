@@ -213,6 +213,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "prodcom", label: "ProdCom" },
   { id: "propresenter", label: "ProPresenter" },
   { id: "pvp", label: "ProVideoPlayer" },
+  { id: "qsys", label: "Q-SYS" },
   { id: "reaper", label: "REAPER" },
   { id: "resi", label: "Resi" },
   { id: "ross-tsl", label: "Ross TSL" },
