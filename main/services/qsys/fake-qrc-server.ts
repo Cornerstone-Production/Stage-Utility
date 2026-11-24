@@ -41,7 +41,7 @@ export class FakeQrcServer {
 
   start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      const server = net.createServer((socket) => this.accept(socket));
+      const server = net.createServer({ noDelay: true }, (socket) => this.accept(socket));
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => {
         this.server = server;
