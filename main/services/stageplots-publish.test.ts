@@ -966,6 +966,117 @@ describe("a republish the page did not take", () => {
   });
 });
 
+describe("a republish around a missing page, a restore and a start", () => {
+  const rename = (h: Harness, name: string) => h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name, version: p.version + 1 } : p)) }));
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "warn", () => undefined), mock.method(console, "log", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+  const targetOf = (h: Harness) => (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps;
+
+  test("a change made with no page set up, then undone, leaves no stale error once the page is set up again", async () => {
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    targetOf(h).target = async () => ({ ok: false, message: "Set up the public link first." });
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+      await rename(h, "Plot 0");
+      await h.publisher.settle();
+    });
+    assert.ok((await h.venue()).publish!.lastError, "no error was left to clear, so this tests nothing");
+    targetOf(h).target = async () => ({ ok: true, origin: o.origin, token: TOKEN });
+    await quietly(async () => {
+      await h.publisher.pageSaved(null, o.origin);
+      await h.publisher.settle();
+    });
+    assert.equal((await h.venue()).publish!.lastError, null, "stale error stays after the page is set up again");
+  });
+
+  test("a restore that gives way sends what the page did not take while it held", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    let down = true;
+    h.page.respond = (req) => (down && SP.test(req.path) ? { status: 503, body: "" } : h.page.worker(req));
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    const resume = await h.publisher.pause();
+    down = false;
+    await quietly(async () => {
+      resume();
+      await h.publisher.settle();
+    });
+    const secret = (await h.venue()).publish!.secret;
+    assert.equal((JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).name, "Renamed", "the change waited for the next change or the retry a minute on");
+  });
+
+  test("a venue no longer published leaves the failing count, so the next failure waits the first wait again", async () => {
+    const doc = venueDoc(1, 0);
+    doc.venues.push({ id: "v-2", name: "Chapel", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    doc.plots.push({ id: "p-9", venueId: "v-2", name: "Chapel plot", backgroundId: null, bgFade: 0, items: [], version: 1 });
+    const h = await harness(doc, { republishRetry: { firstMs: 1000, maxMs: 8000 } });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    assert.ok((await h.publisher.publish("v-2")).ok);
+    await h.publisher.settle();
+    h.page.respond = (req) => (SP.test(req.path) && req.method === "PUT" ? { status: 503, body: "" } : h.page.worker(req));
+    const lines: string[] = [];
+    const spies = (["log", "warn"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+      // A restore takes v-1's link away, queuing it for removal as a restore over it does, and the retry comes due.
+      const gone = (await h.venue()).publish!;
+      await stageplotsStore.update((d) => ({
+        ...d,
+        venues: d.venues.map((v) => (v.id === "v-1" ? { ...v, publish: undefined } : v)),
+        pendingRemovals: [...d.pendingRemovals, { secret: gone.secret, origin: gone.origin, since: "2026-11-13T10:00:00.000Z", reason: "restored over" }],
+      }));
+      await new Promise((r) => setTimeout(r, 1100));
+      await h.publisher.settle();
+      await h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-9" ? { ...p, name: "Chapel renamed", version: p.version + 1 } : p)) }));
+      await h.publisher.settle();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const retries = lines.filter((l) => l.includes("the page did not take"));
+    assert.deepEqual(
+      retries.map((l) => l.replace(/^.*\] /, "")),
+      ["1 published venue the page did not take is sent again in 1 s, and on every change before that", "1 published venue the page did not take is sent again in 1 s, and on every change before that"],
+    );
+  });
+
+  test("a start with no page set up says nothing and leaves no error on a venue that did not change", async () => {
+    const doc = venueDoc(1, 0);
+    const o = { origin: "https://page.example" };
+    doc.venues[0]!.publish = { secret: `${"Q".repeat(42)}E`, origin: o.origin, publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], listed: false };
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    let h: Harness;
+    try {
+      h = await harness(doc, { target: async () => ({ ok: false, message: "Set up the public link first." }) });
+      await h.publisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      await h.publisher.settle();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    assert.ok(h.targetCalls() > 0, "the start never looked for a page, so this tests nothing");
+    assert.deepEqual(lines.filter((l) => l.includes("could not be republished")), []);
+    assert.equal((await h.venue()).publish!.lastError, null);
+    await stageplotsStore.update((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, publish: undefined })) }));
+  });
+});
+
 describe("what goes wrong in the background", () => {
   test("a republish that throws (settings unreadable) is logged on [stageplots] and never escapes as an unhandled rejection", async () => {
     let throwNow = false;

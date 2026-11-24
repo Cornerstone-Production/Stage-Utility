@@ -378,7 +378,7 @@ export class StagePlotsPublisher {
     // that links the patch waits until the patch reads, so it never goes out unlinked over a
     // page that showed its devices: unreadable now, the patch is read again on the backoff and
     // those venues go then (patchHealed).
-    void this.readPatch().then((p) => this.republishAll(p.ok ? "all" : "unlinked"));
+    void this.readPatch().then((p) => this.republishAll(p.ok ? "all" : "unlinked", true));
   }
 
   /** Shutdown: no more republishing, and whatever is running finishes. */
@@ -576,8 +576,12 @@ export class StagePlotsPublisher {
     this.fireTimer = null;
   }
 
-  /** Republish each published venue (`unlinked`: only those with no point linked to the patch). The fingerprint sends nothing where nothing changed. */
-  private async republishAll(which: "all" | "unlinked" = "all"): Promise<void> {
+  /**
+   * Republish each published venue (`unlinked`: only those with no point linked to the patch). The
+   * fingerprint sends nothing where nothing changed. `boot`: the pass at start, which says nothing
+   * and records nothing for a venue it cannot send for want of a page (nothing changed).
+   */
+  private async republishAll(which: "all" | "unlinked" = "all", boot = false): Promise<void> {
     if (this.stopped || this.paused) return;
     let doc: StagePlotsDoc;
     try {
@@ -586,13 +590,16 @@ export class StagePlotsPublisher {
       say("error", [], `could not read the stage plots to republish them: ${errorMessage(err)}`);
       return;
     }
+    // A venue no longer published (unpublished, deleted, or restored over) has nothing left to
+    // resend: counted as failing, it would hold the backoff at its longest for every venue after it.
+    for (const id of [...this.failing]) if (!doc.venues.some((v) => v.id === id && v.publish)) this.republished(id, true);
     for (const venue of doc.venues) {
       const pub = venue.publish;
       if (!pub) continue;
       if (which === "unlinked" && linksThePatch(doc, venue)) continue;
       // Nobody is waiting on a republish: what throws in one (the settings or the store
       // unreadable) is said here, or it is never said at all.
-      void this.serial(venue.id, () => this.republish(venue.id)).catch((err: unknown) => {
+      void this.serial(venue.id, () => this.republish(venue.id, boot)).catch((err: unknown) => {
         say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
       });
     }
@@ -827,7 +834,7 @@ export class StagePlotsPublisher {
   }
 
   /** A change: send what differs from what was last sent. Nothing at all when nothing published changed. */
-  private async republish(venueId: string): Promise<void> {
+  private async republish(venueId: string, boot = false): Promise<void> {
     if (this.paused) return;
     let doc: StagePlotsDoc;
     try {
@@ -844,7 +851,14 @@ export class StagePlotsPublisher {
     if (this.attempted.get(venueId) === print) return;
     const target = await this.deps.target();
     if (!target.ok) {
-      // No page to send to: nothing to try again on a timer. A Public link save follows it (pageSaved).
+      // No page to send to: nothing to try again on a timer, so not failing; a Public link save
+      // follows it (pageSaved). At start nothing changed: nothing to say or record.
+      this.republished(venueId, true);
+      if (boot) return;
+      // What the page holds is now behind the document, whatever this change is: a change back to
+      // what it was sent must still go once a page is set up, and clear this error.
+      this.attempted.delete(venueId);
+      this.sent.delete(pub.secret);
       say("warn", [pub.secret], `"${venue.name}" changed and could not be republished: ${target.message}`);
       const at = this.at();
       await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, target.message, [pub.secret]) }));
