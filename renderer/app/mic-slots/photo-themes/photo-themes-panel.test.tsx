@@ -51,7 +51,8 @@ const { __resetReplayCacheForTests } = await import("../../../lib/api.js");
 const { TooltipProvider } = await import("../../../components/ui/tooltip-provider.js");
 const { Toaster } = await import("../../../components/ui/toast.js");
 
-const PLAN = { planId: "7001", serviceTypeId: "100", sortDate: "2026-12-24T00:00:00Z" };
+/** Christmas Eve, 7pm in the app's zone (America/Chicago, from /api/state): already the 25th in UTC. */
+const PLAN = { planId: "7001", serviceTypeId: "100", sortDate: "2026-12-25T01:00:00Z" };
 const XMAS = "th-aaaaaaaaaaaa";
 const EASTER = "th-bbbbbbbbbbbb";
 
@@ -94,7 +95,7 @@ const theme = (id: string, name: string, over: Record<string, unknown> = {}) => 
   createdAt: "2026-11-01T00:00:00Z",
   lastUsedDate: "2026-12-24",
   keptUntil: "2027-03-24",
-  plans: [{ planId: "7001", serviceTypeId: "100", sortDate: "2026-12-24T00:00:00Z" }],
+  plans: [{ planId: "7001", serviceTypeId: "100", sortDate: "2026-12-25T01:00:00Z" }],
   people: [],
   ...over,
 });
@@ -136,6 +137,7 @@ beforeEach(() => {
       status = no.status;
       out = { error: no.error };
     } else if (path === "/api/photo-themes") out = state();
+    else if (path === "/api/state") out = { timezone: "America/Chicago" };
     else if (path.endsWith("/approve-all")) {
       const sent = (body as { people: { personId: string }[] }).people;
       out = { approved: sent.length - approveAllSkips.length, skipped: approveAllSkips };
@@ -203,7 +205,7 @@ const chipOf = (id: string) => card(id).querySelector("[data-person-chip]")?.tex
 const gets = () => calls.filter((c) => c.method === "GET" && c.path === "/api/photo-themes").length;
 
 describe("each status a card can be in", () => {
-  const view = (p: P, ctx = { planId: "7001" }) => cardView(p as never, ctx);
+  const view = (p: P, ctx: { planId?: string } = { planId: "7001" }) => cardView(p as never, { ...ctx, timeZone: "America/Chicago" });
   test("the chip and the buttons for each", () => {
     assert.deepEqual(
       [
@@ -226,7 +228,7 @@ describe("each status a card can be in", () => {
   });
 
   test("an approved photo from another service says which; this service's own does not", () => {
-    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-14", approvedAt: "", stale: false } })).note, "From Mon, Dec 14");
+    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-15T01:00:00Z", approvedAt: "", stale: false } })).note, "From Mon 14 Dec");
     assert.equal(view(person("1", "A", "approved")).note, null);
   });
 
@@ -677,7 +679,7 @@ describe("themes: creating one, and Manage themes", () => {
     await click(screen.getByRole("button", { name: /Christmas 2026/ }));
     await click(screen.getByRole("button", { name: "Delete theme…" }));
     const box = screen.getByRole("group", { name: "Confirm delete theme" });
-    assert.match(box.textContent ?? "", /Delete Christmas 2026\? Its 2 photos are removed, and these services go back to the originals: Thu, Dec 24\./);
+    assert.match(box.textContent ?? "", /Delete Christmas 2026\? Its 2 photos are removed, and these services go back to the originals: Thu 24 Dec\./);
     assert.deepEqual(writes(), []);
     await click(within(box).getByRole("button", { name: "Delete theme" }));
     assert.deepEqual(writes().map((c) => `${c.method} ${c.path.replace(/th-[0-9a-f]{12}/, "T")}`), ["DELETE /api/photo-themes/themes/T"]);

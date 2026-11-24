@@ -15,7 +15,7 @@ import { Button, Input, Textarea } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { useCardOps } from "./card-ops";
 import { Num } from "./photo-bits";
-import { keptDay, usedBy } from "./photo-format";
+import { keptDay } from "./photo-format";
 import { PersonCard, type CardAction } from "./person-card";
 import { DeleteTheme, ThemeFacts, themeLabel } from "./theme-boxes";
 import type { PhotoThemes } from "./use-photo-themes";
@@ -48,7 +48,7 @@ export function ManageThemes({
         <>
           <h4 className="m-0 text-[10px] font-medium uppercase tracking-[0.07em] text-fg-subtle">Manage themes</h4>
           {themes.map((t) => {
-            const services = usedBy(t).length;
+            const services = t.plans.length;
             return (
               <button
                 key={t.id}
@@ -155,7 +155,7 @@ function ThemeDetail({
                   />
         <div className="mt-1 text-[11.5px] leading-[15px] text-fg-subtle">Changes the prompt for every service using {themeLabel(theme)}; existing approved photos stay until redone.</div>
       </div>
-      <ThemeFacts theme={theme} />
+      <ThemeFacts theme={theme} timeZone={photos.timeZone} />
       <DeleteTheme theme={theme} photos={photos} onDeleted={onDeleted} />
       <h4 className="m-0 text-[10px] font-medium uppercase tracking-[0.07em] text-fg-subtle">
         People in this theme · <Num>{theme.people.length}</Num>
@@ -170,7 +170,7 @@ function ThemeDetail({
                 person={p}
                 theme={theme}
                 original={p.originalUrl}
-                context={{}}
+                context={{ timeZone: photos.timeZone }}
                 editedCaption="Themed"
                 busy={busy(p)}
                 canRedo={photos.canSend}

@@ -12,7 +12,7 @@ import type { ThemeDTO, ThemePersonDTO } from "@main/types/photo-themes";
 import { Button, MENU_ITEM, MENU_ITEM_DANGER, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, menuContent } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
 import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, useEscapeFirst, type ChipTone } from "./photo-bits";
-import { serviceDay } from "./photo-format";
+import { planDateLabel } from "../../../settings/sections/plan-date-label";
 
 export type CardAction = "redo" | "approve" | "keep";
 
@@ -31,6 +31,8 @@ export interface CardContext {
   noOriginal?: boolean;
   /** Others on this plan already have a photo and this person has none: they were added after the last run. */
   addedLater?: boolean;
+  /** The app's zone, for the day a photo's plan falls on. */
+  timeZone: string;
 }
 
 /** What a card says for a person's status. Pure, so each wording is one place. */
@@ -54,7 +56,9 @@ export function cardView(p: ThemePersonDTO, ctx: CardContext): CardView {
         border: null,
       };
     case "approved": {
-      const from = p.approved?.fromPlanId && p.approved.fromPlanId !== ctx.planId ? serviceDay(p.approved.fromDate) : ctx.planId ? null : serviceDay(p.approved?.fromDate);
+      // `fromDate` is the plan's sort date, an instant: named on the app's calendar.
+      const fromDay = planDateLabel(p.approved?.fromDate, ctx.timeZone);
+      const from = p.approved?.fromPlanId && p.approved.fromPlanId !== ctx.planId ? fromDay : ctx.planId ? null : fromDay;
       return {
         chip: { tone: "ok", label: "Approved", check: true },
         note: from ? `From ${from}` : null,

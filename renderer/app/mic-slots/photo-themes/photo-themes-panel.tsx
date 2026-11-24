@@ -354,7 +354,7 @@ function PanelBody({
                     person={p}
                     theme={theme}
                     original={p.originalUrl}
-                    context={{ planId: plan.planId, noOriginal: !p.originalUrl, addedLater }}
+                    context={{ planId: plan.planId, noOriginal: !p.originalUrl, addedLater, timeZone: photos.timeZone }}
                     busy={busyActions(photos, theme.id, p.personId)}
                     canRedo={photos.canSend}
                     onAction={(a) => void act(p, a)}
@@ -403,7 +403,7 @@ function ThemesBlock({ themes, usedHere, photos, onManage }: { themes: ThemeDTO[
             <b className="font-semibold">{themeLabel(t)}</b>{" "}
             {t.id === usedHere && <span className="ml-1 rounded-full bg-accent-soft px-2 py-px text-[11.5px] font-medium text-accent-soft-fg">This plan</span>}
           </span>
-          <ThemeFacts theme={t} showPeople />
+          <ThemeFacts theme={t} timeZone={photos.timeZone} showPeople />
           <span className="flex flex-wrap gap-1.5">
             <Button variant="filled" size="small" onClick={() => onManage(t.id)}>
               Manage
