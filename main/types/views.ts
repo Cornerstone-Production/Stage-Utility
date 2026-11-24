@@ -663,7 +663,9 @@ export type LayoutObjectConfig =
     }
   | { type: "qsys-meter"; binding: QsysBinding | null; binding2?: QsysBinding | null; form: "bar" | "number"; unit?: string }
   | { type: "qsys-mute"; binding: QsysBinding | null }
-  | { type: "qsys-button"; binding: QsysBinding | null; label: string; hold: boolean }
+  // press: what the bound control is. "momentary" is an on and off control held on while
+  // pressed (the server leases it); absent is "trigger", fired once on press.
+  | { type: "qsys-button"; binding: QsysBinding | null; label: string; hold: boolean; press?: "trigger" | "momentary" }
   // A boolean control, or a pair of trigger controls (on and off).
   | {
       type: "qsys-switch";

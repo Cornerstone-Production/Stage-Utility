@@ -249,7 +249,7 @@ describe("/api/qsys", () => {
     const { qsysWriter } = await import("../qsys/qsys-write.js");
     const { panelHasMomentary } = await import("../../types/qsys.js");
     // The views as the server reads them: panel-m has a momentary button on the mute.
-    const views = [{ id: "panel-m", layout: { objects: [{ id: "b1", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false } }] } }] as never;
+    const views = [{ id: "panel-m", layout: { objects: [{ id: "b1", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false, press: "momentary" } }] } }] as never;
     const realCheck = qsysWriter.momentaryCheck;
     qsysWriter.momentaryCheck = async (panelId, a) => panelHasMomentary(views, panelId, a);
     for (const [what, body] of [

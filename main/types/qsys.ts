@@ -4,11 +4,10 @@ import type { LayoutObject, LayoutObjectConfig, View } from "./views.js";
 
 /**
  * Whether panel `panelId` has a momentary button on `a`: a Q-SYS button bound to
- * it, anywhere in its layout. Until the button's Trigger/Momentary setting is
- * saved on the object, a button the page draws as a momentary is any button on a
- * Boolean, so this is the same rule; the server checks the Boolean itself. The
- * server takes a momentary lease only where this holds, so a client claiming a
- * lease on a latching control (a toggle, a mute) is not given one.
+ * it, anywhere in its layout, whose saved `press` is "momentary" (absent is a
+ * trigger). The server checks the Boolean itself. It takes a momentary lease only
+ * where this holds, so a client claiming a lease on a latching control (a toggle,
+ * a mute), or on a button saved as a trigger, is not given one.
  */
 export function panelHasMomentary(views: View[], panelId: string | null, a: QsysAddress): boolean {
   const view = panelId ? views.find((v) => v.id === panelId) : undefined;
@@ -16,7 +15,7 @@ export function panelHasMomentary(views: View[], panelId: string | null, a: Qsys
   const walk = (objects: LayoutObject[]): boolean =>
     objects.some(
       (o) =>
-        (o.config.type === "qsys-button" && o.config.binding?.component === a.component && o.config.binding.control === a.control) ||
+        (o.config.type === "qsys-button" && o.config.press === "momentary" && o.config.binding?.component === a.component && o.config.binding.control === a.control) ||
         (o.children ? walk(o.children) : false),
     );
   return walk(view.layout?.objects ?? []);

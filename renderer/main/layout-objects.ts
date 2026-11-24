@@ -873,6 +873,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "A level fader for a Q-SYS control",
     group: "Q-SYS",
     config: () => ({ type: "qsys-fader", binding: null, orientation: "vertical", showDb: true, steps: false, stepDb: 3 }),
+    // Tall, as the panel mockups draw a fader and its strip. Dense is chosen on the object and does not resize it.
+    defaultSize: { w: 0.07, h: 0.7 },
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
   },
@@ -937,6 +939,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "Name, fader, mute and meter for one channel",
     group: "Q-SYS",
     config: () => ({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null }),
+    defaultSize: { w: 0.09, h: 0.8 },
     style: () => PILL(),
     integration: QSYS_INTEGRATION,
   },

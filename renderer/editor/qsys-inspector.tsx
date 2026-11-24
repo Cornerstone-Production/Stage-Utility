@@ -7,13 +7,15 @@
 // never gets an empty row: "Add" opens the browser first, and a row exists only
 // once it has a control.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, Trash2Icon } from "lucide-react";
 
 import type { QsysAddress, QsysBinding } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { Button } from "../components/ui";
-import { QsysCoreBrowser, type QsysBrowseKind } from "./qsys-core-browser";
+import { isWritable, kindOf } from "@main/types/qsys";
+import { allowKey, fitsKind, hasChoices, loadQsysCore, QsysCoreBrowser, type CatalogComponent, type CatalogControl, type QsysBrowseKind, type QsysCoreLoad } from "./qsys-core-browser";
+import { channelLabel, channelsOf, matchStrip, problemWords, type Eligibility, type StripChannel, type StripSlot } from "./qsys-strip";
 import { Row, RowNumber, RowSwitch, RowText, RowToggle, Section } from "./inspector-rows";
 
 export type QsysConfig = Extract<LayoutObjectConfig, { type: `qsys-${string}` }>;
@@ -127,7 +129,7 @@ const DENSITY = [
   { value: "dense", label: "Dense" },
 ] as const;
 
-export function QsysInspector({ c, onConfig }: { c: QsysConfig; onConfig: (c: LayoutObjectConfig) => void }) {
+export function QsysInspector({ c, onConfig, onBreakApart }: { c: QsysConfig; onConfig: (c: LayoutObjectConfig) => void; onBreakApart?: () => void }) {
   switch (c.type) {
     case "qsys-fader":
       return <FaderInspector c={c} onConfig={onConfig} />;
@@ -149,19 +151,7 @@ export function QsysInspector({ c, onConfig }: { c: QsysConfig; onConfig: (c: La
         </div>
       );
     case "qsys-selector":
-      return (
-        <div className="flex flex-col gap-2.5">
-          <Bind
-            label="Choice list"
-            hint="A control with a list of choices. Used when there are no buttons below."
-            kind="choice"
-            writable
-            value={c.binding}
-            onChange={(b) => onConfig({ ...c, binding: b })}
-          />
-          <Items title="Buttons" addLabel="Add button" items={c.items} onChange={(items) => onConfig({ ...c, items })} />
-        </div>
-      );
+      return <SelectorInspector c={c} onConfig={onConfig} />;
     case "qsys-label":
       return (
         <div className="flex flex-col gap-2.5">
@@ -170,7 +160,7 @@ export function QsysInspector({ c, onConfig }: { c: QsysConfig; onConfig: (c: La
         </div>
       );
     case "qsys-strip":
-      return <StripInspector c={c} onConfig={onConfig} />;
+      return <StripInspector c={c} onConfig={onConfig} onBreakApart={onBreakApart} />;
     case "qsys-status":
       return null;
   }
@@ -204,16 +194,21 @@ function MeterInspector({ c, onConfig }: { c: Of<"qsys-meter">; onConfig: (c: La
 }
 
 function ButtonInspector({ c, onConfig }: { c: Of<"qsys-button">; onConfig: (c: LayoutObjectConfig) => void }) {
-  // Only decides which controls the browser offers; the button follows the control's own type.
-  const [momentary, setMomentary] = useState(false);
+  // Saved on the object: it decides which controls the browser offers, and whether the
+  // server leases the press (main/types/qsys.ts panelHasMomentary). Absent is a trigger.
+  const momentary = c.press === "momentary";
   return (
     <div className="flex flex-col gap-2.5">
       <RowToggle
         label="Control type"
-        hint="A trigger fires once when pressed. A momentary is an on and off control held on while it is pressed."
+        hint="A trigger fires once when pressed. A momentary is an on and off control held on while it is pressed. Changing it clears the control."
         value={momentary ? "momentary" : "trigger"}
         options={[{ value: "trigger", label: "Trigger" }, { value: "momentary", label: "Momentary" }]}
-        onChange={(v) => setMomentary(v === "momentary")}
+        onChange={(v) => {
+          if ((v === "momentary") === momentary) return;
+          const { press: _was, ...rest } = c;
+          onConfig({ ...rest, binding: null, ...(v === "momentary" ? { press: "momentary" as const } : {}) });
+        }}
       />
       <Bind label="Control" kind={momentary ? "boolean" : "trigger"} writable value={c.binding} onChange={(b) => onConfig({ ...c, binding: b })} />
       {c.binding && <LitBy binding={c.binding} onChange={(b) => onConfig({ ...c, binding: b })} />}
@@ -257,9 +252,10 @@ function SwitchInspector({ c, onConfig }: { c: Of<"qsys-switch">; onConfig: (c: 
   );
 }
 
-function StripInspector({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutObjectConfig) => void }) {
+function StripInspector({ c, onConfig, onBreakApart }: { c: Of<"qsys-strip">; onConfig: (c: LayoutObjectConfig) => void; onBreakApart?: () => void }) {
   return (
     <div className="flex flex-col gap-2.5">
+      <StripFill c={c} onConfig={onConfig} />
       <Bind label="Name" hint="Shown above the fader from this text control. A label typed below wins." kind="string" writable={false} value={c.name} onChange={(name) => onConfig({ ...c, name })} />
       <RowText label="Label" value={c.label} onChange={(label) => onConfig({ ...c, label })} />
       <Bind label="Level" kind="gain" writable value={c.gain} onChange={(gain) => onConfig({ ...c, gain })} />
@@ -267,6 +263,130 @@ function StripInspector({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: La
       <Bind label="Meter" kind="meter" writable={false} value={c.meter} onChange={(meter) => onConfig({ ...c, meter })} />
       <Bind label="Second meter" hint="A second channel beside the first." kind="meter" writable={false} value={c.meter2} onChange={(meter2) => onConfig({ ...c, meter2 })} />
       <RowToggle label="Density" hint="Dense is the staff panel's narrow strip, with a dB scale." value={c.density ?? "standard"} options={DENSITY} onChange={(v) => onConfig({ ...c, density: v === "dense" ? "dense" : undefined })} />
+      {onBreakApart && (
+        <Button variant="transparent" onClick={onBreakApart} aria-label="Break apart" tooltip="Replace this strip with a label, fader, meter and mute you can place separately">
+          Break apart
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Whether the Core reports a control with a list of choices: read once. Nothing is offered that the Core did not say. */
+function useCoreHasChoices(): boolean {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    let current = true;
+    void loadQsysCore(false).then((r) => {
+      if (current) setHas(r.state === "ready" && r.components.some((comp) => comp.controls.some(hasChoices)));
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  return has;
+}
+
+function SelectorInspector({ c, onConfig }: { c: Of<"qsys-selector">; onConfig: (c: LayoutObjectConfig) => void }) {
+  const coreHasChoices = useCoreHasChoices();
+  return (
+    <div className="flex flex-col gap-2.5">
+      {/* The choice-list mode only where the Core reports choices (or one is already bound, so it can be seen and cleared). */}
+      {(coreHasChoices || c.binding) && (
+        <Bind
+          label="Choice list"
+          hint="A control with a list of choices. Used when there are no buttons below."
+          kind="choice"
+          writable
+          value={c.binding}
+          onChange={(b) => onConfig({ ...c, binding: b })}
+        />
+      )}
+      <Items title="Buttons" addLabel="Add button" items={c.items} onChange={(items) => onConfig({ ...c, items })} />
+    </div>
+  );
+}
+
+const SLOTS: StripSlot[] = ["gain", "meter", "meter2", "mute", "name"];
+
+/** The browser's rule for what may fill a strip slot, over one component. */
+function eligibilityOver(comp: CatalogComponent, load: Extract<QsysCoreLoad, { state: "ready" }>): Eligibility {
+  const control = (name: string): CatalogControl | undefined => comp.controls.find((x) => x.Name === name);
+  return (slot, name) => {
+    const ctl = control(name);
+    if (!ctl) return "wrong-kind";
+    if (slot === "gain" || slot === "mute") {
+      const entry = load.allow?.get(allowKey(comp.name, name));
+      if (!entry) return "not-allowed";
+      if (!isWritable(ctl, entry)) return "not-writable";
+      return fitsKind(slot === "gain" ? "gain" : "boolean", comp.type, ctl) ? "ok" : "wrong-kind";
+    }
+    return (slot === "name" ? kindOf(ctl) === "text" : kindOf(ctl) === "number") ? "ok" : "wrong-kind";
+  };
+}
+
+/** Bind a whole channel at once: pick a component, then a channel; the fields fill from the control names. */
+function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutObjectConfig) => void }) {
+  const [open, setOpen] = useState(false);
+  const [load, setLoad] = useState<QsysCoreLoad>({ state: "loading" });
+  const [component, setComponent] = useState("");
+  const [notes, setNotes] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    void loadQsysCore(true).then((r) => {
+      if (current) setLoad(r);
+    });
+    return () => {
+      current = false;
+    };
+  }, [open]);
+  const withChannels = load.state === "ready" ? load.components.filter((comp) => channelsOf(comp.controls.map((x) => x.Name)).length > 0) : [];
+  const comp = withChannels.find((x) => x.name === component);
+
+  const apply = (channel: StripChannel) => {
+    if (!comp || load.state !== "ready") return;
+    const m = matchStrip(comp.controls.map((x) => x.Name), channel, eligibilityOver(comp, load));
+    const at = (slot: StripSlot) => (m[slot].control ? { component: comp.name, control: m[slot].control } : null);
+    onConfig({ ...c, name: at("name"), gain: at("gain"), mute: at("mute"), meter: at("meter"), meter2: at("meter2") ?? undefined });
+    // A second meter is optional; saying it is missing would be noise.
+    setNotes(SLOTS.filter((s) => s !== "meter2" && m[s].problem).map((s) => problemWords(s, m[s].problem!)));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Button variant="soft" aria-expanded={open} onClick={() => { setOpen((o) => !o); setLoad({ state: "loading" }); }}>
+        Bind a channel
+      </Button>
+      {open && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-line p-2" data-qsys-strip-fill>
+          {load.state === "loading" && <p className="text-caption2 text-fg-muted">Reading the Core…</p>}
+          {load.state === "no-core" && <p role="status" className="text-caption2 text-fg-muted">No Q-SYS Core is connected, so there is nothing to choose from.</p>}
+          {load.state === "failed" && <p role="alert" className="text-caption2 text-danger-11">{load.what === "catalog" ? "The Core's controls could not be read. See /log." : "The allowlist could not be read, so no writable control is known. See /log."}</p>}
+          {load.state === "ready" && (withChannels.length === 0 ? (
+            <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input_3_gain, meter_3, text_display_3).</p>
+          ) : (
+            <>
+              <select aria-label="Component" className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote font-mono" value={component} onChange={(e) => setComponent(e.target.value)}>
+                <option value="">Choose a component</option>
+                {withChannels.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+              </select>
+              {comp && (
+                <div className="flex flex-wrap gap-1" role="group" aria-label="Channel">
+                  {channelsOf(comp.controls.map((x) => x.Name)).map((ch) => (
+                    <Button key={`${ch.side}${ch.n}`} variant="filled" size="small" onClick={() => apply(ch)}>{channelLabel(ch)}</Button>
+                  ))}
+                </div>
+              )}
+            </>
+          ))}
+          {notes.length > 0 && (
+            <ul className="flex flex-col gap-0.5 text-caption2 text-fg-muted" data-qsys-fill-notes>
+              {notes.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

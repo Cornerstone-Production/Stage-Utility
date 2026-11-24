@@ -44,6 +44,8 @@ test("every other type arrives exactly where it always did", () => {
   assert.deepEqual([...own].sort(), [
     "message-composer",
     "messages",
+    "qsys-fader",
+    "qsys-strip",
   ]);
   for (const type of Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[]) {
     if (own.has(type)) continue;

@@ -68,13 +68,42 @@ export function fitsKind(kind: QsysBrowseKind, componentType: string, c: Catalog
   }
 }
 
-type Load =
+export type QsysCoreLoad =
   | { state: "loading" }
   | { state: "no-core" }
   | { state: "failed"; what: "catalog" | "allowlist" }
   | { state: "ready"; components: CatalogComponent[]; allow: Map<string, AllowEntry> | null };
+type Load = QsysCoreLoad;
+export type { CatalogComponent, CatalogControl, AllowEntry };
+export { hasChoices };
 
 const keyOf = (component: string, control: string) => `${component}\u0000${control}`;
+export const allowKey = keyOf;
+
+/** The Core's catalog, and the allowlist when `writable`, as the browser reads them. Never throws; says what failed. */
+export async function loadQsysCore(writable: boolean): Promise<Exclude<QsysCoreLoad, { state: "loading" }>> {
+  let catalog: { components: CatalogComponent[] };
+  try {
+    catalog = await invoke<{ components: CatalogComponent[] }>("qsys:catalog");
+    if (!Array.isArray(catalog?.components)) throw new Error("the catalog answer has no component list");
+  } catch (err) {
+    // 503 is the server saying there is no connection. Anything else is a failed read.
+    if ((err as ApiError).status === 503) return { state: "no-core" };
+    logReadFailure("qsys", "the Core's catalog for the control browser", err);
+    return { state: "failed", what: "catalog" };
+  }
+  let allow: Map<string, AllowEntry> | null = null;
+  if (writable) {
+    try {
+      const a = await invoke<{ entries: AllowEntry[] }>("qsys:allowlist");
+      allow = new Map(a.entries.map((e) => [keyOf(e.component, e.control), e]));
+    } catch (err) {
+      logReadFailure("qsys", "the allowlist for the control browser", err);
+      return { state: "failed", what: "allowlist" };
+    }
+  }
+  return { state: "ready", components: catalog.components, allow };
+}
 
 export function QsysCoreBrowser({
   kind,
@@ -105,34 +134,9 @@ export function QsysCoreBrowser({
   useEffect(() => {
     if (!open) return;
     let current = true;
-    void (async () => {
-      let catalog: { components: CatalogComponent[] };
-      try {
-        catalog = await invoke<{ components: CatalogComponent[] }>("qsys:catalog");
-      } catch (err) {
-        if (!current) return;
-        // 503 is the server saying there is no connection. Anything else is a failed read.
-        if ((err as ApiError).status === 503) setLoad({ state: "no-core" });
-        else {
-          logReadFailure("qsys", "the Core's catalog for the control browser", err);
-          setLoad({ state: "failed", what: "catalog" });
-        }
-        return;
-      }
-      let allow: Map<string, AllowEntry> | null = null;
-      if (writable) {
-        try {
-          const a = await invoke<{ entries: AllowEntry[] }>("qsys:allowlist");
-          allow = new Map(a.entries.map((e) => [keyOf(e.component, e.control), e]));
-        } catch (err) {
-          if (!current) return;
-          logReadFailure("qsys", "the allowlist for the control browser", err);
-          setLoad({ state: "failed", what: "allowlist" });
-          return;
-        }
-      }
-      if (current) setLoad({ state: "ready", components: catalog.components, allow });
-    })();
+    void loadQsysCore(writable).then((r) => {
+      if (current) setLoad(r);
+    });
     return () => {
       current = false;
     };

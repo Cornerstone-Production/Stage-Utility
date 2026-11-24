@@ -103,6 +103,7 @@ import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from ".
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
+import { breakApartStrip, replaceById } from "./qsys-strip";
 
 /** How close an edge must come before it snaps, in rendered pixels. Small enough
  *  that deliberate placement is never fought, large enough to catch a hand. */
@@ -1822,6 +1823,17 @@ export function LayoutEditor({
     setSelectedIds(new Set());
     setDirty(true);
   }
+  /** A Q-SYS channel strip becomes its parts, in the strip's footprint: one undo puts it back. */
+  function breakApartIds(id: string) {
+    const o = findById(objects, id);
+    if (!o || o.config.type !== "qsys-strip" || isLockedInTree(objects, id)) return;
+    const parts = breakApartStrip(o, uid);
+    if (parts.length === 0) return;
+    pushHistory();
+    setObjects((prev) => replaceById(prev, id, parts));
+    setSelectedIds(new Set(parts.map((p) => p.id)));
+    setDirty(true);
+  }
   function duplicateSelected() {
     duplicateIds(selectedIds);
   }
@@ -2613,6 +2625,7 @@ export function LayoutEditor({
                 onReorder={(d) => reorder(selected.id, d)}
                 onDuplicate={() => duplicateIds(new Set([selected.id]))}
                 onRemove={() => removeIds(new Set([selected.id]))}
+                onBreakApart={() => breakApartIds(selected.id)}
                 onReparentOut={() => reparentToRoot(selected.id)}
                 onToggleLock={() => { pushHistory(); update(selected.id, { locked: !selected.locked }); }}
                 onSaveGroup={() => { setGroupName(""); setGroupDlgOpen(true); }}

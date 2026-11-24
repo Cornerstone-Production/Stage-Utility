@@ -895,8 +895,8 @@ function ButtonObject({ c, interactive, ts }: { c: Of<"qsys-button">; interactiv
   return (
     <Frame type={c.type} state={state} ts={ts} bound={!!c.binding} style={{ alignItems: "stretch", justifyContent: "stretch" }}>
       {c.binding && (
-        // A Boolean control is a momentary: on while pressed, off on release.
-        <TriggerButton binding={c.binding} label={c.label || c.binding.control} interactive={interactive} hold={c.hold} momentary style={{ flex: 1 }} />
+        // A saved momentary is on while pressed, off on release; absent is a trigger.
+        <TriggerButton binding={c.binding} label={c.label || c.binding.control} interactive={interactive} hold={c.hold} momentary={c.press === "momentary"} style={{ flex: 1 }} />
       )}
     </Frame>
   );

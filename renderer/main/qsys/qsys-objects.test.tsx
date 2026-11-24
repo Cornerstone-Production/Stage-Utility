@@ -902,7 +902,7 @@ describe("review fixes", () => {
   });
 
   test("a Boolean on a button is a momentary: true on press, false on release", async () => {
-    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     const btn = q("qsys-button", "button");
     act(() => {
       fireEvent.pointerDown(btn, { pointerId: 10 });
@@ -915,8 +915,23 @@ describe("review fixes", () => {
     assert.deepEqual(server.writes.map((w) => w.body.value), [true, false]);
   });
 
-  test("a momentary pressed across a drop does not send its release after it", async () => {
+  test("a button with no saved press type is a trigger: no release is written", async () => {
     await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    const btn = q("qsys-button", "button");
+    act(() => {
+      fireEvent.pointerDown(btn, { pointerId: 13 });
+    });
+    await wait(20);
+    act(() => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 13 }));
+      fireEvent.click(btn);
+    });
+    await wait(40);
+    assert.ok(!server.writes.some((w) => w.body.value === false), `a trigger wrote a release: ${JSON.stringify(server.writes.map((w) => w.body.value))}`);
+  });
+
+  test("a momentary pressed across a drop does not send its release after it", async () => {
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     act(() => {
       fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 11 });
     });
@@ -1077,7 +1092,7 @@ describe("review round 2", () => {
   });
 
   test("a second press on a momentary does not release it while the first is held", async () => {
-    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     const btn = q("qsys-button", "button");
     act(() => {
       fireEvent.pointerDown(btn, { pointerId: 5 });
@@ -1096,7 +1111,7 @@ describe("review round 2", () => {
   });
 
   test("focus leaving mid-press lets go: a hold does not complete, a momentary is released", async () => {
-    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }, { type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    await mount([{ type: "qsys-button", binding: b("save"), label: "Save", hold: true }, { type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     const [hold, talk] = [...document.querySelectorAll('[data-qsys-object="qsys-button"] button')] as HTMLElement[];
     act(() => {
       fireEvent.keyDown(hold, { key: "Enter" });
@@ -1173,7 +1188,7 @@ describe("review round 2", () => {
   });
 
   test("a momentary press asks for a lease, renews it while held, and stops renewing on release or a break", async () => {
-    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     const btn = q("qsys-button", "button");
     act(() => {
       fireEvent.pointerDown(btn, { pointerId: 6 });
@@ -1207,7 +1222,7 @@ describe("review round 2", () => {
 
 describe("review round 3", () => {
   test("renewals name the page's stream, and stop once the server says no lease is held", async () => {
-    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false }]);
+    await mount([{ type: "qsys-button", binding: b("talk"), label: "Talk", hold: false, press: "momentary" }]);
     server.leaseHeld = false; // the press took no lease (or it ended)
     act(() => {
       fireEvent.pointerDown(q("qsys-button", "button"), { pointerId: 21 });
