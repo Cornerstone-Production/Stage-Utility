@@ -274,6 +274,14 @@ describe("Q-SYS cog menu, PIN and auto-return", () => {
     assert.deepEqual(where(), { path: "/qsys/quiet", search: {} });
   });
 
+  test("a staff panel with any ?return has the cog, even one naming no panel (its own list, as its own home)", async () => {
+    await open("/qsys/booth?return=no-such-panel");
+    assert.ok(cog(), "a staff panel a cog opened, whose home has gone, has no way out");
+    fireEvent.click(cog()!);
+    await wait(10);
+    assert.deepEqual(homeHinted(), ["booth"]);
+  });
+
   test("away, the countdown is the home panel's, whatever the open panel's own", async () => {
     secondMs = 5; // a minute is 300 ms
     // The booth's own return time is 30 minutes; home's is 1.

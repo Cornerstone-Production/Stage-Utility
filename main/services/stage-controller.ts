@@ -40,6 +40,7 @@ import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { QSYS_ALIASES_MAX, canBeQsysPanel, findPanelBySlug, parseQsysPanelBlock, qsysSlugsOf, slugTakenMessage, uniqueQsysSlug, type QsysPanelBlock } from "../types/qsys.js";
 import { isSafeKey } from "./safe-key.js";
+import { KEPT_BLOCK_LOG_MAX } from "./qsys/qsys-slug-repair.js";
 import {
   CAPTION_COLOR,
   ICON_COLOR,
@@ -4185,7 +4186,9 @@ export class StageController {
   /** commitViewPatch's write, for a change that touches more than one view (a
    *  panel rename that other panels' cog menus follow): one assignment, one save. */
   private async commitViews(views: View[], logLines: readonly string[]): Promise<StageState> {
-    for (const line of logLines) console.log(scrub(line, 800));
+    // Each line was built with scrub() on every value; the bound here is the
+    // longest of them, a kept-aside block in full (KEPT_BLOCK_LOG_MAX).
+    for (const line of logLines) console.log(scrub(line, KEPT_BLOCK_LOG_MAX + 512));
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -4444,7 +4447,7 @@ export class StageController {
       next = own.length > 0 ? { ...withoutAliases(block), aliases: own } : withoutAliases(block);
       if (was) {
         inactive = [...inactive, was];
-        lines.push(`[qsys] "${scrub(view.name)}": its panel settings for /qsys/${scrub(was.slug)} were kept aside, whole, to restore /qsys/${scrub(block.slug)}: ${scrub(JSON.stringify(was), 600)}`);
+        lines.push(`[qsys] "${scrub(view.name)}": its panel settings for /qsys/${scrub(was.slug)} were kept aside, whole, to restore /qsys/${scrub(block.slug)}: ${scrub(JSON.stringify(was), KEPT_BLOCK_LOG_MAX)}`);
       }
     } else if (block) {
       const renamedFrom = was && was.slug !== block.slug ? was.slug : null;
@@ -4500,7 +4503,7 @@ export class StageController {
         const { qsysInactive: _kept, ...others } = v;
         return { ...others, ...(rest.length > 0 ? { qsysInactive: rest } : {}) } as View;
       }),
-      [`[qsys] "${scrub(view.name)}" (${scrub(id)}): kept-aside panel settings dismissed by the operator: ${scrub(want, 600)}`],
+      [`[qsys] "${scrub(view.name)}" (${scrub(id)}): kept-aside panel settings dismissed by the operator: ${scrub(want, KEPT_BLOCK_LOG_MAX)}`],
     );
   }
 

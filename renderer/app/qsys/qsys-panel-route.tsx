@@ -16,12 +16,13 @@
 //
 // A volunteer panel opened full screen also carries the cog menu (its home's
 // siblings, and "Open Stage Utility" behind the staff PIN). Any panel opened from
-// a cog with `?return=<home>` carries the cog too, whatever its kind, so a device
-// that went to a staff panel always has a way back, and the banner that counts
-// down to going home on the home panel's time (qsys-cog-menu.tsx,
-// use-auto-return.ts). Neither is drawn in the shell. The no-Core warning's link
-// to the Q-SYS settings follows the device's home: a volunteer device never gets
-// one, wherever its cog took it.
+// a cog (any `?return=`, even one naming no panel) carries the cog too, whatever
+// its kind, so a device that went to a staff panel always has a way back; and,
+// when `?return` names its home, the banner that counts down to going home on the
+// home panel's time (qsys-cog-menu.tsx, use-auto-return.ts). Neither is drawn in
+// the shell. The no-Core warning links to the Q-SYS settings only when both the
+// open panel and the device's home are staff panels: a volunteer panel never
+// does, and neither does a staff panel a volunteer device's cog opened.
 //
 // An address a panel had before a rename (an alias) still opens it: the page puts
 // the URL right, replacing the entry, and a `?return` naming an old address is put
@@ -87,7 +88,11 @@ export function QsysPanelRoute() {
     // The shell gutters its content; a panel paints its own ground to the edges.
     <div className="-mx-2 h-full max-sm:-mx-3">
       {view && home ? (
-        <QsysPanelSurface view={view} settingsLink={home.qsys?.kind === "staff"} device={{ home, away: away !== null, views }} />
+        <QsysPanelSurface
+          view={view}
+          settingsLink={view.qsys?.kind === "staff" && home.qsys?.kind === "staff"}
+          device={{ home, away: away !== null, fromCog: ret !== null, views }}
+        />
       ) : (
         <QsysPanelNotFound slug={slug} />
       )}
@@ -96,8 +101,9 @@ export function QsysPanelRoute() {
 }
 
 /** A panel open full screen on a device: its home panel, whether it is away from
- *  it, and every view (for the cog's list). Absent in the shell. */
-type Device = { home: View; away: boolean; views: readonly View[] };
+ *  it, whether a cog opened it (`?return` present, whatever it names), and every
+ *  view (for the cog's list). Absent in the shell. */
+type Device = { home: View; away: boolean; fromCog: boolean; views: readonly View[] };
 
 /** No panel at this address: said, on the panel's own ground, never a blank page. */
 export function QsysPanelNotFound({ slug, link }: { slug: string; link?: boolean }) {
@@ -183,7 +189,7 @@ function PanelFrame({ view, settingsLink, inShell, device }: { view: View; setti
         )}
         {/* A volunteer panel has a cog, and so does any panel a cog opened: a staff
             panel on its own is already behind the shell or a staff device. */}
-        {device && (view.qsys?.kind === "volunteer" || device.away) && <QsysCogMenu key={key} view={view} home={device.home} views={device.views} />}
+        {device && (view.qsys?.kind === "volunteer" || device.fromCog) && <QsysCogMenu key={key} view={view} home={device.home} views={device.views} />}
       </header>
       {device?.away && <QsysReturnBanner key={key} home={device.home} />}
       {noCore && <NoCoreStrip settingsLink={settingsLink} />}

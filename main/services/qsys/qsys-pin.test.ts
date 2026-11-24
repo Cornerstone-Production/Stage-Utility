@@ -153,6 +153,18 @@ test("a hash stored without its cost (before it was stored) is read at Node's de
   assert.deepEqual(await checkPin("9158", "c5"), { ok: false, lockedForMs: 0 });
 });
 
+test("a stored PIN this build cannot read is read as none, said on the log, and kept on disk", async () => {
+  // A cost this server will not run (N not a power of two): a hand edit, or a newer build.
+  const odd = { pin: { salt: "a".repeat(32), hash: "b".repeat(64), cost: { N: 3, r: 8, p: 1 } } };
+  const file = path.join(TMP, "qsys-pin.json");
+  await fs.writeFile(file, JSON.stringify(odd));
+  await quiet(() => __reloadPinForTests());
+  assert.deepEqual(await pinState(), { set: false }, "an unreadable PIN read as set");
+  assert.ok(warnings.some((w) => w.startsWith("[qsys] qsys-pin.json holds a staff PIN this build cannot read")), JSON.stringify(warnings));
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), odd, "the file was overwritten");
+  assert.deepEqual(await checkPin("1234", "c7"), { ok: false, lockedForMs: 0, notSet: true });
+});
+
 test("a new hash is stored with its cost, and a restore keeps it", async () => {
   await quiet(() => setPin("2468"));
   const saved = JSON.parse(await fs.readFile(path.join(TMP, "qsys-pin.json"), "utf8")) as { pin: { cost?: unknown } };

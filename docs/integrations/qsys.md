@@ -237,12 +237,13 @@ settings: when its views put two panels at one address, the first keeps it and e
 later one takes the next free suffix. Panel settings on a view that is not a custom
 console, or settings this app cannot read (a hand-edited address, a field from a
 newer build), are kept aside on the view, whole, and nothing reads them as a panel.
-All of these are logged when the views are loaded (a kept-aside block in full) and
+All of these are logged when the views are loaded (a kept-aside block in full, up to
+4096 characters) and
 listed at the top of the panels on `/qsys/manage` for as long as the server runs.
 There, kept-aside settings can be restored once the view is a custom console
 (**Restore as panel**; when the view is a panel now, it asks first and its current
 settings are kept aside in their place), or forgotten (**Dismiss**, confirmed; the
-log keeps a copy of the settings). A console with Q-SYS objects and no panel
+log keeps a copy of the settings, up to 4096 characters). A console with Q-SYS objects and no panel
 settings still works where it is shown, as a staff panel, and `/qsys/manage`
 offers to make it a panel.
 
@@ -288,7 +289,7 @@ An address no panel has shows "There is no panel here", never a blank page.
 | Connected to sound system | The panel has read the Core's current values. | Live. |
 | Reconnecting to sound system | The page is reading the Core's values again: just opened, back from sleep, or its own connection to Stage Utility came back. | Hold their last values and take no input until the read lands. |
 | Sound system offline | Stage Utility cannot reach the Core, or this page cannot reach Stage Utility (the server stopped, the iPad off the network). After 2 seconds without the Core, or 10 seconds without Stage Utility, a card covers the controls, which are dimmed under it: "Audio controls are offline. This page can't reach the sound system, so nothing here will change anything. Use the Q-SYS panel on the wall, or find a tech." The service and the page keep retrying, and the card goes when both are back; the page then reads the Core's values before it takes a touch. | Greyed, no input. |
-| No Q-SYS Core is set up | The integration is off or has no Core host. A bar under the header says so; on a staff panel and inside the app it links to the Q-SYS settings. A device whose home is a volunteer panel never gets the link, whatever panel its cog has opened. | Greyed, no input. The panel stays editable. |
+| No Q-SYS Core is set up | The integration is off or has no Core host. A bar under the header says so; on a staff panel and inside the app it links to the Q-SYS settings. The link is there only when both this panel and the device's home are staff panels: a volunteer panel never has it, and neither does a staff panel a volunteer device's cog opened. | Greyed, no input. The panel stays editable. |
 
 A page that wakes from sleep, or whose connection to Stage Utility drops and comes
 back, reads the Core's current values before it takes a touch, and never sends its
@@ -301,8 +302,8 @@ panels are not affected.
 ### Cog menu and staff PIN
 
 A volunteer panel opened full screen (`/qsys/<slug>`) has a cog at the right of its
-header, and so does any panel a cog opened (`?return=` names a home), a staff panel
-included, so a device always has a way back. A staff panel opened on its own, and
+header, and so does any panel a cog opened (any `?return=`, even one that names no
+panel), a staff panel included, so a device always has a way back. A staff panel opened on its own, and
 panels inside the app, have none. The cog opens a menu, which takes focus while it
 is open (Tab stays inside it; Escape or a tap outside closes it):
 
@@ -569,7 +570,7 @@ Look at `/log` and filter for `[qsys]`.
 | `panel "<view>" moved from /qsys/<a> to /qsys/<b>; the old address still leads to it, and <n> other panel(s) list the new one in their cog menus` | A panel's address was changed. `/qsys/<a>` keeps opening it. |
 | `"<view>" keeps its last 20 old addresses; /qsys/<a> no longer lead to it` | A rename past 20 old addresses forgot the oldest. |
 | `"<view>": its panel settings for /qsys/<a> were kept aside, whole, to restore /qsys/<b>: <block>` | **Restore as panel** on a view that was a panel: its settings went aside in place of the restored ones. |
-| `"<view>" (<id>): kept-aside panel settings dismissed by the operator: <block>` | **Dismiss** on `/qsys/manage` forgot kept-aside settings. The line is the only copy left. |
+| `"<view>" (<id>): kept-aside panel settings dismissed by the operator: <block>` | **Dismiss** on `/qsys/manage` forgot kept-aside settings. The line (up to 4096 characters of them) is the only copy left. |
 | `an allowlist save was stopped: the list changed since the edits began; the page shows what changed` | From `/qsys/manage`: the list was saved elsewhere after the edits began, so the server refused the save (`409`, `rev-changed`) and nothing was written. The page shows what changed and waits for the operator. |
 | `restoring kept-aside panel settings on <view> was refused: <why>`, `dismissing kept-aside panel settings on <view> was refused: <why>` | From `/qsys/manage`: **Restore as panel** or **Dismiss** was refused, as for an address another panel has, or settings already gone. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |

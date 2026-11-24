@@ -324,7 +324,7 @@ function KeptAside({ views }: { views: View[] }) {
   async function dismiss(view: View, raw: unknown) {
     const ok = await confirm({
       title: `Dismiss these settings on "${view.name}"?`,
-      message: "They are forgotten. The log keeps a copy of them, word for word.",
+      message: "They are forgotten. The server's log keeps a copy of them.",
       confirmLabel: "Dismiss",
       destructive: true,
     });
@@ -554,8 +554,8 @@ export function PanelSettingsDialog({ view, views, onClose }: { view: View; view
 /**
  * Whether a staff PIN is set, and setting, changing or removing it. Four digits,
  * typed as text (a PIN may start with 0). The server keeps only a salted hash, so
- * the PIN is never shown back. Not PIN-gated itself, by Henry's decision: the
- * network is the boundary.
+ * the PIN is never shown back. Not PIN-gated itself, by design: the network is the
+ * boundary.
  */
 function PinSection() {
   const [pinSet, putPinSet] = usePinSet();

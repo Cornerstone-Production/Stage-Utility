@@ -35,18 +35,16 @@ import type { View } from "../../types/views.js";
 
 export type { QsysSlugRepair };
 
+/** How much of a block set aside, or dismissed, its log line carries: past any block
+ *  this app writes, and the most an import lets a kept-aside entry be. */
+export const KEPT_BLOCK_LOG_MAX = 4096;
+
 const repairsSeen: QsysSlugRepair[] = [];
 const seenKeys = new Set<string>();
 
 /** What every load of the views this process made changed, for /qsys/manage. */
 export function qsysSlugRepairs(): QsysSlugRepair[] {
   return repairsSeen;
-}
-
-/** Test seam: forget the repairs. */
-export function __resetQsysSlugRepairsForTests(): void {
-  repairsSeen.length = 0;
-  seenKeys.clear();
 }
 
 /** A view's kept-aside list as a list: a value that is not one becomes its only entry. */
@@ -94,7 +92,7 @@ export function repairQsysBlocks<V>(raw: V): V {
     const inactive = (v as { qsysInactive?: unknown }).qsysInactive;
     if (inactive !== undefined && !Array.isArray(inactive)) {
       changed = true;
-      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had kept-aside panel settings that were not a list; kept as a list of one: ${scrub(JSON.stringify(inactive), 600)}`);
+      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had kept-aside panel settings that were not a list; kept as a list of one: ${scrub(JSON.stringify(inactive), KEPT_BLOCK_LOG_MAX)}`);
       view = { ...v, qsysInactive: [inactive] };
     }
     if (!("qsys" in view)) return view;
@@ -107,13 +105,13 @@ export function repairQsysBlocks<V>(raw: V): V {
     if (!("block" in p)) {
       changed = true;
       repairs.push({ viewId: String(v.id), name: String(v.name), from: null, to: null, why: "malformed" });
-      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) has panel settings this app cannot read (${scrub(p.error)}); kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), 600)}`);
+      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) has panel settings this app cannot read (${scrub(p.error)}); kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), KEPT_BLOCK_LOG_MAX)}`);
       return setAside(view, view.qsys);
     }
     if (!canBeQsysPanel(v)) {
       changed = true;
       repairs.push({ viewId: v.id, name: v.name, from: p.block.slug, to: null, why: "not-a-console" });
-      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had panel settings for /qsys/${scrub(p.block.slug)} but is not a custom console; kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), 600)}`);
+      console.warn(`[qsys] views.json: "${scrub(v.name)}" (${scrub(v.id)}) had panel settings for /qsys/${scrub(p.block.slug)} but is not a custom console; kept aside, not a panel: ${scrub(JSON.stringify(v.qsys), KEPT_BLOCK_LOG_MAX)}`);
       return setAside(view, view.qsys);
     }
     if (owner.get(p.block.slug) === v) return view;

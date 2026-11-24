@@ -343,6 +343,19 @@ describe("panel settings kept aside", () => {
     assert.equal((await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: {} })).status, 400);
   });
 
+  it("a dismissed entry as large as an import allows is logged whole, the log's copy being the only one left", async () => {
+    const big = { kind: "staff", slug: "zone-1", note: "x".repeat(3900) };
+    seed({ ...consoleView("c1", "Booth"), qsysInactive: [big] } as View);
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.join(" ")));
+    try {
+      assert.equal((await callRoute(viewRoutes, "/api/views/c1/qsys-inactive/dismiss", { method: "POST", body: { entry: big } })).status, 200);
+    } finally {
+      log.mock.restore();
+    }
+    assert.ok(lines.some((l) => l.endsWith(JSON.stringify(big))), "the log line cut the dismissed settings short");
+  });
+
   it("POST /api/views reads qsys: null as no block, as PATCH does", async () => {
     seed();
     const made = await callRoute(viewRoutes, "/api/views", { method: "POST", body: { name: "Plain", kind: "custom", surface: "console", qsys: null } });

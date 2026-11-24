@@ -349,6 +349,12 @@ describe("Q-SYS panel pages", () => {
     assert.equal(document.querySelector("[data-qsys-no-core] a") !== null, false, "a volunteer device reached settings through a staff panel");
     cleanup();
     __resetQsysPanelsForTests();
+    // And the other way: a volunteer panel stays without the link, whatever its home.
+    await open("/qsys/zone-1?return=booth");
+    assert.ok(document.querySelector("[data-qsys-no-core]"));
+    assert.equal(document.querySelector("[data-qsys-no-core] a") !== null, false, "a volunteer panel got the settings link from a staff home");
+    cleanup();
+    __resetQsysPanelsForTests();
     await open("/qsys/manage/zone-1");
     assert.equal(document.querySelector("[data-qsys-no-core] a")?.getAttribute("href"), "/settings/integrations", "the shell has the link");
     assert.ok(screen.getByText("Edit"), "the panel stays editable in the shell");
