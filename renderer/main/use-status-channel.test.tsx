@@ -91,6 +91,19 @@ describe("useStatusChannel failed", () => {
     assert.equal(seen.failed, false, "a live push is an answer");
   });
 
+  test("onReadFailure is told why the read failed, so a caller can say it on /log", async () => {
+    const told: string[] = [];
+    // Memoised as every caller's is; the callback need not be.
+    const read = () => Promise.reject(new Error("timeout"));
+    function Probe(): React.ReactElement {
+      useStatusChannel<Dto>(read, "obs:status", true, { onReadFailure: (err) => told.push((err as Error).message) });
+      return React.createElement("output");
+    }
+    render(React.createElement(Probe));
+    await settle();
+    assert.deepEqual(told, ["timeout"]);
+  });
+
   test("a read that succeeds is not failed", async () => {
     const seen = mount(async () => ({ connected: true, recording: false, rev: 1 }), "obs:status");
     await settle();

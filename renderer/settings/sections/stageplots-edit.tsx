@@ -486,7 +486,7 @@ function EditorBody({
   header: ReactNode;
   error: boolean;
   save: Save;
-  refresh: () => Promise<void>;
+  refresh: () => void;
   onVenue: (id: string) => void;
   onPlot: (pick: { venueId: string; plotId: string }) => void;
   backgroundId: string | null;
