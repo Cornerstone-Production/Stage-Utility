@@ -939,12 +939,7 @@ export class PhotoThemesService {
 
   /** Record a finished job, if anything still wants it. */
   private async commit(job: Job, outcome: { status: "ready"; bytes: Buffer; ext: "webp" | "png" } | { status: "failed"; reason: string }): Promise<void> {
-    if (this.expected.get(job.key) !== job.id) {
-      if (outcome.status === "ready") {
-        console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
-      }
-      return this.settle(job, null);
-    }
+    if (this.expected.get(job.key) !== job.id) return this.notKept(job, outcome.status);
     if (this.paused) {
       console.warn(`[photo-theme] an edit of ${scrub(job.name)} finished while a restore was landing, and was not kept`);
       this.expected.delete(job.key);
@@ -990,14 +985,15 @@ export class PhotoThemesService {
       this.settle(job, false);
       return;
     }
-    if (dropped) {
-      if (outcome.status === "ready") {
-        console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
-      }
-      return this.settle(job, null);
-    }
+    if (dropped) return this.notKept(job, outcome.status);
     this.expected.delete(job.key);
     this.settle(job, outcome.status === "ready");
+  }
+
+  /** A finished job nothing wants any more (removed, moved, deleted): said when it was a paid edit, and counted as skipped. */
+  private notKept(job: Job, status: "ready" | "failed"): void {
+    if (status === "ready") console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
+    this.settle(job, null);
   }
 
   /** A job is over: count it into its run, and log the run when it is the last. */
