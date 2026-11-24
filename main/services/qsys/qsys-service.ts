@@ -71,7 +71,8 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
 
   private client: QrcClient | null = null;
   /** The transport handed to other code. Set only once logon, status and the
-   *  catalog have been read, so nothing can write before the current state is known. */
+   *  catalog have been read, so no other code sends on a connection whose design
+   *  it does not know yet. */
   private wrapped: QrcTransport | null = null;
   /** Bumped by every teardown, so each connection has its own number. Work started
    *  on one connection (a dial, a catalog read) checks it before it lands. */

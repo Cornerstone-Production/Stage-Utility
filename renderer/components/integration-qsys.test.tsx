@@ -2,7 +2,7 @@
 // that is a real number box with its bounds, a save that carries what is on
 // screen, and the Test answer drawn in the dialog.
 //
-// The wording of the answer ("Connected to <design>") is the manager's, covered
+// The wording of the answer ("Connected to <design>") is the service's, covered
 // in main/services/qsys/qsys-service.test.ts; here the fetch is wrapped so
 // the dialog is shown the answer a real server would give.
 
