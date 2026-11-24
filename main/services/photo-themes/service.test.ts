@@ -169,6 +169,22 @@ describe("generating", () => {
     assert.equal(photoThemes.state().themes[0]!.people.every((p) => p.pending?.reason === "Out of API credits"), true);
   });
 
+  it("fails the rest of a run once when both edits in flight come back out of credits, and sends nothing more", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    const theme = await themed(["1", "2", "3", "4", "5", "6"].map((id) => person(id)));
+    // Both in flight answer together, so their two drains of the queue overlap.
+    fake.edit = async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return { status: 429, body: errorBody("credit_balance_exhausted", "insufficient_quota") };
+    };
+    await generated();
+    assert.equal(fake.edits(), 2, "the two in flight; the rest failed without a request");
+    for (const id of ["1", "2", "3", "4", "5", "6"]) assert.equal(statusOf(theme.id, id), "failed", id);
+    const runs = lines.filter((l) => l.startsWith("[photo-theme] generate for plan"));
+    assert.deepEqual(runs, ['[photo-theme] generate for plan 2001 in "Christmas 2026": 0 made, 6 failed, 0 reused at no cost, 0 skipped'], "each job settled once");
+    assert.equal(lines.filter((l) => l.includes("failed: Out of API credits")).length, 6, "each person failed once");
+  });
+
   it("waits out a rate limit for as long as OpenAI asks, then tries again", async () => {
     const theme = await themed([person("1")]);
     let calls = 0;

@@ -909,11 +909,12 @@ export class PhotoThemesService {
     await this.fail(job, result.reason);
     if (FATAL.has(result.kind)) {
       // The rest of the run would fail the same way, each one a request: failed
-      // here, without asking.
-      for (const queued of [...this.queue]) {
-        this.queue = this.queue.filter((j) => j !== queued);
-        await this.fail(queued, result.reason);
-      }
+      // here, without asking. Taken off the queue all at once, before the first
+      // await: another job's drain, or a pump from its finally, then finds
+      // nothing left to fail twice or to send.
+      const rest = this.queue;
+      this.queue = [];
+      for (const queued of rest) await this.fail(queued, result.reason);
     }
   }
 
