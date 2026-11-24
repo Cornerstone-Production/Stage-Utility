@@ -16,10 +16,32 @@ import { installRenderDom, isPlumbing } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
+const sseHandlers = new Map<string, Set<(e: { data: string }) => void>>();
+(globalThis as unknown as { EventSource: unknown }).EventSource = class {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  readyState = 1;
+  onopen: unknown = null;
+  onerror: unknown = null;
+  onmessage: unknown = null;
+  addEventListener(channel: string, handler: (e: { data: string }) => void): void {
+    sseHandlers.set(channel, (sseHandlers.get(channel) ?? new Set()).add(handler));
+  }
+  removeEventListener(channel: string, handler: (e: { data: string }) => void): void {
+    sseHandlers.get(channel)?.delete(handler);
+  }
+  close(): void {}
+};
+const emit = (payload: unknown) => {
+  for (const h of [...(sseHandlers.get("photo-themes:changed") ?? [])]) h({ data: JSON.stringify(payload) });
+};
+
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { OpenAiKeyForm } = await import("./openai-card.js");
+const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 
 const KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
 type Conn = { method: "api-key" | null; hint: string | null; state: string; reason: string | null; checkedAt: string | null };
@@ -29,14 +51,19 @@ let current: Conn = conn();
 let calls: { method: string; url: string; body: string | null }[] = [];
 /** Answers keyed by "METHOD path"; a function sees the body. */
 let answers: Record<string, (body: string | null) => { status?: number; body: unknown }> = {};
+/** While set, a GET waits for it before answering: a read still out. */
+let holdGets: Promise<void> | null = null;
 const realFetch = globalThis.fetch;
 let client: InstanceType<typeof QueryClient> | null = null;
 
 beforeEach(() => {
   cleanup();
+  sseHandlers.clear();
+  __resetReplayCacheForTests();
   current = conn();
   calls = [];
   answers = {};
+  holdGets = null;
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
     const url = String(input);
@@ -44,8 +71,10 @@ beforeEach(() => {
     const method = init?.method ?? "GET";
     const body = init?.body ?? null;
     calls.push({ method, url, body });
+    const answerNow = current;
+    if (method === "GET" && holdGets) await holdGets;
     const a = answers[`${method} ${url}`];
-    const out = a ? a(body) : { body: current };
+    const out = a ? a(body) : { body: answerNow };
     const status = out.status ?? 200;
     return { ok: status < 400, status, statusText: "x", json: async () => out.body } as unknown as Response;
   }) as typeof fetch;
@@ -126,6 +155,29 @@ describe("the connection, as the server reports it", () => {
     assert.equal(button(container, /^Test/)?.disabled, true);
     assert.equal(button(container, /Remove key/), undefined);
     assert.equal(button(container, /^Save/)?.disabled, true, "and Save waits for something typed");
+  });
+});
+
+describe("a change made elsewhere", () => {
+  test("a key refused by an edit, or saved in another browser, moves the card without a reload", async () => {
+    const { container } = await mount();
+    assert.equal(container.querySelector("[data-openai-state]")?.getAttribute("data-openai-state"), "connected");
+    const reads = calls.length;
+    await act(async () => emit({ epoch: "e", seq: 1, running: 0, queued: 0, active: [], connection: conn({ state: "invalid-key", reason: "OpenAI rejected the API key" }) }));
+    await settle();
+    assert.equal(container.querySelector("[data-openai-state]")?.getAttribute("data-openai-state"), "invalid-key");
+    assert.equal(calls.length, reads, "the frame carries the connection: nothing is read again");
+  });
+
+  test("a read that was already out when the frame came does not put the older value back", async () => {
+    const { container } = await mount();
+    let release!: () => void;
+    holdGets = new Promise<void>((r) => (release = r));
+    await act(async () => void client!.invalidateQueries({ queryKey: ["openai", "status"] }));
+    await act(async () => emit({ epoch: "e", seq: 1, running: 0, queued: 0, active: [], connection: conn({ state: "invalid-key", reason: "OpenAI rejected the API key" }) }));
+    release();
+    await settle();
+    assert.equal(container.querySelector("[data-openai-state]")?.getAttribute("data-openai-state"), "invalid-key");
   });
 });
 

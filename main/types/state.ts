@@ -31,6 +31,15 @@ export interface ListRevisions {
   bar: number;
 }
 
+/** The followed plan auto mode is holding while Planning Center reports it live. */
+export interface RolloverHeld {
+  planId: string;
+  planTitle: string | null;
+  planDates: string | null;
+  /** The plan's planned service end, ISO. */
+  endsAt: string;
+}
+
 export interface StageState {
   serviceTypeId: string | null;
   serviceTypeName: string | null;
@@ -95,6 +104,11 @@ export interface StageState {
   /** Mac output helpers and Windows kiosks follow this server's version on their
    *  own. See machine-updates.ts. */
   autoUpdateMachines: boolean;
+  /** Auto mode holding the followed plan past its planned end (and the hour's grace)
+   *  because Planning Center still reports it live: nothing time-based moves off a live
+   *  service, so Home says so instead. Null while nothing is held. `endsAt` is the
+   *  planned end (ISO); how long ago that was is the reader's to work out. */
+  rolloverHeld: RolloverHeld | null;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
   /** How the slot editor's plan switcher steps. Editor-only — it never changes

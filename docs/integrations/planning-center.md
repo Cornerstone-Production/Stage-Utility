@@ -72,7 +72,10 @@ runs. That holds on a stale live reading too, while its service is within 12 hou
 of now. It is the same test the recorders use. The rollover comes once Live leaves
 the plan's items or reaches SERVICE END, with no time limit; while it waits, it
 says so once per plan: `[stage-controller] auto rollover waits: plan <id> ended
-<N> min ago, Planning Center still reports it live (item <title>)`.
+<N> min ago, Planning Center still reports it live (item <title>)`, and Home's
+**Needs attention** shows "Still following <plan>" with how long past its end and
+**Pick a plan**, until the service ends or another plan is picked (see
+[Needs attention](../features/operator-app.md#needs-attention)).
 
 A read that fails does not move the plan:
 

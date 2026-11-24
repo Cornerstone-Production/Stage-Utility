@@ -5,6 +5,8 @@
 // plan id) arrives on a request, and as arrays on disk. parseBook is both the
 // load and the restore check, so a restored file is held to what a save writes.
 
+import { createHash } from "node:crypto";
+
 import { isCalendarDate } from "../calendar-date.js";
 import { isPcoId } from "../pco-path.js";
 import { isPcoPersonId } from "../pco-person-id.js";
@@ -34,6 +36,10 @@ export interface ApprovedPhoto {
   approvedAt: string;
   /** A newer Planning Center photo the operator chose to keep this one over ("Keep"). */
   acceptedFrom?: string;
+  /** The theme prompt it stands for (see promptKey): the one it was made under, or
+   *  the one it was kept under ("Keep these", a move or copy into the theme).
+   *  Absent in a book written before it was recorded: then the theme's baselinePrompt. */
+  prompt?: string;
 }
 
 /** An edit that is not on screens: waiting for review, or a failed attempt. */
@@ -46,6 +52,8 @@ export interface PendingPhoto {
   planId: string | null;
   serviceDate: string | null;
   at: string;
+  /** As ApprovedPhoto's: the prompt an edit was made under. */
+  prompt?: string;
 }
 
 export interface ThemePerson {
@@ -59,8 +67,8 @@ export interface Theme {
   id: string;
   name: string;
   prompt: string;
-  /** The prompt the photos were last made, or kept, under. Differs from
-   *  `prompt` after an edit until somebody redoes everyone or keeps them. */
+  /** The prompt a photo with no `prompt` of its own stands for: one made before
+   *  each photo recorded it. Kept, and written, so such a book still reads. */
   baselinePrompt: string;
   createdAt: string;
   /** The latest service date (app zone) that used it. Only ever moves forward. */
@@ -220,6 +228,7 @@ function parseApproved(raw: unknown, what: string): ApprovedPhoto {
     approvedAt: isoTime(raw.approvedAt, `${what}'s approvedAt`),
   };
   if (raw.acceptedFrom !== undefined) out.acceptedFrom = fingerprint(raw.acceptedFrom, `${what}'s acceptedFrom`);
+  if (raw.prompt !== undefined) out.prompt = fingerprint(raw.prompt, `${what}'s prompt`);
   return out;
 }
 
@@ -236,6 +245,7 @@ function parsePending(raw: unknown, what: string): PendingPhoto {
   };
   if (raw.status === "ready") out.file = photoFile(raw.file, `${what}'s file`);
   else out.reason = reasonText(raw.reason, `${what}'s reason`);
+  if (raw.prompt !== undefined) out.prompt = fingerprint(raw.prompt, `${what}'s prompt`);
   return out;
 }
 
@@ -339,6 +349,23 @@ function parseBookTrusted(file: BookFile): Book {
     ),
     plans: new Map(file.plans.map((p) => [p.planId, { ...p }])),
   };
+}
+
+/** A prompt as a photo records it: 16 hex of a hash, so a book does not carry
+ *  2000 characters per person. Two prompts that differ by a character differ here. */
+export function promptKey(prompt: string): string {
+  return createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+}
+
+/**
+ * The person's newest photo (the edit waiting for review, else the approved
+ * one) stands for a prompt other than the theme's current one: made before the
+ * prompt was changed, and neither redone nor kept since.
+ */
+export function madeUnderEarlierPrompt(theme: Theme, person: ThemePerson): boolean {
+  const newest = person.pending?.file ? person.pending : person.approved;
+  if (!newest) return false;
+  return (newest.prompt ?? promptKey(theme.baselinePrompt)) !== promptKey(theme.prompt);
 }
 
 /** Every stored photo file the book refers to. */

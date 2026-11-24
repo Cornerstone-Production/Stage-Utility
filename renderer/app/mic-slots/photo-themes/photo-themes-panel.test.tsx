@@ -51,7 +51,8 @@ const { __resetReplayCacheForTests } = await import("../../../lib/api.js");
 const { TooltipProvider } = await import("../../../components/ui/tooltip-provider.js");
 const { Toaster } = await import("../../../components/ui/toast.js");
 
-const PLAN = { planId: "7001", serviceTypeId: "100", sortDate: "2026-12-24T00:00:00Z" };
+/** Christmas Eve, 7pm in the app's zone (America/Chicago, from /api/state): already the 25th in UTC. */
+const PLAN = { planId: "7001", serviceTypeId: "100", sortDate: "2026-12-25T01:00:00Z" };
 const XMAS = "th-aaaaaaaaaaaa";
 const EASTER = "th-bbbbbbbbbbbb";
 
@@ -60,14 +61,17 @@ interface P {
   personId: string;
   name: string;
   status: Status;
+  promptChanged: boolean;
   approved: null | { url: string; fromPlanId: string | null; fromDate: string | null; approvedAt: string; stale: boolean };
-  pending: null | { status: "generating" | "ready" | "failed"; url: string | null; reason: string | null; planId: string | null };
+  pending: null | { status: "generating" | "ready" | "failed"; url: string | null; file?: string | null; reason: string | null; planId: string | null };
 }
+/** A stored edit's name for a person: 16 hex, as the server's are. */
+const editFile = (kind: "a" | "b", personId: string) => `${kind}${personId.padStart(15, "0")}.webp`;
 const person = (personId: string, name: string, status: Status, over: Partial<P> = {}): P => {
-  const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/a${personId}.webp`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
+  const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/${editFile("a", personId)}`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
   const pending =
-    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/r${personId}.webp`, reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
-  return { personId, name, status, approved, pending, ...over };
+    status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/${editFile("b", personId)}`, file: editFile("b", personId), reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
+  return { personId, name, status, promptChanged: false, approved, pending, ...over };
 };
 
 let people: P[] = [];
@@ -79,6 +83,10 @@ let calls: { method: string; path: string; body: unknown }[] = [];
 /** "METHOD /path" to the status and body it answers instead. */
 let refuse: Record<string, { status: number; error: string }> = {};
 let hold: Promise<void> | null = null;
+/** The people an approve-all answers it skipped (their edit changed since it was shown). */
+let approveAllSkips: string[] = [];
+/** What a generate answers. */
+let generateAnswer: { queued: number; reused: number; skipped: { personId: string; name: string; reason: string }[] } = { queued: 0, reused: 0, skipped: [] };
 let closed = 0;
 
 const theme = (id: string, name: string, over: Record<string, unknown> = {}) => ({
@@ -89,7 +97,7 @@ const theme = (id: string, name: string, over: Record<string, unknown> = {}) => 
   createdAt: "2026-11-01T00:00:00Z",
   lastUsedDate: "2026-12-24",
   keptUntil: "2027-03-24",
-  plans: [{ planId: "7001", serviceTypeId: "100", sortDate: "2026-12-24T00:00:00Z" }],
+  plans: [{ planId: "7001", serviceTypeId: "100", sortDate: "2026-12-25T01:00:00Z" }],
   people: [],
   ...over,
 });
@@ -109,6 +117,8 @@ beforeEach(() => {
   calls = [];
   refuse = {};
   hold = null;
+  approveAllSkips = [];
+  generateAnswer = { queued: 0, reused: 0, skipped: [] };
   closed = 0;
   roster = { roster: "plan" };
   connection = { method: "api-key", hint: "sk-…3f2a", state: "connected", reason: null, checkedAt: null };
@@ -130,6 +140,12 @@ beforeEach(() => {
       status = no.status;
       out = { error: no.error };
     } else if (path === "/api/photo-themes") out = state();
+    else if (path === "/api/state") out = { timezone: "America/Chicago" };
+    else if (path.endsWith("/generate")) out = generateAnswer;
+    else if (path.endsWith("/approve-all")) {
+      const sent = (body as { people: { personId: string }[] }).people;
+      out = { approved: sent.length - approveAllSkips.length, skipped: approveAllSkips };
+    }
     else if (path.startsWith("/api/photo-themes/plans/") && method === "GET") {
       out = {
         planId: "7001",
@@ -138,6 +154,8 @@ beforeEach(() => {
         ...roster,
         people: people.map((p) => ({ ...p, originalUrl: p.personId === "9003" ? null : `https://avatars.example/${p.personId}` })),
         toGenerate: people.filter((p) => p.personId !== "9003" && (p.status === "none" || p.status === "failed")).length,
+        // The server's count for Redo all; the panel shows it as it is.
+        toRedoAll: people.filter((p) => p.personId !== "9003" && (p.promptChanged || p.status === "none" || p.status === "failed")).length,
       };
     }
     return { ok: status < 400, status, statusText: "x", json: async () => out, text: async () => JSON.stringify(out) } as unknown as Response;
@@ -193,7 +211,7 @@ const chipOf = (id: string) => card(id).querySelector("[data-person-chip]")?.tex
 const gets = () => calls.filter((c) => c.method === "GET" && c.path === "/api/photo-themes").length;
 
 describe("each status a card can be in", () => {
-  const view = (p: P, ctx = { planId: "7001" }) => cardView(p as never, ctx);
+  const view = (p: P, ctx: { planId?: string } = { planId: "7001" }) => cardView(p as never, { ...ctx, timeZone: "America/Chicago" });
   test("the chip and the buttons for each", () => {
     assert.deepEqual(
       [
@@ -216,7 +234,7 @@ describe("each status a card can be in", () => {
   });
 
   test("an approved photo from another service says which; this service's own does not", () => {
-    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-14", approvedAt: "", stale: false } })).note, "From Mon, Dec 14");
+    assert.equal(view(person("1", "A", "approved", { approved: { url: "u", fromPlanId: "6000", fromDate: "2026-12-15T01:00:00Z", approvedAt: "", stale: false } })).note, "From Mon, Dec 14");
     assert.equal(view(person("1", "A", "approved")).note, null);
   });
 
@@ -232,7 +250,7 @@ describe("each status a card can be in", () => {
     assert.equal(chipOf("9001"), "Approved");
     assert.equal(chipOf("9002"), "Ready to review");
     assert.equal(chipOf("9003"), "No Planning Center photo");
-    assert.equal(document.querySelector("[data-generate]")?.textContent, "Everyone has a photo in Christmas 2026");
+    assert.equal(document.querySelector("[data-generate]")?.textContent, "Nothing to send: 1 without a usable Planning Center photo", "Casey has no photo, and none to make one from");
   });
 });
 
@@ -253,6 +271,18 @@ describe("the header and the hints", () => {
     people = [person("9002", "Jordan P.", "ready")];
     await mount();
     assert.equal(screen.queryByRole("group", { name: /Photos shown on screens/ }), null);
+  });
+
+  test("with nobody it could send, Generate says why instead of claiming everyone has a photo", async () => {
+    people = [person("9001", "Alex R.", "approved"), person("9003", "Casey L.", "none")];
+    await mount();
+    const btn = document.querySelector("[data-generate]") as HTMLButtonElement;
+    assert.equal(btn.textContent, "Nothing to send: 1 without a usable Planning Center photo");
+    assert.equal(btn.disabled, true);
+    people = [person("9001", "Alex R.", "approved")];
+    cleanup();
+    await mount();
+    assert.equal((document.querySelector("[data-generate]") as HTMLButtonElement).textContent, "Everyone has a photo in Christmas 2026");
   });
 
   test("a failing connection says so in the panel, with the way to Integrations", async () => {
@@ -280,12 +310,13 @@ describe("the header and the hints", () => {
 });
 
 describe("Approve and Approve all", () => {
-  test("Approve sends that one person and the card follows the server", async () => {
+  test("Approve sends that one person, with the edit it showed, and the card follows the server", async () => {
     await mount();
     people = people.map((p) => (p.personId === "9002" ? person("9002", "Jordan P.", "approved") : p));
     await click(screen.getByRole("button", { name: "Approve Jordan P." }));
     const post = writes().find((c) => c.path.endsWith("/people/9002/approve"))!;
     assert.equal(post.method, "POST");
+    assert.deepEqual(post.body, { file: editFile("b", "9002") });
     assert.equal(chipOf("9002"), "Approved");
   });
 
@@ -300,7 +331,7 @@ describe("Approve and Approve all", () => {
   test("Approve all counts what the route approves: ready edits made for THIS plan", async () => {
     people = [
       person("9002", "Jordan P.", "ready"),
-      person("9004", "Morgan T.", "ready", { pending: { status: "ready", url: "/x.webp", reason: null, planId: "6000" } }),
+      person("9004", "Morgan T.", "ready", { pending: { status: "ready", url: "/x.webp", file: editFile("b", "9004"), reason: null, planId: "6000" } }),
       person("9005", "Riley S.", "ready"),
     ];
     await mount();
@@ -309,6 +340,20 @@ describe("Approve and Approve all", () => {
     await click(btn);
     const post = writes().find((c) => c.path === "/api/photo-themes/plans/7001/approve-all")!;
     assert.equal(post.method, "POST");
+    assert.deepEqual(post.body, {
+      people: [
+        { personId: "9002", file: editFile("b", "9002") },
+        { personId: "9005", file: editFile("b", "9005") },
+      ],
+    }, "the edits on screen, by file: nothing that lands later");
+  });
+
+  test("Approve all names whoever it left for another look", async () => {
+    people = [person("9002", "Jordan P.", "ready"), person("9005", "Riley S.", "ready")];
+    approveAllSkips = ["9005"];
+    await mount();
+    await click(screen.getByRole("button", { name: /Approve all ready/ }));
+    assert.match(document.body.textContent ?? "", /Changed since it was shown, so left for another look: Riley S\./);
   });
 
   test("with nothing ready, Approve all cannot be pressed", async () => {
@@ -390,6 +435,34 @@ describe("Move, Copy and Remove", () => {
   });
 });
 
+describe("without a working key", () => {
+  for (const state of ["not-connected", "invalid-key"] as const) {
+    test(`${state}: Generate, Redo and Redo all wait for a key; the switch, Approve, Approve all and Remove do not`, async () => {
+      connection = { method: state === "not-connected" ? null : "api-key", hint: state === "not-connected" ? null : "sk-…3f2a", state, reason: null, checkedAt: null };
+      themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+      people = [person("9001", "Alex R.", "approved", { promptChanged: true }), person("9002", "Jordan P.", "ready"), person("9004", "Dana K.", "none")];
+      await mount();
+      const disabled = (name: string | RegExp) => (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+      assert.equal(disabled(/^Generate 1 for/), true, "Generate");
+      assert.equal(disabled("Redo Alex R."), true, "Redo");
+      assert.equal(disabled(/^Redo all/), true, "Redo all");
+      assert.equal(screen.getByRole("link", { name: "Open Integrations" }).getAttribute("href"), "/settings/integrations", "says where to fix it");
+
+      assert.equal(disabled("Approve Jordan P."), false, "Approve");
+      assert.equal(disabled(/Approve all ready/), false, "Approve all");
+      assert.equal(disabled("Keep these"), false, "Keep these");
+      const sw = screen.getByRole("group", { name: /Photos shown on screens/ });
+      choice = { ...choice!, show: "original" };
+      await click(within(sw).getByRole("button", { name: "Original" }));
+      assert.ok(writes().some((c) => c.method === "PATCH" && (c.body as { show?: string }).show === "original"), "the switch still sends");
+      await openMenu(screen.getByRole("button", { name: "More for Alex R." }));
+      await choose(screen.getByRole("menuitem", { name: "Remove from theme…" }));
+      await click(within(screen.getByRole("group", { name: "Confirm remove" })).getByRole("button", { name: "Remove" }));
+      assert.ok(writes().some((c) => c.method === "DELETE" && c.path.endsWith("/people/9001")), "Remove still sends");
+    });
+  }
+});
+
 describe("what costs money", () => {
   test("mounting, choosing a theme, switching and frames never send a generate or a redo", async () => {
     await mount();
@@ -420,6 +493,14 @@ describe("what costs money", () => {
     const posts = writes().filter((c) => c.path.endsWith("/generate"));
     assert.equal(posts.length, 1);
     assert.deepEqual(posts[0]!.body, { serviceTypeId: "100", mode: "missing" });
+  });
+
+  test("Generate says whom it did not send, and why", async () => {
+    people = [person("9001", "Alex R.", "none"), person("9004", "Dana K.", "none")];
+    generateAnswer = { queued: 1, reused: 0, skipped: [{ personId: "9004", name: "Dana K.", reason: "Their photo is not on Planning Center" }] };
+    await mount();
+    await click(screen.getByRole("button", { name: /Generate 2 for/ }));
+    assert.match(document.body.textContent ?? "", /Not sent: Dana K\. \(Their photo is not on Planning Center\)/);
   });
 
   test("a prompt typed and not yet kept is saved BEFORE Generate sends", async () => {
@@ -488,19 +569,46 @@ describe("what costs money", () => {
     });
   }
 
-  test("Redo all, from the prompt-changed banner, is Generate over everyone", async () => {
+  test("Redo all says how many it would bill, asks first, and sends nothing on Cancel", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [
+      person("9001", "Alex R.", "approved", { promptChanged: true }),
+      person("9002", "Jordan P.", "ready"),
+      person("9004", "Dana K.", "approved", { promptChanged: true }),
+      person("9005", "Riley S.", "none"),
+    ];
     await mount();
     assert.match(document.querySelector("[data-prompt-changed]")?.textContent ?? "", /changed/);
-    await click(screen.getByRole("button", { name: "Redo all" }));
-    assert.deepEqual(writes().find((c) => c.path.endsWith("/generate"))!.body, { serviceTypeId: "100", mode: "all" });
+    const redoAll = screen.getByRole("button", { name: /^Redo all/ });
+    assert.equal(redoAll.textContent, "Redo all (3)", "Alex and Dana, made under the old prompt, and Riley, who has none: not Jordan");
+    await click(redoAll);
+    assert.deepEqual(writes().filter((c) => c.path.endsWith("/generate")), [], "one press only asks");
+    const box = screen.getByRole("group", { name: "Confirm redo all" });
+    assert.match(box.textContent ?? "", /Make 3 photos again for Christmas 2026\? Each is a new OpenAI edit, and is billed/);
+    await click(within(box).getByRole("button", { name: "Cancel" }));
+    assert.equal(screen.queryByRole("group", { name: "Confirm redo all" }) === null, true);
+    assert.deepEqual(writes().filter((c) => c.path.endsWith("/generate")), []);
+
+    await click(screen.getByRole("button", { name: /^Redo all/ }));
+    await click(within(screen.getByRole("group", { name: "Confirm redo all" })).getByRole("button", { name: "Redo 3" }));
+    const sent = writes().filter((c) => c.path.endsWith("/generate"));
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0]!.body, { serviceTypeId: "100", mode: "all" });
   });
 
   test("Keep these accepts the prompt without redoing anyone", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved", { promptChanged: true })];
     await mount();
     await click(screen.getByRole("button", { name: "Keep these" }));
     assert.deepEqual(writes().map((c) => c.path.replace(/th-[0-9a-f]{12}/, "T")), ["/api/photo-themes/themes/T/keep-prompt"]);
+  });
+
+  test("the prompt-changed banner is about this service's people: flagged only on another service, it is not shown here", async () => {
+    themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved"), person("9002", "Jordan P.", "ready")];
+    await mount();
+    assert.equal(document.querySelector("[data-prompt-changed]") === null, true, "nobody here was made under the old prompt: Redo all would bill for nothing");
   });
 });
 
