@@ -9,6 +9,10 @@ const MAX_CHANGE_GROUPS = 4;
 interface Group {
   controls: Set<string>;
   rate: number | null;
+  /** Reply form: the AutoPoll request id every push repeats, once AutoPoll has run. */
+  pollId?: unknown;
+  /** Reply form: changes waiting for the group's AutoPoll to start. */
+  pending: QrcChange[];
 }
 
 interface Session {
@@ -34,6 +38,15 @@ export class FakeQrcServer {
   received: { method: string; params: unknown }[] = [];
   /** When true, requests are recorded and held unanswered until releaseHeld(). */
   holdReplies = false;
+  /**
+   * How change-group pushes reach the client. QSC's QRC Commands page shows
+   * AutoPoll results as repeated replies carrying the AutoPoll request's id
+   * ("reply"); community modules handle `ChangeGroup.Poll` notifications
+   * ("notify"). Which one a Core sends is unverified, so the client takes both.
+   */
+  autoPollForm: "notify" | "reply" = "notify";
+  /** The most change groups any one connection has held at once. */
+  maxGroups = 0;
   private held: { session: Session; text: string }[] = [];
 
   private server: net.Server | null = null;
@@ -126,9 +139,7 @@ export class FakeQrcServer {
   private pushChange(component: string, control: QrcControl): void {
     for (const s of this.sessions) {
       for (const [id, group] of s.groups) {
-        if (group.controls.has(key(component, control.Name))) {
-          this.notify(s, "ChangeGroup.Poll", { Id: id, Changes: [this.change(component, control)] });
-        }
+        if (group.controls.has(key(component, control.Name))) this.push(s, id, group, [this.change(component, control)]);
       }
     }
   }
@@ -233,7 +244,10 @@ export class FakeQrcServer {
       case "ChangeGroup.AutoPoll": {
         const group = session.groups.get(String(p.Id));
         if (group) group.rate = Number(p.Rate);
-        this.reply(session, msg.id, true);
+        if (group && this.autoPollForm === "reply") {
+          group.pollId = msg.id;
+          this.reply(session, msg.id, { Id: String(p.Id), Changes: group.pending.splice(0) });
+        } else this.reply(session, msg.id, true);
         return;
       }
       case "ChangeGroup.Clear": {
@@ -297,8 +311,9 @@ export class FakeQrcServer {
     let group = session.groups.get(gid);
     if (!group) {
       if (session.groups.size >= MAX_CHANGE_GROUPS) return this.fail(session, id, 5, "Change groups exhausted");
-      group = { controls: new Set(), rate: null };
+      group = { controls: new Set(), rate: null, pending: [] };
       session.groups.set(gid, group);
+      this.maxGroups = Math.max(this.maxGroups, session.groups.size);
     }
     const fresh: QrcChange[] = [];
     for (const c of controls) {
@@ -307,7 +322,7 @@ export class FakeQrcServer {
     }
     this.reply(session, id, true);
     // Adding a control resends its current state.
-    this.notify(session, "ChangeGroup.Poll", { Id: gid, Changes: fresh });
+    this.push(session, gid, group, fresh);
   }
 
   /**
@@ -328,6 +343,13 @@ export class FakeQrcServer {
       const control = this.find(component, name);
       if (control) changes.push(this.change(component, control));
     }
-    this.notify(session, "ChangeGroup.Poll", { Id: id, Changes: changes });
+    this.push(session, id, group, changes);
+  }
+
+  /** Deliver a group's changes in the configured form. */
+  private push(session: Session, id: string, group: Group, changes: QrcChange[]): void {
+    if (this.autoPollForm === "notify") return this.notify(session, "ChangeGroup.Poll", { Id: id, Changes: changes });
+    if (group.pollId === undefined) group.pending.push(...changes);
+    else this.reply(session, group.pollId, { Id: id, Changes: changes });
   }
 }

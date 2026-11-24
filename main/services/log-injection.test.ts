@@ -163,6 +163,9 @@ const REQUEST_FACING = [
   // PRODCOM_DEBUG frame and the error text ProdCom sends back, all off its socket
   // or REST replies.
   "prodcom-service.ts",
+  // Its skip line names a panel id and a control address, both saved into a View
+  // over HTTP; the rest is fixed group names, counts and what the Core said back.
+  "qsys/qsys-watch.ts",
   // Names a wireless connection or a feed out of a restored bundle, which
   // POST /api/config/import takes from anyone on the LAN.
   "restore-credentials.ts",
@@ -374,7 +377,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["pvp-service.ts", DEVICE],
   ["qsys/qrc-client.ts", DEVICE],
   ["qsys/qsys-service.ts", DEVICE],
-  ["qsys/qsys-watch.ts", UNAUDITED],
   ["reaper-service.ts", DEVICE],
   ["reconcile-records.ts", UNAUDITED],
   // Its one line is a fixed sentence naming a test hook; no value reaches it.
@@ -588,6 +590,8 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "plan-export.ts"),
     // Off a ProdCom socket or REST reply; see REQUEST_FACING.
     path.join(HERE, "prodcom-service.ts"),
+    // A panel id and control address saved into a View over HTTP; see REQUEST_FACING.
+    path.join(HERE, "qsys/qsys-watch.ts"),
     // Its one summary line names the serviceKey the replay was handed, which
     // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
     // — the same exposure history-edit.ts carries.

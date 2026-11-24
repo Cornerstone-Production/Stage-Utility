@@ -19,8 +19,11 @@
 // The value cache serves hydration (`current`). It belongs to one connection:
 // a new transport, or a new DesignCode on the same one, empties it before
 // anything is re-read, so a value from before a drop is never served or
-// replayed. `ready()` is false until the rebuild after such a reset has been
-// answered and every watched control has a value from this connection.
+// replayed. `ready()` (write readiness) is false from such a reset until the
+// rebuilt groups have been Invalidated; `current()` answers per address.
+//
+// AutoPoll pushes arrive as `ChangeGroup.Poll` notifications, or as repeated
+// replies to the AutoPoll request, which QrcClient hands over in the same shape.
 
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
@@ -50,7 +53,8 @@ export interface WatchSource {
   readonly transport: QrcTransport | null;
   readonly meterRates: QsysMeterRates;
   getCatalog(): QsysCatalog | null;
-  onCatalog(cb: (c: QsysCatalog) => void): void;
+  /** Returns a function that stops listening. */
+  onCatalog(cb: (c: QsysCatalog) => void): () => void;
 }
 
 /**
@@ -77,6 +81,10 @@ interface Desired {
 const sameChange = (a: QrcChange, b: QrcChange): boolean =>
   a.Value === b.Value && a.String === b.String && a.Position === b.Position;
 
+/** Retry a failed update after 1 s, doubling to this cap. */
+const RETRY_FIRST_MS = 1_000;
+const RETRY_MAX_MS = 30_000;
+
 export class QsysWatch {
   private panels: WatchPanel[] = [];
 
@@ -86,10 +94,13 @@ export class QsysWatch {
   private readonly groups = new Map<GroupId, Group>();
   private meterKinds = new Map<string, Set<PanelKind>>();
   private readonly cache = new Map<string, QrcChange>();
-  /** Set by a reset; cleared once the rebuilt groups have been Invalidated. */
+  /** Set when the connection or the design is new; cleared once the rebuilt
+   *  groups have been Invalidated. Write readiness is exactly its negation. */
   private rebuilding = true;
-  /** A run failed on the live connection, so what the Core holds is unknown. */
+  /** A run failed on the live connection, so which groups the Core holds is unknown. */
   private broken = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryDelay = 0;
 
   /** Addresses already logged as missing from this catalog. */
   private skipped = new Set<string>();
@@ -98,10 +109,19 @@ export class QsysWatch {
 
   private running: Promise<void> | null = null;
   private dirty = false;
+  private readonly unsubscribe: (() => void)[] = [];
 
-  constructor(private readonly source: WatchSource) {
-    source.onCatalog(() => this.kick());
-    addSubscriptionListener(() => this.kick());
+  constructor(
+    private readonly source: WatchSource,
+    onSubscriptions: (cb: () => void) => () => void = addSubscriptionListener,
+  ) {
+    this.unsubscribe.push(source.onCatalog(() => this.kick()), onSubscriptions(() => this.kick()));
+  }
+
+  /** Stop listening and cancel a pending retry. For tests; the singleton lives as long as the process. */
+  dispose(): void {
+    for (const off of this.unsubscribe.splice(0)) off();
+    this.cancelRetry();
   }
 
   /** Every panel that could be open, with the addresses its objects read. */
@@ -112,9 +132,10 @@ export class QsysWatch {
 
   /**
    * Bring the Core's change groups in line with the open panels. One run at a
-   * time; a call during a run schedules one more. Rejects when the Core refuses
-   * a change on the live connection; a connection that drops mid-run is not a
-   * failure (the reconnect rebuilds from scratch).
+   * time; a call during a run queues one more pass, which runs even if the
+   * current pass fails. Rejects when the last pass was refused by the Core on the
+   * live connection (a retry is already scheduled); a connection that drops
+   * mid-run is not a failure, because the reconnect rebuilds from scratch.
    */
   recompute(): Promise<void> {
     this.dirty = true;
@@ -124,10 +145,15 @@ export class QsysWatch {
     return this.running;
   }
 
-  /** The cached values of these addresses that were read on the live connection. */
+  /**
+   * The cached values of these addresses, read on the live connection and the
+   * current design. An address with no value yet is absent: this is the
+   * per-address "have we read it" answer, for hydration.
+   */
   current(addresses: QsysAddress[]): Map<string, QrcChange> {
     this.sync();
     const out = new Map<string, QrcChange>();
+    if (this.designStale()) return out;
     for (const a of addresses) {
       const k = addressKey(a);
       const v = this.cache.get(k);
@@ -137,28 +163,38 @@ export class QsysWatch {
   }
 
   /**
-   * True once the current state has been read on the live connection: the
-   * groups are built (and Invalidated after a reconnect or design change) and
-   * every watched control has a value. Writes wait on this.
+   * Write readiness, at connection level. False from a connect, a reconnect or a
+   * new DesignCode until the rebuilt groups have been Invalidated, so nothing is
+   * written before the Core's current state has been read again. Opening a panel
+   * or a refused group update on a live connection does not change it.
    */
   ready(): boolean {
     this.sync();
-    if (!this.transport || this.rebuilding) return false;
-    for (const g of this.groups.values()) for (const k of g.keys) if (!this.cache.has(k)) return false;
-    return true;
+    return !!this.transport && !this.rebuilding && !this.designStale();
+  }
+
+  /** The catalog moved to a new design that the groups have not caught up with yet. */
+  private designStale(): boolean {
+    return this.designCode !== null && this.source.getCatalog()?.designCode !== this.designCode;
   }
 
   private kick(): void {
-    this.recompute().catch((err: unknown) => {
-      console.warn(`[qsys] change group update failed: ${scrub(errorMessage(err))}`);
-    });
+    // A refusal is logged, and retried, by scheduleRetry where it is caught.
+    this.recompute().catch(() => undefined);
   }
 
   private async drain(): Promise<void> {
+    let failure: unknown = null;
     while (this.dirty) {
       this.dirty = false;
-      await this.reconcile();
+      try {
+        await this.reconcile();
+        failure = null;
+      } catch (err) {
+        failure = err;
+      }
     }
+    if (failure) throw failure;
   }
 
   /** Adopt the service's current transport. A different one means the old groups
@@ -169,10 +205,12 @@ export class QsysWatch {
     this.transport = t;
     this.designCode = null;
     this.broken = false;
+    this.cancelRetry();
     this.reset();
     if (t) t.onNotification((method, params) => this.onNotification(t, method, params));
   }
 
+  /** Forget the groups and every value: the connection or the design is new. */
   private reset(): void {
     this.groups.clear();
     this.meterKinds = new Map();
@@ -186,15 +224,19 @@ export class QsysWatch {
     const catalog = this.source.getCatalog();
     if (!t || !catalog) return;
     try {
-      const redesigned = this.designCode !== null && catalog.designCode !== this.designCode;
-      if (redesigned || this.broken) {
-        console.log(`[qsys] ${redesigned ? "design changed" : "retrying after a failed update"}, rebuilding change groups`);
+      if (this.designStale()) {
+        console.log("[qsys] design changed, rebuilding change groups");
         // Same connection, so the groups are still on the Core: remove them.
-        // After a failure the Core may hold any of our groups; otherwise only the ones we built.
-        for (const id of this.broken ? GROUP_IDS : [...this.groups.keys()]) await this.destroyLeftover(t, id);
+        for (const id of [...this.groups.keys()]) await this.destroyLeftover(t, id);
         this.reset();
-        this.broken = false;
+      } else if (this.broken) {
+        console.log("[qsys] rebuilding change groups after a failed update");
+        // After a failure the Core may hold any of our groups. Same design and
+        // connection, so the cached values stay good; the re-adds resend them.
+        for (const id of GROUP_IDS) await this.destroyLeftover(t, id);
+        this.groups.clear();
       }
+      this.broken = false;
       this.designCode = catalog.designCode;
 
       const want = this.desired(catalog);
@@ -206,16 +248,32 @@ export class QsysWatch {
         for (const id of this.groups.keys()) await t.send("ChangeGroup.Invalidate", { Id: id });
         this.rebuilding = false;
       }
+      this.retryDelay = 0;
       this.logSummary();
     } catch (err) {
       // The connection went away under us: the service logs that, and the next
       // connection's catalog rebuilds everything.
       if (this.source.transport !== t) return;
-      // What the Core holds is unknown now: rebuild from nothing next time.
       this.broken = true;
-      this.rebuilding = true;
+      this.scheduleRetry(err);
       throw err;
     }
+  }
+
+  /** One retry at a time, 1 s doubling to 30 s; cancelled when the connection changes. */
+  private scheduleRetry(err: unknown): void {
+    this.cancelRetry();
+    this.retryDelay = this.retryDelay ? Math.min(this.retryDelay * 2, RETRY_MAX_MS) : RETRY_FIRST_MS;
+    console.warn(`[qsys] change group update failed: ${scrub(errorMessage(err))}; retrying in ${scrub(this.retryDelay / 1000)} s`);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.kick();
+    }, this.retryDelay);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   /**
@@ -228,7 +286,7 @@ export class QsysWatch {
       await t.send("ChangeGroup.Destroy", { Id: id });
     } catch (err) {
       if (!(err instanceof QrcError)) throw err;
-      console.log(`[qsys] change group ${id} was not on the Core (${scrub(err.message)})`);
+      console.log(`[qsys] change group ${scrub(id)} was not on the Core (${scrub(err.message)})`);
     }
   }
 
@@ -357,7 +415,7 @@ export class QsysWatch {
     const summary = `${n("values")} values, ${n("meters-volunteer")} volunteer meters, ${n("meters-staff")} staff meters`;
     if (summary === this.lastSummary) return;
     this.lastSummary = summary;
-    console.log(`[qsys] watching ${summary}`);
+    console.log(`[qsys] watching ${scrub(summary)}`);
   }
 }
 

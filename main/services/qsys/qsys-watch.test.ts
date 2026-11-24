@@ -4,7 +4,7 @@
 // groups die with the connection.
 
 import assert from "node:assert/strict";
-import { after, afterEach, before, beforeEach, mock, test } from "node:test";
+import { after, afterEach, before, beforeEach, describe, mock, test } from "node:test";
 import { addBroadcastListener, setNamedSubscriberCheck, subscriptionsChanged } from "../broadcaster.js";
 import { addressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
 import { FakeQrcServer } from "./fake-qrc-server.js";
@@ -68,6 +68,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  watch.dispose();
   svc.stop();
   await fake.stop();
 });
@@ -133,244 +134,343 @@ const methods = (from = 0): string[] => fake.received.slice(from).map((r) => r.m
 const autoPollRates = (from = 0): number[] =>
   fake.received.slice(from).filter((r) => r.method === "ChangeGroup.AutoPoll").map((r) => (r.params as { Rate: number }).Rate);
 
-test("only controls of panels whose qsys:watch:<id> channel is named by a client are added", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
-  await watch.recompute();
-  assert.equal(methods().filter((m) => m.startsWith("ChangeGroup.")).length, 0, "nothing is open, yet a change group was touched");
-  await open("a");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
-  await open("b");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"]);
-});
+for (const form of ["notify", "reply"] as const) {
+  describe(`pushes as ${form}`, () => {
+    beforeEach(() => {
+      fake.autoPollForm = form;
+    });
 
-test("closing the last panel that uses a control removes it; no panels = groups cleared, no AutoPoll", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN, MUTE, METER), panel("b", "staff", GAIN)]);
-  await open("a", "b");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values", "Zone 1/meter_1@meters-staff"]);
-  assert.equal(watch.current([MUTE]).size, 1);
-  await close("a");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"], "a control no open panel uses is still watched");
-  assert.equal(watch.current([MUTE]).size, 0, "the cache still serves a control nobody watches, which will go stale");
-  assert.ok(!methods().includes("ChangeGroup.Remove"), "QRC's Remove is named-controls only; it cannot remove a component control");
-  const mark = fake.received.length;
-  await close("b");
-  assert.equal(liveGroups().size, 0, "with no panels open the Core still holds a change group (and its AutoPoll)");
-  assert.deepEqual(autoPollRates(mark), [], "an AutoPoll was started with no panels open");
-  assert.equal(watch.current([GAIN]).size, 0);
-});
+    test("only controls of panels whose qsys:watch:<id> channel is named by a client are added", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
+      await watch.recompute();
+      assert.equal(methods().filter((m) => m.startsWith("ChangeGroup.")).length, 0, "nothing is open, yet a change group was touched");
+      await open("a");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+      await open("b");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"]);
+    });
 
-test("volunteer meters poll at 1/volunteerMeterHz, staff meters at 1/staffMeterHz, values at the faster active rate", async () => {
-  await connect();
-  watch.setPanels([panel("vol", "volunteer", GAIN, METER), panel("staff", "staff", MUTE, METER2)]);
-  await open("vol");
-  assert.deepEqual(
-    [...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(),
-    ["meters-volunteer@0.1", "values@0.1"],
-    "a volunteer-only setup polls at the staff rate",
-  );
-  await open("staff");
-  assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-staff@0.05", "meters-volunteer@0.1", "values@0.05"]);
-  assert.deepEqual([...new Set(autoPollRates())].sort(), [0.05, 0.1]);
-  // The values group dropped back when the staff panel closed.
-  await close("staff");
-  assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-volunteer@0.1", "values@0.1"]);
-});
+    test("closing the last panel that uses a control removes it; no panels = groups cleared, no AutoPoll", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN, MUTE, METER), panel("b", "staff", GAIN)]);
+      await open("a", "b");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values", "Zone 1/meter_1@meters-staff"]);
+      assert.equal(watch.current([MUTE]).size, 1);
+      await close("a");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"], "a control no open panel uses is still watched");
+      assert.equal(watch.current([MUTE]).size, 0, "the cache still serves a control nobody watches, which will go stale");
+      assert.ok(!methods().includes("ChangeGroup.Remove"), "QRC's Remove is named-controls only; it cannot remove a component control");
+      const mark = fake.received.length;
+      await close("b");
+      assert.equal(liveGroups().size, 0, "with no panels open the Core still holds a change group (and its AutoPoll)");
+      assert.deepEqual(autoPollRates(mark), [], "an AutoPoll was started with no panels open");
+      assert.equal(watch.current([GAIN]).size, 0);
+    });
 
-test("rates follow the settings: a volunteer rate of 5 polls every 0.2 s", async () => {
-  await connect({ volunteerMeterHz: 5, staffMeterHz: 25 });
-  watch.setPanels([panel("vol", "volunteer", METER), panel("staff", "staff", METER2)]);
-  await open("vol", "staff");
-  assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-staff@0.04", "meters-volunteer@0.2"]);
-});
+    test("volunteer meters poll at 1/volunteerMeterHz, staff meters at 1/staffMeterHz, values at the faster active rate", async () => {
+      await connect();
+      watch.setPanels([panel("vol", "volunteer", GAIN, METER), panel("staff", "staff", MUTE, METER2)]);
+      await open("vol");
+      assert.deepEqual(
+        [...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(),
+        ["meters-volunteer@0.1", "values@0.1"],
+        "a volunteer-only setup polls at the staff rate",
+      );
+      await open("staff");
+      assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-staff@0.05", "meters-volunteer@0.1", "values@0.05"]);
+      assert.deepEqual([...new Set(autoPollRates())].sort(), [0.05, 0.1]);
+      // The values group dropped back when the staff panel closed.
+      await close("staff");
+      assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-volunteer@0.1", "values@0.1"]);
+    });
 
-test("a meter on both a volunteer and a staff panel goes in the staff group only, and reaches both channels", async () => {
-  await connect();
-  watch.setPanels([panel("vol", "volunteer", METER), panel("staff", "staff", METER)]);
-  await open("vol", "staff");
-  assert.deepEqual(membership(), ["Zone 1/meter_1@meters-staff"]);
-  sent.length = 0;
-  fake.setControl("Zone 1", "meter_1", -12);
-  await settle();
-  assert.deepEqual(
-    sent.map((s) => s.channel).sort(),
-    ["qsys:meters:staff", "qsys:meters:volunteer"],
-    "a volunteer panel showing a meter that rides the staff group never hears it",
-  );
-});
+    test("rates follow the settings: a volunteer rate of 5 polls every 0.2 s", async () => {
+      await connect({ volunteerMeterHz: 5, staffMeterHz: 25 });
+      watch.setPanels([panel("vol", "volunteer", METER), panel("staff", "staff", METER2)]);
+      await open("vol", "staff");
+      assert.deepEqual([...liveGroups()].map(([id, g]) => `${id}@${g.rate}`).sort(), ["meters-staff@0.04", "meters-volunteer@0.2"]);
+    });
 
-test("unchanged demand sends nothing, and a pure addition sends only the new control's add", async () => {
-  // Every subscribe anywhere in the app runs a recompute; it must cost the Core nothing.
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN, METER), panel("b", "staff", MUTE)]);
-  await open("a");
-  let mark = fake.received.length;
-  subscriptionsChanged();
-  await watch.recompute();
-  await settle();
-  assert.deepEqual(methods(mark).filter((m) => m.startsWith("ChangeGroup.")), [], "a recompute with unchanged demand touched the Core");
-  mark = fake.received.length;
-  await open("b");
-  assert.deepEqual(
-    fake.received.slice(mark).filter((r) => r.method.startsWith("ChangeGroup.")),
-    [{ method: "ChangeGroup.AddComponentControl", params: { Id: "values", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "mute" }] } } }],
-    "adding one control rebuilt more than it added",
-  );
-});
+    test("a meter on both a volunteer and a staff panel goes in the staff group only, and reaches both channels", async () => {
+      await connect();
+      watch.setPanels([panel("vol", "volunteer", METER), panel("staff", "staff", METER)]);
+      await open("vol", "staff");
+      assert.deepEqual(membership(), ["Zone 1/meter_1@meters-staff"]);
+      sent.length = 0;
+      fake.setControl("Zone 1", "meter_1", -12);
+      await settle();
+      assert.deepEqual(
+        sent.map((s) => s.channel).sort(),
+        ["qsys:meters:staff", "qsys:meters:volunteer"],
+        "a volunteer panel showing a meter that rides the staff group never hears it",
+      );
+    });
 
-test("never uses more than 3 change groups", async () => {
-  await connect();
-  watch.setPanels([
-    panel("v1", "volunteer", GAIN, METER),
-    panel("v2", "volunteer", MUTE, METER2),
-    panel("s1", "staff", ZONE_GAIN, METER),
-    panel("s2", "staff", METER2),
-  ]);
-  let most = 0;
-  const step = async (fn: () => Promise<void>) => {
-    await fn();
-    most = Math.max(most, liveGroups().size);
-  };
-  await step(() => open("v1"));
-  await step(() => open("s1"));
-  await step(() => open("v2"));
-  await step(() => open("s2"));
-  await step(() => close("s1"));
-  await step(() => open("s1"));
-  await step(() => close("v1", "v2"));
-  await step(() => open("v1"));
-  fake.status = { ...fake.status, DesignCode: "design-2" };
-  pushEngineStatus();
-  await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
-  await step(() => watch.recompute());
-  assert.ok(most <= 3, `the Core held ${most} change groups at once (QRC allows 4 per connection)`);
-});
+    test("unchanged demand sends nothing, and a pure addition sends only the new control's add", async () => {
+      // Every subscribe anywhere in the app runs a recompute; it must cost the Core nothing.
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN, METER), panel("b", "staff", MUTE)]);
+      await open("a");
+      let mark = fake.received.length;
+      subscriptionsChanged();
+      await watch.recompute();
+      await settle();
+      assert.deepEqual(methods(mark).filter((m) => m.startsWith("ChangeGroup.")), [], "a recompute with unchanged demand touched the Core");
+      mark = fake.received.length;
+      await open("b");
+      assert.deepEqual(
+        fake.received.slice(mark).filter((r) => r.method.startsWith("ChangeGroup.")),
+        [{ method: "ChangeGroup.AddComponentControl", params: { Id: "values", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "mute" }] } } }],
+        "adding one control rebuilt more than it added",
+      );
+    });
 
-test("changes broadcast on the right channel with only the changed controls", async () => {
-  await connect();
-  watch.setPanels([panel("vol", "volunteer", GAIN, MUTE, METER), panel("staff", "staff", METER2)]);
-  await open("vol", "staff");
-  sent.length = 0;
-  fake.setControl("Lobby_Mixer", "gain", -3);
-  await settle();
-  assert.deepEqual(sent, [{ channel: "qsys:values", changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -3, String: "-3dB", Position: 97 / 120 }] }]);
-  sent.length = 0;
-  fake.setControl("Zone 1", "meter_1", -20);
-  fake.setControl("Zone 1", "meter_2", -30);
-  await settle();
-  assert.deepEqual(
-    sent.map((s) => `${s.channel} ${s.changes.map((c) => c.Name).join(",")}`).sort(),
-    ["qsys:meters:staff meter_2", "qsys:meters:volunteer meter_1"],
-  );
-  // An Invalidate resends every control; nothing that did not change goes out.
-  sent.length = 0;
-  for (const id of liveGroups().keys()) await svc.transport!.send("ChangeGroup.Invalidate", { Id: id });
-  await settle();
-  assert.deepEqual(sent, [], "an unchanged value was broadcast");
-  assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -3, "the hydration cache missed a change");
-});
+    test("never uses more than 3 change groups", async () => {
+      await connect();
+      watch.setPanels([
+        panel("v1", "volunteer", GAIN, METER),
+        panel("v2", "volunteer", MUTE, METER2),
+        panel("s1", "staff", ZONE_GAIN, METER),
+        panel("s2", "staff", METER2),
+      ]);
+      const step = (fn: () => Promise<void>) => fn();
+      await step(() => open("v1"));
+      await step(() => open("s1"));
+      await step(() => open("v2"));
+      await step(() => open("s2"));
+      await step(() => close("s1"));
+      await step(() => open("s1"));
+      await step(() => close("v1", "v2"));
+      await step(() => open("v1"));
+      fake.status = { ...fake.status, DesignCode: "design-2" };
+      pushEngineStatus();
+      await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
+      await step(() => watch.recompute());
+      // The fake's high-water mark sees a group that lived only inside one run.
+      assert.ok(fake.maxGroups <= 3, `the Core held ${fake.maxGroups} change groups at once (QRC allows 4 per connection)`);
+    });
 
-test("a control the Core's catalog lacks is skipped with one [qsys] line, and its component's other controls still watched", async () => {
-  await connect();
-  const warn = mock.method(console, "warn", () => {});
-  try {
-    const gone: QsysAddress = { component: "Lobby_Mixer", control: "no_such" };
-    watch.setPanels([panel("a", "staff", GAIN, gone)]);
-    await open("a");
-    await watch.recompute();
-    assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
-    const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("no_such"));
-    assert.equal(lines.length, 1, `expected one skip line, got ${JSON.stringify(lines)}`);
-    assert.ok(lines[0].startsWith("[qsys]"));
-    assert.equal(watch.ready(), true, "a skipped address blocks readiness forever");
-  } finally {
-    warn.mock.restore();
-  }
-});
+    test("changes broadcast on the right channel with only the changed controls", async () => {
+      await connect();
+      watch.setPanels([panel("vol", "volunteer", GAIN, MUTE, METER), panel("staff", "staff", METER2)]);
+      await open("vol", "staff");
+      sent.length = 0;
+      fake.setControl("Lobby_Mixer", "gain", -3);
+      await settle();
+      assert.deepEqual(sent, [{ channel: "qsys:values", changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -3, String: "-3dB", Position: 97 / 120 }] }]);
+      sent.length = 0;
+      fake.setControl("Zone 1", "meter_1", -20);
+      fake.setControl("Zone 1", "meter_2", -30);
+      await settle();
+      assert.deepEqual(
+        sent.map((s) => `${s.channel} ${s.changes.map((c) => c.Name).join(",")}`).sort(),
+        ["qsys:meters:staff meter_2", "qsys:meters:volunteer meter_1"],
+      );
+      // An Invalidate resends every control; nothing that did not change goes out.
+      sent.length = 0;
+      for (const id of liveGroups().keys()) await svc.transport!.send("ChangeGroup.Invalidate", { Id: id });
+      await settle();
+      assert.deepEqual(sent, [], "an unchanged value was broadcast");
+      assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -3, "the hydration cache missed a change");
+    });
 
-test("after a reconnect the groups are rebuilt, Invalidate resends values, and nothing stale is served meanwhile", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN, METER)]);
-  await open("a");
-  assert.equal(watch.ready(), true);
-  assert.equal(watch.current([GAIN, METER]).size, 2);
+    test("a control the Core's catalog lacks is skipped with one [qsys] line, and its component's other controls still watched", async () => {
+      await connect();
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        const gone: QsysAddress = { component: "Lobby_Mixer", control: "no_such" };
+        watch.setPanels([panel("a", "staff", GAIN, gone)]);
+        await open("a");
+        await watch.recompute();
+        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+        const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("no_such"));
+        assert.equal(lines.length, 1, `expected one skip line, got ${JSON.stringify(lines)}`);
+        assert.ok(lines[0].startsWith("[qsys]"));
+        assert.equal(watch.ready(), true, "a skipped address blocks readiness forever");
+      } finally {
+        warn.mock.restore();
+      }
+    });
 
-  // The Core changes while the connection is down: the old value must never come back.
-  await fake.dropClients();
-  await until(() => svc.transport === null, "disconnect");
-  assert.equal(watch.ready(), false, "ready() stayed true with no connection");
-  assert.equal(watch.current([GAIN]).size, 0, "the value cache outlived its connection");
-  fake.components.get("Lobby_Mixer")![0].Value = 6;
-  fake.components.get("Lobby_Mixer")![0].String = "6dB";
+    test("after a reconnect the groups are rebuilt, Invalidate resends values, and nothing stale is served meanwhile", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN, METER)]);
+      await open("a");
+      assert.equal(watch.ready(), true);
+      assert.equal(watch.current([GAIN, METER]).size, 2);
 
-  const mark = fake.received.length;
-  mock.timers.tick(3_000);
-  await until(() => svc.transport !== null, "reconnected");
-  await watch.recompute();
-  await settle();
+      // The Core changes while the connection is down: the old value must never come back.
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      assert.equal(watch.ready(), false, "ready() stayed true with no connection");
+      assert.equal(watch.current([GAIN]).size, 0, "the value cache outlived its connection");
+      fake.components.get("Lobby_Mixer")![0].Value = 6;
+      fake.components.get("Lobby_Mixer")![0].String = "6dB";
 
-  const after = methods(mark);
-  assert.ok(!after.includes("ChangeGroup.Destroy"), "a Destroy was sent for groups that died with the old connection");
-  assert.ok(after.includes("ChangeGroup.AddComponentControl"));
-  assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a reconnect");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Zone 1/meter_1@meters-staff"]);
-  assert.equal(watch.ready(), true);
-  assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, 6, "the value was not re-read after the reconnect");
-});
+      const mark = fake.received.length;
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      await watch.recompute();
+      await settle();
 
-test("ready() stays false until the rebuilt groups have answered", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN)]);
-  named.add(watchChannel("a"));
-  fake.holdReplies = true;
-  const pending = watch.recompute();
-  await until(() => methods().includes("ChangeGroup.AddComponentControl"), "group add sent");
-  assert.equal(watch.ready(), false, "ready() while the group add is unanswered");
-  fake.holdReplies = false;
-  await fake.dropClients();
-  await pending;
-  assert.equal(watch.ready(), false);
-});
+      const after = methods(mark);
+      assert.ok(!after.includes("ChangeGroup.Destroy"), "a Destroy was sent for groups that died with the old connection");
+      assert.ok(after.includes("ChangeGroup.AddComponentControl"));
+      assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a reconnect");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Zone 1/meter_1@meters-staff"]);
+      assert.equal(watch.ready(), true);
+      assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, 6, "the value was not re-read after the reconnect");
+    });
 
-test("a new DesignCode on the same connection destroys and rebuilds the groups and drops vanished controls", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN, MUTE)]);
-  await open("a");
-  const mark = fake.received.length;
-  fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -20, String: "-20dB", Position: 0.3, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-  ]);
-  fake.status = { ...fake.status, DesignCode: "design-2" };
-  pushEngineStatus();
-  await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
-  await watch.recompute();
-  await settle();
-  const after = methods(mark);
-  assert.ok(after.includes("ChangeGroup.Destroy"), "the old design's groups were left on the Core");
-  assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a design change");
-  assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
-  assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -20);
-  assert.equal(watch.current([MUTE]).size, 0, "a control the new design lacks is still served from the cache");
-  assert.equal(watch.ready(), true);
-});
+    test("opening a panel on a live connection keeps write readiness while its controls are added", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
+      await open("a");
+      assert.equal(watch.ready(), true);
+      named.add(watchChannel("b"));
+      fake.holdReplies = true;
+      const pending = watch.recompute();
+      await until(() => methods().filter((m) => m === "ChangeGroup.AddComponentControl").length === 2, "second add sent");
+      assert.equal(watch.ready(), true, "adding one panel's controls blocked writes on every panel");
+      assert.equal(watch.current([MUTE]).size, 0, "a control with no value read yet was served");
+      fake.holdReplies = false;
+      await fake.dropClients();
+      await pending;
+    });
 
-test("a refusal from the Core rejects recompute, leaves ready() false, and the next run rebuilds from nothing", async () => {
-  await connect();
-  watch.setPanels([panel("a", "staff", GAIN)]);
-  named.add(watchChannel("a"));
-  fake.failNext("ChangeGroup.AutoPoll", 5);
-  await assert.rejects(watch.recompute(), (err: unknown) => (err as { code?: number }).code === 5);
-  assert.equal(watch.current([GAIN]).size, 1, "the add's resend should have been cached");
-  assert.equal(watch.ready(), false, "ready() after the Core refused part of the rebuild");
-  const mark = fake.received.length;
-  await watch.recompute();
-  await settle();
-  const after = methods(mark);
-  assert.ok(after.includes("ChangeGroup.Destroy"), "the half-built group was trusted, not rebuilt");
-  assert.deepEqual(autoPollRates(mark), [0.05], "the retried group never got its AutoPoll");
-  assert.equal(watch.ready(), true);
-});
+    test("after a reconnect, write readiness waits for the rebuild's Invalidate, and a retry gets there on its own", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      await open("a");
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      fake.failNext("ChangeGroup.Invalidate", -32604);
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      // The catalog event runs the rebuild; a recompute() here would queue a second pass.
+      await until(() => fake.received.some((r) => r.method === "ChangeGroup.Invalidate"), "refused Invalidate");
+      await settle();
+      assert.equal(watch.ready(), false, "ready() before the post-reconnect Invalidate was answered");
+      mock.timers.tick(1_000);
+      await until(() => watch.ready(), "retry completes the rebuild");
+    });
+
+    test("a new DesignCode on the same connection destroys and rebuilds the groups and drops vanished controls", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN, MUTE)]);
+      await open("a");
+      const mark = fake.received.length;
+      fake.components.set("Lobby_Mixer", [
+        { Name: "gain", Type: "Float", Value: -20, String: "-20dB", Position: 0.3, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+      ]);
+      fake.status = { ...fake.status, DesignCode: "design-2" };
+      pushEngineStatus();
+      await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
+      await watch.recompute();
+      await settle();
+      const after = methods(mark);
+      assert.ok(after.includes("ChangeGroup.Destroy"), "the old design's groups were left on the Core");
+      assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a design change");
+      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+      assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -20);
+      assert.equal(watch.current([MUTE]).size, 0, "a control the new design lacks is still served from the cache");
+      assert.equal(watch.ready(), true);
+    });
+
+    test("a refusal on a live connection keeps readiness, logs, and retries on its own with a growing delay", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN), panel("b", "volunteer", METER)]);
+      await open("a");
+      assert.equal(watch.ready(), true);
+      const warn = mock.method(console, "warn", () => {});
+      const retries = () => warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.startsWith("[qsys] change group update failed"));
+      try {
+        fake.failNext("ChangeGroup.AutoPoll", 5);
+        fake.failNext("ChangeGroup.AutoPoll", 5);
+        // One pass, from the subscription change alone.
+        named.add(watchChannel("b"));
+        subscriptionsChanged();
+        await until(() => retries().length === 1, "refused update");
+        await settle();
+        assert.equal(watch.ready(), true, "one Core refusal on a live connection blocked every write");
+        assert.equal(watch.current([GAIN]).size, 1, "a refusal for another group dropped a good value");
+        assert.equal(retries().length, 1);
+        assert.match(retries()[0], /retrying in 1 s$/);
+        const mark = fake.received.length;
+        // No subscription change: only the retry timer can bring the group back.
+        mock.timers.tick(1_000);
+        await until(() => retries().length === 2, "first retry, refused again");
+        assert.match(retries()[1], /retrying in 2 s$/);
+        assert.ok(methods(mark).includes("ChangeGroup.Destroy"), "the retry trusted a half-built group");
+        mock.timers.tick(2_000);
+        await until(() => liveGroups().get("meters-volunteer")?.rate === 0.1, "second retry builds the group");
+        assert.equal(retries().length, 2);
+        assert.equal(watch.ready(), true);
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
+    test("a pass queued while a run fails still runs", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
+      await watch.recompute(); // let setPanels' own pass finish, so the next run reads only "a"
+      named.add(watchChannel("a"));
+      fake.failNext("ChangeGroup.AutoPoll", 5);
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        const first = watch.recompute();
+        named.add(watchChannel("b"));
+        const second = watch.recompute();
+        assert.equal(first, second);
+        await second.catch(() => undefined);
+        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"], "the queued pass was dropped with the failed one");
+      } finally {
+        warn.mock.restore();
+      }
+    });
+
+    test("between a new DesignCode and the rebuild, nothing old is served and writes wait", async () => {
+      // A source whose catalog events never reach the watch holds the window open.
+      const quiet = {
+        get transport() {
+          return svc.transport;
+        },
+        get meterRates() {
+          return svc.meterRates;
+        },
+        getCatalog: () => svc.getCatalog(),
+        onCatalog: () => () => {},
+      };
+      watch.dispose();
+      watch = new QsysWatch(quiet, () => () => {});
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      await open("a");
+      assert.equal(watch.ready(), true);
+      fake.status = { ...fake.status, DesignCode: "design-2" };
+      pushEngineStatus();
+      await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
+      assert.equal(watch.ready(), false, "writes allowed against a design the groups have not caught up with");
+      assert.equal(watch.current([GAIN]).size, 0, "a value from the old design was served");
+      await watch.recompute();
+      assert.equal(watch.ready(), true);
+      assert.equal(watch.current([GAIN]).size, 1);
+    });
+
+    test("a disposed watch no longer reacts to subscriptions or catalogs", async () => {
+      await connect();
+      watch.setPanels([panel("a", "staff", GAIN)]);
+      watch.dispose();
+      named.add(watchChannel("a"));
+      const mark = fake.received.length;
+      subscriptionsChanged();
+      await settle();
+      assert.deepEqual(methods(mark).filter((m) => m.startsWith("ChangeGroup.")), []);
+    });
+  });
+}
 
 test("isMeterControl: meter components and controls named meter*", () => {
   assert.equal(isMeterControl("meter2", { Name: "x", Type: "Float" }), true);

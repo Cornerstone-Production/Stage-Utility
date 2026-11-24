@@ -35,6 +35,14 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * costs one copy rather than one per piece.
  */
 export const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+/** Unmatched reply ids already warned about; cleared when it reaches this size. */
+const MAX_WARNED_IDS = 256;
+
+/** A change-group push in reply form: `result: { Id, Changes: [...] }`. */
+function isChangeGroupResult(result: unknown): result is { Id: string; Changes: unknown[] } {
+  const r = result as { Id?: unknown; Changes?: unknown } | null;
+  return !!r && typeof r === "object" && typeof r.Id === "string" && Array.isArray(r.Changes);
+}
 
 interface Pending {
   method: string;
@@ -53,6 +61,7 @@ export class QrcClient implements QrcTransport {
   private readonly closeHandlers: ((err: Error | null) => void)[] = [];
   private closed = false;
   private closeError: Error | null = null;
+  private readonly warnedIds = new Set<string>();
 
   private constructor(
     private readonly socket: net.Socket,
@@ -172,16 +181,30 @@ export class QrcClient implements QrcTransport {
         p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number.isFinite(code) ? code : -1));
       });
     } else if (typeof msg.method === "string" && msg.id === undefined) {
-      for (const cb of this.notificationHandlers) {
-        try {
-          cb(msg.method, msg.params);
-        } catch (err) {
-          console.warn(`[qsys] QRC notification handler for ${scrub(msg.method)} threw: ${scrubError(err)}`);
-        }
-      }
+      this.notify(msg.method, msg.params);
+    } else if (!msg.error && isChangeGroupResult(msg.result)) {
+      // QSC's reference shows AutoPoll results as replies that repeat the AutoPoll
+      // request's id; after the first, nothing is pending for it. Delivered as the
+      // notification form, so callers handle one shape.
+      this.notify("ChangeGroup.Poll", msg.result);
     } else {
-      // Also what a reply arriving after its request timed out looks like.
+      // Also what a reply arriving after its request timed out looks like. Once per
+      // id, so a Core repeating one id cannot flood the log.
+      const id = String(msg.id);
+      if (this.warnedIds.has(id)) return;
+      if (this.warnedIds.size >= MAX_WARNED_IDS) this.warnedIds.clear();
+      this.warnedIds.add(id);
       console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})`);
+    }
+  }
+
+  private notify(method: string, params: unknown): void {
+    for (const cb of this.notificationHandlers) {
+      try {
+        cb(method, params);
+      } catch (err) {
+        console.warn(`[qsys] QRC notification handler for ${scrub(method)} threw: ${scrubError(err)}`);
+      }
     }
   }
 

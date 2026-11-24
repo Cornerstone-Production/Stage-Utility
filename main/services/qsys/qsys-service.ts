@@ -148,8 +148,13 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     return this.catalog;
   }
 
-  onCatalog(cb: (c: QsysCatalog) => void): void {
+  /** Returns a function that stops listening. */
+  onCatalog(cb: (c: QsysCatalog) => void): () => void {
     this.catalogListeners.push(cb);
+    return () => {
+      const i = this.catalogListeners.indexOf(cb);
+      if (i !== -1) this.catalogListeners.splice(i, 1);
+    };
   }
 
   /** Read every component and its controls. Concurrent callers share one read. */
@@ -300,7 +305,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
   private announce(status: QrcStatus, catalog: QsysCatalog): void {
     this.publishConnected(status);
     this.report("connected", `Connected to ${status.DesignName}`);
-    for (const cb of this.catalogListeners) {
+    for (const cb of [...this.catalogListeners]) {
       try {
         cb(catalog);
       } catch (err) {

@@ -88,11 +88,16 @@ export function channelSubscriberCount(channel: string): number {
  * and a producer starts or stops itself from there. See cue-live.ts.
  */
 const subscriptionListeners: (() => void)[] = [];
-export function addSubscriptionListener(cb: () => void): void {
+/** Returns a function that removes the listener again. */
+export function addSubscriptionListener(cb: () => void): () => void {
   subscriptionListeners.push(cb);
+  return () => {
+    const i = subscriptionListeners.indexOf(cb);
+    if (i !== -1) subscriptionListeners.splice(i, 1);
+  };
 }
 export function subscriptionsChanged(): void {
-  for (const cb of subscriptionListeners) {
+  for (const cb of [...subscriptionListeners]) {
     try {
       cb();
     } catch (err) {
