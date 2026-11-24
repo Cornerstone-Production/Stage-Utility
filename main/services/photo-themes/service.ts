@@ -61,7 +61,9 @@ import {
   emptyBook,
   extendUse,
   keptUntil,
+  madeUnderEarlierPrompt,
   parseBook,
+  promptKey,
   referencedFiles,
   serializeBook,
   serviceDay,
@@ -149,6 +151,8 @@ interface Job {
   runId: number;
   attempts: number;
   notBefore: number;
+  /** The prompt the edit was sent with, once it has been: what the result records. */
+  prompt?: string;
 }
 
 interface Run {
@@ -386,7 +390,7 @@ export class PhotoThemesService {
       id: t.id,
       name: t.name,
       prompt: t.prompt,
-      promptChanged: t.prompt !== t.baselinePrompt && [...t.people.values()].some((p) => p.approved || p.pending?.file),
+      promptChanged: [...t.people.values()].some((p) => this.promptChangedFor(t, p)),
       createdAt: t.createdAt,
       lastUsedDate: t.lastUsedDate,
       keptUntil: keptUntil(t),
@@ -402,6 +406,7 @@ export class PhotoThemesService {
     const key = jobKey(t.id, personId);
     const generating = this.running.has(key) || this.queue.some((j) => j.key === key);
     const stale = entry?.approved ? this.isStale(entry) : false;
+    const promptChanged = entry ? this.promptChangedFor(t, entry) : false;
     let status: ThemedPhotoStatus = "none";
     if (generating) status = "generating";
     else if (entry?.pending) status = entry.pending.status;
@@ -412,6 +417,7 @@ export class PhotoThemesService {
       // What Manage themes draws beside the edit: their photo as this server last saw it, else what the edit was made from.
       originalUrl: this.currentPhoto(personId) ?? entry?.approved?.sourceUrl ?? entry?.pending?.sourceUrl ?? null,
       status,
+      promptChanged,
       approved: entry?.approved
         ? {
             url: themedPhotoUrl(entry.approved.file),
@@ -432,6 +438,11 @@ export class PhotoThemesService {
             }
           : null,
     };
+  }
+
+  /** Their photo was made under an earlier prompt, and is not being made again now. */
+  private promptChangedFor(t: Theme, p: ThemePerson): boolean {
+    return !this.expected.has(jobKey(t.id, p.personId)) && madeUnderEarlierPrompt(t, p);
   }
 
   private jobFor(key: string): Job | undefined {
@@ -492,11 +503,16 @@ export class PhotoThemesService {
     return this.themeDto(this.book.themes.get(id)!);
   }
 
-  /** Keep the photos made under the old prompt: "Keep these". */
+  /** Keep the photos made under an earlier prompt, everyone's, on every plan: "Keep these". */
   async keepPrompt(id: string): Promise<ThemeDTO> {
     await this.mutate((b) => {
       const t = themeIn(b, id);
       t.baselinePrompt = t.prompt;
+      const key = promptKey(t.prompt);
+      for (const p of t.people.values()) {
+        if (p.approved) p.approved.prompt = key;
+        if (p.pending) p.pending.prompt = key;
+      }
     });
     return this.themeDto(this.book.themes.get(id)!);
   }
@@ -656,7 +672,8 @@ export class PhotoThemesService {
       // Checked again here: a remove queued ahead of this write may have taken it.
       if (!src?.approved) throw new PhotoThemeRefused("They have no approved photo in this theme to " + kind, 409);
       this.cancel(jobKey(to, personId));
-      target.people.set(personId, { personId, name: src.name, approved: { ...src.approved } });
+      // Put there on purpose: it stands for the target's prompt, not the one it was made under.
+      target.people.set(personId, { personId, name: src.name, approved: { ...src.approved, prompt: promptKey(target.prompt) } });
       if (kind === "move") from.people.delete(personId);
     });
   }
@@ -681,8 +698,10 @@ export class PhotoThemesService {
   /**
    * Queue edits for the people on a plan. `missing` sends only those with no
    * approved photo in the theme and none waiting for review: anyone with an
-   * approved one is reused at no cost. `all` redoes everyone (after a prompt change), and takes the new
-   * prompt as the one the photos are made under.
+   * approved one is reused at no cost. `all` (Redo all, after a prompt change)
+   * also sends those on this plan whose photo was made under an earlier prompt.
+   * Each photo records its own prompt, so people on other plans still made
+   * under the old one keep the theme's `promptChanged` until they are redone too.
    */
   async generate(planId: string, serviceTypeId: string, mode: "missing" | "all"): Promise<GenerateResultDTO> {
     const usable = this.connection.usable();
@@ -700,13 +719,15 @@ export class PhotoThemesService {
     const toSend: PlanPerson[] = [];
     for (const p of read.people) {
       const entry = theme.people.get(p.personId);
+      // Redo all sends again only a photo made under an earlier prompt.
+      const keep = entry && !(mode === "all" && madeUnderEarlierPrompt(theme, entry));
       if (this.expected.has(jobKey(themeId, p.personId))) {
         result.skipped.push({ personId: p.personId, name: p.name, reason: "Already being made" });
-      } else if (mode === "missing" && entry?.approved) {
+      } else if (keep && entry.approved) {
         // On screen already: reused at no cost, whatever a later Redo did.
         // A failed Redo is tried again only by Redo.
         result.reused++;
-      } else if (mode === "missing" && entry?.pending?.status === "ready") {
+      } else if (keep && entry.pending?.status === "ready") {
         result.skipped.push({ personId: p.personId, name: p.name, reason: "Made, waiting for review" });
       } else if (!p.photoUrl) {
         result.skipped.push({ personId: p.personId, name: p.name, reason: "No Planning Center photo" });
@@ -715,12 +736,6 @@ export class PhotoThemesService {
       } else {
         toSend.push(p);
       }
-    }
-    if (mode === "all" && theme.baselinePrompt !== theme.prompt) {
-      await this.mutate((b) => {
-        const t = themeIn(b, themeId);
-        t.baselinePrompt = t.prompt;
-      });
     }
     const runId = this.nextRunId++;
     const run: Run = { label: `plan ${planId}`, themeName: theme.name, made: 0, failed: 0, reused: result.reused, skipped: 0, outstanding: 0 };
@@ -873,7 +888,8 @@ export class PhotoThemesService {
       console.warn(`[photo-theme] the photo of ${scrub(job.name)} could not be decoded: ${scrub(errorMessage(err))}`);
       return this.fail(job, "Their Planning Center photo could not be read as an image");
     }
-    const result = await editImage({ apiKey, prompt: theme.prompt, png, fetchImpl: this.deps?.fetchImpl });
+    job.prompt = theme.prompt;
+    const result = await editImage({ apiKey, prompt: job.prompt, png, fetchImpl: this.deps?.fetchImpl });
     if (result.ok) {
       this.connection.recordSuccess();
       const ext = editExtension(result.bytes);
@@ -924,7 +940,14 @@ export class PhotoThemesService {
         const t = b.themes.get(job.themeId);
         if (!t) return;
         const at = new Date(this.now()).toISOString();
-        const base = { madeFrom: photoFingerprint(job.sourceUrl), sourceUrl: job.sourceUrl, planId: job.planId, serviceDate: job.serviceDate, at };
+        const base = {
+          madeFrom: photoFingerprint(job.sourceUrl),
+          sourceUrl: job.sourceUrl,
+          planId: job.planId,
+          serviceDate: job.serviceDate,
+          at,
+          ...(job.prompt !== undefined ? { prompt: promptKey(job.prompt) } : {}),
+        };
         const person = t.people.get(job.personId) ?? { personId: job.personId, name: job.name };
         person.name = job.name;
         if (outcome.status === "ready") {
@@ -1129,8 +1152,8 @@ function themeIn(b: Book, id: string): Theme {
 function promote(t: Theme, personId: string, now: number): void {
   const p = t.people.get(personId);
   if (!p?.pending || p.pending.status !== "ready" || !p.pending.file) return;
-  const { file, madeFrom, sourceUrl, planId, serviceDate } = p.pending;
-  p.approved = { file, madeFrom, sourceUrl, planId, serviceDate, approvedAt: new Date(now).toISOString() };
+  const { file, madeFrom, sourceUrl, planId, serviceDate, prompt } = p.pending;
+  p.approved = { file, madeFrom, sourceUrl, planId, serviceDate, approvedAt: new Date(now).toISOString(), ...(prompt !== undefined ? { prompt } : {}) };
   delete p.pending;
 }
 
@@ -1145,7 +1168,7 @@ function choiceDto(c: PlanChoice): PlanChoiceDTO {
 }
 
 function noneDto(personId: string, name: string): ThemePersonDTO {
-  return { personId, name, status: "none", approved: null, pending: null, originalUrl: null };
+  return { personId, name, status: "none", promptChanged: false, approved: null, pending: null, originalUrl: null };
 }
 
 export const photoThemes = new PhotoThemesService();

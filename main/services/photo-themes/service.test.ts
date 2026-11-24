@@ -497,6 +497,94 @@ describe("retention", () => {
   });
 });
 
+describe("a changed prompt", () => {
+  const SNOW = "Snow, keep the face the same";
+  const flagged = (themeId: string) => photoThemes.state().themes.find((t) => t.id === themeId)!.promptChanged;
+  const flaggedOn = async (plan: string) =>
+    (await photoThemes.planPeople(plan, TYPE)).people.filter((p) => p.promptChanged).map((p) => p.personId);
+
+  /** Two plans sharing person 2, everyone approved under the first prompt, then the prompt changed. */
+  async function twoPlansThenNewPrompt() {
+    const theme = await themed([person("1"), person("2")]);
+    srv.rosters.set(PLAN_2, [person("2"), person("3")]);
+    await photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2026-12-31T16:00:00Z", themeId: theme.id });
+    await generated();
+    await generated("missing", PLAN_2);
+    await approveAllShown(photoThemes, PLAN);
+    await approveAllShown(photoThemes, PLAN_2);
+    assert.equal(flagged(theme.id), false);
+    await photoThemes.updateTheme(theme.id, { prompt: SNOW });
+    return theme;
+  }
+
+  it("Redo all on one plan leaves another plan's people made under the old prompt flagged, until they are redone too", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    assert.equal(flagged(theme.id), true);
+    assert.deepEqual(await flaggedOn(PLAN), ["1", "2"]);
+
+    fake.requests.length = 0;
+    assert.deepEqual(await generated("all", PLAN), { queued: 2, reused: 0, skipped: [] });
+    assert.deepEqual(await flaggedOn(PLAN), [], "this plan's people are redone under the new prompt");
+    assert.equal(flagged(theme.id), true, "person 3, on the other plan only, is still made under the old prompt");
+    assert.deepEqual(await flaggedOn(PLAN_2), ["3"], "person 2 was redone from the first plan");
+
+    // Redo all there sends only person 3: person 2 keeps their approved photo, and their new edit waits for review.
+    assert.deepEqual(await generated("all", PLAN_2), { queued: 1, reused: 1, skipped: [] });
+    assert.equal(fake.edits(), 3, "nobody was paid for twice");
+    assert.equal(flagged(theme.id), false);
+  });
+
+  it("Keep these clears it for everyone, on every plan, and sends nothing", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    fake.requests.length = 0;
+    await photoThemes.keepPrompt(theme.id);
+    assert.equal(flagged(theme.id), false);
+    assert.deepEqual(await flaggedOn(PLAN_2), []);
+    assert.deepEqual(await generated("all", PLAN), { queued: 0, reused: 2, skipped: [] }, "Redo all has nobody left to redo");
+    assert.equal(fake.edits(), 0);
+  });
+
+  it("a photo moved into a theme stands for that theme's prompt", async () => {
+    const a = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, a.id, "1");
+    const b = await photoThemes.createTheme({ name: "Easter 2027", prompt: "Spring flowers, keep the face the same" });
+    await photoThemes.transfer(a.id, "1", b.id, "copy");
+    assert.equal(flagged(b.id), false, "a copy put there on purpose is not 'made under an earlier prompt'");
+  });
+
+  it("a book written before photos recorded their prompt still loads, read against its baseline prompt", async () => {
+    const file = (baselinePrompt: string) =>
+      JSON.stringify({
+        version: 1,
+        themes: [
+          {
+            id: "th-0123456789ab",
+            name: "Christmas 2026",
+            prompt: SNOW,
+            baselinePrompt,
+            createdAt: "2026-11-01T00:00:00Z",
+            lastUsedDate: null,
+            people: [
+              {
+                personId: "1",
+                name: "Person 1",
+                approved: { file: "0123456789abcdef.webp", madeFrom: "0123456789abcdef", sourceUrl: pcoPhoto("1"), planId: null, serviceDate: null, approvedAt: "2026-11-02T00:00:00Z" },
+              },
+            ],
+          },
+        ],
+        plans: [],
+      });
+    await fs.writeFile(path.join(TMP, "photo-themes.json"), file("Christmas lights"));
+    await photoThemes.reloadForTests();
+    assert.equal(flagged("th-0123456789ab"), true, "made under the baseline, which is not the prompt now");
+    await fs.writeFile(path.join(TMP, "photo-themes.json"), file(SNOW));
+    await photoThemes.reloadForTests();
+    assert.equal(flagged("th-0123456789ab"), false);
+  });
+});
+
 describe("a file that cannot be used", () => {
   it("is left as it is: nothing is saved over it, and nothing is swept", async (t: TestContext) => {
     const lines = captureConsole(t, "error", "warn");

@@ -63,9 +63,10 @@ it on as many services as you like: a person with an approved photo in the theme
 gets it on every service that uses the theme, at no further cost.
 
 Editing a theme's prompt changes it for every service using the theme. Photos
-already made stay until they are redone; the theme reports `promptChanged` until
-everyone is redone (Generate with `mode: "all"`) or the photos are kept as they are
-(`keep-prompt`).
+already made stay until they are redone. Each photo records the prompt it was made
+under, so each person made under an earlier one reports `promptChanged` until they
+are redone (Generate with `mode: "all"` on a plan they are on, or Redo) or the
+photos are kept as they are (`keep-prompt`, for everyone at once).
 
 ## A service's photos
 
@@ -155,8 +156,9 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 
 A card with an approved photo has a **⋯** menu: **Move to theme…**, **Copy to theme…**
 and **Remove from theme…**, each confirmed in place, naming how many services it
-affects. Changing the prompt of a theme shows a notice, since it changes the theme
-for every service using it, with **Redo all** (every person again) and **Keep these**.
+affects. Changing the prompt of a theme shows a notice on each service with somebody
+whose photo was made under the old one, with **Redo all** (those people again, and
+anyone still without a photo) and **Keep these** (everyone's, on every service).
 A prompt is saved when its box is left, or before any Generate or Redo; if the server
 refuses it, nothing is sent and the box goes back to the saved prompt.
 

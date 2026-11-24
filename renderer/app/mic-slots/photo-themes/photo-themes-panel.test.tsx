@@ -60,6 +60,7 @@ interface P {
   personId: string;
   name: string;
   status: Status;
+  promptChanged: boolean;
   approved: null | { url: string; fromPlanId: string | null; fromDate: string | null; approvedAt: string; stale: boolean };
   pending: null | { status: "generating" | "ready" | "failed"; url: string | null; reason: string | null; planId: string | null };
 }
@@ -69,7 +70,7 @@ const person = (personId: string, name: string, status: Status, over: Partial<P>
   const approved = status === "approved" || status === "stale" ? { url: `/api/photo-themes/images/${editFile("a", personId)}`, fromPlanId: "7001", fromDate: "2026-12-14", approvedAt: "", stale: status === "stale" } : null;
   const pending =
     status === "ready" ? { status: "ready" as const, url: `/api/photo-themes/images/${editFile("b", personId)}`, reason: null, planId: "7001" } : status === "failed" ? { status: "failed" as const, url: null, reason: "Refused under OpenAI's content policy", planId: "7001" } : status === "generating" ? { status: "generating" as const, url: null, reason: null, planId: "7001" } : null;
-  return { personId, name, status, approved, pending, ...over };
+  return { personId, name, status, promptChanged: false, approved, pending, ...over };
 };
 
 let people: P[] = [];
@@ -419,7 +420,7 @@ describe("without a working key", () => {
     test(`${state}: Generate, Redo and Redo all wait for a key; the switch, Approve, Approve all and Remove do not`, async () => {
       connection = { method: state === "not-connected" ? null : "api-key", hint: state === "not-connected" ? null : "sk-…3f2a", state, reason: null, checkedAt: null };
       themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
-      people = [person("9001", "Alex R.", "approved"), person("9002", "Jordan P.", "ready"), person("9004", "Dana K.", "none")];
+      people = [person("9001", "Alex R.", "approved", { promptChanged: true }), person("9002", "Jordan P.", "ready"), person("9004", "Dana K.", "none")];
       await mount();
       const disabled = (name: string | RegExp) => (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
       assert.equal(disabled(/^Generate 1 for/), true, "Generate");
@@ -542,6 +543,7 @@ describe("what costs money", () => {
 
   test("Redo all, from the prompt-changed banner, is Generate over everyone", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved", { promptChanged: true }), person("9002", "Jordan P.", "ready")];
     await mount();
     assert.match(document.querySelector("[data-prompt-changed]")?.textContent ?? "", /changed/);
     await click(screen.getByRole("button", { name: "Redo all" }));
@@ -550,9 +552,17 @@ describe("what costs money", () => {
 
   test("Keep these accepts the prompt without redoing anyone", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved", { promptChanged: true })];
     await mount();
     await click(screen.getByRole("button", { name: "Keep these" }));
     assert.deepEqual(writes().map((c) => c.path.replace(/th-[0-9a-f]{12}/, "T")), ["/api/photo-themes/themes/T/keep-prompt"]);
+  });
+
+  test("the prompt-changed banner is about this service's people: flagged only on another service, it is not shown here", async () => {
+    themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved"), person("9002", "Jordan P.", "ready")];
+    await mount();
+    assert.equal(document.querySelector("[data-prompt-changed]") === null, true, "nobody here was made under the old prompt: Redo all would bill for nothing");
   });
 });
 

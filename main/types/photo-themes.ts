@@ -89,6 +89,9 @@ export interface ThemePersonDTO {
   personId: string;
   name: string;
   status: ThemedPhotoStatus;
+  /** Their photo (the edit waiting for review, else the approved one) was made under an
+   *  earlier prompt of the theme, was not kept, and is not being made again now. */
+  promptChanged: boolean;
   approved: ApprovedPhotoDTO | null;
   pending: PendingPhotoDTO | null;
   /** Their Planning Center photo, for a card to draw beside the edit: the one this server last saw, else the one the edit was made from. Null with none. */
@@ -105,7 +108,7 @@ export interface ThemeDTO {
   id: string;
   name: string;
   prompt: string;
-  /** The prompt was changed after photos were made, and nobody has redone or kept them yet. */
+  /** Somebody's photo in it has `promptChanged`: the prompt changed after it was made, and it has not been redone or kept. */
   promptChanged: boolean;
   createdAt: string;
   /** The last service date that used this theme, as a date in the app's time zone. */

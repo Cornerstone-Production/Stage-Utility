@@ -130,6 +130,8 @@ function PanelBody({
   const generating = list.some((p) => p.status === "generating");
   const readyHere = list.filter((p) => p.status === "ready" && p.pending?.planId === plan.planId);
   const addedLater = list.some((p) => p.status !== "none");
+  /** People on THIS service whose photo was made under an earlier prompt. Others' stay flagged on their own services. */
+  const promptChangedHere = list.some((p) => p.promptChanged);
 
   async function choose(themeId: string) {
     if (themeId === NEW_THEME) return setNewTheme({ name: "", prompt: "", error: null });
@@ -284,7 +286,7 @@ function PanelBody({
             </div>
           </div>
 
-          {theme.promptChanged && (
+          {promptChangedHere && (
             <div role="status" data-prompt-changed className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-warn-9/35 bg-warn-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">The prompt for {themeLabel(theme)} changed; existing approved photos stay until redone.</span>
               <span className="flex gap-1.5">
