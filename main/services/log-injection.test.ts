@@ -138,6 +138,7 @@ const REQUEST_FACING = [
   // Every line names a file it serves (an allowlisted name) and what the release
   // host or the disk said back, which is text from outside.
   "output-helper-download.ts",
+  "patch-store.ts",
   // Names a tag value and a tag-group error typed into Planning Center and read
   // back over HTTP, and a person id off a response body; scrubbed at the logger.
   "pco-prep-tags.ts",
@@ -568,6 +569,9 @@ function requestFacingFiles(): string[] {
     // Every line names a file it serves (an allowlisted name) and what the release
     // host or the disk said back, which is text from outside.
     path.join(HERE, "output-helper-download.ts"),
+    // Each value it leaves out of patch.json is named with the sheet's and variant's names and
+    // the override's key, which arrive in the body of POST /api/patch.
+    path.join(HERE, "patch-store.ts"),
     // Names a tag value, an error and a person id read from Planning Center.
     path.join(HERE, "pco-prep-tags.ts"),
     path.join(HERE, "pco-service.ts"),
