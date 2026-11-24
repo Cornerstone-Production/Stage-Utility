@@ -18,7 +18,7 @@ import {
 } from "./kiosk-discovery.js";
 import { heardDuplicate, recheckFromScratch, startDuplicateCheck, stopDuplicateCheck } from "./kiosk-duplicate-check.js";
 import { recordSeen, scanning, forgetSeen, noteReleased } from "./kiosk-presence.js";
-import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
+import { bindingWritesHeld, kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
 import { errorMessage } from "./errors.js";
 import { DEFAULT_DISCOVERY_PORT, type DuplicateCheck } from "../types/kiosk.js";
 
@@ -185,8 +185,9 @@ export function startKioskResponder(opts: ResponderOptions): void {
       // touch() returns the SAME array when nothing changed, so a probe every
       // two seconds does not become a file write every two seconds.
       // Skipped while saves to the bindings are refused (DataStore.refusingSaves):
-      // [data-store] has said so once, and each probe would warn again.
-      if (!kioskDevicesStore.refusingSaves()) {
+      // [data-store] has said so once, and each probe would warn again. And while a
+      // config restore lands (bindingWritesHeld): the next probe says it all again.
+      if (!kioskDevicesStore.refusingSaves() && !bindingWritesHeld()) {
         try {
           await updateDevices((current) =>
             touch(current, probe.id, {

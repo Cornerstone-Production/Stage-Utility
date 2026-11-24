@@ -620,6 +620,9 @@ async function pauseBackgroundWriters(): Promise<() => void> {
     // Holds its queue's results and its retention sweep: a finished edit or a
     // sweep must not write over the restored photo themes.
     ["theme photos", () => import("./photo-themes/service.js").then((m) => m.photoThemes.pause())],
+    // Holds every write to the screen bindings: a probe or heartbeat would write the
+    // store's cached, pre-restore bindings back over the restored kiosk-devices.json.
+    ["the screen bindings", () => import("./kiosk-devices-store.js").then((m) => m.pauseBindingWrites())],
   ] as const;
   const settled = await Promise.allSettled(writers.map(([, pause]) => pause()));
   const undos = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
