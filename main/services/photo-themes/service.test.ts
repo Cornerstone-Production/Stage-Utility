@@ -436,6 +436,42 @@ describe("a person's original photo, for Manage themes", () => {
 });
 
 describe("move, copy and remove", () => {
+  it("an edit that lands while a remove of that person is still being written is not kept", async (t) => {
+    const lines = captureConsole(t, "log");
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    // The write queue, held: the remove waits in it, and the redo's result queues behind the remove.
+    const writes = (photoThemes as unknown as { writes: { enqueue: <R>(fn: () => Promise<R>) => Promise<R> } }).writes;
+    const enqueue = writes.enqueue;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let removing: Promise<void> | null = null;
+    const base = fake.edit;
+    fake.edit = async (r) => {
+      let queued = 0;
+      writes.enqueue = <R>(fn: () => Promise<R>): Promise<R> => {
+        const out = enqueue.call(writes, fn) as Promise<R>;
+        // The hold, the remove, then the redo's result: let them run, in that order.
+        if (++queued === 3) release();
+        return out;
+      };
+      void writes.enqueue(() => held);
+      removing = photoThemes.remove(theme.id, "1");
+      return base(r);
+    };
+    try {
+      await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+      await photoThemes.idle();
+      await removing;
+    } finally {
+      writes.enqueue = enqueue;
+      fake.edit = base;
+    }
+    assert.equal(photoThemes.state().themes[0]!.people.some((p) => p.personId === "1"), false, "removed, and not put back by the redo that landed behind the remove");
+    assert.ok(lines.some((l) => l.includes("finished after it was removed from its theme, and was not kept")));
+  });
+
   it("a remove whose save fails leaves the person's edit in flight to land, paid for and kept", async () => {
     const theme = await themed([person("1")]);
     await generated();

@@ -941,10 +941,17 @@ export class PhotoThemesService {
       this.expected.delete(job.key);
       return this.settle(job, null);
     }
+    let dropped = false;
     try {
       await this.mutate(async (b, saved) => {
+        // Checked again in the write: a remove, move or copy, delete or sweep
+        // queued ahead of this one cancels the job only once its own save has
+        // landed, which can be after the check above.
         const t = b.themes.get(job.themeId);
-        if (!t) return;
+        if (this.expected.get(job.key) !== job.id || !t) {
+          dropped = true;
+          return;
+        }
         const at = new Date(this.now()).toISOString();
         const base = {
           madeFrom: photoFingerprint(job.sourceUrl),
@@ -973,6 +980,12 @@ export class PhotoThemesService {
       this.expected.delete(job.key);
       this.settle(job, false);
       return;
+    }
+    if (dropped) {
+      if (outcome.status === "ready") {
+        console.log(`[photo-theme] an edit of ${scrub(job.name)} finished after it was removed from its theme, and was not kept`);
+      }
+      return this.settle(job, null);
     }
     this.expected.delete(job.key);
     this.settle(job, outcome.status === "ready");
