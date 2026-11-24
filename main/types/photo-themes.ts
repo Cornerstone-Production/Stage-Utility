@@ -11,6 +11,16 @@ export const THEME_ID = /^th-[0-9a-f]{12}$/;
 /** A stored edit's file name: the first 16 hex of its SHA-256 and its type. */
 export const THEMED_PHOTO_FILE = /^[0-9a-f]{16}\.(?:webp|png)$/;
 
+const THEMED_PHOTO_PATH = "/api/photo-themes/images/";
+
+/** Where a stored edit is served, for review or for a slot. */
+export function themedPhotoUrl(file: string): string {
+  return THEMED_PHOTO_PATH + file;
+}
+
+/** The most people one approve-all names: more than any plan's boards hold. */
+export const MAX_APPROVE_ALL = 500;
+
 /**
  * How a resolved slot names a themed photo in its `photoUrl`.
  *
@@ -57,6 +67,9 @@ export interface PendingPhotoDTO {
   status: "generating" | "ready" | "failed";
   /** The edit, once there is one. */
   url: string | null;
+  /** The stored edit's name, once there is one: what an approval sends back, so an edit
+   *  that replaced the one shown is never the one approved. */
+  file: string | null;
   /** Why it failed, in words for an operator. */
   reason: string | null;
   /** The plan it is being made for. */
@@ -68,6 +81,9 @@ export interface ThemePersonDTO {
   personId: string;
   name: string;
   status: ThemedPhotoStatus;
+  /** Their photo (the edit waiting for review, else the approved one) was made under an
+   *  earlier prompt of the theme, was not kept, and is not being made again now. */
+  promptChanged: boolean;
   approved: ApprovedPhotoDTO | null;
   pending: PendingPhotoDTO | null;
   /** Their Planning Center photo, for a card to draw beside the edit: the one this server last saw, else the one the edit was made from. Null with none. */
@@ -84,7 +100,7 @@ export interface ThemeDTO {
   id: string;
   name: string;
   prompt: string;
-  /** The prompt was changed after photos were made, and nobody has redone or kept them yet. */
+  /** Somebody's photo in it has `promptChanged`: the prompt changed after it was made, and it has not been redone or kept. */
   promptChanged: boolean;
   createdAt: string;
   /** The last service date that used this theme, as a date in the app's time zone. */
@@ -158,8 +174,11 @@ export interface PlanPeopleDTO {
   roster: "live" | "plan" | "unavailable";
   reason?: string;
   people: PlanPersonDTO[];
-  /** How many a Generate would send to OpenAI: those with no photo in the theme, or whose last one failed. */
+  /** How many a Generate would send to OpenAI: people with a usable Planning Center photo, no approved
+   *  photo, and none being made or waiting for review. */
   toGenerate: number;
+  /** How many Redo all (a Generate with `mode: "all"`) would send. */
+  toRedoAll: number;
 }
 
 /**
@@ -173,6 +192,24 @@ export interface PhotoThemesChanged {
   queued: number;
   /** Who is being made now or is waiting, sorted. */
   active: { themeId: string; personId: string }[];
+  /** How the OpenAI connection stands now: a frame is also sent when only this changed. */
+  connection: OpenAiConnectionDTO;
+}
+
+/** One edit an approve-all was sent: the person, and the file they were shown. */
+export interface ShownEdit {
+  personId: string;
+  file: string;
+}
+
+/**
+ * What an approve-all answers. `skipped` are the people sent whose edit is no
+ * longer the one they were shown (redone, removed or approved meanwhile): they
+ * are left as they are, for another look.
+ */
+export interface ApproveAllResultDTO {
+  approved: number;
+  skipped: string[];
 }
 
 /** What a generate answers: what it queued, and what it did not send and why. */

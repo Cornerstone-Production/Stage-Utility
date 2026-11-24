@@ -55,7 +55,10 @@ const posts = () => calls.filter((c) => c.method !== "GET");
 
 const frame = (seq: number, epoch = "e1") => ({ epoch, seq, running: 0, queued: 0, active: [] });
 
+/** Renders of every Probe: a frame that changes nothing must not re-render the page the hook is in. */
+let renders = 0;
 function Probe({ label }: { label: string }) {
+  renders++;
   const photos = usePhotoThemes(PLAN);
   return React.createElement("p", { "data-probe": label }, `${photos.choice?.show ?? "none"}|${photos.theme?.name ?? "no theme"}|${photos.hasApproved}`);
 }
@@ -112,6 +115,16 @@ describe("what a photo-themes:changed frame makes the page read", () => {
     await act(async () => emit(frame(11)));
     await settle();
     assert.equal(gets(), 3, "the same seq again is nothing new");
+  });
+
+  test("a frame that changes nothing renders nothing: the whole Mic slots page sits on this hook", async () => {
+    await mount("a");
+    await act(async () => emit(frame(10)));
+    await settle();
+    const before = renders;
+    await act(async () => emit(frame(10)));
+    await settle();
+    assert.equal(renders - before, 0);
   });
 
   test("a gap reads again and says a frame was missed", async () => {

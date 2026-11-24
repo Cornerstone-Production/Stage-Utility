@@ -63,9 +63,10 @@ it on as many services as you like: a person with an approved photo in the theme
 gets it on every service that uses the theme, at no further cost.
 
 Editing a theme's prompt changes it for every service using the theme. Photos
-already made stay until they are redone; the theme reports `promptChanged` until
-everyone is redone (Generate with `mode: "all"`) or the photos are kept as they are
-(`keep-prompt`).
+already made stay until they are redone. Each photo records the prompt it was made
+under, so each person made under an earlier one reports `promptChanged` until they
+are redone (Generate with `mode: "all"` on a plan they are on, or Redo) or the
+photos are kept as they are (`keep-prompt`, for everyone at once).
 
 ## A service's photos
 
@@ -124,14 +125,20 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 2. **Open a plan on Mic slots** and choose **<plan> only**. **Theme photos**, beside
    the **⋯** menu, opens the sheet: at the right of the boards on a wide screen, over
    the bottom of the page on a phone. It is off, with the reason on hover and in a
-   line under the bar, on a Default (*Theme photos is per service: pick a plan*) and
-   without a working key (*Connect OpenAI in Integrations*).
+   line under the bar, on a Default (*Theme photos is per service: pick a plan*).
+   Without a working key it still opens: Generate and Redo wait for one, with a
+   link to Integrations, and the switch, Approve, Remove and Delete work as ever.
 3. **Pick a theme**, or **New theme…** (a name and a prompt). Photos the theme
    already has for people on this service arrive approved, marked *From <date>*.
-4. **Generate N for <theme>** sends only the people without a photo in it. Each
+4. **Generate N for <theme>** sends only the people without a photo in it (with
+   nobody it could send, it says how many have no usable Planning Center photo), and names
+   anyone it did not send with the reason (no Planning Center photo, one not on
+   Planning Center, already being made, waiting for review). Each
    person's card shows their original beside the edit while it is made, then waits
    for **Approve** (or **Approve all ready**, which approves the ready edits made
-   for this service). **Redo** makes one person again.
+   for this service). Each approves the edit on screen: one redone after it was
+   shown is left for another look, and the sheet names who. **Redo** makes one
+   person again.
 5. **Original | Themed** appears beside the button once the theme has an approved
    photo, and in the sheet's header while it is open (the bar's copy gives way, so
    the bar does not wrap). It chooses what this service's screens show;
@@ -152,8 +159,10 @@ Theme photos is for one service, so it works on a plan, never on a Default.
 
 A card with an approved photo has a **⋯** menu: **Move to theme…**, **Copy to theme…**
 and **Remove from theme…**, each confirmed in place, naming how many services it
-affects. Changing the prompt of a theme shows a notice, since it changes the theme
-for every service using it, with **Redo all** (every person again) and **Keep these**.
+affects. Changing the prompt of a theme shows a notice on each service with somebody
+whose photo was made under the old one, with **Redo all (N)** (those people again,
+and anyone still without a photo; it says how many it will bill and asks first) and
+**Keep these** (everyone's, on every service).
 A prompt is saved when its box is left, or before any Generate or Redo; if the server
 refuses it, nothing is sent and the box goes back to the saved prompt.
 
