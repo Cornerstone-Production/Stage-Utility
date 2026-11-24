@@ -577,6 +577,7 @@ export type IpcChannel =
   | "qsys:bindings"
   | "qsys:catalog"
   | "qsys:lease"
+  | "qsys:panelRepairs"
   | "qsys:panelValues"
   | "qsys:setAllowlist"
   | "qsys:status"
@@ -1021,6 +1022,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/qsys/catalog");
     case "qsys:lease":
       return post<T>("/api/qsys/lease", p);
+    case "qsys:panelRepairs":
+      return apiFetch<T>("/api/qsys/panel-repairs");
     case "qsys:panelValues":
       return apiFetch<T>(`/api/qsys/values?panel=${encodeURIComponent(String(p.panel ?? ""))}`);
     case "qsys:status":

@@ -175,12 +175,13 @@ describe("the Q-SYS panel block", () => {
     assert.deepEqual(consoles.all, ["console:c1"]);
   });
 
-  it("a restored views file with two panels at one address is refused", async () => {
+  it("the restore check never refuses a backup over panel addresses or a null block; it still refuses a malformed block", async () => {
+    // The repair happens on the load after the restore: qsys-slug-repair-restore.test.ts.
     const check = restoreCheckFor("views.json")!;
-    const twice = await check([panel("p1", "zone-1"), panel("p2", "zone-1")]);
-    assert.equal(twice.ok, false);
-    assert.match((twice as { reason: string }).reason, /\/qsys\/zone-1/);
-    assert.equal((await check([panel("p1", "zone-1"), panel("p2", "zone-2")])).ok, true, "two addresses (positive control)");
+    assert.equal((await check([panel("p1", "zone-1"), panel("p2", "zone-1")])).ok, true, "two panels at one address refused a backup");
+    assert.equal((await check([{ ...consoleView("c1", "Booth"), qsys: null } as unknown as View])).ok, true, "qsys: null refused");
+    const bad = await check([{ ...consoleView("c1", "Booth"), qsys: { kind: "guest", slug: "x" } } as unknown as View]);
+    assert.equal(bad.ok, false, "a malformed block got through (positive control)");
   });
 
   it("slugify and uniqueQsysSlug make legal, free slugs", () => {

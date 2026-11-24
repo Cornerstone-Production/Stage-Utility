@@ -228,7 +228,11 @@ console first. Home cannot be a panel.
 | Who uses it | **Volunteer** (big targets; meters at the volunteer rate) or **Staff** (dense; meters at the staff rate). |
 | Address | The panel's slug: `/qsys/<slug>`. Lowercase letters, digits and single hyphens, up to 64 characters. Unique: a save that takes another panel's is refused, naming that panel. `manage` is not allowed. |
 
-A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A console
+A duplicated panel gets the next free address (`<slug>-2`, `<slug>-3`). A restored
+backup is never refused over panel addresses: when its views put two panels at one
+address, the first keeps it and each later one takes the next free suffix, and panel
+settings on a view that is not a custom console are dropped. Both are logged when the
+views are loaded and listed at the top of the panels on `/qsys/manage`. A console
 with Q-SYS objects and no panel settings still works where it is shown, as a staff
 panel, and `/qsys/manage` offers to make it a panel.
 
@@ -268,15 +272,16 @@ An address no panel has shows "There is no panel here", never a blank page.
 |---|---|---|
 | Connected to sound system | The panel has read the Core's current values. | Live. |
 | Reconnecting to sound system | The page is reading the Core's values again: just opened, back from sleep, or its own connection to Stage Utility came back. | Hold their last values and take no input until the read lands. |
-| Sound system offline | Stage Utility cannot reach the Core. After 2 seconds, a card covers the controls: "Audio controls are offline. This page can't reach the sound system, so nothing here will change anything. Use the Q-SYS panel on the wall, or find a tech." The service keeps retrying, and the card goes when the Core is back. | Greyed, no input. |
+| Sound system offline | Stage Utility cannot reach the Core, or this page cannot reach Stage Utility (the server stopped, the iPad off the network). After 2 seconds without the Core, or 10 seconds without Stage Utility, a card covers the controls, which are dimmed under it: "Audio controls are offline. This page can't reach the sound system, so nothing here will change anything. Use the Q-SYS panel on the wall, or find a tech." The service and the page keep retrying, and the card goes when both are back; the page then reads the Core's values before it takes a touch. | Greyed, no input. |
 | No Q-SYS Core is set up | The integration is off or has no Core host. A bar under the header says so; on a staff panel and inside the app it links to the Q-SYS settings. | Greyed, no input. The panel stays editable. |
 
 A page that wakes from sleep, or whose connection to Stage Utility drops and comes
 back, reads the Core's current values before it takes a touch, and never sends its
 own values back: only a fresh touch writes.
 
-If Stage Utility itself is down, an iPad shows the browser's own error. The Core and
-its wall panels are not affected.
+An iPad that opens a panel while Stage Utility is down shows the browser's own error;
+one that already had it open shows the card above. Either way the Core and its wall
+panels are not affected.
 
 ### Moving a panel between installs
 
@@ -462,7 +467,10 @@ Look at `/log` and filter for `[qsys]`.
 | `allowlist add refused: <why>` | **Add all controls … uses** saved nothing: the stored list is invalid, or the result broke a rule. |
 | `panel settings for <view> were refused: <why>`, `a new panel was refused: <why>` | From the page: a panel's settings or a new panel were refused, as for an address another panel has. The server's own line is `[stage-controller] setViewQsys … refused` or `createView refused`. |
 | `the allowlist save was refused: <why>`, `adding a panel's controls to the allowlist was refused: <why>`, `replacing the invalid allowlist was refused: <why>` | From `/qsys/manage`: the server refused the change; the page shows the same reason. |
-| `could not read the allowlist for /qsys/manage`, `… the binding check for /qsys/manage`, `… the Q-SYS connection for /qsys/manage` | A read on the Q-SYS page failed; that section says so. |
+| `could not read the allowlist for /qsys/manage`, `… the binding check for /qsys/manage`, `… the Q-SYS connection for /qsys/manage`, `… the panel repairs for /qsys/manage` | A read on the Q-SYS page failed; that section says so. |
+| `views.json: "<view>" (<id>) shared /qsys/<slug> with an earlier panel; it opens at /qsys/<new> now` | The saved views (a restored backup, a hand edit) put two panels at one address. The later one was given the next free address; `/qsys/manage` lists it. Said on each load until the views are next saved. |
+| `views.json: "<view>" (<id>) had panel settings for /qsys/<slug> but is not a custom console; it is an ordinary view now` | Panel settings on a display or another kind were dropped when the views were loaded. |
+| `an allowlist save was stopped: the list changed since the page read it` | From `/qsys/manage`: the list was changed elsewhere after the page read it, so the save sent nothing; Discard shows the new list. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 | `ready listener failed: <reason>` | A bug in this app's handling of writes becoming possible again (where an owed release is sent). Writes carry on; report the line. |
 

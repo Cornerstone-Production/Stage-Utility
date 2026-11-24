@@ -32,11 +32,16 @@ import { QSYS_MANAGE_PATH, qsysPanelPath } from "./qsys-paths";
 
 /** How long the server must have been without the Core before the offline card
  *  covers the panel. A blip shorter than this reads as Reconnecting instead. */
-let overlayAfterMs = 2_000;
+let coreLostAfterMs = 2_000;
+/** How long this page must have been without Stage Utility itself (its event
+ *  stream down: the server stopped, the iPad off the network) before the same card
+ *  covers it. Longer than the Core's: an iPad waking takes a moment to reconnect. */
+let pageLostAfterMs = 10_000;
 
-/** Test seam: how long the offline card waits. */
-export function __setOfflineOverlayDelayForTests(ms: number): void {
-  overlayAfterMs = ms;
+/** Test seam: how long the offline card waits, for the Core and for the page. */
+export function __setOfflineOverlayDelayForTests(coreMs: number, pageMs = pageLostAfterMs): void {
+  coreLostAfterMs = coreMs;
+  pageLostAfterMs = pageMs;
 }
 
 /** The approved copy, word for word. */
@@ -90,67 +95,78 @@ export function QsysPanelSurface({ view, settingsLink = false, inShell = false }
   const panel = useQsysPanel(view.id, panelKindOf(view));
   return (
     <QsysPanelContext.Provider value={panel}>
-      <div className="kiosk-surface relative flex h-full min-h-0 flex-col" data-qsys-panel={view.qsys?.slug ?? view.id}>
-        <PanelHeader name={inShell ? null : view.name} />
-        <PanelBody view={view} settingsLink={settingsLink} />
-      </div>
+      <PanelFrame view={view} settingsLink={settingsLink} inShell={inShell} />
     </QsysPanelContext.Provider>
   );
 }
 
 type Line = { tone: "ok" | "warn" | "danger"; text: string };
 
-/** What the connection line says, from the panel's store. */
-function useConnectionLine(): { line: Line; noCore: boolean; coreDown: boolean } {
+/**
+ * What the panel says, from its store: the connection line, the no-Core strip, and
+ * whether the offline card covers it. The card comes when the server has been
+ * without the Core for 2 s, or this page without Stage Utility for 10 s; either way
+ * nothing here can change anything. When the page's stream comes back, the store
+ * reads the Core's state again before it takes input (use-qsys-values.ts).
+ */
+function useConnection(): { line: Line; noCore: boolean; overlay: boolean } {
   const st = useQsysPanelState();
   const noCore = st.configured === false;
-  const coreDown = !noCore && st.core === "reconnecting";
-  if (noCore) return { line: { tone: "warn", text: NO_CORE_TITLE }, noCore, coreDown };
-  if (st.live) return { line: { tone: "ok", text: "Connected to sound system" }, noCore, coreDown };
-  if (coreDown) return { line: { tone: "danger", text: "Sound system offline" }, noCore, coreDown };
-  return { line: { tone: "warn", text: "Reconnecting to sound system" }, noCore, coreDown };
+  const coreLost = useAfter(!noCore && st.core === "reconnecting", coreLostAfterMs);
+  const pageLost = useAfter(!st.stream, pageLostAfterMs);
+  const overlay = coreLost || pageLost;
+  if (pageLost) return { line: { tone: "danger", text: "Sound system offline" }, noCore, overlay };
+  if (noCore) return { line: { tone: "warn", text: NO_CORE_TITLE }, noCore, overlay };
+  if (st.live) return { line: { tone: "ok", text: "Connected to sound system" }, noCore, overlay };
+  if (st.core === "reconnecting") return { line: { tone: "danger", text: "Sound system offline" }, noCore, overlay };
+  return { line: { tone: "warn", text: "Reconnecting to sound system" }, noCore, overlay };
 }
 
 const DOT: Record<Line["tone"], string> = { ok: "bg-ok-9", warn: "bg-warn-9", danger: "bg-danger-9" };
 
-function PanelHeader({ name }: { name: string | null }) {
-  const { line } = useConnectionLine();
+function PanelFrame({ view, settingsLink, inShell }: { view: View; settingsLink: boolean; inShell: boolean }) {
+  const { line, noCore, overlay } = useConnection();
   return (
-    <header className={cn("flex shrink-0 items-center gap-4 border-b border-line px-6", name === null ? "h-10" : "h-[72px]")}>
-      <div className="flex min-w-0 grow flex-col gap-0.5">
-        {name !== null && <h1 className="truncate text-title2 font-semibold tracking-[-0.01em] text-fg">{name}</h1>}
-        <div className="flex items-center gap-2 text-footnote text-fg-muted" data-connection-line={line.tone}>
-          <span aria-hidden className={cn("size-2 shrink-0 rounded-full", DOT[line.tone])} />
-          <span>{line.text}</span>
+    <div className="kiosk-surface relative flex h-full min-h-0 flex-col" data-qsys-panel={view.qsys?.slug ?? view.id}>
+      <header className={cn("flex shrink-0 items-center gap-4 border-b border-line px-6", inShell ? "h-10" : "h-[72px]")}>
+        <div className="flex min-w-0 grow flex-col gap-0.5">
+          {!inShell && <h1 className="truncate text-title2 font-semibold tracking-[-0.01em] text-fg">{view.name}</h1>}
+          {/* A live region: a screen reader hears the Core drop, not only the card. */}
+          <div role="status" aria-live="polite" className="flex items-center gap-2 text-footnote text-fg-muted" data-connection-line={line.tone}>
+            <span aria-hidden className={cn("size-2 shrink-0 rounded-full", DOT[line.tone])} />
+            <span>{line.text}</span>
+          </div>
         </div>
-      </div>
-    </header>
-  );
-}
-
-function PanelBody({ view, settingsLink }: { view: View; settingsLink: boolean }) {
-  const { noCore, coreDown } = useConnectionLine();
-  const overlay = useAfter(coreDown, overlayAfterMs);
-  return (
-    <>
+        {/* In the shell, the page's name is the context bar's; the panel's address and
+            kind go here, as the approved navigation board shows them. */}
+        {inShell && view.qsys && (
+          <div className="flex shrink-0 items-center gap-3 text-footnote" data-qsys-shell-note>
+            <span className="font-mono text-fg-subtle">{qsysPanelPath(view.qsys.slug)}</span>
+            <span className="text-fg-muted">{view.qsys.kind === "volunteer" ? "Volunteer panel" : "Staff panel"}</span>
+          </div>
+        )}
+      </header>
       {noCore && <NoCoreStrip settingsLink={settingsLink} />}
       <div className="relative min-h-0 flex-1">
-        {view.layout && view.layout.objects.length > 0 ? (
-          <LayoutRenderer
-            layout={view.layout}
-            viewId={view.id}
-            ndiSource={null}
-            interactive={capabilityLive("shell", "control")}
-            surface="console"
-            allowHls
-            screen={null}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center p-6 text-center text-body text-fg-muted">Nothing on this panel yet.</div>
-        )}
+        {/* Dimmed under the card, as the approved panel draws it. */}
+        <div className={cn("h-full", overlay && "pointer-events-none opacity-35")}>
+          {view.layout && view.layout.objects.length > 0 ? (
+            <LayoutRenderer
+              layout={view.layout}
+              viewId={view.id}
+              ndiSource={null}
+              interactive={capabilityLive("shell", "control")}
+              surface="console"
+              allowHls
+              screen={null}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center p-6 text-center text-body text-fg-muted">Nothing on this panel yet.</div>
+          )}
+        </div>
         {overlay && <OfflineCard />}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -187,7 +203,7 @@ function OfflineCard(): ReactNode {
   return (
     // Over the layout only, so the header's connection line still shows; the scrim
     // also takes every touch, though the objects are deaf anyway while offline.
-    <div className="absolute inset-0 flex items-start justify-center bg-black/60 px-6 pt-[min(200px,20vh)]" data-qsys-offline>
+    <div className="absolute inset-0 flex items-start justify-center bg-(--kiosk-bg)/60 px-6 pt-[min(200px,20vh)]" data-qsys-offline>
       <div role="alert" className="flex w-[480px] max-w-full flex-col gap-2.5 rounded-[20px] border border-line-strong bg-[var(--kiosk-surface-1)] p-7 text-center">
         <div className="text-title3 font-semibold text-fg">{OFFLINE_TITLE}</div>
         <div className="text-subheadline text-fg-muted">{OFFLINE_BODY}</div>

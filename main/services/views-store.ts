@@ -13,6 +13,7 @@ import { parseQsysPanelBlock } from "../types/qsys.js";
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse, textOrNull, uniqueIds } from "./restore-check.js";
 import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
+import { repairQsysBlocks } from "./qsys/qsys-slug-repair.js";
 import { isSafeKey } from "./safe-key.js";
 
 /**
@@ -39,7 +40,10 @@ const restoreCheck = checked((raw) => {
     textOrNull(v.ndiSource, `${what}'s NDI source`);
     optional(v.hideChrome, "boolean", `${what}'s hideChrome`);
     optional(v.showInSidebar, "boolean", `${what}'s showInSidebar`);
-    if (v.qsys !== undefined) {
+    // Null reads as no block. Its shape is checked; whether it is a console and its
+    // address is free are not refused here: the load after the restore repairs them
+    // (qsys-slug-repair.ts), because a backup that fails to restore is worse.
+    if (v.qsys !== undefined && v.qsys !== null) {
       const parsed = parseQsysPanelBlock(v.qsys);
       if ("error" in parsed) refuse(`${what}'s Q-SYS panel settings: ${parsed.error}`);
     }
@@ -51,14 +55,6 @@ const restoreCheck = checked((raw) => {
     }
   });
   uniqueIds(list, "the views");
-  // /qsys/<slug> opens one panel; a slug on two views would open whichever came first.
-  const slugs = new Set<string>();
-  for (const v of list) {
-    const slug = (v.qsys as { slug?: unknown } | undefined)?.slug;
-    if (typeof slug !== "string") continue;
-    if (slugs.has(slug)) refuse(`two views use the Q-SYS panel address /qsys/${slug}`);
-    slugs.add(slug);
-  }
   return views;
 });
 
@@ -73,5 +69,7 @@ export const viewsStore = new DataStore<View[]>("views.json", [], "config", {
   restoreCheck,
   // A view saved before ServiceCue was renamed names its layout with the old
   // field; it is read as the new one and written as the new one on the next save.
-  normalize: adoptLegacyViewFields,
+  // Q-SYS panel blocks that share an address or sit on a view that cannot be a
+  // panel are repaired the same way (qsys-slug-repair.ts).
+  normalize: (raw) => repairQsysBlocks(adoptLegacyViewFields(raw)),
 });

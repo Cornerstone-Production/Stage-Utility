@@ -20,6 +20,7 @@
 //   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not
 //                                      connected (code not-connected), or while the check cannot read the views
 //                                      or the allowlist (code check-failed)
+//   GET  /api/qsys/panel-repairs       [{ viewId, name, from, to, why }]: panel blocks the last load of the views repaired
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -31,6 +32,7 @@ import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
 import { AllowlistRefused, AllowlistStoredInvalid, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
 import { viewsStore } from "../views-store.js";
+import { qsysSlugRepairs } from "../qsys/qsys-slug-repair.js";
 import { isReadOnlyDirection } from "../../types/qsys.js";
 import { qsysBindings, writeAddressesOf } from "../qsys/qsys-bindings.js";
 import { qsysService } from "../qsys/qsys-service.js";
@@ -201,6 +203,13 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     // Never an empty report in place of a check that could not run: empty means every binding resolves.
     // The code says which of the two a 503 is.
     error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503, answer.error);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/panel-repairs") {
+    // What the last load of the views changed in panel blocks (a shared address, a
+    // block on a view that cannot be a panel). Read only.
+    json(res, qsysSlugRepairs());
     return;
   }
 

@@ -86,6 +86,8 @@ export interface QsysPanelState {
   core: "connected" | "reconnecting" | "offline" | null;
   /** Whether a Core is set up and on; null until the server has said. */
   configured: boolean | null;
+  /** This page's own event stream to Stage Utility is up. */
+  stream: boolean;
 }
 
 /** Worst of several states: offline beats unavailable beats live. */
@@ -304,7 +306,7 @@ export class QsysPanel {
   }
 
   stateSnapshot(): QsysPanelState {
-    return this.cached("state", () => ({ live: this.live, connection: this.connection(), epoch: this.epoch, core: this.coreState, configured: this.coreConfigured }));
+    return this.cached("state", () => ({ live: this.live, connection: this.connection(), epoch: this.epoch, core: this.coreState, configured: this.coreConfigured, stream: this.streamUp }));
   }
 
   /** Whether input is accepted at all: the stream is up and the panel has been read since. */
@@ -806,7 +808,7 @@ export function useQsysPanelContext(): QsysPanel | null {
 
 const UNAVAILABLE: QsysValue = { value: null, string: "", position: null, state: "unavailable" };
 const NO_CONTROL: QsysControlInfo = { type: "", range: null, choices: null, writable: false, allowed: false, limits: { min: null, max: null }, hold: false };
-const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0, core: null, configured: null };
+const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0, core: null, configured: null, stream: false };
 
 /** One control's value as the Core last reported it, and whether input is open. */
 export function useQsysValue(a: QsysAddress | null): QsysValue {

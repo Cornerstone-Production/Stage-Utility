@@ -87,6 +87,7 @@ interface Server {
   puts: Record<string, unknown>[];
   posts: Record<string, unknown>[];
   allow: { entries: unknown[]; invalid: string | null };
+  repairs: unknown[];
 }
 
 let server: Server;
@@ -106,6 +107,7 @@ function freshServer(): Server {
     puts: [],
     posts: [],
     allow: structuredClone(ALLOW),
+    repairs: [],
   };
 }
 
@@ -139,6 +141,7 @@ const f = stubFetchWithLog((url, init) => {
     return ok({ entries: body.entries });
   }
   if (url === "/api/qsys/allowlist") return ok(server.allow);
+  if (url === "/api/qsys/panel-repairs") return ok(server.repairs);
   if (url === "/api/qsys/catalog") return ok(CATALOG);
   if (url === "/api/qsys/bindings") return reply(server.bindings.status, server.bindings.body);
   if (url === "/api/qsys/write") {
@@ -166,7 +169,7 @@ beforeEach(() => {
   __resetReplayCacheForTests();
   __resetQsysPanelsForTests();
   __sseFallback.noteStream(true);
-  __setOfflineOverlayDelayForTests(50);
+  __setOfflineOverlayDelayForTests(50, 150);
 });
 afterEach(() => {
   cleanup();
@@ -353,7 +356,78 @@ describe("Q-SYS panel pages", () => {
   });
 });
 
+describe("a panel that loses Stage Utility", () => {
+  test("after the page's own stream has been down a while, the offline card covers it; back, it reads before input", async () => {
+    await open("/qsys/zone-1");
+    assert.equal(muteState(), "live");
+    act(() => __sseFallback.noteStream(false));
+    await wait(60);
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false, "a short drop covered the panel");
+    assert.equal(line(), "Reconnecting to sound system");
+    await wait(150);
+    const card = document.querySelector("[data-qsys-offline]");
+    assert.equal(card !== null, true, "no card while the page could not reach Stage Utility");
+    assert.ok((card!.textContent ?? "").includes(OFFLINE_BODY));
+    assert.equal(line(), "Sound system offline");
+    // Back, but its read is slow: no card, and no input until the read lands.
+    let release: () => void = () => {};
+    server.holdReads = (r) => (release = r);
+    server.values.mute = true;
+    act(() => __sseFallback.noteStream(true));
+    await wait(60);
+    assert.equal(document.querySelector("[data-qsys-offline]") !== null, false, "the card stayed after the stream came back");
+    assert.equal(muteState(), "offline", "input opened before the read landed");
+    act(() => {
+      fireEvent.click(muteButton());
+    });
+    await wait(20);
+    assert.equal(server.writes.length, 0, "a tap before the read was sent");
+    server.holdReads = null;
+    release();
+    await wait(60);
+    assert.equal(muteState(), "live");
+    assert.equal(muteButton().getAttribute("aria-pressed"), "true", "it shows the Core's value from the read");
+  });
+});
+
 describe("/qsys/manage", () => {
+  test("a restored backup's repaired panel addresses are said; Home is never offered as a panel", async () => {
+    server.repairs = [{ viewId: "v-x", name: "Zone 1 copy", from: "zone-1", to: "zone-1-2", why: "shared" }];
+    const HOME = { id: "home", name: "Home", kind: "custom", surface: "console", createdAt: NOW, layout: layoutWith(MUTE) };
+    server.views = [ZONE, BOOTH, HOME];
+    await open("/qsys/manage");
+    await wait(60);
+    assert.match(document.querySelector("[data-qsys-repairs]")?.textContent ?? "", /"Zone 1 copy" shared \/qsys\/zone-1 with an earlier panel, so it opens at \/qsys\/zone-1-2 now/);
+    assert.equal(screen.queryByText("Make it a panel") !== null, false, "Home was offered as a panel");
+  });
+
+  test("an allowlist save over a list changed elsewhere sends nothing, says so, and Discard shows the new list", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    act(() => {
+      fireEvent.change(screen.getByLabelText(`Max for ${MIX} gain`), { target: { value: "0" } });
+      fireEvent.blur(screen.getByLabelText(`Max for ${MIX} gain`));
+    });
+    // Another operator saves meanwhile.
+    server.allow = { entries: [{ component: MIX, control: "gain", label: "", min: -50, max: 10, confirm: "none" }], invalid: null };
+    act(() => {
+      fireEvent.click(screen.getByText("Save the allowlist"));
+    });
+    await wait(40);
+    assert.equal(server.puts.length, 0, "the save overwrote someone else's list");
+    assert.match(document.querySelector('section[aria-label="Allowlist"] [role="alert"]')?.textContent ?? "", /changed somewhere else/);
+    act(() => {
+      fireEvent.click(screen.getByText("Discard"));
+    });
+    await wait(10);
+    assert.equal((screen.getByLabelText(`Min for ${MIX} gain`) as HTMLInputElement).value, "-50");
+  });
+
+  test("in the shell, a panel's header carries its address and kind", async () => {
+    await open("/qsys/manage/zone-1");
+    assert.match(document.querySelector("[data-qsys-shell-note]")?.textContent ?? "", /\/qsys\/zone-1.*Volunteer panel/);
+  });
+
   test("/qsys/manage lists panels with kind, binding problems, connection, allowlist, PIN and rates", async () => {
     server.bindings = {
       status: 200,

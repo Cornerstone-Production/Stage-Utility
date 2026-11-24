@@ -586,7 +586,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         try {
           state = await stageController.setViewQsys(id, qsys);
         } catch (err) {
-          // Taken between the check above and here (another save in between).
+          // Taken between the check above and here: another save landed during this
+          // body's awaits. Accepted, and narrow (two operators claiming one address in
+          // the same moment): the fields applied above this have landed, and the 400
+          // says the address did not. Holding the slug across the awaits would need a
+          // reservation the controller does not keep for any other field.
           if (!(err instanceof QsysPanelRefused)) throw err;
           error(res, err.message, err.status);
           return;
