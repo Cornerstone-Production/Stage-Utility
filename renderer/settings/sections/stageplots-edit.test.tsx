@@ -53,6 +53,8 @@ let DRAFT_NOTICE: string | null = null;
 let draftPutsOut = 0;
 /** GET /api/stageplots/drafts asked, from any page. */
 let draftReads = 0;
+/** While above 0, a GET /api/stageplots/drafts fails as a server that does not answer, and counts down. */
+let DRAFTS_READ_FAILS = 0;
 /** The drafts note the server broadcasts on stageplots:drafts after any change to them. */
 function announceDrafts() {
   FakeEventSource.last?.push("stageplots:drafts", { drafts: DRAFTS.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
@@ -235,6 +237,10 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   }
   if (u.pathname === "/api/stageplots/drafts") {
     draftReads++;
+    if (DRAFTS_READ_FAILS > 0) {
+      DRAFTS_READ_FAILS--;
+      throw new TypeError("Failed to fetch");
+    }
     const body = { drafts: structuredClone(DRAFTS) };
     return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
   }
@@ -364,6 +370,7 @@ beforeEach(() => {
   DRAFT_NOTICE = null;
   draftPutsOut = 0;
   draftReads = 0;
+  DRAFTS_READ_FAILS = 0;
   STATE = {};
   UPCOMING = { plans: [], cacheAgeMs: 0 };
   localStorage.clear();
@@ -1590,6 +1597,21 @@ describe("the kept draft", () => {
     await click(screen.getByRole("button", { name: "Save" }));
     await until(isKept, "the draft to be kept after the failed save");
     assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft"]);
+  });
+
+  test("a re-read of the drafts that fails is made again, so another desk's draft opens rather than being stored over", async () => {
+    await mount();
+    const reads = draftReads;
+    // Another desk keeps a draft of Special, and this editor's read of the drafts fails once.
+    DRAFTS_READ_FAILS = 1;
+    DRAFTS = [...DRAFTS, { plotId: DOC.plots[1].id, baseVersion: DOC.plots[1].version, items: [item({ id: "theirs" })], savedAt: "2026-11-14T15:00:00.000Z" }];
+    await act(async () => announceDrafts());
+    // Past the first wait before a read is made again (DRAFTS_RETRY_FIRST_MS).
+    await wait(2600);
+    assert.ok(draftReads >= reads + 1, "the note did not set off a read, so this tests nothing");
+    await click(tabs()[1]);
+    for (let i = 0; i < 3; i++) await settle();
+    assert.ok(ids().includes("theirs"), "the other desk's draft did not open: this editor would store over it");
   });
 
   test("a plot's draft survives a save on another plot, and opens again when its tab is picked", async () => {
