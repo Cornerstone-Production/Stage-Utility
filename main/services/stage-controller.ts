@@ -439,6 +439,16 @@ export function writeIconEntry(
 /** A service type and its nearest upcoming plan, as auto mode weighs them. */
 type Candidate = { type: ServiceTypeDTO; plan: PlanDTO };
 
+/** A rundown's columns: the note categories its items use, in `order` (Planning Center's),
+ *  then any it does not name in the order the items first use them. */
+function columnsInOrder(items: readonly PlanItemDTO[], order: readonly string[]): string[] {
+  const used = new Set<string>();
+  for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
+  const ordered = order.filter((c) => used.has(c));
+  for (const c of used) if (!ordered.includes(c)) ordered.push(c);
+  return ordered;
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -580,6 +590,9 @@ export class StageController {
   /** Plan-list reads that keep failing, said once per outage. Keys:
    *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
   private readonly plansOutage = new OutageLog();
+  /** Planning Center's own note-category order per service type, as last read. It only
+   *  orders a rundown's columns, so a failed read falls back to it. */
+  private readonly categoryOrder = new Map<string, string[]>();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -1691,13 +1704,42 @@ export class StageController {
     if (!this.state.serviceTypeId || !this.state.planId) return empty;
     const [items, categories] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId),
-      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+      this.noteCategoryOrder(this.state.serviceTypeId),
     ]);
-    const used = new Set<string>();
-    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
-    const ordered = categories.filter((c) => used.has(c));
-    for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
-    return { planId: this.state.planId, items, noteCategories: ordered };
+    return { planId: this.state.planId, items, noteCategories: columnsInOrder(items, categories) };
+  }
+
+  /**
+   * Planning Center's order for a service type's note categories, for a rundown's columns.
+   * Never rejects.
+   *
+   * The order is all this decides: which columns a rundown has comes from its items' own
+   * notes. So a failed read is not the rundown's failure, as it was while this threw
+   * through the Promise.all beside the items and blanked the ServiceCue page, the public
+   * page and the plan items over one failed request. It falls back to the order last read,
+   * or none (the items' own order), and is said once per outage on [pco]. The
+   * note-categories route and Home's row read the categories themselves, and still fail.
+   */
+  private async noteCategoryOrder(serviceTypeId: string): Promise<string[]> {
+    const key = `categories:${serviceTypeId}`;
+    try {
+      const categories = await pcoService.listItemNoteCategories(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+      this.categoryOrder.set(serviceTypeId, categories);
+      const back = this.plansOutage.ok(key, Date.now());
+      if (back.log) {
+        console.log(`[pco] note categories for service type ${scrub(serviceTypeId)} can be read again; rundown columns follow Planning Center's order${scrub(back.note)}`);
+      }
+      return categories;
+    } catch (err) {
+      const last = this.categoryOrder.get(serviceTypeId) ?? [];
+      const decision = this.plansOutage.fail(key, errorMessage(err), Date.now());
+      if (decision.log) {
+        console.warn(
+          `[pco] note categories for service type ${scrub(serviceTypeId)} could not be read (${scrub(errorMessage(err))}); rundowns still answer, their columns ${last.length > 0 ? "in the order last read" : "in the order the items use them"}${scrub(decision.note)}`,
+        );
+      }
+      return last;
+    }
   }
 
   // ── Pre-service checklist, sourced from Planning Center plan notes ───────
@@ -2094,16 +2136,11 @@ export class StageController {
     // costs nothing — the colors ride along on a request already being made.
     const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
-      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
+      this.noteCategoryOrder(serviceTypeId),
       pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
       pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret),
     ]);
-    const used = new Set<string>();
-    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
-    const ordered = categories.filter((c) => used.has(c));
-    for (const c of used) if (!ordered.includes(c)) ordered.push(c);
-
     return {
       serviceTypeId,
       planId: plan.id,
@@ -2111,7 +2148,7 @@ export class StageController {
       planSeriesTitle: plan.seriesTitle,
       planDates: plan.dates,
       items,
-      noteCategories: ordered,
+      noteCategories: columnsInOrder(items, categories),
       itemTypeColors: serviceTypes.find((t) => t.id === serviceTypeId)?.itemTypeColors ?? [],
       serviceTimes,
       timeZone,

@@ -673,6 +673,31 @@ class PcoService {
     this.cache.set(key, { value, writtenAt: Date.now(), ttl });
   }
 
+  /**
+   * A read whose answer is cached for `ttl` and whose FAILURE is held for
+   * TTL_FAILED_MS: inside that, the same error is thrown again without asking.
+   *
+   * For a read that throws its failure to the caller rather than parsing it to an
+   * empty answer. Caching nothing on a failure is the other half of the mistake
+   * TTL_FAILED_MS describes: a page polling every minute, on every screen, through
+   * a 429 episode keeps the episode going. The failure is held under its own key,
+   * so a held failure can never be read back as data.
+   */
+  private async heldRead<T>(cacheKey: string, ttl: number | (() => number), read: () => Promise<T>): Promise<T> {
+    const cached = this.cacheGet<T>(cacheKey);
+    if (cached !== null) return cached;
+    const held = this.cacheGet<{ error: unknown }>(`failed:${cacheKey}`);
+    if (held) throw held.error;
+    try {
+      const value = await read();
+      this.cacheSet(cacheKey, value, ttl);
+      return value;
+    } catch (err) {
+      this.cacheSet(`failed:${cacheKey}`, { error: err }, TTL_FAILED_MS);
+      throw err;
+    }
+  }
+
   /** Invalidate every cache entry scoped to one plan (its items, team, service
    *  times, attachments). Used for targeted refresh instead of nuking the lot. */
   clearPlanCache(planId: string): void {
@@ -1287,7 +1312,7 @@ class PcoService {
    * different endpoints returning the same shape. Written once because this
    * repository's most expensive recurring mistake is fixing one copy of a thing
    * that exists in several — the pagination, the sequence sort and the
-   * do-not-cache-a-failure rule would all have had to be got right twice.
+   * held-failure rule would all have had to be got right twice.
    */
   private async noteCategoryNames(
     appId: string,
@@ -1295,28 +1320,23 @@ class PcoService {
     serviceTypeId: string,
     collection: "item_note_categories" | "plan_note_categories",
   ): Promise<string[]> {
-    const cacheKey = `${collection}:${appId}:${serviceTypeId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/${pcoSegment("collection", collection)}?per_page=100`;
     // A failed read throws to the caller, which names it ([pco] on the route) and answers 502. It
     // used to parse to an empty list with a 200, so Planning Center being down read as "this service
     // type has no note categories": Home said All clear and the layouts page said nothing at all.
-    const json = await this.request(url, appId, secret);
-    const items = Array.isArray(json.data) ? json.data : [];
-    const result = items
-      .map((n) => ({
-        name: typeof n.attributes.name === "string" ? n.attributes.name : "",
-        sequence: typeof n.attributes.sequence === "number" ? n.attributes.sequence : 0,
-      }))
-      .filter((c) => c.name)
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((c) => c.name);
-
-    // Only a real answer reaches here, so only a real answer is cached.
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
-    return result;
+    // The failure is held, never as an empty list: see heldRead.
+    return this.heldRead(`${collection}:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [];
+      return items
+        .map((n) => ({
+          name: typeof n.attributes.name === "string" ? n.attributes.name : "",
+          sequence: typeof n.attributes.sequence === "number" ? n.attributes.sequence : 0,
+        }))
+        .filter((c) => c.name)
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((c) => c.name);
+    });
   }
 
   /** The plan-note categories a service type offers, for the checklist picker. */
