@@ -138,8 +138,10 @@ indicator) need the control to exist.
 Each problem is one `[qsys] binding: <view>/<object> <problem> (<component>/<control>)`
 line on `/log`, written when the problem first appears and not again while it
 stands; a line says when every problem has been fixed. The report is at
-`GET /api/qsys/bindings`. The check has nothing to compare with while the Core is
-not connected, and says nothing then.
+`GET /api/qsys/bindings`, which answers `503` while the Core is not connected (there
+is nothing to compare with), and `[]` only when every binding resolves. A config
+restore restarts the server, which reads the restored views and allowlist and
+checks them afresh. An unreadable views file stops the check, and says so.
 
 The same step gives the watch its panels: every View with Q-SYS objects, and the
 controls its objects read. When two people move one fader, the last write wins, and
@@ -207,6 +209,9 @@ Look at `/log` and filter for `[qsys]`.
 | `write log saved again` | A save succeeded after failures. |
 | `catalog refresh failed: <reason>` | A catalog refresh asked for over the API failed. |
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
+| `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
+| `binding check: every binding resolves` | Every problem the check had reported is fixed. |
+| `binding check could not run: <reason>` | The views or the allowlist could not be read. The last report stands until a check runs. |
 | `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
 
 The lines below are about watching the controls open panels read.

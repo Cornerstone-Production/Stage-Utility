@@ -3,7 +3,7 @@
 // A "panel" is any View whose layout holds Q-SYS objects. Every time the Views
 // change, the catalog is read again, or the allowlist is saved, this rebuilds the
 // watch's panel list from the views and reruns the check, so a binding that no
-// longer resolves is said on /log and shown on /qsys/manage rather than found
+// longer resolves is said on /log and answered by GET /api/qsys/bindings rather than found
 // out by a volunteer on a Sunday.
 //
 // An object that WRITES (fader, mute, button, switch, presets, selector, a
@@ -11,6 +11,9 @@
 // allowlist, and writable: not a read-only control, and not a number with no
 // range set. An object that only READS (meter, label, a strip's name and meters,
 // every indicator) needs the control to exist.
+//
+// A config restore needs no rerun here: it writes the files and the process restarts, and
+// start() reads them fresh at boot.
 //
 // The report is logged only when it changes: one `[qsys] binding:` line for each
 // problem that was not in the last report.
@@ -32,7 +35,7 @@ type Role = "write" | "read";
 type Slot = { binding: QsysBinding | null | undefined; role: Role };
 
 /** Each binding an object holds, and whether the object writes it. Indicators are always read. */
-function slotsOf(config: LayoutObjectConfig): Slot[] {
+export function slotsOf(config: LayoutObjectConfig): Slot[] {
   switch (config.type) {
     case "qsys-fader":
     case "qsys-mute":
@@ -109,7 +112,8 @@ function writeProblem(entry: AllowEntry | undefined, control: QsysCatalog["compo
 /**
  * Check every binding of every Q-SYS panel against the Core's catalog and the
  * allowlist. Pure: the caller says what the Core has. With no catalog (the Core is
- * not connected) there is nothing to check against, and the report is empty.
+ * not connected) there is nothing to check against, and the report is empty (the
+ * route answers 503 then, so an empty report only ever means clean).
  */
 export function checkBindings(views: View[], catalog: QsysCatalog | null, allow: Map<string, AllowEntry>): BindingReport {
   if (!catalog) return [];
@@ -156,6 +160,7 @@ const lineOf = (r: BindingReport[number]): string =>
 export interface BindingSources {
   getCatalog(): QsysCatalog | null;
   onCatalog(cb: (c: QsysCatalog) => void): void;
+  /** Throws while the views file cannot be read, rather than answering the defaults. */
   loadViews(): Promise<View[]>;
   loadAllow(): Promise<AllowEntry[]>;
   onViewsSaved(cb: () => void): void;
@@ -184,9 +189,14 @@ export class QsysBindings {
     again();
   }
 
-  /** The last report. Empty while no catalog has been read. */
-  current(): BindingReport {
-    return this.report;
+  /** The last report, or null while the Core is not connected (a report from an earlier connection is not served). */
+  current(): BindingReport | null {
+    return this.src.getCatalog() ? this.report : null;
+  }
+
+  /** Resolves once any run in flight, and any queued behind it, has finished. Starts nothing and changes nothing. */
+  async settled(): Promise<void> {
+    while (this.running) await this.running;
   }
 
   /** Rebuild the watch's panels and rerun the check. One run at a time; a call during a run queues one more. */
@@ -205,8 +215,13 @@ export class QsysBindings {
         const [views, entries] = await Promise.all([this.src.loadViews(), this.src.loadAllow()]);
         this.src.setPanels(panelsFromViews(views));
         const catalog = this.src.getCatalog();
-        // No catalog, nothing to check against: keep the last report and say nothing.
-        if (!catalog) continue;
+        // No catalog, nothing to check against: drop the old connection's report, so a
+        // reconnect says its problems again, and say nothing.
+        if (!catalog) {
+          this.report = [];
+          this.logged = new Set();
+          continue;
+        }
         this.report = checkBindings(views, catalog, new Map(entries.map((e) => [addressKey(e), e])));
         this.say();
       } catch (err) {
@@ -227,7 +242,7 @@ export class QsysBindings {
 export const qsysBindings = new QsysBindings({
   getCatalog: () => qsysService.getCatalog(),
   onCatalog: (cb) => qsysService.onCatalog(cb),
-  loadViews: () => viewsStore.load(),
+  loadViews: () => viewsStore.loadStrict(),
   loadAllow: () => qsysAllowlist.list(),
   onViewsSaved: (cb) => viewsStore.onSaved(() => cb()),
   onAllowSaved: (cb) => qsysAllowlist.onSaved(cb),

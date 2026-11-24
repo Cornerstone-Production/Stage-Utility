@@ -127,6 +127,51 @@ describe("checkBindings", () => {
   });
 });
 
+describe("the check's slots and the watch's addresses agree", () => {
+  const A = (n: string) => bind("C", n);
+  const B = (n: string) => ({ ...A(n), indicator: bind("I", n) });
+  // A Record over every qsys-* type: a new type that is not listed here does not compile.
+  type QsysType = Extract<LayoutObjectConfig["type"], `qsys-${string}`>;
+  const FULL: Record<QsysType, LayoutObjectConfig> = {
+    "qsys-fader": fader(B("a")),
+    "qsys-meter": { type: "qsys-meter", binding: B("a"), binding2: B("b"), form: "bar" },
+    "qsys-mute": { type: "qsys-mute", binding: B("a") },
+    "qsys-button": { type: "qsys-button", binding: B("a"), label: "x", hold: false },
+    "qsys-switch": { type: "qsys-switch", binding: B("a"), onBinding: B("b"), offBinding: B("c"), label: "x" },
+    "qsys-presets": { type: "qsys-presets", items: [{ label: "1", binding: B("a") }, { label: "2", binding: B("b") }], previous: B("c") },
+    "qsys-selector": { type: "qsys-selector", binding: B("a"), items: [{ label: "1", binding: B("b") }, { label: "2", binding: B("c") }] },
+    "qsys-label": { type: "qsys-label", binding: B("a"), text: "" },
+    "qsys-strip": { type: "qsys-strip", name: B("a"), label: "x", gain: B("b"), mute: B("c"), meter: B("d"), meter2: B("e") },
+    "qsys-status": { type: "qsys-status" },
+  };
+
+  test("the Q-SYS object types, exactly", () => {
+    assert.deepEqual(Object.keys(FULL).sort(), [
+      "qsys-button",
+      "qsys-fader",
+      "qsys-label",
+      "qsys-meter",
+      "qsys-mute",
+      "qsys-presets",
+      "qsys-selector",
+      "qsys-status",
+      "qsys-strip",
+      "qsys-switch",
+    ]);
+  });
+
+  for (const [type, config] of Object.entries(FULL)) {
+    test(`${type}: the bindings the check walks are the addresses the watch reads`, async () => {
+      const { slotsOf } = await import("./qsys-bindings.js");
+      const { qsysAddressesOf } = await import("../../types/qsys.js");
+      const walked = slotsOf(config).flatMap(({ binding }) =>
+        binding ? [addressKey(binding), ...(binding.indicator ? [addressKey(binding.indicator)] : [])] : [],
+      );
+      assert.deepEqual([...new Set(walked)].sort(), qsysAddressesOf(config).map(addressKey).sort());
+    });
+  }
+});
+
 describe("panelsFromViews", () => {
   test("a view with Q-SYS objects is a panel, addresses deduped; a view without is not", () => {
     const panels = panelsFromViews([
@@ -206,7 +251,7 @@ describe("QsysBindings", () => {
       await h.b.refresh();
       assert.deepEqual(h.set.at(-1), [{ id: "p1", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] }]);
       const startedWith = h.set.length;
-      assert.deepEqual(h.b.current().map((r) => r.problem), ["not-allowed"]);
+      assert.deepEqual(h.b.current()?.map((r) => r.problem), ["not-allowed"]);
 
       h.setEntries([entry("Lobby_Mixer", "gain")]);
       h.on.allow();
@@ -221,7 +266,7 @@ describe("QsysBindings", () => {
       h.setCatalog({ ...CATALOG, components: [] });
       h.on.catalog();
       await h.b.refresh();
-      assert.deepEqual(h.b.current().map((r) => r.problem), ["missing-component"], "a catalog read did not rerun the check");
+      assert.deepEqual(h.b.current()?.map((r) => r.problem), ["missing-component"], "a catalog read did not rerun the check");
       assert.ok(h.set.length > startedWith);
     } finally {
       cap.restore();
@@ -234,7 +279,67 @@ describe("QsysBindings", () => {
     h.setViews([view("p1", obj("x", { type: "container" } as LayoutObjectConfig))]);
     await h.b.refresh();
     assert.deepEqual(h.set.at(-1), []);
-    assert.deepEqual(h.b.current(), []);
+    assert.equal(h.b.current(), null, "no Core: null, so the route can say 503 rather than [] for all clear");
+  });
+
+  test("a report from an earlier connection is not served, and a reconnect says its problems again", async () => {
+    const h = harness();
+    const cap = lines();
+    try {
+      h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
+      await h.b.refresh();
+      assert.equal(h.b.current()?.length, 1);
+      h.setCatalog(null);
+      assert.equal(h.b.current(), null, "a stale report outlived the connection");
+      await h.b.refresh();
+      assert.equal(cap.out.length, 1);
+      h.setCatalog(CATALOG);
+      await h.b.refresh();
+      assert.equal(cap.out.length, 2, "the new connection did not say the problem again");
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("an unreadable views file keeps the last report and never says every binding resolves", async () => {
+    const cap = lines();
+    try {
+      let broken = false;
+      const b = new QsysBindings({
+        getCatalog: () => CATALOG,
+        onCatalog: () => {},
+        loadViews: async () => {
+          if (broken) throw new Error("views.json unreadable");
+          return [view("p1", obj("f1", fader(bind("Gone", "gain"))))];
+        },
+        loadAllow: async () => [],
+        onViewsSaved: () => {},
+        onAllowSaved: () => {},
+        setPanels: () => {},
+      });
+      await b.refresh();
+      broken = true;
+      await b.refresh();
+      assert.equal(b.current()?.length, 1);
+      assert.ok(!cap.out.some((l) => l.includes("every binding resolves")), cap.out.join(" | "));
+      assert.ok(cap.out.some((l) => l.startsWith("[qsys] binding check could not run")));
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("settled() waits for a run in flight and starts none", async () => {
+    const h = harness();
+    await h.b.settled();
+    assert.deepEqual(h.set, [], "settled() ran a check");
+    h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
+    const run = h.b.refresh();
+    await h.b.settled();
+    assert.equal(h.b.current()?.length, 1, "settled() returned before the run finished");
+    await run;
+    const n = h.set.length;
+    await h.b.settled();
+    assert.equal(h.set.length, n);
   });
 
   test("a failed read says so and does not throw", async () => {
@@ -326,5 +431,24 @@ describe("two writers converge", () => {
     await settle();
     assert.deepEqual(sent.map((s) => s.changes.map((c) => c.Value)), [[-2]], "the UCI's value was not broadcast");
     assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -2, "the cache kept the iPad's value");
+  });
+});
+
+describe("the real views store", () => {
+  test("an unreadable views file stops the check instead of reading as no panels", async () => {
+    // A directory where the file should be: a read that fails, as a permissions fault does.
+    await fs.rm(path.join(TMP, "views.json"), { force: true });
+    await fs.mkdir(path.join(TMP, "views.json"));
+    const { qsysBindings } = await import("./qsys-bindings.js");
+    const out: string[] = [];
+    const m = mock.method(console, "warn", (...a: unknown[]) => void out.push(a.join(" ")));
+    const e = mock.method(console, "error", () => {});
+    try {
+      await qsysBindings.refresh();
+    } finally {
+      m.mock.restore();
+      e.mock.restore();
+    }
+    assert.ok(out.some((l) => l.startsWith("[qsys] binding check could not run")), `the failed read was not said: ${out.join(" | ")}`);
   });
 });

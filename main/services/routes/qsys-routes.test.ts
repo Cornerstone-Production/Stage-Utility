@@ -147,6 +147,7 @@ describe("/api/qsys", () => {
     assert.equal(status.writable, false);
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog")).status, 503);
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog/refresh", { method: "POST" })).status, 503);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/bindings")).status, 503, "an empty list here would read as all clear");
     await quietly(() => put([GAIN]));
     const r = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5 }));
     assert.equal(r.status, 200);
@@ -306,8 +307,21 @@ describe("/api/qsys", () => {
       { id: "v1", name: "V", kind: "custom", createdAt: "2026-01-01", layout: { version: 1, canvas: {}, objects: [object("ok", "mute"), object("bad", "nope")] } },
     ] as never);
     assert.equal((await put([MUTE])).status, 200);
+    // The GET changes nothing: it answers what the subscriptions to the views, the allowlist and the catalog computed.
+    const { qsysBindings } = await import("../qsys/qsys-bindings.js");
+    await quietly(async () => {
+      qsysBindings.start();
+      await qsysBindings.refresh();
+    });
     const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/bindings"));
     assert.equal(r.status, 200);
+    const setPanels = mock.method(qsysWatch, "setPanels");
+    try {
+      await quietly(() => callRoute(qsysRoutes, "/api/qsys/bindings"));
+      assert.equal(setPanels.mock.callCount(), 0, "a GET reset the watch's panels");
+    } finally {
+      setPanels.mock.restore();
+    }
     assert.deepEqual(r.json, [{ panelId: "v1", objectId: "bad", address: { component: "Lobby_Mixer", control: "nope" }, problem: "missing-control" }]);
   });
 });

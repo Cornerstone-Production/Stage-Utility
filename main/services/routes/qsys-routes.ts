@@ -13,7 +13,7 @@
 //   POST /api/qsys/write               { component, control, value, panelId?, final? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
-//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]
+//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not connected
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -141,9 +141,11 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "GET" && pathname === "/api/qsys/bindings") {
-    // Rerun first: the answer reflects the views and allowlist as saved now.
-    await qsysBindings.refresh();
-    json(res, qsysBindings.current());
+    // Read only: the check reruns when the views, the allowlist or the catalog change.
+    await qsysBindings.settled();
+    const report = qsysBindings.current();
+    if (!report) return error(res, "the Q-SYS Core is not connected", 503);
+    json(res, report);
     return;
   }
 
