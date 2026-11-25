@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { isOn, kindOf, unwritableReason } from "./qsys.js";
+import { isOn, isReadOnlyDirection, kindOf, unwritableReason } from "./qsys.js";
 
 describe("kindOf", () => {
   test("every Type a Core reports, one per line, sorted, is the kind its writes follow", () => {
@@ -24,6 +24,23 @@ describe("kindOf", () => {
 
   test("a snapshot's load.N (State Trigger) needs no allowlist range: it is a trigger, not a number", () => {
     assert.equal(unwritableReason({ Type: "State Trigger", Value: 0, Direction: "Read/Write" }, { min: null, max: null }), null);
+  });
+});
+
+describe("isReadOnlyDirection", () => {
+  test("every Direction a Core may report, one per line, sorted: Read and Read Only refuse writes", () => {
+    const table: [direction: unknown, readOnly: boolean][] = [
+      ["READ ONLY", true],
+      ["Read", true],
+      ["Read Only", true],
+      ["Read/Write", false],
+      ["ReadOnly", true],
+      ["Write", false],
+      ["read", true],
+    ];
+    assert.deepEqual(table.map(([d]) => d), table.map(([d]) => d).sort(), "the table is not sorted");
+    for (const [d, readOnly] of table) assert.equal(isReadOnlyDirection(d), readOnly, `Direction ${JSON.stringify(d)}`);
+    for (const d of [undefined, null, ""]) assert.equal(isReadOnlyDirection(d), false, `a missing Direction (${String(d)}) is not read-only`);
   });
 });
 

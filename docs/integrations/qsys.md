@@ -93,7 +93,7 @@ imported as an allowlist file. Every write is checked by the server.
   any text, so allowlist a text control only if any text is safe to send.
 - A value of the wrong type is refused (`bad-value`): text or `true` to a gain, a
   number to a mute or a text control, a number that is not finite.
-- A control the Core reports as read-only (direction `Read`, as a meter) is refused
+- A control the Core reports as read-only (direction `Read` or `Read Only`, as a meter) is refused
   (`read-only`), allowlisted or not.
 - An allowlisted control the running design does not have, as after a redeploy that
   removed it, is refused (`not-in-design`) without anything being sent.

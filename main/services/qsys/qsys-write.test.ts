@@ -392,7 +392,8 @@ describe("writeControl", () => {
     assert.deepEqual(mine.map((e) => [e.result, e.repeats]), [["not-in-design", 10]], "a drag on a missing control wrote an entry per sample");
   });
 
-  test("a control the Core reports read-only is refused before anything is sent, allowlist or not", async () => {
+  for (const direction of ["Read", "Read Only"]) test(`a control the Core reports read-only (Direction "${direction}") is refused before anything is sent, allowlist or not`, async () => {
+    fake.components.get("Zone 1")!.find((c) => c.Name === "meter")!.Direction = direction;
     await connect();
     const warn = capture("warn");
     try {

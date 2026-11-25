@@ -67,7 +67,7 @@ export interface QsysControlInfo {
   range: { min: number; max: number } | null;
   /** The choices a combo box offers, when the Core lists them. */
   choices: string[] | null;
-  /** False when the Core reports the control read-only (Direction "Read"). */
+  /** False when the Core reports the control read-only (Direction "Read" or "Read Only"; isReadOnlyDirection). */
   writable: boolean;
   /** On the allowlist: writable at all. */
   allowed: boolean;

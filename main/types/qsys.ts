@@ -49,12 +49,14 @@ export type QsysDensity = "standard" | "dense";
 export type PanelKind = "volunteer" | "staff";
 
 /**
- * A control the Core reports as read-only (QRC `Direction: "Read"`). The one rule
- * for it: the writer refuses such a control before sending, and a panel draws an
- * object that writes it as Unavailable.
+ * A control the Core reports as read-only: QRC `Direction` `Read`, or `Read Only`
+ * (the spelling read from a Core in Emulate; the exact literal is unconfirmed, so
+ * `ReadOnly` and any case count too). A writable control reports `Read/Write`. The
+ * one rule for it: the writer refuses such a control before sending, and a panel
+ * draws an object that writes it as Unavailable.
  */
 export function isReadOnlyDirection(direction: unknown): boolean {
-  return /^read$/i.test(String(direction ?? "").trim());
+  return /^read(\s*only)?$/i.test(String(direction ?? "").trim());
 }
 
 /** The parts of a QRC control the rules below read. */
