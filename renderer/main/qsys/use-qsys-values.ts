@@ -37,7 +37,7 @@ import { addressKey, choicesOf, isReadOnlyDirection, type PanelKind, type QsysAd
 import { toast } from "../../components/ui/toast";
 import { getStreamStatus, invoke, onNotification, onStreamStatusChange, streamClientId, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
-import { rangeOf } from "./fader-scale";
+import { rangeOf } from "@main/types/qsys-taper";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
 export type { WriteResult };

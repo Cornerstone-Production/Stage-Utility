@@ -17,9 +17,7 @@
 // meters and the slider's aria values, so the thumb never jumps when the Core's
 // answer lands.
 
-import { positionOf, rangeOf, taperFor, valueOf, type Taper } from "@main/types/qsys-taper";
-
-export { rangeOf };
+import { positionOf, taperFor, valueOf, type Taper } from "@main/types/qsys-taper";
 
 export const FADER_FLOOR_DB = -60;
 /** With a low top, how far under it the linear part starts. */

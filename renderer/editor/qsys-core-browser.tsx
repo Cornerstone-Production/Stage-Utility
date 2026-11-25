@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeftIcon, XIcon } from "lucide-react";
 
 import { choicesOf, isMeterComponent, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
-import { rangeOf } from "../main/qsys/fader-scale";
+import { rangeOf } from "@main/types/qsys-taper";
 import { Button, Input } from "../components/ui";
 import { invoke, type ApiError } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -57,7 +57,7 @@ interface AllowEntry {
   max: number | null;
 }
 
-// The panel's own rules (fader-scale.ts rangeOf, types/qsys.ts choicesOf), so the
+// The panel's own rules (types/qsys-taper.ts rangeOf, types/qsys.ts choicesOf), so the
 // editor offers exactly what a panel will draw live.
 const hasRange = (c: CatalogControl) => rangeOf(c) !== null;
 const hasChoices = (c: CatalogControl) => choicesOf(c) !== null;
