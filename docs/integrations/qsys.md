@@ -331,7 +331,9 @@ measured table, so a touch that does not move sends nothing; between the measure
 points the table can sit a little off the Core's own curve, and the thumb steps that
 far on the first move. What a drag sends is still a value in dB, so the allowlist's
 limits apply exactly as for any write; the drag stops at them, and the limit line is
-drawn at the limit's place on the taper. A strip's meters are drawn on the same
+drawn at the limit's place on the taper. The travel above the line is the Core's to
+the top of its range, so a finger can run on past the line while the thumb waits
+there; drawn back, the thumb moves again once the finger reaches it. A strip's meters are drawn on the same
 taper, so they line up with the fader.
 
 Measured ranges: -100 to +10 dB. A fader on any other range moves linearly in dB
