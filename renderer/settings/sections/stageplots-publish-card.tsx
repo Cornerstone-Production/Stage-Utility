@@ -35,7 +35,7 @@ import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
-import { copyText } from "../../lib/clipboard";
+import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { formatClock } from "../../lib/clock-format";
 import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
@@ -208,7 +208,9 @@ export function PublishCard({
   const [error, setError] = useState<string | null>(null);
   /** What the server said beside a success: a copy left on a page this server cannot reach. Kept until another venue. */
   const [notice, setNotice] = useState<string | null>(null);
-  const [copy, setCopy] = useState<"idle" | "copied" | "select">("idle");
+  // No timer: the status stays until another venue or link, and a failed copy selects the field.
+  const { state: copyState, copy: copyLink, reset: resetCopy } = useCopyFeedback(null);
+  const copy = copyState === "failed" ? "select" : copyState;
   const fieldRef = useRef<HTMLInputElement>(null);
 
   const published = usePublishedLink(venue);
@@ -216,7 +218,7 @@ export function PublishCard({
   // A new venue, or the same one published, unpublished or moved to a new link, starts clean.
   useResyncOn([venue.id, linkKey(venue) ?? ""], () => {
     setError(null);
-    setCopy("idle");
+    resetCopy();
   });
   useResyncOn([venue.id], () => setNotice(null));
 
@@ -247,14 +249,8 @@ export function PublishCard({
     setError(r.ok ? null : r.error);
   };
 
-  const onCopy = async () => {
-    if (await copyText(link)) {
-      setCopy("copied");
-      return;
-    }
-    // No clipboard here (plain HTTP) and the older copy command did nothing: select it for the operator.
-    setCopy("select");
-  };
+  // A failed copy (no clipboard on plain HTTP and the older copy command did nothing) selects the field for the operator.
+  const onCopy = () => copyLink(link);
 
   const onRegenerate = async () => {
     const ok = await confirm({
