@@ -758,6 +758,18 @@ describe("Q-SYS objects", () => {
     assert.ok(drawnPct(bar) > 99, `above the fader's top is the top, drew ${bar.style.transform}`);
   });
 
+  test("a strip's meter on a tapered fader follows the taper, so it lines up with the fader", async () => {
+    // output.1.gain is -100..+10 (a measured taper); -10 dB sits at 0.5 there, where linear -60..0 would put it at 0.83.
+    server.values.meter = -10;
+    server.values["output.1.gain"] = -10;
+    await mount([{ type: "qsys-strip", name: null, label: "Lead", gain: b("output.1.gain"), mute: null, meter: b("meter") }]);
+    const bar = q("qsys-strip", "[data-meter-bar]");
+    assert.ok(Math.abs(drawnPct(bar) - 50) < 0.01, `-10 dB on the taper drew ${bar.style.transform}`);
+    push("qsys:meters:staff", [{ control: "meter", value: 0 }]);
+    await wait(250);
+    assert.ok(Math.abs(drawnPct(bar) - 75) < 0.01, `0 dB on the taper drew ${bar.style.transform}`);
+  });
+
   test("a meters-only strip has no fader to follow and uses the standalone window", async () => {
     await mount([{ type: "qsys-strip", name: null, label: "Room", gain: null, mute: null, meter: b("meter") }]);
     const bar = q("qsys-strip", "[data-meter-bar]");
