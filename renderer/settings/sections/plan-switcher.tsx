@@ -77,7 +77,7 @@ export function useUpcomingPlans({ enabled = true, refetchMs }: { enabled?: bool
 }
 
 /** "Wed Sep 10 · Youth Night", or "Youth Night default". */
-function entryLabel(entry: SwitcherEntry, timeZone: string | null, withType: boolean): string {
+function entryLabel(entry: SwitcherEntry, timeZone: string, withType: boolean): string {
   if (entry.planId === null) {
     return entry.serviceTypeName ? `${entry.serviceTypeName} default` : "Default";
   }

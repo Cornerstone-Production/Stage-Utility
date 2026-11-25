@@ -27,12 +27,12 @@ export function zonedDayLabel(ms: number, timeZone: string, { year = false }: { 
 }
 
 /** "Sun, Nov 15" for the instant `ms` on the calendar of `timeZone`; word order is the browser's language's. */
-export function zonedWeekdayMonthDay(ms: number, timeZone: string | null): string {
+export function zonedWeekdayMonthDay(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    ...(timeZone ? { timeZone } : {}),
+    timeZone,
   }).format(ms);
 }
 
@@ -44,7 +44,7 @@ export function zonedWeekdayMonthDay(ms: number, timeZone: string | null): strin
  * a format somebody typed, and a wrong date on the slot editor's pill points a
  * save at the wrong week.
  */
-export function planLabel(planSortDate: string | null, planDates: string | null, timeZone: string | null): string {
+export function planLabel(planSortDate: string | null, planDates: string | null, timeZone: string): string {
   if (planSortDate) {
     const at = Date.parse(planSortDate);
     if (Number.isFinite(at)) return zonedWeekdayMonthDay(at, timeZone);

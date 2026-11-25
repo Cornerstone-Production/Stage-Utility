@@ -81,7 +81,7 @@ export function placePastedPlan(link: PlanLink, allPlans: UpcomingPlan[], thisTy
 
 /** "Fri, Oct 9" and "8:00 PM" for a plan's sort_date, in the plan's own zone. Either is
  *  null when the plan has no date to format. */
-export function planWhen(sortDate: string | null, timeZone: string | null): { date: string | null; time: string | null } {
+export function planWhen(sortDate: string | null, timeZone: string): { date: string | null; time: string | null } {
   if (!sortDate || !Number.isFinite(Date.parse(sortDate))) return { date: null, time: null };
   const date = zonedWeekdayMonthDay(Date.parse(sortDate), timeZone);
   return { date, time: formatClock(sortDate, { timeZone }) };

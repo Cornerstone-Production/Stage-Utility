@@ -64,7 +64,7 @@ describe("planLabel", () => {
   });
 
   test("planLabel falls back again with neither", () => {
-    assert.equal(planLabel(null, null, null), "This plan");
+    assert.equal(planLabel(null, null, "UTC"), "This plan");
   });
 
   test("planLabel: an unparseable sort date does not become Invalid Date", () => {
