@@ -61,7 +61,7 @@ import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZone
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
-import { isStringList } from "./is-record.js";
+import { isStringList } from "../types/is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
   incompleteOf,
