@@ -51,6 +51,12 @@ export class FakeQrcServer {
    * a Core that limits or quantizes a write, so its read-back differs.
    */
   coerceSet: ((component: string, name: string, value: number | boolean | string) => number | boolean | string) | null = null;
+  /**
+   * The shape of a Component.Set reply with ResponseValues. A Core sends a bare
+   * list ("array"); "object" is the `{ Name, Controls }` form QSC's page shows,
+   * which the writer also takes.
+   */
+  setReplyForm: "array" | "object" = "array";
   /** The most change groups any one connection has held at once. */
   maxGroups = 0;
   /** When true, an Invalidate is answered but the values it resends are held until releaseInvalidatePushes(). */
@@ -300,16 +306,10 @@ export class FakeQrcServer {
       targets.push(control);
     }
     requested.forEach((r, i) => this.apply(targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value));
-    this.reply(
-      session,
-      id,
-      p.ResponseValues
-        ? {
-            Name: name,
-            Controls: targets.map((c) => ({ Name: c.Name, Value: c.Value, String: c.String, Position: c.Position })),
-          }
-        : true,
-    );
+    // A Core answers ResponseValues with a bare list, one entry per control set,
+    // each naming its component (Designer 10.0.1 Emulate); without it, `true`.
+    const values = targets.map((c) => this.change(name, c));
+    this.reply(session, id, !p.ResponseValues ? true : this.setReplyForm === "array" ? values : { Name: name, Controls: values });
     for (const c of targets) this.pushChange(name, c);
   }
 

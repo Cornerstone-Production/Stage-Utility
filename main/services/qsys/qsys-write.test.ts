@@ -199,6 +199,16 @@ describe("writeControl", () => {
     assert.deepEqual(b, { ok: true, value: true, string: "true", position: 1, clamped: false });
   });
 
+  test("a read-back in either reply form is the Core's value: the bare list a Core sends, and the Controls object", async () => {
+    await connect();
+    assert.equal(fake.setReplyForm, "array", "the fake must answer as a Core does by default");
+    const a = await writer.write(req({ value: -20 }));
+    assert.equal(a.ok && a.value, -20, `the bare list a Core sends was not read: ${JSON.stringify(a)}`);
+    fake.setReplyForm = "object";
+    const o = await writer.write(req({ value: -30 }));
+    assert.equal(o.ok && o.value, -30, `the Controls form was not read: ${JSON.stringify(o)}`);
+  });
+
   test("a read-back that differs from the sent value logs a mismatch", async () => {
     await connect();
     fake.coerceSet = (_c, _n, v) => (typeof v === "number" ? v - 3 : v);

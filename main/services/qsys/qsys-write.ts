@@ -167,6 +167,19 @@ function loggable(v: unknown): unknown {
   return null;
 }
 
+type ReadBack = { Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown };
+
+/**
+ * The entry for `control` in a Component.Set reply with ResponseValues. A Core
+ * answers with a bare list of `{ Component, Name, String, Value, Position }`
+ * (Designer 10.0.1 Emulate); the `{ Name, Controls: [...] }` form QSC's page
+ * shows is taken too.
+ */
+export function readBack(reply: unknown, control: string): ReadBack | undefined {
+  const list = Array.isArray(reply) ? reply : (reply as { Controls?: unknown } | null)?.Controls;
+  return Array.isArray(list) ? (list as (ReadBack | null)[]).find((x) => x?.Name === control) ?? undefined : undefined;
+}
+
 function findControl(catalog: QsysCatalog, component: string, control: string): QrcControl | undefined {
   return catalog.components.find((c) => c.name === component)?.controls.find((c) => c.Name === control);
 }
@@ -641,10 +654,7 @@ export class QsysWriter {
       const message = `the connection to the Core dropped during the write to ${where}, so it may or may not have landed`;
       return refuse("core-error", message, `${message}: ${errorMessage(err)}`);
     }
-    const controls = (reply as { Controls?: unknown } | null)?.Controls;
-    const back = Array.isArray(controls)
-      ? (controls as { Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown }[]).find((x) => x?.Name === control)
-      : undefined;
+    const back = readBack(reply, control);
     if (!back || !("Value" in back)) {
       lease();
       return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);
