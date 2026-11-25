@@ -81,7 +81,10 @@ imported as an allowlist file. Every write is checked by the server.
   `max` empty it is refused (`no-range`).
 - A value outside the range is clamped to it, and the clamp is logged.
 - Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
-  with `true`.
+  with `true`, which reaches the Core as `1`. A control whose Core Type names a
+  trigger is one: `Trigger`, and a snapshot's `load.N`, which a Core reports as
+  `State Trigger`. A snapshot's lit state is its `match.N` (a read-only Boolean),
+  bound as the preset's **Lit by**.
 - A text control takes any text up to 1024 characters. Only a selector's choice
   list is checked against the control's choices (below); anything else may send
   any text, so allowlist a text control only if any text is safe to send.

@@ -54,6 +54,8 @@ const CHIME: AllowEntry = { component: "Paging", control: "chime", label: "Chime
 const METER: AllowEntry = { component: "Zone 1", control: "meter", label: "Zone meter", min: -100, max: 0, confirm: "none" };
 /** Numeric-typed on the Core, but it lists its choices; allowlisted with no range. */
 const SOURCE: AllowEntry = { component: "Router", control: "source", label: "Source", min: null, max: null, confirm: "none" };
+/** A snapshot load: a State Trigger, allowlisted with no range. */
+const SNAPSHOT: AllowEntry = { component: "Lobby_Snapshots", control: "load.1", label: "Snapshot 1", min: null, max: null, confirm: "none" };
 const SIGN: AllowEntry = { component: "Sign", control: "message", label: "Sign text", min: null, max: null, confirm: "none" };
 /** On the allowlist, not in the design. */
 const GHOST: AllowEntry = { component: "Lobby_Mixer", control: "gone", label: "Gone", min: -10, max: 0, confirm: "none" };
@@ -95,12 +97,17 @@ beforeEach(async () => {
   fake.components.set("Sign", [{ Name: "message", Type: "Text", Value: "hello", String: "hello", Position: 0, Direction: "Read/Write" }]);
   fake.components.set("Router", [{ Name: "source", Type: "Float", Value: 0, String: "Mic", Position: 0, Direction: "Read/Write", Choices: ["Mic", "Laptop"] } as never]);
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
+  // A snapshot controller as a Core reports it: load.N is a State Trigger, 0 (2 when loaded).
+  fake.components.set("Lobby_Snapshots", [
+    { Name: "load.1", Type: "State Trigger", Value: 0, String: "0", Position: 0, Direction: "Read/Write" },
+    { Name: "match.1", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read" },
+  ]);
   port = await fake.start();
   svc = new QsysService();
   subscriptionListeners = [];
   watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
   writer = new QsysWriter(svc, watch);
-  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN, SOURCE]);
+  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN, SOURCE, SNAPSHOT]);
 });
 
 afterEach(async () => {
@@ -341,6 +348,13 @@ describe("writeControl", () => {
     assert.equal(entries[0].to, -20);
     await settle();
     assert.equal(sets().length, 1, "a refused write was retried");
+  });
+
+  test("a snapshot's load.N, a State Trigger, is a trigger: no range, true sent as 1", async () => {
+    await connect();
+    const r = await writer.write(req({ component: "Lobby_Snapshots", control: "load.1", value: true }));
+    assert.ok(r.ok, `a State Trigger was refused: ${JSON.stringify(r)}`);
+    assert.deepEqual((sets()[0].params as { Controls: unknown }).Controls, [{ Name: "load.1", Value: 1 }]);
   });
 
   test("a trigger takes no range and is sent as 1", async () => {

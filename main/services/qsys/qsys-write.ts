@@ -130,7 +130,9 @@ const KINDS: Record<Kind, { check(value: unknown, min: number, max: number, wher
     same: (sent, got) => sent === (got === true || got === 1),
   },
   trigger: {
-    // QRC fires a trigger on any Set; 1 is what the reference shows.
+    // QRC fires a trigger on any Set; 1 is what the reference shows. A State Trigger
+    // (a snapshot's load.N) is sent 1 too: it is a trigger to the writer, and whether a
+    // Core loads the snapshot on 1 is on the spec's list to re-check in Emulate.
     check: (value, _min, _max, where) => (value === true || value === 1 ? { ok: true, send: 1, clamped: false } : badValue(`${where} is a trigger; send true`)),
     same: () => true,
   },
