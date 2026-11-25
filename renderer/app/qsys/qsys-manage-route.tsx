@@ -35,6 +35,7 @@ import {
 } from "@main/types/qsys";
 import type { View } from "@main/types/views";
 import { walkLayoutObjects } from "@main/types/views";
+import { rangeText, untaperedRanges, type UntaperedRange } from "@main/types/qsys-taper";
 import { errorMessage } from "@main/services/errors";
 import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Radio, RadioGroup, Switch, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -121,6 +122,7 @@ export function QsysManageRoute() {
       <ConnectionSection status={status} failed={statusFailed} />
       <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} />
       <BindingsSection bindings={bindings} views={views} />
+      <TapersSection views={views} status={status} />
       <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
         <PinSection />
       </Section>
@@ -914,6 +916,65 @@ function AllowlistSection({
           {message.text}
         </p>
       )}
+    </Section>
+  );
+}
+
+// ── Fader tapers ─────────────────────────────────────────────────────────────
+
+type CatalogForTapers = { components: { name: string; controls: { Name: string; ValueMin?: unknown; ValueMax?: unknown }[] }[] };
+type Tapers = { state: "loading" | "offline" } | { state: "failed"; message: string } | { state: "ok"; catalog: CatalogForTapers };
+
+/** The Core's catalog, read again on each new one (catalogAt), for the taper list. */
+function useTaperCatalog(status: Status | null): Tapers {
+  const connected = status?.connected === true;
+  const key = connected ? String(status?.catalogAt ?? "") : null;
+  const [answer, setAnswer] = useState<{ key: string; read: Tapers } | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    let live = true;
+    invoke<CatalogForTapers>("qsys:catalog").then(
+      (catalog) => live && setAnswer({ key, read: { state: "ok", catalog } }),
+      (err: unknown) => {
+        logReadFailure("qsys", "the Core's catalog for the fader tapers on /qsys/manage", err);
+        if (live) setAnswer({ key, read: { state: "failed", message: `The Core's controls could not be read: ${errorMessage(err)}` } });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  if (key === null) return { state: "offline" };
+  return answer?.key === key ? answer.read : { state: "loading" };
+}
+
+/**
+ * The fader ranges with no measured Q-SYS taper (main/types/qsys-taper.ts): a fader
+ * on one moves linearly in dB, not as the Core's own does. Listed so the range can
+ * be measured and added; the server logs each once, from the same rule.
+ */
+function TapersSection({ views, status }: { views: View[]; status: Status | null }) {
+  const read = useTaperCatalog(status);
+  const ranges: UntaperedRange[] = read.state === "ok" ? untaperedRanges(views, read.catalog) : [];
+  return (
+    <Section title="Fader tapers" hint="A fader on a control range whose Q-SYS taper has been measured sits and moves exactly as the Core's own fader does. Any other range moves linearly in dB.">
+      <div data-qsys-tapers={read.state}>
+        {read.state === "loading" && <p className="text-footnote text-fg-muted">Reading the Core…</p>}
+        {read.state === "offline" && <p className="text-footnote text-fg-muted">Connect a Core to check the faders&apos; ranges.</p>}
+        {read.state === "failed" && <Callout tone="warn">{read.message}</Callout>}
+        {read.state === "ok" && ranges.length === 0 && <p className="text-footnote text-fg-muted">Every fader is on a measured range.</p>}
+        {read.state === "ok" && ranges.length > 0 && (
+          <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
+            {ranges.map((r) => (
+              <li key={rangeText(r)} data-qsys-untapered={rangeText(r)} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-2 text-footnote">
+                <span className="font-mono font-medium text-fg">{rangeText(r)}</span>
+                <span className="text-warn-11">No measured taper: moves linearly in dB</span>
+                <span className="font-mono text-fg-muted">{r.controls.map((a) => `${a.component} ${a.control}`).join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Section>
   );
 }

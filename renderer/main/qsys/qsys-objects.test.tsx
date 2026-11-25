@@ -8,8 +8,10 @@
 // NOT unit-tested here, and checked in a browser instead: how the objects LOOK.
 // jsdom loads no stylesheet and lays nothing out, so every CSS variable is "" and
 // every box is 0x0. The fader's track length is stubbed below so a drag has a
-// scale; the thumb's place, the meter's colour bands and the limit line are
-// verified by driving a real page. States are asserted through `data-state`,
+// scale. Where the thumb and the limit line sit along the travel is asserted from
+// the fader's data-travel and data-limit-at, which their styles are drawn from;
+// the pixels they land on, and the meter's colour bands, are verified by driving
+// a real page. States are asserted through `data-state`,
 // `aria-pressed` and the words on the controls, which are what those looks are
 // chosen from.
 //
@@ -72,6 +74,8 @@ const CATALOG = {
         { Name: "level_ro", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
         // Numeric-typed, but it lists its choices; allowlisted with no range.
         { Name: "src", Type: "Float", Choices: ["Mic", "Laptop"] },
+        // A mixer output gain on the range whose taper is measured (-100..+10 dB).
+        { Name: "output.1.gain", Type: "Float", ValueMin: -100, ValueMax: 10 },
       ] as { Name: string; Type: string; ValueMin?: number; ValueMax?: number; Direction?: string; Choices?: string[] }[],
     },
   ],
@@ -86,6 +90,7 @@ const ALLOW = {
     { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "level_ro", label: "", min: -100, max: 20, confirm: "none" },
     { component: MIX, control: "src", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "output.1.gain", label: "", min: -100, max: 0, confirm: "none" },
   ],
 };
 
@@ -103,6 +108,8 @@ interface Server {
   allowFails: boolean;
   catalog: typeof CATALOG;
   values: Record<string, unknown>;
+  /** The Position a values read reports per control, where the test gives one. */
+  positions: Record<string, number>;
   /** What a write answers; the default lands it as sent. */
   answer: (body: Record<string, unknown>) => unknown;
   writes: { body: Record<string, unknown>; at: number }[];
@@ -136,6 +143,7 @@ function freshServer(): Server {
     holdReads: null,
     allowFails: false,
     catalog: CATALOG,
+    positions: {},
     values: { gain: -20, mute: false, meter: -30, "load.1": 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, "load.free": 0, talk: false, level_ro: -5, src: "Mic" },
     answer: (body) => ({ ok: true, value: body.value, string: String(body.value), clamped: false }),
     writes: [],
@@ -171,7 +179,13 @@ const f = stubFetchWithLog((url, init) => {
     const answer = () =>
       ok({
         ready: server.ready,
-        values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })),
+        values: Object.entries(server.values).map(([control, value]) => ({
+          component: MIX,
+          control,
+          value,
+          string: String(value),
+          ...(server.positions[control] !== undefined ? { position: server.positions[control] } : {}),
+        })),
         ...(server.catalogAt !== undefined ? { catalogAt: server.catalogAt } : {}),
       });
     const hold = server.holdReads;
@@ -271,8 +285,12 @@ function up(clientY: number) {
 function stream(upNow: boolean) {
   act(() => __sseFallback.noteStream(upNow));
 }
-function push(channel: string, changes: { control: string; value: unknown }[]) {
-  act(() => FakeEventSource.last!.push(channel, { changes: changes.map((c) => ({ Component: MIX, Name: c.control, Value: c.value, String: String(c.value) })) }));
+function push(channel: string, changes: { control: string; value: unknown; position?: number }[]) {
+  act(() =>
+    FakeEventSource.last!.push(channel, {
+      changes: changes.map((c) => ({ Component: MIX, Name: c.control, Value: c.value, String: String(c.value), ...(c.position !== undefined ? { Position: c.position } : {}) })),
+    }),
+  );
 }
 
 /** Every Q-SYS object type, sorted, one per line, each bound to a control the fixture has. */
@@ -598,6 +616,43 @@ describe("Q-SYS objects", () => {
     up(10);
     await wait(30);
     assert.equal(server.writes.at(-1)!.body.value, 0);
+  });
+
+  test("a fader on a measured range follows the Q-SYS taper: the Core's Position, a drag along it, the limit at its place", async () => {
+    const TAPERED: LayoutObjectConfig = { ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig;
+    server.values["output.1.gain"] = 0;
+    server.positions["output.1.gain"] = 0.75;
+    await mount([TAPERED]);
+    const fader = q("qsys-fader", "[data-fader]");
+    assert.equal(fader.dataset.travel, "0.75", "0 dB sits at 0.75 of the travel, as on a Q-SYS fader");
+    assert.equal(Number(fader.dataset.limitAt).toFixed(3), "0.750", "the allowlist's 0 dB limit sits at 0 dB's place on the taper");
+    // A Core Position between the table's points is drawn as the Core reports it.
+    push("qsys:values", [{ control: "output.1.gain", value: -10, position: 0.4987 }]);
+    assert.equal(fader.dataset.travel, "0.4987");
+    assert.equal(dbText(), "-10.0");
+    // Drag in position space: from 0.4987, 17 px up of 200 is +0.085, on the taper about -6 dB.
+    down(fader, 100);
+    move(83);
+    up(83);
+    await wait(30);
+    const wrote = server.writes.at(-1)!.body.value as number;
+    assert.ok(Math.abs(wrote - -6.06) < 0.1, `a drag of 0.085 travel from -10 dB wrote ${wrote}, not about -6 dB as the taper puts it`);
+    // Up past the limit: the drag stops at 0 dB, the value the server enforces.
+    server.answer = (body) => ({ ok: true, value: body.value, string: String(body.value), position: 0.75, clamped: false });
+    down(fader, 150);
+    move(0);
+    up(0);
+    await wait(30);
+    assert.equal(server.writes.at(-1)!.body.value, 0, "a drag past the limit wrote past it");
+  });
+
+  test("a fader on a range with no measured taper stays linear in dB and ignores the Core's Position", async () => {
+    server.positions.gain = 0.9;
+    await mount([FADER]);
+    const fader = q("qsys-fader", "[data-fader]");
+    // -20 dB on the linear -60..0 travel (the allowlist's 0 dB is its top) is 2/3.
+    assert.equal(Number(fader.dataset.travel).toFixed(4), (2 / 3).toFixed(4));
+    assert.equal(fader.dataset.limitAt, "1", "the limit is the top of a linear travel");
   });
 
   test("in the editor (not interactive) nothing writes", async () => {

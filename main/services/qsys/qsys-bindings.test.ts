@@ -37,7 +37,8 @@ const ctl = (Name: string, Type: string, Direction = "Read/Write") => ({
   String: "0",
   Position: 0,
   Direction,
-  ...(Type === "Float" ? { ValueMin: -100, ValueMax: 20 } : {}),
+  // A mixer gain's range as a Core reports it, which has a measured taper.
+  ...(Type === "Float" ? { ValueMin: -100, ValueMax: 10 } : {}),
 });
 
 const CATALOG: QsysCatalog = {
@@ -277,6 +278,26 @@ describe("QsysBindings", () => {
       h.setViews([]);
       await h.b.refresh();
       assert.equal(cap.out.at(-1), "[qsys] binding check: every binding resolves");
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("a fader range with no measured taper is said once, naming its controls; a measured one is not said", async () => {
+    const h = harness();
+    h.setCatalog({
+      ...CATALOG,
+      components: [...CATALOG.components, { name: "Hall_Mixer", type: "mixer", controls: [{ ...ctl("output.1.gain", "Float"), ValueMin: -100, ValueMax: 20 }] }],
+    });
+    h.setEntries([entry("Lobby_Mixer", "gain"), entry("Hall_Mixer", "output.1.gain")]);
+    const cap = lines();
+    try {
+      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "gain"))), obj("f2", fader(bind("Hall_Mixer", "output.1.gain"))))]);
+      await h.b.refresh();
+      await h.b.refresh();
+      assert.deepEqual(cap.out, [
+        "[qsys] no measured taper for range -100..20; faders on it move linearly in dB, not as the Core's do (Hall_Mixer/output.1.gain). See /qsys/manage",
+      ]);
     } finally {
       cap.restore();
     }

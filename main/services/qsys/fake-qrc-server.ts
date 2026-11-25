@@ -3,6 +3,7 @@
 
 import net from "node:net";
 import { addressKey, parseAddressKey } from "../../types/qsys.js";
+import { positionOf, taperFor } from "../../types/qsys-taper.js";
 import type { QrcChange, QrcControl, QrcStatus } from "./qrc-types.js";
 
 const MAX_CHANGE_GROUPS = 4;
@@ -161,8 +162,10 @@ export class FakeQrcServer {
     control.Value = value;
     control.String = typeof value === "number" && control.ValueMin !== undefined ? `${value}dB` : String(value);
     if (typeof value === "number" && control.ValueMin !== undefined && control.ValueMax !== undefined) {
+      // A range a Core's taper was measured on gets that taper's Position, as a Core reports it; any other, linear.
+      const taper = taperFor({ min: control.ValueMin, max: control.ValueMax });
       const span = control.ValueMax - control.ValueMin;
-      control.Position = span > 0 ? (value - control.ValueMin) / span : 0;
+      control.Position = taper ? positionOf(taper, value) : span > 0 ? (value - control.ValueMin) / span : 0;
     } else if (typeof value === "boolean") control.Position = value ? 1 : 0;
     else if (typeof value === "number") control.Position = value;
   }

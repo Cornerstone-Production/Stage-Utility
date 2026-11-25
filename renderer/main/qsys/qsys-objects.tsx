@@ -13,10 +13,13 @@
 // and never jumps; a pure trigger with no readable state stays unlit and flashes
 // when the Core confirms the write.
 //
-// A fader's thumb, its drag and its limit line all use one scale: the Core's
-// Value, linear over the control's own range (ValueMin..ValueMax from the
-// catalog). The Core's Position follows its own taper, which the page does not
-// know, so a thumb drawn from it would jump at release when the read-back lands.
+// A fader's thumb, its drag and its limit line all use one scale (fader-scale.ts).
+// On a range whose taper has been measured (main/types/qsys-taper.ts) it is the
+// Core's own: the thumb sits at the Position the Core reports, as on a UCI, a drag
+// moves along that taper and writes the value the table gives for where the finger
+// is, and the limit line sits at the limit's place on it. On any other range it is
+// linear in dB and the Core's Position is not drawn: it follows a taper the page
+// does not know, so a thumb drawn from it would jump when the read-back lands.
 
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
@@ -24,7 +27,7 @@ import { isOn, kindOf, type PanelKind, type QsysAddress, type QsysBinding, type 
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
-import { atBottom, faderScale, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
+import { atBottom, faderScale, limitAt as limitOf, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
 import {
   DRAG_COALESCE_MS,
   QsysPanelContext,
@@ -552,6 +555,7 @@ interface FaderProps {
 function useFaderDrag({
   addr,
   core,
+  corePosition,
   scale,
   writable,
   vertical,
@@ -560,6 +564,8 @@ function useFaderDrag({
   addr: QsysAddress | null;
   /** The Core's value, when it is a number. */
   core: number | null;
+  /** The Core's Position for it, when it reported one. Drawn only on a measured taper. */
+  corePosition: number | null;
   scale: FaderScale | null;
   writable: boolean;
   vertical: boolean;
@@ -603,6 +609,9 @@ function useFaderDrag({
   const norm = (x: number) => (scale ? travelOf(scale, x) : 0);
   // What is on screen: the finger's value while a gesture is open, else the Core's.
   const shown = local ?? core;
+  // Where the thumb is: the finger's value on the scale, else the Core's own Position
+  // on a measured taper (the place a UCI draws it), else the Core's value on the scale.
+  const level = local !== null ? norm(local) : core === null ? null : scale?.taper && corePosition !== null ? Math.min(1, Math.max(0, corePosition)) : norm(core);
 
   const snapBack = () => {
     drag.current?.gesture.cancel();
@@ -623,7 +632,7 @@ function useFaderDrag({
     // thumb stays where the finger left it until the Core answers, and a second
     // touch in that moment must not jump back to the old value.
     const startValue = shown;
-    const startNorm = norm(startValue);
+    const startNorm = level ?? norm(startValue);
     const s = scale!;
     const startAt = vertical ? e.clientY : e.clientX;
     const at = panel.epoch;
@@ -673,7 +682,7 @@ function useFaderDrag({
     void write(addr!, Math.round(next * 100) / 100, { final: true });
   };
 
-  return { track, shown, norm, onPointerDown, step };
+  return { track, shown, level, norm, onPointerDown, step };
 }
 
 /** The arrow keys a slider steps on, and which way. */
@@ -687,22 +696,25 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
 
   const dense = density === "dense";
   const range = info.range;
-  // The fader's own scale (fader-scale.ts): linear in dB from -60 (or the allowlist's
-  // minimum) to the allowlist's maximum, the Core's minimum at the bottom stop.
+  // The fader's own scale (fader-scale.ts): the Core's taper on a measured range,
+  // else linear in dB from -60 (or the allowlist's minimum) to the allowlist's
+  // maximum, the Core's minimum at the bottom stop.
   const scale = faderScale(range, info.limits);
   const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
-  const { track, shown, norm, onPointerDown, step } = useFaderDrag({
+  const { track, shown, level: thumbAt, norm, onPointerDown, step } = useFaderDrag({
     addr,
     core: typeof v.value === "number" ? v.value : null,
+    corePosition: v.position,
     scale,
     writable,
     vertical,
     stepDb,
   });
 
-  const level = shown === null ? (v.position ?? 0) : scale ? norm(shown) : (v.position ?? 0);
-  // The allowlist's limit is the top of travel; marked there when it stops short of the Core's own.
-  const limitAt = scale && range && scale.top < range.max ? 1 : null;
+  const level = thumbAt ?? v.position ?? 0;
+  // The allowlist's limit, marked where it stops short of the Core's own maximum:
+  // the top of a linear travel, or its own place on a taper.
+  const limitAt = scale && range ? limitOf(scale, range) : null;
   const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
   const offline = v.state === "offline";
 
@@ -718,6 +730,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     <div
       ref={track}
       data-fader
+      // Where the thumb and the limit line are, 0..1 along the travel: what their
+      // styles are drawn from, readable where no layout is (jsdom).
+      data-travel={shown === null ? undefined : level}
+      data-limit-at={limitAt ?? undefined}
       data-at-limit={atLimit || undefined}
       role="slider"
       aria-label={name}
@@ -866,9 +882,11 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
   const bottom = scale?.bottom;
   const floor = scale?.floor;
   const top = scale?.top;
+  // A module constant (qsys-taper.ts), so the same one each render.
+  const taper = scale?.taper;
   useEffect(() => {
     if (!panel) return;
-    const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top } : null;
+    const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top, ...(taper ? { taper } : {}) } : null;
     drawn.current = null;
     return panel.addMeterSink({ component, control }, (r) => meterLevel(r, on), {
       draw: (level) => {
@@ -882,7 +900,7 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
         drawn.current = { level, band };
       },
     });
-  }, [panel, component, control, bottom, floor, top, vertical]);
+  }, [panel, component, control, bottom, floor, top, taper, vertical]);
   return (
     <div
       data-meter

@@ -13,6 +13,8 @@ export type Status = {
   isEmulator: boolean | null;
   /** A Core is set up: the integration is enabled with an address. */
   configured?: boolean;
+  /** When the Core's catalog was last read; a new stamp is a new catalog. */
+  catalogAt?: number | null;
 };
 
 /** The connection, read once and then followed on qsys:status: null until known,

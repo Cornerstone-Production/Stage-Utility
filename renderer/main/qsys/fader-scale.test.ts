@@ -1,11 +1,12 @@
-// The fader's scale: linear in dB from -60 (or the allowlist's minimum) to the top,
-// the Core's minimum at the bottom stop. Pure arithmetic; the thumb that draws it is
-// checked in a browser.
+// The fader's scale: the Core's measured taper on a range that has one; otherwise
+// linear in dB from -60 (or the allowlist's minimum) to the top, the Core's minimum
+// at the bottom stop. Pure arithmetic; the thumb that draws it is checked in a
+// browser.
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { FADER_FLOOR_DB, TICK_MARKS_DB, atBottom, faderScale, stepFrom, travelOf, valueAt } from "./fader-scale.js";
+import { FADER_FLOOR_DB, TICK_MARKS_DB, atBottom, faderScale, limitAt, meterLevel, stepFrom, travelOf, valueAt } from "./fader-scale.js";
 
 const GAIN = { min: -100, max: 20 };
 
@@ -54,4 +55,36 @@ test("a top at or under -60 dB still leaves a fader: the linear part starts 12 d
   const tight = faderScale(GAIN, { min: -75, max: -70 })!;
   assert.equal(tight.floor, -75, "never under the bottom");
   assert.ok(travelOf(tight, -72.5) > 0 && travelOf(tight, -72.5) < 1);
+});
+
+const OUT = { min: -100, max: 10 };
+
+test("a measured range is the Core's taper: 0 dB at 0.75, the limit at its place, the drag held to the limits", () => {
+  const s = faderScale(OUT, { min: -100, max: 0 })!;
+  assert.ok(s.taper, "a -100..+10 control has a measured taper");
+  assert.equal(travelOf(s, 0), 0.75);
+  assert.equal(travelOf(s, -10), 0.5);
+  assert.equal(travelOf(s, 6), 0.915, "a value past the limit is still drawn where the Core has it");
+  assert.equal(limitAt(s, OUT), 0.75, "the 0 dB limit sits at 0 dB's place on the taper");
+  assert.equal(valueAt(s, 0.5), -10);
+  assert.equal(valueAt(s, 0.9), 0, "the finger past the limit writes the limit");
+  assert.equal(valueAt(s, 0), -100);
+  assert.ok(atBottom(s, -100), "the Core's minimum reads -inf");
+  assert.equal(limitAt(faderScale(OUT, { min: null, max: null })!, OUT), null, "no limit short of the Core's own top, no line");
+  const raised = faderScale(OUT, { min: -40, max: 0 })!;
+  assert.equal(valueAt(raised, 0), -40, "the drag stops at the allowlist's minimum");
+  assert.ok(!atBottom(raised, -40), "a raised minimum is not -inf");
+});
+
+test("a strip's meter on a tapered fader lines up with it", () => {
+  const s = faderScale(OUT, { min: -100, max: 0 })!;
+  assert.equal(meterLevel({ value: -10, position: null }, s), 0.5);
+  assert.equal(meterLevel({ value: -120, position: null }, s), 0);
+});
+
+test("an unmeasured range keeps the linear scale; its limit is the top of travel", () => {
+  const s = faderScale(GAIN, { min: -100, max: 0 })!;
+  assert.equal(s.taper, undefined);
+  assert.equal(limitAt(s, GAIN), 1);
+  assert.equal(travelOf(s, -30), 0.5);
 });

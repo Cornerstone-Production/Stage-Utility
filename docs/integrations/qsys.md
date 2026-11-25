@@ -321,6 +321,23 @@ A page that wakes from sleep, or whose connection to Stage Utility drops and com
 back, reads the Core's current values before it takes a touch, and never sends its
 own values back: only a fresh touch writes.
 
+#### Faders
+
+A fader on a control whose range has a measured Q-SYS taper follows the Core's own
+fader: its thumb sits at the position the Core reports, as on a Q-SYS touch screen
+(0 dB at three quarters of the travel on a -100 to +10 dB gain), and a drag moves
+along that taper. What a drag sends is still a value in dB, so the allowlist's
+limits apply exactly as for any write; the drag stops at them, and the limit line is
+drawn at the limit's place on the taper. A strip's meters are drawn on the same
+taper, so they line up with the fader.
+
+Measured ranges: -100 to +10 dB. A fader on any other range moves linearly in dB
+from -60 dB (or the allowlist's minimum) to the allowlist's maximum, with the Core's
+minimum at the bottom stop, and looks no different. Each such range is logged once
+(see [Troubleshooting](#troubleshooting)) and listed on
+[`/qsys/manage`](#the-q-sys-page) so it can be measured: set the control to a series
+of values on a Core and read back each `Position`.
+
 An iPad that opens a panel while Stage Utility is down shows the browser's own error;
 one that already had it open shows the card above. Either way the Core and its wall
 panels are not affected.
@@ -431,6 +448,9 @@ A panel's settings travel in its view bundle (see
   **Start a new, empty list**, which keeps the old file beside the new one.
 - **Binding check**: each problem with its panel and control, "Every binding
   resolves", "Connect a Core to check the bindings", or why the check could not run.
+- **Fader tapers**: the control ranges faders and strip levels are bound to that have
+  no measured Q-SYS taper, each with its controls, or "Every fader is on a measured
+  range". See [Faders](#faders).
 - **Staff PIN**: whether one is set, and a field to set or change it (four digits,
   never shown back), with **Remove PIN**. With none set, a volunteer panel's
   **Open Stage Utility** does not open the app. See
@@ -602,6 +622,7 @@ Look at `/log` and filter for `[qsys]`.
 | `could not read the button names of <component>: <reason>; the editor lists its buttons by number` | The Core refused the `Component.Get` that reads a selector plugin's button names. The connection and the catalog are fine; the editor's browser lists its `Button N` controls without names. |
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
+| `no measured taper for range <min>..<max>; faders on it move linearly in dB, not as the Core's do (<controls>). See /qsys/manage` | A fader or a strip's level is bound to a control whose range has no measured Q-SYS taper, so it moves linearly in dB rather than as the Core's own fader. Logged once per range while the server runs. See [Faders](#faders). |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
 | `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
 | `staff PIN set by <address>`, `staff PIN removed by <address>; …` | The staff PIN was set, changed or removed from `/qsys/manage` (or `PUT /api/qsys/pin`). |

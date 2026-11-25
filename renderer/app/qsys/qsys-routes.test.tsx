@@ -130,7 +130,22 @@ const ALLOW = {
   ],
   invalid: null as string | null,
 };
-const CATALOG = { designCode: "d1", components: [{ name: MIX, type: "mixer", controls: [{ Name: "mute", Type: "Boolean" }, { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 }] }] };
+const CATALOG = {
+  designCode: "d1",
+  components: [
+    {
+      name: MIX,
+      type: "mixer",
+      controls: [
+        { Name: "mute", Type: "Boolean" },
+        { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        // A measured range (-100..+10) and one with no measured taper (-100..+20).
+        { Name: "output.1.gain", Type: "Float", ValueMin: -100, ValueMax: 10 },
+        { Name: "output.2.gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+      ],
+    },
+  ],
+};
 
 const f = stubFetchWithLog((url, init) => {
   if (server.failReads.includes(url)) return reply(500, { error: "boom" });
@@ -623,6 +638,24 @@ describe("/qsys/manage", () => {
     assert.match(report.textContent ?? "", /Booth.*Lobby_Mixer gone.*no such control/);
     assert.ok(document.querySelector("[data-qsys-pin]"), "no staff PIN section");
     assert.equal(document.querySelector("[data-qsys-rates]")?.getAttribute("href"), "/settings/integrations");
+  });
+
+  test("/qsys/manage lists the fader ranges with no measured taper, with their controls, and says when there are none", async () => {
+    const fader = (control: string) => ({ type: "qsys-fader", binding: { component: MIX, control }, orientation: "vertical", showDb: true, steps: false, stepDb: 1 });
+    server.views = [{ ...BOOTH, layout: layoutWith(fader("output.1.gain"), fader("output.2.gain"), MUTE) }];
+    await open("/qsys/manage");
+    await wait(60);
+    const rows = [...document.querySelectorAll("[data-qsys-untapered]")].map((n) => [n.getAttribute("data-qsys-untapered"), n.textContent]);
+    assert.equal(rows.length, 1, JSON.stringify(rows));
+    assert.equal(rows[0]![0], "-100..20");
+    assert.match(rows[0]![1] ?? "", /Lobby_Mixer output\.2\.gain/);
+    assert.doesNotMatch(rows[0]![1] ?? "", /output\.1\.gain/, "a fader on a measured range was listed");
+    cleanup();
+    __resetQsysPanelsForTests();
+    server.views = [{ ...BOOTH, layout: layoutWith(fader("output.1.gain")) }];
+    await open("/qsys/manage");
+    await wait(60);
+    assert.match(document.querySelector('[data-qsys-tapers="ok"]')?.textContent ?? "", /Every fader is on a measured range/);
   });
 
   test("a panel's sibling that no panel has is listed, once and by name, and is not an error", async () => {

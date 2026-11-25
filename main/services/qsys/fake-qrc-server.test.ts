@@ -55,3 +55,10 @@ test("a Boolean is true/false from GetControls, and 1/0 from Component.Get, a ch
   const values = (pushes as { Changes: { Value: unknown }[] }[]).flatMap((p) => p.Changes.map((c) => c.Value));
   assert.deepEqual(values, [0, 1], "a change group carries a Boolean as a number");
 });
+
+test("a -100..+10 gain reads back the Position a Core reports on its taper: 0 dB at 0.75", async () => {
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: 0 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(back[0]!.Position, 0.75);
+  const low = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -10 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(low[0]!.Position, 0.5);
+});
