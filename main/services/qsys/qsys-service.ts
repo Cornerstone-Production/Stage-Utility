@@ -12,6 +12,7 @@ import { scrub } from "../scrub.js";
 import { QrcClient, QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcComponent, QrcControl, QrcStatus } from "./qrc-types.js";
 import { QSYS_DEFAULT_RATES, type QsysMeterRates, type QsysSettings } from "./qsys-settings.js";
+import { isSelectorButton } from "../../types/qsys.js";
 
 /** The Core drops a connection after 60 s of silence; ping at half that. */
 const KEEPALIVE_MS = 30_000;
@@ -38,9 +39,6 @@ export interface QsysCatalog {
   }[];
 }
 
-/** A selector plugin's buttons: it lists `Button 1`..`Button 100` whatever its configured count. */
-const SELECTOR_BUTTON = /^Button \d+$/;
-
 /**
  * The names a Core draws on a component's `Button N` controls, which GetControls
  * does not carry: one Component.Get for all of them, its Legend merged into each.
@@ -48,7 +46,7 @@ const SELECTOR_BUTTON = /^Button \d+$/;
  * Legend; a lost connection throws, as any catalog read does.
  */
 async function withLegends(t: QrcTransport, name: string, controls: QrcControl[]): Promise<{ controls: QrcControl[]; legendError?: string }> {
-  const buttons = controls.filter((c) => SELECTOR_BUTTON.test(c.Name));
+  const buttons = controls.filter((c) => isSelectorButton(c.Name));
   if (!buttons.length) return { controls };
   let reply: unknown;
   try {

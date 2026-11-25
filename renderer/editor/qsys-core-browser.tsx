@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, XIcon } from "lucide-react";
 
-import { choicesOf, isMeterControl, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
+import { choicesOf, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
 import { rangeOf } from "../main/qsys/fader-scale";
 import { Button, Input } from "../components/ui";
 import { invoke, type ApiError } from "../lib/api";
@@ -300,7 +300,7 @@ export function QsysCoreBrowser({
                   )
                 ) : chosen ? (
                   <>
-                    {chosen.comp.legendError && chosen.list.some((c) => /^Button \d+$/.test(c.Name)) && (
+                    {chosen.comp.legendError && chosen.list.some((c) => isSelectorButton(c.Name)) && (
                       <li role="status" className="px-2 py-1.5 text-caption2 text-fg-muted">
                         The Core did not say these buttons&apos; names, so they are listed by number. See /log.
                       </li>

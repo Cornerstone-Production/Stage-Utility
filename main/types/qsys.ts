@@ -141,6 +141,13 @@ export function isMeterControl(componentType: string, control: { Name: string; T
   return /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
 }
 
+/**
+ * A selector plugin's button: it lists `Button 1`..`Button 100` whatever its
+ * configured count, and its names come only from Component.Get's Legend. The
+ * catalog read and the editor's Core browser both ask here.
+ */
+export const isSelectorButton = (name: string): boolean => /^Button \d+$/.test(name);
+
 /** A map key for an address. NUL cannot appear in a Code Name or a control name. */
 export function addressKey(a: QsysAddress): string {
   return `${a.component}\u0000${a.control}`;
