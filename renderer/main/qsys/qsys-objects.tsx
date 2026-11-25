@@ -56,7 +56,6 @@ export const FLASH_MS = 600;
 const AMBER_AT = 0.74;
 const RED_AT = 0.86;
 
-
 /**
  * A Boolean, by the rule the writer and the editor use (kindOf). The catalog's
  * Type decides once read; only before that does the value's own type. Not both:
@@ -522,7 +521,6 @@ function TriggerButton({
 }
 
 // ── Fader ───────────────────────────────────────────────────────────────────
-
 
 interface FaderProps {
   binding: QsysBinding | null;
