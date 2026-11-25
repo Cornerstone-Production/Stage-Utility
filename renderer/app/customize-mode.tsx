@@ -9,13 +9,15 @@
 // this file holds the state and the saves.
 //
 // THE RAIL DRAWS A DRAFT AHEAD OF THE SAVED ARRANGEMENT. It reads the live SSE
-// state, which an optimistic write to React Query never reaches, so a change
-// would otherwise show only once its broadcast came back, and a refused save
-// would leave nothing to put back. Every
-// change sets the draft and saves; a refusal puts the draft back to what is
-// saved. When the saved arrangement changes BY VALUE and no save of ours is in
-// flight, the draft follows it: outside the mode it is dropped, and inside it
-// is rebased, so another browser's change is not overwritten by our next drag.
+// state, which a write to React Query never reaches ahead of the broadcast, so a
+// change would otherwise show only once its broadcast came back, and a refused
+// save would leave nothing to put back. The arrangement is saved like any list
+// the server holds whole (use-saved-list.ts): a change is a function of the
+// arrangement it lands on, one save is out at a time, the draft is the server's
+// last answer with the changes still waiting applied, and a refusal drops its
+// change and reads the arrangement back. Another browser's change is taken in
+// when nothing of ours is waiting; our own echo is not, told apart by the
+// server's count of saves rather than by what the arrangement says.
 
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DndContext, DragOverlay, type DragEndEvent, type DragMoveEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
@@ -24,6 +26,7 @@ import { SlidersHorizontalIcon } from "lucide-react";
 
 import {
   consoleViewId,
+  EMPTY_SIDEBAR,
   isConsoleId,
   LOCKED_PAGE,
   resolveSidebar,
@@ -34,13 +37,14 @@ import {
   type SidebarConsoles,
 } from "@main/services/sidebar-arrangement";
 import { toast } from "../components/ui";
-import { useResyncOn } from "../lib/use-resync-on";
 import { useStageState } from "../main/use-stage-state";
 import { dropPoint } from "./drag-geometry";
 import { CustomizeContext, useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
-import { setSidebar } from "./set-sidebar";
+import { sidebarListIo } from "./set-sidebar";
+import { revisionOf, useSavedList } from "./use-saved-list";
 import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
-import { hidePage } from "./sidebar-edits";
+import { addSection, hidePage } from "./sidebar-edits";
+import { uid } from "../lib/uid";
 import { BarDragGhost, RailDragGhost } from "./rail-drag-ghost";
 import { isBarDrag, useBarEditor } from "./bar-editor";
 import { usePointerSensors } from "./drag-parts";
@@ -90,86 +94,101 @@ const besidePointer: Modifier = ({ activatorEvent, draggingNodeRect, transform }
   };
 };
 
-const sameArrangement = (a: SidebarArrangement | null, b: SidebarArrangement | null) =>
-  JSON.stringify(a) === JSON.stringify(b);
+/** The arrangement is a list of one: what two lists mean, for telling an echo from news. */
+const keyOfArrangement = (list: SidebarArrangement[]) => JSON.stringify(list[0] ?? null);
 
 export function CustomizeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { state } = useStageState();
   const [customizing, setCustomizing] = useState(false);
-  const [draft, setDraft] = useState<SidebarArrangement | null>(null);
-  /** Saves of ours not yet answered. While one is out, a broadcast may be our
-   *  own echo racing the answer, so the draft is not moved for it. */
-  const [saving, setSaving] = useState(0);
-  const { resolved, consoles } = useResolvedFromState(state, draft);
-  const saved = state?.sidebar ?? null;
+
   // BY VALUE: every broadcast carries a new state object, and one about anything
   // else (a clock, a console) must not move the draft, or a Hide flickers back.
-  const savedKey = useMemo(() => JSON.stringify(saved), [saved]);
-
-  useResyncOn([savedKey], () => {
-    if (saving > 0) return;
-    setDraft(customizing ? saved : null);
-  });
-
-  const savedRef = useRef(saved);
-  const customizingRef = useRef(customizing);
+  const savedKey = state ? JSON.stringify(state.sidebar ?? EMPTY_SIDEBAR) : null;
+  const savedList = useMemo(() => (savedKey === null ? null : [JSON.parse(savedKey) as SidebarArrangement]), [savedKey]);
+  const io = useMemo(() => sidebarListIo(queryClient), [queryClient]);
+  const { list, editTracked } = useSavedList({ io, saved: savedList, revision: revisionOf(state, "sidebar"), keyOf: keyOfArrangement });
+  // The draft is held while the mode is on, and outside it for as long as the
+  // broadcast of our last save has not arrived: dropped sooner, the rail would
+  // flicker back to the arrangement before it.
+  const held = list[0];
+  const draft = held && (customizing || JSON.stringify(held) !== savedKey) ? held : null;
+  const { resolved, consoles } = useResolvedFromState(state, draft);
+  const consolesRef = useRef(consoles);
   useEffect(() => {
-    savedRef.current = saved;
-    customizingRef.current = customizing;
+    consolesRef.current = consoles;
   });
-
-  const commit = useCallback(
-    async (next: SidebarArrangement): Promise<boolean> => {
-      setDraft(next);
-      setSaving((n) => n + 1);
-      const ok = await setSidebar(queryClient, next);
-      setSaving((n) => n - 1);
-      if (!ok) setDraft(customizingRef.current ? savedRef.current : null);
-      else if (!customizingRef.current && sameArrangement(savedRef.current, next)) setDraft(null);
-      return ok;
-    },
-    [queryClient],
-  );
 
   /** The Undo toast on screen, retired by the next change on either tab. */
   const undoToast = useRef<string | null>(null);
+  const undoTicket = useRef(0);
   const retireUndo = useCallback(() => {
     if (undoToast.current) toast.dismiss(undoToast.current);
     undoToast.current = null;
+    return ++undoTicket.current;
   }, []);
-  const offerUndo = useCallback(
-    (said: string, undo: () => void) => {
-      retireUndo();
-      const id = toast.withAction(said, {
-        label: "Undo",
-        onSelect: () => {
-          if (undoToast.current === id) undoToast.current = null;
-          undo();
-        },
+  const offerUndo = useCallback((said: string, undo: () => void, ticket: number) => {
+    // A change made since this one retired its Undo: it is not offered late.
+    if (ticket !== undoTicket.current) return;
+    if (undoToast.current) toast.dismiss(undoToast.current);
+    const id = toast.withAction(said, {
+      label: "Undo",
+      onSelect: () => {
+        if (undoToast.current === id) undoToast.current = null;
+        undo();
+      },
+    });
+    undoToast.current = id;
+  }, []);
+
+  /** Save a change, saying the server's words if it is refused. How it went. */
+  const save = useCallback(
+    async (change: (arrangement: SidebarArrangement) => SidebarArrangement | null) => {
+      const result = await editTracked((l) => {
+        const next = change(l[0] ?? EMPTY_SIDEBAR);
+        return next ? [next] : l;
       });
-      undoToast.current = id;
+      if (!result.ok) toast.error(result.error);
+      return result;
     },
-    [retireUndo],
+    [editTracked],
   );
 
+  /** Make a change; whether it saved one. */
   const apply = useCallback(
-    (next: ResolvedSidebar | null, said?: string, undoable = false) => {
-      if (!next) return;
-      retireUndo();
-      const before = toSavedSidebar(resolved, consoles);
-      void commit(toSavedSidebar(next, consoles));
-      if (!said) return;
-      if (undoable) offerUndo(said, () => void commit(before));
-      else toast.info(said);
+    async (change: (r: ResolvedSidebar) => ResolvedSidebar | null, said?: string, undoable = false): Promise<boolean> => {
+      // A rule refused it: nothing to save, nothing to say.
+      if (!change(resolved)) return false;
+      const ticket = retireUndo();
+      const result = await save((arrangement) => {
+        const next = change(resolveSidebar(arrangement, consolesRef.current));
+        return next ? toSavedSidebar(next, consolesRef.current) : null;
+      });
+      // Said once it has saved, and only for a change that changed something: not
+      // for one the server refused, nor for one an earlier refusal left nothing
+      // to do.
+      if (!result.ok || !result.changed) return false;
+      if (!said) return true;
+      // Undo puts back what this change was applied to, as the server held it.
+      // Not what was drawn at the click, which may have held an earlier change
+      // the server then refused.
+      const before = result.before[0] ?? EMPTY_SIDEBAR;
+      if (undoable) {
+        offerUndo(said, () => {
+          retireUndo();
+          void save(() => before);
+        }, ticket);
+      } else toast.info(said);
+      return true;
     },
-    [commit, consoles, offerUndo, resolved, retireUndo],
+    [offerUndo, resolved, retireUndo, save],
   );
 
   const setConsoleShown = useCallback(
-    (id: string, shown: boolean, said?: string) => {
-      void setViewShowInSidebar(queryClient, consoleViewId(id), shown);
-      if (said) {
+    async (id: string, shown: boolean, said?: string) => {
+      const saved = await setViewShowInSidebar(queryClient, consoleViewId(id), shown);
+      // Said once it has saved: not for a change the server refused.
+      if (saved && said) {
         toast.info(said, {
           action: { label: "Undo", onSelect: () => void setViewShowInSidebar(queryClient, consoleViewId(id), !shown) },
         });
@@ -188,25 +207,29 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
         setConsoleShown(id, false, `Hid ${label}. It still opens from Screens.`);
         return;
       }
-      apply(hidePage(resolved, id), `Hid ${label}. It still opens from a link.`, true);
+      apply((r) => hidePage(r, id), `Hid ${label}. It still opens from a link.`, true);
     },
-    [apply, resolved, setConsoleShown],
+    [apply, setConsoleShown],
   );
+
+  /** A new, empty section at the end; its id once it has saved, or null if it did
+   *  not. The id is made here, once: a change is run again for every redraw and for
+   *  the save, and an id made inside it would be a different section each time, so a
+   *  rename or a drop on the drawn one would miss the saved one. */
+  const addNewSection = useCallback(async () => {
+    const id = uid("s");
+    return (await apply((r) => addSection(r, id))) ? id : null;
+  }, [apply]);
 
   const [tab, setTab] = useState<CustomizeTab>("sidebar");
   const open = useCallback((which: CustomizeTab) => {
-    setDraft(savedRef.current);
     setTab(which);
     setCustomizing(true);
   }, []);
-  const done = useCallback(() => {
-    setCustomizing(false);
-    setDraft(null);
-  }, []);
+  const done = useCallback(() => setCustomizing(false), []);
   // On a phone the bar starts on its own set, the one that device shows.
   const isMobile = useIsMobile();
   const bar = useBarEditor({
-    active: customizing && tab === "bar",
     opened: customizing,
     startOn: isMobile ? "mobile" : "desktop",
     undo: { offer: offerUndo, retire: retireUndo },
@@ -273,6 +296,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     draft,
     consoles,
     apply,
+    addSection: addNewSection,
     setConsoleShown,
     hide,
     drag: railDrag.drag,

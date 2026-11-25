@@ -103,8 +103,10 @@ read, and the next save replaces the original. A page keeps its place when its
 route is renamed: the arrangement names pages by a stable id, not by address.
 
 Each change's **Undo** puts back that change only: a newer change takes the
-older toast down. Two browsers customizing at once see each other's changes as
-they are saved.
+older toast down. A change's toast appears once the server has accepted it. One
+the server refuses shows its reason instead, and the sidebar goes back to what is
+saved. Two browsers customizing at once see each other's changes as they are
+saved.
 
 **On a phone the hamburger is the only way in.** There is no swipe from the left
 edge of the screen — that edge belongs to the browser's own back gesture, and a

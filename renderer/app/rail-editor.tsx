@@ -34,7 +34,7 @@ import { Caret, DRAGGABLE } from "./drag-parts";
 import type { RailDrag } from "./rail-drop";
 import type { Destination } from "./destinations";
 import { setBranding } from "./set-branding";
-import { addSection, newSectionId, removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
+import { removedSectionMessage, removeSection, renameSection } from "./sidebar-edits";
 
 const X_BUTTON =
   "grid size-5 shrink-0 place-items-center rounded-full border border-line-strong bg-surface text-fg-muted " +
@@ -66,10 +66,11 @@ export function RailEditor({
   const { resolved, aim, listRef } = customize;
   const [renaming, setRenaming] = useState<string | null>(null);
 
-  function addNew() {
-    const id = newSectionId(resolved);
-    customize.apply(addSection(resolved, id));
-    setRenaming(id);
+  /** The name field opens on the new section once it has saved: a refused one is
+   *  not there to name. */
+  async function addNew() {
+    const id = await customize.addSection();
+    if (id) setRenaming(id);
   }
 
   return (
@@ -86,14 +87,14 @@ export function RailEditor({
             onRename={() => setRenaming(section.id)}
             onRenamed={(label) => {
               setRenaming(null);
-              if (label !== null) customize.apply(renameSection(resolved, section.id, label));
+              if (label !== null) customize.apply((r) => renameSection(r, section.id, label));
             }}
           />
         ))}
         <button
           type="button"
           data-rail-add
-          onClick={addNew}
+          onClick={() => void addNew()}
           className="mt-3.5 flex h-8 items-center gap-2 rounded-lg border border-dashed border-line-strong px-2.5 text-[12.5px] font-medium text-fg-muted transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <PlusIcon className="size-3.5" />
@@ -121,7 +122,7 @@ function SectionEditor({
   /** The new name, or null when the rename was abandoned. */
   onRenamed: (label: string | null) => void;
 }) {
-  const { resolved, apply, drag, aim } = useCustomize();
+  const { apply, drag, aim } = useCustomize();
   // A phone has no hover, so its × buttons are always shown.
   const { isMobile: alwaysShowX } = useSidebarChrome();
   const litDz = aim.dz === section.id;
@@ -163,7 +164,7 @@ function SectionEditor({
             <button
               type="button"
               aria-label={`Remove section ${section.label}`}
-              onClick={() => apply(removeSection(resolved, section.id), removedSectionMessage(section), true)}
+              onClick={() => apply((r) => removeSection(r, section.id), removedSectionMessage(section), true)}
               {...NO_DRAG}
               className={cn(X_BUTTON, alwaysShowX ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
             >

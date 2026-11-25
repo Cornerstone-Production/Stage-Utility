@@ -126,10 +126,9 @@ export function ConsoleRailIcon({
         // one, which is about the icon.
         data-rail-glyph
         className="contents"
-        onContextMenu={(e) => {
-          e.stopPropagation();
-          trigger.onContextMenu(e);
-        }}
+        // The glyph's trigger claims the press or right-click: neither the row's
+        // menu nor the rail's opens on it.
+        onContextMenu={trigger.onContextMenu}
         onPointerDown={trigger.onPointerDown}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}

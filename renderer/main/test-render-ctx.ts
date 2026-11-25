@@ -31,6 +31,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   barItems: [],
   barMobileItems: [],
   sidebar: { sections: [], hidden: [] },
+  listRevisions: { boot: "", sidebar: 0, bar: 0 },
   savedColors: [],
   notesByObject: {},
   slotsByLayoutObject: {},

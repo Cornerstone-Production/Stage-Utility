@@ -28,7 +28,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
-import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
 import { plural } from "@main/services/plural";
 import { buildLabel } from "../lib/build-label";
@@ -230,7 +230,7 @@ export function Rail({
           items.push({
             label: s.label || "Top, beside Home",
             onSelect: () =>
-              customize.apply(movePage(resolved, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
+              customize.apply((r) => movePage(r, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
           });
         }
       }
@@ -361,6 +361,8 @@ export function Rail({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
+          // The press is this handle's, and its trigger claims it: the rail around
+          // it leaves it alone, so the one-item menu opens and not the rail's too.
           onPointerDown={(e) => {
             onStartResize(e);
             resizeTrigger.onPointerDown(e);
@@ -368,11 +370,7 @@ export function Rail({
           onPointerMove={resizeTrigger.onPointerMove}
           onPointerUp={resizeTrigger.onPointerUp}
           onPointerCancel={resizeTrigger.onPointerCancel}
-          onContextMenu={(e) => {
-            // Its own one-item menu, not the rail's as well.
-            e.stopPropagation();
-            resizeTrigger.onContextMenu(e);
-          }}
+          onContextMenu={resizeTrigger.onContextMenu}
           onClickCapture={resizeTrigger.onClickCapture}
           onDoubleClick={onResetWidth}
           style={resizeTrigger.style}
@@ -419,9 +417,8 @@ function RailRow({
   ariaLabel?: string;
   menuItems: () => ContextMenuItem[];
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const trigger = useContextMenuTrigger((point) => setMenu({ ...point, items: menuItems() }));
-  const onGlyph = (e: React.SyntheticEvent) => e.target instanceof Element && e.target.closest("[data-rail-glyph]") !== null;
+  const { menu, open, close } = useContextMenuState();
+  const trigger = useContextMenuTrigger((point) => open(point, menuItems()));
   return (
     <>
       <SidebarListItem
@@ -430,21 +427,18 @@ function RailRow({
         title={d.label}
         ariaLabel={ariaLabel}
         badge={badge}
-        onContextMenu={(e) => {
-          // The rail's own menu must not open on top of this one.
-          e.stopPropagation();
-          trigger.onContextMenu(e);
-        }}
-        onPointerDown={(e) => {
-          if (!onGlyph(e)) trigger.onPointerDown(e);
-        }}
+        // The row's trigger claims the press or right-click, so the rail around it
+        // does not open its own menu as well; a console's glyph claims it first, so
+        // its icon menu is the only one that opens there.
+        onContextMenu={trigger.onContextMenu}
+        onPointerDown={trigger.onPointerDown}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}
         onPointerCancel={trigger.onPointerCancel}
         onClickCapture={trigger.onClickCapture}
         style={trigger.style}
       />
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
     </>
   );
 }

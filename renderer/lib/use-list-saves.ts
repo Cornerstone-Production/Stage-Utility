@@ -27,11 +27,23 @@ export type ListEdit<T> = (list: T[]) => T[];
 
 export type ListSaveResult = { ok: true } | { ok: false; error: string };
 
+/**
+ * How one step went, in full. A saved one also says whether it changed anything (an
+ * edit that found nothing to do saves nothing) and the list it was applied to, which
+ * is what an Undo puts back: the list as the server held it when this step's turn
+ * came, not as the page drew it when it was clicked, which may have held an edit the
+ * server then refused.
+ */
+export type ListStepResult<T> = { ok: true; changed: boolean; before: T[] } | { ok: false; error: string };
+
 /** How the list reaches the server. Must be stable: a module-level constant. */
 export interface ListIo<T> {
   save: (list: T[]) => Promise<T[]>;
   read: () => Promise<T[]>;
 }
+
+/** A step's result as `edit` and `request` give it. */
+const said = <T,>(r: ListStepResult<T>): ListSaveResult => (r.ok ? { ok: true } : r);
 
 type Step<T> = { edit: ListEdit<T> } | { request: () => Promise<T[]> };
 
@@ -42,14 +54,19 @@ export function useListSaves<T>(io: ListIo<T>): {
   adopt: (list: T[]) => void;
   /** Queue an edit; resolves once it has been saved or refused. */
   edit: (e: ListEdit<T>) => Promise<ListSaveResult>;
+  /** `edit`, resolving with what it changed and what it was applied to. */
+  editTracked: (e: ListEdit<T>) => Promise<ListStepResult<T>>;
   /** Queue a request that answers with the whole list; resolves once it has answered or failed. */
   request: (r: () => Promise<T[]>) => Promise<ListSaveResult>;
+  /** Steps queued or out. A state, so the render in which the queue empties is a render. */
+  pending: number;
 } {
   // Written only from handlers and from the save loop, never during render.
   const base = useRef<T[]>([]);
-  const queue = useRef<{ step: Step<T>; done: (r: ListSaveResult) => void }[]>([]);
+  const queue = useRef<{ step: Step<T>; done: (r: ListStepResult<T>) => void }[]>([]);
   const saving = useRef(false);
   const [list, setList] = useState<T[]>([]);
+  const [pending, setPending] = useState(0);
 
   const redraw = useCallback(() => {
     // An edit that throws is drawn as no change; its failure is returned when its turn
@@ -70,18 +87,19 @@ export function useListSaves<T>(io: ListIo<T>): {
     redraw();
   }, [redraw]);
 
-  const saveOne = useCallback(async (step: Step<T>): Promise<ListSaveResult> => {
+  const saveOne = useCallback(async (step: Step<T>): Promise<ListStepResult<T>> => {
+    const before = base.current;
     try {
       if ("edit" in step) {
         // Inside the try: an edit that throws is refused like a save the server refused,
         // rather than staying at the head of the queue with every edit behind it waiting.
-        const next = step.edit(base.current);
-        if (next === base.current) return { ok: true }; // nothing to change (a move past the end)
+        const next = step.edit(before);
+        if (next === before) return { ok: true, changed: false, before }; // nothing to change (a move past the end)
         base.current = await io.save(next);
       } else {
         base.current = await step.request();
       }
-      return { ok: true };
+      return { ok: true, changed: true, before };
     } catch (err) {
       // Refused or failed, the server may hold something other than the last answer
       // (another window saved meanwhile), so the edits still waiting are applied to what
@@ -104,6 +122,7 @@ export function useListSaves<T>(io: ListIo<T>): {
         const result = await saveOne(head.step);
         queue.current.shift();
         redraw();
+        setPending(queue.current.length);
         head.done(result);
       }
     } finally {
@@ -111,14 +130,16 @@ export function useListSaves<T>(io: ListIo<T>): {
     }
   }, [saveOne, redraw]);
 
-  const enqueue = useCallback((step: Step<T>) => new Promise<ListSaveResult>((done) => {
+  const enqueue = useCallback((step: Step<T>) => new Promise<ListStepResult<T>>((done) => {
     queue.current.push({ step, done });
     redraw();
+    setPending(queue.current.length);
     void drain();
   }), [drain, redraw]);
 
-  const edit = useCallback((e: ListEdit<T>) => enqueue({ edit: e }), [enqueue]);
-  const request = useCallback((r: () => Promise<T[]>) => enqueue({ request: r }), [enqueue]);
+  const editTracked = useCallback((e: ListEdit<T>) => enqueue({ edit: e }), [enqueue]);
+  const edit = useCallback((e: ListEdit<T>) => editTracked(e).then(said), [editTracked]);
+  const request = useCallback((r: () => Promise<T[]>) => enqueue({ request: r }).then(said), [enqueue]);
 
-  return { list, adopt, edit, request };
+  return { list, adopt, edit, editTracked, request, pending };
 }
