@@ -28,7 +28,7 @@ import {
   Switch,
 } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
-import { planLabel } from "../../settings/sections/slots-target-pill";
+import { planLabel } from "../../settings/sections/plan-date-label";
 import { useUpcomingPlans } from "../../settings/sections/plan-switcher";
 import { useStageState } from "../../main/use-stage-state";
 import { appZoneOf } from "../../lib/app-zone";

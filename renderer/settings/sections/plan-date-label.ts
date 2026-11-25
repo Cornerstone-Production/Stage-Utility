@@ -1,9 +1,15 @@
-// plan-date-label.ts — a Planning Center plan's date as stage plots names it,
-// "Sun 15 Nov" (day before month, the mockup's order), on the app's calendar.
+// plan-date-label.ts — the one place a Planning Center plan's date is put into
+// words, always on the app's calendar (the zone passed in, never the browser's).
 //
-// Beside planLabel (slots-target-pill.tsx), which words the same date in the
-// browser's own order for the slot editor. Stage plots uses this one: its
-// badge, its This week card, its delete confirm and its printed date.
+// Two visible formats, each kept by the surfaces that show it:
+//   zonedDayLabel         "Sun 15 Nov"   stage plots: badge, This week card,
+//                                        delete confirm, printed date
+//   zonedWeekdayMonthDay  "Sun, Nov 15"  slots, the plan switcher, Mic slots and
+//                                        the ServiceCue plan button (word order
+//                                        follows the browser's language)
+// planLabel and planDateLabel put a plan's sort date or Planning Center's own
+// words through them. A 7 pm Sunday service in Chicago is Monday on a UTC
+// clock, so a caller that drops the zone names the wrong day.
 
 import type { UpcomingPlan } from "@main/types/pco";
 
@@ -18,6 +24,32 @@ export function zonedDayLabel(ms: number, timeZone: string, { year = false }: { 
   }).formatToParts(ms);
   const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
   return [get("weekday"), get("day"), get("month"), ...(year ? [get("year")] : [])].join(" ");
+}
+
+/** "Sun, Nov 15" for the instant `ms` on the calendar of `timeZone`; word order is the browser's language's. */
+export function zonedWeekdayMonthDay(ms: number, timeZone: string | null): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(ms);
+}
+
+/**
+ * "Wed Sep 13" from the plan's PCO sort_date.
+ *
+ * Falls back to the plan's dates AS PLANNING CENTER WORDS THEM when there is no
+ * sort_date to format: parsing that string into a weekday would be guessing at
+ * a format somebody typed, and a wrong date on the slot editor's pill points a
+ * save at the wrong week.
+ */
+export function planLabel(planSortDate: string | null, planDates: string | null, timeZone: string | null): string {
+  if (planSortDate) {
+    const at = Date.parse(planSortDate);
+    if (Number.isFinite(at)) return zonedWeekdayMonthDay(at, timeZone);
+  }
+  return planDates ?? "This plan";
 }
 
 /** "9:00" for the instant `ms` in `timeZone`, on a 24-hour clock. */

@@ -18,7 +18,7 @@ import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
 import { appZoneOf } from "../../lib/app-zone";
 import { useEditingTarget } from "./editing-target";
-import { planLabel } from "./slots-target-pill";
+import { planLabel } from "./plan-date-label";
 import {
   decodeTarget,
   encodeTarget,

@@ -12,7 +12,7 @@ import type { ThemeDTO, ThemePersonDTO } from "@main/types/photo-themes";
 import { Button, MENU_ITEM, MENU_ITEM_DANGER, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, menuContent } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
 import { Avatar, Chip, InlineBox, Num, PhotoPair, Placeholder, ThemeTag, planningCenterPhoto, useEscapeFirst, type ChipTone } from "./photo-bits";
-import { planLabel } from "../../../settings/sections/slots-target-pill";
+import { planLabel } from "../../../settings/sections/plan-date-label";
 
 export type CardAction = "redo" | "approve" | "keep";
 

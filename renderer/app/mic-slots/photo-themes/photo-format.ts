@@ -10,7 +10,7 @@
 
 import type { ThemeDTO } from "@main/types/photo-themes";
 
-import { planLabel } from "../../../settings/sections/slots-target-pill";
+import { planLabel } from "../../../settings/sections/plan-date-label";
 
 const DAY_YEAR = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 

@@ -7,6 +7,7 @@
 // order; the server's order is the one the arrows walk.
 
 import { formatClock } from "../lib/clock-format";
+import { zonedWeekdayMonthDay } from "../settings/sections/plan-date-label";
 import { switcherSequence, stepTarget, type SwitcherEntry } from "../settings/sections/plan-switcher-step";
 
 /** The plans of one service type, in the order the server sent them. */
@@ -82,11 +83,6 @@ export function placePastedPlan(link: PlanLink, allPlans: UpcomingPlan[], thisTy
  *  null when the plan has no date to format. */
 export function planWhen(sortDate: string | null, timeZone: string | null): { date: string | null; time: string | null } {
   if (!sortDate || !Number.isFinite(Date.parse(sortDate))) return { date: null, time: null };
-  const date = new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    ...(timeZone ? { timeZone } : {}),
-  }).format(Date.parse(sortDate));
+  const date = zonedWeekdayMonthDay(Date.parse(sortDate), timeZone);
   return { date, time: formatClock(sortDate, { timeZone }) };
 }
