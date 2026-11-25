@@ -81,8 +81,9 @@ export type QsysControlKind = "boolean" | "trigger" | "text" | "number";
  * A Core value read as on or off: the one rule for whether a Boolean is on,
  * wherever a mute, a switch, a lit button or a release decides from it. A Core
  * sends a Boolean as true/false (GetControls) or as 1/0 (Component.Get, change
- * groups, with String "true"/"false"), so 1, 1.0, true and "true" are on, and
- * 0, false and "false" off. Value only, never String: a mute's String is
+ * groups, with String "true"/"false"), so true and any finite number but 0 are
+ * on; as text, only "true", "1" and "on" (any case, trimmed), never "1.0".
+ * Anything else is off. Value only, never String: a mute's String is
  * "muted"/"unmuted".
  */
 export function isOn(v: unknown): boolean {

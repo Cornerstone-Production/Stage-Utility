@@ -87,7 +87,8 @@ imported as an allowlist file. Every write is checked by the server.
   bound as the preset's **Lit by**.
 - A Core reports a Boolean as `true`/`false` in its control list and as `1`/`0` in
   the values it pushes and reads back; either is on or off alike, on a panel and on
-  the server. A write's read-back of `1` for `true` is not a mismatch.
+  the server. Any other number is on unless it is 0; a text value is on only as
+  `true`, `1` or `on`. A write's read-back of `1` for `true` is not a mismatch.
 - A text control takes any text up to 1024 characters. Only a selector's choice
   list is checked against the control's choices (below); anything else may send
   any text, so allowlist a text control only if any text is safe to send.

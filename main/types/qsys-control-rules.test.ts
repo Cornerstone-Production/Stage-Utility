@@ -46,7 +46,7 @@ describe("isReadOnlyDirection", () => {
 
 describe("isOn", () => {
   test("a Boolean as a Core sends it, as true/false, 1/0 or 1.0/0.0, and as text", () => {
-    for (const v of [true, 1, 1.0, "true", "TRUE", " true "]) assert.equal(isOn(v), true, `${JSON.stringify(v)} is on`);
-    for (const v of [false, 0, 0.0, -0, "false", "", null, undefined, Number.NaN, "muted", "unmuted"]) assert.equal(isOn(v), false, `${JSON.stringify(v)} is off`);
+    for (const v of [true, 1, 1.0, "true", "TRUE", " true ", "1", "on", "ON"]) assert.equal(isOn(v), true, `${JSON.stringify(v)} is on`);
+    for (const v of [false, 0, 0.0, -0, "false", "", null, undefined, Number.NaN, "muted", "unmuted", "0", "1.0", "off"]) assert.equal(isOn(v), false, `${JSON.stringify(v)} is off`);
   });
 });
