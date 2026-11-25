@@ -181,6 +181,8 @@ describe("what is in the bundle", () => {
       "renderer/lib/sse-channels.ts",
       "renderer/lib/subscribe-reporter.ts",
       "renderer/lib/uid.ts",
+      // The stage plots page's plot width, which its labels are sized by.
+      "renderer/lib/use-element-size.ts",
       "renderer/lib/use-failed-reads.ts",
       // The stage plots page's pan and zoom.
       "renderer/lib/use-latest-ref.ts",

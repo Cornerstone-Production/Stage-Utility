@@ -23,6 +23,8 @@ let STORED: Map<string, unknown>;
 let asked: string[] = [];
 /** Keys that answer 500, as a read the Worker could not serve. */
 let FAILING = new Set<string>();
+/** While set, the next index read answers what was stored when it was asked, once this resolves: a slow read. */
+let INDEX_HOLD: Promise<void> | null = null;
 
 function index(extra: Partial<PublishedVenue> = {}): PublishedVenue {
   return {
@@ -56,6 +58,11 @@ function plot(id: string, name: string, hash: string | null): PublishedPlot {
   const prefix = `/stageplots/${SECRET}/`;
   if (path.startsWith(prefix) && FAILING.has(path.slice(prefix.length))) return { ok: false, status: 500, json: async () => ({}), text: async () => "{}" };
   const value = path.startsWith(prefix) ? STORED.get(path.slice(prefix.length)) : undefined;
+  if (INDEX_HOLD && path === `${prefix}index`) {
+    const hold = INDEX_HOLD;
+    INDEX_HOLD = null;
+    await hold;
+  }
   if (value === undefined) return { ok: false, status: 404, json: async () => ({ error: "Not found" }), text: async () => '{"error":"Not found"}' };
   return { ok: true, status: 200, json: async () => value, text: async () => JSON.stringify(value) };
 };
@@ -78,6 +85,7 @@ beforeEach(() => {
   ]);
   asked = [];
   FAILING = new Set();
+  INDEX_HOLD = null;
 });
 
 /** The tab coming back into view: the page reads again. */
@@ -201,6 +209,20 @@ describe("the published stage plots page", () => {
     await comeBack();
     assert.match(document.body.textContent ?? "", /This link is not published\./);
     assert.equal(document.querySelector("svg[role=img]"), null);
+  });
+
+  test("a read that answers after a newer one never puts its older venue back", async () => {
+    await mount();
+    let release!: () => void;
+    INDEX_HOLD = new Promise((r) => (release = r));
+    STORED.set("index", index({ name: "Old name" }));
+    await comeBack();
+    STORED.set("index", index({ name: "New name" }));
+    await comeBack();
+    assert.match(document.body.textContent ?? "", /New name/);
+    await act(async () => release());
+    for (let i = 0; i < 5; i++) await settle();
+    assert.match(document.body.textContent ?? "", /New name/, "the older read, answering last, put its venue back");
   });
 
   test("a link with nothing behind it says so, and asks for nothing more", async () => {

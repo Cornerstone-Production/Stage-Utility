@@ -13,6 +13,9 @@
 // down) are counted by page under the venue's state, with Remove now; with no venue selected the
 // editor shows them alone (PendingLinksCard).
 //
+// The link itself is read on its own (usePublishedLink): the document every page follows, the
+// crew's chromeless /stageplots included, carries no secret.
+//
 // The page's host is the venue's own once published, and the Public link card's address
 // before that. Copy uses the clipboard where the browser has one; over plain HTTP, where
 // it has none and the older copy command does not work, the link is put in a field and
@@ -23,7 +26,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CircleXIcon, CopyIcon, GlobeIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 
 import type { PublishSettingsDTO } from "@main/types/servicecue-publish-status";
-import type { PendingRemovalView, Venue } from "@main/types/stageplots";
+import type { PendingRemovalView, VenueView } from "@main/types/stageplots";
 import { STAGEPLOTS_PATH } from "@main/types/servicecue-publish";
 import { plural } from "@main/services/plural";
 
@@ -31,6 +34,7 @@ import { Button } from "../../components/ui/button";
 import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
+import { logReadFailure } from "../../lib/client-log";
 import { copyText } from "../../lib/clipboard";
 import { formatClock } from "../../lib/clock-format";
 import { cn } from "../../lib/cn";
@@ -67,6 +71,44 @@ function usePublishTarget() {
     queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
     staleTime: 60_000,
   });
+}
+
+/** What names the venue's link without carrying it: changed by a publish, regenerate or move, never by a republish. */
+function linkKey(venue: VenueView): string | null {
+  const pub = venue.publish;
+  return pub ? `${venue.id} ${pub.origin} ${pub.linkAt ?? pub.publishedAt}` : null;
+}
+
+/**
+ * The venue's public link, read on its own (GET /api/stageplots/venues/:id/link): the document
+ * the crew's /stageplots reads carries no secret. Read again when the link may have changed
+ * (linkAt: a publish, regenerate or move, here or from another desk), never on a republish, which
+ * every edit sets off. Until the read for a new link answers, no link is offered, never the one
+ * before it; Try again keeps the link it has while it reads. A read that fails is said on the
+ * client log and on the card.
+ */
+export function usePublishedLink(venue: VenueView): { url: string | null; failed: boolean; retry: () => void } {
+  const key = linkKey(venue);
+  const [attempt, setAttempt] = useState(0);
+  const [read, setRead] = useState<{ key: string; url: string | null; failed: boolean } | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    let live = true;
+    stageplotsApi.link(venue.id).then(
+      (r) => live && setRead({ key, url: r.url, failed: false }),
+      (err: unknown) => {
+        logReadFailure("stageplots", `the public link of ${venue.name}`, err);
+        if (live) setRead((was) => ({ key, url: was?.key === key ? was.url : null, failed: true }));
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // The name is only for the log line: a rename is no reason to read the link again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, attempt, venue.id]);
+  const retry = () => setAttempt((n) => n + 1);
+  return read && read.key === key ? { url: read.url, failed: read.failed, retry } : { url: null, failed: false, retry };
 }
 
 /**
@@ -151,7 +193,7 @@ export function PublishCard({
   follow,
   landing,
 }: {
-  venue: Venue;
+  venue: VenueView;
   pending: readonly PendingRemovalView[];
   save: Save;
   timeZone: string;
@@ -169,8 +211,10 @@ export function PublishCard({
   const [copy, setCopy] = useState<"idle" | "copied" | "select">("idle");
   const fieldRef = useRef<HTMLInputElement>(null);
 
+  const published = usePublishedLink(venue);
+  const link = published.url ?? "";
   // A new venue, or the same one published, unpublished or moved to a new link, starts clean.
-  useResyncOn([venue.id, pub?.secret ?? ""], () => {
+  useResyncOn([venue.id, linkKey(venue) ?? ""], () => {
     setError(null);
     setCopy("idle");
   });
@@ -186,7 +230,6 @@ export function PublishCard({
   const savedUrl = target.data?.url ?? "";
   const pageSetUp = savedUrl !== "" && target.data?.token !== "";
   const host = pub ? new URL(pub.origin).host : savedUrl ? new URL(savedUrl).host : "the public page";
-  const link = pub ? `${pub.origin}${STAGEPLOTS_PATH}/${pub.secret}` : "";
 
   const run = async (action: Exclude<Action, "listing">) => {
     setWorking(action);
@@ -301,13 +344,24 @@ export function PublishCard({
               // short secret is what tells this link from the last one.
               <span className="flex min-w-0 flex-1 font-mono text-fg" data-testid="publish-link">
                 <span className="min-w-0 truncate">{host}</span>
-                <span className="shrink-0">{`${STAGEPLOTS_PATH}/${shortSecret(pub.secret)}`}</span>
+                <span className="shrink-0">{`${STAGEPLOTS_PATH}/${link ? shortSecret(link.slice(link.lastIndexOf("/") + 1)) : "…"}`}</span>
               </span>
             )}
-            <button type="button" className={cn(iconButton, "size-6")} title="Copy link" aria-label="Copy link" onClick={() => void onCopy()}>
+            <button type="button" className={cn(iconButton, "size-6")} title="Copy link" aria-label="Copy link" disabled={!link} onClick={() => void onCopy()}>
               <CopyIcon className="size-3.5" />
             </button>
           </div>
+          {published.failed && (
+            <p role="alert" className={cn(statusLine, "-mt-1.5 text-danger-11")}>
+              <CircleXIcon aria-hidden />
+              <span>
+                The link could not be read from the server.{" "}
+                <button type="button" className="underline underline-offset-2" onClick={published.retry}>
+                  Try again
+                </button>
+              </span>
+            </p>
+          )}
           {copy === "copied" && (
             <p role="status" className="-mt-1.5 text-caption1 text-fg-subtle">
               Copied.

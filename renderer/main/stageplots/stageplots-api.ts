@@ -6,7 +6,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import type { PatchFile } from "@main/types/patch";
-import type { BackgroundView, Plot, PlotDraft, PlotItem, StagePlotsView, Venue, VenueKind } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotDraft, PlotItem, StagePlotsView, VenueKind, VenueLink, VenueView } from "@main/types/stageplots";
 
 import { invoke } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
@@ -31,7 +31,7 @@ export interface PdfPage {
 }
 
 /** A publish action's answer: the venue as it now is, and anything the operator should know beside it. */
-export type PublishAnswer = Venue & { notice?: string };
+export type PublishAnswer = VenueView & { notice?: string };
 
 /** On an answer that deleted or moved a plot's kept draft: what the drafts file could not take. The change itself landed. */
 export interface DraftNotice {
@@ -42,14 +42,14 @@ export const stageplotsApi = {
   get: () => invoke<StagePlotsView>("stageplots:get"),
   /** The patch, for linked connection points. Rejects (503) when it cannot be read, rather than answering the seed sheets. */
   patch: () => invoke<PatchFile>("stageplots:patch"),
-  createVenue: (venue: VenueInput) => invoke<Venue>("stageplots:createVenue", { venue }),
+  createVenue: (venue: VenueInput) => invoke<VenueView>("stageplots:createVenue", { venue }),
   /** `slug`: a new address, the old one kept as an alias. `oldSlugs`: the aliases to keep, some of them left out. */
-  updateVenue: (id: string, changes: Partial<VenueInput> & { slug?: string; oldSlugs?: string[] }) => invoke<Venue>("stageplots:updateVenue", { id, changes }),
+  updateVenue: (id: string, changes: Partial<VenueInput> & { slug?: string; oldSlugs?: string[] }) => invoke<VenueView>("stageplots:updateVenue", { id, changes }),
   /** A venue's plots in a new tab order: each of its plot ids exactly once. */
-  reorderPlots: (venueId: string, plotIds: string[]) => invoke<Venue>("stageplots:updateVenue", { id: venueId, changes: { plotIds } }),
+  reorderPlots: (venueId: string, plotIds: string[]) => invoke<VenueView>("stageplots:updateVenue", { id: venueId, changes: { plotIds } }),
   /** `notice`: the venue was published and its link could not be removed yet (it is queued). */
   deleteVenue: (id: string) => invoke<{ ok: true; notice?: string } & DraftNotice>("stageplots:deleteVenue", { id }),
-  setDefault: (venueId: string, plotId: string) => invoke<Venue>("stageplots:setDefault", { venueId, plotId }),
+  setDefault: (venueId: string, plotId: string) => invoke<VenueView>("stageplots:setDefault", { venueId, plotId }),
   /** Give one plan its own plot for this venue, or hand it back to the default
    *  (`plotId` null). `planDate` is the plan's sort date, kept to name it by. */
   setOverride: (planId: string, venueId: string, plotId: string | null, planDate: string | null) =>
@@ -82,6 +82,8 @@ export const stageplotsApi = {
   discardDraft: (id: string) => invoke<{ ok: true }>("stageplots:discardDraft", { id }),
   /** Save a plot's markup. Rejects with `status` 409 when the plot changed since `version`. */
   saveItems: (id: string, version: number, items: PlotItem[]) => invoke<{ plot: Plot } & DraftNotice>("stageplots:saveItems", { id, version, items }),
+  /** A venue's public link, or null while it is not published. No other read carries the secret. */
+  link: (id: string) => invoke<VenueLink>("stageplots:link", { id }),
   /** Put a venue on the public page behind a new secret link. */
   publish: (id: string) => invoke<PublishAnswer>("stageplots:publish", { id }),
   /** Move a published venue to a new link; the old one stops working once the new one is up. */

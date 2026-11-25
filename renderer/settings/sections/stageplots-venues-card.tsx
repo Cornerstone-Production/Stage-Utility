@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CopyIcon, PlusIcon, XIcon } from "lucide-react";
 
-import { STAGEPLOT_LIMITS, type StagePlotsView, type Venue, type VenueKind } from "@main/types/stageplots";
+import { STAGEPLOT_LIMITS, type StagePlotsView, type VenueView, type VenueKind } from "@main/types/stageplots";
 
 import { Button } from "../../components/ui/button";
 import { confirm } from "../../components/ui/confirm-dialog";
@@ -42,7 +42,7 @@ export function VenuesCard({
   drafted,
 }: {
   doc: StagePlotsView;
-  selected: Venue | null;
+  selected: VenueView | null;
   /** Picks a venue; answers whether it did (unsaved work may have been kept instead). */
   onSelect: (id: string) => Promise<boolean>;
   save: Save;
@@ -89,7 +89,7 @@ export function VenuesCard({
     if (venue) void onSelect(venue.id);
   };
 
-  const remove = async (venue: Venue) => {
+  const remove = async (venue: VenueView) => {
     const n = venue.plotIds.length;
     const ok = await confirm({
       title: `Delete ${venue.name}?`,
@@ -100,14 +100,14 @@ export function VenuesCard({
     if (ok) await run(() => stageplotsApi.deleteVenue(venue.id));
   };
 
-  const address = (v: Venue) => `${window.location.origin}${venuePath(v)}`;
-  const copyAddress = (v: Venue) => {
+  const address = (v: VenueView) => `${window.location.origin}${venuePath(v)}`;
+  const copyAddress = (v: VenueView) => {
     const byHand = () => setCopied(`Copy this address by hand: ${address(v)}`);
     void copyText(address(v))
       .then((ok) => (ok ? setCopied(`Copied ${address(v)}`) : byHand()))
       .catch(byHand);
   };
-  const menuFor = (v: Venue): ContextMenuItem[] => [
+  const menuFor = (v: VenueView): ContextMenuItem[] => [
     {
       label: "Rename",
       onSelect: () => {
@@ -223,7 +223,7 @@ export function VenuesCard({
  * pressed. A refused one stays as typed, outlined, with the server's reason under it, until it
  * is changed or Escape puts back the saved one. Shows the id for a venue that has no address yet.
  */
-function AddressField({ venue, onCommit, onCopy }: { venue: Venue; onCommit: (slug: string) => Promise<string | null>; onCopy: () => void }) {
+function AddressField({ venue, onCommit, onCopy }: { venue: VenueView; onCommit: (slug: string) => Promise<string | null>; onCopy: () => void }) {
   const saved = venueSegment(venue);
   const [draft, setDraft] = useState(saved);
   const [refused, setRefused] = useState<string | null>(null);
@@ -287,7 +287,7 @@ function AddressField({ venue, onCommit, onCopy }: { venue: Venue; onCommit: (sl
 }
 
 /** The addresses a venue had before, each still opening it, with a × that stops one answering (after asking). */
-function OldAddresses({ venue, run }: { venue: Venue; run: <T>(fn: () => Promise<T>) => Promise<T | null> }) {
+function OldAddresses({ venue, run }: { venue: VenueView; run: <T>(fn: () => Promise<T>) => Promise<T | null> }) {
   if (venue.oldSlugs.length === 0) return null;
   const drop = async (slug: string) => {
     const ok = await confirm({
