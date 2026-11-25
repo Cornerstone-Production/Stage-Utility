@@ -233,8 +233,8 @@ says so.
 The same step gives the watch its panels: every View with Q-SYS objects or a panel
 block, the controls its objects read, and its kind. The controls open panels read are
 watched with QRC change groups: at most three per connection (values, volunteer
-meters, staff meters), each polled by the Core at its rate (`AutoPoll`; 30 a second,
-the highest meter rate, is a rate a Core accepts). The Core sends each group's changes
+meters, staff meters), each polled by the Core at its rate (`AutoPoll`; a Core in
+Emulate took a 30 ms rate, the highest meter rate, and polled every 15 to 48 ms). The Core sends each group's changes
 as `ChangeGroup.Poll` notifications, every control's value on the first, and an empty
 one on every tick with nothing changed, which is dropped without a broadcast or a
 line. After a reconnect or a new design the groups are built again and `Invalidate`d,
