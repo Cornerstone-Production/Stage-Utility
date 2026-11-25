@@ -32,7 +32,7 @@ import { secretsStore } from "./secrets.js";
 import { feedSecretSlot } from "./video/feed-id.js";
 import { pullCredentialTarget } from "./video/feed-input.js";
 import { wirelessCredentialTarget, wirelessSecretSlot } from "./wireless-credentials.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 
 /** A wireless connection or a feed, as either side of a restore holds it. */
 type Entry = Record<string, unknown> & { id: string; name: string };

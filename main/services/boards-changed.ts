@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 
 import { broadcast } from "./broadcaster.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { BOARDS_CHANGED_CHANNEL, type BoardChange, type BoardsChanged } from "../types/boards-changed.js";
 
 const EPOCH = randomUUID();

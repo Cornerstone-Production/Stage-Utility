@@ -26,7 +26,7 @@ import { FEED_ID_PATTERN, isReservedFeedId } from "./feed-id.js";
 import { keptPassphraseError, parseFeedInput, passphraseProblem, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved } from "../credential-target.js";
 import { PORT_KEYS, parsePorts } from "./ports.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 
 export const VIDEO_FEEDS_BUNDLE_KIND = "stage-utility-video-feeds";
 

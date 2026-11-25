@@ -11,7 +11,7 @@
 // Pure, so the renderer's stage plots picker reads a sheet by the same rules.
 
 import type { PatchEndpoint, PatchFile, PatchSheet } from "../types/patch.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 
 type Overrides = Record<string, Partial<PatchEndpoint>>;
 type ByPlan = PatchSheet["assignments"]["byPlan"];

@@ -37,7 +37,8 @@ import { errorMessage } from "../main/services/errors.js";
 import { isStringList } from "../main/services/is-record.js";
 import { isMain } from "./is-main.ts";
 import type { DeployBinding, DeployManifest } from "../main/types/servicecue-deploy.js";
-import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, isRecord, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
+import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
+import { isRecord } from "../main/types/is-record.js";
 import { STATIC_HEADERS_FILE } from "../publish/servicecue/src/headers.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

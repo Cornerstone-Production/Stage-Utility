@@ -27,7 +27,7 @@ import {
 import { DataStore } from "./data-store.js";
 import { firstFree } from "./first-free.js";
 import { errorMessage } from "./errors.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
 import { scrub } from "./scrub.js";
 import { fitToHeight, plotHeight, sortPending } from "./stageplots-doc.js";

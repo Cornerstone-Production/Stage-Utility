@@ -11,7 +11,7 @@
 // where the item was.
 
 import type { PlotItem } from "@main/types/stageplots";
-import { isRecord } from "@main/services/is-record";
+import { isRecord } from "@main/types/is-record";
 import { validateItems } from "@main/services/stageplot-items";
 
 import { readStored, removeStored, writeStored } from "../../lib/safe-storage";

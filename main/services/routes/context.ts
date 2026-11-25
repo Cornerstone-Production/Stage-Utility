@@ -9,7 +9,7 @@ import * as http from "http";
 import * as zlib from "node:zlib";
 
 import { errorMessage } from "../errors.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { PcoUrlRefused } from "../pco-path.js";
 import { scrub } from "../scrub.js";
 
