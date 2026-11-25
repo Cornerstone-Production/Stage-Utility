@@ -44,9 +44,11 @@ type LayoutObjectConfig = import("@main/types/views").LayoutObjectConfig;
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
-// jsdom has no layout: give every element a 200 px box so a drag has a scale.
+// jsdom has no layout: give every element a 240 px box so a drag has a scale. A
+// standard fader's 40 px thumb then travels 200 px, the length a drag is measured
+// against, so 20 px of finger is a tenth of the travel.
 (window.HTMLElement.prototype as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => ({
-  x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 200, width: 200, height: 200,
+  x: 0, y: 0, top: 0, left: 0, right: 240, bottom: 240, width: 240, height: 240,
 });
 
 const MIX = "Lobby_Mixer";
@@ -644,6 +646,20 @@ describe("Q-SYS objects", () => {
     up(0);
     await wait(30);
     assert.equal(server.writes.at(-1)!.body.value, 0, "a drag past the limit wrote past it");
+  });
+
+  test("a drag keeps the thumb under the finger: a finger moving a quarter of the thumb's travel moves it a quarter", async () => {
+    // 0 dB at 0.75 of the travel on the taper; a quarter down is 0.5, which is -10 dB.
+    server.values["output.1.gain"] = 0;
+    server.positions["output.1.gain"] = 0.75;
+    await mount([{ ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig]);
+    const fader = q("qsys-fader", "[data-fader]");
+    down(fader, 100);
+    move(150); // 50 px of the thumb's 200 px travel (the 240 px track less the 40 px thumb)
+    assert.equal(fader.dataset.travel, "0.5", "the thumb moved a different distance from the finger");
+    up(150);
+    await wait(30);
+    assert.equal(server.writes.at(-1)!.body.value, -10);
   });
 
   test("a fader on a range with no measured taper stays linear in dB and ignores the Core's Position", async () => {

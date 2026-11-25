@@ -560,6 +560,7 @@ function useFaderDrag({
   writable,
   vertical,
   stepDb,
+  thumbAlong,
 }: {
   addr: QsysAddress | null;
   /** The Core's value, when it is a number. */
@@ -570,6 +571,8 @@ function useFaderDrag({
   writable: boolean;
   vertical: boolean;
   stepDb: number;
+  /** The thumb's length along the track, in px: the thumb travels the track less this. */
+  thumbAlong: number;
 }) {
   const panel = useQsysPanelContext();
   const { epoch } = useQsysPanelState();
@@ -625,7 +628,10 @@ function useFaderDrag({
     const el = track.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const length = vertical ? rect.height : rect.width;
+    // The thumb's travel, not the track's: the thumb is drawn from 0 to the track
+    // less its own length, so a finger moving this far moves it end to end and it
+    // stays under the finger.
+    const length = (vertical ? rect.height : rect.width) - thumbAlong;
     // jsdom lays nothing out; a real browser always has a length here.
     if (!(length > 0)) return;
     // From the value on screen, not the Core's last report: after a release the
@@ -701,6 +707,8 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   // maximum, the Core's minimum at the bottom stop.
   const scale = faderScale(range, info.limits);
   const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
+  // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
+  const thumbAlong = dense ? 24 : 40;
   const { track, shown, level: thumbAt, norm, onPointerDown, step } = useFaderDrag({
     addr,
     core: typeof v.value === "number" ? v.value : null,
@@ -709,6 +717,7 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     writable,
     vertical,
     stepDb,
+    thumbAlong,
   });
 
   const level = thumbAt ?? v.position ?? 0;
@@ -718,8 +727,6 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
   const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
   const offline = v.state === "offline";
 
-  // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
-  const thumbAlong = dense ? 24 : 40;
   const thumbAcross = dense ? 28 : 48;
   const trackWidth = dense ? 4 : 8;
   const limitAcross = dense ? 20 : 32;
