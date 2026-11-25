@@ -25,7 +25,7 @@ async function rawServer(onConnection: (s: net.Socket) => void): Promise<number>
 beforeEach(async () => {
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
   ]);
   port = await fake.start();
 });
@@ -140,10 +140,10 @@ test("the fake survives an unparseable request and a refused group add keeps its
     );
   }
   for (let i = 0; i < 4; i++) {
-    await c.send("ChangeGroup.AddComponentControl", { Id: `ok${i}`, Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+    await c.send("ChangeGroup.AddComponentControl", { Id: `ok${i}`, Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain" }] } });
   }
   await assert.rejects(
-    c.send("ChangeGroup.AddComponentControl", { Id: "ok4", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } }),
+    c.send("ChangeGroup.AddComponentControl", { Id: "ok4", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain" }] } }),
     (err: unknown) => err instanceof QrcError && err.code === 5,
   );
 });
@@ -155,7 +155,7 @@ test("the fake answers a group add or a Set whose Controls is not a list with an
     (err: unknown) => err instanceof QrcError && err.code === -32602,
   );
   await assert.rejects(
-    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: { Name: "gain", Value: 0 } }),
+    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: { Name: "output.1.gain", Value: 0 } }),
     (err: unknown) => err instanceof QrcError && err.code === -32602,
   );
   await c.send("NoOp");
@@ -167,10 +167,10 @@ test("the fake's ChangeGroup.Remove is named-controls only, like the Core's: a C
   c.onNotification((method, params) => {
     if (method === "ChangeGroup.Poll") pushes.push(params);
   });
-  await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
-  await c.send("ChangeGroup.Remove", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain" }] } });
+  await c.send("ChangeGroup.Remove", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain" }] } });
   pushes.length = 0;
-  fake.setControl("Lobby_Mixer", "gain", -3);
+  fake.setControl("Lobby_Mixer", "output.1.gain", -3);
   await c.send("NoOp");
   assert.equal(pushes.length, 1, "a component control left the group through Remove, which QRC does not document");
 });
@@ -184,15 +184,15 @@ test("AutoPoll results repeated as replies to the AutoPoll id arrive as ChangeGr
   });
   const warn = mock.method(console, "warn", () => {});
   try {
-    await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+    await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain" }] } });
     const first = (await c.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.1 })) as { Changes: { Value: unknown }[] };
     assert.deepEqual(first.Changes.map((ch) => ch.Value), [-10], "the first AutoPoll reply carries the add's resend");
-    fake.setControl("Lobby_Mixer", "gain", -3);
-    fake.setControl("Lobby_Mixer", "gain", -4);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -3);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -4);
     await c.send("NoOp");
     assert.deepEqual(pushes, [
-      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -3, String: "-3dB", Position: 97 / 120 }] },
-      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -4, String: "-4dB", Position: 96 / 120 }] },
+      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "output.1.gain", Value: -3, String: "-3dB", Position: 97 / 120 }] },
+      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "output.1.gain", Value: -4, String: "-4dB", Position: 96 / 120 }] },
     ]);
     assert.deepEqual(warn.mock.calls.map((x) => String(x.arguments[0])), []);
   } finally {
@@ -241,7 +241,7 @@ test("an error response rejects with QrcError carrying the code", async () => {
   const c = await connect();
   fake.failNext("Component.Set", 8);
   await assert.rejects(
-    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "gain", Value: 1 }] }),
+    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: 1 }] }),
     (err: unknown) => err instanceof QrcError && err.code === 8,
   );
 });

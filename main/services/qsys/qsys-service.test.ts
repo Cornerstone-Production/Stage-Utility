@@ -28,11 +28,11 @@ after(() => mock.timers.reset());
 beforeEach(async () => {
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   fake.components.set("Zone 1", [
-    { Name: "gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
   ]);
   port = await fake.start();
   svc = new QsysService();
@@ -124,7 +124,7 @@ test("EngineStatus with a new DesignCode triggers refreshCatalog and onCatalog",
   const getComponents = () => fake.received.filter((r) => r.method === "Component.GetComponents").length;
   assert.equal(getComponents(), 1);
   fake.components.set("Hall_Amp", [
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   fake.status = { ...fake.status, DesignCode: "design-2", DesignName: "Hall Design" };
   fake.pushStatus();
