@@ -96,6 +96,11 @@ function levelBinding(config: LayoutObjectConfig): QsysAddress | null {
   return null;
 }
 
+/** As much of the Core's catalog (`GET /api/qsys/catalog`) as the taper check reads: each component's controls and their ranges. */
+export interface TaperCatalog {
+  components: { name: string; controls: { Name: string; ValueMin?: unknown; ValueMax?: unknown }[] }[];
+}
+
 /** A control range with no measured taper, and the fader controls bound on it. */
 export interface UntaperedRange {
   min: number;
@@ -110,7 +115,7 @@ export interface UntaperedRange {
  * own fader does. Sorted by min then max. A binding the Core does not have, or a
  * control with no range, is the binding check's to report, not this.
  */
-export function untaperedRanges(views: readonly View[], catalog: { components: { name: string; controls: { Name: string; ValueMin?: unknown; ValueMax?: unknown }[] }[] }): UntaperedRange[] {
+export function untaperedRanges(views: readonly View[], catalog: TaperCatalog): UntaperedRange[] {
   const controls = new Map(catalog.components.map((c) => [c.name, new Map(c.controls.map((x) => [x.Name, x]))]));
   const byRange = new Map<string, UntaperedRange & { seen: Set<string> }>();
   for (const view of views) {

@@ -35,7 +35,7 @@ import {
 } from "@main/types/qsys";
 import type { View } from "@main/types/views";
 import { walkLayoutObjects } from "@main/types/views";
-import { rangeText, untaperedRanges, type UntaperedRange } from "@main/types/qsys-taper";
+import { rangeText, untaperedRanges, type TaperCatalog, type UntaperedRange } from "@main/types/qsys-taper";
 import { errorMessage } from "@main/services/errors";
 import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Radio, RadioGroup, Switch, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -922,8 +922,7 @@ function AllowlistSection({
 
 // ── Fader tapers ─────────────────────────────────────────────────────────────
 
-type CatalogForTapers = { components: { name: string; controls: { Name: string; ValueMin?: unknown; ValueMax?: unknown }[] }[] };
-type Tapers = { state: "loading" | "offline" } | { state: "failed"; message: string } | { state: "ok"; catalog: CatalogForTapers };
+type Tapers = { state: "loading" | "offline" } | { state: "failed"; message: string } | { state: "ok"; catalog: TaperCatalog };
 
 /** The Core's catalog, read again on each new one (catalogAt), for the taper list. */
 function useTaperCatalog(status: Status | null): Tapers {
@@ -933,7 +932,7 @@ function useTaperCatalog(status: Status | null): Tapers {
   useEffect(() => {
     if (key === null) return;
     let live = true;
-    invoke<CatalogForTapers>("qsys:catalog").then(
+    invoke<TaperCatalog>("qsys:catalog").then(
       (catalog) => live && setAnswer({ key, read: { state: "ok", catalog } }),
       (err: unknown) => {
         logReadFailure("qsys", "the Core's catalog for the fader tapers on /qsys/manage", err);
