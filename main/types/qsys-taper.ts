@@ -62,10 +62,19 @@ export function taperFor(range: { min: number; max: number } | null): Taper | nu
   return MEASURED_TAPERS.find((t) => t.min === range.min && t.max === range.max) ?? null;
 }
 
-/** Interpolate between the two points around `x`, reading `from` and writing `to` (0 value, 1 position). */
-function along(t: Taper, x: number, from: 0 | 1, to: 0 | 1): number {
+/** A taper point's columns: its value, and its Position. */
+const VALUE = 0;
+const POSITION = 1;
+type Column = typeof VALUE | typeof POSITION;
+
+/**
+ * Read `x` in column `from` across the taper and answer column `to`, interpolating
+ * between the two points around it and holding at the ends. Fails closed: `x` that
+ * is not a number reads as the bottom, never the top.
+ */
+function interpolateTaper(t: Taper, x: number, from: Column, to: Column): number {
   const pts = t.points;
-  if (x <= pts[0]![from]) return pts[0]![to];
+  if (!(x > pts[0]![from])) return pts[0]![to];
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1]!;
     const b = pts[i]!;
@@ -74,11 +83,11 @@ function along(t: Taper, x: number, from: 0 | 1, to: 0 | 1): number {
   return pts[pts.length - 1]![to];
 }
 
-/** 0..1 along the Core's travel for value `v` (clamped to the range). */
-export const positionOf = (t: Taper, v: number): number => along(t, v, 0, 1);
+/** 0..1 along the Core's travel for value `v` (clamped to the range; NaN is the bottom). */
+export const positionOf = (t: Taper, v: number): number => interpolateTaper(t, v, VALUE, POSITION);
 
-/** The value at `p` (0..1) along the Core's travel (clamped to the range). */
-export const valueOf = (t: Taper, p: number): number => along(t, p, 1, 0);
+/** The value at `p` (0..1) along the Core's travel (clamped to the range; NaN is the bottom). */
+export const valueOf = (t: Taper, p: number): number => interpolateTaper(t, p, POSITION, VALUE);
 
 /** The control a fader-like object writes as a level: a fader's, a strip's gain. */
 function levelBinding(config: LayoutObjectConfig): QsysAddress | null {

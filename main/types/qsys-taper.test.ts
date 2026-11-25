@@ -55,6 +55,13 @@ describe("the measured tapers", () => {
     }
   });
 
+  test("a value or a place that is not a number reads as the bottom, never the top", () => {
+    for (const t of MEASURED_TAPERS) {
+      assert.equal(positionOf(t, Number.NaN), 0, `${rangeText(t)}: NaN dB is not at the bottom of the travel`);
+      assert.equal(valueOf(t, Number.NaN), t.min, `${rangeText(t)}: a NaN place is not the bottom value`);
+    }
+  });
+
   test("only an exact range has a taper", () => {
     assert.ok(taperFor({ min: -100, max: 10 }));
     assert.equal(taperFor({ min: -100, max: 20 }), null);
