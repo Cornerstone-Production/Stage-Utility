@@ -282,6 +282,32 @@ for (const form of ["notify", "reply"] as const) {
       assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -3, "the hydration cache missed a change");
     });
 
+    test("the empty poll a Core sends on every tick broadcasts nothing and says nothing; a real change still goes out", async () => {
+      await connect();
+      watch.setPanels([panel("vol", "volunteer", GAIN, MUTE, METER), panel("staff", "staff", METER2)]);
+      await open("vol", "staff");
+      const cached = watch.current([GAIN, MUTE, METER, METER2]);
+      sent.length = 0;
+      const log = mock.method(console, "log", () => {});
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        for (let i = 0; i < 200; i++) fake.tick();
+        await settle();
+        assert.equal(sent.length, 0, `an empty poll was broadcast: ${JSON.stringify(sent)}`);
+        assert.deepEqual([...log.mock.calls, ...warn.mock.calls].map((c) => c.arguments.join(" ")), [], "an empty poll wrote a line");
+        assert.deepEqual(watch.current([GAIN, MUTE, METER, METER2]), cached, "an empty poll changed the cache");
+        assert.equal(watch.ready(), true);
+        // The positive control: the same groups still carry a real change.
+        fake.setControl("Lobby_Mixer", "output.1.gain", -3);
+        fake.tick();
+        await settle();
+        assert.deepEqual(sent.map((x) => x.channel), ["qsys:values"]);
+      } finally {
+        log.mock.restore();
+        warn.mock.restore();
+      }
+    });
+
     test("a control the Core's catalog lacks is skipped with one [qsys] line, and its component's other controls still watched", async () => {
       await connect();
       const warn = mock.method(console, "warn", () => {});

@@ -42,10 +42,11 @@ export class FakeQrcServer {
   /** When true, requests are recorded and held unanswered until releaseHeld(). */
   holdReplies = false;
   /**
-   * How change-group pushes reach the client. QSC's QRC Commands page shows
-   * AutoPoll results as repeated replies carrying the AutoPoll request's id
-   * ("reply"); community modules handle `ChangeGroup.Poll` notifications
-   * ("notify"). Which one a Core sends is unverified, so the client takes both.
+   * How change-group pushes reach the client. A Core sends `ChangeGroup.Poll`
+   * notifications ("notify", Designer 10.0.1 Emulate), and answers the AutoPoll
+   * request itself with one `true`. QSC's QRC Commands page shows AutoPoll
+   * results as repeated replies carrying the AutoPoll request's id ("reply");
+   * the client takes that form too.
    */
   autoPollForm: "notify" | "reply" = "notify";
   /**
@@ -133,6 +134,18 @@ export class FakeQrcServer {
   /** Send the values held back from every Invalidate so far, in order. */
   releaseInvalidatePushes(): void {
     for (const push of this.heldPushes.splice(0)) push();
+  }
+
+  /**
+   * One AutoPoll tick with nothing changed: a Core sends every polling group an
+   * empty `Changes: []` on every tick (about every 30 ms at the fastest rate).
+   * The fake sends changes the moment they happen instead of on a timer, so a
+   * test calls this to send the empty ticks between them.
+   */
+  tick(): void {
+    for (const session of this.sessions) {
+      for (const [id, group] of session.groups) if (group.rate !== null) this.push(session, id, group, []);
+    }
   }
 
   /** Push EngineStatus with the current `status` to every connected client. */
