@@ -21,7 +21,7 @@ const teardown = installDom();
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider } = await import("../components/ui/index.js");
-const { QsysCoreBrowser } = await import("./qsys-core-browser.js");
+const { QsysCoreBrowser, fitsKind } = await import("./qsys-core-browser.js");
 type Binding = import("@main/types/qsys").QsysBinding;
 type Props = import("react").ComponentProps<typeof QsysCoreBrowser>;
 
@@ -158,6 +158,14 @@ describe("the Core browser", () => {
       await into(r, MIX);
       assert.deepEqual(controls(r.container), expected, `kind ${kind}`);
     }
+  });
+
+  test("a meter component's settings are not levels: a meter2's hold.time is offered to nothing that draws a level", () => {
+    const numeric = (Name: string) => ({ Name, Type: "Float", ValueMin: 0, ValueMax: 10 });
+    assert.equal(fitsKind("gain", "meter2", numeric("hold.time")), false, "a meter2's hold.time is offered as a fader");
+    assert.equal(fitsKind("meter", "meter2", numeric("hold.time")), false, "a meter2's hold.time is offered as a meter");
+    assert.equal(fitsKind("meter", "meter2", numeric("meter.1")), true);
+    assert.equal(fitsKind("gain", "mixer", numeric("output.1.gain")), true);
   });
 
   test("a writable object only offers allowlisted controls; read-only objects offer all", async () => {

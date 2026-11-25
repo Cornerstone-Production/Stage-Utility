@@ -130,6 +130,9 @@ export function isWritable(c: QsysControlFacts, entry: { min: number | null; max
 /** The levels on a meter component: meter2's `meter.N`, `peak.N` and `rms.N` (Float, read-only). */
 const METER_LEVEL_NAME = /^(meter|peak|rms)\.\d+$/i;
 
+/** A meter component (a Core reports meter2's Type as `meter2`): its controls are levels and their settings, never a fader's level. */
+export const isMeterComponent = (componentType: string): boolean => /^meter/i.test(componentType);
+
 /**
  * A meter. On a meter component (a Core reports meter2's Type as `meter2`), only
  * its levels, `meter.N`, `peak.N` and `rms.N`: its `select` choice, `hold.time`
@@ -137,7 +140,7 @@ const METER_LEVEL_NAME = /^(meter|peak|rms)\.\d+$/i;
  * name or Type starts with `meter` (`meter.3` on a mixer).
  */
 export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
-  if (/^meter/i.test(componentType)) return METER_LEVEL_NAME.test(control.Name);
+  if (isMeterComponent(componentType)) return METER_LEVEL_NAME.test(control.Name);
   return /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
 }
 

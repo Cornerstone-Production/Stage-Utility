@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, XIcon } from "lucide-react";
 
-import { choicesOf, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
+import { choicesOf, isMeterComponent, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
 import { rangeOf } from "../main/qsys/fader-scale";
 import { Button, Input } from "../components/ui";
 import { invoke, type ApiError } from "../lib/api";
@@ -68,7 +68,8 @@ export function fitsKind(kind: QsysBrowseKind, componentType: string, c: Catalog
     case "meter":
       return isMeterControl(componentType, { Name: c.Name, Type: String(c.Type ?? "") });
     case "gain":
-      return kindOf(c) === "number" && hasRange(c) && !isMeterControl(componentType, { Name: c.Name, Type: String(c.Type ?? "") });
+      // Nothing on a meter component is a level to write: a meter2's hold.time is numeric and ranged, but a setting.
+      return kindOf(c) === "number" && hasRange(c) && !isMeterComponent(componentType) && !isMeterControl(componentType, { Name: c.Name, Type: String(c.Type ?? "") });
     case "boolean":
       return kindOf(c) === "boolean";
     case "trigger":
