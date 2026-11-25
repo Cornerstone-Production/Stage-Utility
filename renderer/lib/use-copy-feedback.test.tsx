@@ -65,11 +65,51 @@ describe("useCopyFeedback", () => {
     assert.equal(result.current.state, "idle");
   });
 
-  test("unmounting cancels the timer and a late copy does not set state", async () => {
-    const { result, unmount } = renderHook(() => useCopyFeedback(30));
-    await act(async () => void (await result.current.copy("x")));
-    unmount();
-    await wait(60); // would warn or throw if the timer survived
-    assert.ok(true);
+  describe("unmounting", () => {
+    // Every timer the hook sets and has not cleared or seen fire.
+    const pending = new Set<unknown>();
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    beforeEach(() => {
+      pending.clear();
+      globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+        const h = realSet(() => {
+          pending.delete(h);
+          fn();
+        }, ms);
+        pending.add(h);
+        return h;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = ((h: Parameters<typeof clearTimeout>[0]) => {
+        pending.delete(h);
+        realClear(h);
+      }) as typeof clearTimeout;
+    });
+    after(() => {
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
+    });
+
+    test("cancels the timer a finished copy left running", async () => {
+      const { result, unmount } = renderHook(() => useCopyFeedback(5_000));
+      await act(async () => void (await result.current.copy("x")));
+      assert.equal(pending.size, 1, "a copy starts one timer");
+      unmount();
+      assert.equal(pending.size, 0, "unmounting must clear it");
+    });
+
+    test("a copy that resolves after unmount sets no state and starts no timer", async () => {
+      let resolveWrite!: () => void;
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: () => new Promise<void>((r) => (resolveWrite = r)) },
+      });
+      const { result, unmount } = renderHook(() => useCopyFeedback(5_000));
+      const late = result.current.copy("x");
+      unmount();
+      resolveWrite();
+      assert.equal(await late, true, "the copy itself still reports what happened");
+      assert.equal(pending.size, 0, "a late copy must not schedule a timer on an unmounted card");
+    });
   });
 });

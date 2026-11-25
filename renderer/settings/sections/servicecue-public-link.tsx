@@ -49,7 +49,6 @@ import type {
 
 /** How often the card asks how it is going while the page is open. */
 const POLL_MS = 5_000;
-/** How long "Copied" stays on the button. */
 
 const QUERY_KEY = ["servicecue:getPublish"] as const;
 

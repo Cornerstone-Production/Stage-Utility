@@ -51,11 +51,9 @@ export function VenuesCard({
 }) {
   const [error, setError] = useState<string | null>(null);
   // The status is for reading once, so it stays up longer than a button label: it goes after a few seconds.
-  const { state: copyState, copy: copyToClipboard } = useCopyFeedback(COPIED_MS);
-  /** The address the last Copy was for, so the status can name it. */
-  const [copiedAddress, setCopiedAddress] = useState("");
+  const { state: copyState, copiedText, copy: copyToClipboard } = useCopyFeedback(COPIED_MS);
   const copied =
-    copyState === "copied" ? `Copied ${copiedAddress}` : copyState === "failed" ? `Copy this address by hand: ${copiedAddress}` : null;
+    copyState === "copied" ? `Copied ${copiedText}` : copyState === "failed" ? `Copy this address by hand: ${copiedText}` : null;
   const { menu, open: openMenu, close: closeMenu } = useContextMenuState();
   const cardRef = useRef<HTMLElement>(null);
   const router = useRouterHandle();
@@ -100,7 +98,6 @@ export function VenuesCard({
 
   const address = (v: VenueView) => `${window.location.origin}${venuePath(v)}`;
   const copyAddress = (v: VenueView) => {
-    setCopiedAddress(address(v));
     void copyToClipboard(address(v));
   };
   const menuFor = (v: VenueView): ContextMenuItem[] => [
