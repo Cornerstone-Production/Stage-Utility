@@ -326,7 +326,10 @@ own values back: only a fresh touch writes.
 A fader on a control whose range has a measured Q-SYS taper follows the Core's own
 fader: its thumb sits at the position the Core reports, as on a Q-SYS touch screen
 (0 dB at three quarters of the travel on a -100 to +10 dB gain), and a drag moves
-along that taper. What a drag sends is still a value in dB, so the allowlist's
+along that taper. A drag starts from the value shown, at that value's place on the
+measured table, so a touch that does not move sends nothing; between the measured
+points the table can sit a little off the Core's own curve, and the thumb steps that
+far on the first move. What a drag sends is still a value in dB, so the allowlist's
 limits apply exactly as for any write; the drag stops at them, and the limit line is
 drawn at the limit's place on the taper. A strip's meters are drawn on the same
 taper, so they line up with the fader.

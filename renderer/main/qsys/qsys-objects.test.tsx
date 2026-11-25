@@ -632,7 +632,7 @@ describe("Q-SYS objects", () => {
     push("qsys:values", [{ control: "output.1.gain", value: -10, position: 0.4987 }]);
     assert.equal(fader.dataset.travel, "0.4987");
     assert.equal(dbText(), "-10.0");
-    // Drag in position space: from 0.4987, 17 px up of 200 is +0.085, on the taper about -6 dB.
+    // A drag starts from -10 dB's place on the table (0.5), not the Core's 0.4987: 17 px up of 200 is +0.085, on the taper about -6 dB.
     down(fader, 100);
     move(83);
     up(83);
@@ -660,6 +660,28 @@ describe("Q-SYS objects", () => {
     up(150);
     await wait(30);
     assert.equal(server.writes.at(-1)!.body.value, -10);
+  });
+
+  test("a drag on a taper starts from the value, not the Core's Position: a touch that has not moved writes nothing", async () => {
+    // A real Core's curve bends between the measured points, so its Position for -50 dB
+    // is not the table's (0.123). Here it reports 0.10; read back through the table that
+    // is about -55 dB, a value nobody chose.
+    server.values["output.1.gain"] = -50;
+    server.positions["output.1.gain"] = 0.1;
+    await mount([{ ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig]);
+    const fader = q("qsys-fader", "[data-fader]");
+    assert.equal(fader.dataset.travel, "0.1", "at rest the thumb sits where the Core reports it");
+    down(fader, 100);
+    move(100); // a move event with no movement, as a resting finger sends
+    up(100);
+    await wait(30);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [], "a touch that did not move wrote a value");
+    down(fader, 100);
+    move(99); // one pixel up
+    up(99);
+    await wait(30);
+    const wrote = server.writes.at(-1)?.body.value as number;
+    assert.ok(wrote > -50 && wrote < -48, `one pixel up from -50 dB wrote ${wrote}, not a little above -50`);
   });
 
   test("a fader on a range with no measured taper stays linear in dB and ignores the Core's Position", async () => {

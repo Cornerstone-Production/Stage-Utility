@@ -637,8 +637,12 @@ function useFaderDrag({
     // From the value on screen, not the Core's last report: after a release the
     // thumb stays where the finger left it until the Core answers, and a second
     // touch in that moment must not jump back to the old value.
-    const startValue = shown;
-    const startNorm = level ?? norm(startValue);
+    const startValue = Math.round(shown * 100) / 100;
+    // The value's place on the scale, never the Core's Position: on a taper a Core's
+    // Position between the measured points is off the table, and a drag that started
+    // there would write a value the finger never chose with no movement at all. The
+    // thumb steps from the Core's place to the table's on the first move.
+    const startNorm = norm(startValue);
     const s = scale!;
     const startAt = vertical ? e.clientY : e.clientX;
     const at = panel.epoch;
