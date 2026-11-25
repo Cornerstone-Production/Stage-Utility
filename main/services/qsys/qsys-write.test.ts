@@ -203,7 +203,8 @@ describe("writeControl", () => {
     assert.deepEqual(sets()[0].params, { Name: "Lobby_Mixer", Controls: [{ Name: "gain", Value: -20 }], ResponseValues: true });
     assert.deepEqual(r, { ok: true, value: -20, string: "-20dB", position: 80 / 120, clamped: false });
     const b = await writer.write(req({ control: "mute", value: true }));
-    assert.deepEqual(b, { ok: true, value: true, string: "true", position: 1, clamped: false });
+    // A Boolean's read-back comes as a number, as Component.Get sends it, and is the value sent.
+    assert.deepEqual(b, { ok: true, value: 1, string: "true", position: 1, clamped: false });
   });
 
   test("a read-back in either reply form is the Core's value: the bare list a Core sends, and the Controls object", async () => {
@@ -962,6 +963,44 @@ describe("owed releases and who may take a lease", () => {
     assert.equal(entry.cause, "lease owed");
     assert.equal(entry.device, "server (lease owed)");
     assert.ok(warn.lines.some((l) => /\[qsys\] sending the owed release of Lobby_Mixer\/mute/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("with the control watched, the 1 a change group carries for on counts as on: the owed release is sent", async () => {
+    const warn = capture("warn");
+    try {
+      await connect();
+      watch.setPanels([{ id: "panel-a", kind: "staff", addresses: [MUTE_ADDR] }]);
+      named.add(watchChannel("panel-a"));
+      subscriptionsChanged();
+      await watch.recompute();
+      await settle();
+      assert.equal((await press()).ok, true);
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => writer.owes(MUTE_ADDR), "the release owed");
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      await until(() => muteSets().length === 2, "the owed release");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.equal(typeof [...watch.current([MUTE_ADDR]).values()][0]?.Value, "number", "the watch did not hold the Core's number");
+    assert.deepEqual(muteSets(), [true, false]);
+  });
+
+  test("a Boolean's read-back of 1 is the true that was sent: logged ok, no mismatch", async () => {
+    await connect();
+    const warn = capture("warn");
+    try {
+      const r = await writer.write(req({ control: "mute", value: true }));
+      assert.equal(r.ok && r.value, 1);
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(warn.lines.filter((l) => /mismatch/.test(l)), []);
+    assert.equal((await qsysWriteLog.list()).entries[0].result, "ok");
   });
 
   test("an owed release is not sent when the Core reports the control off", async () => {

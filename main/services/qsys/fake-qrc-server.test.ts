@@ -34,3 +34,24 @@ test("Component.Set with ResponseValues answers a bare list naming the component
   assert.equal(entry!.Value, -20);
   assert.equal(await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -30 }] }), true);
 });
+
+test("a Boolean is true/false from GetControls, and 1/0 from Component.Get, a change group and a Set read-back", async () => {
+  const listed = (await client.send("Component.GetControls", { Name: "Lobby_Mixer" })) as { Controls: { Name: string; Value: unknown }[] };
+  assert.equal(listed.Controls.find((c) => c.Name === "output.1.mute")!.Value, false);
+
+  const got = (await client.send("Component.Get", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute" }] })) as { Name: string; Controls: Record<string, unknown>[] };
+  assert.equal(got.Name, "Lobby_Mixer");
+  assert.deepEqual(got.Controls, [{ Name: "output.1.mute", Value: 0, String: "unmuted", Position: 0 }]);
+
+  const pushes: unknown[] = [];
+  client.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params);
+  });
+  await client.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute" }] } });
+  await client.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.03 });
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute", Value: true }], ResponseValues: true })) as { Value: unknown }[];
+  assert.equal(back[0]!.Value, 1, "a Set read-back carries a Boolean as a number");
+  for (let i = 0; i < 1000 && pushes.length < 2; i++) await new Promise((r) => setImmediate(r));
+  const values = (pushes as { Changes: { Value: unknown }[] }[]).flatMap((p) => p.Changes.map((c) => c.Value));
+  assert.deepEqual(values, [0, 1], "a change group carries a Boolean as a number");
+});

@@ -20,7 +20,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import { kindOf, type PanelKind, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
+import { isOn, kindOf, type PanelKind, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
@@ -53,13 +53,6 @@ export const FLASH_MS = 600;
 const AMBER_AT = 0.74;
 const RED_AT = 0.86;
 
-/** A Core value read as on or off. Q-SYS reports booleans as true/false or 1/0. */
-export function truthy(v: unknown): boolean {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "number") return v !== 0;
-  if (typeof v === "string") return /^(true|1|on)$/i.test(v.trim());
-  return false;
-}
 
 /**
  * A Boolean, by the rule the writer and the editor use (kindOf). The catalog's
@@ -82,9 +75,9 @@ function useLit(b: QsysBinding | null | undefined): boolean | null {
   const own = useQsysValue(b ?? null);
   const indicator = useQsysValue(b?.indicator ?? null);
   const info = useQsysControl(b ?? null);
-  if (b?.indicator) return indicator.state === "unavailable" ? null : truthy(indicator.value);
+  if (b?.indicator) return indicator.state === "unavailable" ? null : isOn(indicator.value);
   if (own.state === "unavailable") return null;
-  return isBooleanControl(info, own.value) ? truthy(own.value) : null;
+  return isBooleanControl(info, own.value) ? isOn(own.value) : null;
 }
 
 /** Light for FLASH_MS after `flash()`; for a trigger the Core confirmed. */
@@ -977,7 +970,7 @@ function MuteButton({ binding, interactive, dense = false }: { binding: QsysBind
   const v = useQsysValue(addr);
   const writeState = useQsysWriteState(addr);
   const write = useQsysWrite();
-  const muted = v.state !== "unavailable" && truthy(v.value);
+  const muted = v.state !== "unavailable" && isOn(v.value);
   const canInput = interactive && writeState === "live";
   const look: CSSProperties = {
     borderRadius: dense ? 8 : 12,
@@ -1088,7 +1081,7 @@ function SwitchObject({ c, interactive, ts }: { c: Of<"qsys-switch">; interactiv
   const name = c.label.trim() || (c.binding ?? c.onBinding)?.control || "Switch";
 
   if (c.binding) {
-    const on = own.state !== "unavailable" && truthy(own.value);
+    const on = own.state !== "unavailable" && isOn(own.value);
     const canInput = interactive && ownState === "live";
     return (
       <Frame type={c.type} state={ownState} ts={ts} style={{ alignItems: "center", gap: "0.5em", padding: "0.3em" }}>
@@ -1250,7 +1243,7 @@ function StripObject({ c, interactive, ts }: { c: Of<"qsys-strip">; interactive:
   const dense = c.density === "dense";
   const name = useQsysValue(c.name);
   const mute = useQsysValue(c.mute);
-  const muted = mute.state !== "unavailable" && truthy(mute.value);
+  const muted = mute.state !== "unavailable" && isOn(mute.value);
   const gainState = useQsysWriteState(c.gain, true);
   const muteState = useQsysWriteState(c.mute);
   const meters = [c.meter, c.meter2].filter((m): m is QsysBinding => !!m);

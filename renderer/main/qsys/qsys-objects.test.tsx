@@ -421,6 +421,25 @@ describe("Q-SYS objects", () => {
     assert.equal(btn.textContent, "Mute", "a UCI unmuting it is shown");
   });
 
+  test("a mute and a switch read a Boolean as a Core pushes it: 1 and 1.0 on, 0 off, and the hydration's number too", async () => {
+    server.values.mute = 1;
+    await mount([{ type: "qsys-mute", binding: b("mute") }, { type: "qsys-switch", binding: b("mute"), label: "Thing" }]);
+    const btn = q("qsys-mute", "button");
+    const sw = q("qsys-switch", '[role="switch"]');
+    assert.equal(btn.textContent, "Muted", "the hydrated 1 is muted");
+    assert.equal(sw.getAttribute("aria-checked"), "true");
+    push("qsys:values", [{ control: "mute", value: 0 }]);
+    assert.equal(btn.textContent, "Mute");
+    assert.equal(sw.getAttribute("aria-checked"), "false");
+    push("qsys:values", [{ control: "mute", value: 1.0 }]);
+    assert.equal(btn.textContent, "Muted");
+    act(() => {
+      fireEvent.click(btn);
+    });
+    await wait(30);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [false], "a tap on a muted control (1) writes false");
+  });
+
   test("a preset with no readable state renders unlit and flashes on a confirmed write", async () => {
     await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load_1") }] }]);
     const btn = q("qsys-presets", "button");

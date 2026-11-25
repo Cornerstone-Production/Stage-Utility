@@ -152,8 +152,14 @@ export class FakeQrcServer {
     else if (typeof value === "number") control.Position = value;
   }
 
+  /**
+   * A control as a change group, Component.Get and a Set read-back carry it. A Core
+   * sends a Boolean there as 1 or 0 (String "true"/"false" as it was), though
+   * GetControls reports the same control as true/false.
+   */
   private change(component: string, c: QrcControl): QrcChange {
-    return { Component: component, Name: c.Name, Value: c.Value, String: c.String, Position: c.Position };
+    const Value = typeof c.Value === "boolean" ? (c.Value ? 1 : 0) : c.Value;
+    return { Component: component, Name: c.Name, Value, String: c.String, Position: c.Position };
   }
 
   private pushChange(component: string, control: QrcControl): void {
@@ -255,6 +261,8 @@ export class FakeQrcServer {
         this.reply(session, msg.id, { Name: p.Name, Controls: controls.map((c) => ({ ...c })) });
         return;
       }
+      case "Component.Get":
+        return this.componentGet(session, msg.id, p);
       case "Component.Set":
         return this.componentSet(session, msg.id, p);
       case "ChangeGroup.AddComponentControl":
@@ -291,6 +299,22 @@ export class FakeQrcServer {
       default:
         this.fail(session, msg.id, -32601, "Method not found");
     }
+  }
+
+  /** `{ Name, Controls: [{ Name }] }` answers `{ Name, Controls: [{ Name, Value, String, Position }] }`, Booleans as numbers. */
+  private componentGet(session: Session, id: unknown, p: Record<string, unknown>): void {
+    const name = String(p.Name);
+    const controls = this.components.get(name);
+    if (!controls) return this.fail(session, id, 7, "Unknown component");
+    if (!Array.isArray(p.Controls)) return this.fail(session, id, -32602, "Invalid params: Controls is not a list");
+    const out: Record<string, unknown>[] = [];
+    for (const r of p.Controls as { Name?: unknown }[]) {
+      const control = controls.find((c) => c.Name === r?.Name);
+      if (!control) return this.fail(session, id, 8, "Unknown control");
+      const { Component: _c, ...rest } = this.change(name, control);
+      out.push(rest);
+    }
+    this.reply(session, id, { Name: name, Controls: out });
   }
 
   private componentSet(session: Session, id: unknown, p: Record<string, unknown>): void {

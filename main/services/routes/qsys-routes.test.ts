@@ -352,7 +352,8 @@ describe("/api/qsys", () => {
     await until(() => qsysWatch.current([{ component: "Lobby_Mixer", control: "mute" }]).size === 1, "mute read");
     const r = (await callRoute(qsysRoutes, "/api/qsys/values?panel=panel-v")).json as { ready: boolean; values: unknown[] };
     assert.equal(r.ready, true);
-    assert.deepEqual(r.values, [{ component: "Lobby_Mixer", control: "mute", value: false, string: "false", position: 0 }]);
+    // A change group carries a Boolean as a number, as a Core does; pages read it with isOn.
+    assert.deepEqual(r.values, [{ component: "Lobby_Mixer", control: "mute", value: 0, string: "false", position: 0 }]);
   });
   test("GET /api/qsys/bindings reports the views' broken bindings against the live catalog and allowlist", async () => {
     await quietly(connect);

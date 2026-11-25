@@ -85,6 +85,9 @@ imported as an allowlist file. Every write is checked by the server.
   trigger is one: `Trigger`, and a snapshot's `load.N`, which a Core reports as
   `State Trigger`. A snapshot's lit state is its `match.N` (a read-only Boolean),
   bound as the preset's **Lit by**.
+- A Core reports a Boolean as `true`/`false` in its control list and as `1`/`0` in
+  the values it pushes and reads back; either is on or off alike, on a panel and on
+  the server. A write's read-back of `1` for `true` is not a mismatch.
 - A text control takes any text up to 1024 characters. Only a selector's choice
   list is checked against the control's choices (below); anything else may send
   any text, so allowlist a text control only if any text is safe to send.

@@ -76,6 +76,21 @@ export function choicesOf(c: QsysControlFacts): string[] | null {
 export type QsysControlKind = "boolean" | "trigger" | "text" | "number";
 
 /**
+ * A Core value read as on or off: the one rule for whether a Boolean is on,
+ * wherever a mute, a switch, a lit button or a release decides from it. A Core
+ * sends a Boolean as true/false (GetControls) or as 1/0 (Component.Get, change
+ * groups, with String "true"/"false"), so 1, 1.0, true and "true" are on, and
+ * 0, false and "false" off. Value only, never String: a mute's String is
+ * "muted"/"unmuted".
+ */
+export function isOn(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return Number.isFinite(v) && v !== 0;
+  if (typeof v === "string") return /^(true|1|on)$/i.test(v.trim());
+  return false;
+}
+
+/**
  * Which rules a control's writes follow. Fails closed: anything not positively a
  * boolean, trigger or text control is numeric, so it is range-checked. A Core
  * reports Type `Boolean`, `Float`, `Integer`, `Text`, `Trigger` and `State Trigger`
