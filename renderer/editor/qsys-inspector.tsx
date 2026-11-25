@@ -367,7 +367,7 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
         <div className="flex flex-col gap-1.5 rounded-md border border-line p-2" data-qsys-strip-fill>
           <CoreLoadNotice load={load} />
           {load.state === "ready" && (withChannels.length === 0 ? (
-            <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input_3_gain, meter_3, text_display_3).</p>
+            <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input.3.gain, output.1.mute, text.display.3).</p>
           ) : (
             <>
               <select aria-label="Component" className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote font-mono" value={component} onChange={(e) => setComponent(e.target.value)}>

@@ -60,13 +60,13 @@ const CATALOG = {
         { Name: "gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute", Type: "Boolean" },
         { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 },
-        { Name: "load_1", Type: "Trigger" },
+        { Name: "load.1", Type: "Trigger" },
         { Name: "save", Type: "Trigger" },
         { Name: "zone_name", Type: "Text" },
         // On the Core, not on the allowlist.
         { Name: "gain_free", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute_free", Type: "Boolean" },
-        { Name: "load_free", Type: "Trigger" },
+        { Name: "load.free", Type: "Trigger" },
         // A momentary (Boolean on a button), and a level the Core says is read-only.
         { Name: "talk", Type: "Boolean" },
         { Name: "level_ro", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
@@ -81,7 +81,7 @@ const ALLOW = {
   entries: [
     { component: MIX, control: "gain", label: "", min: -100, max: 0, confirm: "none" },
     { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
-    { component: MIX, control: "load_1", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "load.1", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "save", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "level_ro", label: "", min: -100, max: 20, confirm: "none" },
@@ -136,7 +136,7 @@ function freshServer(): Server {
     holdReads: null,
     allowFails: false,
     catalog: CATALOG,
-    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0, talk: false, level_ro: -5, src: "Mic" },
+    values: { gain: -20, mute: false, meter: -30, "load.1": 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, "load.free": 0, talk: false, level_ro: -5, src: "Mic" },
     answer: (body) => ({ ok: true, value: body.value, string: String(body.value), clamped: false }),
     writes: [],
     reads: 0,
@@ -282,8 +282,8 @@ const EVERY: LayoutObjectConfig[] = [
   { type: "qsys-label", binding: b("zone_name"), text: "" },
   { type: "qsys-meter", binding: b("meter"), form: "bar" },
   { type: "qsys-mute", binding: b("mute") },
-  { type: "qsys-presets", items: [{ label: "One", binding: b("load_1") }] },
-  { type: "qsys-selector", items: [{ label: "A", binding: b("load_1") }] },
+  { type: "qsys-presets", items: [{ label: "One", binding: b("load.1") }] },
+  { type: "qsys-selector", items: [{ label: "A", binding: b("load.1") }] },
   { type: "qsys-status" },
   { type: "qsys-strip", name: null, label: "Lead", gain: b("gain"), mute: b("mute"), meter: b("meter") },
   { type: "qsys-switch", binding: b("mute"), label: "Thing" },
@@ -441,7 +441,7 @@ describe("Q-SYS objects", () => {
   });
 
   test("a preset with no readable state renders unlit and flashes on a confirmed write", async () => {
-    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load_1") }] }]);
+    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load.1") }] }]);
     const btn = q("qsys-presets", "button");
     assert.equal(btn.getAttribute("aria-pressed"), "false");
     act(() => {
@@ -462,11 +462,11 @@ describe("Q-SYS objects", () => {
   });
 
   test("a preset lights from its indicator, and only from it", async () => {
-    server.values.match_1 = 0;
-    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load_1"), indicator: b("match_1") } }] }]);
+    server.values["match.1"] = 0;
+    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load.1"), indicator: b("match.1") } }] }]);
     const btn = q("qsys-presets", "button");
     assert.equal(btn.getAttribute("aria-pressed"), "false");
-    push("qsys:values", [{ control: "match_1", value: 1 }]);
+    push("qsys:values", [{ control: "match.1", value: 1 }]);
     assert.equal(btn.getAttribute("aria-pressed"), "true");
   });
 
@@ -770,11 +770,11 @@ const UNBOUND: LayoutObjectConfig[] = [
 
 /** Every writing type, bound to controls the Core has but the allowlist does not. Sorted. */
 const NOT_ALLOWED: LayoutObjectConfig[] = [
-  { type: "qsys-button", binding: b("load_free"), label: "Go", hold: false },
+  { type: "qsys-button", binding: b("load.free"), label: "Go", hold: false },
   { type: "qsys-fader", binding: b("gain_free"), orientation: "vertical", showDb: true, steps: true, stepDb: 3 },
   { type: "qsys-mute", binding: b("mute_free") },
-  { type: "qsys-presets", items: [{ label: "Free", binding: b("load_free") }] },
-  { type: "qsys-selector", items: [{ label: "Free", binding: b("load_free") }] },
+  { type: "qsys-presets", items: [{ label: "Free", binding: b("load.free") }] },
+  { type: "qsys-selector", items: [{ label: "Free", binding: b("load.free") }] },
   { type: "qsys-strip", name: null, label: "Free", gain: b("gain_free"), mute: b("mute_free"), meter: null },
   { type: "qsys-switch", binding: b("mute_free"), label: "Free" },
 ];

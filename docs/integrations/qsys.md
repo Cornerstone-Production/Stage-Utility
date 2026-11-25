@@ -141,7 +141,7 @@ What is offered depends on the field:
 | Mute, switch, momentary button (**Control type** Momentary), **Lit by** | On and off controls |
 | Trigger button, switch pair, preset, selector button, Previous | Triggers |
 | Selector choice list | Controls that list their choices. The field is offered only when the Core reports one |
-| Meter, strip meter | Meter controls (a control, component or type whose name starts `meter`) |
+| Meter, strip meter | Meter controls: on a meter component (`meter2`), its levels `meter.N`, `peak.N` and `rms.N`, not its settings; elsewhere a control whose name or type starts `meter` |
 | Label text, strip name | Text controls |
 
 A field that **writes** is offered only controls that are on the allowlist and that the
@@ -171,11 +171,16 @@ level, mute, meter and second meter fill from the controls named for that channe
 
 | Field | Names tried (`N` the channel, `SIDE` input or output) |
 |---|---|
-| Level | `gain_N`, `SIDE_gain_N`, `SIDE_N_gain` |
-| Mute | `mute_N`, `SIDE_mute_N`, `SIDE_N_mute` |
-| Meter | `meter_N`, `meter_N_1`, `meter_SIDE_N` |
-| Second meter | `meter_N_2` |
-| Name | `label_N`, `name_N`, `text_display_N`, `SIDE_N_label`, `SIDE_N_name` |
+| Level | `SIDE.N.gain` |
+| Mute | `SIDE.N.mute` |
+| Meter | `meter.N` |
+| Second meter | none: bind it by hand |
+| Name | `SIDE.N.label`, then `text.display.N` |
+
+These are the names a Core gives a mixer's controls. A crosspoint
+(`input.1.output.2.gain`) is no channel's. A Core's meters are usually on a meter
+component of their own, not on the mixer, so the meter fields mostly stay empty after
+the fill; bind them from that component.
 
 Level and mute fill only with an allowlisted, writable control; the others by the same
 rule the field's own Core browser uses. A field with no match stays empty and the

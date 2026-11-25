@@ -31,9 +31,9 @@ const { qsysAllowlist } = await import("./qsys/qsys-allowlist-store.js");
 const { viewsStore } = await import("./views-store.js");
 const { POLL_CLIENT_TTL_MS } = await import("./event-poll.js");
 
-const MUTE = { component: "Lobby_Mixer", control: "mute" };
+const MUTE = { component: "Lobby_Mixer", control: "output.1.mute" };
 const fake = new FakeQrcServer();
-fake.components.set("Lobby_Mixer", [{ Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" }]);
+fake.components.set("Lobby_Mixer", [{ Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" }]);
 let server: SocketServer;
 
 /** Every [qsys] and [events] line these tests make on purpose, kept off the test output. */
@@ -80,7 +80,7 @@ const press = (cid: string) =>
   });
 const muteSets = () =>
   fake.received
-    .filter((r) => r.method === "Component.Set" && (r.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute")
+    .filter((r) => r.method === "Component.Set" && (r.params as { Controls: { Name: string }[] }).Controls[0].Name === "output.1.mute")
     .map((r) => (r.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
 
 before(async () => {
@@ -133,7 +133,7 @@ describe("a momentary's lease and the connection it was pressed on", { timeout: 
     }
     await waitFor(() => muteSets().length === 2, "closing the stream it was pressed on did not release it");
     assert.deepEqual(muteSets(), [true, false]);
-    assert.ok(lines.some((l) => /momentary Lobby_Mixer\/mute released by the server: the pressing page's event stream closed/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => /momentary Lobby_Mixer\/output\.1\.mute released by the server: the pressing page's event stream closed/.test(l)), lines.join("\n"));
   });
 
   test("a poll client's expiry releases what was pressed on it", async () => {

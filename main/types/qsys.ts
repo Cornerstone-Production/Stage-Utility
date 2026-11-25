@@ -127,13 +127,18 @@ export function isWritable(c: QsysControlFacts, entry: { min: number | null; max
   return unwritableReason(c, entry, viaChoices) === null;
 }
 
+/** The levels on a meter component: meter2's `meter.N`, `peak.N` and `rms.N` (Float, read-only). */
+const METER_LEVEL_NAME = /^(meter|peak|rms)\.\d+$/i;
+
 /**
- * A meter: a control on a meter component (meter2 and kin), or a control named
- * `meter...`. Which component types the Core reports for meters is one of the
- * spec's "verify in Emulate" items; the name rule covers meter2's `meter_1`.
+ * A meter. On a meter component (a Core reports meter2's Type as `meter2`), only
+ * its levels, `meter.N`, `peak.N` and `rms.N`: its `select` choice, `hold.time`
+ * and the rest are settings, not meters. On any other component, a control whose
+ * name or Type starts with `meter` (`meter.3` on a mixer).
  */
 export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
-  return /^meter/i.test(componentType) || /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
+  if (/^meter/i.test(componentType)) return METER_LEVEL_NAME.test(control.Name);
+  return /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
 }
 
 /** A map key for an address. NUL cannot appear in a Code Name or a control name. */

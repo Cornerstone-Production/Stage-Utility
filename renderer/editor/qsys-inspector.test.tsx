@@ -39,23 +39,23 @@ const CATALOG = {
       controls: [
         { Name: "gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute", Type: "Boolean" },
-        { Name: "load_1", Type: "Trigger" },
-        { Name: "load_2", Type: "Trigger" },
-        { Name: "match_1", Type: "Boolean" },
+        { Name: "load.1", Type: "Trigger" },
+        { Name: "load.2", Type: "Trigger" },
+        { Name: "match.1", Type: "Boolean" },
         { Name: "zone_name", Type: "Text" },
-        { Name: "meter_1", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "meter.1", Type: "Float", ValueMin: -100, ValueMax: 20 },
       ],
     },
     {
       name: "Input_Bank",
       type: "mixer",
       controls: [
-        { Name: "input_3_gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
-        { Name: "input_3_mute", Type: "Boolean" },
-        { Name: "meter_3", Type: "Float", ValueMin: -100, ValueMax: 20, Direction: "Read" },
-        { Name: "text_display_3", Type: "Text", Direction: "Read" },
-        { Name: "input_4_gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
-        { Name: "input_4_mute", Type: "Boolean" },
+        { Name: "input.3.gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "input.3.mute", Type: "Boolean" },
+        { Name: "meter.3", Type: "Float", ValueMin: -100, ValueMax: 20, Direction: "Read" },
+        { Name: "text.display.3", Type: "Text", Direction: "Read" },
+        { Name: "input.4.gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "input.4.mute", Type: "Boolean" },
       ],
     },
   ],
@@ -64,8 +64,8 @@ const CATALOG = {
 let withChoices = false;
 const allow = (control: string, min: number | null = null, max: number | null = null) => ({ component: MIX, control, label: "", min, max, confirm: "none" });
 const bank = (control: string, min: number | null = null, max: number | null = null) => ({ component: "Input_Bank", control, label: "", min, max, confirm: "none" });
-// input_4_mute is deliberately not allowlisted.
-const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load_1"), allow("load_2"), bank("input_3_gain", -100, 0), bank("input_3_mute"), bank("input_4_gain", -100, 0)] };
+// input.4.mute is deliberately not allowlisted.
+const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0)] };
 
 const f = stubFetchWithLog((url) => {
   if (url === "/api/qsys/catalog") {
@@ -142,10 +142,10 @@ describe("the Q-SYS inspector", () => {
     const r = mount({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null });
     await choose(r, "Level", "gain");
     await choose(r, "Mute", "mute");
-    await choose(r, "Meter", "meter_1");
+    await choose(r, "Meter", "meter.1");
     await choose(r, "Name", "zone_name");
     const s = r.latest();
-    assert.deepEqual([s.gain, s.mute, s.meter, s.name], [b("gain"), b("mute"), b("meter_1"), b("zone_name")]);
+    assert.deepEqual([s.gain, s.mute, s.meter, s.name], [b("gain"), b("mute"), b("meter.1"), b("zone_name")]);
   });
 
   test("adding a preset picks the control first and never adds an empty row", async () => {
@@ -155,21 +155,21 @@ describe("the Q-SYS inspector", () => {
     await wait();
     fireEvent.click(r.getByRole("button", { name: "Add preset" }));
     assert.deepEqual(r.latest().items, [], "opening and closing added a row");
-    await choose(r, "Add preset", "load_1");
-    assert.deepEqual(r.latest().items, [{ label: "load_1", binding: b("load_1") }]);
-    await choose(r, "Add preset", "load_2");
-    assert.deepEqual((r.latest().items as { label: string }[]).map((i) => i.label), ["load_1", "load_2"]);
+    await choose(r, "Add preset", "load.1");
+    assert.deepEqual(r.latest().items, [{ label: "load.1", binding: b("load.1") }]);
+    await choose(r, "Add preset", "load.2");
+    assert.deepEqual((r.latest().items as { label: string }[]).map((i) => i.label), ["load.1", "load.2"]);
     // A preset's label is the operator's to rename.
     fireEvent.change(r.getAllByLabelText("Label")[0]!, { target: { value: "Full band" } });
     assert.equal((r.latest().items as { label: string }[])[0]!.label, "Full band");
     fireEvent.click(r.getByRole("button", { name: "Remove Full band" }));
-    assert.deepEqual((r.latest().items as { label: string }[]).map((i) => i.label), ["load_2"]);
+    assert.deepEqual((r.latest().items as { label: string }[]).map((i) => i.label), ["load.2"]);
   });
 
   test("a preset's lamp control is kept when its control is changed", async () => {
-    const r = mount({ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load_1"), indicator: b("match_1") } }] });
-    await choose(r, "Control", "load_2");
-    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...b("load_2"), indicator: b("match_1") });
+    const r = mount({ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load.1"), indicator: b("match.1") } }] });
+    await choose(r, "Control", "load.2");
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...b("load.2"), indicator: b("match.1") });
   });
 
   test("a switch changing mode clears the other mode's controls", async () => {
@@ -178,9 +178,9 @@ describe("the Q-SYS inspector", () => {
     await wait();
     const s = r.latest();
     assert.equal(s.binding, null, "the single control would shadow the pair");
-    await choose(r, "On trigger", "load_1");
-    await choose(r, "Off trigger", "load_2");
-    assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [b("load_1"), b("load_2")]);
+    await choose(r, "On trigger", "load.1");
+    await choose(r, "Off trigger", "load.2");
+    assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [b("load.1"), b("load.2")]);
     fireEvent.click(r.getByRole("button", { name: "One control" }));
     await wait();
     assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [null, null]);
@@ -188,8 +188,8 @@ describe("the Q-SYS inspector", () => {
 
   test("a button's control type decides which controls it is offered", async () => {
     const r = mount({ type: "qsys-button", binding: null, label: "", hold: false });
-    await choose(r, "Control", "load_1");
-    assert.deepEqual(r.latest().binding, b("load_1"));
+    await choose(r, "Control", "load.1");
+    assert.deepEqual(r.latest().binding, b("load.1"));
   });
 
   test("a label's text control and its own text are separate fields", async () => {
@@ -237,21 +237,21 @@ describe("the Q-SYS inspector", () => {
     fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
     await wait();
     const select = r.getByLabelText("Component") as HTMLSelectElement;
-    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank"], "only components with channel-named controls (meter_1 alone makes one)");
+    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank"], "only components with channel-named controls (meter.1 alone makes one)");
     fireEvent.change(select, { target: { value: "Input_Bank" } });
     await wait();
     fireEvent.click(r.getByRole("button", { name: "Input 4" }));
     await wait();
     const four = r.latest() as Record<string, unknown>;
     const ib = (control: string) => ({ component: "Input_Bank", control });
-    assert.deepEqual([four.gain, four.mute, four.meter, four.name], [ib("input_4_gain"), null, null, null]);
+    assert.deepEqual([four.gain, four.mute, four.meter, four.name], [ib("input.4.gain"), null, null, null]);
     const notes = r.container.querySelector("[data-qsys-fill-notes]")!.textContent ?? "";
     assert.match(notes, /mute control is not on the allowlist/);
     assert.match(notes, /No meter control found/);
     fireEvent.click(r.getByRole("button", { name: "Input 3" }));
     await wait();
     const three = r.latest() as Record<string, unknown>;
-    assert.deepEqual([three.gain, three.mute, three.meter, three.name], [ib("input_3_gain"), ib("input_3_mute"), ib("meter_3"), ib("text_display_3")]);
+    assert.deepEqual([three.gain, three.mute, three.meter, three.name], [ib("input.3.gain"), ib("input.3.mute"), ib("meter.3"), ib("text.display.3")]);
     assert.equal(r.container.querySelector("[data-qsys-fill-notes]"), null, "nothing to explain");
     // Any field can be changed afterwards.
     await choose(r, "Mute", "mute");

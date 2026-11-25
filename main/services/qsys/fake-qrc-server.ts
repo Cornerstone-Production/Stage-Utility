@@ -27,6 +27,8 @@ const key = (component: string, name: string): string => addressKey({ component,
 
 export class FakeQrcServer {
   components = new Map<string, QrcControl[]>();
+  /** Each component's Type as GetComponents reports it (`mixer`, `meter2`, ...); "component" when not set. */
+  componentTypes = new Map<string, string>();
   status: QrcStatus = {
     Platform: "Core 110f",
     State: "Active",
@@ -252,7 +254,7 @@ export class FakeQrcServer {
         this.reply(
           session,
           msg.id,
-          [...this.components.keys()].map((Name) => ({ Name, Type: "component", Properties: [] })),
+          [...this.components.keys()].map((Name) => ({ Name, Type: this.componentTypes.get(Name) ?? "component", Properties: [] })),
         );
         return;
       case "Component.GetControls": {

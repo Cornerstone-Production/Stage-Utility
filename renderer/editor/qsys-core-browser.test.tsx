@@ -49,10 +49,10 @@ const CATALOG = {
         { Name: "mute", Type: "Boolean" },
         { Name: "mute_free", Type: "Boolean" },
         { Name: "mute_ro", Type: "Boolean", Direction: "Read" },
-        { Name: "load_1", Type: "Trigger" },
+        { Name: "load.1", Type: "Trigger" },
         { Name: "zone_name", Type: "Text" },
         { Name: "source", Type: "Text", Choices: ["Mic", "Laptop"] },
-        { Name: "meter_1", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "meter.1", Type: "Float", ValueMin: -100, ValueMax: 20 },
       ],
     },
     {
@@ -76,7 +76,7 @@ const ALLOW = {
     entry(MIX, "trim", -10, 10),
     entry(MIX, "mute", null, null),
     entry(MIX, "mute_ro", null, null),
-    entry(MIX, "load_1", null, null),
+    entry(MIX, "load.1", null, null),
     entry(MIX, "source", null, null),
     entry(AMP, "output", -60, 0),
   ],
@@ -145,10 +145,10 @@ describe("the Core browser", () => {
     const cases: [Props["kind"], string[]][] = [
       // numeric with a range from the Core, not a meter
       ["gain", ["gain", "gain_free", "gain_ro", "gain_nolimit"]],
-      ["trigger", ["load_1"]],
+      ["trigger", ["load.1"]],
       ["string", ["zone_name", "source"]],
       ["choice", ["source"]],
-      ["meter", ["meter_1"]],
+      ["meter", ["meter.1"]],
     ];
     for (const [kind, expected] of cases) {
       cleanup();
