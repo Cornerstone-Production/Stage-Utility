@@ -2,7 +2,7 @@
 // Binds 127.0.0.1 on an ephemeral port; no real device is ever contacted.
 
 import net from "node:net";
-import { addressKey, parseAddressKey } from "../../types/qsys.js";
+import { addressKey, isOn, isSelectorButton, parseAddressKey } from "../../types/qsys.js";
 import { positionOf, taperFor } from "../../types/qsys-taper.js";
 import type { QrcChange, QrcControl, QrcStatus } from "./qrc-types.js";
 
@@ -120,8 +120,7 @@ export class FakeQrcServer {
   setControl(component: string, name: string, value: number | boolean | string): void {
     const control = this.find(component, name);
     if (!control) throw new Error(`fake core has no ${component}/${name}`);
-    this.apply(control, value);
-    this.pushChange(component, control);
+    for (const c of this.land(component, control, value)) this.pushChange(component, c);
   }
 
   /** Answer every request held so far, in order. `holdReplies` is left as it is,
@@ -156,6 +155,18 @@ export class FakeQrcServer {
 
   private find(component: string, name: string): QrcControl | undefined {
     return this.components.get(component)?.find((c) => c.Name === name);
+  }
+
+  /**
+   * Land `value` on `control` as a Core does, answering every control it changed:
+   * a selector plugin's Button N is a radio, so turning one on turns its siblings off.
+   */
+  private land(component: string, control: QrcControl, value: number | boolean | string): QrcControl[] {
+    this.apply(control, value);
+    if (!isSelectorButton(control.Name) || !isOn(control.Value)) return [control];
+    const cleared = (this.components.get(component) ?? []).filter((c) => c !== control && isSelectorButton(c.Name) && isOn(c.Value));
+    for (const c of cleared) this.apply(c, false);
+    return [control, ...cleared];
   }
 
   private apply(control: QrcControl, value: number | boolean | string): void {
@@ -348,12 +359,15 @@ export class FakeQrcServer {
       if (!control) return this.fail(session, id, 8, "Unknown control");
       targets.push(control);
     }
-    requested.forEach((r, i) => this.apply(targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value));
+    const changed = new Set<QrcControl>();
+    requested.forEach((r, i) => {
+      for (const c of this.land(name, targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value)) changed.add(c);
+    });
     // A Core answers ResponseValues with a bare list, one entry per control set,
     // each naming its component (Designer 10.0.1 Emulate); without it, `true`.
     const values = targets.map((c) => this.change(name, c));
     this.reply(session, id, !p.ResponseValues ? true : this.setReplyForm === "array" ? values : { Name: name, Controls: values });
-    for (const c of targets) this.pushChange(name, c);
+    for (const c of changed) this.pushChange(name, c);
   }
 
   private groupAdd(session: Session, id: unknown, p: Record<string, unknown>): void {

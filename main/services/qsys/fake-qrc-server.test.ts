@@ -62,3 +62,28 @@ test("a -100..+10 gain reads back the Position a Core reports on its taper: 0 dB
   const low = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -10 }], ResponseValues: true })) as { Position: number }[];
   assert.equal(low[0]!.Position, 0.5);
 });
+
+test("a selector plugin's Button N is a radio: pressing one, by Set or at the Core, turns the others off and pushes them", async () => {
+  fake.components.set(
+    "Source_Select",
+    [1, 2, 3].map((n) => ({ Name: `Button ${n}`, Type: "Boolean", Value: n === 1, String: String(n === 1), Position: n === 1 ? 1 : 0, Direction: "Read/Write" })),
+  );
+  const on = async () => {
+    const listed = (await client.send("Component.GetControls", { Name: "Source_Select" })) as { Controls: { Name: string; Value: unknown }[] };
+    return listed.Controls.filter((c) => c.Value === true).map((c) => c.Name);
+  };
+  const pushes: { Changes: { Name: string; Value: unknown }[] }[] = [];
+  client.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params as never);
+  });
+  await client.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Source_Select", Controls: [{ Name: "Button 1" }] } });
+  await client.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.03 });
+
+  await client.send("Component.Set", { Name: "Source_Select", Controls: [{ Name: "Button 3", Value: true }] });
+  assert.deepEqual(await on(), ["Button 3"], "a Set of Button 3 left another button on");
+  for (let i = 0; i < 1000 && pushes.length < 2; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(pushes.flatMap((p) => p.Changes.map((c) => `${c.Name}=${String(c.Value)}`)), ["Button 1=1", "Button 1=0"], "Button 1 going off was not pushed");
+
+  fake.setControl("Source_Select", "Button 2", true);
+  assert.deepEqual(await on(), ["Button 2"], "a press at the Core left another button on");
+});
