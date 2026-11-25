@@ -260,7 +260,8 @@ export class FakeQrcServer {
       case "Component.GetControls": {
         const controls = this.components.get(String(p.Name));
         if (!controls) return this.fail(session, msg.id, 7, "Unknown component");
-        this.reply(session, msg.id, { Name: p.Name, Controls: controls.map((c) => ({ ...c })) });
+        // GetControls carries no Legend; a Core says a button's name only to Component.Get.
+        this.reply(session, msg.id, { Name: p.Name, Controls: controls.map(({ Legend: _legend, ...c }) => ({ ...c })) });
         return;
       }
       case "Component.Get":
@@ -303,7 +304,7 @@ export class FakeQrcServer {
     }
   }
 
-  /** `{ Name, Controls: [{ Name }] }` answers `{ Name, Controls: [{ Name, Value, String, Position }] }`, Booleans as numbers. */
+  /** `{ Name, Controls: [{ Name }] }` answers `{ Name, Controls: [{ Name, Value, String, Position, Legend? }] }`, Booleans as numbers. */
   private componentGet(session: Session, id: unknown, p: Record<string, unknown>): void {
     const name = String(p.Name);
     const controls = this.components.get(name);
@@ -314,7 +315,7 @@ export class FakeQrcServer {
       const control = controls.find((c) => c.Name === r?.Name);
       if (!control) return this.fail(session, id, 8, "Unknown control");
       const { Component: _c, ...rest } = this.change(name, control);
-      out.push(rest);
+      out.push(control.Legend === undefined ? rest : { ...rest, Legend: control.Legend });
     }
     this.reply(session, id, { Name: name, Controls: out });
   }

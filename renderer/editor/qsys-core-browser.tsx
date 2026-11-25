@@ -24,8 +24,13 @@ import { invoke, type ApiError } from "../lib/api";
 import { cn } from "../lib/cn";
 import { logReadFailure } from "../lib/client-log";
 
-/** What an object wants to bind: a level, an on/off, a button, a choice list, a meter, or text. */
-export type QsysBrowseKind = "gain" | "boolean" | "trigger" | "choice" | "meter" | "string";
+/**
+ * What an object wants to bind: a level, an on/off, a button, a choice list, a
+ * meter, or text. `press` is a selector's button: a trigger, or an on/off control
+ * (a selector plugin's `Button N` is a Boolean, on for the chosen one), both
+ * written true on a press.
+ */
+export type QsysBrowseKind = "gain" | "boolean" | "trigger" | "press" | "choice" | "meter" | "string";
 
 interface CatalogControl {
   Name: string;
@@ -35,11 +40,15 @@ interface CatalogControl {
   ValueMin?: number;
   ValueMax?: number;
   Choices?: unknown;
+  /** A selector button's name as the Core draws it, when the server could read it. */
+  Legend?: string;
 }
 interface CatalogComponent {
   name: string;
   type: string;
   controls: CatalogControl[];
+  /** The Core would not say its buttons' names. */
+  legendError?: string;
 }
 interface AllowEntry {
   component: string;
@@ -64,6 +73,8 @@ export function fitsKind(kind: QsysBrowseKind, componentType: string, c: Catalog
       return kindOf(c) === "boolean";
     case "trigger":
       return kindOf(c) === "trigger";
+    case "press":
+      return kindOf(c) === "trigger" || kindOf(c) === "boolean";
     case "string":
       return kindOf(c) === "text";
     case "choice":
@@ -80,6 +91,12 @@ export type { CatalogComponent, CatalogControl, AllowEntry };
 export { hasChoices };
 
 const keyOf = (component: string, control: string) => `${component}\u0000${control}`;
+
+/** Controls in natural order: Button 2 before Button 10, output.2 before output.10. */
+const natural = (a: CatalogControl, b: CatalogControl) => a.Name.localeCompare(b.Name, undefined, { numeric: true });
+
+/** The name a Core draws on a control, when it reported a non-empty one. */
+export const legendOf = (c: CatalogControl): string | null => (typeof c.Legend === "string" && c.Legend.trim() ? c.Legend.trim() : null);
 export const allowKey = keyOf;
 
 const LOADING: QsysCoreLoad = { state: "loading" };
@@ -165,7 +182,8 @@ export function QsysCoreBrowser({
   /** The object WRITES this control: only allowlisted, writable ones are offered. */
   writable: boolean;
   value: QsysBinding | null;
-  onChange: (b: QsysBinding | null) => void;
+  /** `legend`: the name the Core draws on the chosen control, when it reported one. */
+  onChange: (b: QsysBinding | null, legend?: string) => void;
   /** What this binding is called in the inspector ("Fader control", "On trigger"). */
   label?: string;
   /** What the button says while nothing is bound. */
@@ -183,16 +201,18 @@ export function QsysCoreBrowser({
   const offered = (comp: CatalogComponent): CatalogControl[] =>
     load.state !== "ready"
       ? []
-      : comp.controls.filter((c) => {
-          if (!fitsKind(kind, comp.type, c)) return false;
-          if (!writable) return true;
-          const entry = load.allow?.get(keyOf(comp.name, c.Name));
-          // A choice list is written with one of its choices, which bound it in place of a range.
-          return !!entry && isWritable(c, entry, kind === "choice");
-        });
+      : comp.controls
+          .filter((c) => {
+            if (!fitsKind(kind, comp.type, c)) return false;
+            if (!writable) return true;
+            const entry = load.allow?.get(keyOf(comp.name, c.Name));
+            // A choice list is written with one of its choices, which bound it in place of a range.
+            return !!entry && isWritable(c, entry, kind === "choice");
+          })
+          .sort(natural);
 
-  const pick = (comp: string, control: string) => {
-    onChange({ component: comp, control });
+  const pick = (comp: string, c: CatalogControl) => {
+    onChange({ component: comp, control: c.Name }, legendOf(c) ?? undefined);
     setOpen(false);
     setQuery("");
     setComponent(null);
@@ -211,9 +231,15 @@ export function QsysCoreBrowser({
 
   const controlRow = (comp: CatalogComponent, c: CatalogControl, showComponent: boolean) => (
     <li key={`${comp.name}/${c.Name}`}>
-      <button type="button" data-qsys-control={c.Name} className={row} onClick={() => pick(comp.name, c.Name)}>
+      <button type="button" data-qsys-control={c.Name} className={row} onClick={() => pick(comp.name, c)}>
         <span className="min-w-0 truncate">
           <span className="font-mono">{c.Name}</span>
+          {legendOf(c) && (
+            <>
+              {" "}
+              <span data-qsys-legend>{legendOf(c)}</span>
+            </>
+          )}
           {showComponent && <span className="text-fg-muted"> in {comp.name}</span>}
         </span>
         {/* A space for the accessible name; a flex container draws none. */}
@@ -273,7 +299,14 @@ export function QsysCoreBrowser({
                     matches.slice(0, 200).map(({ comp, c }) => controlRow(comp, c, true))
                   )
                 ) : chosen ? (
-                  chosen.list.map((c) => controlRow(chosen.comp, c, false))
+                  <>
+                    {chosen.comp.legendError && chosen.list.some((c) => /^Button \d+$/.test(c.Name)) && (
+                      <li role="status" className="px-2 py-1.5 text-caption2 text-fg-muted">
+                        The Core did not say these buttons&apos; names, so they are listed by number. See /log.
+                      </li>
+                    )}
+                    {chosen.list.map((c) => controlRow(chosen.comp, c, false))}
+                  </>
                 ) : withControls.length === 0 ? (
                   <li className="px-2 py-1.5 text-caption2 text-fg-muted">
                     {writable ? "No allowlisted control fits. Allow one on the Q-SYS manage page." : "No control on this Core fits."}

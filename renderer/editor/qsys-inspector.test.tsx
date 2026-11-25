@@ -44,6 +44,8 @@ const CATALOG = {
         { Name: "match.1", Type: "Boolean" },
         { Name: "zone_name", Type: "Text" },
         { Name: "meter.1", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        // A selector plugin's button: a Boolean, its name from the Core's Legend.
+        { Name: "Button 2", Type: "Boolean", Legend: "Lectern" },
       ],
     },
     {
@@ -65,7 +67,7 @@ let withChoices = false;
 const allow = (control: string, min: number | null = null, max: number | null = null) => ({ component: MIX, control, label: "", min, max, confirm: "none" });
 const bank = (control: string, min: number | null = null, max: number | null = null) => ({ component: "Input_Bank", control, label: "", min, max, confirm: "none" });
 // input.4.mute is deliberately not allowlisted.
-const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0)] };
+const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0)] };
 
 const f = stubFetchWithLog((url) => {
   if (url === "/api/qsys/catalog") {
@@ -213,6 +215,20 @@ describe("the Q-SYS inspector", () => {
     await wait();
     assert.equal(again.latest().press, undefined, "trigger is the absence of the field");
     assert.equal(again.latest().binding, null, "a boolean is not a trigger: the binding is cleared");
+  });
+
+  test("a selector's button can be a selector plugin's Boolean, and its row is named as the Core names it", async () => {
+    const r = mount({ type: "qsys-selector", items: [] });
+    await choose(r, "Add button", "Button 2");
+    assert.deepEqual(r.latest().items, [{ label: "Lectern", binding: b("Button 2") }]);
+    cleanup();
+    // A preset stays a trigger: the Boolean is not offered there.
+    const p = mount({ type: "qsys-presets", items: [] });
+    fireEvent.click(p.getByRole("button", { name: "Add preset" }));
+    await wait();
+    fireEvent.click(p.getByRole("button", { name: new RegExp(`^${MIX}`) }));
+    await wait();
+    assert.equal(p.queryByRole("button", { name: /^Button 2/ }), null);
   });
 
   test("a selector offers the choice list only where the Core reports Choices", async () => {

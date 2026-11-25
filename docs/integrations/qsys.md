@@ -139,7 +139,8 @@ What is offered depends on the field:
 |---|---|
 | Fader and strip level | Numeric controls with a range on the Core, not meters |
 | Mute, switch, momentary button (**Control type** Momentary), **Lit by** | On and off controls |
-| Trigger button, switch pair, preset, selector button, Previous | Triggers |
+| Trigger button, switch pair, preset, Previous | Triggers |
+| Selector button | Triggers, and on and off controls (a selector plugin's `Button N`) |
 | Selector choice list | Controls that list their choices. The field is offered only when the Core reports one |
 | Meter, strip meter | Meter controls: on a meter component (`meter2`), its levels `meter.N`, `peak.N` and `rms.N`, not its settings; elsewhere a control whose name or type starts `meter` |
 | Label text, strip name | Text controls |
@@ -158,6 +159,13 @@ Core Type is numeric. Any other object on a control that also lists choices writ
 as its own kind: a mute or a switch on a Boolean sends true and false, and a fader on
 a numeric control still needs a range. While the saved views cannot be read the
 choices hold for anything but a Boolean.
+
+Controls are listed in number order (`Button 2` before `Button 10`). A selector
+plugin lists `Button 1` to `Button 100` whatever its button count, so each `Button N`
+shows the name the Core draws on it beside it, read with one `Component.Get` per such
+component when the catalog is read; a button with no name shows none. Picking one
+for a selector names its row after it. If the Core will not say the names, the
+buttons are listed by number, the browser says so, and `/log` has a line.
 
 With no Core connected the browser says so and lists nothing; an existing binding
 stays shown and can be cleared. A read that fails for any other reason is logged to
@@ -584,6 +592,7 @@ Look at `/log` and filter for `[qsys]`.
 | `could not save the write log; entries since are in memory only` | The write log file cannot be written. Writes still go through; `/api/qsys/write-log` reports `saveError`. Logged once per run of failures. |
 | `write log saved again` | A save succeeded after failures. |
 | `catalog refresh failed: <reason>` | A catalog refresh asked for over the API failed. |
+| `could not read the button names of <component>: <reason>; the editor lists its buttons by number` | The Core refused the `Component.Get` that reads a selector plugin's button names. The connection and the catalog are fine; the editor's browser lists its `Button N` controls without names. |
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |

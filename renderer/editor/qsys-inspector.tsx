@@ -81,17 +81,23 @@ function LitBy({ binding, onChange }: { binding: QsysBinding; onChange: (b: Qsys
   );
 }
 
-/** A list of labelled trigger controls. Adding picks the control first. */
+/**
+ * A list of labelled controls: triggers for presets; for a selector's buttons,
+ * triggers or on/off controls (`press`). Adding picks the control first, and the
+ * row's label starts as the name the Core draws on it, else the control's name.
+ */
 function Items({
   title,
   addLabel,
   items,
   onChange,
+  kind = "trigger",
 }: {
   title: string;
   addLabel: string;
   items: Item[];
   onChange: (items: Item[]) => void;
+  kind?: "trigger" | "press";
 }) {
   const set = (i: number, patch: Partial<Item>) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const move = (i: number, by: -1 | 1) => {
@@ -105,7 +111,7 @@ function Items({
       {items.map((it, i) => (
         <div key={i} className="flex flex-col gap-1.5 rounded-md border border-line p-2" data-qsys-item={i}>
           <RowText label="Label" value={it.label} onChange={(v) => set(i, { label: v })} />
-          <Bind label="Control" kind="trigger" writable clearable={false} value={it.binding} onChange={(b) => b && set(i, { binding: b })} />
+          <Bind label="Control" kind={kind} writable clearable={false} value={it.binding} onChange={(b) => b && set(i, { binding: b })} />
           <LitBy binding={it.binding} onChange={(b) => set(i, { binding: b })} />
           <div className="flex justify-end gap-1">
             <Button variant="transparent" size="small" iconOnly disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${it.label || "item"} up`}>
@@ -121,12 +127,12 @@ function Items({
         </div>
       ))}
       <QsysCoreBrowser
-        kind="trigger"
+        kind={kind}
         writable
         label={addLabel}
         placeholder={addLabel}
         value={null}
-        onChange={(b) => b && onChange([...items, { label: b.control, binding: b }])}
+        onChange={(b, legend) => b && onChange([...items, { label: legend ?? b.control, binding: b }])}
       />
     </div>
   );
@@ -314,7 +320,7 @@ function SelectorInspector({ c, onConfig }: { c: Of<"qsys-selector">; onConfig: 
           onChange={(b) => onConfig({ ...c, binding: b })}
         />
       )}
-      <Items title="Buttons" addLabel="Add button" items={c.items} onChange={(items) => onConfig({ ...c, items })} />
+      <Items title="Buttons" addLabel="Add button" kind="press" items={c.items} onChange={(items) => onConfig({ ...c, items })} />
     </div>
   );
 }

@@ -20,6 +20,11 @@ export interface QrcControl {
   ValueMax?: number;
   /** A combo box's list of choices, when the Core reports one. */
   Choices?: string[];
+  /**
+   * A button's name as the Core draws it. Not in GetControls: read with
+   * Component.Get, and only for a selector's `Button N` controls (qsys-service.ts).
+   */
+  Legend?: string;
 }
 
 export interface QrcStatus {
