@@ -14,7 +14,7 @@
 // nothing here asks for it again, so "updating" becomes "current" without a reload.
 
 import { errorMessage } from "@main/services/errors";
-import { isValidTimeZone } from "@main/services/app-timezone";
+import { dayUnlessToday, isValidTimeZone } from "@main/services/app-timezone";
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { useState, type FocusEvent, type ReactNode } from "react";
@@ -87,6 +87,12 @@ interface DeployLine {
  * What the status line and its detail say, for a state. `elapsedMs` is how long ago the answer was
  * read, so a retry time the server stamped is counted from its own clock and not the browser's.
  */
+/** When the service window closes, in the operator's clock format and the app's zone, with its day when that is not today: "1:15 PM Sunday". */
+function closesAt(at: number, nowMs: number, timeZone: string | undefined): string {
+  const day = dayUnlessToday(at, nowMs, timeZone);
+  return `${formatClock(at, { timeZone })}${day ? ` ${day}` : ""}`;
+}
+
 function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number): DeployLine {
   const build = d.page?.build ?? d.bundle?.build ?? "unknown";
   switch (d.state) {
@@ -133,7 +139,7 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
         const timeZone = zone && isValidTimeZone(zone) ? zone : undefined;
         return {
           tone: "warn",
-          text: `Waiting for the service window to close${d.waitingUntil != null ? ` at ${formatClock(d.waitingUntil, { timeZone })}` : ""}, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
+          text: `Waiting for the service window to close${d.waitingUntil != null ? ` at ${closesAt(d.waitingUntil, d.now + elapsedMs, timeZone)}` : ""}, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
           detail: "Updating reloads every open page, so it waits out the time around a service, as the app's own updates do. Update the page now goes ahead.",
         };
       }

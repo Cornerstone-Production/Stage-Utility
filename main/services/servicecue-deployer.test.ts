@@ -301,7 +301,7 @@ describe("a service being live", () => {
     assert.equal(d.status().waitingUntil, world.windowCloses);
     await sleep(100);
     assert.equal(apiCalls(), 0, "Cloudflare was called inside the service window");
-    assert.equal(lines.filter((l) => /the service window is open until \d\d:\d\d:\d\d, so the page is not updated now/.test(l)).length, 1, lines.join("\n"));
+    assert.equal(lines.filter((l) => /the service window is open until \d\d:\d\d( [A-Z][a-z]+day)?, so the page is not updated now/.test(l)).length, 1, lines.join("\n"));
 
     world.windowCloses = null;
     await reaches(d, "current");

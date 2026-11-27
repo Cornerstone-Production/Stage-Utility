@@ -11,6 +11,8 @@ import {
   zonedMinuteOfDay,
   zonedParts,
   startOfZonedDay,
+  clockWithDayOf,
+  dayUnlessToday,
 } from "./app-timezone.js";
 
 // 18:30 America/Chicago on Sunday 2 Aug 2026 — 23:30 UTC the same day.
@@ -122,5 +124,38 @@ describe("startOfZonedDay", () => {
 
   it("refuses an instant, which would be a whole offset out", () => {
     assert.throws(() => startOfZonedDay("2026-01-15T00:00:00Z", "UTC"), /YYYY-MM-DD/);
+  });
+});
+
+describe("dayUnlessToday and clockWithDayOf: a time that is not today says which day", () => {
+  // Friday 27 Nov 2026, 13:00 in Chicago (19:00 UTC).
+  const FRIDAY = Date.parse("2026-11-27T19:00:00Z");
+  const CHI = "America/Chicago";
+
+  it("says nothing for later the same day, even past midnight UTC", () => {
+    // 21:00 Chicago is 03:00 UTC on the Saturday: still Friday where the operator is.
+    const tonight = Date.parse("2026-11-28T03:00:00Z");
+    assert.equal(dayUnlessToday(tonight, FRIDAY, CHI), null);
+    assert.equal(clockWithDayOf(tonight, FRIDAY, CHI), "21:00");
+  });
+
+  it("names the weekday within the coming week", () => {
+    // Sunday 29 Nov, 13:15 Chicago.
+    const sunday = Date.parse("2026-11-29T19:15:00Z");
+    assert.equal(dayUnlessToday(sunday, FRIDAY, CHI), "Sunday");
+    assert.equal(clockWithDayOf(sunday, FRIDAY, CHI), "13:15 Sunday");
+  });
+
+  it("adds the date a week or more out, and for a day already past, where a weekday alone names the wrong week", () => {
+    assert.equal(clockWithDayOf(Date.parse("2026-12-06T19:15:00Z"), FRIDAY, CHI), "13:15 Sunday 6 Dec");
+    assert.equal(clockWithDayOf(Date.parse("2026-11-26T19:15:00Z"), FRIDAY, CHI), "13:15 Thursday 26 Nov");
+  });
+
+  it("is the app's zone's day, not the host's: the same two instants are one day in Chicago and two in Kolkata", () => {
+    // 12:00 UTC is Friday in both; 20:00 UTC is still Friday in Chicago and already Saturday in Kolkata.
+    const morning = Date.parse("2026-11-27T12:00:00Z");
+    const later = Date.parse("2026-11-27T20:00:00Z");
+    assert.equal(clockWithDayOf(later, morning, CHI), "14:00");
+    assert.equal(clockWithDayOf(later, morning, "Asia/Kolkata"), "01:30 Saturday");
   });
 });

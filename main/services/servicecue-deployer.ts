@@ -35,7 +35,7 @@
 // Log lines are `[servicecue-deploy]`, each decision once, and each deploy that went ahead of a service
 // under way by override. Never a token.
 
-import { clockOf } from "./app-timezone.js";
+import { clockWithDayOf } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
 import { MASK } from "./mask.js";
 import { plural } from "./plural.js";
@@ -524,7 +524,7 @@ export class ServiceCueDeployer implements DeployHook {
       why === "live"
         ? `a service is under way (${reasons.join(", ")}), so the page is not updated now (${change}); it will be when the service ends`
         : why === "window"
-          ? `the service window is open until ${clockOf(windowCloses ?? Date.now())}, so the page is not updated now (${change}); it will be when the window closes`
+          ? `the service window is open until ${clockWithDayOf(windowCloses ?? Date.now())}, so the page is not updated now (${change}); it will be when the window closes`
           : `the service times are not known (the server has just started, or Planning Center cannot be reached), so the page is not updated now; it will be once they are (${change})`,
     );
     if (mode === "auto") this.arm(this.timings.liveRecheckMs);

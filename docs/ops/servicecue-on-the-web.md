@@ -336,7 +336,7 @@ changed the page and is not asked about.
 | Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
 | Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
 | Waiting for the service to end, then updating to build X (version) | a service is under way (Planning Center in an item, or a recorder open); the page is left alone until it ends, and the line below names what updating now would interrupt. **Update anyway** overrides it after a confirm |
-| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
+| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, followed by its day when that is not today (*1:15 PM Sunday*), and Update the page now goes ahead |
 | Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
 | Couldn't update the page: *reason*. Whether the page took it is not known. | the last attempt got no answer, and what Cloudflare holds could not be read to see whether it went through |

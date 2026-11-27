@@ -57,7 +57,7 @@ import {
 import { plural } from "./plural.js";
 import { createHash, randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
-import { appTimeZone, clockOf, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
+import { appTimeZone, clockWithDayOf, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
@@ -3789,7 +3789,7 @@ export class StageController {
       // Once per scheduled hour that falls in a window: the tick is hourly, and only the scheduled hour reaches this.
       if (!decision.apply && decision.why === "window") {
         const until = serviceWindow.activeUntil(now.getTime());
-        console.log(`[stage-controller] auto-update waits: a planned service window is open until ${clockOf(until ?? now.getTime()).slice(0, 5)}; it tries again at the next scheduled time`);
+        console.log(`[stage-controller] auto-update waits: a planned service window is open until ${scrub(clockWithDayOf(until ?? now.getTime(), now.getTime()))}; it tries again at the next scheduled time`);
       }
       if (decision.apply) {
         console.log("[stage-controller] auto-update window — applying update");

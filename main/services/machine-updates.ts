@@ -32,7 +32,7 @@
 // "What it trusts").
 
 import { scrub } from "./scrub.js";
-import { clockOf } from "./app-timezone.js";
+import { clockWithDayOf } from "./app-timezone.js";
 
 export const UPDATE_PLATFORMS = ["macos", "windows"] as const;
 export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
@@ -205,7 +205,7 @@ export function decide(input: Pick<CheckInput, "platform" | "have" | "state" | "
 
 /** The sentence Screens shows for a machine. A Windows launcher is a digest,
  *  which nobody can read, so it is never named. */
-export function describe({ platform, have, state, target, detail }: Pick<CheckInput, "platform" | "have" | "state" | "target" | "detail">, want: string, d: Decision): string {
+export function describe({ platform, have, state, target, detail }: Pick<CheckInput, "platform" | "have" | "state" | "target" | "detail">, want: string, d: Decision, nowMs: number = Date.now()): string {
   if (platform === "windows") {
     if (d.update && state === "retrying") return `Kiosk launcher out of date. The update did not finish${detail ? `: ${detail}` : ""}. It is tried again later`;
     if (d.update) return "Kiosk launcher updating";
@@ -234,15 +234,15 @@ export function describe({ platform, have, state, target, detail }: Pick<CheckIn
     case "live":
       return `Helper ${have}. Updates to ${want} when the service is no longer live`;
     case "window":
-      return `Helper ${have}. Updates to ${want} after the service window closes at ${closing(d.until)}`;
+      return `Helper ${have}. Updates to ${want} after the service window closes at ${closing(d.until, nowMs)}`;
     case "unknown":
       return `Helper ${have}. Updates to ${want} once Planning Center's service times are known`;
   }
 }
 
-/** HH:MM in the app's zone: an operator reads it against their own clock. */
-function closing(until: number | undefined): string {
-  return clockOf(until ?? 0).slice(0, 5);
+/** HH:MM in the app's zone, with its day when that is not the day of `nowMs`: an operator reads it against their own clock and calendar. */
+function closing(until: number | undefined, nowMs: number): string {
+  return clockWithDayOf(until ?? 0, nowMs);
 }
 
 /** How a log line names a machine: its kind, its name, and enough of its id to
@@ -305,7 +305,7 @@ export class MachineUpdates {
       at: input.at,
       checkedAt: now,
       update: d.update,
-      reason: describe(input, gate.want, d),
+      reason: describe(input, gate.want, d, now),
       waitingOn: d.update ? undefined : d.why,
       waitUntil: d.update ? undefined : d.until,
     };
@@ -415,7 +415,7 @@ export class MachineUpdates {
 /** Why a machine was told to wait, for its log line. Never asked for `current`,
  *  which logs a line of its own. */
 function waitPhrase(m: MachineUpdate): string {
-  if (m.waitingOn === "window") return `a service window is open until ${closing(m.waitUntil)}`;
+  if (m.waitingOn === "window") return `a service window is open until ${closing(m.waitUntil, m.checkedAt)}`;
   return {
     off: "automatic updates are off",
     failed: "this version failed here before",

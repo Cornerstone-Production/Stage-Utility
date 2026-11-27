@@ -128,6 +128,15 @@ describe("MachineUpdates", () => {
     assert.match(lines[0], /waiting, a service window is open until 23:00$/);
   });
 
+  it("names the close's day when it is not today, in the app's zone", () => {
+    setAppTimeZone("Asia/Kolkata");
+    // 23:00 on Sunday 18 Oct 2026 in Kolkata, asked on the Friday before.
+    const closes = Date.UTC(2026, 9, 18, 17, 30);
+    const m = updates.check(check(), { ...gate, windowCloses: closes }, closes - 2 * 86_400_000);
+    assert.equal(m.reason, "Helper 1.26.0. Updates to 1.27.0 after the service window closes at 23:00 Sunday");
+    assert.match(lines[0], /waiting, a service window is open until 23:00 Sunday$/);
+  });
+
   it("logs what the Mac says it did, once", () => {
     updates.check(check(), gate, 0);
     updates.check(check({ state: "failed", target: "1.27.0", detail: "Chromium did not start" }), gate, 300_000);

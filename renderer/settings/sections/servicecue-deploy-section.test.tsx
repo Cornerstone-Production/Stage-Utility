@@ -268,10 +268,16 @@ describe("the status line, by state", () => {
   });
 
   test("waiting for the service window: says when it closes, in the app's zone, and Update the page now can be pressed", async () => {
-    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: DEPLOYED_AT }));
-    assert.equal(status(), "Waiting for the service window to close at 8:14 AM, then updating to build 3f2a91c (1.28.0)");
+    // NOW is 2:00 AM on a Friday in Chicago. Later the same day: the time alone.
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: NOW + 3 * 60 * 60_000 }));
+    assert.equal(status(), "Waiting for the service window to close at 5:00 AM, then updating to build 3f2a91c (1.28.0)");
     assert.ok(sectionText().includes("it waits out the time around a service, as the app's own updates do"));
     assert.equal(updateButton()?.disabled, false);
+  });
+
+  test("waiting for the service window to close on another day: names the day, in the app's zone", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: NOW + 2 * 86_400_000 + 3 * 60 * 60_000 }));
+    assert.equal(status(), "Waiting for the service window to close at 5:00 AM Sunday, then updating to build 3f2a91c (1.28.0)");
   });
 
   test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
