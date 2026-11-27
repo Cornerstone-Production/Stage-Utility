@@ -16,10 +16,12 @@
 // is a flat 1 s and "one fetch a second" is exact.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, type TestContext } from "node:test";
+import { describe, it, beforeEach, afterEach, after, type TestContext } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsole } from "./fixtures/capture-console.js";
+import { advance, fakeTime, settle } from "./fixtures/live-poller-clock.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-poller-chain-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -28,6 +30,10 @@ process.env.HOME = path.join(TMP, "home");
 const { livePoller } = await import("./live-poller.js");
 const { stageController } = await import("./stage-controller.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
+const { PcoAuthError } = await import("./pco-service.js");
+const { serviceWindow } = await import("./service-window.js");
+
+after(() => fs.rm(TMP, { recursive: true, force: true }));
 
 type Controller = { fetchLive: () => Promise<unknown>; maybeAutoAdvance: () => Promise<void> };
 const real = {
@@ -39,8 +45,8 @@ const ITEM = { mode: "item", currentItemId: "i1", serverNow: "2026-09-20T15:00:0
 
 let fetches = 0;
 let advances = 0;
-/** Resolves the read being held, if one is. */
-let releaseHeld: (() => void) | null = null;
+/** Settles the read being held, if one is: with "stale", or with `err`. */
+let releaseHeld: ((err?: Error) => void) | null = null;
 let holdNext = false;
 const labels: string[] = [];
 addBroadcastListener((channel, payload) => {
@@ -55,8 +61,8 @@ function stubController(): void {
     fetches++;
     if (holdNext) {
       holdNext = false;
-      return new Promise((resolve) => {
-        releaseHeld = () => resolve({ ...ITEM, label: "stale" });
+      return new Promise((resolve, reject) => {
+        releaseHeld = (err) => (err ? reject(err) : resolve({ ...ITEM, label: "stale" }));
       });
     }
     return Promise.resolve({ ...ITEM, label: `read ${fetches}` });
@@ -67,23 +73,7 @@ function stubController(): void {
   };
 }
 
-/** Let a tick's awaits run. setImmediate is not one of the faked timers. */
-const settle = async () => {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-};
-
-let base = Date.UTC(2026, 8, 20, 15);
-function fakeTime(t: TestContext): void {
-  base += 3_600_000;
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: base });
-}
-
-async function advanceSeconds(t: TestContext, n: number): Promise<void> {
-  for (let i = 0; i < n; i++) {
-    t.mock.timers.tick(1_000);
-    await settle();
-  }
-}
+const advanceSeconds = (t: TestContext, n: number) => advance(t, n * 1_000);
 
 /** Start with the first read hanging, then let `interrupt` land on it. */
 async function interruptInFlightTick(interrupt: () => void): Promise<void> {
@@ -148,6 +138,45 @@ describe("live-poller: one poll chain", () => {
     await settle();
     await advanceSeconds(t, 5);
     assert.equal(fetches, 2 + 3 + 5, "the late read must neither start a chain of its own nor reset the live one's timer");
+  });
+
+  it("an overtaken read that FAILS says nothing about credentials the operator just replaced", async (t) => {
+    fakeTime(t);
+    const errors = captureConsole(t, "error");
+    await interruptInFlightTick(() => livePoller.start());
+
+    // The old credentials' 401 lands after the save that fixed them.
+    releaseHeld!(new PcoAuthError());
+    await settle();
+
+    assert.deepEqual(
+      errors.filter((l) => l.includes("PCO auth")),
+      [],
+      "an auth failure from before the credential save was logged as if it were current",
+    );
+    await advanceSeconds(t, 5);
+    assert.equal(fetches, 2 + 5, "and it neither backs the live chain off nor starts its own");
+  });
+
+  it("a throw from what a read feeds costs the tick, not the chain, and logs once", async (t) => {
+    fakeTime(t);
+    const errors = captureConsole(t, "error");
+    (stageController as unknown as Controller).maybeAutoAdvance = () => {
+      advances++;
+      throw new Error("auto-advance exploded");
+    };
+    // A failed tick waits the idle cadence: 4 s with the window held open.
+    t.mock.method(serviceWindow, "pollDelayMs", (ms: number) => ms);
+    livePoller.start();
+    await settle();
+    await advanceSeconds(t, 12);
+
+    assert.equal(fetches, 4, "polling must survive a throw after the read (once 1: it ended for good)");
+    assert.equal(
+      errors.filter((l) => l.includes("[live-poller] tick failed after the read: auto-advance exploded")).length,
+      1,
+      `one line per run, not one per tick: ${errors.join(" | ")}`,
+    );
   });
 
   it("stop() while a tick awaits fetchLive leaves no chain, and the late read acts on nothing", async (t) => {

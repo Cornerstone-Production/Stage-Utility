@@ -33,7 +33,7 @@ import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
 
 /** Fire-and-forget a per-tick side effect, naming it if it fails. */
-function tick(who: string, p: Promise<unknown>): void {
+function fireAndLog(who: string, p: Promise<unknown>): void {
   void p.catch((err) => console.error(`[live-poller] ${who} tick failed:`, err));
 }
 
@@ -109,11 +109,9 @@ class LivePoller {
   private lastBroadcastAt = 0;
   /** Collapses a repeating failure so one outage cannot evict the whole log. */
   private readonly errors = new RepeatLog("[live-poller] fetch error:");
-  /**
-   * The one poll chain. Ticker cancels before it arms and re-arms after every
-   * tick, a throw included, so a start() while a tick awaits fetchLive cannot
-   * leave two chains running, and a tick that throws cannot end polling.
-   */
+  /** The same, for a throw from the work done with a read that succeeded. */
+  private readonly actErrors = new RepeatLog("[live-poller] tick failed after the read:");
+  /** The one poll chain: see ticker.ts for why a second cannot start. */
   private readonly ticker = new Ticker<LiveTick>({
     tick: () => this.tick(),
     nextDelayMs: (outcome) => this.nextDelayMs(outcome),
@@ -128,8 +126,7 @@ class LivePoller {
    * so integration-manager's post-credential-save start() has to take effect
    * at once, or the operator who just fixed their App ID would wait out the
    * backoff wondering whether it had worked. A tick already awaiting fetchLive
-   * is superseded: its read, made with the old credentials, is dropped and it
-   * does not re-arm.
+   * is superseded: the poller drops its read and it does not re-arm.
    */
   start(): void {
     const wasRunning = this.running;
@@ -191,7 +188,7 @@ class LivePoller {
     };
   }
 
-  /** The delay table. `null` is a tick that threw: wait the idle cadence. */
+  /** The delay table. */
   private nextDelayMs(outcome: LiveTick | null): number {
     switch (outcome) {
       // Bad credentials are usually a configuration fault, so ask rarely; see
@@ -207,11 +204,10 @@ class LivePoller {
       // anyway), stretched outside a service window.
       case "idle":
         return serviceWindow.pollDelayMs(IDLE_INTERVAL_MS * this.rateFactor(), DORMANT_INTERVAL_MS);
-      // Transient (e.g. 429 / network): keep last client state, slow down.
-      // "superseded" never gets here, since its generation moved.
-      case "failed":
-      case "superseded":
-      case null:
+      // A transient failure (e.g. 429 / network) keeps the last client state
+      // and slows down; so does a tick that threw (null). "superseded" is never
+      // asked: its generation moved, so the Ticker does not re-arm it.
+      default:
         return serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS);
     }
   }
@@ -258,26 +254,43 @@ class LivePoller {
       //
       // Saving credentials still restarts the poller, so the fast path is intact;
       // this is only the floor under it.
-      if (err instanceof PcoAuthError) {
-        const decision = this.errors.fail(`[live-poller] ${err.message} — retrying every 5 minutes`, Date.now());
-        if (decision.line) console.error(decision.line);
-        return "auth-failed";
-      }
-      const decision = this.errors.fail(errorMessage(err), Date.now());
+      const auth = err instanceof PcoAuthError;
+      const message = auth ? `${errorMessage(err)} — retrying every 5 minutes` : errorMessage(err);
+      const decision = this.errors.fail(message, Date.now());
       if (decision.line) console.error(decision.line);
-      return "failed";
+      return auth ? "auth-failed" : "failed";
     }
 
     // fetchLive is an HTTP call that can take seconds, and start() or stop()
-    // may have landed while it was in flight. Neither may be acted over: a
-    // config restore stops the poller precisely to keep anything from writing
+    // may have landed while it was in flight. The poller acts on nothing it read
+    // then: a config restore stops it precisely to keep anything from writing
     // over the files it is about to lay down, and its resume (or a credential
-    // save) has already started a fresh tick of its own.
+    // save) has already started a fresh tick. (fetchLive itself still caches
+    // the read as the controller's last live state; that is its own business.)
     if (generation !== this.generation) return this.superseded();
 
     const recovered = this.errors.ok(Date.now());
     if (recovered.line) console.log(recovered.line);
 
+    // A throw from here on is a bug in what a read feeds, not a Planning Center
+    // failure. It costs this tick and slows the next, and says so once per run
+    // rather than once a second as an unhandled rejection would.
+    try {
+      this.act(live);
+    } catch (err) {
+      const failed = this.actErrors.fail(errorMessage(err), Date.now());
+      if (failed.line) console.error(failed.line);
+      return "failed";
+    }
+    const healed = this.actErrors.ok(Date.now());
+    if (healed.line) console.log(healed.line);
+
+    return live?.mode === "item" ? "item" : "idle";
+  }
+
+  /** Everything one successful read feeds: the broadcast, the recorders and
+   *  auto-advance. Synchronous; the side effects run fire-and-forget. */
+  private act(live: PcoLiveDTO | null): void {
     if (live) {
       // Poll fast (to detect item switches promptly) but only PUSH when something
       // the client renders actually changed — or every LIVE_KEEPALIVE_MS for clock
@@ -294,19 +307,17 @@ class LivePoller {
       // rejection is unhandled, and Node's default is to take the whole server —
       // and every stage display with it — down mid-service.
       // Fold the current SPL reading into the live item's running max/avg.
-      tick("spl-recorder", splRecorder.onLiveTick(live));
+      fireAndLog("spl-recorder", splRecorder.onLiveTick(live));
       // Sample the live attendance/occupancy into the service's trend.
-      tick("attendance-recorder", attendanceRecorder.onLiveTick(live));
+      fireAndLog("attendance-recorder", attendanceRecorder.onLiveTick(live));
       // Record the actual rundown timing (item starts/durations vs planned).
-      tick("service-timeline-recorder", serviceTimelineRecorder.onLiveTick(live));
+      fireAndLog("service-timeline-recorder", serviceTimelineRecorder.onLiveTick(live));
       // Start the baptism timer from the plan, when it has been told how.
-      tick("baptism-timer", baptismTimerService.onLiveTick(live));
+      fireAndLog("baptism-timer", baptismTimerService.onLiveTick(live));
     }
 
     // Auto mode: roll to the next event once the current one ended (+1h grace).
-    tick("auto-advance", stageController.maybeAutoAdvance());
-
-    return live?.mode === "item" ? "item" : "idle";
+    fireAndLog("auto-advance", stageController.maybeAutoAdvance());
   }
 }
 
